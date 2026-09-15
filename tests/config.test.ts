@@ -211,7 +211,6 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.scheduledTasksEnabled).toBe(false);
     expect(runtime.config.idleReleaseMinutes).toBe(15);
-    expect(runtime.config.apiProviders).toEqual([]);
     expect(runtime.config.credentialsDirectory).toBe(join(fixture.root, "credentials"));
     expect(runtime.config.codexSocketPath).toBe(join(fixture.root, "runtime/app-server.sock"));
     expect(runtime.config.stateDatabasePath).toBe(join(fixture.root, "data/gateway.sqlite3"));
@@ -330,7 +329,7 @@ describe("Gateway config.toml", () => {
     })).toThrow(/permissions 与 sandbox 不能同时设置/u);
   });
 
-  it("rejects insecure remote direct API endpoints", () => {
+  it("rejects the removed direct API provider registry", () => {
     const fixture = createFixture({
       api_providers: [{
         id: "responses-relay",
@@ -342,7 +341,7 @@ describe("Gateway config.toml", () => {
 
     expect(() => loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    })).toThrow("必须使用 HTTPS");
+    })).toThrow(/api_providers/u);
   });
 
   it("rejects the removed vision configuration", () => {

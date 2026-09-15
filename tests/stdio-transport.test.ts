@@ -33,11 +33,15 @@ describe("StdioTransport", () => {
         ].join("\r\n")
       : [
           "#!/bin/sh",
-          'printf "%s" "$CODEX_TEST_MARKER" >&2',
+          'printf "%s\\n" "$CODEX_TEST_MARKER" >&2',
           "while IFS= read -r _line; do :; done",
         ].join("\n"), { mode: 0o700 });
     chmodSync(executable, 0o700);
     let stderr = "";
+    let resolveMarker: () => void = () => undefined;
+    const markerReceived = new Promise<void>((resolve) => {
+      resolveMarker = resolve;
+    });
     const transport = new StdioTransport({
       codexBinary: executable,
       createCodexProcessInvocation: (args) => executableInvocation(executable, args),
@@ -48,12 +52,14 @@ describe("StdioTransport", () => {
       },
       onStderr: (text) => {
         stderr += text;
+        if (stderr.trim() === "isolated-codex-home") resolveMarker();
       },
     });
 
     try {
       await transport.connect();
-      await expect.poll(() => stderr).toBe("isolated-codex-home");
+      await markerReceived;
+      expect(stderr.trim()).toBe("isolated-codex-home");
     } finally {
       await transport.close();
     }

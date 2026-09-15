@@ -1,6 +1,6 @@
 import type {
   ModelRequestMetricSample,
-  ModelRequestMetricsStore,
+  ModelRequestMetricsWriteStore,
   ModelRequestMetricsWriter,
 } from "./request-metrics.js";
 
@@ -16,7 +16,9 @@ interface WriteCheckpoint {
   resolve: (succeeded: boolean) => void;
 }
 
-export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWriter {
+export class BufferedModelRequestMetricsWriter<
+  Store extends ModelRequestMetricsWriteStore = ModelRequestMetricsWriteStore,
+> implements ModelRequestMetricsWriter {
   private readonly pending: ModelRequestMetricSample[] = [];
   private readonly checkpoints: WriteCheckpoint[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
@@ -25,7 +27,7 @@ export class BufferedModelRequestMetricsWriter implements ModelRequestMetricsWri
   private closed = false;
 
   constructor(
-    private readonly store: ModelRequestMetricsStore,
+    private readonly store: Store,
     private readonly onError?: (error: Error) => void,
   ) {}
 

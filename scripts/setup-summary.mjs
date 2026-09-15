@@ -33,9 +33,6 @@ export async function loadSetupConfigurationSummary({
     })),
   ];
   const installedSkills = loadInstalledSkills({ environment });
-  const apiProviderCount = Array.isArray(document.api_providers)
-    ? document.api_providers.length
-    : 0;
   return {
     primary: providerState.primary,
     officialAuth: providerState.officialAuth,
@@ -48,7 +45,6 @@ export async function loadSetupConfigurationSummary({
     channels: gatewayChannelStates(document),
     installedSkillCount: installedSkills.length,
     agent: providerState.externalAgent,
-    apiProviderCount,
     configPath,
   };
 }
@@ -67,7 +63,6 @@ export async function writeSetupConfigurationSummary({
     `- 通讯渠道：${summary.channels.map(channelLabel).join("、") || "未配置"}`,
     `- 用户技能目录：${summary.installedSkillCount} 个技能`,
     `- 共享第三方子代理：${agentLabel(summary.agent)}`,
-    `- 直接 API Provider（预留）：${summary.apiProviderCount} 个`,
     `- Gateway 配置：${summary.configPath}`,
     "- 作用范围：Provider、模型与登录由 Codex 配置管理；通讯渠道由 Gateway 配置管理。",
     "- 安全提示：API Key、Token、应用凭据、允许名单和代理值均不显示。",

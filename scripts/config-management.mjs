@@ -25,6 +25,7 @@ import {
   applyWorkspaceSetting,
   projectWorkspaceSettings,
 } from "./config-workspace-management.mjs";
+import { detectTerminalIdentity } from "../runtime/terminal-identity.mjs";
 import { packageDir, requireUserConfig } from "./runtime-config.mjs";
 
 const operationUpdateValues = ["full", "compact", "hidden"];
@@ -90,6 +91,9 @@ export function loadGatewaySettings(environment = process.env) {
         },
         upstreamUserAgent: typeof codex.upstream_user_agent === "string"
           ? codex.upstream_user_agent
+          : null,
+        terminalIdentity: typeof codex.terminal_identity === "string"
+          ? codex.terminal_identity
           : null,
         defaults: officialTuiIdentityDefaults(),
       },
@@ -184,6 +188,26 @@ export function updateGatewaySetting(
     ...(result.generatedTokens === undefined ? {} : { generatedTokens: result.generatedTokens }),
     ...(backupPath === null ? {} : { backupPath }),
   };
+}
+
+/**
+ * 按运行命令的终端补入缺失的 `[codex].terminal_identity`：App Server 由服务进程启动、自身没有
+ * 终端，只有运行安装或更新命令的终端能探测到用户实际使用的终端。已配置或探测不到终端时不做
+ * 修改，返回未写入时的 `null`，调用方据此决定是否提示；`codexc config` 与 WebUI 直接在预填
+ * 中使用同一探测结果，不走这里。
+ */
+export function applyTerminalIdentityFromEnvironment(environment = process.env) {
+  const terminalIdentity = detectTerminalIdentity(environment);
+  if (terminalIdentity === null) return null;
+  const settings = loadGatewaySettings(environment);
+  const { clientIdentity, upstreamUserAgent, terminalIdentity: configured } =
+    settings.system.officialTuiIdentity;
+  if (configured !== null) return null;
+  const result = updateGatewaySetting({
+    kind: "system.official-tui-identity",
+    value: { clientIdentity, upstreamUserAgent, terminalIdentity },
+  }, { environment, expectedRevision: settings.revision });
+  return result.value.terminalIdentity;
 }
 
 export function validateNetworkProxyValue(field, value) {
@@ -295,14 +319,22 @@ function applySetting(document, input) {
           "上游 User-Agent 长度不能超过 512 个字符",
         );
       }
+      const terminalIdentity = optionalStrictString(
+        input.value?.terminalIdentity,
+        64,
+        "value.terminalIdentity",
+        "终端标识",
+      );
       const codex = { ...table(document.codex) };
       if (clientIdentity === null) delete codex.client_identity;
       else codex.client_identity = clientIdentity;
       if (upstreamUserAgent === null) delete codex.upstream_user_agent;
       else codex.upstream_user_agent = upstreamUserAgent;
+      if (terminalIdentity === null) delete codex.terminal_identity;
+      else codex.terminal_identity = terminalIdentity;
       document.codex = validateCodexConfigDocument(codex);
       return changed(
-        { clientIdentity, upstreamUserAgent },
+        { clientIdentity, upstreamUserAgent, terminalIdentity },
         "restart-all",
       );
     }

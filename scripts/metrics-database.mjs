@@ -21,7 +21,12 @@ import {
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
+  metricStorageColumns,
+  metricStorageColumnsSql,
   modelRequestMetricsSchemaVersion,
+  modelRequestMetricsIndexesSql,
+  modelRequestMetricsTableSql,
+  requireCurrentModelRequestMetricsSchema,
 } from "../dist/observability/index.js";
 import {
   inspectMetricsDatabase,
@@ -34,6 +39,7 @@ import {
   readMetricsTurns,
   requireCompatibleMetricsDatabase,
   resolveMetricsDatabaseContext,
+  validateMetricsDatabaseStructure,
 } from "./metrics-database-access.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { resolveConfiguredPath } from "./runtime-config.mjs";
@@ -154,6 +160,7 @@ export function upgradeMetricsDatabase(
   try {
     const status = inspectMetricsDatabase(environment);
     if (status.schemaVersion === modelRequestMetricsSchemaVersion) {
+      validateMetricsDatabaseStructure(environment);
       return {
         backupPath: null,
         changed: false,
@@ -165,7 +172,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -197,12 +204,6 @@ export function upgradeMetricsDatabase(
       if (previousSchemaVersion < 6) {
         statements.push(`
           ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
-        `);
-      }
-      if (previousSchemaVersion < 8) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT
-            CHECK (pricing_bucket IS NULL OR pricing_bucket IN ('peak', 'off-peak'));
         `);
       }
       if (previousSchemaVersion < 9) {
@@ -274,6 +275,14 @@ export function upgradeMetricsDatabase(
           ON subagent_turns (parent_thread_id, parent_turn_id);
       `);
       statements.push(`
+        DROP VIEW IF EXISTS model_request_metrics_enriched;
+        ALTER TABLE model_request_metrics RENAME TO model_request_metrics_legacy;
+        ${modelRequestMetricsTableSql}
+        INSERT INTO model_request_metrics (id, ${metricStorageColumnsSql})
+          SELECT id, ${metricStorageColumnsSql}
+          FROM model_request_metrics_legacy;
+        DROP TABLE model_request_metrics_legacy;
+        ${modelRequestMetricsIndexesSql}
         UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
           WHERE name = 'schema_version';
       `);
@@ -718,17 +727,18 @@ function requireMigratedMetricsColumns(database) {
   const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
     .all()
     .map((column) => column.name);
-  const required = [
-    "id", "provider", "transport", "response_format", "operation",
-    "thread_id", "turn_id", "request_started_at_ms", "response_completed_at_ms",
-    "recorded_at_ms", "weekly_quota_limit_id", "weekly_used_percent_millionths",
-    "weekly_resets_at", "weekly_quota_plan_type", "error_message", "pricing_bucket",
-    "quota_windows", "user_agent",
-  ];
-  const missingMetrics = required.filter((column) => !columns.includes(column));
-  if (missingMetrics.length > 0) {
-    throw new Error(`model_request_metrics 缺少 ${missingMetrics.join("、")}`);
+  const required = ["id", ...metricStorageColumns];
+  if (
+    columns.length !== required.length
+    || required.some((column, index) => columns[index] !== column)
+  ) {
+    throw new Error("model_request_metrics 列定义不匹配");
   }
+  const legacyView = database.prepare(`
+    SELECT 1 FROM sqlite_master
+    WHERE type = 'view' AND name = 'model_request_metrics_enriched'
+  `).get();
+  if (legacyView !== undefined) throw new Error("遗留指标 View 仍然存在");
   if (!databaseHasTable(database, "subagent_threads")) {
     throw new Error("subagent_threads 表缺失");
   }
@@ -756,6 +766,7 @@ function requireMigratedMetricsColumns(database) {
   }
   if (!databaseHasTable(database, "account_sources")) throw new Error("account_sources 表缺失");
   if (!databaseHasTable(database, "account_snapshots")) throw new Error("account_snapshots 表缺失");
+  requireCurrentModelRequestMetricsSchema(database);
 }
 
 function backupTimestamp(date) {

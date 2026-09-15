@@ -5,7 +5,6 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/index.js";
 import type { InteractionPort } from "../src/approval/index.js";
 import {
   createFeishuRuntimeModule,
@@ -603,7 +602,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    apiProviders: [],
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     metricsStorage: { retentionDays: 365, maxRows: 1_000_000 },
@@ -620,7 +618,14 @@ function options(
 ) {
   return {
     config: runtimeConfig,
-    service: {} as ConversationUseCases,
+    service: {
+      submit: vi.fn(),
+      status: vi.fn(),
+      listWorkspaces: vi.fn(),
+      modelState: vi.fn(),
+      listPlugins: vi.fn(),
+    },
+    commands: { execute: vi.fn() },
     bindings,
     logger: pino({ level: "silent" }),
     gatewayVersion: "0.146.0",

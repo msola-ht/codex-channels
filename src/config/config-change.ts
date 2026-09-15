@@ -13,7 +13,6 @@ export type GlobalConfigChangeCode =
   | "display.reasoning"
   | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
-  | "api.providers"
   | "metrics.storage"
   | "observability.log-level"
   | "workspace.default"

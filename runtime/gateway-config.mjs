@@ -87,15 +87,6 @@ const weixinSetupSchema = z.strictObject({
   ),
 });
 
-const apiProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
-
-const apiProviderSchema = z.strictObject({
-  id: apiProviderIdSchema,
-  name: z.string().trim().min(1).max(64),
-  protocol: z.literal("responses"),
-  endpoint: z.url(),
-});
-
 const webuiSchema = z.strictObject({
   host: z.enum(["127.0.0.1", "::1", "0.0.0.0"]).default("127.0.0.1"),
   port: z.number().int().min(1).max(65535).default(8787),
@@ -128,6 +119,18 @@ const clientIdentitySchema = z.strictObject({
 const upstreamUserAgentSchema = z.string().min(1).max(512).refine(
   (value) => /^[\x20-\x7e]+$/u.test(value) && value === value.trim(),
   "upstream_user_agent 必须是 1–512 个可显示 ASCII 字符，且不允许首尾空白或其他控制字符",
+);
+
+/** `[codex].terminal_identity` 的字面格式：`终端名` 或 `终端名/版本`。 */
+export const terminalIdentityPattern =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$/u;
+
+const terminalIdentitySchema = z.string().max(
+  64,
+  "terminal_identity 长度不能超过 64 个字符",
+).regex(
+  terminalIdentityPattern,
+  "terminal_identity 必须是「终端名」或「终端名/版本」，字符限字母、数字、.、_、-，且以字母或数字开头",
 );
 
 function containsControlCharacter(value) {
@@ -163,6 +166,7 @@ const codexSchema = z.strictObject({
   sandbox: z.enum(["read-only", "workspace-write"]).default("workspace-write"),
   client_identity: clientIdentitySchema.optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
+  terminal_identity: terminalIdentitySchema.optional(),
 });
 
 const gatewayDocumentSchema = z.strictObject({
@@ -199,10 +203,6 @@ const gatewayDocumentSchema = z.strictObject({
   scheduled_tasks: z.strictObject({
     enabled: z.boolean().default(false),
   }).default({ enabled: false }),
-  api_providers: z.array(apiProviderSchema).refine(
-    (providers) => new Set(providers.map((provider) => provider.id)).size === providers.length,
-    "api_providers 不能包含重复 ID",
-  ).default([]),
   storage: z.strictObject({
     database_path: z.string().min(1).default("data/gateway.sqlite3"),
   }).default({ database_path: "data/gateway.sqlite3" }),

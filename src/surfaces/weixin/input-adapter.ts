@@ -1,8 +1,8 @@
 import type { Logger } from "pino";
 
 import type {
-  ConversationUseCases,
-  ScheduledTaskUseCases,
+  ConversationCommandExecutor,
+  ConversationTurnUseCases,
 } from "../../application/index.js";
 import {
   conversationTargetKey,
@@ -60,7 +60,8 @@ export interface WeixinInputAdapterOptions {
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationUseCases;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  commands: ConversationCommandExecutor;
   outbox: Pick<WeixinOutbox, "notifyText">;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;
@@ -71,7 +72,6 @@ export interface WeixinInputAdapterOptions {
   ): Promise<void>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
-  scheduledTasks?: ScheduledTaskUseCases;
   interactions?: Pick<WeixinInteractionPort, "handleText">;
   images?: Pick<WeixinImagePort, "download">;
   files?: Pick<WeixinFilePort, "download">;
@@ -114,15 +114,13 @@ export class WeixinInputAdapter {
     this.conversations = new WeixinConversationAdapter(
       options.service,
       options.outbox,
+      options.commands,
       options.images,
       {
         quietWindowMs: 0,
         pollingHealth: this.health,
         now: this.now,
         debugEnabled: options.debugEnabled ?? false,
-        ...(options.scheduledTasks === undefined
-          ? {}
-          : { scheduledTasks: options.scheduledTasks }),
         ...(options.doctor === undefined
           ? {}
           : {

@@ -73,7 +73,7 @@
 | Astra 模型选择器与异步澄清提示 | 让原生 Codex 客户端使用捆绑的 Astra 模型选择器，并在需要澄清时给出更准确的提示 | 随锁定 CLI 自动获得；Gateway 不复制 TUI、模型选择器或提示文案逻辑 | 目标 CLI 版本检查、真实 App Server 合同 |
 | TUI 空闲总结开关 | 让管理员控制终端失去焦点后是否自动生成会话回顾 | 通过 `codexc setup → Codex 新会话默认值 → 空闲总结` 写入 `tui.auto_recap`，默认写入 `false`；手动 `/recap` 不受影响 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置写入测试 |
 | 实验性上下文管理开关 | 为符合条件的官方 ChatGPT Codex 新会话启用上游上下文管理 | `codexc setup → Codex 新会话默认值 → 实验性上下文管理` 通过版本化 `config/batchWrite` 写入 `features.context_management.experimental_mode`，默认关闭；Doctor 只读显示状态 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`doctor.mjs`](../scripts/doctor.mjs)、真实 App Server 配置合同 |
-| 官方内置 Pinned 分区保留与自定义 Thread 分区撤回 | 让用户继续通过 `/pin`、`/unpin` 固定会话，并明确不再提供本项目的自定义分区目录、管理员权限和外观扩展 | 0.153.4 起撤回 0.147.0 曾采用的自定义 Thread 分区管理：删除共享 `/section`、`thread_sections.administrators`、`ThreadSectionAccessPolicy` 与 `threadSection/*` 客户端方法，保留官方内置 Pinned 分区并由既有 `/pin`、`/unpin` 使用 `thread/section/move`；`/section` 只返回移除提示，旧配置中的 `[thread_sections]` 失败关闭，同步更新 config schema、Surface、WebUI、错误文案和文档 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`client.ts`](../src/codex-client/client.ts)、[`errors.md`](errors.md)、[`channel-acceptance-matrix.md`](channel-acceptance-matrix.md)、[`config.test.ts`](../tests/config.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
+| 官方内置 Pinned 分区保留与自定义 Thread 分区撤回 | 让用户继续通过 `/pin`、`/unpin` 固定会话，并明确不再提供本项目的自定义分区目录、管理员权限和外观扩展 | 0.153.4 撤回 0.147.0 曾采用的自定义 Thread 分区管理：删除 `thread_sections.administrators`、`ThreadSectionAccessPolicy` 与 `threadSection/*` 客户端方法，保留官方内置 Pinned 分区并由既有 `/pin`、`/unpin` 使用 `thread/section/move`；0.153.4 的 `/section` 迁移提示在 0.154.0 删除命令入口和专属错误码，旧配置中的 `[thread_sections]` 继续失败关闭 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`client.ts`](../src/codex-client/client.ts)、[`config.test.ts`](../tests/config.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 ### 明确不采用
 
@@ -324,7 +324,6 @@
 | --- | --- | --- | --- |
 | 受管模型自动审核要求 | 描述企业或受管环境要求自动审核的模型范围 | 可改进受管环境提示 | 当前审批仍由 Surface Actor 显式决定；不新增 `configRequirements/read` 依赖，不让受管要求自动批准、拒绝或改变模型可选性 |
 | MCP 单次 OAuth 注册策略 | 允许登录时选择自动发现、动态注册或预注册客户端 | 可为少数 OAuth 注册兼容性问题提供显式覆盖 | 当前 OAuth 自动发现路径工作正常，且没有用户选择和凭据配置边界；不扩展 OAuth 参数或凭据策略 |
-| Thread 分区外观 | 为自定义 Thread 分区保存跨客户端同步的图标和颜色 | 可让渠道中的分区目录与原生客户端使用相同的视觉标识 | 当前 `/section` 只投影分区名称，创建和重命名时省略 `appearance`，因此不会覆盖其他客户端已有设置；只有三个 Surface 形成统一、安全且有明确用户需求的图标或颜色展示规则时再扩展 Application 类型与写入命令 |
 
 ### 明确不采用
 

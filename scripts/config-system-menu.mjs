@@ -4,6 +4,10 @@ import { release as osRelease } from "node:os";
 import { join } from "node:path";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  detectTerminalIdentity,
+  detectTerminalUserAgentToken,
+} from "../runtime/terminal-identity.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import {
   loadGatewaySettings,
@@ -50,6 +54,11 @@ export async function runSystemSettings({
         label: "一键设为官方 TUI 身份",
         hint: "同时设置 codex-tui 客户端身份与官方模型上游 UA",
       },
+      {
+        value: "official_tui_terminal",
+        label: "模型上游终端标识",
+        hint: "codex.terminal_identity；预填运行本命令的终端，可编辑，留空则删除",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -72,6 +81,9 @@ export async function runSystemSettings({
   }
   if (section === "official_tui_identity") {
     return runOfficialTuiIdentity({ environment, output, prompts, writeConfig });
+  }
+  if (section === "official_tui_terminal") {
+    return runOfficialTuiTerminal({ environment, output, prompts, writeConfig });
   }
   throw new Error(`未知系统设置：${String(section)}`);
 }
@@ -246,19 +258,7 @@ function currentOsInfo() {
 }
 
 function terminalUserAgentToken() {
-  const program = process.env.TERM_PROGRAM;
-  const version = process.env.TERM_PROGRAM_VERSION;
-  if (program && program.trim()) {
-    return sanitizeUserAgentToken(version && version.trim()
-      ? `${program.trim()}/${version.trim()}`
-      : program.trim());
-  }
-  const term = process.env.TERM;
-  return sanitizeUserAgentToken(term && term.trim() ? term.trim() : "unknown");
-}
-
-function sanitizeUserAgentToken(value) {
-  return value.replace(/[^A-Za-z0-9._/-]/gu, "_");
+  return detectTerminalUserAgentToken(process.env) ?? "unknown";
 }
 
 async function runOfficialTuiIdentity({ environment, output, prompts, writeConfig }) {
@@ -280,6 +280,7 @@ async function runOfficialTuiIdentity({ environment, output, prompts, writeConfi
     value: {
       clientIdentity: identity,
       upstreamUserAgent: value === "" ? null : value,
+      terminalIdentity: settings.system.officialTuiIdentity.terminalIdentity,
     },
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(
@@ -289,6 +290,37 @@ async function runOfficialTuiIdentity({ environment, output, prompts, writeConfi
   return {
     clientIdentity: result.value.clientIdentity,
     upstreamUserAgent: result.value.upstreamUserAgent,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
+}
+
+async function runOfficialTuiTerminal({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const current = settings.system.officialTuiIdentity;
+  const value = await prompts.text({
+    message: "模型上游终端标识：默认取运行本命令的终端（如 iTerm.app/3.5.14），可编辑；"
+      + "留空则不再设置",
+    initialValue: current.terminalIdentity ?? detectTerminalIdentity(process.env) ?? "",
+    validate: (input) => input.length <= 64 ? undefined : "终端标识过长",
+  });
+  if (prompts.isCancel(value)) return { action: "back" };
+  const normalized = value.trim();
+  const result = updateGatewaySetting({
+    kind: "system.official-tui-identity",
+    value: {
+      clientIdentity: current.clientIdentity,
+      upstreamUserAgent: current.upstreamUserAgent,
+      terminalIdentity: normalized === "" ? null : normalized,
+    },
+  }, { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(normalized
+    ? `模型上游终端标识已设为 ${normalized}：${result.configPath}\n`
+    : `已清除模型上游终端标识，模型上游 UA 由 App Server 自行探测终端：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return {
+    terminalIdentity: result.value.terminalIdentity,
     configPath: result.configPath,
     activation: result.activation,
     activationResult: result.activationResult,

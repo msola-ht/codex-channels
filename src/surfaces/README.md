@@ -76,8 +76,8 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
-并单独列出最近直接 API 请求；`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
-把 Codex Provider 和直接 API 按同一请求口径聚合，最多展示请求量最高的 20 组；`errors` 用同一
+`global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
+按同一请求口径聚合指标库记录，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 不把请求累计输入误写成上下文占用；聚合中的上下文压缩摘要单列请求数与 Token，不显示模型请求
 聚合耗时、首段回复延迟、生成速度、本地价格或费用。信息类聊天指令（`/status`、`/usage`、
@@ -86,8 +86,8 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
 Markdown、Telegram HTML、微信结构化字段渲染列表。
 `/sessions` 和 `/archived` 共用可复制的分页/筛选命令，仅支持运行状态、固定状态、Provider 和关键词。
-自定义会话分区入口及其管理员权限已移除；`/section` 只返回移除提示。内置 Pinned 在三渠道统一复用
-`/pin` 与 `/unpin`，渠道只提交选择，不保存分区状态。
+自定义会话分区入口及其管理员权限已移除。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`，
+渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
 Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
 Turn、Thread 或 Surface 关闭时清理。
@@ -111,7 +111,7 @@ Turn、Thread 或 Surface 关闭时清理。
 指标读取失败时只显示“统计暂不可用”。
 原生 OpenAI 鉴权的 Codex Provider 统一显示为“OpenAI 官方”，且只在该类 Thread 显示 Fast 与
 OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”标识（例如“OpenAI · 自定义”），
-直接 API 的自定义提供商继续使用自身名称；各 Surface 只保留 HTML、
+历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
 `elapsed-duration.ts` 只把已确认的 Turn、操作、推理状态等毫秒值或账户用量秒数格式化为三个 Surface
@@ -121,13 +121,18 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
-`conversation-command-format.ts`
-统一 Telegram、飞书与微信共用的分组命令目录、有界会话列表、Workspace、Skill、MCP、Plugin、
-权限、项目规则、Diff、Goal、模型选择、Default/Plan 模式、Provider 感知的用量与额度等平台无关
-命令结果文案与状态文本；OpenAI `/usage` 以账户摘要为主，在当前 Thread 有效时追加有界的官方 Credits、可选美元、
+`conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于
+`conversation-command-help.ts`、`conversation-session-command-format.ts`、
+`conversation-scheduled-task-command-format.ts`、`conversation-extension-command-format.ts`、
+`conversation-model-account-command-format.ts`、`conversation-workspace-status-command-format.ts` 和
+`conversation-command-outcome-format.ts`，按帮助、会话、计划任务、Skill/MCP/Plugin、模型账户、
+Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与微信的平台无关命令文案，不导入平台 SDK，
+也不写入 Application 状态；OpenAI `/usage` 以账户摘要为主，在当前 Thread 有效时追加有界的官方 Credits、可选美元、
 字段完整时的 Token 汇总和最多 8 个明细组，官方估算不可用或查询失败时只追加稳定提示；DeepSeek `/usage` 显示余额，
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。
+`conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
+飞书与微信直接复用该映射，Telegram 继续在自己的交互式渲染器中处理按钮和键盘。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
@@ -183,8 +188,8 @@ Adapter 负责。
 三个 Surface 都实现该入口，微信按目标 Conversation 复用其回复上下文与授权检查。
 Surface 不得直接操作底层 JSON-RPC Transport，也不得把平台 SDK 类型引入 Conversation Core。
 
-会话命令统一映射到 Application 的 `ConversationCommandService`；Surface 负责提取命令名和参数，
-并渲染类型化结果。Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
+会话命令统一映射到 Bootstrap 注入的 Application `ConversationCommandExecutor`；Surface 只保留普通输入、状态或菜单实际需要的能力切片，并负责提取命令名、参数和渲染类型化结果。
+Skill、Plugin 与子代理新建 Turn 时由统一 `turn.started` 生命周期确认，命令结果
 不重复发送启动提示；该事件保留具体扩展类型和名称，追加到活动 Turn 时仍渲染明确确认。普通文本、图片下载、平台帮助、身份查询和
 交互取消保留在平台边界。PNG/JPEG/WebP/非动画 GIF
 的大小限制与内容签名校验由 `managed-image-store.ts` 在 Surface 内复用；

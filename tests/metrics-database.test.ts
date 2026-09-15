@@ -32,6 +32,7 @@ import {
   validateMetricsDatabaseStructure,
 } from "../scripts/metrics-database.mjs";
 import {
+  metricStorageColumns,
   modelRequestMetricsSchemaVersion,
   requestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
@@ -407,6 +408,30 @@ describe("model request metrics database operations", () => {
     );
   });
 
+  it("rejects a current version with legacy columns", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.close();
+    const database = new DatabaseSync(databasePath);
+    database.exec("ALTER TABLE model_request_metrics ADD COLUMN billing_mode TEXT;");
+    database.close();
+
+    expect(() => validateMetricsDatabaseStructure(environment)).toThrow(
+      new RegExp(`Schema ${modelRequestMetricsSchemaVersion} 结构不完整`, "u"),
+    );
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+    })).toThrow(
+      new RegExp(`Schema ${modelRequestMetricsSchemaVersion} 结构不完整`, "u"),
+    );
+    expect(() => {
+      const opened = new SqliteModelRequestMetricsStore(databasePath);
+      opened.close();
+    }).toThrow(
+      new RegExp(`Schema ${modelRequestMetricsSchemaVersion} 结构不完整`, "u"),
+    );
+  });
+
   it("reads a reusable aggregate report and paged sanitized export", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
@@ -430,11 +455,6 @@ describe("model request metrics database operations", () => {
       outputTokens: null,
       reasoningOutputTokens: null,
       totalTokens: null,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
     });
     store.close();
     const nowMs = Date.now() + 1;
@@ -446,7 +466,7 @@ describe("model request metrics database operations", () => {
     });
     expect(report).toMatchObject({
       format: "codex-connect-request-metrics-report",
-      version: 2,
+      version: 3,
       weeklyQuota: {
         limitId: "codex",
         planType: "plus",
@@ -472,7 +492,7 @@ describe("model request metrics database operations", () => {
     const exported = readMetricsExport(environment, { range: "24h", nowMs });
     expect(exported).toMatchObject({
       format: "codex-connect-request-metrics-export",
-      version: 2,
+      version: 3,
       weeklyQuota: {
         limitId: "codex",
         planType: "plus",
@@ -652,7 +672,7 @@ describe("model request metrics database operations", () => {
     const run = readMetricsRun(environment, "thread-1");
     expect(run).toMatchObject({
       format: "codex-connect-request-metrics-run",
-      version: 1,
+      version: 2,
       threadId: "thread-1",
       latestTurn: {
         turnId: "turn-1",
@@ -695,7 +715,7 @@ describe("model request metrics database operations", () => {
     const turns = readMetricsTurns(environment, "thread-1");
     expect(turns).toMatchObject({
       format: "codex-connect-request-metrics-turns",
-      version: 1,
+      version: 2,
       threadId: "thread-1",
       turns: [{
         turnId: "turn-1",
@@ -990,9 +1010,8 @@ describe("model request metrics database operations", () => {
     ).get()).toEqual({ value: modelRequestMetricsSchemaVersion });
     const columns = upgraded.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      "pricing_bucket",
-    ]));
+    expect(columns.map((column) => column.name)).not.toContain("pricing_bucket");
+    expect(columns.map((column) => column.name)).toContain("quota_windows");
     upgraded.close();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     expect(store.count()).toBe(2);
@@ -1032,10 +1051,8 @@ describe("model request metrics database operations", () => {
     ).get()).toEqual({ value: modelRequestMetricsSchemaVersion });
     const columns = upgraded.prepare("PRAGMA table_info(model_request_metrics)")
       .all() as Array<{ name: string }>;
-    expect(columns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      "pricing_bucket",
-      "quota_windows",
-    ]));
+    expect(columns.map((column) => column.name)).not.toContain("pricing_bucket");
+    expect(columns.map((column) => column.name)).toContain("quota_windows");
     upgraded.close();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     expect(store.count()).toBe(2);
@@ -1129,6 +1146,100 @@ describe("model request metrics database operations", () => {
     upgraded.close();
   });
 
+  it("backs up and rebuilds v13 as the compact v14 schema", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), userAgent: "codex-tui/0.154.0" });
+    store.close();
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      ALTER TABLE model_request_metrics ADD COLUMN billing_mode TEXT;
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_currency TEXT;
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_source TEXT;
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_effective_at_ms INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT;
+      ALTER TABLE model_request_metrics
+        ADD COLUMN uncached_input_price_per_million_nanos INTEGER;
+      ALTER TABLE model_request_metrics
+        ADD COLUMN cached_input_price_per_million_nanos INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN output_price_per_million_nanos INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN upstream_created_at REAL;
+      ALTER TABLE model_request_metrics ADD COLUMN upstream_completed_at REAL;
+      ALTER TABLE model_request_metrics ADD COLUMN first_token_at_ms INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN first_reasoning_delta_at_ms INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN last_reasoning_delta_at_ms INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN first_output_delta_at_ms INTEGER;
+      ALTER TABLE model_request_metrics ADD COLUMN last_output_delta_at_ms INTEGER;
+      UPDATE model_request_metrics SET
+        billing_mode = 'api',
+        pricing_currency = 'USD',
+        pricing_source = 'legacy',
+        pricing_effective_at_ms = 1,
+        pricing_bucket = 'peak',
+        uncached_input_price_per_million_nanos = 1,
+        cached_input_price_per_million_nanos = 1,
+        output_price_per_million_nanos = 1,
+        upstream_created_at = 1,
+        upstream_completed_at = 2,
+        first_token_at_ms = 1100,
+        first_reasoning_delta_at_ms = 1100,
+        last_reasoning_delta_at_ms = 1200,
+        first_output_delta_at_ms = 1300,
+        last_output_delta_at_ms = 1400;
+      CREATE VIEW model_request_metrics_enriched AS
+        SELECT *, 0 AS total_cost_nanos FROM model_request_metrics;
+      UPDATE schema_metadata SET value = 13 WHERE name = 'schema_version';
+    `);
+    legacy.close();
+
+    expect(() => validateMetricsDatabaseStructure(environment, {
+      allowUpgradeable: true,
+    })).not.toThrow();
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-09-14T12:34:56.789Z"),
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      previousSchemaVersion: 13,
+      schemaVersion: 14,
+    });
+    expect(result.backupPath).toContain(".v13.2026-09-14T12-34-56-789Z.bak");
+    if (process.platform !== "win32") {
+      expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
+    }
+    const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
+    expect(backup.prepare("SELECT billing_mode FROM model_request_metrics").get())
+      .toEqual({ billing_mode: "api" });
+    backup.close();
+
+    const upgraded = new DatabaseSync(databasePath, { readOnly: true });
+    const columns = upgraded.prepare("PRAGMA table_info(model_request_metrics)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(["id", ...metricStorageColumns]);
+    expect(upgraded.prepare(`
+      SELECT provider, input_tokens, user_agent FROM model_request_metrics
+    `).get()).toEqual({
+      provider: "deepseek",
+      input_tokens: 1_000,
+      user_agent: "codex-tui/0.154.0",
+    });
+    expect(upgraded.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'view' AND name = 'model_request_metrics_enriched'
+    `).get()).toBeUndefined();
+    upgraded.close();
+
+    const resumed = new SqliteModelRequestMetricsStore(databasePath);
+    resumed.record({ ...metricSample(), threadId: "thread-2", turnId: "turn-2" });
+    resumed.close();
+    const appended = new DatabaseSync(databasePath, { readOnly: true });
+    expect(appended.prepare("SELECT id FROM model_request_metrics ORDER BY id").all())
+      .toEqual([{ id: 1 }, { id: 2 }]);
+    appended.close();
+  });
+
   it("rolls back the v9 to v10 migration when structural validation fails", () => {
     const { environment, databasePath } = fixture();
     createLegacyV6Database(databasePath, 1);
@@ -1202,6 +1313,49 @@ describe("model request metrics database operations", () => {
     if (process.platform !== "win32") expect(statSync(backupPath).mode & 0o777).toBe(0o600);
   });
 
+  it("rolls back a v13 migration when account tables are malformed", () => {
+    const { environment, databasePath } = fixture();
+    createLegacyV6Database(databasePath, 1);
+    const database = new DatabaseSync(databasePath);
+    database.exec(`
+      ALTER TABLE model_request_metrics ADD COLUMN pricing_bucket TEXT;
+      ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
+      ALTER TABLE model_request_metrics ADD COLUMN user_agent TEXT;
+      CREATE TABLE subagent_threads (
+        thread_id TEXT PRIMARY KEY,
+        parent_thread_id TEXT NOT NULL,
+        parent_turn_id TEXT,
+        agent_path TEXT NOT NULL,
+        recorded_at_ms INTEGER NOT NULL
+      );
+      CREATE TABLE subagent_turns (
+        thread_id TEXT NOT NULL,
+        turn_id TEXT NOT NULL,
+        parent_thread_id TEXT NOT NULL,
+        parent_turn_id TEXT NOT NULL,
+        agent_path TEXT NOT NULL,
+        recorded_at_ms INTEGER NOT NULL,
+        PRIMARY KEY (thread_id, turn_id)
+      );
+      CREATE INDEX subagent_turns_parent_turn
+        ON subagent_turns (parent_thread_id, parent_turn_id);
+      CREATE TABLE account_sources (source_id TEXT PRIMARY KEY);
+      CREATE TABLE account_snapshots (snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT);
+      UPDATE schema_metadata SET value = 13 WHERE name = 'schema_version';
+    `);
+    database.close();
+
+    expect(() => upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false,
+      now: () => new Date("2026-09-14T13:45:00.000Z"),
+    })).toThrow(/Schema 14 结构不完整/u);
+
+    expect(inspectMetricsDatabase(environment).schemaVersion).toBe(13);
+    expect(existsSync(
+      `${databasePath}.v13.2026-09-14T13-45-00-000Z.bak`,
+    )).toBe(true);
+  });
+
   it("refuses metrics upgrades while Gateway is running", () => {
     const { environment, databasePath } = fixture();
     createMetricsDatabase(databasePath, 3, 1);
@@ -1218,7 +1372,7 @@ describe("model request metrics database operations", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12 升级到 v13/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13 升级到 v14/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 
@@ -1510,14 +1664,7 @@ function metricSample(): ModelRequestMetricSample {
     outputTokens: 100,
     reasoningOutputTokens: 40,
     totalTokens: 1_100,
-    upstreamCreatedAt: 1_785_640_800,
-    upstreamCompletedAt: 1_785_640_801,
     requestStartedAtMs: 1_000,
-    firstTokenAtMs: 1_100,
-    firstReasoningDeltaAtMs: 1_100,
-    lastReasoningDeltaAtMs: 1_300,
-    firstOutputDeltaAtMs: 1_400,
-    lastOutputDeltaAtMs: 1_600,
     responseCompletedAtMs: 1_650,
     weeklyQuota: null,
   };

@@ -34,7 +34,6 @@ describe("WebUI management operation boundaries", () => {
   });
 
   it("keeps high-risk path classification explicit", () => {
-    expect(isHighRiskManagementPath("/api-providers")).toBe(true);
     expect(isHighRiskManagementPath("/provider-settings/preview")).toBe(true);
     expect(isHighRiskManagementPath("/account-settings/preview")).toBe(true);
     expect(isHighRiskManagementPath("/tasks/preview")).toBe(true);

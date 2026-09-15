@@ -61,8 +61,6 @@ export function formatSurfaceUserFacingError(
       return sessionCommandUsageText;
     case "archived-sessions.usage":
       return archivedSessionCommandUsageText;
-    case "thread-section.removed":
-      return "会话分区功能已移除；请使用 /pin、/unpin 和 /rename";
     case "thread.bound":
       return "该 Codex Session 已绑定到其他会话";
     case "thread.takeover.busy":

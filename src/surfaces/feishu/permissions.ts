@@ -4,7 +4,7 @@ export interface FeishuPermissionRuntimeStatus {
   menuEventObserved: boolean;
 }
 
-import { toStructuredMarkdownList } from "../conversation-command-format.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 
 export type FeishuUserAuthorizationStatus =
   | "pending"

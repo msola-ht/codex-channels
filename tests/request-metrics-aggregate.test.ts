@@ -28,22 +28,12 @@ describe("request metrics aggregate reports", () => {
       turnId: null,
       model: "deepseek-v4-flash",
       status: "failed",
-      firstTokenAtMs: 1_300,
-      firstReasoningDeltaAtMs: 1_300,
-      lastReasoningDeltaAtMs: 1_400,
-      firstOutputDeltaAtMs: 1_500,
-      lastOutputDeltaAtMs: 1_700,
       responseCompletedAtMs: 1_750,
     });
     store.record({
       ...sample(),
       provider: "openai",
       model: "gpt-5.6-sol",
-      firstTokenAtMs: 1_900,
-      firstReasoningDeltaAtMs: 1_900,
-      lastReasoningDeltaAtMs: 2_000,
-      firstOutputDeltaAtMs: 2_100,
-      lastOutputDeltaAtMs: 2_300,
       responseCompletedAtMs: 2_350,
     });
 
@@ -59,13 +49,7 @@ describe("request metrics aggregate reports", () => {
       cachedInputTokens: 2_700,
       outputTokens: 300,
       reasoningOutputTokens: 120,
-      outputSpeedSampleCount: 3,
-      outputSpeedTimedCount: 3,
-      ttftP50Ms: 300,
-      ttftP95Ms: 900,
-      ttftSampleCount: 3,
     });
-    expect(global.aggregate?.ttftAverageMs).toBeCloseTo(433.333, 2);
 
     const providers = store.aggregate({ dimension: "provider", ...range });
     expect(providers.totalGroupCount).toBe(2);

@@ -119,7 +119,7 @@ export function formatTelegramPanelHtml(
     if (field) {
       const label = escapeTelegramHtml(field[1]!);
       const value = escapeTelegramHtml(field[2]!);
-      const formattedValue = /^(切换|恢复|恢复归档)：$/.test(field[1]!)
+      const formattedValue = /^(切换|恢复|恢复归档|恢复会话)：$/.test(field[1]!)
         ? `<code>${value.trimStart()}</code>`
         : value;
       output.push(`<b>${label}</b>${formattedValue}`);

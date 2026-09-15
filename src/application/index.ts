@@ -14,14 +14,12 @@ export {
   type ProviderAccountLimits,
   type ProviderAccountQueryPort,
   type OfficialAccountSnapshot,
-  type OfficialAccountSnapshotQueryPort,
   type OfficialAccountSnapshotWriter,
   type ProviderAccountUsage,
   type ProviderBalance,
   type ProviderQuotaWindow,
 } from "./account-port.js";
 export { createOfficialAccountSnapshot } from "./account-snapshot.js";
-export { OfficialAccountSnapshotService } from "./account-snapshot-service.js";
 export {
   ProviderAccountService,
   createOpenAiAccountAdapter,
@@ -47,8 +45,10 @@ export {
   threadRevertCommandUsageText,
   scheduledTaskCommandUsageText,
   type ConversationCommandName,
+  type ConversationCommandExecutor,
   type ConversationCommandOutcome,
   type ConversationCommandResult,
+  type ConversationCommandUseCases,
   type McpDetailView,
   type PluginListView,
 } from "./conversation-command-service.js";
@@ -84,12 +84,16 @@ export {
   type AgentRolePort,
   type ConversationInput,
   type ConversationIdleReleaseResult,
+  type ConversationAccountMetricsUseCases,
+  type ConversationExtensionUseCases,
   type ConversationQueryPort,
+  type ConversationQueueRevertUseCases,
   type ConversationResumeResult,
   type ConversationSession,
+  type ConversationSessionUseCases,
   type ConversationStatus,
   type ConversationTransferPort,
-  type ConversationUseCases,
+  type ConversationTurnUseCases,
   type ThreadQueueListResult,
   type ThreadQueueReorderResult,
   type ProjectRulesPort,
@@ -164,7 +168,6 @@ export {
 } from "./permission-port.js";
 export {
   estimateWeeklyLimit,
-  type DirectApiRequestMetricsSummary,
   type RequestMetricsAggregate,
   type RequestMetricsAggregateReport,
   type RequestMetricsAggregateView,

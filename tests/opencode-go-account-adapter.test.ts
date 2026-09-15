@@ -58,7 +58,6 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 0,
           resetsAt: Math.floor(Date.parse("2026-08-16T18:03:54.934Z") / 1_000),
           status: "ok",
-          totalUsd: 12,
         },
         {
           windowId: "weekly",
@@ -66,7 +65,6 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 2,
           resetsAt: Math.floor(Date.parse("2026-08-17T00:00:00.934Z") / 1_000),
           status: "ok",
-          totalUsd: 30,
         },
         {
           windowId: "monthly",
@@ -74,7 +72,6 @@ describe("OpenCode Go account adapter", () => {
           usedPercent: 1,
           resetsAt: Math.floor(Date.parse("2026-09-15T14:22:07.934Z") / 1_000),
           status: "ok",
-          totalUsd: 60,
         },
       ],
     });
@@ -207,14 +204,7 @@ describe("OpenCode Go account adapter", () => {
       outputTokens: 9_000_000,
       reasoningOutputTokens: 0,
       totalTokens: 18_000_000,
-      upstreamCreatedAt: 0,
-      upstreamCompletedAt: 0,
       requestStartedAtMs: baseMs - 1 * hourMs,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
       responseCompletedAtMs: baseMs - 1 * hourMs,
       weeklyQuota: null,
     });
@@ -294,6 +284,46 @@ describe("OpenCode Go account adapter", () => {
     expect(byWindow.get("monthly")).toBe(220_000);
   });
 
+  it("keeps rolling-window tokens when the live reset time drifts", async () => {
+    const codexHome = await createCodexHome();
+    const metricsPath = modelRequestMetricsDatabasePath(join(codexHome, "gateway.sqlite3"));
+    const nowMs = Date.parse("2026-09-14T04:00:00.000Z");
+    const recordedReset = Date.parse("2026-09-14T06:16:23.000Z") / 1_000;
+    const liveReset = "2026-09-14T06:17:10.000Z";
+    const store = new SqliteModelRequestMetricsStore(metricsPath, nowMs);
+    try {
+      recordWindowSample(
+        store,
+        Date.parse("2026-09-14T02:00:00.000Z"),
+        60_000,
+        40_000,
+        100_000,
+        nowMs,
+        [{ windowId: "rolling", resetsAt: recordedReset }],
+      );
+    } finally {
+      store.close();
+    }
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      metricsDatabasePath: metricsPath,
+      nowMs: () => nowMs + 1,
+      fetchImpl: async () => new Response(JSON.stringify({
+        usage: {
+          rolling: { status: "ok", percent: 4, resetsAt: liveReset },
+        },
+      }), { status: 200 }),
+    });
+
+    await expect(adapter.accountUsage()).resolves.toMatchObject({
+      kind: "quota-windows",
+      windows: [expect.objectContaining({
+        windowId: "rolling",
+        localTokens: 100_000,
+      })],
+    });
+  });
+
   it("attributes tokens by the recorded quota window snapshot when present", async () => {
     const codexHome = await createCodexHome();
     const directory = await mkdtemp(join(tmpdir(), "codexc-opencode-go-window-snapshot-"));
@@ -313,7 +343,7 @@ describe("OpenCode Go account adapter", () => {
       { windowId: "weekly", resetsAt: weeklyResetsAt },
       { windowId: "monthly", resetsAt: monthlyResetsAt },
     ];
-    // 请求时间在滚动窗口范围外，但快照属于当前窗口：按快照归属。
+    // 滚动窗口只按请求时间归属；即使快照重置时间相同，范围外请求也不计入。
     recordWindowSample(
       store,
       baseMs - 6 * hourMs,
@@ -415,16 +445,16 @@ describe("OpenCode Go account adapter", () => {
     const byWindow = new Map(
       usage.windows.map((window) => [window.windowId, window.localTokens]),
     );
-    expect(byWindow.get("rolling")).toBe(200_000);
+    expect(byWindow.get("rolling")).toBe(100_000);
     expect(byWindow.get("weekly")).toBe(240_000);
     expect(byWindow.get("monthly")).toBe(250_000);
   });
 
   it.each([
-    ["rolling", "2026-08-17T05:00:00.000Z"],
-    ["weekly", "2026-08-24T00:00:00.000Z"],
-    ["monthly", "2026-09-17T00:00:00.000Z"],
-  ])("counts %s tokens after reset without moving requests from a valid previous window", async (windowId, resetsAt) => {
+    ["rolling", "2026-08-17T05:00:00.000Z", 10_300],
+    ["weekly", "2026-08-24T00:00:00.000Z", 300],
+    ["monthly", "2026-09-17T00:00:00.000Z", 300],
+  ])("counts %s tokens from its current quota range", async (windowId, resetsAt, expectedTokens) => {
     const codexHome = await createCodexHome();
     const metricsPath = modelRequestMetricsDatabasePath(join(codexHome, "gateway.sqlite3"));
     const boundaryMs = Date.parse("2026-08-17T00:00:00.000Z");
@@ -436,7 +466,7 @@ describe("OpenCode Go account adapter", () => {
       // 重置点及之后开始的请求携带旧缓存，应按开始时间计入新窗口。
       recordWindowSample(store, boundaryMs, 40, 60, 100, boundaryMs + 5_000, previousWindow);
       recordWindowSample(store, boundaryMs + 1, 80, 120, 200, boundaryMs + 5_000, previousWindow);
-      // 与当前窗口不同但在请求开始时仍有效的快照继续优先，不能一律按时间回退。
+      // 固定窗口保留快照归属；滚动窗口仍按请求时间归入当前范围。
       recordWindowSample(store, boundaryMs, 4_000, 6_000, 10_000, boundaryMs + 5_000, [
         { windowId, resetsAt: boundaryMs / 1_000 + 1 },
       ]);
@@ -454,7 +484,7 @@ describe("OpenCode Go account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toMatchObject({
       kind: "quota-windows",
-      windows: [expect.objectContaining({ windowId, localTokens: 300 })],
+      windows: [expect.objectContaining({ windowId, localTokens: expectedTokens })],
     });
   });
 
@@ -575,14 +605,7 @@ function recordWindowSample(
     outputTokens,
     reasoningOutputTokens: 0,
     totalTokens,
-    upstreamCreatedAt: 0,
-    upstreamCompletedAt: 0,
     requestStartedAtMs,
-    firstTokenAtMs: null,
-    firstReasoningDeltaAtMs: null,
-    lastReasoningDeltaAtMs: null,
-    firstOutputDeltaAtMs: null,
-    lastOutputDeltaAtMs: null,
     responseCompletedAtMs: requestStartedAtMs,
     ...(recordedAtMs === undefined ? {} : { recordedAtMs }),
     weeklyQuota: null,

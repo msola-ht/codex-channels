@@ -4,7 +4,7 @@ import type {
   ConfigChangeScope,
 } from "../config/index.js";
 import type { Workspace } from "../policy/index.js";
-import { toStructuredMarkdownList } from "./conversation-command-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 import type { SurfaceConfigurationChange } from "./types.js";
 
 export function formatWorkspacesAdded(
@@ -132,7 +132,6 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "display.reasoning": "思考状态显示",
     "experimental.plugin-api": "开发中 Plugin API",
     "scheduled-tasks.enabled": "Gateway 计划任务",
-    "api.providers": "第三方 API 提供商",
     "metrics.storage": "指标保留策略",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",

@@ -13,7 +13,6 @@ export const mcpCommandUsageText = "用法：/mcp [health | reload | 名称或�
 export const pluginCommandUsageText = "用法：/plugin [health | list [页码] [search <关键词>] | <名称、完整 ID 或序号> [任务]]";
 export const sessionCommandUsageText = "用法：/sessions [页码] [filter <all|running|pinned>] [provider <名称>] [search <关键词>]";
 export const archivedSessionCommandUsageText = "用法：/archived [页码] [filter <all|pinned>] [provider <名称>] [search <关键词>]";
-export const threadSectionCommandUsageText = "会话分区功能已移除；请使用 /pin、/unpin 和 /rename";
 export const threadQueueCommandUsageText = "用法：/queue add <文本> | /queue list [页码] | /queue update <完整 ID 或当前列表序号> <文本> | /queue delete <完整 ID 或当前列表序号> | /queue reorder <完整 ID 或当前列表序号> <目标位置> | /queue start [完整 ID 或当前列表序号]";
 export const threadRevertCommandUsageText = "用法：/revert list [页码] | /revert <Turn ID 或当前列表序号> | /revert confirm <一次性令牌>";
 
@@ -97,9 +96,6 @@ export function parseSessionListView(input: string, archived: boolean): SessionL
     index = 1;
   }
   const recognized = new Set(["filter", "provider", "search"]);
-  if (parts[0] === "section" || parts[0] === "unsectioned") {
-    throw sessionListUsageError(archived);
-  }
   if (index === 0 && !recognized.has(parts[0] ?? "")) {
     if (input.length > 128) throw sessionListUsageError(archived);
     return { ...view, searchTerm: input };

@@ -17,14 +17,10 @@ export interface TurnRequestMetricsSummary {
   turnId: string;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
   compact?: CompactRequestMetricsSummary | null;
 }
 
@@ -32,29 +28,11 @@ export interface ThreadRequestMetricsAggregate {
   turnCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
   compact?: CompactRequestMetricsSummary | null;
-}
-
-export interface DirectApiRequestMetricsSummary {
-  provider: string;
-  providerName?: string;
-  model: string | null;
-  status: "completed" | "failed" | "incomplete" | "unknown";
-  httpStatus: number | null;
-  requestDurationMs: number | null;
-  inputTokens: number | null;
-  cachedInputTokens: number | null;
-  outputTokens: number | null;
-  reasoningOutputTokens: number | null;
-  totalTokens: number | null;
 }
 
 export interface ThreadRequestMetricsSummary {
@@ -62,7 +40,6 @@ export interface ThreadRequestMetricsSummary {
   modelProvider: string;
   latestTurn: TurnRequestMetricsSummary | null;
   threadAggregate: ThreadRequestMetricsAggregate | null;
-  latestDirectApi: DirectApiRequestMetricsSummary | null;
 }
 
 export type RequestMetricsTimeRange =
@@ -98,24 +75,15 @@ export interface RequestMetricsCommandQuery {
 export interface RequestMetricsAggregate {
   requestCount: number;
   unsuccessfulRequestCount: number;
-  requestDurationMs: number;
   inputTokens: number;
   cachedInputTokens: number | null;
   outputTokens: number;
   reasoningOutputTokens: number;
-  outputTokensPerSecond: number | null;
-  outputSpeedSampleCount: number;
-  outputSpeedTimedCount: number;
-  ttftAverageMs: number | null;
-  ttftP50Ms: number | null;
-  ttftP95Ms: number | null;
-  ttftSampleCount: number;
   compact?: CompactRequestMetricsSummary | null;
 }
 
 export interface RequestMetricsGroup {
   provider: string | null;
-  providerName?: string;
   model: string | null;
   aggregate: RequestMetricsAggregate;
 }
@@ -132,7 +100,6 @@ export interface RequestMetricsAggregateReport {
 
 export interface RequestMetricsErrorGroup {
   provider: string;
-  providerName?: string;
   model: string | null;
   status: "failed" | "incomplete" | "unknown";
   httpStatus: number | null;

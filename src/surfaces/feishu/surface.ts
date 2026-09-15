@@ -1,9 +1,9 @@
 import type { Logger } from "pino";
 
 import type {
-  ConversationUseCases,
+  ConversationCommandExecutor,
+  ConversationTurnUseCases,
   ScheduledTaskConfirmation,
-  ScheduledTaskUseCases,
 } from "../../application/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
@@ -103,14 +103,14 @@ export interface FeishuStartupNotification {
 export interface FeishuSurfaceOptions {
   appId: string;
   appSecret: string;
-  service: ConversationUseCases;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   logger: Logger;
   uploadsDirectory: string;
   credentialsDirectory: string;
   onFatal: (error: Error) => void;
   actorRegistry?: ConversationActorRegistry;
-  scheduledTasks?: ScheduledTaskUseCases;
   openApiAgent?: unknown;
   accountsAgent?: unknown;
   webSocketAgent?: unknown;
@@ -261,6 +261,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.service,
       this.output,
       this.images,
+      options.commands,
       () => ({
         connectionReady: this.connectionReady,
         cardActionObserved: this.cardActionObserved,
@@ -281,9 +282,6 @@ export class FeishuSurface implements SurfaceAdapter {
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),
-        ...(options.scheduledTasks === undefined
-          ? {}
-          : { scheduledTasks: options.scheduledTasks }),
         ...(files === undefined ? {} : { files }),
         audios: this.audios,
         ...(quotedMessages === undefined

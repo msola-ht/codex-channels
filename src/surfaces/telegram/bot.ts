@@ -3,13 +3,14 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
 import {
-  ConversationCommandService,
   conversationCommandNames,
   listProviders,
+  type ConversationCommandExecutor,
   type ConversationCommandName,
-  type ConversationUseCases,
+  type ConversationExtensionUseCases,
+  type ConversationSessionUseCases,
+  type ConversationTurnUseCases,
   type ScheduledTaskConfirmation,
-  type ScheduledTaskUseCases,
 } from "../../application/index.js";
 import {
   UserFacingError,
@@ -26,8 +27,8 @@ import type {
 } from "../types.js";
 import {
   conversationCommandHelpLines,
-  formatConversationScheduledConfirmation,
-} from "../conversation-command-format.js";
+} from "../conversation-command-help.js";
+import { formatConversationScheduledConfirmation } from "../conversation-scheduled-task-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatOperationFailure,
@@ -102,8 +103,8 @@ export interface TelegramAudioPort {
 
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
+  commands: ConversationCommandExecutor;
   actorRegistry?: ConversationActorRegistry;
-  scheduledTasks?: ScheduledTaskUseCases;
   onFatal?: (error: Error) => void;
   imageStore?: TelegramImagePort;
   audioStore?: TelegramAudioPort;
@@ -126,13 +127,18 @@ export interface TelegramSurfaceOptions {
 export interface CreateTelegramSurfaceOptions extends TelegramSurfaceOptions {
   token: string;
   proxyUrl?: string;
-  service: ConversationUseCases;
+  service: TelegramConversationUseCases;
   access: SurfaceAccessPolicy;
   startupRecipients: ReadonlySet<number>;
   workspaces: Workspace[];
   uploadsDirectory: string;
   logger: Logger;
 }
+
+export type TelegramConversationUseCases =
+  & Pick<ConversationTurnUseCases, "touchActivity" | "submit">
+  & Pick<ConversationSessionUseCases, "status" | "listWorkspaces">
+  & Pick<ConversationExtensionUseCases, "modelState" | "listPlugins">;
 
 export function createTelegramSurface(
   options: CreateTelegramSurfaceOptions,
@@ -162,7 +168,7 @@ export class TelegramSurface {
   private readonly audioStore: TelegramAudioPort;
   private readonly textFileInput: TelegramTextFilePort;
   private readonly actorRegistry: ConversationActorRegistry | undefined;
-  private readonly commands: ConversationCommandService;
+  private readonly commands: ConversationCommandExecutor;
   private readonly inputs: SurfaceInputCoalescer;
   private readonly pluginTaskPrompts: TelegramPluginTaskPrompts;
   private readonly now: () => number;
@@ -173,7 +179,7 @@ export class TelegramSurface {
   constructor(
     token: string,
     proxyUrl: string | undefined,
-    private readonly service: ConversationUseCases,
+    private readonly service: TelegramConversationUseCases,
     private readonly access: SurfaceAccessPolicy,
     startupRecipients: ReadonlySet<number>,
     workspaces: Workspace[],
@@ -215,10 +221,7 @@ export class TelegramSurface {
     this.now = options.now ?? Date.now;
     this.debugEnabled = options.debugEnabled ?? false;
     this.notificationRecipients = new Set(startupRecipients);
-    this.commands = new ConversationCommandService(
-      service,
-      options.scheduledTasks,
-    );
+    this.commands = options.commands;
     this.pluginTaskPrompts = new TelegramPluginTaskPrompts({ now: this.now });
     const apiExecutor = new TelegramApiExecutor(logger);
     this.outbox = new TelegramOutbox(this.bot.api, logger, apiExecutor, {

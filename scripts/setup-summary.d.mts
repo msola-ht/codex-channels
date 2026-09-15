@@ -24,7 +24,6 @@ export interface SetupConfigurationSummary {
   agent:
     | { status: "configured"; provider: string; model: string }
     | { status: "unavailable" | "not-configured" };
-  apiProviderCount: number;
   configPath: string;
 }
 

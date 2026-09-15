@@ -1,4 +1,4 @@
-import { toStructuredMarkdownList } from "./conversation-command-format.js";
+import { toStructuredMarkdownList } from "./markdown-list.js";
 
 export const interactionProcessedTitle = "Codex 交互已处理";
 export const interactionCancelledTitle = "Codex 交互已取消";

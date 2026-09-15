@@ -246,14 +246,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableTokenCount(record.outputTokens)
     || !nullableTokenCount(record.reasoningOutputTokens)
     || !nullableTokenCount(record.totalTokens)
-    || !nullableFiniteNumber(record.upstreamCreatedAt)
-    || !nullableFiniteNumber(record.upstreamCompletedAt)
     || !finiteNumber(record.requestStartedAtMs)
-    || !nullableFiniteNumber(record.firstTokenAtMs)
-    || !nullableFiniteNumber(record.firstReasoningDeltaAtMs)
-    || !nullableFiniteNumber(record.lastReasoningDeltaAtMs)
-    || !nullableFiniteNumber(record.firstOutputDeltaAtMs)
-    || !nullableFiniteNumber(record.lastOutputDeltaAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
   ) {
     return undefined;
@@ -375,10 +368,6 @@ function nullableUserAgent(value: unknown): boolean {
 
 function finiteNumber(value: unknown): boolean {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-function nullableFiniteNumber(value: unknown): boolean {
-  return value === null || finiteNumber(value);
 }
 
 function nullableTokenCount(value: unknown): boolean {

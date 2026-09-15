@@ -4,20 +4,26 @@ import { join } from "node:path";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/index.js";
+import type { ConversationTurnUseCases } from "../src/application/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../src/policy/index.js";
 import {
-  WeixinInputAdapter,
+  WeixinInputAdapter as ProductionWeixinInputAdapter,
   WeixinInputFatalError,
   WeixinProtocolError,
   WeixinReplyContextStore,
   type WeixinProtocolClient,
   type WeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
+import {
+  conversationCommandExecutor,
+  conversationInputUseCases,
+  conversationStatus,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const accountId = "account-fixture@im.bot";
 const actorId = "actor-fixture@im.wechat";
@@ -26,6 +32,27 @@ const target: ConversationTarget = {
   accountId,
   conversationId: actorId,
 };
+
+type ProductionWeixinInputOptions = ConstructorParameters<
+  typeof ProductionWeixinInputAdapter
+>[0];
+type TestWeixinInputOptions = Omit<
+  ProductionWeixinInputOptions,
+  "service" | "commands"
+> & {
+  service: ConversationMethodOverrides;
+};
+
+class WeixinInputAdapter extends ProductionWeixinInputAdapter {
+  constructor(options: TestWeixinInputOptions) {
+    const { service, ...rest } = options;
+    super({
+      ...rest,
+      service: conversationInputUseCases(service),
+      commands: conversationCommandExecutor(service),
+    });
+  }
+}
 
 const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-weixin-input-images-"));
 const pngImagePath = join(imageFixtureDirectory, "image.png");
@@ -219,22 +246,12 @@ describe("WeixinInputAdapter", () => {
     const outbox = outboxFixture();
     const service = {
       ...serviceFixture(),
-      status: vi.fn(() => ({
-        workspaceId: "main",
-        workspaceName: "Main",
-        cwd: "/workspace",
+      status: vi.fn(() => conversationStatus({
         threadId: "thread",
-        turnId: null,
         model: "gpt-test",
         effort: "medium",
-        serviceTier: null,
-        modelPending: false,
-        effortPending: false,
-        fastModePending: false,
-        collaborationMode: "default",
-        collaborationModePending: false,
       })),
-    } as unknown as ConversationUseCases;
+    };
     const adapter = new WeixinInputAdapter({
       accountId,
       client,
@@ -1102,18 +1119,16 @@ function serviceFixture(
   implementation: (
     target: ConversationTarget,
     text: string,
-  ) => ReturnType<ConversationUseCases["submit"]> = async () => ({
+  ) => ReturnType<ConversationTurnUseCases["submit"]> = async () => ({
     threadId: "thread",
     turnId: "turn",
     steered: false,
   }),
-): ConversationUseCases & {
+): Pick<ConversationTurnUseCases, "submit"> & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
     submit: vi.fn(implementation),
-  } as unknown as ConversationUseCases & {
-    submit: ReturnType<typeof vi.fn>;
   };
 }
 

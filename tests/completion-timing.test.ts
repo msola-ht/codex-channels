@@ -7,14 +7,10 @@ describe("mergeCompletionTiming", () => {
   it("rebuilds a recovered Turn from the persisted local proxy summary", () => {
     const latestTurn = turnSummary({
       requestCount: 2,
-      requestDurationMs: 12_000,
       inputTokens: 1_000,
       cachedInputTokens: 800,
       outputTokens: 100,
       reasoningOutputTokens: 40,
-      outputTokensPerSecond: 25,
-      outputSpeedSampleCount: 2,
-      outputSpeedTimedCount: 2,
       compact: {
         model: "gpt-5.6-sol",
         hasMixedModels: false,
@@ -49,9 +45,6 @@ describe("mergeCompletionTiming", () => {
       requestCount: 2,
       cachedInputTokens: null,
       reasoningOutputTokens: 0,
-      outputTokensPerSecond: null,
-      outputSpeedSampleCount: 2,
-      outputSpeedTimedCount: 1,
       compact: null,
     });
 
@@ -137,14 +130,10 @@ function turnSummary(
     turnId: "turn-1",
     requestCount: 0,
     unsuccessfulRequestCount: 0,
-    requestDurationMs: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
     outputTokens: 0,
     reasoningOutputTokens: 0,
-    outputTokensPerSecond: null,
-    outputSpeedSampleCount: 0,
-    outputSpeedTimedCount: 0,
     ...overrides,
     compact: overrides.compact ?? null,
   };

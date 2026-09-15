@@ -165,15 +165,6 @@ describe("shared surface copy contract", () => {
     }
   });
 
-  it("explains removed Thread Section commands consistently on every surface", () => {
-    const error = new UserFacingError("thread-section.removed", "opaque internal fallback");
-    for (const surface of ["Telegram", "飞书", "微信"] as const) {
-      expect(formatSurfaceUserFacingError(error, surface)).toBe(
-        "会话分区功能已移除；请使用 /pin、/unpin 和 /rename",
-      );
-    }
-  });
-
   it("formats MCP OAuth completion without exposing sensitive failure details", () => {
     expect(formatRuntimeMcpOAuthCompleted({
       name: "docs",

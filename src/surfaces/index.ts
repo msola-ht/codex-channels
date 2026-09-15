@@ -41,10 +41,12 @@ export { formatConversationIdleReleased } from "./output-copy.js";
 export { formatProviderIdleReleaseNotice } from "./output-copy.js";
 export {
   formatConversationCommandOutcome,
+} from "./conversation-command-outcome-format.js";
+export {
   formatConversationScheduledConfirmation,
   formatConversationScheduledRuns,
   formatConversationScheduledTasks,
-} from "./conversation-command-format.js";
+} from "./conversation-scheduled-task-command-format.js";
 export { setConfiguredCustomPrimaryProviderId } from "./provider-format.js";
 export type {
   OperationUpdateDisplay,

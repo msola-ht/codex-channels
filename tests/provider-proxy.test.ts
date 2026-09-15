@@ -859,14 +859,8 @@ describe("ProviderProxy", () => {
       outputTokens: 30,
       reasoningOutputTokens: 10,
       totalTokens: 150,
-      upstreamCreatedAt: null,
-      upstreamCompletedAt: null,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
     });
+    expect(metric).not.toHaveProperty("firstTokenAtMs");
     expect(received).toHaveLength(1);
     expect(received[0]?.host).toBe(`127.0.0.1:${upstreamAddress.port}`);
     expect(received[0]?.authorization).toBe("Bearer sk-test1234");
@@ -942,8 +936,6 @@ describe("ProviderProxy", () => {
       outputTokens: 50,
       reasoningOutputTokens: 20,
       totalTokens: 550,
-      upstreamCreatedAt: null,
-      upstreamCompletedAt: null,
     })]);
     expect(JSON.stringify(metrics)).not.toContain("不得进入指标");
     expect(JSON.stringify(metrics)).not.toContain("response-private-id");
@@ -1081,9 +1073,7 @@ describe("ProviderProxy", () => {
       threadId: "thread-function",
       turnId: "turn-function",
     });
-    expect(metrics[0]?.firstTokenAtMs).toBeNull();
-    expect(metrics[0]?.firstOutputDeltaAtMs).toBeNull();
-    expect(metrics[0]?.lastOutputDeltaAtMs).toBeNull();
+    expect(metrics[0]).not.toHaveProperty("firstTokenAtMs");
   });
 
   it("forwards ordinary deltas before waiting for terminal metrics", async () => {
@@ -1441,9 +1431,7 @@ describe("ProviderProxy", () => {
       reasoningOutputTokens: 10,
       totalTokens: 150,
     });
-    expect(metrics[0]?.firstTokenAtMs).toBeNull();
-    expect(metrics[0]?.firstReasoningDeltaAtMs).toBeNull();
-    expect(metrics[0]?.firstOutputDeltaAtMs).toBeNull();
+    expect(metrics[0]).not.toHaveProperty("firstTokenAtMs");
   });
 
   it("does not record WebSocket startup prewarm as a model request", async () => {

@@ -1,5 +1,5 @@
 import type { ConversationTarget } from "../../conversation-core/index.js";
-import { toStructuredMarkdownList } from "../conversation-command-format.js";
+import { toStructuredMarkdownList } from "../markdown-list.js";
 
 import type { WeixinCredentialStore } from "./credential-store.js";
 import {

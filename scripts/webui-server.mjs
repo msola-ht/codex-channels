@@ -10,7 +10,7 @@ import {
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { runtimeConfig, userDataDir } from "./runtime-config.mjs";
+import { userDataDir } from "./runtime-config.mjs";
 import {
   assertWebuiHost,
   parseWebuiCliArgs,
@@ -19,21 +19,14 @@ import {
   readGatewayConfig,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
-import { readAppServerUserAgent } from "../runtime/app-server-read.mjs";
-import {
-  GatewayAccountRefreshError,
-  requestGatewayAccountRefresh,
-} from "../runtime/gateway-account-refresh.mjs";
+import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
 import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
 import {
   ConfigManagementError,
   loadGatewaySettings,
-  updateGatewaySetting,
 } from "./config-management.mjs";
 import { loadModelProviderManagementState } from "./model-provider-management.mjs";
-import { readManagedServiceErrorAsync } from "./service-status.mjs";
-import { invalidateServiceStatusSummary, loadServiceStatusSummary, serviceVersion } from "./webui-service-status.mjs";
+import { loadServiceStatusSummary } from "./webui-service-status.mjs";
 import {
   ApiError,
   authorized,
@@ -55,51 +48,29 @@ import {
   previewCodexUserSetting,
   updateCodexUserSetting,
 } from "./codex-user-settings-management.mjs";
-import { configActivationResult } from "./config-activation-result.mjs";
-import {
-  deleteApiProvider,
-  listApiProviders,
-  saveApiProvider,
-} from "./api-provider-management.mjs";
 import { WebuiManagementTaskRunner } from "./webui-management-tasks.mjs";
-import { apiProviderResourceStateFromList, redactApiProviderResult } from "./webui-management-providers.mjs";
-import { managementTaskResourceState, normalizeTaskRequestShape } from "./webui-management-task-resource.mjs";
 import {
-  isHighRiskManagedSetting,
-  normalizeManagedSetting,
-  redactManagedSettings,
-} from "./webui-management-settings.mjs";
-import {
-  apiProviderResourceState,
-  assertManagedSetting,
-  codexManagementError,
   isHighRiskManagementPath,
-  loadProviderManagementSummary,
-  invalidateProviderManagementSummary,
   ManagementOperationError,
-  normalizeApiProviderMutation,
-  previewApiProviderOperation,
 } from "./webui-management-operations.mjs";
 import {
   applyProviderSettingsMutation,
-  loadProviderSettingsResource,
-  normalizeProviderSettingsMutation,
   previewProviderSettingsMutation,
-  redactProviderSettingsResult,
 } from "./webui-provider-settings-management.mjs";
 import {
   applyAccountSettingsMutation,
   loadAccountSettingsResource,
-  normalizeAccountSettingsMutation,
   previewAccountSettingsMutation,
-  redactAccountSettingsResult,
 } from "./webui-account-settings-management.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { routeCodexSettingsManagement } from "./webui-management-codex-route.mjs";
+import { routeGatewaySettingsManagement } from "./webui-management-gateway-route.mjs";
 import {
-  loadOpencodeGoAccounts,
-  opencodeGoAccountDisplayName,
-  opencodeGoProviderId,
-} from "../runtime/opencode-go-accounts.mjs";
+  routeProviderManagement,
+  sendAccountSnapshots,
+} from "./webui-management-provider-route.mjs";
+import { routeStatusManagement } from "./webui-management-status-route.mjs";
+import { routeTaskManagement } from "./webui-management-task-route.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8787;
@@ -115,9 +86,6 @@ const requestSortKeys = {
   input: "inputTokens",
   output: "outputTokens",
   reasoningOutput: "reasoningOutputTokens",
-  speed: "outputTokensPerSecond",
-  ttft: "ttftMs",
-  duration: "requestDurationMs",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
@@ -125,9 +93,6 @@ const SOURCE_GATEWAY_VERSION = readJsonMetadata(join(PACKAGE_DIR, "src", "versio
 const GATEWAY_VERSION = PACKAGE_VERSION ?? SOURCE_GATEWAY_VERSION;
 const CODEX_CLI_VERSION = (readJsonMetadata(join(PACKAGE_DIR, "src", "codex-protocol", "version.json"))?.codexCli ?? null)
   ?.replace(/^codex-cli\s+/u, "") ?? null;
-const highRiskCodexSettingKinds = new Set(["permissions"]);
-const appServerUserAgentCacheTtlMs = 5_000;
-
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -378,610 +343,34 @@ async function routeManagement(environment, url, request, response, state, token
       state.limiter.consume({ principalId, category: "high-risk" });
     }
   }
-  if (path === "/codex/settings" && request.method === "GET") {
-    try {
-      sendManagementJson(response, 200, await state.loadCodexSettings({ environment }));
-    } catch {
-      throw new ApiError(503, "codex_settings_unavailable", "App Server 用户设置暂不可用，请检查 App Server 状态");
-    }
-    return;
-  }
-  if (path === "/accounts/refresh" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (
-      !body
-      || typeof body !== "object"
-      || Array.isArray(body)
-      || typeof body.provider !== "string"
-      || Object.keys(body).some((key) => key !== "provider")
-    ) {
-      throw new ApiError(400, "invalid_account_refresh", "账户刷新请求必须包含唯一的 provider 字段");
-    }
-    try {
-      await state.refreshGatewayAccount(
-        resolveGatewayConfigPath(environment),
-        body.provider,
-      );
-    } catch (error) {
-      if (error instanceof GatewayAccountRefreshError) {
-        if (error.code === "provider_not_found") throw new ApiError(404, error.code, error.message);
-        if (error.code === "invalid_request") throw new ApiError(400, error.code, error.message);
-        throw new ApiError(
-          error.code === "refresh_failed" ? 502 : 503,
-          error.code,
-          error.message,
-        );
-      }
-      throw new ApiError(503, "gateway_unavailable", "Gateway 账户刷新接口不可用");
-    }
-    handleAccountSnapshots(environment, response);
-    return;
-  }
-  if (path === "/codex/settings/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
-    }
-    try {
-      const result = await state.previewCodexSetting(body.setting, {
-        environment,
-        expectedVersion: body.revision,
-      });
-      const payload = {
-        revision: result.previousVersion,
-        value: result.value,
-        activation: configActivationResult(result.activation),
-      };
-      if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
-        state.limiter.consume({ principalId, category: "high-risk" });
-        const issued = state.confirmations.issue({
-          sessionId: principalId,
-          operation: "codex.settings.write",
-          inputFingerprint: fingerprintManagementValue(body.setting),
-          resourceRevision: body.revision,
-          previewFingerprint: fingerprintManagementValue(payload),
-        });
-        payload.confirmationRequired = true;
-        payload.confirmationToken = issued.token;
-        payload.confirmationExpiresAt = issued.expiresAt;
-      }
-      sendManagementJson(response, 200, payload);
-    } catch (error) {
-      if (error instanceof ManagementSecurityError) throw error;
-      throw codexManagementError(error);
-    }
-    return;
-  }
-  if (path === "/codex/settings" && request.method === "PATCH") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
-    }
-    let result;
-    try {
-      if (highRiskCodexSettingKinds.has(body.setting?.kind)) {
-        state.limiter.consume({ principalId, category: "high-risk" });
-        const previewResult = await state.previewCodexSetting(body.setting, {
-          environment,
-          expectedVersion: body.revision,
-        });
-        const preview = {
-          revision: previewResult.previousVersion,
-          value: previewResult.value,
-          activation: configActivationResult(previewResult.activation),
-        };
-        state.confirmations.consume(body.confirmationToken, {
-          sessionId: principalId,
-          operation: "codex.settings.write",
-          inputFingerprint: fingerprintManagementValue(body.setting),
-          resourceRevision: body.revision,
-          previewFingerprint: fingerprintManagementValue(preview),
-        });
-      }
-      state.audit.assertWritable();
-      result = await state.updateCodexSetting(body.setting, {
-        environment,
-        expectedVersion: body.revision,
-      });
-    } catch (error) {
-      if (error instanceof ManagementSecurityError) throw error;
-      throw codexManagementError(error);
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    let current = null;
-    try {
-      current = await state.loadCodexSettings({ environment });
-    } catch (error) {
-      console.error("App Server 用户设置已写入，但新修订读取失败", error);
-    }
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "codex.settings.update",
-        target: String(body.setting?.kind ?? "unknown"),
-        inputFingerprint: fingerprintManagementValue(body.setting),
-        revision: fingerprintManagementValue(result.previousVersion),
-        phase: "completed",
-        resultCode: "updated",
-        recovery: current === null ? "re-read" : "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("App Server 用户设置已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, {
-      revision: current?.version ?? null,
-      value: result.value,
-      activation: configActivationResult(result.activation),
-      ...(current === null ? { consistency: "unknown" } : {}),
-      auditStatus,
-    });
-    return;
-  }
-  if (path === "/api-providers" && request.method === "GET") {
-    try {
-      const state = listApiProviders(environment);
-      sendManagementJson(response, 200, {
-        observedAt: new Date().toISOString(),
-        providers: state.providers.map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          protocol: provider.protocol,
-          endpoint: provider.endpoint,
-          hasApiKey: provider.hasApiKey,
-        })),
-      });
-    } catch {
-      throw new ApiError(503, "api_provider_state_unavailable", "直接 API Provider 配置暂不可用");
-    }
-    return;
-  }
-  if (path === "/api-providers/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    const input = normalizeApiProviderMutation(body, environment);
-    const preview = previewApiProviderOperation(input, environment);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceState = apiProviderResourceState(environment);
-    const resourceRevision = fingerprintManagementValue(resourceState);
-    const issued = state.confirmations.issue({
-      sessionId: principalId,
-      operation: "api-provider.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(preview),
-    });
-    sendManagementJson(response, 200, {
-      preview,
-      resourceRevision,
-      confirmationToken: issued.token,
-      confirmationExpiresAt: issued.expiresAt,
-    });
-    return;
-  }
-  if (path === "/api-providers" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
-      throw new ApiError(400, "invalid_json", "Provider 写入请求必须包含 confirmationToken");
-    }
-    const input = normalizeApiProviderMutation(body, environment);
-    const operation = input.operation === "delete" ? "delete" : "save";
-    const inputFingerprint = fingerprintManagementValue(input);
-    const current = listApiProviders(environment);
-    const resourceState = apiProviderResourceStateFromList(current.providers);
-    const resourceRevision = fingerprintManagementValue(resourceState);
-    const preview = previewApiProviderOperation(input, environment);
-    state.confirmations.consume(body.confirmationToken, {
-      sessionId: principalId,
-      operation: "api-provider.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(preview),
-    });
-    let result;
-    try {
-      state.audit.assertWritable();
-      result = operation === "delete"
-        ? deleteApiProvider(input.id, { environment, expectedState: resourceState })
-        : saveApiProvider({ ...input.provider, operation: preview.operation }, { environment, expectedState: resourceState });
-    } catch (error) {
-      if (error?.code === "stale-revision") {
-        throw new ApiError(409, "stale-revision", "Provider 配置已变化，请重新预览后重试");
-      }
-      throw new ApiError(400, "api_provider_write_failed", error instanceof Error ? error.message : "Provider 写入失败");
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "api-provider.write",
-        target: String(operation === "delete" ? input.id : input.provider?.id ?? "unknown"),
-        inputFingerprint,
-        revision: resourceRevision,
-        previewId: fingerprintManagementValue(preview),
-        confirmationId: fingerprintManagementValue(body.confirmationToken),
-        phase: "completed",
-        resultCode: result.action,
-        recovery: "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("Provider 已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, { ...redactApiProviderResult(result), auditStatus });
-    return;
-  }
-  if (path === "/provider-settings" && request.method === "GET") {
-    const resource = await readProviderSettingsResource(environment, state);
-    sendManagementJson(response, 200, {
-      observedAt: new Date().toISOString(),
-      resourceRevision: fingerprintManagementValue(resource),
-      ...resource,
-    });
-    return;
-  }
-  if (path === "/account-settings" && request.method === "GET") {
-    const resource = await readAccountSettingsResource(environment, state);
-    sendManagementJson(response, 200, {
-      observedAt: new Date().toISOString(),
-      resourceRevision: fingerprintManagementValue(resource),
-      ...resource,
-    });
-    return;
-  }
-  if (path === "/account-settings/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    const input = normalizeAccountSettingsMutation(body);
-    const preview = await state.previewAccountSettings(input, environment);
-    const safePreview = redactAccountSettingsResult(preview);
-    const resource = await readAccountSettingsResource(environment, state);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    const issued = state.confirmations.issue({
-      sessionId: principalId,
-      operation: "account-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
-    });
-    sendManagementJson(response, 200, {
-      preview: safePreview,
-      resourceRevision,
-      confirmationToken: issued.token,
-      confirmationExpiresAt: issued.expiresAt,
-    });
-    return;
-  }
-  if (path === "/account-settings" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
-      throw new ApiError(400, "invalid_json", "账户设置写入请求必须包含 confirmationToken");
-    }
-    const input = normalizeAccountSettingsMutation(body);
-    const resource = await readAccountSettingsResource(environment, state);
-    const preview = await state.previewAccountSettings(input, environment);
-    const safePreview = redactAccountSettingsResult(preview);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    state.confirmations.consume(body.confirmationToken, {
-      sessionId: principalId,
-      operation: "account-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
-    });
-    let result;
-    try {
-      state.audit.assertWritable();
-      result = await state.applyAccountSettings(input, environment, safePreview);
-    } catch (error) {
-      throw error instanceof ManagementOperationError
-        ? error
-        : new ApiError(400, "account_settings_write_failed", error instanceof Error ? error.message : "账户设置写入失败");
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    invalidateServiceStatusSummary(state.serviceStatusCache);
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "account-settings.write",
-        target: accountSettingsAuditTarget(input),
-        inputFingerprint,
-        revision: resourceRevision,
-        previewId: fingerprintManagementValue(safePreview),
-        confirmationId: fingerprintManagementValue(body.confirmationToken),
-        phase: "completed",
-        resultCode: result.action ?? "updated",
-        recovery: "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("账户设置已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, { ...redactAccountSettingsResult(result), auditStatus });
-    return;
-  }
-  if (path === "/provider-settings/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    const input = normalizeProviderSettingsMutation(body);
-    const preview = await state.previewProviderSettings(input, environment);
-    const safePreview = redactProviderSettingsResult(preview);
-    const resource = await readProviderSettingsResource(environment, state);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    const issued = state.confirmations.issue({
-      sessionId: principalId,
-      operation: "provider-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
-    });
-    sendManagementJson(response, 200, {
-      preview: safePreview,
-      resourceRevision,
-      confirmationToken: issued.token,
-      confirmationExpiresAt: issued.expiresAt,
-    });
-    return;
-  }
-  if (path === "/provider-settings" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.confirmationToken !== "string") {
-      throw new ApiError(400, "invalid_json", "Provider 设置写入请求必须包含 confirmationToken");
-    }
-    const input = normalizeProviderSettingsMutation(body);
-    const resource = await readProviderSettingsResource(environment, state);
-    const preview = await state.previewProviderSettings(input, environment);
-    const safePreview = redactProviderSettingsResult(preview);
-    const inputFingerprint = fingerprintManagementValue(input);
-    const resourceRevision = fingerprintManagementValue(resource);
-    state.confirmations.consume(body.confirmationToken, {
-      sessionId: principalId,
-      operation: "provider-settings.write",
-      inputFingerprint,
-      resourceRevision,
-      previewFingerprint: fingerprintManagementValue(safePreview),
-    });
-    let result;
-    try {
-      state.audit.assertWritable();
-      result = await state.applyProviderSettings(input, environment, safePreview);
-    } catch (error) {
-      throw error instanceof ManagementOperationError
-        ? error
-        : new ApiError(400, "provider_settings_write_failed", error instanceof Error ? error.message : "Provider 设置写入失败");
-    }
-    invalidateProviderManagementSummary(state.providerStateCache);
-    invalidateServiceStatusSummary(state.serviceStatusCache);
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "provider-settings.write",
-        target: providerSettingsAuditTarget(input),
-        inputFingerprint,
-        revision: resourceRevision,
-        previewId: fingerprintManagementValue(safePreview),
-        confirmationId: fingerprintManagementValue(body.confirmationToken),
-        phase: "completed",
-        resultCode: result.action ?? "updated",
-        recovery: "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("Provider 设置已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, { ...redactProviderSettingsResult(result), auditStatus });
-    return;
-  }
-  const taskMatch = path.match(/^\/tasks(?:\/([^/]+))?$/u);
-  if (taskMatch && request.method === "GET") {
-    if (taskMatch[1] === undefined) sendManagementJson(response, 200, { tasks: state.tasks.list(principalId) });
-    else {
-      const task = state.tasks.get(taskMatch[1], principalId);
-      if (task === null) throw new ApiError(404, "task_not_found", "找不到管理任务");
-      sendManagementJson(response, 200, task);
-    }
-    return;
-  }
-  if (path === "/tasks/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    let preview;
-    try { preview = state.tasks.preview(body); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
-    const normalized = normalizeTaskRequestShape(body);
-    const inputFingerprint = fingerprintManagementValue(normalized);
-    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache, SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null, (...args) => new ApiError(...args));
-    preview = { ...preview, resource };
-    const resourceRevision = fingerprintManagementValue(
-      resource,
-    );
-    const issued = state.confirmations.issue({ sessionId: principalId, operation: "management.task", inputFingerprint, resourceRevision, previewFingerprint: fingerprintManagementValue(preview) });
-    sendManagementJson(response, 200, { preview, resourceRevision, confirmationToken: issued.token, confirmationExpiresAt: issued.expiresAt });
-    return;
-  }
-  if (path === "/tasks" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || typeof body.confirmationToken !== "string") throw new ApiError(400, "invalid_task", "任务写入请求必须包含 confirmationToken");
-    const normalized = normalizeTaskRequestShape(body);
-    let preview;
-    try { preview = state.tasks.preview(normalized); } catch (error) { throw new ApiError(400, "invalid_task", error instanceof Error ? error.message : "任务输入无效"); }
-    const inputFingerprint = fingerprintManagementValue(normalized);
-    const resource = await managementTaskResourceState(normalized, environment, state.serviceStatusCache, SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null, (...args) => new ApiError(...args));
-    preview = { ...preview, resource };
-    const resourceRevision = fingerprintManagementValue(
-      resource,
-    );
-    state.confirmations.consume(body.confirmationToken, { sessionId: principalId, operation: "management.task", inputFingerprint, resourceRevision, previewFingerprint: fingerprintManagementValue(preview) });
-    try {
-      state.audit.assertWritable();
-      const task = state.tasks.start(normalized, {
-        owner: principalId,
-        environment,
-        auditMetadata: {
-          sessionId: principalId,
-          source: "webui",
-          operation: "management.task",
-          target: `${normalized.operation}:${normalized.action}:${normalized.target ?? ""}`,
-          inputFingerprint,
-          revision: resourceRevision,
-          previewId: fingerprintManagementValue(preview),
-          confirmationId: fingerprintManagementValue(body.confirmationToken),
-        },
-      });
-      let auditStatus = "recorded";
-      try {
-        state.audit.record({
-          sessionId: principalId,
-          source: "webui",
-          operation: "management.task",
-          target: `${normalized.operation}:${normalized.action}:${normalized.target ?? ""}`,
-          inputFingerprint,
-          revision: resourceRevision,
-          previewId: fingerprintManagementValue(preview),
-          confirmationId: fingerprintManagementValue(body.confirmationToken),
-          phase: "started",
-          resultCode: "queued",
-          recovery: "retry-task",
-        });
-      } catch (error) {
-        auditStatus = "degraded";
-        console.error("管理任务已启动，但启动审计记录失败", error);
-      }
-      sendManagementJson(response, 202, { ...task, auditStatus });
-    } catch (error) { throw new ApiError(400, "task_start_failed", error instanceof Error ? error.message : "任务启动失败"); }
-    return;
-  }
-  const cancelMatch = path.match(/^\/tasks\/([^/]+)$/u);
-  if (cancelMatch && request.method === "DELETE") {
-    const task = state.tasks.cancel(cancelMatch[1], principalId);
-    if (task === null) throw new ApiError(404, "task_not_found", "找不到管理任务");
-    sendManagementJson(response, 200, task);
-    return;
-  }
-  if (path === "/settings" && request.method === "GET") {
-    sendManagementJson(response, 200, redactManagedSettings(loadGatewaySettings(environment)));
-    return;
-  }
-  if (path === "/services" && request.method === "GET") {
-    await handleManagementServices(environment, response, state.serviceStatusCache);
-    return;
-  }
-  if (path === "/upstream-user-agent" && request.method === "GET") {
-    await handleUpstreamUserAgent(environment, response, state.appServerUserAgentCache);
-    return;
-  }
-  if (path === "/providers" && request.method === "GET") {
-    await handleManagementProviders(environment, response, state.providerStateCache, state.loadProviderState);
-    return;
-  }
-  if (path === "/settings/preview" && request.method === "POST") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    const setting = normalizeManagedSetting(body?.setting);
-    assertManagedSetting(setting);
-    if (isHighRiskManagedSetting(setting)) {
-      state.limiter.consume({ principalId, category: "high-risk" });
-    }
-    const result = updateGatewaySetting(setting, {
-      environment,
-      expectedRevision: body.revision,
-      writeConfig: () => undefined,
-      skipBackup: true,
-    });
-    const payload = {
-      revision: body.revision,
-      value: result.value,
-      activation: result.activationResult,
-    };
-    if (isHighRiskManagedSetting(setting)) {
-      const issued = state.confirmations.issue({
-        sessionId: principalId,
-        operation: "gateway.settings.write",
-        inputFingerprint: fingerprintManagementValue(setting),
-        resourceRevision: body.revision,
-        previewFingerprint: fingerprintManagementValue(payload),
-      });
-      payload.confirmationRequired = true;
-      payload.confirmationToken = issued.token;
-      payload.confirmationExpiresAt = issued.expiresAt;
-    }
-    sendManagementJson(response, 200, payload);
-    return;
-  }
-  if (path === "/settings" && request.method === "PATCH") {
-    const body = await readJsonBody(request, validation.maximumBodyBytes);
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      throw new ApiError(400, "invalid_json", "管理请求正文必须是对象");
-    }
-    const input = normalizeManagedSetting(body.setting);
-    assertManagedSetting(input);
-    if (isHighRiskManagedSetting(input)) {
-      state.limiter.consume({ principalId, category: "high-risk" });
-      const dryRun = updateGatewaySetting(input, {
-        environment,
-        expectedRevision: body.revision,
-        writeConfig: () => undefined,
-        skipBackup: true,
-      });
-      const preview = {
-        revision: body.revision,
-        value: dryRun.value,
-        activation: dryRun.activationResult,
-      };
-      state.confirmations.consume(body.confirmationToken, {
-        sessionId: principalId,
-        operation: "gateway.settings.write",
-        inputFingerprint: fingerprintManagementValue(input),
-        resourceRevision: body.revision,
-        previewFingerprint: fingerprintManagementValue(preview),
-      });
-    }
-    try {
-      state.audit.assertWritable();
-    } catch (error) {
-      console.error("管理设置未写入，审计记录不可用", error);
-      sendManagementJson(response, 500, {
-        error: {
-          code: "management_audit_unavailable",
-          message: "设置未写入，审计记录不可用；请检查 Gateway 数据目录权限和磁盘空间",
-        },
-      });
-      return;
-    }
-    const result = updateGatewaySetting(input, {
-      environment,
-      expectedRevision: body.revision,
-    });
-    let auditStatus = "recorded";
-    try {
-      state.audit.record({
-        sessionId: principalId,
-        source: "webui",
-        operation: "settings.update",
-        target: String(input?.kind ?? "unknown"),
-        inputFingerprint: fingerprintManagementValue(input),
-        revision: result.previousRevision,
-        phase: "completed",
-        resultCode: "updated",
-        recovery: "none",
-      });
-    } catch (error) {
-      auditStatus = "degraded";
-      console.error("管理设置已写入，但审计记录失败", error);
-    }
-    sendManagementJson(response, 200, {
-      revision: loadGatewaySettings(environment).revision,
-      value: result.value,
-      activation: result.activationResult,
-      auditStatus,
-    });
-    return;
-  }
+  const routeContext = {
+    environment,
+    maximumBodyBytes: validation.maximumBodyBytes,
+    path,
+    principalId,
+    request,
+    response,
+    state,
+  };
+  const consumeHighRisk = () =>
+    state.limiter.consume({ principalId, category: "high-risk" });
+  if (await routeCodexSettingsManagement({ ...routeContext, consumeHighRisk })) return;
+  if (await routeProviderManagement({
+    ...routeContext,
+    configPath: resolveGatewayConfigPath(environment),
+    openMetricsStore,
+  })) return;
+  if (await routeTaskManagement({
+    ...routeContext,
+    gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
+  })) return;
+  if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
+  if (await routeStatusManagement({
+    ...routeContext,
+    codexCliVersion: CODEX_CLI_VERSION,
+    gatewayVersion: GATEWAY_VERSION,
+    openMetricsStore,
+  })) return;
   throw new ApiError(404, "not_found", `未知管理 API：${path}`);
 }
 
@@ -1002,140 +391,6 @@ function normalizeLoopbackOrigin(value, expectedOrigin) {
     return value;
   }
 }
-
-async function handleManagementServices(environment, response, serviceStatusCache) {
-  const serviceResults = await loadServiceStatusSummary(environment, serviceStatusCache);
-  const platform = serviceResults.find((result) => result.platform !== null)?.platform ?? null;
-  const entries = await Promise.all(serviceResults.map(async (result) => ({
-    ...result.entry,
-    identifier: result.entry.identifier ?? null,
-    version: serviceVersion(result.entry.target, { gatewayVersion: GATEWAY_VERSION, codexCliVersion: CODEX_CLI_VERSION }),
-    recentError: await readManagedServiceErrorAsync({ environment, target: result.entry.target }),
-  })));
-  sendManagementJson(response, 200, {
-    observedAt: new Date().toISOString(),
-    available: platform !== null,
-    platform,
-    healthy: platform === null ? null : entries.every((service) => service.running),
-    entries,
-  });
-}
-
-/**
- * 模型上游实际收到的 User-Agent：配置了 `[codex].upstream_user_agent` 时以配置为准且不探测
- * App Server，否则以短缓存读取 App Server 生成的进程级 UA。应答同时携带最近一条指标记录实际
- * 发出的 UA，供界面判断配置是否已在运行中的服务里生效。App Server 未运行时不视为接口失败。
- */
-async function handleUpstreamUserAgent(environment, response, cache) {
-  const paths = runtimeConfig(environment);
-  const document = readGatewayConfig(paths.configPath);
-  const codex = document.codex;
-  const configured = typeof codex.upstream_user_agent === "string"
-    ? codex.upstream_user_agent
-    : null;
-  const appServerUserAgent = configured !== null
-    ? null
-    : await cachedAppServerUserAgent(document, paths.dataDir, cache);
-  const effectiveUserAgent = configured ?? appServerUserAgent;
-  const recentRequest = latestRecordedUserAgent(environment);
-  sendManagementJson(response, 200, {
-    observedAt: new Date().toISOString(),
-    configuredUserAgent: configured,
-    appServerUserAgent,
-    effectiveUserAgent,
-    source: configured !== null ? "override" : (appServerUserAgent === null ? "unavailable" : "app-server"),
-    recentRequestUserAgent: recentRequest?.userAgent ?? null,
-    recentRequestAtMs: recentRequest?.recordedAtMs ?? null,
-  });
-}
-
-/**
- * 探测 App Server 生成的进程级 UA 并复用短 TTL 结果（含失败），避免多标签页或连续刷新
- * 重复握手。探测使用官方非全局客户端身份，不改变 App Server 的 originator 或 UA 后缀。
- */
-async function cachedAppServerUserAgent(document, dataDir, cache) {
-  if (cache.expiresAtMs > Date.now()) return cache.value;
-  const value = await readAppServerUserAgent({
-    socketPath: resolvePrimaryAppServerSocketPath(document, dataDir),
-    codexBinary: document.codex.binary,
-    clientInfo: {
-      name: "codex_app_server_daemon",
-      title: "Codex Connect WebUI",
-      version: GATEWAY_VERSION,
-    },
-  }).catch(() => null);
-  cache.value = value;
-  cache.expiresAtMs = Date.now() + appServerUserAgentCacheTtlMs;
-  return value;
-}
-
-/** 最近一条模型请求实际发往上游的 UA；指标库不可用或还没有请求时返回 null。 */
-function latestRecordedUserAgent(environment) {
-  let store;
-  try {
-    store = openMetricsStore(environment);
-    const range = metricsRange("all", Date.now());
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-      offset: 0,
-      limit: 1,
-      sortKey: "recordedAtMs",
-      sortDirection: "desc",
-    });
-    const record = page.records[0];
-    return record === undefined
-      ? null
-      : {
-          userAgent: record.userAgent ?? null,
-          recordedAtMs: record.recordedAtMs ?? null,
-        };
-  } catch {
-    return null;
-  } finally {
-    store?.close();
-  }
-}
-
-async function handleManagementProviders(environment, response, providerStateCache, loadProviderState) {
-  let providers;
-  try {
-    providers = await loadProviderManagementSummary(environment, providerStateCache, loadProviderState);
-  } catch {
-    throw new ApiError(503, "provider_state_unavailable", "Provider 状态暂不可用，请使用 codexc setup 查看");
-  }
-  sendManagementJson(response, 200, providers);
-}
-
-function providerSettingsAuditTarget(input) {
-  if (input.operation === "primary.custom.save") return String(input.provider?.providerId ?? "unknown");
-  if (input.operation === "managed.default") return String(input.provider ?? "unknown");
-  if (input.operation === "managed.window") return String(input.model ?? "unknown");
-  if (input.operation === "external-agent") return String(input.provider ?? input.action ?? "unknown");
-  return String(input.providerId ?? "unknown");
-}
-
-function accountSettingsAuditTarget(input) {
-  if (input.operation.startsWith("opencode.account.")) return String(input.accountId ?? "unknown");
-  return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
-}
-
-async function readProviderSettingsResource(environment, state) {
-  try {
-    return await loadProviderSettingsResource(environment, state.loadProviderState);
-  } catch {
-    throw new ApiError(503, "provider_state_unavailable", "Provider 设置暂不可用，请检查 Codex 配置");
-  }
-}
-
-async function readAccountSettingsResource(environment, state) {
-  try {
-    return await state.loadAccountSettings(environment);
-  } catch {
-    throw new ApiError(503, "account_state_unavailable", "账户设置暂不可用，请检查 Provider 配置");
-  }
-}
-
 function readJsonMetadata(path) {
   try {
     const value = JSON.parse(readFileSync(path, "utf8"));
@@ -1191,75 +446,11 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     return;
   }
   if (apiPath === "/accounts") {
-    handleAccountSnapshots(environment, response);
+    sendAccountSnapshots(environment, response, openMetricsStore);
     return;
   }
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
-
-function handleAccountSnapshots(environment, response) {
-  const store = openMetricsStore(environment);
-  try {
-    const storedSnapshots = typeof store.latestAccountSnapshots === "function"
-      ? store.latestAccountSnapshots()
-      : [];
-    let accounts = null;
-    const warnings = [];
-    try {
-      accounts = loadOpencodeGoAccounts(environment);
-    } catch {
-      warnings.push({
-        source: "opencode-go",
-        code: "registry_unavailable",
-        message: "OpenCode Go 账户元数据暂不可用",
-      });
-    }
-    const configuredAccounts = accounts ?? [];
-    const accountById = new Map(configuredAccounts.map((account) => [account.id, account]));
-    const snapshots = storedSnapshots
-      .filter((snapshot) => {
-        if (accounts === null) return true;
-        const opencodeGo = snapshot.provider === "ocg"
-          || snapshot.provider.startsWith("ocg-");
-        return !opencodeGo
-          || (snapshot.accountId !== null && accountById.has(snapshot.accountId));
-      })
-      .map((snapshot) => {
-        const account = snapshot.accountId === null
-          ? undefined
-          : accountById.get(snapshot.accountId);
-        return {
-          ...snapshot,
-          displayName: account === undefined
-            ? snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider
-            : opencodeGoAccountDisplayName(account),
-          default: account?.default ?? false,
-        };
-      });
-    for (const account of configuredAccounts) {
-      const provider = opencodeGoProviderId(account.id);
-      if (snapshots.some((snapshot) => snapshot.provider === provider)) continue;
-      snapshots.push({
-        provider,
-        accountId: account.id,
-        observedAtMs: 0,
-        available: false,
-        usage: { kind: "unsupported", provider },
-        limits: { kind: "unsupported", provider },
-        displayName: opencodeGoAccountDisplayName(account),
-        default: account.default,
-      });
-    }
-    sendJson(response, 200, {
-      observedAtMs: snapshots.reduce((latest, item) => Math.max(latest, item.observedAtMs), 0),
-      snapshots,
-      warnings,
-    });
-  } finally {
-    store.close();
-  }
-}
-
 function openMetricsStore(environment, endAtMs = Date.now()) {
   const status = inspectMetricsDatabase(environment);
   if (!status.exists) {
@@ -1368,7 +559,6 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
         parentTurnId: subagent.parentTurnId,
         latestTurn: summary.latestTurn,
         threadAggregate: summary.threadAggregate,
-        latestDirectApi: summary.latestDirectApi,
       });
       return;
     }

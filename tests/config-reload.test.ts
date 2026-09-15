@@ -456,7 +456,6 @@ function config(overrides: Partial<GatewayConfig> = {}): GatewayConfig {
     reasoningEnabled: true,
     pluginApiEnabled: true,
     scheduledTasksEnabled: false,
-    apiProviders: [],
     credentialsDirectory: "/tmp/credentials",
     stateDatabasePath: "/tmp/gateway.sqlite3",
     metricsStorage: { retentionDays: 365, maxRows: 1_000_000 },

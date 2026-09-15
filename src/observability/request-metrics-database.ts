@@ -9,7 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { securePrivateFileSync } from "../../runtime/private-file.mjs";
 
-export const modelRequestMetricsSchemaVersion = 13;
+export const modelRequestMetricsSchemaVersion = 14;
 const incompleteLockGraceMs = 30_000;
 
 export interface RequestMetricsDatabaseLock {

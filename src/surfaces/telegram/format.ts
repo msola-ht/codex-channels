@@ -20,10 +20,10 @@ import {
 import {
   formatConversationLimits,
   formatConversationModels,
-  formatConversationSessions,
-  formatConversationStatus,
   formatConversationUsage,
-} from "../conversation-command-format.js";
+} from "../conversation-model-account-command-format.js";
+import { formatConversationSessions } from "../conversation-session-command-format.js";
+import { formatConversationStatus } from "../conversation-workspace-status-command-format.js";
 import type { Workspace } from "../../policy/index.js";
 import type { SurfaceConfigurationChange } from "../types.js";
 
@@ -48,6 +48,19 @@ export function splitTelegramText(text: string, limit = 4_000): string[] {
     chunks.push(remaining.join(""));
   }
   return chunks;
+}
+
+export function formatIdleReleaseNotification(minutes: number, threadId: string): string {
+  return [
+    "## 会话已自动解除占用",
+    "",
+    `${minutes} 分钟内没有输入或输出。`,
+    "",
+    "### 恢复会话",
+    `/r ${threadId}`,
+    "",
+    "直接发送消息将开始新会话。",
+  ].join("\n");
 }
 
 export function formatSessions(

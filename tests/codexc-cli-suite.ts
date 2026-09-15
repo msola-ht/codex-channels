@@ -215,7 +215,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         includes: [
           "Codex 新会话默认值 → 配置核心默认值 / 默认模型与思考等级 / Fast 默认状态 / 计划清单工具 / 实验性上下文管理 / 沙盒、审批与网络",
           "OpenAI 官方 → 登录并恢复官方",
-          "受管 Provider 模型设置 / 共享第三方子代理 / 直接 API Provider（预留）",
+          "受管 Provider 模型设置 / 共享第三方子代理",
         ],
       },
       { args: ["work", "--help"], includes: ["权限"] },
@@ -3402,7 +3402,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
     expect(output).toContain("脱敏配置总览");
     expect(output).toContain("模型与提供商、共享第三方子代理、通讯渠道和项目技能");
-    expect(output).toContain("直接 API Provider（预留）");
+    expect(output).not.toContain("直接 API Provider");
   });
 
     }
@@ -4481,14 +4481,7 @@ function metricsSample(index: number): ModelRequestMetricSample {
     outputTokens: 100,
     reasoningOutputTokens: 40,
     totalTokens: 1_100,
-    upstreamCreatedAt: null,
-    upstreamCompletedAt: null,
     requestStartedAtMs: now - 200,
-    firstTokenAtMs: now - 150,
-    firstReasoningDeltaAtMs: now - 150,
-    lastReasoningDeltaAtMs: now - 100,
-    firstOutputDeltaAtMs: now - 90,
-    lastOutputDeltaAtMs: now - 50,
     responseCompletedAtMs: now,
     weeklyQuota: null,
   };

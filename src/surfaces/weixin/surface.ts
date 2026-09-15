@@ -1,11 +1,9 @@
 import type { Logger } from "pino";
 
 import type {
-  ConversationUseCases,
+  ConversationCommandExecutor,
+  ConversationTurnUseCases,
   ScheduledTaskConfirmation,
-  ScheduledTaskUseCases,
-} from "../../application/index.js";
-import type {
 } from "../../application/index.js";
 import type {
   ConversationTarget,
@@ -66,8 +64,8 @@ export interface WeixinSurfaceOptions {
   typingClient?: WeixinTypingProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
-  service: ConversationUseCases;
-  scheduledTasks?: ScheduledTaskUseCases;
+  service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
+  commands: ConversationCommandExecutor;
   access: SurfaceAccessPolicy;
   logger: Logger;
   onFatal: (error: WeixinInputFatalError) => void;
@@ -195,9 +193,7 @@ export class WeixinSurface implements SurfaceAdapter {
       client: options.client,
       cursorStore: options.cursorStore,
       service: options.service,
-      ...(options.scheduledTasks === undefined
-        ? {}
-        : { scheduledTasks: options.scheduledTasks }),
+      commands: options.commands,
       outbox: this.output,
       access: options.access,
       replyContexts,

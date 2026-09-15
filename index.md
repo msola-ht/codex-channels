@@ -31,7 +31,7 @@
 
 ## 协议与设计
 
-- [`docs/architecture-optimization.md`](docs/architecture-optimization.md)：全项目链路审查、结构性优化原则、实施顺序与进度。
+- [`docs/module-closure-plan.md`](docs/module-closure-plan.md)：链路闭环后的模块结构收口批次、依赖、验收标准与停止条件。
 - [`docs/management-interfaces-development.md`](docs/management-interfaces-development.md)：Setup、Config、安装和更新命令面向未来本机可视化的结构化接口演进计划与进度。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 原生支持的
@@ -52,7 +52,7 @@
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
-  身份、模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
+  身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
 - [`docs/opencode-go-multi-account.md`](docs/opencode-go-multi-account.md)：OpenCode Go
   多账户实现（账户文件、CLI/Setup、共享代理、会话切换与租约生命周期）。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。

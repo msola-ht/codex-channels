@@ -23,17 +23,10 @@ export interface CompactSummary {
 export interface Aggregate {
   requestCount: number
   unsuccessfulRequestCount: number
-  requestDurationMs: number
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
   reasoningOutputTokens: number
-  outputTokensPerSecond: number | null
-  outputSpeedSampleCount: number
-  outputSpeedTimedCount: number
-  ttftAverageMs: number | null
-  ttftP50Ms: number | null
-  ttftP95Ms: number | null
   compact: CompactSummary | null
 }
 
@@ -135,12 +128,10 @@ export interface TurnSummary {
   turnId: string
   requestCount: number
   unsuccessfulRequestCount: number
-  requestDurationMs: number
   inputTokens: number
   cachedInputTokens: number | null
   outputTokens: number
   reasoningOutputTokens: number
-  outputTokensPerSecond: number | null
   compact: CompactSummary | null
   recordedAtMs?: number
 }
@@ -153,7 +144,6 @@ export interface ThreadRunResponse {
   parentTurnId: string | null
   latestTurn: TurnSummary | null
   threadAggregate: (Aggregate & { turnCount: number }) | null
-  latestDirectApi: RequestRecord | null
 }
 
 export interface ThreadTurnsResponse {
@@ -184,13 +174,7 @@ export interface RequestRecord {
   outputTokens: number | null
   reasoningOutputTokens: number | null
   totalTokens: number | null
-  requestDurationMs: number | null
-  ttftMs: number | null
-  thinkingDurationMs: number | null
-  outputDurationMs: number | null
-  generationDurationMs: number | null
   cacheHitRate: number | null
-  outputTokensPerSecond: number | null
   recordedAtMs: number
 }
 
@@ -205,9 +189,6 @@ export type RequestSortKey =
   | "input"
   | "output"
   | "reasoningOutput"
-  | "speed"
-  | "ttft"
-  | "duration"
 
 export type RequestSortDirection = "asc" | "desc"
 
@@ -340,6 +321,7 @@ export interface ManagementSettingsResponse {
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
       upstreamUserAgent: string | null
+      terminalIdentity: string | null
       defaults: { name: string; version: string }
     }
     workspaces: Array<{ id: string; name: string; sandbox: string | null; approvalPolicy: string | null; permissions: string | null }>
@@ -439,54 +421,6 @@ export interface ManagementTaskPreview {
   activation: string | { status: string; target: string; commands: readonly string[] }
   resource?: unknown
   requiresConfirmation: true
-}
-
-export type ManagementApiProviderMutationInput =
-  | {
-      operation: "save"
-      provider: { id: string; name: string; endpoint: string; apiKey?: string }
-    }
-  | { operation: "delete"; id: string }
-
-export interface ManagementApiProvider {
-  id: string
-  name: string
-  protocol: "responses"
-  endpoint: string
-  hasApiKey: boolean
-}
-
-export interface ManagementApiProviderActivation {
-  status: string
-  target: string
-  commands: readonly string[]
-}
-
-export interface ManagementApiProviderPreview {
-  operation: "create" | "update" | "delete"
-  provider: {
-    id: string
-    name: string
-    protocol?: "responses"
-    endpoint?: string
-    apiKeyChange?: boolean
-  }
-  activation: ManagementApiProviderActivation
-}
-
-export interface ManagementApiProviderPreviewResponse {
-  preview: ManagementApiProviderPreview
-  resourceRevision: string
-  confirmationToken: string
-  confirmationExpiresAt: number
-}
-
-export interface ManagementApiProviderMutationResponse {
-  action: string
-  provider?: ManagementApiProvider | { id: string; name: string } | string
-  activation?: string
-  activationResult?: ManagementApiProviderActivation
-  auditStatus?: "recorded" | "degraded"
 }
 
 export interface ManagementProviderSettingsResponse {
@@ -769,7 +703,6 @@ export interface OpencodeGoQuotaWindow {
   usedPercent: number
   resetsAt: number | null
   status: string | null
-  totalUsd?: number
   localTokens?: number | null
 }
 

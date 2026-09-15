@@ -9,10 +9,13 @@ export type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsQuotaAccountStore,
+  ModelRequestMetricsRequestQueryStore,
   ModelRequestMetricsSortKey,
   ModelRequestMetricsStore,
+  ModelRequestMetricsThreadQueryStore,
+  ModelRequestMetricsWriteStore,
   ModelRequestMetricsWriter,
-  ModelBillingMode,
   ModelRequestOperation,
   ModelResponseFormat,
   ModelRequestStatus,
@@ -23,6 +26,7 @@ export type {
   StoredModelRequestMetricsErrorGroup,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsPage,
+  StoredModelRequestAccountSnapshot,
   StoredModelRequestMetricsGroup,
   StoredModelRequestMetricsReport,
   StoredSubagentThreadRecord,
@@ -34,6 +38,9 @@ export type {
   StoredWeeklyQuotaWindow,
   QuotaHistoryQuery,
   StoredQuotaPeriod,
+  StoredProviderTokenMetric,
+  ProviderTokenMetricQuery,
+  ModelRequestAccountSnapshotInput,
   WeeklyQuotaEstimateQuery,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
@@ -50,3 +57,10 @@ export {
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "./sqlite-request-metrics-store.js";
+export {
+  metricStorageColumns,
+  metricStorageColumnsSql,
+  modelRequestMetricsIndexesSql,
+  modelRequestMetricsTableSql,
+  requireCurrentModelRequestMetricsSchema,
+} from "./sqlite-request-metrics-schema.js";

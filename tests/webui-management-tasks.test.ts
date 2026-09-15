@@ -68,21 +68,28 @@ describe("WebUI management tasks", () => {
         writeFileSync(executable, "#!/bin/sh\nprintf 'api-key=super-secret\\n' >&2\nexit 7\n", { mode: 0o700 });
         chmodSync(executable, 0o700);
       }
-      const runner = new WebuiManagementTaskRunner();
+      let resolveTaskFinished: () => void = () => undefined;
+      const taskFinished = new Promise<void>((resolve) => {
+        resolveTaskFinished = resolve;
+      });
+      const runner = new WebuiManagementTaskRunner({
+        onEvent: () => resolveTaskFinished(),
+      });
       const task = runner.start(
         { operation: "update" },
-        { owner: "owner-output", environment: { ...process.env, PATH: directory } },
+        {
+          owner: "owner-output",
+          environment: { ...process.env, PATH: directory },
+          auditMetadata: { sessionId: "session-output" },
+        },
       );
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const current = runner.get(task.id, "owner-output");
-        if (current?.state === "failed") {
-          expect(current.error).toBe("任务失败（退出码 7）");
-          expect(current.error).not.toContain("super-secret");
-          return;
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 10));
-      }
-      throw new Error("管理任务未在预期时间内结束");
+      await taskFinished;
+      const current = runner.get(task.id, "owner-output");
+      expect(current).toMatchObject({
+        state: "failed",
+        error: "任务失败（退出码 7）",
+      });
+      expect(current?.error).not.toContain("super-secret");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

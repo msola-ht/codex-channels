@@ -5,7 +5,6 @@ import { join } from "node:path";
 import pino from "pino";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
-import type { ConversationUseCases } from "../src/application/index.js";
 import {
   feishuCardElements,
   FeishuEventConnection,
@@ -13,6 +12,11 @@ import {
   type FeishuCardDocument,
 } from "../src/surfaces/feishu/index.js";
 import { FeishuSurface } from "../src/surfaces/feishu/surface.js";
+import {
+  conversationCommandExecutor,
+  conversationInputUseCases,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const imageFixtureDirectory = mkdtempSync(join(tmpdir(), "codex-feishu-surface-images-"));
 const imagePath = join(imageFixtureDirectory, "image.png");
@@ -712,7 +716,7 @@ describe("Feishu Surface", () => {
 });
 
 function createFixture(
-  service: Partial<ConversationUseCases> | undefined = undefined,
+  service: ConversationMethodOverrides | undefined = undefined,
   configurationRecipients?: () => readonly string[],
   startupNotification?: {
     messages(): ReadonlyArray<{ chatId: string; text: string }>;
@@ -737,14 +741,14 @@ function createFixture(
     botMenus: [],
   },
 ) {
-  const conversationService = ({
+  const conversationService = {
     submit: async () => ({
       threadId: "thread-1",
       turnId: "turn-1",
       steered: false,
     }),
     ...service,
-  }) as ConversationUseCases;
+  };
   let readyCallback: (() => void) | undefined;
   let reconnectingCallback: (() => void) | undefined;
   let reconnectedCallback: (() => void) | undefined;
@@ -802,7 +806,8 @@ function createFixture(
   const surface = new FeishuSurface({
     appId: "cli_0123456789abcdef",
     appSecret: "secret",
-    service: conversationService,
+    service: conversationInputUseCases(conversationService),
+    commands: conversationCommandExecutor(conversationService),
     access: {
       isAllowed: () => true,
     },

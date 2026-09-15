@@ -465,36 +465,6 @@ describe("Codex Connect setup", () => {
     });
   });
 
-  it("selects third-party API management without entering DeepSeek setup", async () => {
-    const apiProviderSetup = vi.fn(async () => "api-provider-configured");
-    const deepseekSetup = vi.fn();
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("models")
-        .mockResolvedValueOnce("third_party")
-        .mockResolvedValueOnce("api_provider"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    await expect(runSetup({
-      input: {},
-      output: {},
-      prompts,
-      deepseekSetup,
-      apiProviderSetup,
-    })).resolves.toBe("api-provider-configured");
-
-    expect(apiProviderSetup).toHaveBeenCalledWith({ input: {}, output: {}, prompts });
-    expect(deepseekSetup).not.toHaveBeenCalled();
-    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
-      value: "api_provider",
-      label: "直接 API Provider（预留）",
-      hint: "只保存未来直接 API 注册；不进入 App Server 或 /model",
-    });
-  });
-
   it("renders Setup provider and channel status without exposing credentials", async () => {
     const output: string[] = [];
     const summary = await writeSetupConfigurationSummary({
@@ -507,12 +477,6 @@ describe("Codex Connect setup", () => {
             bot_token: "telegram-secret",
             allowed_user_ids: [123456],
           },
-          api_providers: [{
-            id: "relay-a",
-            name: "Relay A",
-            protocol: "responses",
-            endpoint: "https://api-secret.example/v1/responses",
-          }],
         },
       }),
       loadProviderState: async () => ({
@@ -590,14 +554,11 @@ describe("Codex Connect setup", () => {
     expect(rendered).toContain("通讯渠道：Telegram（已启用）");
     expect(rendered).toContain("用户技能目录：1 个技能");
     expect(rendered).toContain("共享第三方子代理：deepseek · deepseek-v4-pro");
-    expect(rendered).toContain("直接 API Provider（预留）：1 个");
-    expect(summary.apiProviderCount).toBe(1);
     expect(rendered).not.toContain("telegram-secret");
     expect(rendered).not.toContain("123456");
     expect(rendered).not.toContain("managed-secret");
     expect(rendered).not.toContain("custom-secret");
     expect(rendered).not.toContain("secret.example");
-    expect(rendered).not.toContain("api-secret.example");
     expect(rendered).not.toContain("\u001b");
   });
 
@@ -606,7 +567,7 @@ describe("Codex Connect setup", () => {
       environment: {},
       loadGatewayDocument: () => ({
         configPath: "/private/config.toml",
-        document: { api_providers: [] },
+        document: {},
       }),
       loadProviderState: async () => ({
         configVersion: "v1",
@@ -642,7 +603,6 @@ describe("Codex Connect setup", () => {
       channels: [],
       installedSkillCount: 0,
       agent: { status: "not-configured" },
-      apiProviderCount: 0,
       configPath: "/private/config.toml",
     });
   });

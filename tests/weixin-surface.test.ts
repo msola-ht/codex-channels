@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  ConversationUseCases,
+  ConversationTurnUseCases,
   ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../src/application/index.js";
@@ -18,12 +18,17 @@ import type { SurfaceAdapter } from "../src/surfaces/index.js";
 import {
   WeixinConfigurationDeliveryError,
   WeixinProtocolError,
-  WeixinSurface,
+  WeixinSurface as ProductionWeixinSurface,
   type WeixinProtocolClient,
   type WeixinLifecycleProtocolClient,
   type WeixinReplyContextPersistence,
   type WeixinUpdatesCursorStore,
 } from "../src/surfaces/weixin/index.js";
+import {
+  conversationCommandExecutor,
+  conversationInputUseCases,
+  type ConversationMethodOverrides,
+} from "./conversation-command-fixture.js";
 
 const accountId = "account-fixture@im.bot";
 const actorId = "actor-fixture@im.wechat";
@@ -32,6 +37,28 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
+
+type ProductionWeixinSurfaceOptions = ConstructorParameters<
+  typeof ProductionWeixinSurface
+>[0];
+type TestWeixinSurfaceOptions = Omit<
+  ProductionWeixinSurfaceOptions,
+  "service" | "commands"
+> & {
+  service: ConversationMethodOverrides;
+  scheduledTasks?: ScheduledTaskUseCases;
+};
+
+class WeixinSurface extends ProductionWeixinSurface {
+  constructor(options: TestWeixinSurfaceOptions) {
+    const { service, scheduledTasks, ...rest } = options;
+    super({
+      ...rest,
+      service: conversationInputUseCases(service),
+      commands: conversationCommandExecutor(service, scheduledTasks),
+    });
+  }
+}
 
 const temporaryDirectories: string[] = [];
 
@@ -534,7 +561,7 @@ describe("WeixinSurface", () => {
     const service = {
       submit,
       stop,
-    } as unknown as ConversationUseCases;
+    };
     const sendText = vi.fn<WeixinProtocolClient["sendText"]>(async () => {});
     let pollCount = 0;
     const client: WeixinProtocolClient = {
@@ -979,7 +1006,7 @@ function cursorStoreFixture(): WeixinUpdatesCursorStore & {
   };
 }
 
-function serviceFixture(): ConversationUseCases & {
+function serviceFixture(): Pick<ConversationTurnUseCases, "submit"> & {
   submit: ReturnType<typeof vi.fn>;
 } {
   return {
@@ -988,8 +1015,6 @@ function serviceFixture(): ConversationUseCases & {
       turnId: "turn",
       steered: false,
     })),
-  } as unknown as ConversationUseCases & {
-    submit: ReturnType<typeof vi.fn>;
   };
 }
 

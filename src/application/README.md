@@ -5,14 +5,16 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
-- `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；负责授权后的用例调用和结果分页，不包含平台文案或消息布局。
+- `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
-- `conversation-service.ts`：通过稳定的 `ConversationUseCases` 公开 Surface 和命令层所需用例，
+- `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 只保留兼容门面委托。
+- `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
+- `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
  具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
@@ -21,8 +23,7 @@
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
-  扩展查询通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile
-  均使用稳定结果。
+  扩展与账户查询分别委托给独立组件，通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile 均使用稳定结果。
   空闲释放通过 `releaseIdle` 核对活动 Turn、原生 Queue、待处理交互和待结算子代理，再取消
   App Server 订阅并解绑；释放后按主动新建同一语义恢复模型偏好、清除待生效协作模式并失效
   Revert/Queue 快照。普通输入、平台本地命令和审批交互刷新活动时间，输出事件也由组合根统一刷新。
@@ -64,16 +65,14 @@
   Luna Reserve 后端授权摘要、第三方余额和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
-- `account-snapshot-service.ts`：提供跨 WebUI 与渠道复用的最新官方账户快照查询入口。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
   一次成功快照，不以 `unsupported` 覆盖有效余额或额度。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
-  指标累计、最近直接 API 请求，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
+  指标累计，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
   只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；
-  直接 API 保留稳定提供商 ID，并可携带配置中的显示名称；不向 Application 暴露 SQLite
-  或请求正文。
+  历史无 Turn 指标只参与通用明细和时间范围聚合；不向 Application 暴露 SQLite 或请求正文。
 - `skill-port.ts`：定义已直接安装 Skill 的稳定名称与说明查询，以及只供 Application 启动
   Turn 使用的精确 Skill 路径解析；路径不向 Surface 暴露，也不传播 Scope、依赖或上游扫描错误。
 - `mcp-port.ts`：定义 MCP Server 概览、当前 Thread 的未启动/连接中/已连接/需认证/失败/取消/禁用或未知运行状态、可空 Plugin 来源、只表示工具发现是否失败的布尔状态、带只读/可能写入/未知属性的工具摘要、资源/模板详情、共享 OAuth
@@ -102,7 +101,8 @@
   显式 Skill 调用同时发送 `$<skill-name>` 文本标记和内部 Skill 引用。Application 不构造官方 `UserInput`，
   也不接收完整官方 Turn 响应。
 
-Surface 应依赖 `ConversationUseCases` 驱动会话，不依赖具体服务类，也不应直接拼装 JSON-RPC。
+Surface 只依赖直接输入、状态或菜单所需的能力切片，并使用 Bootstrap 注入的
+`ConversationCommandExecutor` 执行共享命令；不依赖完整 `ConversationUseCases`、具体服务类或底层 JSON-RPC。
 Thread 的权威状态仍来自 App Server，本模块只编排请求和必要的本地选择。
 Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默认以 25 条一页维护五分钟、
 不含正文的 Conversation 选择快照，数字选择器只使用该快照，完整 ID 则重新复核权威列表。
@@ -140,8 +140,8 @@ Turn、steer、停止、重命名、固定、压缩、Review 和 Goal 只依赖 
 `codex-client` 负责映射。停止直接读取 Core 中精确的活动 Thread/Turn 并发送中断，不进入同一
 Conversation 的普通操作互斥区，因此不会被尚未返回的 steer 阻塞。Goal set/clear 请求成功后，Application 使用已确认结果立即更新 Core；
 App Server 通知继续处理其他客户端修改与恢复后的状态校正。
-自定义 Thread 分区的 Application 命令和管理员权限已移除；`/section` 仅返回移除提示。内置 Pinned
-仍由 `/pin` 与 `/unpin` 提供会话级快捷入口。
+自定义 Thread 分区的 Application 命令和管理员权限已移除。内置 Pinned 仍由 `/pin` 与 `/unpin`
+提供会话级快捷入口。
 模型选择和 Fast 只依赖 `ModelSelectionPort`；不可见模型过滤、官方模型字段裁剪，以及目标
 Provider App Server 的有效思考等级与服务层级读取均由 `codex-client` 统一处理。CLI Setup 直接依赖
 具体 Client 的全局默认值读写，不扩大 Surface 可用的会话端口。

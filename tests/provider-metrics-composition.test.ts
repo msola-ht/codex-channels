@@ -220,11 +220,6 @@ describe("ProviderMetricsComposition", () => {
       outputTokens: null,
       reasoningOutputTokens: null,
       totalTokens: null,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
     };
 
     expect(toModelTimingEvent(failed)).toMatchObject({
@@ -247,11 +242,6 @@ describe("ProviderMetricsComposition", () => {
       outputTokens: null,
       reasoningOutputTokens: null,
       totalTokens: null,
-      firstTokenAtMs: null,
-      firstReasoningDeltaAtMs: null,
-      lastReasoningDeltaAtMs: null,
-      firstOutputDeltaAtMs: null,
-      lastOutputDeltaAtMs: null,
     };
 
     expect(toModelTimingEvent({
@@ -299,14 +289,7 @@ function metrics(): ProviderProxyMetrics {
     outputTokens: 20,
     reasoningOutputTokens: 5,
     totalTokens: 120,
-    upstreamCreatedAt: 1_785_640_800,
-    upstreamCompletedAt: 1_785_640_801,
     requestStartedAtMs: 1_000,
-    firstTokenAtMs: 1_200,
-    firstReasoningDeltaAtMs: 1_200,
-    lastReasoningDeltaAtMs: 1_500,
-    firstOutputDeltaAtMs: 1_600,
-    lastOutputDeltaAtMs: 1_800,
     responseCompletedAtMs: 1_900,
     weeklyQuota: null,
     quotaWindows: null,

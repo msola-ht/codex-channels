@@ -141,10 +141,10 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - 官方返回的推理 Token 计数仍与所有 Provider 一样展示；Gateway 不读取或保存推理内容。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
-- `/metrics` 从独立指标库读取当前 Thread 最近 Turn 的请求累计和最近一次直接 API 请求；输入量是
-  多次请求的累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 与
-  OpenAI 官方及第三方直接 API 使用相同统计口径，不为 DeepSeek 建立专属统计表。Gateway 不在
-  本地计算或估算 DeepSeek 价格与费用，`/metrics` 只展示请求、Token、速度、异常和官方账户数据。
+- `/metrics` 从独立指标库读取当前 Thread 最近 Turn 和整个 Thread 的请求累计；输入量是多次请求的
+  累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 按统一口径聚合，
+  不为 DeepSeek 建立专属统计表。Gateway 不在本地计算或估算 DeepSeek 价格与费用，`/metrics` 只展示
+  请求、Token、异常和官方账户数据。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
@@ -158,8 +158,7 @@ Files API 或其他图片入口。图片 Token 由 DeepSeek 按尺寸换算并�
 Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看图时使用 `/model` 切换到
 `deepseek-flash`。Gateway 不再把图片转交给另一套外部视觉 API。
 
-旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。通用 `api_providers`
-注册表及其隔离 API Key 仍保留给未来明确设计的直接 API 功能，现阶段没有运行时调用方；旧的
+旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。旧的
 `credentials/vision/` 单视觉凭据不再读取，也不会自动删除。
 
 固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
@@ -201,7 +200,7 @@ Windows + 飞书真实验收（2026-08-30）确认：明确要求“只用 DS �
 子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
 线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
 页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；Schema v10
-以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v13 另以 `subagent_turns` 保存每次
+以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v14 另以 `subagent_turns` 保存每次
 子代理运行的精确子 Turn 与父 Turn；v7–v10 历史运行关系不按时间推断。从本机终端
 运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
 `codexc metrics upgrade`。

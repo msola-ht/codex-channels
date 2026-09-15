@@ -12,10 +12,12 @@
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
   `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
   同类请求先由 `scheduled-task-server-request.ts` 拒绝。
-- `app.ts`：校验 Codex 版本，装配 Transport、Client、Core、Router 和 Storage；把同一 Client 的
+- `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
+  把具体组件所有权交给组件图。
+- `gateway-component-graph.ts`：校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
-  仅用于失效短期选择快照和校正 Core 派生状态；处理启动、重连、
-  订阅恢复与关闭，并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
+  仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、重连、订阅恢复与组件关闭原语，
+  并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
@@ -27,6 +29,7 @@
   Store 生命周期委托给 `scheduled-task-composition.ts`。
   同一组合根还把 Luna Reserve 状态机接到最终 `usageLimitExceeded`、Thread/账户生命周期和关闭顺序；
   切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
+- `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
@@ -64,15 +67,15 @@
   思考等级、请求结果和 Token，不在 Tracker 内重复计算。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
-- `surface-plugin.ts`：定义编译期内置 Surface 插件、插件上下文和运行时模块契约，并校验插件 ID、
+- `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
-- `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，并保留各平台访问策略、
+- `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、
   热加载钩子、故障上报装配和全局生命周期通知的安全收件人。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储
   读取凭据，不把 Token 放入运行配置。
-- `proxy-fetch.ts`：把共享 HTTP(S) 代理选择适配到微信使用的 Fetch 接口；命中 `NO_PROXY`
-  时使用直连 Fetch，否则通过按代理 URL 复用的 Undici Dispatcher 发出请求。
+- `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
+  Dispatcher 复用由 `runtime/proxy-fetch.mjs` 实现。
 - `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做一次有界、无凭据的 HTTP
   传输探测；官方双目标全部不可达时生成脱敏状态供渠道上线通知使用，单目标失败只记录日志，
   均不阻断 Gateway；自定义 `openai_base_url` 只探测该地址。

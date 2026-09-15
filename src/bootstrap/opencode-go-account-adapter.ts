@@ -8,6 +8,7 @@ import {
 import {
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
+import type { ModelRequestMetricsRequestQueryStore } from "../observability/index.js";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
@@ -27,11 +28,6 @@ const windowLabels: Readonly<Record<string, string>> = Object.freeze({
   rolling: "5小时",
   weekly: "7天",
   monthly: "月度",
-});
-const windowTotalUsd: Readonly<Record<string, number>> = Object.freeze({
-  rolling: 12,
-  weekly: 30,
-  monthly: 60,
 });
 
 export function createOpencodeGoAccountAdapter(
@@ -207,7 +203,7 @@ function quotaWindowRange(
 }
 
 function readOpencodeGoTokens(
-  store: SqliteModelRequestMetricsStore,
+  store: Pick<ModelRequestMetricsRequestQueryStore, "forEachProviderTokenMetric">,
   ranges: ReadonlyArray<readonly [string, number | null, number, number]>,
   provider: string,
   totals: Map<string, number>,
@@ -266,9 +262,10 @@ function requestInQuotaWindow(
 ): boolean {
   const snapshot = record.quotaWindows?.find((window) => window.windowId === windowId);
   const requestAtMs = record.requestStartedAtMs ?? record.recordedAtMs;
-  // 后台刷新前的缓存可能已过期；仅在请求开始时仍有效的快照可决定窗口归属。
+  // 滚动窗口按请求时间归属；固定窗口仅接受请求开始时仍有效的快照。
   if (
-    snapshot?.resetsAt !== null
+    windowId !== "rolling"
+    && snapshot?.resetsAt !== null
     && snapshot?.resetsAt !== undefined
     && currentResetsAt !== null
     && snapshot.resetsAt * 1_000 > requestAtMs
@@ -342,9 +339,6 @@ function parseUsageResponse(value: unknown, provider: string): ProviderAccountUs
       usedPercent: window.percent,
       resetsAt: null,
       status: typeof window.status === "string" ? window.status : null,
-      ...(windowTotalUsd[windowId] === undefined
-        ? {}
-        : { totalUsd: windowTotalUsd[windowId] }),
     };
     if (typeof window.resetsAt === "string") {
       const resetsAt = Date.parse(window.resetsAt);

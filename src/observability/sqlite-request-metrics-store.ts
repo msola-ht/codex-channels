@@ -77,9 +77,6 @@ const pageSortSql = {
   inputTokens: "input_tokens",
   outputTokens: "output_tokens",
   reasoningOutputTokens: "reasoning_output_tokens",
-  outputTokensPerSecond: "output_tokens_per_second",
-  ttftMs: "ttft_ms",
-  requestDurationMs: "request_duration_ms",
 } as const;
 const observableCompletionSql = `
   status = 'completed'
@@ -181,8 +178,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         INSERT INTO model_request_metrics (
           ${metricStorageColumnsSql}
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -271,14 +267,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.outputTokens,
       sample.reasoningOutputTokens,
       sample.totalTokens,
-      sample.upstreamCreatedAt,
-      sample.upstreamCompletedAt,
       sample.requestStartedAtMs,
-      sample.firstTokenAtMs,
-      sample.firstReasoningDeltaAtMs,
-      sample.lastReasoningDeltaAtMs,
-      sample.firstOutputDeltaAtMs,
-      sample.lastOutputDeltaAtMs,
       sample.responseCompletedAtMs,
       recordedAtMs,
       sample.weeklyQuota?.limitId ?? null,
@@ -378,7 +367,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("模型请求指标查询数量必须在 1 到 500 之间");
     }
     const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics_enriched ORDER BY id DESC LIMIT ?
+      SELECT * FROM model_request_metrics ORDER BY id DESC LIMIT ?
     `).all(limit) as unknown as MetricRow[];
     return rows.map(toStoredMetric);
   }
@@ -390,7 +379,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     validateWeeklyQuotaEstimateQuery(query);
     const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
     const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics_enriched
+      SELECT * FROM model_request_metrics
       WHERE provider = ?
         AND recorded_at_ms >= ?
         AND recorded_at_ms <= ?
@@ -445,7 +434,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("额度历史查询时间范围无效");
     }
     const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics_enriched
+      SELECT * FROM model_request_metrics
       WHERE recorded_at_ms >= ? AND recorded_at_ms < ?
       ORDER BY recorded_at_ms ASC, id ASC
     `).all(query.startAtMs, query.endAtMs) as unknown as MetricRow[];
@@ -690,7 +679,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     const failuresSql = query.onlyFailures ? ` AND NOT (${observableCompletionSql})` : "";
     const matchedTotal = (this.database.prepare(`
       SELECT COUNT(*) AS n
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?${failuresSql}${filterSql}
     `).get(
@@ -700,7 +689,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     ) as { n: number }).n;
     const rows = this.database.prepare(`
       SELECT *
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
         ${failuresSql}${filterSql}
@@ -764,7 +753,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(input_tokens) AS input_token_count,
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
       GROUP BY day
@@ -897,7 +886,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ON child.parent_thread_id = parent.thread_id
       ), scoped AS (
         SELECT metric.*
-        FROM model_request_metrics_enriched AS metric
+        FROM model_request_metrics AS metric
         WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
           AND metric.turn_id IS NOT NULL
       )
@@ -908,49 +897,21 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
-        SUM(request_duration_ms) AS request_duration_ms,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
         COUNT(input_tokens) AS input_token_count,
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN non_reasoning_output_tokens ELSE 0 END)
-          AS non_reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN output_duration_ms ELSE 0 END)
-          AS output_duration_ms,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-          AS output_speed_sample_count,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-          AS output_speed_timed_count,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
-    const latestDirectApi = this.database.prepare(`
-      SELECT *
-      FROM model_request_metrics_enriched
-      WHERE thread_id = ?
-        AND turn_id IS NULL
-        AND operation = 'response'
-        AND transport = 'http'
-        AND response_format = 'json'
-      ORDER BY id DESC
-      LIMIT 1
-    `).get(threadId) as MetricRow | undefined;
     return {
       threadId,
       latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
       threadAggregate: threadAggregate.request_count === 0
         ? null
         : toStoredThreadAggregate(threadAggregate),
-      latestDirectApi: latestDirectApi === undefined
-        ? null
-        : toStoredMetric(latestDirectApi),
     };
   }
 
@@ -983,7 +944,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AND child.parent_turn_id = parent.turn_id
       ), scoped AS (
         SELECT metric.*
-        FROM model_request_metrics_enriched AS metric
+        FROM model_request_metrics AS metric
         WHERE (
           metric.thread_id = ? AND metric.turn_id = ?
         ) OR (
@@ -1005,26 +966,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
-        SUM(request_duration_ms) AS request_duration_ms,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
         COUNT(input_tokens) AS input_token_count,
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN non_reasoning_output_tokens ELSE 0 END)
-          AS non_reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN output_duration_ms ELSE 0 END)
-          AS output_duration_ms,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-          AS output_speed_sample_count,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-          AS output_speed_timed_count,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
@@ -1053,33 +1000,33 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT
         (
           SELECT provider
-          FROM model_request_metrics_enriched AS latest_provider
+          FROM model_request_metrics AS latest_provider
           WHERE latest_provider.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_provider.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
             AND latest_provider.operation = 'response'
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
         (
           SELECT model
-          FROM model_request_metrics_enriched AS latest_model
+          FROM model_request_metrics AS latest_model
           WHERE latest_model.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_model.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
             AND latest_model.operation = 'response'
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
         (
           SELECT reasoning_effort
-          FROM model_request_metrics_enriched AS latest_effort
+          FROM model_request_metrics AS latest_effort
           WHERE latest_effort.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_effort.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
             AND latest_effort.operation = 'response'
           ORDER BY latest_effort.id DESC
           LIMIT 1
@@ -1089,28 +1036,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
-        SUM(request_duration_ms) AS request_duration_ms,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
         COUNT(input_tokens) AS input_token_count,
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN non_reasoning_output_tokens ELSE 0 END)
-          AS non_reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN output_duration_ms ELSE 0 END)
-          AS output_duration_ms,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-          AS output_speed_sample_count,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-          AS output_speed_timed_count,
         ${compactAggregateSql}
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE thread_id = ? AND turn_id = ?
       GROUP BY turn_id
     `).get(threadId, turnId) as TurnSummaryRow | undefined;
@@ -1125,31 +1058,31 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT
         (
           SELECT provider
-          FROM model_request_metrics_enriched AS latest_provider
+          FROM model_request_metrics AS latest_provider
           WHERE latest_provider.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_provider.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
         (
           SELECT model
-          FROM model_request_metrics_enriched AS latest_model
+          FROM model_request_metrics AS latest_model
           WHERE latest_model.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_model.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
         (
           SELECT reasoning_effort
-          FROM model_request_metrics_enriched AS latest_effort
+          FROM model_request_metrics AS latest_effort
           WHERE latest_effort.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_effort.turn_id
-              = model_request_metrics_enriched.turn_id
+              = model_request_metrics.turn_id
           ORDER BY latest_effort.id DESC
           LIMIT 1
         ) AS reasoning_effort,
@@ -1158,29 +1091,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
-        SUM(request_duration_ms) AS request_duration_ms,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
         COUNT(input_tokens) AS input_token_count,
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN non_reasoning_output_tokens ELSE 0 END)
-          AS non_reasoning_output_tokens,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0
-            THEN output_duration_ms ELSE 0 END)
-          AS output_duration_ms,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-          AS output_speed_sample_count,
-        SUM(CASE WHEN non_reasoning_output_tokens > 0
-              AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-          AS output_speed_timed_count,
         ${compactAggregateSql},
         MAX(recorded_at_ms) AS recorded_at_ms
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE thread_id = ? AND turn_id IS NOT NULL
       GROUP BY turn_id
       ORDER BY MAX(id) DESC
@@ -1205,7 +1124,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
     const row = this.database.prepare(`
       SELECT COUNT(DISTINCT turn_id) AS turn_count, COUNT(*) AS request_count
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       WHERE thread_id = ? AND turn_id IS NOT NULL
     `).get(threadId) as { turn_count: number; request_count: number };
     return row.request_count === 0 ? null : row.turn_count;
@@ -1215,30 +1134,30 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.requireOpen();
     const rows = this.database.prepare(`
       SELECT
-        model_request_metrics_enriched.thread_id AS thread_id,
+        model_request_metrics.thread_id AS thread_id,
         (
           SELECT provider
-          FROM model_request_metrics_enriched AS latest_provider
+          FROM model_request_metrics AS latest_provider
           WHERE latest_provider.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_provider.turn_id IS NOT NULL
           ORDER BY latest_provider.id DESC
           LIMIT 1
         ) AS provider,
         (
           SELECT model
-          FROM model_request_metrics_enriched AS latest_model
+          FROM model_request_metrics AS latest_model
           WHERE latest_model.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_model.turn_id IS NOT NULL
           ORDER BY latest_model.id DESC
           LIMIT 1
         ) AS model,
         (
           SELECT reasoning_effort
-          FROM model_request_metrics_enriched AS latest_effort
+          FROM model_request_metrics AS latest_effort
           WHERE latest_effort.thread_id
-              = model_request_metrics_enriched.thread_id
+              = model_request_metrics.thread_id
             AND latest_effort.turn_id IS NOT NULL
           ORDER BY latest_effort.id DESC
           LIMIT 1
@@ -1249,16 +1168,16 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         SUM(output_tokens) AS output_tokens,
         ${compactAggregateSql},
         MIN(request_started_at_ms) AS first_request_started_at_ms,
-        MAX(model_request_metrics_enriched.recorded_at_ms) AS recorded_at_ms,
+        MAX(model_request_metrics.recorded_at_ms) AS recorded_at_ms,
         subagent.agent_path AS agent_path,
         subagent.parent_thread_id AS parent_thread_id,
         subagent.parent_turn_id AS parent_turn_id
-      FROM model_request_metrics_enriched
+      FROM model_request_metrics
       LEFT JOIN subagent_threads AS subagent
-        ON subagent.thread_id = model_request_metrics_enriched.thread_id
-      WHERE model_request_metrics_enriched.thread_id IS NOT NULL
+        ON subagent.thread_id = model_request_metrics.thread_id
+      WHERE model_request_metrics.thread_id IS NOT NULL
         AND turn_id IS NOT NULL
-      GROUP BY model_request_metrics_enriched.thread_id
+      GROUP BY model_request_metrics.thread_id
       ORDER BY MAX(id) DESC
     `).all() as unknown as Array<CompactSummaryRow & {
       thread_id: string;
@@ -1330,7 +1249,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("同步批量大小必须在 1 到 500 之间");
     }
     const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics_enriched
+      SELECT * FROM model_request_metrics
       WHERE id > ?
       ORDER BY id ASC
       LIMIT ?
@@ -1391,78 +1310,26 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           metric.*,
           ${grouping.provider} AS group_provider,
           ${grouping.model} AS group_model
-        FROM model_request_metrics_enriched AS metric
+        FROM model_request_metrics AS metric
         WHERE recorded_at_ms >= ?
           AND recorded_at_ms < ?
-      ), aggregate_rows AS (
-        SELECT
-          group_provider AS provider,
-          group_model AS model,
-          COUNT(*) AS request_count,
-          SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-            AS unsuccessful_request_count,
-          SUM(request_duration_ms) AS request_duration_ms,
-          SUM(input_tokens) AS input_tokens,
-          SUM(cached_input_tokens) AS cached_input_tokens,
-          COUNT(input_tokens) AS input_token_count,
-          COUNT(cached_input_tokens) AS cached_input_token_count,
-          SUM(output_tokens) AS output_tokens,
-          SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-          SUM(CASE WHEN non_reasoning_output_tokens > 0
-                AND output_duration_ms > 0
-              THEN non_reasoning_output_tokens ELSE 0 END)
-            AS non_reasoning_output_tokens,
-          SUM(CASE WHEN non_reasoning_output_tokens > 0
-                AND output_duration_ms > 0
-              THEN output_duration_ms ELSE 0 END)
-            AS output_duration_ms,
-          SUM(CASE WHEN non_reasoning_output_tokens > 0 THEN 1 ELSE 0 END)
-            AS output_speed_sample_count,
-          SUM(CASE WHEN non_reasoning_output_tokens > 0
-                AND output_duration_ms > 0 THEN 1 ELSE 0 END)
-            AS output_speed_timed_count,
-          ${compactAggregateSql}
-        FROM filtered
-        GROUP BY group_provider, group_model
-      ), ttft_ranked AS (
-        SELECT
-          group_provider AS provider,
-          group_model AS model,
-          ttft_ms,
-          ROW_NUMBER() OVER (
-            PARTITION BY group_provider, group_model ORDER BY ttft_ms
-          ) AS ttft_rank,
-          COUNT(*) OVER (
-            PARTITION BY group_provider, group_model
-          ) AS ttft_count
-        FROM filtered
-        WHERE ttft_ms IS NOT NULL
-      ), ttft_rows AS (
-        SELECT
-          provider,
-          model,
-          AVG(ttft_ms) AS ttft_average_ms,
-          MAX(CASE WHEN ttft_rank = CAST((ttft_count * 50 + 99) / 100 AS INTEGER)
-            THEN ttft_ms END) AS ttft_p50_ms,
-          MAX(CASE WHEN ttft_rank = CAST((ttft_count * 95 + 99) / 100 AS INTEGER)
-            THEN ttft_ms END) AS ttft_p95_ms,
-          COUNT(*) AS ttft_sample_count
-        FROM ttft_ranked
-        GROUP BY provider, model
-      ), combined AS (
-        SELECT
-          aggregate_rows.*,
-          ttft_rows.ttft_average_ms,
-          ttft_rows.ttft_p50_ms,
-          ttft_rows.ttft_p95_ms,
-          COALESCE(ttft_rows.ttft_sample_count, 0) AS ttft_sample_count,
-          COUNT(*) OVER () AS total_group_count
-        FROM aggregate_rows
-        LEFT JOIN ttft_rows
-          ON aggregate_rows.provider IS ttft_rows.provider
-          AND aggregate_rows.model IS ttft_rows.model
       )
-      SELECT * FROM combined
+      SELECT
+        group_provider AS provider,
+        group_model AS model,
+        COUNT(*) AS request_count,
+        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
+          AS unsuccessful_request_count,
+        SUM(input_tokens) AS input_tokens,
+        SUM(cached_input_tokens) AS cached_input_tokens,
+        COUNT(input_tokens) AS input_token_count,
+        COUNT(cached_input_tokens) AS cached_input_token_count,
+        SUM(output_tokens) AS output_tokens,
+        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+        ${compactAggregateSql},
+        COUNT(*) OVER () AS total_group_count
+      FROM filtered
+      GROUP BY group_provider, group_model
       ORDER BY request_count DESC, provider ASC, model ASC
       LIMIT ?
     `).all(query.startAtMs, query.endAtMs, limit) as unknown as AggregateRow[];
@@ -1482,6 +1349,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.database.exec("BEGIN IMMEDIATE");
     try {
       ensureCurrentModelRequestMetricsSchema(this.database);
+      requireCurrentModelRequestMetricsSchema(this.database);
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
