@@ -165,6 +165,48 @@ describe("shared surface copy contract", () => {
     }
   });
 
+  it("renders every release, model setup, and agent role error as actionable copy", () => {
+    const cases = [
+      [
+        new UserFacingError("release.usage", "opaque internal fallback"),
+        "用法：/release [force]",
+      ],
+      [
+        new UserFacingError("release.unsupported", "opaque internal fallback"),
+        "当前环境不支持释放会话占用",
+      ],
+      [
+        new UserFacingError(
+          "model.configured-default.missing",
+          "opaque internal fallback",
+          { provider: "deepseek", model: "deepseek-test" },
+        ),
+        "配置的默认模型不属于当前主 Provider deepseek：deepseek-test",
+      ],
+      [
+        new UserFacingError("model.official.not-logged-in", "opaque internal fallback"),
+        "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login",
+      ],
+      [
+        new UserFacingError("agents.usage", "opaque internal fallback"),
+        "用法：/agents <角色名称或序号> <任务>",
+      ],
+      [
+        new UserFacingError("agents.not-found", "opaque internal fallback"),
+        "指定的子代理角色不存在；使用 /agents 查看可用角色",
+      ],
+      [
+        new UserFacingError("agents.config-unreadable", "opaque internal fallback"),
+        "Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml",
+      ],
+    ] as const;
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      for (const [error, expected] of cases) {
+        expect(formatSurfaceUserFacingError(error, surface)).toBe(expected);
+      }
+    }
+  });
+
   it("formats MCP OAuth completion without exposing sensitive failure details", () => {
     expect(formatRuntimeMcpOAuthCompleted({
       name: "docs",

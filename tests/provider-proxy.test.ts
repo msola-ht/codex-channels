@@ -2102,7 +2102,7 @@ describe("ProviderProxy", () => {
     expect(status).toBe(404);
   });
 
-  it("forwards the locked OpenAI 0.148.0 HTTP API paths without recording response metrics", async () => {
+  it("forwards the locked OpenAI 0.154.0 HTTP API paths without recording response metrics", async () => {
     const received: Array<{ method: string; path: string }> = [];
     const upstream = createServer((request, response) => {
       received.push({
