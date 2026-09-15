@@ -62,6 +62,40 @@ describe("real App Server test process cleanup", () => {
       });
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "force stops a process that exceeds the graceful shutdown window",
+    async () => {
+      const runtimeRoot = resolve(".runtime");
+      mkdirSync(runtimeRoot, { recursive: true });
+      const testRuntime = mkdtempSync(join(runtimeRoot, "process-force-stop-"));
+      const markerPath = join(testRuntime, "ready");
+      const childSource = [
+        'const { writeFileSync } = require("node:fs");',
+        'process.on("SIGTERM", () => undefined);',
+        'writeFileSync(process.argv[1], "ready");',
+        "setInterval(() => undefined, 1_000);",
+      ].join("\n");
+      const child = spawn(process.execPath, ["-e", childSource, markerPath], {
+        detached: true,
+        stdio: "ignore",
+      });
+
+      try {
+        await waitFor(() => existsSync(markerPath), 1_000);
+        await stopDetachedTestProcess(child, 100);
+        expect(child.signalCode).toBe("SIGKILL");
+      } finally {
+        signalTestProcessTree(child, "SIGKILL");
+        rmSync(testRuntime, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 100,
+        });
+      }
+    },
+  );
 });
 
 deepseekCatalogContractTest(

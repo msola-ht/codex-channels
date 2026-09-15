@@ -22,7 +22,7 @@ export async function stopDetachedTestProcess(child: ChildProcess, timeoutMs: nu
   if (child.exitCode !== null || child.signalCode !== null) return;
   signalTestProcessTree(child, "SIGTERM");
   try { await waitFor(() => child.exitCode !== null || child.signalCode !== null, timeoutMs); }
-  catch (error) { signalTestProcessTree(child, "SIGKILL"); await waitFor(() => child.exitCode !== null || child.signalCode !== null, 2_000); throw error; }
+  catch { signalTestProcessTree(child, "SIGKILL"); await waitFor(() => child.exitCode !== null || child.signalCode !== null, 2_000); }
 }
 export function appendDiagnostic(current: string, chunk: string): string { return `${current}${chunk}`.slice(-4_000); }
 export function appServerFailure(message: string, stderr: string): string {
