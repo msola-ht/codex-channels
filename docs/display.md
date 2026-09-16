@@ -83,6 +83,9 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
 范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
 本机 CLI 需要精确自然日或账期时使用 `--from YYYY-MM-DD --to YYYY-MM-DD`。
+渠道、CLI 与 WebUI 的 Token 统一使用 `K`、`M`、`B` 紧凑单位：`K` / `M` 最多保留两位小数，
+`B` 最多保留三位小数；渠道、CLI 和 WebUI 的汇总请求数使用相同单位且最多保留两位小数，逐条明细及
+JSON / CSV 导出仍保留精确整数。
 未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token 的
 failed 请求计入异常记录，避免这类错误完全不可见。
 

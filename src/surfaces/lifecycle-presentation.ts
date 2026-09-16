@@ -30,6 +30,7 @@ import {
 import { missingFinalResponseText } from "./output-copy.js";
 import {
   formatCacheHitRate,
+  formatRequestCount,
   formatTokenCount,
 } from "./token-format.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
@@ -282,7 +283,7 @@ export function createSubagentCompletedPresentation(
       fields,
     };
   }
-  fields.push({ label: "模型请求", value: `${event.requestCount} 次` });
+  fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -486,17 +487,17 @@ export function createTurnCompletedPresentation(
       .filter((entry): entry is [string, number] =>
         typeof entry[1] === "number" && entry[1] > 0
       )
-      .map(([label, count]) => `${label} ${count}`)
+      .map(([label, count]) => `${label} ${formatRequestCount(count)}`)
       .join(" · ");
     runFields.push({
       label: "模型请求",
-      value: `${event.timing.modelRequestCount} 次${details ? `（${details}${recoveredFailureCount > 0 ? "，最终成功" : ""}）` : ""}`,
+      value: `${formatRequestCount(event.timing.modelRequestCount)} 次${details ? `（${details}${recoveredFailureCount > 0 ? "，最终成功" : ""}）` : ""}`,
     });
   }
   if (event.timing?.reasoningRequestCount !== undefined) {
     runFields.push({
       label: "思考次数",
-      value: `${event.timing.reasoningRequestCount} 次`,
+      value: `${formatRequestCount(event.timing.reasoningRequestCount)} 次`,
     });
   }
   if (fallbackCacheField) {
@@ -561,7 +562,7 @@ export function createTurnCompletedPresentation(
     const taskFields: LifecyclePresentationField[] = [
       {
         label: "模型请求",
-        value: `${task.requestCount} 次`,
+        value: `${formatRequestCount(task.requestCount)} 次`,
       },
       {
         title: "Token",
@@ -621,7 +622,7 @@ export function createTurnCompletedPresentation(
     const session = event.sessionAggregate;
     sessionFields.push({
       label: "模型请求",
-      value: `${session.requestCount} 次`,
+      value: `${formatRequestCount(session.requestCount)} 次`,
     });
     sessionFields.push({
       title: "Token",

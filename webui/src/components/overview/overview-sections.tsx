@@ -25,6 +25,7 @@ import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
 import { useLanguage } from "@/hooks/language-context"
 import {
+  formatCount,
   formatErrorType,
   formatPlanType,
   formatSuccessRate,
@@ -52,18 +53,14 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
     ? `${(global.cachedInputTokens / global.inputTokens * 100).toFixed(1)}%`
     : "—"
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       <StatCard
         value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={`总计 Token · 请求 ${global.requestCount.toLocaleString("zh-CN")} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
+        description={`总计 Token · 请求 ${formatCount(global.requestCount)} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
       />
       <StatCard
         value={formatTokens(global.inputTokens)}
-        description="输入 Token"
-      />
-      <StatCard
-        value={formatTokens(global.cachedInputTokens)}
-        description={`缓存 Token · 命中率 ${cacheHitRate}`}
+        description={`输入 Token · 其中缓存 ${formatTokens(global.cachedInputTokens)} · 命中率 ${cacheHitRate}`}
       />
       <StatCard
         value={formatTokens(global.outputTokens)}

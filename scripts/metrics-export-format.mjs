@@ -1,6 +1,9 @@
-import { formatTokenCount } from "../dist/surfaces/token-format.js";
+import {
+  formatRequestCount,
+  formatTokenCount,
+} from "../dist/surfaces/token-format.js";
 
-export { formatTokenCount };
+export { formatRequestCount, formatTokenCount };
 
 export function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);

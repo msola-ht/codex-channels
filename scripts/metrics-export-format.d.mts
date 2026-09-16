@@ -1,3 +1,4 @@
+export function formatRequestCount(value: number): string;
 export function formatTokenCount(value: number): string;
 
 export function isRecord(value: unknown): value is Record<string, unknown>;

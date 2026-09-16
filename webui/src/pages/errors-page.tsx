@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/tooltip"
 import { useErrors } from "@/hooks/use-errors"
 import { useLanguage } from "@/hooks/language-context"
-import { formatErrorMessage, formatErrorType, formatSuccessRate, formatTime } from "@/lib/format"
+import { formatCount, formatErrorMessage, formatErrorType, formatSuccessRate, formatTime } from "@/lib/format"
 import type { RangeName } from "@/lib/types"
 
 const PAGE_SIZE = 50
@@ -65,8 +65,8 @@ export function ErrorsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <StatCard
               title="请求总数"
-              value={data.errors.requestCount.toLocaleString("zh-CN")}
-              description={`失败 ${data.errors.unsuccessfulRequestCount}`}
+              value={formatCount(data.errors.requestCount)}
+              description={`失败 ${formatCount(data.errors.unsuccessfulRequestCount)}`}
             />
             <StatCard
               title="成功率"

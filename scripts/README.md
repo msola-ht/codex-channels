@@ -98,8 +98,8 @@
   App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
-- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token/时间格式化与
-  Markdown/CSV 转义；Token 格式复用 Application/Surface 导出。
+- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
+  以及 Markdown/CSV 转义；紧凑数字格式复用 Surface 导出。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
