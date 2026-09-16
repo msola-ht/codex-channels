@@ -83,6 +83,24 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
 范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
 本机 CLI 需要精确自然日或账期时使用 `--from YYYY-MM-DD --to YYYY-MM-DD`。
+`threads`、`turns`、`report` 与 `export` 共用时间和请求筛选：Provider、模型、`response|compact`
+操作、`completed|failed|incomplete|unknown` 状态及关键词可组合使用。`--thread` 精确指定会话，
+`--turn` 必须同时指定会话；`turns <Thread ID>` 的会话由位置参数提供。`threads`、`turns`
+默认全部保留历史，`report`、`export` 默认最近 30 天。日期按执行主机本地时区解析并包含结束日，
+最多查询到当前时刻。
+
+```bash
+codexc metrics threads --range 7d --provider openai
+codexc metrics turns <Thread ID> --from 2026-09-01 --to 2026-09-15
+codexc metrics export --range 7d --thread <Thread ID> --turn <Turn ID> --status failed --format csv
+```
+
+期间查询先按请求记录时间筛选，再按 Thread 或 Turn 汇总；跨越时间边界的一轮只计算范围内的
+请求。轮数是本机指标库中有记录的不同 Turn 数，不代表完整官方历史轮数。会话列表、每轮明细与
+精确 Thread 请求筛选只计算各会话自身，子代理以独立 Thread 列出；`run` 和渠道 `/metrics`
+的全部历史累计继续递归包含已关联子代理。请求导出在数据库内筛选，读取全部匹配页；JSON 保留
+所用范围与筛选条件，JSON/CSV 保留精确数值。
+
 渠道、CLI 与 WebUI 的 Token 统一使用 `K`、`M`、`B` 紧凑单位：`K` / `M` 最多保留两位小数，
 `B` 最多保留三位小数；渠道、CLI 和 WebUI 的汇总请求数使用相同单位且最多保留两位小数，逐条明细及
 JSON / CSV 导出仍保留精确整数。
@@ -209,7 +227,7 @@ Thread 的通知不向渠道广播。失败原因在 Client 边界先脱敏，Te
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到
 `subAgentActivity` 通知时，会把子代理线程 ID、父线程和代理路径写入指标库；被标注的线程
 显示“子代理 · <代理路径>”（如 `/root/ds_probe`），其余显示“主会话”。该标注持久化在
-指标库 `subagent_threads` 表中，`/metrics threads` 与 WebUI Threads 页面共用同一份数据。
+指标库 `subagent_threads` 表中，`codexc metrics threads` 与 WebUI Threads 页面共用同一份数据。
 
 Telegram 和飞书的渠道开始通知：Gateway 在官方 `subAgentActivity.started` Item 完成后向父会话发送一次简短的
 “子代理开始 · 任务名”，不展示子线程 ID；后续 `interacted` 显示为“子代理继续 · 任务名”，

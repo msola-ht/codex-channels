@@ -1,29 +1,13 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchRequests } from "@/lib/api"
-import type {
-  RangeName,
-  RequestSortDirection,
-  RequestSortKey,
-} from "@/lib/types"
+import type { MetricsQuery } from "@/lib/types"
 
-export function useRequests(
-  range: RangeName,
-  offset: number,
-  limit: number,
-  sort: RequestSortKey,
-  direction: RequestSortDirection,
-  filter: string,
-) {
+export function useRequests(query: MetricsQuery) {
   return useApi(
     (signal) => fetchRequests(
-      range,
-      offset,
-      limit,
-      sort,
-      direction,
-      filter,
+      query,
       signal,
     ),
-    [range, offset, limit, sort, direction, filter],
+    [JSON.stringify(query)],
   )
 }

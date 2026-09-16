@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "react-router"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -11,16 +12,19 @@ import {
   DataTable,
   SortableHeader,
   type DataTableColumn,
+  type DataTableProps,
 } from "@/components/metrics/data-table"
 import {
   formatTime,
   formatTokens,
 } from "@/lib/format"
-import type { TurnSummary } from "@/lib/types"
+import type { MetricsQuery, TurnSummary } from "@/lib/types"
+import { metricsLink } from "@/lib/metrics-query"
 
 const TABLE_STATE_KEY = "codex-webui:turns-table-state"
 
 const COLUMN_LABELS: Record<string, string> = {
+  turn: "Turn",
   time: "时间",
   provider: "Provider",
   model: "模型",
@@ -33,8 +37,14 @@ const COLUMN_LABELS: Record<string, string> = {
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-export function TurnTable({ turns }: { turns: TurnSummary[] }) {
+export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"] }) {
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
+    {
+      id: "turn",
+      accessorFn: (turn) => turn.turnId,
+      header: ({ column }) => <SortableHeader column={column}>Turn</SortableHeader>,
+      cell: ({ row }) => <Link className="block max-w-48 truncate underline-offset-4 hover:underline" title={row.original.turnId} to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link>,
+    },
     {
       id: "select",
       header: ({ table }) => (
@@ -197,7 +207,7 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
         </span>
       ),
     },
-  ], [])
+  ], [threadId, query])
 
   return (
     <DataTable
@@ -212,12 +222,7 @@ export function TurnTable({ turns }: { turns: TurnSummary[] }) {
       filterPlaceholder="筛选 Provider / 模型 / 压缩"
       emptyText="暂无明细"
       noMatchText="无匹配记录"
-      pagination={{
-        mode: "client",
-        defaultPageSize: 50,
-        pageSizeOptions: PAGE_SIZE_OPTIONS,
-        defaultSorting: [{ id: "time", desc: true }],
-      }}
+      pagination={{ ...pagination, pageSizeOptions: PAGE_SIZE_OPTIONS }}
     />
   )
 }

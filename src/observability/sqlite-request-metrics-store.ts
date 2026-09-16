@@ -21,7 +21,6 @@ import {
   toStoredThreadAggregate,
   toStoredTurnSummary,
   type AggregateRow,
-  type CompactSummaryRow,
   type ErrorGroupRow,
   type ErrorSummaryRow,
   type MetricRow,
@@ -39,6 +38,8 @@ import type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsScope,
+  ModelRequestMetricsThreadQuery,
   ModelRequestMetricsStore,
   StoredModelRequestMetric,
   StoredModelRequestMetricsDailyRow,
@@ -46,8 +47,8 @@ import type {
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
   StoredThreadRequestMetricsSummary,
-  StoredThreadListItem,
-  StoredThreadTurnSummary,
+  StoredThreadListPage,
+  StoredThreadTurnsPage,
   StoredSubagentThreadRecord,
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
@@ -117,6 +118,17 @@ const normalizedStatusSql = `
       THEN 'incomplete'
     ELSE status
   END
+`;
+const metricsAggregateSql = `
+  COUNT(*) AS request_count,
+  SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END) AS unsuccessful_request_count,
+  SUM(input_tokens) AS input_tokens,
+  SUM(cached_input_tokens) AS cached_input_tokens,
+  COUNT(input_tokens) AS input_token_count,
+  COUNT(cached_input_tokens) AS cached_input_token_count,
+  SUM(output_tokens) AS output_tokens,
+  SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+  ${compactAggregateSql}
 `;
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
@@ -640,14 +652,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
     this.requireOpen();
-    validateMetricsTimeRange(query);
-    if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
-      throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
-    }
-    const offset = query.offset ?? 0;
-    if (!Number.isSafeInteger(offset) || offset < 0) {
-      throw new Error("模型请求指标分页偏移无效");
-    }
+    const scope = metricsScopeSql(query);
+    const offset = metricsPageOffset(query);
     const sortKey = query.sortKey ?? "recordedAtMs";
     const sortDirection = query.sortDirection ?? "desc";
     const sortExpression = pageSortSql[sortKey];
@@ -655,50 +661,17 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       throw new Error("模型请求指标排序无效");
     }
     const order = sortDirection.toUpperCase();
-    const filter = query.filter?.trim() ?? "";
-    if (filter.length > 128) {
-      throw new Error("模型请求指标筛选关键字最多 128 个字符");
-    }
-    const pattern = filter.length === 0
-      ? ""
-      : `%${filter.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
-    const filterSql = pattern.length === 0
-      ? ""
-      : ` AND (
-          provider LIKE ? ESCAPE '\\'
-          OR model LIKE ? ESCAPE '\\'
-          OR operation LIKE ? ESCAPE '\\'
-          OR status LIKE ? ESCAPE '\\'
-          OR error_type LIKE ? ESCAPE '\\'
-          OR error_code LIKE ? ESCAPE '\\'
-          OR error_message LIKE ? ESCAPE '\\'
-        )`;
-    const filterParams = pattern.length === 0
-      ? []
-      : Array.from({ length: 7 }, () => pattern);
-    const failuresSql = query.onlyFailures ? ` AND NOT (${observableCompletionSql})` : "";
-    const matchedTotal = (this.database.prepare(`
-      SELECT COUNT(*) AS n
-      FROM model_request_metrics
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?${failuresSql}${filterSql}
-    `).get(
-      query.startAtMs,
-      query.endAtMs,
-      ...filterParams,
-    ) as { n: number }).n;
+    const aggregateRow = this.queryAggregationRows("global", { ...query, dimension: "global" })[0];
+    const aggregate = aggregateRow === undefined ? null : toStoredMetricsAggregate(aggregateRow);
+    const matchedTotal = aggregate?.requestCount ?? 0;
     const rows = this.database.prepare(`
       SELECT *
       FROM model_request_metrics
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-        ${failuresSql}${filterSql}
+      WHERE ${scope.sql}
       ORDER BY ${sortExpression} ${order}, id ${order}
       LIMIT ? OFFSET ?
     `).all(
-      query.startAtMs,
-      query.endAtMs,
-      ...filterParams,
+      ...scope.params,
       query.limit + 1,
       offset,
     ) as unknown as MetricRow[];
@@ -710,6 +683,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       records: pageRows.map(toStoredMetric),
       nextOffset: hasMore ? offset + query.limit : null,
       matchedTotal,
+      aggregate,
     };
   }
 
@@ -783,16 +757,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport {
     this.requireOpen();
-    validateMetricsTimeRange(query);
+    const scope = metricsScopeSql(query);
     const summary = this.database.prepare(`
       SELECT
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count
       FROM model_request_metrics
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-    `).get(query.startAtMs, query.endAtMs) as unknown as ErrorSummaryRow;
+      WHERE ${scope.sql}
+    `).get(...scope.params) as unknown as ErrorSummaryRow;
     const rows = this.database.prepare(`
       WITH normalized AS (
         SELECT
@@ -809,8 +782,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
             ELSE error_type
           END AS normalized_error_type
         FROM model_request_metrics
-        WHERE recorded_at_ms >= ?
-          AND recorded_at_ms < ?
+        WHERE ${scope.sql}
       ),
       ranked AS (
         SELECT
@@ -839,8 +811,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         provider ASC, model ASC
       LIMIT ?
     `).all(
-      query.startAtMs,
-      query.endAtMs,
+      ...scope.params,
       maximumAggregationGroups,
     ) as unknown as ErrorGroupRow[];
     return {
@@ -1049,67 +1020,19 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     `).get(threadId, turnId) as TurnSummaryRow | undefined;
   }
 
-  threadTurnSummaries(threadId: string): StoredThreadTurnSummary[] {
-    this.requireOpen();
-    if (!threadId.trim() || threadId.length > 128) {
-      throw new Error("Thread ID 无效");
+  threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage {
+    validateThreadId(threadId, "Thread ID");
+    if (query.threadId !== undefined && query.threadId !== threadId) {
+      throw new Error("Thread ID 与查询范围不一致");
     }
-    const rows = this.database.prepare(`
-      SELECT
-        (
-          SELECT provider
-          FROM model_request_metrics AS latest_provider
-          WHERE latest_provider.thread_id
-              = model_request_metrics.thread_id
-            AND latest_provider.turn_id
-              = model_request_metrics.turn_id
-          ORDER BY latest_provider.id DESC
-          LIMIT 1
-        ) AS provider,
-        (
-          SELECT model
-          FROM model_request_metrics AS latest_model
-          WHERE latest_model.thread_id
-              = model_request_metrics.thread_id
-            AND latest_model.turn_id
-              = model_request_metrics.turn_id
-          ORDER BY latest_model.id DESC
-          LIMIT 1
-        ) AS model,
-        (
-          SELECT reasoning_effort
-          FROM model_request_metrics AS latest_effort
-          WHERE latest_effort.thread_id
-              = model_request_metrics.thread_id
-            AND latest_effort.turn_id
-              = model_request_metrics.turn_id
-          ORDER BY latest_effort.id DESC
-          LIMIT 1
-        ) AS reasoning_effort,
-        turn_id,
-        COUNT(DISTINCT turn_id) AS turn_count,
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        ${compactAggregateSql},
-        MAX(recorded_at_ms) AS recorded_at_ms
-      FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL
-      GROUP BY turn_id
-      ORDER BY MAX(id) DESC
-    `).all(threadId) as unknown as Array<
-      TurnSummaryRow & { recorded_at_ms: number }
-    >;
-    return rows.map((row) => ({
-      ...toStoredTurnSummary(row),
-      recordedAtMs: row.recorded_at_ms,
-    }));
+    const { rows, ...page } = this.queryThreadPage("turn_id", { ...query, threadId });
+    return {
+      ...page,
+      turns: rows.map((row) => ({
+        ...toStoredTurnSummary(row),
+        recordedAtMs: row.recorded_at_ms,
+      })),
+    };
   }
 
   /**
@@ -1130,86 +1053,87 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return row.request_count === 0 ? null : row.turn_count;
   }
 
-  threadList(): StoredThreadListItem[] {
+  threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
+    const { rows, ...page } = this.queryThreadPage("thread_id", query);
+    return {
+      ...page,
+      threads: rows.map((row) => ({
+        threadId: row.thread_id,
+        provider: row.provider ?? null,
+        model: row.model ?? null,
+        reasoningEffort: row.reasoning_effort ?? null,
+        agentPath: row.agent_path,
+        parentThreadId: row.parent_thread_id,
+        parentTurnId: row.parent_turn_id,
+        turnCount: row.turn_count,
+        requestCount: row.request_count,
+        inputTokens: row.input_tokens ?? 0,
+        outputTokens: row.output_tokens ?? 0,
+        compact: toStoredCompactSummary(row),
+        firstRequestStartedAtMs: row.first_request_started_at_ms,
+        lastRecordedAtMs: row.recorded_at_ms,
+      })),
+    };
+  }
+
+  private queryThreadPage(group: "thread_id" | "turn_id", query: ModelRequestMetricsThreadQuery) {
     this.requireOpen();
+    const scope = metricsScopeSql(query);
+    const offset = metricsPageOffset(query);
+    const sortKey = query.sortKey ?? "last";
+    const sortColumns = {
+      time: group === "thread_id" ? "first_request_started_at_ms" : "recorded_at_ms",
+      last: "recorded_at_ms", thread: "grouped.thread_id", turn: "grouped.turn_id",
+      provider: "latest.provider", model: "latest.model", turns: "turn_count",
+      requests: "request_count", failures: "unsuccessful_request_count",
+      input: "input_tokens", output: "output_tokens", compact: "compact_request_count",
+    };
+    const sortColumn = sortColumns[sortKey];
+    const direction = query.sortDirection ?? "desc";
+    if (sortColumn === undefined || !["asc", "desc"].includes(direction)) {
+      throw new Error("会话指标排序无效");
+    }
+    const scoped = `SELECT * FROM model_request_metrics
+      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL`;
+    const summary = this.database.prepare(`
+      SELECT ${metricsAggregateSql},
+        COUNT(DISTINCT thread_id) AS thread_count,
+        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count
+      FROM (${scoped})
+    `).get(...scope.params) as unknown as AggregateRow & { thread_count: number; turn_count: number };
+    const matchedTotal = group === "thread_id" ? summary.thread_count : summary.turn_count;
     const rows = this.database.prepare(`
-      SELECT
-        model_request_metrics.thread_id AS thread_id,
-        (
-          SELECT provider
-          FROM model_request_metrics AS latest_provider
-          WHERE latest_provider.thread_id
-              = model_request_metrics.thread_id
-            AND latest_provider.turn_id IS NOT NULL
-          ORDER BY latest_provider.id DESC
-          LIMIT 1
-        ) AS provider,
-        (
-          SELECT model
-          FROM model_request_metrics AS latest_model
-          WHERE latest_model.thread_id
-              = model_request_metrics.thread_id
-            AND latest_model.turn_id IS NOT NULL
-          ORDER BY latest_model.id DESC
-          LIMIT 1
-        ) AS model,
-        (
-          SELECT reasoning_effort
-          FROM model_request_metrics AS latest_effort
-          WHERE latest_effort.thread_id
-              = model_request_metrics.thread_id
-            AND latest_effort.turn_id IS NOT NULL
-          ORDER BY latest_effort.id DESC
-          LIMIT 1
-        ) AS reasoning_effort,
-        COUNT(DISTINCT turn_id) AS turn_count,
-        COUNT(*) AS request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(output_tokens) AS output_tokens,
-        ${compactAggregateSql},
-        MIN(request_started_at_ms) AS first_request_started_at_ms,
-        MAX(model_request_metrics.recorded_at_ms) AS recorded_at_ms,
-        subagent.agent_path AS agent_path,
-        subagent.parent_thread_id AS parent_thread_id,
-        subagent.parent_turn_id AS parent_turn_id
-      FROM model_request_metrics
-      LEFT JOIN subagent_threads AS subagent
-        ON subagent.thread_id = model_request_metrics.thread_id
-      WHERE model_request_metrics.thread_id IS NOT NULL
-        AND turn_id IS NOT NULL
-      GROUP BY model_request_metrics.thread_id
-      ORDER BY MAX(id) DESC
-    `).all() as unknown as Array<CompactSummaryRow & {
+      WITH scoped AS (${scoped}), grouped AS (
+        SELECT thread_id, turn_id, COUNT(DISTINCT turn_id) AS turn_count,
+          ${metricsAggregateSql},
+          MIN(request_started_at_ms) AS first_request_started_at_ms,
+          MAX(recorded_at_ms) AS recorded_at_ms,
+          MAX(id) AS latest_id
+        FROM scoped
+        GROUP BY ${group}
+      )
+      SELECT grouped.*, latest.provider, latest.model, latest.reasoning_effort,
+        subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
+      FROM grouped
+      JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
+      LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
+      ORDER BY ${sortColumn} ${direction}, grouped.${group} ${direction}
+      LIMIT ? OFFSET ?
+    `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & {
       thread_id: string;
-      provider: string | null;
-      model: string | null;
-      reasoning_effort: string | null;
-      turn_count: number;
-      request_count: number;
-      input_tokens: number | null;
-      output_tokens: number | null;
       first_request_started_at_ms: number;
       recorded_at_ms: number;
       agent_path: string | null;
       parent_thread_id: string | null;
       parent_turn_id: string | null;
     }>;
-    return rows.map((row) => ({
-      threadId: row.thread_id,
-      provider: row.provider ?? null,
-      model: row.model ?? null,
-      reasoningEffort: row.reasoning_effort ?? null,
-      agentPath: row.agent_path ?? null,
-      parentThreadId: row.parent_thread_id ?? null,
-      parentTurnId: row.parent_turn_id ?? null,
-      turnCount: row.turn_count,
-      requestCount: row.request_count,
-      inputTokens: row.input_tokens ?? 0,
-      outputTokens: row.output_tokens ?? 0,
-      compact: toStoredCompactSummary(row),
-      firstRequestStartedAtMs: row.first_request_started_at_ms,
-      lastRecordedAtMs: row.recorded_at_ms,
-    }));
+    return {
+      rows,
+      matchedTotal,
+      nextOffset: offset + rows.length < matchedTotal ? offset + rows.length : null,
+      aggregate: summary.request_count === 0 ? null : toStoredMetricsAggregate(summary),
+      turnCount: summary.turn_count,
+    };
   }
 
   subagentThread(threadId: string): {
@@ -1303,6 +1227,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     query: ModelRequestMetricsAggregationQuery,
   ): AggregateRow[] {
     const grouping = aggregationGrouping(dimension);
+    const scope = metricsScopeSql(query);
     const limit = dimension === "global" ? 1 : maximumAggregationGroups;
     return this.database.prepare(`
       WITH filtered AS (
@@ -1311,8 +1236,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           ${grouping.provider} AS group_provider,
           ${grouping.model} AS group_model
         FROM model_request_metrics AS metric
-        WHERE recorded_at_ms >= ?
-          AND recorded_at_ms < ?
+        WHERE ${scope.sql}
       )
       SELECT
         group_provider AS provider,
@@ -1332,7 +1256,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       GROUP BY group_provider, group_model
       ORDER BY request_count DESC, provider ASC, model ASC
       LIMIT ?
-    `).all(query.startAtMs, query.endAtMs, limit) as unknown as AggregateRow[];
+    `).all(...scope.params, limit) as unknown as AggregateRow[];
   }
 
   close(): void {
@@ -1443,6 +1367,45 @@ function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): v
   if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
     throw new Error("模型请求指标聚合维度无效");
   }
+}
+
+function metricsPageOffset(query: { offset?: number; limit: number }): number {
+  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
+    throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
+  }
+  const offset = query.offset ?? 0;
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("模型请求指标分页偏移无效");
+  return offset;
+}
+
+function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params: Array<string | number> } {
+  validateMetricsTimeRange(query);
+  const conditions = ["recorded_at_ms >= ?", "recorded_at_ms < ?"];
+  const params: Array<string | number> = [query.startAtMs, query.endAtMs];
+  for (const [key, column] of [
+    ["threadId", "thread_id"], ["turnId", "turn_id"],
+    ["provider", "provider"], ["model", "model"],
+    ["operation", "operation"], ["status", `(${normalizedStatusSql})`],
+  ] as const) {
+    const value = query[key];
+    if (value === undefined) continue;
+    if (!value.trim() || value.length > 128) throw new Error(`${key} 筛选值无效`);
+    conditions.push(`${column} = ?`);
+    params.push(value);
+  }
+  if (query.turnId !== undefined && query.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
+  if (query.operation !== undefined && !["response", "compact"].includes(query.operation)) throw new Error("operation 筛选值无效");
+  if (query.status !== undefined && !["completed", "failed", "incomplete", "unknown"].includes(query.status)) throw new Error("status 筛选值无效");
+  if (query.onlyFailures) conditions.push(`NOT (${observableCompletionSql})`);
+  const filter = query.filter?.trim() ?? "";
+  if (filter.length > 128) throw new Error("模型请求指标筛选关键字最多 128 个字符");
+  if (filter !== "") {
+    const columns = ["thread_id", "turn_id", "provider", "model", "operation", "status", "error_type", "error_code", "error_message"];
+    conditions.push(`(${columns.map((column) => `${column} LIKE ? ESCAPE '\\'`).join(" OR ")})`);
+    const pattern = `%${filter.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
+    params.push(...columns.map(() => pattern));
+  }
+  return { sql: conditions.join(" AND "), params };
 }
 
 function validateThreadId(value: string, label: string): void {

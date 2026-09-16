@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Link } from "react-router"
 import type { SortingState } from "@tanstack/react-table"
 
 import {
@@ -21,11 +22,14 @@ import {
   formatTime,
   formatTokens,
 } from "@/lib/format"
-import type { RequestRecord } from "@/lib/types"
+import type { MetricsQuery, RequestRecord } from "@/lib/types"
+import { metricsLink } from "@/lib/metrics-query"
 
 const TABLE_STATE_KEY = "codex-webui:requests-table-state-v4"
 
 const COLUMN_LABELS: Record<string, string> = {
+  thread: "Thread",
+  turn: "Turn",
   time: "时间",
   provider: "Provider",
   model: "模型",
@@ -48,6 +52,7 @@ const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500]
 
 export function RequestsTable({
+  query,
   records,
   pageNumber,
   hasPrevious,
@@ -62,6 +67,7 @@ export function RequestsTable({
   filter,
   total,
 }: {
+  query: MetricsQuery
   records: RequestRecord[]
   pageNumber: number
   hasPrevious: boolean
@@ -79,6 +85,20 @@ export function RequestsTable({
   const { language } = useLanguage()
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "thread",
+      accessorFn: (record) => record.threadId ?? "",
+      header: "Thread",
+      enableSorting: false,
+      cell: ({ row }) => row.original.threadId === null ? "—" : <Link className="block max-w-36 truncate underline-offset-4 hover:underline" title={row.original.threadId} to={metricsLink(`/threads/${encodeURIComponent(row.original.threadId)}`, query, { threadId: undefined, turnId: row.original.turnId ?? undefined })}>{row.original.threadId}</Link>,
+    },
+    {
+      id: "turn",
+      accessorFn: (record) => record.turnId ?? "",
+      header: "Turn",
+      enableSorting: false,
+      cell: ({ row }) => <span className="block max-w-36 truncate" title={row.original.turnId ?? undefined}>{row.original.turnId ?? "—"}</span>,
+    },
     {
       id: "select",
       header: ({ table }) => (
@@ -299,7 +319,7 @@ export function RequestsTable({
         </span>
       ),
     },
-  ], [language])
+  ], [language, query])
 
   return (
     <DataTable

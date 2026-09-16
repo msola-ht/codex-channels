@@ -71,7 +71,7 @@
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
-  report/export v3、run/turns v2，未改变结构的 threads 保持 v1；JSON/CSV 同时保留可视化字段；
+  report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v13
   检查点回写、私有备份后，在单一事务中重建为 v14；模型请求记录只复制当前保留字段，删除旧价格、
@@ -87,7 +87,7 @@
   行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
-  时间范围、分组、格式及维护命令参数，复用 Observability 的规范范围与聚合维度，并向顶层帮助
+  时间范围、组合筛选、分组、格式及维护命令参数，复用 Observability 的规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。

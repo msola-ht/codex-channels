@@ -25,6 +25,53 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("scopes Thread, Turn and request totals before grouping and pagination", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    store.recordBatch([
+      { ...sample(), recordedAtMs: 999, model: "outside-before" },
+      { ...sample(), recordedAtMs: 1_000, model: "matching" },
+      { ...sample(), recordedAtMs: 1_200, turnId: "turn-2", model: "matching", status: "failed" },
+      { ...sample(), recordedAtMs: 1_300, threadId: "thread-2", turnId: "turn-1", model: "matching" },
+      { ...sample(), recordedAtMs: 2_000, model: "outside-after" },
+      { ...sample(), recordedAtMs: 1_500, threadId: null, turnId: null, model: "matching" },
+    ]);
+    const query = { startAtMs: 1_000, endAtMs: 2_000, limit: 1, model: "matching" };
+    const threads = store.threadList(query);
+    expect(threads).toMatchObject({ matchedTotal: 2, turnCount: 3, nextOffset: 1, aggregate: { requestCount: 3, inputTokens: 3_000 } });
+    expect(threads.threads[0]).toMatchObject({ threadId: "thread-2", model: "matching", requestCount: 1 });
+    const next = store.threadList({ ...query, offset: 1 });
+    expect(next).toMatchObject({ nextOffset: null, matchedTotal: 2 });
+    expect(next.threads[0]).toMatchObject({ threadId: "thread-1", turnCount: 2, requestCount: 2, model: "matching" });
+    expect(store.threadList({ ...query, offset: 9 })).toMatchObject({ threads: [], nextOffset: null, matchedTotal: 2 });
+    const turns = store.threadTurnSummaries("thread-1", query);
+    expect(turns).toMatchObject({ matchedTotal: 2, nextOffset: 1, aggregate: { requestCount: 2, unsuccessfulRequestCount: 1 } });
+    expect(turns.turns[0]).toMatchObject({ turnId: "turn-2", requestCount: 1 });
+    const scoped = { ...query, threadId: "thread-1", turnId: "turn-1" };
+    const requests = store.page(scoped);
+    expect(requests.records).toHaveLength(1);
+    expect(requests.aggregate).toMatchObject({ requestCount: 1, inputTokens: 1_000 });
+    expect(requests.aggregate).toEqual(store.aggregate({ ...scoped, dimension: "global" }).aggregate);
+    expect(store.page({ ...query, filter: "thread-1" }).matchedTotal).toBe(2);
+    expect(store.page({ ...query, threadId: "thread-1", status: "failed" }).matchedTotal).toBe(1);
+    expect(store.errors({ ...query, threadId: "thread-1" })).toMatchObject({ requestCount: 2, unsuccessfulRequestCount: 1 });
+    expect(() => store.page({ ...query, turnId: "turn-1" })).toThrow("必须同时指定 Thread");
+    store.close();
+  });
+
+  it("uses normalized request status and literal keyword matching for scoped queries", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    store.recordBatch([
+      { ...sample(), recordedAtMs: 1_000, responseFormat: "unknown", model: null, inputTokens: null, outputTokens: null, totalTokens: null },
+      { ...sample(), recordedAtMs: 1_000, model: "model_%" },
+      { ...sample(), recordedAtMs: 1_000, model: "model-other" },
+    ]);
+    const query = { startAtMs: 0, endAtMs: 2_000, limit: 50 };
+    expect(store.page({ ...query, status: "incomplete" }).records[0]?.status).toBe("incomplete");
+    expect(store.page({ ...query, status: "completed" }).matchedTotal).toBe(2);
+    expect(store.page({ ...query, filter: "_%" }).matchedTotal).toBe(1);
+    store.close();
+  });
+
   it("persists a bounded request batch", () => {
     const store = new SqliteModelRequestMetricsStore(
       join(temporaryDirectory(), "request-metrics.sqlite3"),
@@ -344,11 +391,11 @@ describe("SqliteModelRequestMetricsStore", () => {
       requestCount: 3,
       unsuccessfulRequestCount: 2,
     });
-    expect(store.threadTurnSummaries("thread-1")[0]).toMatchObject({
+    expect(store.threadTurnSummaries("thread-1", { startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).turns[0]).toMatchObject({
       requestCount: 3,
       unsuccessfulRequestCount: 2,
     });
-    expect(store.threadList()[0]).toMatchObject({
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).threads[0]).toMatchObject({
       requestCount: 3,
     });
     store.close();
@@ -364,7 +411,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       turnId: "turn-1",
       model: "deepseek-v4-flash",
     });
-    expect(store.threadList()[0]).toMatchObject({
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).threads[0]).toMatchObject({
       threadId: "subagent-thread-1",
       agentPath: null,
     });
@@ -375,7 +422,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       parentTurnId: "parent-turn-1",
       agentPath: "/root/ds_probe",
     });
-    expect(store.threadList()[0]).toMatchObject({
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).threads[0]).toMatchObject({
       threadId: "subagent-thread-1",
       agentPath: "/root/ds_probe",
       parentThreadId: "parent-thread-1",

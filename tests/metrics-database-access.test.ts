@@ -38,6 +38,28 @@ function fixture() {
 }
 
 describe("model request metrics database access", () => {
+  it("exports filtered Threads and Turns across all pages with the same request scope", () => {
+    const { environment, databasePath } = fixture();
+    const nowMs = Date.now() + 1;
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.recordBatch(Array.from({ length: 503 }, (_, index) => ({
+      ...metricSample(), threadId: `thread-${index}`, turnId: "turn-same", recordedAtMs: nowMs - 1, model: "matched",
+    })));
+    store.record({ ...metricSample(), threadId: "outside", model: "other", recordedAtMs: nowMs - 1 });
+    store.close();
+    const options = { range: "24h", model: "matched", nowMs };
+    expect(readMetricsThreads(environment, options).threads).toHaveLength(503);
+    expect(readMetricsExport(environment, options).records).toHaveLength(503);
+    const turns = readMetricsTurns(environment, "thread-1", options);
+    expect(turns.turns).toHaveLength(1);
+    const records = readMetricsExport(environment, { ...options, threadId: "thread-1", turnId: "turn-same" });
+    expect(records.records).toHaveLength(1);
+    expect(records.records[0]).toMatchObject({ threadId: "thread-1", turnId: "turn-same", model: "matched" });
+    const cli = spawnSync(process.execPath, ["scripts/metrics-database.mjs", "turns", "thread-1", "--range", "24h", "--model", "matched", "--format", "json"], { cwd: process.cwd(), encoding: "utf8", env: environment });
+    expect(cli.status, cli.stderr).toBe(0);
+    expect(JSON.parse(cli.stdout)).toMatchObject({ range: { name: "24h" }, turns: [{ turnId: "turn-same", requestCount: 1 }] });
+  });
+
   it("resolves the canonical rolling ranges", () => {
     const now = new Date(2026, 7, 9, 11, 30).getTime();
     expect(metricsRange("24h", now).startAtMs).toBe(now - 86_400_000);

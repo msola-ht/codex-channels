@@ -1,6 +1,8 @@
 import type {
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsFilters,
+  ModelRequestMetricsThreadQuery,
   ModelRequestMetricsQuotaAccountStore,
   ModelRequestMetricsRequestQueryStore,
   ModelRequestMetricsThreadQueryStore,
@@ -76,6 +78,50 @@ export function requestMetricsAggregationDimension(
   return "global";
 }
 
+export function resolveRequestMetricsDates(from: string, to: string, nowMs: number): ResolvedRequestMetricsRange {
+  const startAtMs = parseRequestMetricsDate(from);
+  const end = new Date(parseRequestMetricsDate(to));
+  end.setDate(end.getDate() + 1);
+  const endAtMs = Math.min(end.getTime(), nowMs);
+  if (startAtMs < 0 || startAtMs >= endAtMs) throw new Error("自定义日期范围无效");
+  return { name: `${from}..${to}`, startAtMs, endAtMs };
+}
+
+export function parseRequestMetricsDate(value: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) throw new Error("日期必须使用 YYYY-MM-DD 格式");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    throw new Error("日期无效");
+  }
+  return date.getTime();
+}
+
+export function parseRequestMetricsFilters(input: Record<string, unknown>): ModelRequestMetricsFilters {
+  const filters: ModelRequestMetricsFilters = {};
+  for (const key of ["threadId", "turnId", "provider", "model", "filter"] as const) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value.trim().length === 0 || value.length > 128) {
+      throw new Error(`${key} 筛选值必须为 1–128 个字符`);
+    }
+    filters[key] = value.trim();
+  }
+  if (filters.turnId !== undefined && filters.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
+  if (input.operation !== undefined) {
+    if (input.operation !== "response" && input.operation !== "compact") throw new Error("operation 只支持 response、compact");
+    filters.operation = input.operation;
+  }
+  if (input.status !== undefined) {
+    if (input.status !== "completed" && input.status !== "failed" && input.status !== "incomplete" && input.status !== "unknown") throw new Error("status 不支持该请求状态");
+    filters.status = input.status;
+  }
+  return filters;
+}
+
 export function queryRequestMetricsAggregate(
   store: Pick<ModelRequestMetricsRequestQueryStore, "aggregate">,
   dimension: ModelRequestMetricsAggregationDimension,
@@ -104,8 +150,9 @@ export class RequestMetricsQueryService {
   aggregate(
     dimension: ModelRequestMetricsAggregationDimension,
     range: ResolvedRequestMetricsRange,
+    filters: ModelRequestMetricsFilters = {},
   ) {
-    return queryRequestMetricsAggregate(this.store, dimension, range);
+    return this.store.aggregate({ ...filters, dimension, startAtMs: range.startAtMs, endAtMs: range.endAtMs });
   }
 
   overview(range: ResolvedRequestMetricsRange) {
@@ -118,8 +165,8 @@ export class RequestMetricsQueryService {
     };
   }
 
-  errors(range: ResolvedRequestMetricsRange) {
-    return queryRequestMetricsErrors(this.store, range);
+  errors(range: ResolvedRequestMetricsRange, filters: ModelRequestMetricsFilters = {}) {
+    return this.store.errors({ ...filters, startAtMs: range.startAtMs, endAtMs: range.endAtMs });
   }
 
   daily(range: ResolvedRequestMetricsRange) {
@@ -148,12 +195,12 @@ export class RequestMetricsQueryService {
     return this.store.threadTurnCount(threadId);
   }
 
-  threadTurnSummaries(threadId: string) {
-    return this.store.threadTurnSummaries(threadId);
+  threadTurnSummaries(threadId: string, range: ResolvedRequestMetricsRange, query: Omit<ModelRequestMetricsThreadQuery, "startAtMs" | "endAtMs">) {
+    return this.store.threadTurnSummaries(threadId, { ...query, startAtMs: range.startAtMs, endAtMs: range.endAtMs });
   }
 
-  threadList() {
-    return this.store.threadList();
+  threadList(range: ResolvedRequestMetricsRange, query: Omit<ModelRequestMetricsThreadQuery, "startAtMs" | "endAtMs">) {
+    return this.store.threadList({ ...query, startAtMs: range.startAtMs, endAtMs: range.endAtMs });
   }
 
   subagentThread(threadId: string) {

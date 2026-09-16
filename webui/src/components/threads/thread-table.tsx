@@ -6,6 +6,7 @@ import {
   DataTable,
   SortableHeader,
   type DataTableColumn,
+  type DataTableProps,
 } from "@/components/metrics/data-table"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { Badge } from "@/components/ui/badge"
@@ -14,12 +15,13 @@ import {
   formatTokens,
   shortThreadId,
 } from "@/lib/format"
-import type { ThreadListItem } from "@/lib/types"
+import type { MetricsQuery, ThreadListItem } from "@/lib/types"
+import { metricsLink } from "@/lib/metrics-query"
 
 const TABLE_STATE_KEY = "codex-webui:threads-table-state-v1"
 
 const COLUMN_LABELS: Record<string, string> = {
-  time: "开始时间",
+  time: "期间首次请求",
   thread: "Thread",
   provider: "Provider",
   model: "模型",
@@ -35,7 +37,7 @@ const COLUMN_LABELS: Record<string, string> = {
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200]
 
-export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
+export function ThreadTable({ threads, query, pagination }: { threads: ThreadListItem[]; query: MetricsQuery; pagination: DataTableProps<ThreadListItem>["pagination"] }) {
   const mainCount = threads.filter((thread) => thread.agentPath === null).length
   const subagentCount = threads.length - mainCount
 
@@ -44,7 +46,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
       id: "time",
       accessorFn: (thread) => thread.firstRequestStartedAtMs,
       header: ({ column }) => (
-        <SortableHeader column={column}>开始时间</SortableHeader>
+        <SortableHeader column={column}>期间首次请求</SortableHeader>
       ),
       cell: ({ getValue }) => (
         <span className="tabular-nums text-muted-foreground">
@@ -60,7 +62,7 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
       ),
       cell: ({ row }) => (
         <Link
-          to={`/threads/${row.original.threadId}`}
+          to={metricsLink(`/threads/${encodeURIComponent(row.original.threadId)}`, query, { threadId: undefined })}
           className="font-medium underline-offset-4 hover:underline"
           title={row.original.threadId}
         >
@@ -88,11 +90,10 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
     },
     {
       id: "type",
+      enableSorting: false,
       accessorFn: (thread) =>
         thread.agentPath === null ? "主会话" : `子代理 ${thread.agentPath}`,
-      header: ({ column }) => (
-        <SortableHeader column={column}>类型</SortableHeader>
-      ),
+      header: "类型",
       cell: ({ row }) =>
         row.original.agentPath === null ? (
           <span className="text-muted-foreground">主会话</span>
@@ -108,16 +109,15 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
     },
     {
       id: "parent",
+      enableSorting: false,
       accessorFn: (thread) => thread.parentThreadId ?? "",
-      header: ({ column }) => (
-        <SortableHeader column={column}>父会话</SortableHeader>
-      ),
+      header: "父会话",
       cell: ({ row }) =>
         row.original.parentThreadId === null ? (
           <span className="text-muted-foreground">—</span>
         ) : (
           <Link
-            to={`/threads/${row.original.parentThreadId}`}
+            to={metricsLink(`/threads/${encodeURIComponent(row.original.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}
             className="underline-offset-4 hover:underline"
             title={row.original.parentThreadId}
           >
@@ -192,28 +192,21 @@ export function ThreadTable({ threads }: { threads: ThreadListItem[] }) {
         </span>
       ),
     },
-  ], [])
+  ], [query])
 
   return (
     <DataTable
       title="会话列表"
-      description={({ total, matched }) =>
-        `共 ${total} 个会话（主会话 ${mainCount} · 子代理 ${subagentCount}）· 匹配 ${matched} 条`
+      description={({ total }) =>
+        `共 ${total} 个匹配会话 · 本页主会话 ${mainCount} / 子代理 ${subagentCount} · 各会话只统计自身请求`
       }
       columns={columns}
       data={threads}
       storageKey={TABLE_STATE_KEY}
       columnLabels={COLUMN_LABELS}
-      filterPlaceholder="筛选 Thread / 类型 / 路径 / 模型"
-      filterHint="全库筛选"
       emptyText="暂无会话记录"
       noMatchText="无匹配会话"
-      pagination={{
-        mode: "client",
-        defaultPageSize: 50,
-        pageSizeOptions: PAGE_SIZE_OPTIONS,
-        defaultSorting: [{ id: "last", desc: true }],
-      }}
+      pagination={{ ...pagination, pageSizeOptions: PAGE_SIZE_OPTIONS }}
     />
   )
 }

@@ -4,8 +4,7 @@ import type {
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
   RangeName,
-  RequestSortDirection,
-  RequestSortKey,
+  MetricsQuery,
   RequestsResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
@@ -32,6 +31,7 @@ import type {
   ThreadTurnsResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
+import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
 
@@ -143,9 +143,10 @@ export function fetchDailyUsage(
 }
 
 export function fetchThreads(
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadsResponse> {
-  return getJson<ThreadsResponse>(`${API_PREFIX}/threads`, signal)
+  return getJson<ThreadsResponse>(`${API_PREFIX}/threads?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreadRun(
@@ -160,47 +161,32 @@ export function fetchThreadRun(
 
 export function fetchThreadTurns(
   threadId: string,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadTurnsResponse> {
   return getJson<ThreadTurnsResponse>(
-    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns?${metricsQueryParams(query)}`,
     signal,
   )
 }
 
 export function fetchRequests(
-  range: RangeName,
-  offset: number,
-  limit: number,
-  sort: RequestSortKey,
-  direction: RequestSortDirection,
-  filter: string,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
-  const params = new URLSearchParams({
-    range,
-    offset: String(offset),
-    limit: String(limit),
-    sort,
-    direction,
-  })
-  if (filter.trim() !== "") params.set("filter", filter.trim())
-  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
+  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${metricsQueryParams(query)}`, signal)
+}
+
+export function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<unknown> {
+  return getJson(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchErrors(
-  range: RangeName,
-  offset: number,
-  limit: number,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ErrorsResponse> {
-  const params = new URLSearchParams({
-    range,
-    offset: String(offset),
-    limit: String(limit),
-  })
   return getJson<ErrorsResponse>(
-    `${API_PREFIX}/errors?${params.toString()}`,
+    `${API_PREFIX}/errors?${metricsQueryParams(query)}`,
     signal,
   )
 }

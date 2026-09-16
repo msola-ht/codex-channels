@@ -266,11 +266,11 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 以及当前会话累计；默认输出 Markdown 并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.turns": `${metricsCommandUsage.turns}
 
-导出指定会话每一次对话的汇总（请求次数、Token、速度、耗时）；默认写入
+按时间、模型、操作和状态筛选指定会话自身的每轮请求与 Token；默认全部保留历史，写入
 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.threads": `${metricsCommandUsage.threads}
 
-列出指标库中有记录的所有会话及其对话数、请求数；默认写入 ~/.codex-connect/output/<日期>/，
+按时间和组合条件列出指标库中有记录的会话及其期间轮数、请求数；默认全部保留历史，写入 ~/.codex-connect/output/<日期>/，
 加 --stdout 输出到标准输出。`,
   "metrics.reset": `用法：codexc metrics reset
 
@@ -294,7 +294,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 只读输出汇报；默认最近 30 天并按模型分组，写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。`,
   "metrics.export": `${metricsCommandUsage.export}
 
-只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。--thread 只导出指定 Thread。`,
+只读导出脱敏请求记录；默认最近 30 天、JSON 格式并写入 ~/.codex-connect/output/<日期>/，加 --stdout 输出到标准输出。支持 --thread、--turn 及模型、操作、状态组合筛选；--turn 必须同时指定 --thread。`,
   "metrics.quota": `${metricsCommandUsage.quota}
 
 只读查询已记录的 OpenAI 与 OpenCode Go 历史额度窗口；按实际重置时间归并，并显示窗口起止、请求、Token 和本机样本估算。`,

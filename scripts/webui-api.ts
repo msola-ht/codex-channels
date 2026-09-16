@@ -1,10 +1,34 @@
 export type RangeName =
   | "24h" | "7d" | "30d" | "90d" | "all"
 
-export interface Range {
-  name: RangeName
+export interface Range<Name extends string = RangeName> {
+  name: Name
   startAtMs: number
   endAtMs: number
+}
+
+export interface MetricsQuery {
+  range?: RangeName
+  from?: string
+  to?: string
+  threadId?: string
+  turnId?: string
+  provider?: string
+  model?: string
+  operation?: "response" | "compact"
+  status?: "completed" | "failed" | "incomplete" | "unknown"
+  filter?: string
+  offset?: number
+  limit?: number
+  sort?: string
+  direction?: "asc" | "desc"
+}
+
+export interface MetricsPageSummary {
+  range: Range<string>
+  total: number
+  nextOffset: number | null
+  aggregate: Aggregate | null
 }
 
 export interface CompactSummary {
@@ -113,9 +137,10 @@ export interface ThreadListItem {
   lastRecordedAtMs: number
 }
 
-export interface ThreadsResponse {
+export interface ThreadsResponse extends MetricsPageSummary {
   generatedAt: string
   threads: ThreadListItem[]
+  turnCount: number
 }
 
 export interface TurnSummary {
@@ -143,10 +168,11 @@ export interface ThreadRunResponse {
   threadAggregate: (Aggregate & { turnCount: number }) | null
 }
 
-export interface ThreadTurnsResponse {
+export interface ThreadTurnsResponse extends MetricsPageSummary {
   generatedAt: string
   threadId: string
   turns: TurnSummary[]
+  turnCount: number
 }
 
 export interface RequestRecord {
@@ -190,22 +216,24 @@ export type RequestSortKey =
 export type RequestSortDirection = "asc" | "desc"
 
 export interface RequestsResponse {
-  range: Range
+  range: Range<string>
   generatedAt: string
   records: RequestRecord[]
   nextOffset: number | null
   /** 当前筛选条件下匹配的记录总数（未筛选时等于时间范围内全部记录数） */
   total: number
+  aggregate: Aggregate | null
 }
 
 export interface ErrorsResponse {
-  range: Range
+  range: Range<string>
   generatedAt: string
   errors: ErrorsReport
   /** 按发生时间倒序的单条失败请求。 */
   records: RequestRecord[]
   nextOffset: number | null
   total: number
+  aggregate: Aggregate | null
 }
 
 export interface SettingsSummaryResponse {

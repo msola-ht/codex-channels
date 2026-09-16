@@ -1,10 +1,10 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchErrors } from "@/lib/api"
-import type { RangeName } from "@/lib/types"
+import type { MetricsQuery } from "@/lib/types"
 
-export function useErrors(range: RangeName, offset: number, limit: number) {
+export function useErrors(query: MetricsQuery) {
   return useApi(
-    (signal) => fetchErrors(range, offset, limit, signal),
-    [range, offset, limit],
+    (signal) => fetchErrors(query, signal),
+    [JSON.stringify(query)],
   )
 }

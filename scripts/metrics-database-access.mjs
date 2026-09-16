@@ -16,6 +16,7 @@ import {
 import {
   metricsDimension,
   metricsRangeOptions,
+  metricsFilterOptions,
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
@@ -120,6 +121,7 @@ export function validateMetricsDatabaseStructure(
 
 export function readMetricsReport(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
+  const filters = metricsFilterOptions(options);
   const dimension = metricsDimension(options.group ?? "models");
   const databasePath = requireCompatibleMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
@@ -135,8 +137,9 @@ export function readMetricsReport(environment = process.env, options = {}) {
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
       weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-      report: queries.aggregate(dimension, range),
-      errors: queries.errors(range),
+      filters,
+      report: queries.aggregate(dimension, range, filters),
+      errors: queries.errors(range, filters),
     };
   } finally {
     store.close();
@@ -145,7 +148,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
 
 export function readMetricsExport(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
-  const threadId = options.threadId;
+  const filters = metricsFilterOptions(options);
   const databasePath = requireCompatibleMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
     databasePath,
@@ -158,16 +161,13 @@ export function readMetricsExport(environment = process.env, options = {}) {
     let offset = 0;
     do {
       const page = queries.page(range, {
+        ...filters,
         offset,
         limit: 500,
         sortKey: "recordedAtMs",
         sortDirection: "asc",
       });
-      records.push(
-        ...(threadId === undefined
-          ? page.records
-          : page.records.filter((record) => record.threadId === threadId)),
-      );
+      records.push(...page.records);
       offset = page.nextOffset ?? -1;
     } while (offset >= 0);
     return {
@@ -175,6 +175,8 @@ export function readMetricsExport(environment = process.env, options = {}) {
       version: 3,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
+      filters,
+      aggregate: queries.aggregate("global", range, filters).aggregate,
       weeklyQuota: readWeeklyQuota(store, range.endAtMs),
       records,
     };
@@ -262,7 +264,9 @@ export function readMetricsRun(environment = process.env, threadId) {
   }
 }
 
-export function readMetricsThreads(environment = process.env) {
+export function readMetricsThreads(environment = process.env, options = {}) {
+  const range = metricsRangeOptions(options, options.nowMs ?? Date.now(), "all");
+  const filters = metricsFilterOptions(options);
   const databasePath = requireCompatibleMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
     databasePath,
@@ -270,18 +274,30 @@ export function readMetricsThreads(environment = process.env) {
     { readOnly: true },
   );
   try {
+    const queries = new RequestMetricsQueryService(store);
+    const threads = [];
+    let offset = 0;
+    do {
+      const page = queries.threadList(range, { ...filters, offset, limit: 500 });
+      threads.push(...page.threads);
+      offset = page.nextOffset ?? -1;
+    } while (offset >= 0);
     return {
       format: "codex-connect-request-metrics-threads",
       version: 1,
       generatedAt: new Date().toISOString(),
-      threads: new RequestMetricsQueryService(store).threadList(),
+      range,
+      filters,
+      threads,
     };
   } finally {
     store.close();
   }
 }
 
-export function readMetricsTurns(environment = process.env, threadId) {
+export function readMetricsTurns(environment = process.env, threadId, options = {}) {
+  const range = metricsRangeOptions(options, options.nowMs ?? Date.now(), "all");
+  const filters = metricsFilterOptions({ ...options, threadId });
   const databasePath = requireCompatibleMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(
     databasePath,
@@ -289,12 +305,22 @@ export function readMetricsTurns(environment = process.env, threadId) {
     { readOnly: true },
   );
   try {
+    const queries = new RequestMetricsQueryService(store);
+    const turns = [];
+    let offset = 0;
+    do {
+      const page = queries.threadTurnSummaries(threadId, range, { ...filters, offset, limit: 500 });
+      turns.push(...page.turns);
+      offset = page.nextOffset ?? -1;
+    } while (offset >= 0);
     return {
       format: "codex-connect-request-metrics-turns",
       version: 2,
       generatedAt: new Date().toISOString(),
       threadId,
-      turns: new RequestMetricsQueryService(store).threadTurnSummaries(threadId),
+      range,
+      filters,
+      turns,
     };
   } finally {
     store.close();

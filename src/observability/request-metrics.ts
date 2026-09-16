@@ -184,10 +184,25 @@ export type ModelRequestMetricsAggregationDimension =
   | "provider"
   | "model";
 
-export interface ModelRequestMetricsAggregationQuery {
-  dimension: ModelRequestMetricsAggregationDimension;
+export interface ModelRequestMetricsFilters {
+  threadId?: string;
+  turnId?: string;
+  provider?: string;
+  model?: string;
+  operation?: ModelRequestOperation;
+  status?: ModelRequestStatus;
+  filter?: string;
+  /** 只返回未成功完成的请求，用于错误明细页。 */
+  onlyFailures?: boolean;
+}
+
+export interface ModelRequestMetricsScope extends ModelRequestMetricsFilters {
   startAtMs: number;
   endAtMs: number;
+}
+
+export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetricsScope {
+  dimension: ModelRequestMetricsAggregationDimension;
 }
 
 export interface StoredModelRequestMetricsAggregate {
@@ -223,21 +238,13 @@ export interface StoredModelRequestMetricsDailyRow {
   outputTokens: number;
 }
 
-export interface ModelRequestMetricsErrorQuery {
-  startAtMs: number;
-  endAtMs: number;
-}
+export type ModelRequestMetricsErrorQuery = ModelRequestMetricsScope;
 
-export interface ModelRequestMetricsPageQuery {
-  startAtMs: number;
-  endAtMs: number;
+export interface ModelRequestMetricsPageQuery extends ModelRequestMetricsScope {
   offset?: number;
   limit: number;
   sortKey?: ModelRequestMetricsSortKey;
   sortDirection?: "asc" | "desc";
-  filter?: string;
-  /** 只返回未成功完成的请求，用于错误明细页。 */
-  onlyFailures?: boolean;
 }
 
 export type ModelRequestMetricsSortKey =
@@ -258,6 +265,33 @@ export interface StoredModelRequestMetricsPage {
   records: StoredModelRequestMetric[];
   nextOffset: number | null;
   matchedTotal: number;
+  aggregate: StoredModelRequestMetricsAggregate | null;
+}
+
+export type ModelRequestMetricsThreadSortKey =
+  | "time" | "last" | "thread" | "turn" | "provider" | "model"
+  | "turns" | "requests" | "failures" | "input" | "output" | "compact";
+
+export interface ModelRequestMetricsThreadQuery extends ModelRequestMetricsScope {
+  offset?: number;
+  limit: number;
+  sortKey?: ModelRequestMetricsThreadSortKey;
+  sortDirection?: "asc" | "desc";
+}
+
+export interface StoredThreadMetricsPage {
+  nextOffset: number | null;
+  matchedTotal: number;
+  aggregate: StoredModelRequestMetricsAggregate | null;
+  turnCount: number;
+}
+
+export interface StoredThreadListPage extends StoredThreadMetricsPage {
+  threads: StoredThreadListItem[];
+}
+
+export interface StoredThreadTurnsPage extends StoredThreadMetricsPage {
+  turns: StoredThreadTurnSummary[];
 }
 
 export interface StoredModelRequestMetricsErrorGroup {
@@ -354,9 +388,9 @@ export interface ModelRequestMetricsThreadQueryStore {
     threadId: string,
     turnId: string,
   ): StoredTurnRequestMetricsSummary | null;
-  threadTurnSummaries(threadId: string): StoredThreadTurnSummary[];
+  threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage;
   threadTurnCount(threadId: string): number | null;
-  threadList(): StoredThreadListItem[];
+  threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage;
   subagentThread(threadId: string): {
     agentPath: string | null;
     parentThreadId: string | null;

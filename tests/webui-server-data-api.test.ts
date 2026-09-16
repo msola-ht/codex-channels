@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -35,6 +36,57 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("keeps custom-date Thread, Turn, request, error and export queries consistent", async () => {
+    const fixture = createFixture();
+    const startAtMs = new Date(2026, 0, 2).getTime();
+    const endAtMs = new Date(2026, 0, 3).getTime();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.recordBatch([
+      { ...metricSample(), recordedAtMs: startAtMs - 1, model: "old" },
+      { ...metricSample(), recordedAtMs: startAtMs, model: "matching" },
+      { ...metricSample(), recordedAtMs: startAtMs + 1, model: "matching", turnId: "turn-2", status: "failed" },
+      { ...metricSample(), recordedAtMs: startAtMs + 2, model: "matching", threadId: "thread-2" },
+      { ...metricSample(), recordedAtMs: endAtMs, model: "outside" },
+    ]);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const scope = "from=2026-01-02&to=2026-01-02&provider=deepseek&model=matching";
+    const read = async (path: string) => {
+      const response = await fetch(`${origin}/api/v1/${path}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const threads = await read(`threads?${scope}&limit=1&sort=requests`);
+    expect(threads).toMatchObject({ total: 2, nextOffset: 1, turnCount: 3, aggregate: { requestCount: 3 } });
+    expect(threads.threads[0]).toMatchObject({ threadId: "thread-1", requestCount: 2, turnCount: 2, model: "matching" });
+    const turns = await read(`threads/thread-1/turns?${scope}&limit=1`);
+    expect(turns).toMatchObject({ total: 2, nextOffset: 1, aggregate: { requestCount: 2, unsuccessfulRequestCount: 1 } });
+    expect(turns.turns[0].turnId).toBe("turn-2");
+    const requestScope = `${scope}&threadId=thread-1&turnId=turn-2`;
+    const requests = await read(`requests?${requestScope}`);
+    expect(requests).toMatchObject({ total: 1, aggregate: { requestCount: 1, unsuccessfulRequestCount: 1 } });
+    const exported = await read(`requests/export?${requestScope}`);
+    expect(exported.records).toEqual(requests.records);
+    expect(exported.aggregate).toEqual(requests.aggregate);
+    const errors = await read(`errors?${scope}&threadId=thread-1`);
+    expect(errors).toMatchObject({ total: 1, errors: { requestCount: 2, unsuccessfulRequestCount: 1 } });
+    for (const sort of ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]) {
+      await read(`threads?${scope}&sort=${sort}&direction=asc`);
+    }
+    for (const sort of ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"]) {
+      await read(`threads/thread-1/turns?${scope}&sort=${sort}&direction=asc`);
+    }
+    for (const path of [
+      "threads?range=1h", "threads?from=2026-01-02", "threads?from=2026-02-30&to=2026-03-01",
+      `threads?${scope}&range=7d`, "requests?turnId=turn-1", "requests?status=invalid",
+      "threads/thread-1/turns?threadId=thread-2", "threads?limit=501", "threads?sort=invalid",
+      "requests?provider=a&provider=b", "requests?unsupported=value", "threads/thread-1/run?range=7d",
+      "threads?from=1969-01-01&to=2026-01-02",
+    ]) {
+      expect((await fetch(`${origin}/api/v1/${path}`)).status, path).toBe(400);
+    }
+  });
+
   it("returns overview aggregates, errors and weekly quota", async () => {
     const fixture = createFixture();
     recordSample(fixture.databasePath, {

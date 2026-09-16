@@ -27,6 +27,17 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("accepts shared scope filters for Threads, Turns, reports and exports", () => {
+    const filters = ["--from", "2026-01-01", "--to", "2026-01-02", "--model", "model-1", "--status", "failed", "--operation", "compact"];
+    expect(parseMetricsThreadsArgs(filters)).toMatchObject({ from: "2026-01-01", to: "2026-01-02", model: "model-1" });
+    expect(parseMetricsTurnsArgs(["thread-1", ...filters, "--turn", "turn-1"])).toMatchObject({ threadId: "thread-1", turn: "turn-1" });
+    expect(() => validateMetricsCommandArgs("export", [...filters, "--thread", "thread-1", "--turn", "turn-1"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("report", filters)).not.toThrow();
+    expect(() => validateMetricsCommandArgs("export", ["--turn", "turn-1"])).toThrow("必须同时指定 Thread");
+    expect(() => parseMetricsThreadsArgs(["--status", "invalid"])).toThrow("status");
+    expect(() => parseMetricsTurnsArgs(["thread-1", "--range", "7d", "--from", "2026-01-01", "--to", "2026-01-02"])).toThrow("不能与 --range");
+  });
+
   it("resolves explicit local date ranges without exceeding now", () => {
     const nowMs = new Date(2026, 7, 12, 12).getTime();
 
@@ -38,6 +49,8 @@ describe("metrics command options", () => {
       });
     expect(() => metricsRangeOptions({ from: "2026-08-10" }, nowMs))
       .toThrow("自定义日期必须同时使用 --from 和 --to");
+    expect(() => metricsRangeOptions({ from: "1969-01-01", to: "2026-08-12" }, nowMs))
+      .toThrow("自定义日期范围无效");
   });
 
   it("parses shared report and cleanup options", () => {

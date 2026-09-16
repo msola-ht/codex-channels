@@ -17,9 +17,9 @@ npm run lint       # oxlint
 ```text
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
-  lib/         API 客户端、令牌存取、共享类型转出与格式化
-  hooks/       数据 hook（useApi 统一 loading/error/refetch）、设置管理（共用版本化预览/确认状态机）、请求排序状态与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块与共享数据表格）、requests（请求明细数据表格）、settings（按设置域拆分的卡片与控件）
+  lib/         API 客户端、令牌存取、共享类型转出与格式化；metrics-query.ts 统一查询参数和逐层跳转地址
+  hooks/       数据 hook（useApi 统一 loading/error/refetch）、use-metrics-query（URL 筛选/排序/分页）、use-metrics-export（可取消请求导出）、设置管理（共用版本化预览/确认状态机）与全局货币上下文
+  components/  layout（Sidebar）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、settings（按设置域拆分的卡片与控件）
   pages/       概览、Threads、Thread 详情、请求、错误、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```

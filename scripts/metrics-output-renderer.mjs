@@ -426,6 +426,7 @@ export function printMetricsTurns(result, format) {
     return;
   }
   console.log(`# 会话对话明细 · ${result.threadId}`);
+  console.log(`- 时间范围：${result.range.name} · 当前会话自身的期间统计`);
   console.log("");
   if (result.turns.length === 0) {
     console.log("该会话暂无可导出的对话记录。");
@@ -484,6 +485,7 @@ export function printMetricsThreads(result, format) {
     return;
   }
   console.log(`# 指标会话列表（${result.threads.length}）`);
+  console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
   console.log("");
   console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |");

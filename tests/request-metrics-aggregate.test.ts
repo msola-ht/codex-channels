@@ -379,7 +379,7 @@ describe("request metrics aggregate reports", () => {
       requestCount: 2,
       unsuccessfulRequestCount: 0,
     });
-    expect(store.threadTurnSummaries("thread-1")[0]).toMatchObject({
+    expect(store.threadTurnSummaries("thread-1", { startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).turns[0]).toMatchObject({
       requestCount: 2,
       inputTokens: 2_000,
       outputTokens: 200,
@@ -393,7 +393,7 @@ describe("request metrics aggregate reports", () => {
         outputTokens: 100,
       },
     });
-    expect(store.threadList()[0]).toMatchObject({
+    expect(store.threadList({ startAtMs: 0, endAtMs: Date.now() + 1, limit: 500 }).threads[0]).toMatchObject({
       requestCount: 2,
       inputTokens: 2_000,
       outputTokens: 200,
