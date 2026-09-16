@@ -191,6 +191,8 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
+渠道选择 OpenAI 官方模型时不继承当前 Thread 或用户配置中的 Fast，下一 Turn 显式使用标准服务层级；
+Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、实验性上下文管理、
 `multi_agent_v2` 与受控共享第三方角色 `agents.external` 的普通键级写入共用一次官方
 `config/batchWrite` 事务。角色只保存当前选择的 Provider 与模型；DeepSeek、OpenCode Go 的

@@ -410,7 +410,11 @@ describe("ModelSelectionService", () => {
     const selected = await service.selectModel(target, "gpt-deep");
 
     expect(selected).toMatchObject({ model: "gpt-deep", effort: "high", pending: true });
-    expect(service.turnOverrides(target)).toEqual({ model: "gpt-deep", effort: "high" });
+    expect(service.turnOverrides(target)).toEqual({
+      model: "gpt-deep",
+      effort: "high",
+      serviceTier: "default",
+    });
   });
 
   it("accepts effort indexes and clears pending overrides after a successful turn", async () => {
@@ -716,7 +720,7 @@ describe("ModelSelectionService", () => {
     });
   });
 
-  it("uses the selected model's catalog tier when switching with Fast enabled", async () => {
+  it("resets Fast when switching between OpenAI models", async () => {
     const tierModels = [
       model("gpt-main", ["medium"], "medium", true, true),
       model("gpt-other", ["medium"], "medium", false, true, "fast"),
@@ -741,7 +745,7 @@ describe("ModelSelectionService", () => {
     expect(service.turnOverrides(target)).toEqual({
       model: "gpt-other",
       effort: "medium",
-      serviceTier: "fast",
+      serviceTier: "default",
     });
   });
 
@@ -821,7 +825,7 @@ describe("ModelSelectionService", () => {
     expect(state.effort).toBe("high");
   });
 
-  it("starts a clean OpenAI Thread when switching back from a third-party provider", async () => {
+  it("starts a standard OpenAI Thread when switching back from a third-party provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
     const readDefaultServiceTier = vi.fn().mockResolvedValue("fast");
@@ -849,10 +853,10 @@ describe("ModelSelectionService", () => {
 
     expect(newSession).toHaveBeenCalledOnce();
     expect(fork).not.toHaveBeenCalled();
-    expect(readDefaultServiceTier).toHaveBeenCalledWith("/workspace", "openai");
+    expect(readDefaultServiceTier).not.toHaveBeenCalled();
     expect(state).toMatchObject({
       model: "gpt-main",
-      serviceTier: "priority",
+      serviceTier: "default",
       serviceTierPending: true,
     });
   });
