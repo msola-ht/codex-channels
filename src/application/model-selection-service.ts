@@ -148,6 +148,7 @@ export class ModelSelectionService {
     const current = this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
+    const resetOfficialFast = selectedProvider === "openai";
     const selectedFastTier = fastServiceTierId(selected);
     const providerDefaultEffort = providerChanged
       ? await this.codex.readDefaultReasoningEffort(
@@ -155,7 +156,7 @@ export class ModelSelectionService {
           selectedProvider,
         )
       : undefined;
-    const providerDefaultTier = providerChanged && selectedFastTier
+    const providerDefaultTier = providerChanged && selectedFastTier && !resetOfficialFast
       ? await this.codex.readDefaultServiceTier(
           this.router.workspace(target).cwd,
           selectedProvider,
@@ -181,7 +182,9 @@ export class ModelSelectionService {
       model: selected.model,
       ...(providerChanged ? { modelProvider: selectedProvider } : {}),
       effort,
-      ...(providerChanged
+      ...(resetOfficialFast
+        ? { serviceTier: standardServiceTierRequestValue }
+        : providerChanged
         ? selectedFastTier
           ? {
               serviceTier: isFastServiceTier(providerDefaultTier ?? null, selected)
