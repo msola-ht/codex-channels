@@ -9,7 +9,6 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
-import { StringDecoder } from "node:string_decoder";
 
 import WebSocket, {
   WebSocketServer,
@@ -20,16 +19,14 @@ import {
   endToEndHeaders,
   forwardedRequestHeaders,
   forwardedWebSocketHeaders,
-  isOpenAiRealtimeWebSocketPath,
-  isResponsesPath,
-  isResponsesRequestPath,
-  isSupportedHttpRequest,
+  isSupportedHttpRoute,
   parseListenAddress,
-  resolveAccountPath,
+  resolveProxyRoute,
   responseOperation,
   upstreamPath,
   upstreamWebSocketPath,
   websocketProtocols,
+  type ResolvedProxyRoute,
 } from "./request-routing.js";
 import {
   asRecord,
@@ -37,11 +34,10 @@ import {
   boundedString,
   createMetricsState,
   effectiveUpstreamUserAgent,
-  finalizeHttpStatus,
+  HttpResponseMetricsObserver,
   httpResponseFormat,
   inspectResponseEvent,
   markMetricsFailed,
-  observeJsonResponse,
   observeResponseEvent,
   parseJsonPayload,
   websocketCloseErrorType,
@@ -58,8 +54,6 @@ export type {
   ProviderWeeklyQuotaSnapshot,
 } from "./response-metrics-observer.js";
 
-const maximumJsonMetadataBytes = 1_048_576;
-const maximumSseMetadataLineCharacters = 1_048_576;
 const quotaRefreshCloseTimeoutMs = 1_000;
 
 export interface ProviderProxyUpstream {
@@ -154,7 +148,7 @@ export class ProviderProxy {
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
-    const externalRoleReasoningEffort = boundedReasoningEffort(
+    const externalRoleReasoningEffort = boundedString(
       options.externalRoleReasoningEffort,
     );
     if (
@@ -227,15 +221,15 @@ export class ProviderProxy {
   }
 
   private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
-    const account = resolveAccountPath(
+    const route = resolveProxyRoute(
       request.url,
       this.accountIds,
       this.defaultAccountId,
       this.externalRoleReasoningEffort !== undefined,
     );
-    if (!account || !isSupportedHttpRequest(
+    if (!route || !isSupportedHttpRoute(
       request.method,
-      account.path,
+      route,
       this.allowOpenAiApiPaths,
     )) {
       request.resume();
@@ -250,18 +244,18 @@ export class ProviderProxy {
       turnMetadata,
       Date.now(),
       "http",
-      responseOperation(account.path, turnMetadata.operation),
+      responseOperation(route, turnMetadata.operation),
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
-    if (account.externalRole) {
+    if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
     }
-    const recordsResponseMetrics = isResponsesRequestPath(account.path);
+    const recordsResponseMetrics = route.kind === "response" || route.kind === "compact";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
       if (!recordsResponseMetrics) return Promise.resolve();
       metrics.responseCompletedAtMs = Math.max(metrics.responseCompletedAtMs, Date.now());
-      metricsDelivery ??= this.deliverMetrics(metrics, account.accountId);
+      metricsDelivery ??= this.deliverMetrics(metrics, route.accountId);
       return metricsDelivery;
     };
     const upstreamRequest = upstreamTarget.protocol === "http"
@@ -271,7 +265,7 @@ export class ProviderProxy {
       agent: upstreamTarget.agent ?? this.upstreamAgent,
       hostname: upstreamTarget.host,
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
-      path: upstreamPath(upstreamTarget.basePath, account.path),
+      path: upstreamPath(upstreamTarget.basePath, route.path),
       method: request.method,
       headers: forwardedRequestHeaders(
         request.headers,
@@ -284,67 +278,10 @@ export class ProviderProxy {
       metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
       metrics.weeklyQuota = weeklyQuotaFromHeaders(upstreamResponse.headers);
       writeUpstreamHead(response, upstreamResponse);
-      const decoder = new StringDecoder("utf8");
-      let pending = "";
-      let currentEvent = "";
-      let sseMetadataOverflow = false;
-      let jsonBytes = 0;
-      let jsonOverflow = false;
-      const jsonChunks: Buffer[] = [];
+      const metricsObserver = new HttpResponseMetricsObserver(metrics);
       let forwarding = Promise.resolve();
-      const processLine = (line: string, receivedAtMs: number): boolean => {
-        if (line === "") {
-          currentEvent = "";
-          return false;
-        }
-        if (line.startsWith("event:")) {
-          currentEvent = line.slice(6).trim();
-          return false;
-        }
-        if (!line.startsWith("data:")) return false;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") return false;
-        const observed = inspectResponseEvent(payload, currentEvent);
-        const type = observed.type;
-        if (metrics.responseFormat === "unknown" && type.startsWith("response.")) {
-          metrics.responseFormat = "sse";
-        }
-        return observeResponseEvent(
-          metrics,
-          type,
-          observed.event,
-          receivedAtMs,
-        );
-      };
-      const processText = (text: string, receivedAtMs: number): boolean => {
-        if (sseMetadataOverflow) return false;
-        pending += text;
-        const lines = pending.split(/\r?\n/);
-        pending = lines.pop() ?? "";
-        if (
-          pending.length > maximumSseMetadataLineCharacters
-          || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
-        ) {
-          sseMetadataOverflow = true;
-          pending = "";
-          currentEvent = "";
-          return false;
-        }
-        return lines.some((line) => processLine(line, receivedAtMs));
-      };
       upstreamResponse.on("data", (chunk: Buffer) => {
-        const completed = metrics.responseFormat === "sse"
-          || metrics.responseFormat === "unknown"
-          ? processText(decoder.write(chunk), Date.now())
-          : false;
-        if (metrics.responseFormat === "json" && !jsonOverflow) {
-          jsonBytes += chunk.length;
-          if (jsonBytes <= maximumJsonMetadataBytes) jsonChunks.push(chunk);
-          else {
-            jsonOverflow = true;
-            jsonChunks.length = 0;
-          }
-        }
+        const completed = metricsObserver.observeChunk(chunk, Date.now());
         if (!completed) {
           if (!response.write(chunk)) {
             upstreamResponse.pause();
@@ -365,20 +302,9 @@ export class ProviderProxy {
       });
       upstreamResponse.on("end", () => {
         const endedAtMs = Date.now();
-        const completed = metrics.responseFormat === "sse"
-          || metrics.responseFormat === "unknown"
-          ? processText(decoder.end(), endedAtMs)
-            || (pending ? processLine(pending.trimEnd(), endedAtMs) : false)
-          : metrics.responseFormat === "json" && !jsonOverflow
-            ? observeJsonResponse(
-                metrics,
-                parseJsonPayload(Buffer.concat(jsonChunks).toString("utf8")),
-                endedAtMs,
-              )
-            : false;
-        finalizeHttpStatus(metrics, endedAtMs);
+        const completed = metricsObserver.finish(endedAtMs);
         forwarding = forwarding.then(async () => {
-          if (completed || isResponsesRequestPath(account.path)) await emitMetrics();
+          if (completed || recordsResponseMetrics) await emitMetrics();
           response.end();
         }).catch((error) => {
           this.onError?.(asError(error));
@@ -434,19 +360,17 @@ export class ProviderProxy {
     socket: Duplex,
     head: Buffer,
   ): void {
-    const account = resolveAccountPath(
+    const route = resolveProxyRoute(
       request.url,
       this.accountIds,
       this.defaultAccountId,
       this.externalRoleReasoningEffort !== undefined,
     );
-    const recordsResponseMetrics = account
-      ? isResponsesPath(account.path)
-      : false;
+    const recordsResponseMetrics = route?.kind === "response";
     if (
-      !account
+      !route
       || (!recordsResponseMetrics && !(
-        this.allowOpenAiApiPaths && isOpenAiRealtimeWebSocketPath(account.path)
+        this.allowOpenAiApiPaths && route.kind === "openai-websocket"
       ))
     ) {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
@@ -456,7 +380,7 @@ export class ProviderProxy {
       this.proxyWebSocket(
         request,
         client,
-        account.accountId,
+        route,
         recordsResponseMetrics,
       );
     });
@@ -465,21 +389,15 @@ export class ProviderProxy {
   private proxyWebSocket(
     request: IncomingMessage,
     client: WebSocket,
-    accountId?: string,
+    route: ResolvedProxyRoute,
     recordsResponseMetrics = true,
   ): void {
     const target = this.upstreamFor(request.headers);
     const scheme = target.protocol === "https" ? "wss" : "ws";
     const port = target.port === undefined ? "" : `:${target.port}`;
-    const account = resolveAccountPath(
-      request.url,
-      this.accountIds,
-      this.defaultAccountId,
-      this.externalRoleReasoningEffort !== undefined,
-    );
     const url = `${scheme}://${target.host}${port}${upstreamWebSocketPath(
       target.basePath,
-      account?.path ?? "/responses",
+      route.path,
       recordsResponseMetrics,
     )}`;
     const protocols = websocketProtocols(request.headers["sec-websocket-protocol"]);
@@ -528,7 +446,7 @@ export class ProviderProxy {
           activeMetrics.model = sanitized.model ?? null;
           activeMetrics.serviceTier = sanitized.serviceTier ?? null;
           activeMetrics.reasoningEffort = sanitized.reasoningEffort
-            ?? (account?.externalRole
+            ?? (route.externalRole
               ? this.externalRoleReasoningEffort ?? null
               : null);
         }
@@ -557,7 +475,7 @@ export class ProviderProxy {
         activeMetrics.httpStatus = statusCode;
         markMetricsFailed(activeMetrics, "upstream_handshake_error", Date.now());
         activeMetrics.responseCompletedAtMs = receivedAtMs;
-        void this.deliverMetrics(activeMetrics, accountId);
+        void this.deliverMetrics(activeMetrics, route.accountId);
         activeMetrics = undefined;
       } else {
         const fallback = createMetricsState(
@@ -567,13 +485,13 @@ export class ProviderProxy {
           "response",
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
         );
-        if (account?.externalRole) {
+        if (route.externalRole) {
           fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
         }
         fallback.httpStatus = statusCode;
         markMetricsFailed(fallback, "upstream_handshake_error", Date.now());
         fallback.responseCompletedAtMs = receivedAtMs;
-        void this.deliverMetrics(fallback, accountId);
+        void this.deliverMetrics(fallback, route.accountId);
       }
       response.resume();
       client.terminate();
@@ -600,7 +518,9 @@ export class ProviderProxy {
         return;
       }
       const queued = (forwarding ?? Promise.resolve()).then(async () => {
-        if (completedMetrics) await this.deliverMetrics(completedMetrics, accountId);
+        if (completedMetrics) {
+          await this.deliverMetrics(completedMetrics, route.accountId);
+        }
         if (client.readyState === WebSocket.OPEN) {
           await sendWebSocket(client, data, isBinary);
         }
@@ -643,7 +563,7 @@ export class ProviderProxy {
           Date.now(),
         );
       }
-      void this.deliverMetrics(activeMetrics, accountId);
+      void this.deliverMetrics(activeMetrics, route.accountId);
       activeMetrics = undefined;
     });
     client.on("error", (error) => {
@@ -746,7 +666,7 @@ function sanitizeClientWebSocketMessage(
   const model = boundedString(parsed.model) ?? undefined;
   const serviceTier = boundedString(parsed.service_tier) ?? undefined;
   const reasoning = asRecord(parsed.reasoning);
-  const reasoningEffort = boundedReasoningEffort(reasoning?.effort) ?? undefined;
+  const reasoningEffort = boundedString(reasoning?.effort) ?? undefined;
   const parsedMetadata = typeof rawMetadata === "string"
     ? parseJsonPayload(rawMetadata)
     : asRecord(rawMetadata);
@@ -777,15 +697,6 @@ function sanitizeClientWebSocketMessage(
     ...(serviceTier ? { serviceTier } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
-}
-
-function boundedReasoningEffort(value: unknown): string | null {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 128
-    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
-    ? value
-    : null;
 }
 
 function requestStartTimestamp(

@@ -43,6 +43,7 @@ import {
   terminateChildProcess,
 } from "./process-lifecycle.mjs";
 import { createProxyFetch } from "./proxy-fetch.mjs";
+import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
 
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
@@ -95,8 +96,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     ProviderProxy,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
-  const providerProxies = [];
-  const providerProxyRuntimes = new Map();
   const upstreamAgents = new Set();
   let supervisorOwner;
   const upstreamAgentFor = (upstreamUrl) => {
@@ -111,78 +110,66 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     upstreamAgents.add(agent);
     return agent;
   };
-  const startProviderProxy = async (provider, options) => {
+  const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
+    provider,
+    options,
+  ) => {
     const optionsWithUserAgent = {
       ...options,
       ...(validatedCodex.upstream_user_agent
         ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
         : {}),
     };
-    if (provider === "ocg") {
-      const existing = providerProxyRuntimes.get("ocg");
-      if (existing) return { ...existing, created: false };
-      const modelProxy = new ProviderProxy("127.0.0.1:0", {
-        ...optionsWithUserAgent,
-        accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
-        ...(goDefaultAccountId === undefined
-          ? {}
-          : { defaultAccountId: goDefaultAccountId }),
-        quotaWindowsProvider: (accountId, signal) => {
-          const quota = opencodeGoQuotaWindows.get(accountId ?? goDefaultAccountId);
-          return quota ? quota(signal) : Promise.resolve(null);
-        },
-        onMetrics: (metrics, accountId) => {
-          const targetAccountId = accountId ?? goDefaultAccountId;
-          if (targetAccountId === undefined) return undefined;
-          const targetProvider = opencodeGoProviderId(targetAccountId);
-          return sendProviderProxyMetrics(
-            providerMetricsSocketPath(socketPath, targetProvider),
-            metrics,
-          );
-        },
-        onError: (error) => console.error(
-          "opencode-go 模型统计代理失败："
-          + (error instanceof Error ? error.message : String(error)),
-        ),
-      });
-      await modelProxy.start();
-      providerProxies.push(modelProxy);
-      const proxyRuntime = {
-        baseUrl: `http://${modelProxy.address()}`,
-        proxy: modelProxy,
-      };
-      providerProxyRuntimes.set("ocg", proxyRuntime);
-      console.log(`opencode-go 模型统计代理已启动：${modelProxy.address()}`);
-      return { ...proxyRuntime, created: true };
-    }
-    const existing = providerProxyRuntimes.get(provider);
-    if (existing) return { ...existing, created: false };
+    const opencodeGo = provider === "ocg";
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
-      onMetrics: (metrics) => sendProviderProxyMetrics(
-        providerMetricsSocketPath(socketPath, provider),
-        metrics,
-      ),
+      ...(opencodeGo
+        ? {
+            accountIds: goAccountIds.length === 0 ? undefined : goAccountIds,
+            ...(goDefaultAccountId === undefined
+              ? {}
+              : { defaultAccountId: goDefaultAccountId }),
+            quotaWindowsProvider: (accountId, signal) => {
+              const quota = opencodeGoQuotaWindows.get(
+                accountId ?? goDefaultAccountId,
+              );
+              return quota ? quota(signal) : Promise.resolve(null);
+            },
+            onMetrics: (metrics, accountId) => {
+              const targetAccountId = accountId ?? goDefaultAccountId;
+              if (targetAccountId === undefined) return undefined;
+              const targetProvider = opencodeGoProviderId(targetAccountId);
+              return sendProviderProxyMetrics(
+                providerMetricsSocketPath(socketPath, targetProvider),
+                metrics,
+              );
+            },
+          }
+        : {
+            onMetrics: (metrics) => sendProviderProxyMetrics(
+              providerMetricsSocketPath(socketPath, provider),
+              metrics,
+            ),
+          }),
       onError: (error) => console.error(
-        `${provider} 模型统计代理失败：${error instanceof Error ? error.message : String(error)}`,
+        `${opencodeGo ? "opencode-go" : provider} 模型统计代理失败：`
+        + (error instanceof Error ? error.message : String(error)),
       ),
     });
     await modelProxy.start();
-    providerProxies.push(modelProxy);
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
       proxy: modelProxy,
     };
-    providerProxyRuntimes.set(provider, proxyRuntime);
-    console.log(`${provider} 模型统计代理已启动：${modelProxy.address()}`);
-    return { ...proxyRuntime, created: true };
-  };
+    console.log(
+      `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
+    );
+    return proxyRuntime;
+  });
+  const startProviderProxy = (provider, options) =>
+    providerProxyRuntimes.ensure(provider, options);
   const closeProviderProxy = async (proxy) => {
-    for (const [provider, active] of providerProxyRuntimes) {
-      if (active.proxy === proxy) providerProxyRuntimes.delete(provider);
-    }
-    const proxyIndex = providerProxies.indexOf(proxy);
-    if (proxyIndex >= 0) providerProxies.splice(proxyIndex, 1);
+    providerProxyRuntimes.remove(proxy);
     await proxy.close();
   };
   const providerDefinitions = new Map(
@@ -257,6 +244,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const instanceLaunches = new Map();
   const children = [];
   const childrenByProvider = new Map();
+  const providerProxyIsInUse = (proxyKey) =>
+    providerProxyRuntimes.hasUsers(proxyKey)
+    || sharedProviderProxyKey(primaryProvider) === proxyKey
+    || (
+      thirdPartyRole !== undefined
+      && sharedProviderProxyKey(thirdPartyRole.provider) === proxyKey
+    );
   let watchChild;
   let detachChild;
   const primaryChildCredential = thirdPartyRole
@@ -334,18 +328,26 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       if (await appServerSocketAcceptsWebSocket(managed.socketPath)) return;
       await prepareAppServerSocketPaths([managed.socketPath]);
       const proxyKey = sharedProviderProxyKey(provider);
-      const { baseUrl: localBaseUrl, proxy, created: proxyCreated } = await startProviderProxy(
-        proxyKey,
-        withExternalRoleMetrics(provider, isGoProvider(provider)
-          ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
-      );
-      const providerBaseUrl = isGoProvider(provider)
-        ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
-        : localBaseUrl;
+      providerProxyRuntimes.addUser(proxyKey, provider);
+      let proxy;
       let child;
       try {
-        refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
+        const startedProxy = await startProviderProxy(
+          proxyKey,
+          withExternalRoleMetrics(provider, isGoProvider(provider)
+            ? goProxyOptions
+            : proxyOptionsForUrl(new URL(
+                definition?.baseUrl ?? customDefinition.baseUrl,
+              ))),
+        );
+        proxy = startedProxy.proxy;
+        const providerBaseUrl = isGoProvider(provider)
+          ? `${startedProxy.baseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
+          : startedProxy.baseUrl;
+        refreshThirdPartyRoleConfig(
+          provider,
+          externalRoleBaseUrl(startedProxy.baseUrl),
+        );
         const argumentsList = withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
@@ -376,6 +378,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         console.log(`${provider} App Server 已按需启动：${managed.socketPath}`);
       } catch (error) {
         let cleanupError;
+        providerProxyRuntimes.removeUser(proxyKey, provider);
         if (child) {
           childrenByProvider.delete(provider);
           if (childProcessIsRunning(child) && child.pid !== undefined) {
@@ -392,7 +395,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
             if (childIndex >= 0) children.splice(childIndex, 1);
           }
         }
-        if (proxyCreated) {
+        if (proxy && !providerProxyIsInUse(proxyKey)) {
           try {
             await closeProviderProxy(proxy);
           } catch (proxyError) {
@@ -430,12 +433,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       throw error;
     }
     childrenByProvider.delete(provider);
-    if (provider !== primaryProvider && isGoProvider(provider)) {
-      const remainingGoChild = [...childrenByProvider.keys()].some(isGoProvider);
-      const roleUsesGoProxy = thirdPartyRole && isGoProvider(thirdPartyRole.provider);
-      if (!remainingGoChild && !roleUsesGoProxy) {
-        const goProxy = providerProxyRuntimes.get("ocg")?.proxy;
-        if (goProxy) await closeProviderProxy(goProxy);
+    if (provider !== primaryProvider) {
+      const proxyKey = sharedProviderProxyKey(provider);
+      providerProxyRuntimes.removeUser(proxyKey, provider);
+      if (isGoProvider(provider) && !providerProxyIsInUse(proxyKey)) {
+        const proxy = providerProxyRuntimes.get(proxyKey)?.proxy;
+        if (proxy) await closeProviderProxy(proxy);
       }
     }
     console.log(`${provider} App Server 已释放：${
@@ -535,7 +538,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }
     const lifecycle = forwardChildrenLifecycle(children, async () => {
       await supervisorOwner?.close();
-      await Promise.all(providerProxies.map((proxy) => proxy.close()));
+      await Promise.all(
+        providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
+      );
       for (const agent of upstreamAgents) agent.destroy();
     });
     watchChild = lifecycle.watchChild;
@@ -550,7 +555,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     supervisorOwner.markRunning(primaryProvider);
   } catch (error) {
     await supervisorOwner?.close();
-    await Promise.all(providerProxies.map((proxy) => proxy.close()));
+    await Promise.all(
+      providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
+    );
     for (const agent of upstreamAgents) agent.destroy();
     throw error;
   }
