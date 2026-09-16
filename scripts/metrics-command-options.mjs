@@ -8,7 +8,7 @@ import {
   resolveRequestMetricsDates,
   parseRequestMetricsDate,
   parseRequestMetricsFilters,
-} from "../dist/observability/index.js";
+} from "../dist/observability/query/index.js";
 import {
   loadConfiguredCustomPrimaryModelProvider,
   readPrimaryProviderBackup,

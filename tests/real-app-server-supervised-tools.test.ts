@@ -387,6 +387,10 @@ contractSuite("real supervised App Server tools", () => {
       const childPrompt = "Complete the child contract task.";
       const spawnCallId = "spawn-completion-contract-worker";
       let responseSequence = 0;
+      let releaseChildResponse!: () => void;
+      const parentCompleted = new Promise<void>((resolveCompleted) => {
+        releaseChildResponse = resolveCompleted;
+      });
       const apiServer = createServer((request, response) => {
         if (request.method === "GET" && request.url?.startsWith("/v1/models")) {
           response.writeHead(200, { "content-type": "application/json" });
@@ -456,11 +460,19 @@ contractSuite("real supervised App Server tools", () => {
                 },
                 completedResponseEvent(responseId),
               ];
-          response.writeHead(200, { "content-type": "text/event-stream" });
-          for (const event of events) {
-            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          const sendResponse = () => {
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            for (const event of events) {
+              response.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            response.end();
+          };
+          if (!body.includes(spawnCallId) && body.includes(childPrompt)) {
+            // Exercise late child completion deterministically, not by model-response timing.
+            void parentCompleted.then(sendResponse);
+          } else {
+            sendResponse();
           }
-          response.end();
         });
       });
       await new Promise<void>((resolveListen, rejectListen) => {
@@ -535,6 +547,7 @@ contractSuite("real supervised App Server tools", () => {
             if (event.kind === "completed") parentSequence.push("subagent.completed");
           } else if (event?.type === "turn.completed" && event.threadId === threadId) {
             parentSequence.push("parent.turn.completed");
+            releaseChildResponse();
           }
         });
         const parentTurn = await client.startTurn(
@@ -564,6 +577,7 @@ contractSuite("real supervised App Server tools", () => {
           parentSequence.indexOf("parent.turn.completed"),
         );
       } finally {
+        releaseChildResponse();
         removeNotification?.();
         if (client && threadId) {
           if (parentTurnId) {

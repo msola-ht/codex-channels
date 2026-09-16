@@ -87,7 +87,7 @@
   行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
-  时间范围、组合筛选、分组、格式及维护命令参数，复用 Observability 的规范范围、日期解析与聚合维度，并向顶层帮助
+  时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
   导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
@@ -29,6 +30,24 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("loads command help and validates queries without loading SQLite", () => {
+    const loader = `export function resolve(specifier, context, nextResolve) {
+      if (specifier === "node:sqlite") throw new Error("Query options must not load SQLite");
+      return nextResolve(specifier, context);
+    }`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { register } from "node:module";
+      register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(loader)}`)});
+      const { metricsCommandUsage, validateMetricsCommandArgs } =
+        await import("./scripts/metrics-command-options.mjs");
+      validateMetricsCommandArgs("report", ["--range", "today"]);
+      console.log(metricsCommandUsage.report);
+    `], { cwd: process.cwd(), encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("codexc metrics report");
+  });
+
   it("resolves metrics declaration imports without build artifacts", () => {
     const config = ts.readConfigFile(resolve("tsconfig.json"), ts.sys.readFile);
     expect(config.error).toBeUndefined();

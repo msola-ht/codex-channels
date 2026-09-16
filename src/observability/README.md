@@ -5,6 +5,8 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
+- `query/index.ts`：供 CLI 参数预检使用的无状态公开入口，只导出范围、日期、筛选和聚合维度解析，
+  不加载 SQLite 实现；其他业务模块仍通过模块根入口访问完整能力。
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
