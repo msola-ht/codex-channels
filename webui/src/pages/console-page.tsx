@@ -20,9 +20,8 @@ import { UsageCharts } from "@/components/overview/usage-charts"
 import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
-import { useOverview } from "@/hooks/use-overview"
+import { useDashboard } from "@/hooks/use-dashboard"
 import { cn } from "@/lib/utils"
-import { resolveDashboardData } from "@/lib/overview-state"
 import type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
@@ -36,22 +35,17 @@ export function ConsolePage({ range, onRangeChange }: {
   range: MetricsRangeQuery
   onRangeChange: (range: MetricsRangeQuery) => void
 }) {
-  const account = useOverview(range)
-  const trend = useDailyUsage(range)
+  const { account, trend, refetch } = useDashboard(range)
   const heatmap = useDailyUsage({ range: "90d" })
-  const dashboard = resolveDashboardData(range, account.data, trend.data)
   const officialAccounts = useOfficialAccountSources()
-  const refetchOverview = account.refetch
-  const refetchTrend = trend.refetch
   const refetchHeatmap = heatmap.refetch
   const refreshAccounts = officialAccounts.refresh
 
   const refreshDashboard = useCallback(() => {
-    refetchOverview()
-    refetchTrend()
+    refetch()
     refetchHeatmap()
     void refreshAccounts()
-  }, [refetchHeatmap, refetchOverview, refetchTrend, refreshAccounts])
+  }, [refetchHeatmap, refetch, refreshAccounts])
 
   return (
     <div className="flex flex-col gap-6">
@@ -63,18 +57,18 @@ export function ConsolePage({ range, onRangeChange }: {
         range={range}
         onRangeChange={onRangeChange}
         onRefresh={refreshDashboard}
-        data={dashboard?.overview ?? null}
+        data={trend.data === null ? null : account.data}
         loading={account.loading || trend.loading}
         refreshing={account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing}
         error={account.error}
-        trend={dashboard?.trend ?? null}
+        trend={trend.data}
         trendError={trend.error}
         heatmap={heatmap.data}
         heatmapLoading={heatmap.loading}
         heatmapError={heatmap.error}
       />
       <AccountStatusCards
-        overview={dashboard?.overview ?? null}
+        overview={account.data}
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
@@ -173,7 +167,7 @@ function AccountStatusCards({
   freshness,
   accountError,
 }: {
-  overview: ReturnType<typeof useOverview>["data"]
+  overview: OverviewResponse | null
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }

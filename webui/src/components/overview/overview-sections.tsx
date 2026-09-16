@@ -27,6 +27,7 @@ import { useLanguage } from "@/hooks/language-context"
 import {
   formatCount,
   formatErrorType,
+  formatFailureRate,
   formatPlanType,
   formatSuccessRate,
   formatTime,
@@ -324,7 +325,7 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       <CardHeader>
         <CardTitle>错误摘要</CardTitle>
         <CardDescription>
-          失败率 {formatSuccessRate(errors.requestCount, errors.unsuccessfulRequestCount)}
+          失败率 {formatFailureRate(errors.requestCount, errors.unsuccessfulRequestCount)}
         </CardDescription>
       </CardHeader>
       <CardContent>

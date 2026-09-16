@@ -134,6 +134,11 @@ export function formatSuccessRate(requestCount: number, unsuccessful: number): s
   return `${((requestCount - unsuccessful) / requestCount * 100).toFixed(1)}%`
 }
 
+export function formatFailureRate(requestCount: number, unsuccessful: number): string {
+  if (requestCount <= 0) return "—"
+  return `${(unsuccessful / requestCount * 100).toFixed(1)}%`
+}
+
 export function shortThreadId(threadId: string): string {
   return threadId.length <= 14 ? threadId : `${threadId.slice(0, 8)}…${threadId.slice(-4)}`
 }

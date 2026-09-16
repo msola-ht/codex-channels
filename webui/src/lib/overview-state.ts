@@ -1,11 +1,17 @@
-import type { DailyUsageResponse, MetricsRangeQuery, OverviewResponse } from "./types"
+import type { DailyUsageResponse, OverviewResponse } from "./types"
+
+export interface DashboardResponse<T> {
+  request: object
+  data: T
+}
 
 export function resolveDashboardData(
-  query: MetricsRangeQuery,
-  overview: OverviewResponse | null,
-  trend: DailyUsageResponse | null,
+  request: object,
+  overview: DashboardResponse<OverviewResponse> | null,
+  trend: DashboardResponse<DailyUsageResponse> | null,
 ) {
-  const name = query.range ?? `${query.from}..${query.to}`
-  if (overview?.range.name !== name || trend?.range.name !== name) return null
-  return { overview, trend }
+  return {
+    overview: overview?.request === request ? overview.data : null,
+    trend: trend?.request === request ? trend.data : null,
+  }
 }
