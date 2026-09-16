@@ -776,12 +776,12 @@ describe("ConversationService model selection", () => {
       { activeTurn: () => undefined } as unknown as ConversationCore,
       {
         status: () => ({
-          model: "deepseek-v4-flash-vision-exp",
+          model: "deepseek-flash",
           modelProvider: "deepseek",
           effort: "high",
         }),
         turnOverrides: () => ({
-          model: "deepseek-v4-flash-vision-exp",
+          model: "deepseek-flash",
           modelProvider: "deepseek",
           effort: "high",
         }),

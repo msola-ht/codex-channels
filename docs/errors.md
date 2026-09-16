@@ -107,6 +107,8 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | --- | --- | --- |
 | `goal.empty` | 目标不能为空 | /goal set 未提供目标 |
 | `goal.usage` | /goal 用法提示 | 参数格式错误 |
+| `release.usage` | /release 用法提示 | 参数格式错误 |
+| `release.unsupported` | 当前环境不支持释放会话占用 | Gateway 未装配 Thread 占用释放能力 |
 | `queue.usage` | `/queue add|list|update|delete|reorder|start` 用法提示 | 参数格式错误 |
 | `queue.unavailable` | 当前 App Server 不提供持久队列 | Queue 未装配或状态库不可用 |
 | `queue.empty` | App Server Queue 为空 | 启动时没有可用条目 |

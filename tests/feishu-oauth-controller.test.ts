@@ -1,45 +1,15 @@
-import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import pino from "pino";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import {
-  FeishuOAuthController,
-} from "../src/surfaces/feishu/oauth.js";
+import { FeishuOAuthController } from "../src/surfaces/feishu/oauth.js";
+import type { FeishuCardDocument } from "../src/surfaces/feishu/approval-card.js";
+import type { FeishuOAuthApi } from "../src/surfaces/feishu/oauth-device-flow.js";
+import { FeishuOAuthRefreshError } from "../src/surfaces/feishu/oauth-device-flow.js";
 import type {
-  FeishuCardDocument,
-} from "../src/surfaces/feishu/approval-card.js";
-import type {
-  FeishuOAuthApi,
-} from "../src/surfaces/feishu/oauth-device-flow.js";
-import {
-  FeishuOAuthRefreshError,
-} from "../src/surfaces/feishu/oauth-device-flow.js";
-import {
-  EncryptedFileFeishuUserTokenStore,
-  MacKeychainFeishuUserTokenStore,
-  type FeishuUserTokenStore,
-  type StoredFeishuUserToken,
+  FeishuUserTokenStore,
+  StoredFeishuUserToken,
 } from "../src/surfaces/feishu/oauth-token-store.js";
-
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+import { storedFeishuToken as storedToken } from "./feishu-oauth-test-fixture.js";
 
 describe("Feishu OAuth controller", () => {
   it("does not pre-authorize app scopes without a capability request", async () => {
@@ -597,173 +567,6 @@ describe("Feishu OAuth controller", () => {
   });
 });
 
-describe("Feishu encrypted token store", () => {
-  it("persists no plaintext token and enforces private permissions", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
-    temporaryDirectories.push(directory);
-    chmodSync(directory, 0o755);
-    const store = new EncryptedFileFeishuUserTokenStore(directory);
-    const token = storedToken();
-
-    await store.set(token);
-
-    const files = readdirSync(directory);
-    expect(files).toHaveLength(2);
-    expect(files).toContain(
-      `${createHash("sha256")
-        .update(`${token.appId}:${token.userOpenId}`)
-        .digest("hex")}.enc`,
-    );
-    for (const file of files) {
-      if (process.platform !== "win32") {
-        expect(statSync(join(directory, file)).mode & 0o777).toBe(0o600);
-      }
-      expect(readFileSync(join(directory, file)).includes(
-        Buffer.from("access-secret"),
-      )).toBe(false);
-    }
-    if (process.platform !== "win32") {
-      expect(statSync(directory).mode & 0o777).toBe(0o700);
-    }
-    await expect(store.get(token.appId, token.userOpenId))
-      .resolves.toEqual(token);
-    await store.remove(token.appId, token.userOpenId);
-    await expect(store.get(token.appId, token.userOpenId))
-      .resolves.toBeNull();
-  });
-
-  it("round-trips a granted scope list beyond one hundred entries", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
-    temporaryDirectories.push(directory);
-    const store = new EncryptedFileFeishuUserTokenStore(directory);
-    const token = storedToken({
-      scopes: [
-        ...Array.from({ length: 137 }, (_, index) => `scope:${index}`),
-        "offline_access",
-      ],
-    });
-
-    await store.set(token);
-
-    await expect(store.get(token.appId, token.userOpenId))
-      .resolves.toEqual(token);
-  });
-
-  it("does not treat a corrupted encrypted credential as missing", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-feishu-token-"));
-    temporaryDirectories.push(directory);
-    const store = new EncryptedFileFeishuUserTokenStore(directory);
-    const token = storedToken();
-    await store.set(token);
-    const credential = readdirSync(directory).find((file) =>
-      file.endsWith(".enc")
-    );
-    if (!credential) {
-      throw new Error("expected encrypted credential");
-    }
-    writeFileSync(join(directory, credential), "corrupted", { mode: 0o600 });
-
-    await expect(store.get(token.appId, token.userOpenId))
-      .rejects.toThrow("读取飞书加密凭据失败");
-  });
-
-});
-
-describe("Feishu macOS Keychain token store", () => {
-  it("uses a scoped generic-password entry and round-trips only the requested actor", async () => {
-    const token = storedToken();
-    const run = vi.fn(async (
-      _file: string,
-      arguments_: readonly string[],
-    ) => ({
-      stdout: arguments_[0] === "find-generic-password"
-        ? JSON.stringify(token)
-        : "",
-    }));
-    const store = new MacKeychainFeishuUserTokenStore(run);
-
-    await expect(store.get(token.appId, token.userOpenId))
-      .resolves.toEqual(token);
-    await store.set(token);
-    await store.remove(token.appId, token.userOpenId);
-
-    expect(run.mock.calls.every(([file]) => file === "security")).toBe(true);
-    expect(run.mock.calls[0]?.[1]).toEqual([
-      "find-generic-password",
-      "-s",
-      "codexc-feishu-uat",
-      "-a",
-      "cli_0123456789abcdef:ou_actor",
-      "-w",
-    ]);
-    expect(run.mock.calls[1]?.[1]).toEqual([
-      "add-generic-password",
-      "-U",
-      "-s",
-      "codexc-feishu-uat",
-      "-a",
-      "cli_0123456789abcdef:ou_actor",
-      "-w",
-      JSON.stringify(token),
-    ]);
-    expect(run.mock.calls.filter(([, arguments_]) =>
-      arguments_[0] === "delete-generic-password"
-    )).toHaveLength(1);
-    expect(run.mock.calls[2]?.[1]?.[0]).toBe("delete-generic-password");
-  });
-
-  it("rejects malformed stored credentials instead of treating them as authorized", async () => {
-    const invalidToken = {
-      ...storedToken(),
-      accessToken: "",
-      expiresAt: -1,
-      scopes: ["drive:file:download", "invalid scope"],
-    };
-    const store = new MacKeychainFeishuUserTokenStore(
-      vi.fn(async () => ({
-        stdout: JSON.stringify(invalidToken),
-      })),
-    );
-
-    await expect(store.get(
-      "cli_0123456789abcdef",
-      "ou_actor",
-    )).resolves.toBeNull();
-  });
-
-  it("does not treat a Keychain read failure as a missing credential", async () => {
-    const failure = Object.assign(new Error("Keychain unavailable"), {
-      code: 1,
-    });
-    const store = new MacKeychainFeishuUserTokenStore(
-      vi.fn(async () => {
-        throw failure;
-      }),
-    );
-
-    await expect(store.get(
-      "cli_0123456789abcdef",
-      "ou_actor",
-    )).rejects.toBe(failure);
-  });
-
-  it("does not report a successful revoke when Keychain deletion fails", async () => {
-    const failure = Object.assign(new Error("Keychain unavailable"), {
-      code: 1,
-    });
-    const store = new MacKeychainFeishuUserTokenStore(
-      vi.fn(async () => {
-        throw failure;
-      }),
-    );
-
-    await expect(store.remove(
-      "cli_0123456789abcdef",
-      "ou_actor",
-    )).rejects.toBe(failure);
-  });
-});
-
 function createController({
   authorizedUser = "ou_actor",
   poll,
@@ -915,20 +718,4 @@ class UnreadableTokenStore extends MemoryTokenStore {
   override async remove(): Promise<void> {
     this.removed = true;
   }
-}
-
-function storedToken(
-  overrides: Partial<StoredFeishuUserToken> = {},
-): StoredFeishuUserToken {
-  return {
-    appId: "cli_0123456789abcdef",
-    userOpenId: "ou_actor",
-    accessToken: "access-secret",
-    refreshToken: "refresh-secret",
-    expiresAt: 20_000_000,
-    refreshExpiresAt: 30_000_000,
-    scopes: ["drive:file:download"],
-    grantedAt: 1_000_000,
-    ...overrides,
-  };
 }

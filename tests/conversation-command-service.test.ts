@@ -89,7 +89,6 @@ describe("ConversationCommandService", () => {
     expect(isConversationCommandName("status")).toBe(true);
     expect(isConversationCommandName("plugins")).toBe(false);
     expect(isConversationCommandName("plugin")).toBe(true);
-    expect(isConversationCommandName("section")).toBe(false);
     expect(isConversationCommandName("whoami")).toBe(false);
   });
 

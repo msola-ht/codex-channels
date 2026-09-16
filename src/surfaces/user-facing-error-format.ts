@@ -73,6 +73,10 @@ export function formatSurfaceUserFacingError(
       return "目标不能为空";
     case "goal.usage":
       return "用法：/goal [set <目标>|clear]";
+    case "release.usage":
+      return "用法：/release [force]";
+    case "release.unsupported":
+      return "当前环境不支持释放会话占用";
     case "scheduled-task.command.invalid":
       return error.message.includes("用法") ? scheduledTaskCommandUsageText : error.message;
     case "scheduled-task.confirmation.invalid":
@@ -143,6 +147,10 @@ export function formatSurfaceUserFacingError(
       return "当前 Gateway 不支持修改工作区权限";
     case "model.current.missing":
       return `当前模型不在可用模型列表中：${detail(error, "model", "未知")}`;
+    case "model.configured-default.missing":
+      return `配置的默认模型不属于当前主 Provider ${detail(error, "provider", "未知")}：${detail(error, "model", "未知")}`;
+    case "model.official.not-logged-in":
+      return "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login";
     case "model.provider.mismatch":
       return error.message;
     case "model.unavailable":
@@ -203,6 +211,12 @@ export function formatSurfaceUserFacingError(
       return "开发中的 Plugin API 已关闭；请在 [experimental] 中启用 plugin_api 后重启 Gateway";
     case "plugin.provider.unsupported":
       return "开发中的 Plugin 调用当前只支持 OpenAI Session";
+    case "agents.usage":
+      return "用法：/agents <角色名称或序号> <任务>";
+    case "agents.not-found":
+      return "指定的子代理角色不存在；使用 /agents 查看可用角色";
+    case "agents.config-unreadable":
+      return "Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml";
     case "command.unsupported":
       return surfaceLabel === "Telegram"
         ? `不支持的会话命令：${detail(error, "command", "未知")}`
@@ -221,8 +235,11 @@ export function formatSurfaceUserFacingError(
       return "项目规则检查失败，请在终端运行 codexc rules check 查看详情";
     case "rules.unavailable":
       return "项目规则服务当前不可用";
-    default:
+    default: {
+      const unhandledCode: never = error.code;
+      void unhandledCode;
       return gatewayRequestFailedText;
+    }
   }
 }
 

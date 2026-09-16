@@ -135,7 +135,7 @@ Notification 适配只返回当前支持的稳定事件；未知或畸形通知�
 原始 params，也不阻塞 App Server Reader。
 `subAgentActivity` Item 只在官方完成阶段进入稳定事件，并保留 `started`、`interacted`、
 `interrupted` 与 `completed` 类型，避免同一 Item 的开始与完成阶段重复发布；`completed` 是
-0.150.1 对成功运行的父 Turn 归属信号，Bootstrap 不再从子线程 `turn/completed` 或等待工具状态
+当前锁定版对成功运行的父 Turn 归属信号，Bootstrap 不再从子线程 `turn/completed` 或等待工具状态
 重复推断成功。`collabAgentToolCall` Item 由操作适配器保留官方接收线程 ID 和有界状态，不保留
 代理消息正文；其异常状态与子线程失败/中断通知继续用于非成功终态。Surface 把 `started` 与
 `interacted` 分别显示为开始和继续，并消费稳定操作与完成事件，`interacted` 不改变存活状态。

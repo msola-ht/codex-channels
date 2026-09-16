@@ -26,7 +26,7 @@
   后端在 WS 内返回的包装 error 事件（`status` + `error.type`）与关闭原因（usage limit /
   rate limit）同样归类为失败指标，用量上限这类错误不再落成笼统的断开记录；
   上游缺少 `Content-Type` 时只对合法 `response.*` SSE 事件进行正文识别，以恢复完成事件、模型和
-  Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功率
+  Usage；HTTP 2xx 仍未观察到这些信息时标为 `incomplete/response_not_observed`，不能污染成功请求汇总
   或成功率。旧版 HTTP `/responses/compact` 以及 Codex 0.146 默认通过普通 HTTP/WebSocket
   `/responses` 发送、由私有元数据 `request_kind=compaction` 标记的 remote compaction v2 都归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照

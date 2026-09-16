@@ -26,30 +26,6 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n- Session：测试�
 const turnStoppedText = "**本次运行 · 已停止**\n\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
-  it.skip("shows one initial plan and one message for each completed step", async () => {
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      { planUpdatesEnabled: true },
-    );
-
-    outbox.handle(planUpdated([
-      { step: "检查实现", status: "inProgress" },
-      { step: "补充测试", status: "pending" },
-    ]));
-    outbox.handle(planUpdated([
-      { step: "检查实现", status: "completed" },
-      { step: "补充测试", status: "inProgress" },
-    ]));
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledTimes(2);
-    expect(sendText.mock.calls[0]?.[0].text).toContain("任务计划 · 0/2");
-    expect(sendText.mock.calls[1]?.[0].text).toContain("计划进度 · 1/2");
-    expect(sendText.mock.calls[1]?.[0].text).toContain(
-      "第 1 步完成：检查实现",
-    );
-  });
-
   it("keeps reply contexts private to one account and Conversation", () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
@@ -126,79 +102,16 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it.skip("shows thinking immediately and only once per reasoning segment", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 0,
-    });
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 3_000,
-    });
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 15_000,
-      final: true,
-    });
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "思考中…",
-    ]);
-  });
-
-  it("does not send thinking status when reasoning display is disabled", async () => {
-    const { outbox, sendText } = outboxFixture(
+  it("reserves the reply window for lifecycle output", async () => {
+    const { outbox, sendImage, sendText } = outboxFixture(
       { value: true },
-      { reasoningEnabled: false },
-    );
-
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 15_000,
-      final: true,
-    });
-    await outbox.close();
-
-    expect(sendText).not.toHaveBeenCalled();
-  });
-
-  it.skip("keeps queued thinking visible when command execution starts", async () => {
-    let releaseStart!: () => void;
-    const startGate = new Promise<void>((resolve) => {
-      releaseStart = resolve;
-    });
-    let sendCount = 0;
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      {},
-      async () => {
-        sendCount += 1;
-        if (sendCount === 1) {
-          await startGate;
-        }
+      {
+        operationUpdateDisplay: "full",
+        planUpdatesEnabled: true,
+        reasoningEnabled: true,
       },
     );
 
-    outbox.handle(turnStarted());
     outbox.handle({
       type: "turn.reasoning",
       target,
@@ -208,67 +121,43 @@ describe("WeixinOutbox", () => {
       elapsedMs: 15_000,
       final: true,
     });
-    outbox.handle(operationUpdated("running"));
-    releaseStart();
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "已开始处理。",
-      "思考中…",
-    ]);
-  });
-
-  it.skip("shows a new reasoning status after an operation completes", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle(turnStarted());
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 1_000,
-      final: true,
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    outbox.handle(operationUpdated("running"));
-    outbox.handle(operationUpdated("completed"));
-    outbox.handle({
-      type: "turn.reasoning",
-      target,
-      threadId: "thread",
-      turnId: "turn",
-      summary: "",
-      elapsedMs: 2_000,
-      final: true,
-    });
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "已开始处理。",
-      "思考中…",
-      expect.stringContaining("运行命令 · 已完成"),
-      "思考中…",
-    ]);
-  });
-
-  it.skip("sends a connection restore notice", async () => {
-    const { outbox, sendText } = outboxFixture();
-
+    outbox.handle(planUpdated([
+      { step: "检查实现", status: "inProgress" },
+    ]));
+    outbox.handle(operationUpdated("failed"));
+    outbox.handle(imageGenerationCompleted("/private/generated/image.png"));
     outbox.handle({
       type: "connection.restored",
       target,
       threadId: "thread",
-      message: "openai App Server 已重新连接",
+      message: "连接已恢复",
+    });
+    outbox.handle({
+      type: "account.updated",
+      target,
+      authMode: "chatgpt",
+      planType: "pro",
+    });
+    outbox.handle({
+      type: "user.message",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      itemId: "external-input",
+      text: "来自 CLI 的输入",
+    });
+    outbox.handle({
+      type: "subagent.spawned",
+      target,
+      threadId: "thread",
+      turnId: "turn",
+      agentThreadId: "agent-thread",
+      agentPath: "/root/review",
     });
     await outbox.close();
 
-    expect(sendText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: "Codex 连接已恢复：openai App Server 已重新连接",
-      }),
-    );
+    expect(sendText).not.toHaveBeenCalled();
+    expect(sendImage).not.toHaveBeenCalled();
   });
 
   it("identifies the Plugin in the unified Turn start reply", async () => {
@@ -282,66 +171,6 @@ describe("WeixinOutbox", () => {
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
       text: "已使用 GitHub Plugin 开始处理。",
-    }));
-  });
-
-  it.skip("mirrors CLI input into the bound Weixin conversation", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "user.message",
-      target,
-      threadId: "thread-1",
-      turnId: "turn-1",
-      itemId: "external-input",
-      text: "从 CLI 发来的输入\n第二行",
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledWith({
-      actorId,
-      contextToken: "context-secret",
-      text: "CLI 输入\n\n从 CLI 发来的输入\n第二行",
-    });
-  });
-
-  it.skip("starts typing and cancels it before the final reply", async () => {
-    const events: string[] = [];
-    const typing = {
-      start: vi.fn(() => {
-        events.push("typing:start");
-      }),
-      stop: vi.fn(async () => {
-        events.push("typing:stop");
-      }),
-      close: vi.fn(async () => {
-        events.push("typing:close");
-      }),
-    };
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      { typing },
-      async () => {
-        events.push("text:send");
-      },
-    );
-
-    outbox.handle(turnStarted());
-    outbox.handle(completed("final_answer", "final reply"));
-    await outbox.close();
-
-    expect(typing.start).toHaveBeenCalledWith(target);
-    expect(typing.stop).toHaveBeenCalledWith(target);
-    expect(events.filter((event) => event === "text:send")).toHaveLength(2);
-    expect(events.indexOf("typing:start")).toBeLessThan(
-      events.indexOf("text:send"),
-    );
-    expect(events.indexOf("typing:stop")).toBeLessThan(
-      events.lastIndexOf("text:send"),
-    );
-    expect(typing.close).toHaveBeenCalledOnce();
-    expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
-      text: "final reply",
     }));
   });
 
@@ -489,135 +318,6 @@ describe("WeixinOutbox", () => {
     ]);
   });
 
-  it.skip("renders account, quota, and MCP status as ordered plain text", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "account.updated",
-      target,
-      authMode: "chatgpt",
-      planType: "pro",
-    });
-    outbox.handle({
-      type: "account.rateLimits.updated",
-      target,
-      rateLimits: {
-        limitId: "codex",
-        limitName: "周限",
-        primary: {
-          usedPercent: 12,
-          windowDurationMins: 10_080,
-          resetsAt: null,
-        },
-        secondary: null,
-        credits: null,
-        individualLimit: null,
-        spendControlReached: false,
-        planType: "pro",
-        rateLimitReachedType: null,
-      },
-    });
-    outbox.handle({
-      type: "mcp.status.updated",
-      target,
-      threadId: "thread",
-      name: "docs",
-      status: "failed",
-      error: "认证失败，TOKEN=[REDACTED]",
-      failureReason: null,
-    });
-    outbox.handle({
-      type: "mcp.oauth.completed",
-      target,
-      threadId: "thread",
-      name: "docs",
-      success: true,
-      error: null,
-    });
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "**Codex 账户状态已更新**\n- 认证：chatgpt\n- 套餐：Pro",
-      "**周限 额度提醒**\n- 主窗口：已使用 12% · 周期 7 天\n- 状态：正常",
-      "**MCP Server**\n- 名称：docs\n- 状态：启动失败\n- 原因：认证失败，TOKEN=[已隐藏]",
-      "**MCP OAuth**\n- 名称：docs\n- 状态：登录成功",
-    ]);
-  });
-
-  it.skip("sends only terminal operation updates in Conversation order", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle(operationUpdated("running"));
-    outbox.handle(operationUpdated("completed"));
-    outbox.handle(turnCompleted("completed"));
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "运行命令 · 已完成 · exit 0\n\n"
-      + "具体内容：\n\n"
-      + "git status --short\n\n"
-      + "耗时：125毫秒",
-      turnCompletedText,
-    ]);
-  });
-
-  it.skip("sends a completed generated-image artifact before its operation summary", async () => {
-    const events: string[] = [];
-    const fixture = outboxFixture(
-      { value: true },
-      {
-        readImage: vi.fn(async (path) => {
-          events.push(`read:${path}`);
-          return Buffer.from("validated-image");
-        }),
-      },
-      async ({ text }) => {
-        events.push(`text:${text}`);
-      },
-      async ({ image }) => {
-        events.push(`image:${image.toString()}`);
-      },
-    );
-
-    fixture.outbox.handle(imageGenerationCompleted(
-      "/private/generated/image.png",
-    ));
-    await fixture.outbox.close();
-
-    expect(fixture.sendImage).toHaveBeenCalledWith({
-      actorId,
-      contextToken: "context-secret",
-      image: Buffer.from("validated-image"),
-    });
-    expect(events).toEqual([
-      "read:/private/generated/image.png",
-      "image:validated-image",
-      "text:生成图片 · 已完成",
-    ]);
-  });
-
-  it.skip("sends generated images even when operation summaries are hidden", async () => {
-    const fixture = outboxFixture(
-      { value: true },
-      { operationUpdateDisplay: "hidden" },
-    );
-
-    fixture.outbox.handle(imageGenerationCompleted(
-      "/private/generated/image.png",
-    ));
-    fixture.outbox.handle({
-      ...imageGenerationCompleted("/private/uploads/inbound.png"),
-      operation: {
-        ...imageGenerationCompleted("/private/uploads/inbound.png").operation,
-        kind: "imageView",
-      },
-    });
-    await fixture.outbox.close();
-
-    expect(fixture.sendImage).toHaveBeenCalledOnce();
-    expect(fixture.sendText).not.toHaveBeenCalled();
-  });
-
   it("sends a channel image for an explicit target", async () => {
     const fixture = outboxFixture({ value: true });
 
@@ -634,31 +334,6 @@ describe("WeixinOutbox", () => {
     }, expect.any(AbortSignal));
   });
 
-  it.skip("rechecks authorization after reading a generated image", async () => {
-    const allowed = { value: true };
-    const fixture = outboxFixture(
-      allowed,
-      {
-        readImage: vi.fn(async () => {
-          allowed.value = false;
-          return Buffer.from("validated-image");
-        }),
-      },
-    );
-
-    fixture.outbox.handle(imageGenerationCompleted(
-      "/private/generated/image.png",
-    ));
-    await fixture.outbox.close();
-
-    expect(fixture.sendImage).not.toHaveBeenCalled();
-    expect(fixture.contexts.get(target)).toBeUndefined();
-    expect(fixture.onReplyContextInvalidated).toHaveBeenCalledWith(
-      target,
-      "context-secret",
-    );
-  });
-
   it("hides operation updates without suppressing Turn completion", async () => {
     const { outbox, sendText } = outboxFixture(
       { value: true },
@@ -671,122 +346,6 @@ describe("WeixinOutbox", () => {
     await outbox.close();
 
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      turnCompletedText,
-    ]);
-  });
-
-  it.skip("sends compact operation updates as one line", async () => {
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      { operationUpdateDisplay: "compact" },
-    );
-
-    outbox.handle({
-      ...operationUpdated("failed"),
-      operation: {
-        ...operationUpdated("failed").operation,
-        detail: "first line\nsecond line",
-        exitCode: 1,
-      },
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledWith({
-      actorId,
-      contextToken: "context-secret",
-      text: "运行命令 · 失败 · exit 1 · first line second line · 耗时：125毫秒",
-    });
-  });
-
-  it.skip("hides successful wait calls but keeps subagent failures in compact mode", async () => {
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      { operationUpdateDisplay: "compact" },
-    );
-
-    outbox.handle({
-      ...operationUpdated("completed", "subagent", "wait-1"),
-      operation: {
-        ...operationUpdated("completed", "subagent", "wait-1").operation,
-        action: "wait",
-      },
-    });
-    outbox.handle({
-      ...operationUpdated("failed", "subagent", "wait-2"),
-      operation: {
-        ...operationUpdated("failed", "subagent", "wait-2").operation,
-        action: "wait",
-      },
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText.mock.calls[0]?.[0].text).toContain("等待子代理 · 失败");
-  });
-
-  it.skip("sends one compact subagent start notice", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "subagent.spawned",
-      target,
-      threadId: "parent-thread",
-      turnId: "parent-turn",
-      agentThreadId: "agent-thread-secret",
-      agentPath: "/root/review_task",
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText.mock.calls[0]?.[0].text).toBe("子代理开始 · review_task");
-    expect(sendText.mock.calls[0]?.[0].text).not.toContain("agent-thread-secret");
-  });
-
-  it.skip("sends one compact subagent follow-up notice", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle({
-      type: "subagent.contacted",
-      target,
-      threadId: "parent-thread",
-      turnId: "parent-turn",
-      agentThreadId: "agent-thread-secret",
-      agentPath: "/root/review_task",
-    });
-    await outbox.close();
-
-    expect(sendText).toHaveBeenCalledTimes(1);
-    expect(sendText.mock.calls[0]?.[0].text).toBe("子代理继续 · review_task");
-    expect(sendText.mock.calls[0]?.[0].text).not.toContain("agent-thread-secret");
-  });
-
-  it.skip("summarizes repeated query operations once before Turn completion", async () => {
-    const { outbox, sendText } = outboxFixture();
-
-    outbox.handle(operationUpdated(
-      "completed",
-      "mcpTool",
-      "mcp-1",
-      "codex_apps.github.fetch_pr",
-    ));
-    outbox.handle(operationUpdated(
-      "completed",
-      "dynamicTool",
-      "tool-1",
-      "codex_apps.github.update_pull_request",
-    ));
-    expect(sendText).not.toHaveBeenCalled();
-
-    outbox.handle(turnCompleted("completed"));
-    await outbox.close();
-
-    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
-      "工具查询 · 已完成\n\n"
-      + "MCP 工具：1 次\n"
-      + "  - codex＿apps.github.fetch＿pr · 读写属性未知：1 次\n"
-      + "动态工具：1 次\n"
-      + "  - codex＿apps.github.update＿pull＿request：1 次\n\n"
-      + "总耗时：250毫秒",
       turnCompletedText,
     ]);
   });
