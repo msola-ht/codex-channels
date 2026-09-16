@@ -111,13 +111,21 @@ export function parseRequestMetricsDate(value: string): number {
 
 export function parseRequestMetricsFilters(input: Record<string, unknown>): ModelRequestMetricsFilters {
   const filters: ModelRequestMetricsFilters = {};
-  for (const key of ["threadId", "turnId", "provider", "model", "filter"] as const) {
+  for (const key of ["threadId", "turnId", "model", "filter"] as const) {
     const value = input[key];
     if (value === undefined) continue;
     if (typeof value !== "string" || value.trim().length === 0 || value.length > 128) {
       throw new Error(`${key} 筛选值必须为 1–128 个字符`);
     }
     filters[key] = value.trim();
+  }
+  if (input.provider !== undefined) {
+    const providers = Array.isArray(input.provider) ? input.provider : [input.provider];
+    if (providers.length === 0 || providers.some((value) => typeof value !== "string" || !value.trim() || value.length > 128)) {
+      throw new Error("provider 筛选值必须为 1–128 个字符");
+    }
+    const values = [...new Set(providers.map((value: string) => value.trim()))];
+    filters.provider = values.length === 1 ? values[0]! : values;
   }
   if (filters.turnId !== undefined && filters.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
   if (input.operation !== undefined) {

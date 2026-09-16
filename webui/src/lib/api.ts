@@ -5,6 +5,7 @@ import type {
   OverviewResponse,
   MetricsRangeQuery,
   MetricsQuery,
+  MetricsProvidersResponse,
   RequestsResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
@@ -133,6 +134,10 @@ export function fetchOverview(
     `${API_PREFIX}/overview?${metricsQueryParams(query)}`,
     signal,
   )
+}
+
+export function fetchMetricsProviders(signal?: AbortSignal): Promise<MetricsProvidersResponse> {
+  return getJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
 }
 
 export function fetchDailyUsage(

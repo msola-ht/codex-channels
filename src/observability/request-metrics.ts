@@ -187,7 +187,7 @@ export type ModelRequestMetricsAggregationDimension =
 export interface ModelRequestMetricsFilters {
   threadId?: string;
   turnId?: string;
-  provider?: string;
+  provider?: string | string[];
   model?: string;
   operation?: ModelRequestOperation;
   status?: ModelRequestStatus;

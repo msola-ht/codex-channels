@@ -1,6 +1,7 @@
 export type {
   Aggregate,
   MetricsQuery,
+  MetricsProvidersResponse,
   MetricsRangeQuery,
   MetricsPageSummary,
   CompactSummary,

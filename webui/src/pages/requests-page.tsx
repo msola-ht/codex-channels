@@ -22,7 +22,7 @@ export function RequestsPage() {
           {exporter.pending ? "正在导出…" : "导出全部匹配请求（JSON）"}
         </Button>
       </div>
-      <QueryFilters query={query} onChange={update} />
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} />
       <ErrorBanner error={error ?? exporter.error} />
       {error !== null ? null : loading || data === null ? <PageSkeleton rows={8} /> : (
         <>

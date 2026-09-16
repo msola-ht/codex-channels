@@ -4,14 +4,22 @@ import type { SortingState } from "@tanstack/react-table"
 
 import type { MetricsQuery, RangeName } from "@/lib/types"
 import type { DataTableProps } from "@/components/metrics/data-table"
+import { useApi } from "@/hooks/use-api"
+import { fetchMetricsProviders } from "@/lib/api"
+
+export function useMetricsProviders() {
+  return useApi(fetchMetricsProviders, [])
+}
 
 export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time") {
   const [params, setParams] = useSearchParams()
   const encoded = params.toString()
   const query = useMemo(() => {
-    const values = Object.fromEntries(new URLSearchParams(encoded))
+    const search = new URLSearchParams(encoded)
+    const values = Object.fromEntries(search)
     return {
       ...values,
+      provider: search.has("provider") ? search.getAll("provider") : undefined,
       ...(values.from === undefined && values.to === undefined ? { range: values.range ?? defaultRange } : {}),
       offset: values.offset === undefined ? 0 : Number(values.offset),
       limit: values.limit === undefined ? 50 : Number(values.limit),
@@ -25,8 +33,9 @@ export function useMetricsQuery(defaultRange: RangeName, defaultSort = "time") {
       const next = new URLSearchParams(previous)
       if (resetPage) next.delete("offset")
       for (const [key, value] of Object.entries(changes)) {
-        if (value === undefined || value === "") next.delete(key)
-        else next.set(key, String(value))
+        next.delete(key)
+        if (value === undefined || value === "") continue
+        for (const item of Array.isArray(value) ? value : [value]) next.append(key, String(item))
       }
       return next
     })

@@ -49,7 +49,8 @@
   保存运行级父 Turn 关系，父 Turn 任务合计只纳入这些精确运行关系；
   会话与每轮期间查询由 `threadList(query)`、`threadTurnSummaries(threadId, query)` 提供，先按请求
   记录时间及精确条件筛选，再按自身 Thread/Turn 汇总、排序和分页，返回匹配总数和不受分页影响的
-  汇总；Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
+  汇总；Provider 筛选支持单值或多值并集，`providers()` 返回库内完整去重名单供筛选选项使用。
+  Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合覆盖指标库全部保留记录，

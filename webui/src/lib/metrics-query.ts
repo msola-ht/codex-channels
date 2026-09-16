@@ -1,4 +1,4 @@
-import type { MetricsQuery, RangeName } from "@/lib/types"
+import type { MetricsQuery, RangeName } from "./types"
 
 export const metricsRangeLabels: Record<RangeName | "custom", string> = {
   today: "今天", yesterday: "昨天", "7d": "最近 7 天", "30d": "最近 30 天",
@@ -8,7 +8,8 @@ export const metricsRangeLabels: Record<RangeName | "custom", string> = {
 export function metricsQueryParams(query: MetricsQuery): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== "") params.set(key, String(value))
+    if (value === undefined || value === "") continue
+    for (const item of Array.isArray(value) ? value : [value]) params.append(key, String(item))
   }
   return params.toString()
 }

@@ -687,6 +687,12 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     };
   }
 
+  providers(): string[] {
+    this.requireOpen();
+    const rows = this.database.prepare("SELECT DISTINCT provider FROM model_request_metrics ORDER BY provider").all() as Array<{ provider: string }>;
+    return rows.map((row) => row.provider);
+  }
+
   aggregate(
     query: ModelRequestMetricsAggregationQuery,
   ): StoredModelRequestMetricsReport {
@@ -1384,7 +1390,7 @@ function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params
   const params: Array<string | number> = [query.startAtMs, query.endAtMs];
   for (const [key, column] of [
     ["threadId", "thread_id"], ["turnId", "turn_id"],
-    ["provider", "provider"], ["model", "model"],
+    ["model", "model"],
     ["operation", "operation"], ["status", `(${normalizedStatusSql})`],
   ] as const) {
     const value = query[key];
@@ -1392,6 +1398,12 @@ function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params
     if (!value.trim() || value.length > 128) throw new Error(`${key} 筛选值无效`);
     conditions.push(`${column} = ?`);
     params.push(value);
+  }
+  if (query.provider !== undefined) {
+    const providers = Array.isArray(query.provider) ? query.provider : [query.provider];
+    if (providers.length === 0 || providers.some((value) => !value.trim() || value.length > 128)) throw new Error("provider 筛选值无效");
+    conditions.push(`provider IN (${providers.map(() => "?").join(", ")})`);
+    params.push(...providers);
   }
   if (query.turnId !== undefined && query.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
   if (query.operation !== undefined && !["response", "compact"].includes(query.operation)) throw new Error("operation 筛选值无效");

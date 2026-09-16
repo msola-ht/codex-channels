@@ -13,7 +13,7 @@ export interface MetricsQuery {
   to?: string
   threadId?: string
   turnId?: string
-  provider?: string
+  provider?: string[]
   model?: string
   operation?: "response" | "compact"
   status?: "completed" | "failed" | "incomplete" | "unknown"
@@ -32,6 +32,10 @@ export interface MetricsPageSummary {
 }
 
 export type MetricsRangeQuery = Pick<MetricsQuery, "range" | "from" | "to">
+
+export interface MetricsProvidersResponse {
+  providers: string[]
+}
 
 export interface CompactSummary {
   model: string | null

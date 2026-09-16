@@ -107,9 +107,12 @@ Threads 和每轮明细默认全部保留历史，控制台、请求和错误页
 还支持 `filter` 关键字（最多 128 字符），在 Thread ID、Turn ID、Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
 请求、错误、Threads 和 `/threads/:id/turns` 共用精确筛选 `threadId`、`turnId`、`provider`、
-`model`、`operation`、`status` 及关键词 `filter`；条件之间取交集，`turnId` 必须有对应 Thread
+`model`、`operation`、`status` 及关键词 `filter`；Provider 筛选为可多选下拉，未选表示全部，点击“查询”后生效。
+选项由 `GET /api/v1/providers` 返回指标库全部保留记录中的 Provider 名单，不受当前页或概览前 20 组限制；该接口不接受查询参数。
+多选使用重复参数（如 `provider=openai&provider=deepseek`），Provider 之间取并集并去重，其余条件取交集；
+分页、汇总、逐层跳转及 JSON 导出保留同一组 Provider。`turnId` 必须有对应 Thread
 （每轮接口使用路径中的 Thread）。操作支持 `response|compact`，状态支持
-`completed|failed|incomplete|unknown`；未知字段、重复参数或无效值明确返回 400。
+`completed|failed|incomplete|unknown`；未知字段、除 `provider` 外的重复参数或无效值明确返回 400。
 会话与轮次排序支持 `time`、`last`、`provider`、`model`、`requests`、`input`、`output`、`compact`；
 会话另支持 `thread`、`turns`，轮次另支持 `turn`、`failures`。默认按最近记录倒序，先筛选、汇总和
 排序后分页；汇总覆盖全部匹配记录，独立于当前页。错误汇总的分母为相同筛选条件下的全部请求，
@@ -120,7 +123,8 @@ Threads 和每轮明细默认全部保留历史，控制台、请求和错误页
 只统计自身，子代理独立列出；详情中的“全部保留历史累计”明确包含子代理，不受期间筛选影响，
 对应 `/threads/:id/run`，该累计接口不接受筛选参数。轮数仅表示本机指标库观测到的不同 Turn。
 请求页可导出全部匹配结果为 JSON，导出包含所用时间范围、筛选条件与汇总，不限于当前页。
-请求明细表不展示 Thread、Turn 列；会话与轮次筛选、API 和 JSON 导出的归属字段仍保留。
+请求明细表不展示 Thread、Turn 列，筛选栏也不提供 Thread ID、Turn ID 输入；从会话或轮次跳转时仍保留
+链接中的关联范围，点击“重置”可清除。其他页面的会话与轮次筛选、API 和 JSON 导出的归属字段仍保留。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
 后者显示为无 Token 的 failed 记录；失败记录保存受限长度的错误消息。错误页以发生时间倒序分页
 展示每一条失败请求，响应同时保留错误汇总供概览页展示。

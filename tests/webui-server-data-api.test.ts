@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -36,6 +37,70 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("preserves every Provider in API parameters and scoped navigation links", () => {
+    const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };
+    expect(new URLSearchParams(metricsQueryParams(query)).getAll("provider")).toEqual(query.provider);
+    const link = metricsLink("/requests", query, { threadId: "thread-1", turnId: "turn-2" });
+    const params = new URLSearchParams(link.split("?")[1]);
+    expect(params.getAll("provider")).toEqual(query.provider);
+    expect(params.get("threadId")).toBe("thread-1");
+    expect(params.get("turnId")).toBe("turn-2");
+    for (const key of ["offset", "limit", "sort"]) expect(params.has(key)).toBe(false);
+    expect(metricsQueryParams({ provider: [] })).toBe("");
+    expect(metricsLink("/requests", query, { provider: [] })).not.toContain("provider=");
+  });
+
+  it("lists every recorded Provider without the overview group limit", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const providers = Array.from({ length: 25 }, (_, index) => `provider-${String(index).padStart(2, "0")}`);
+    store.recordBatch(providers.map((provider) => ({ ...metricSample(), provider })));
+    store.record(metricSample());
+    store.record(metricSample());
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/providers`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ providers: ["deepseek", ...providers] });
+    expect((await fetch(`${origin}/api/v1/providers?range=30d`)).status).toBe(400);
+  });
+
+  it("combines multiple Providers before filtering, pagination, aggregation and export", async () => {
+    const fixture = createFixture();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const current = { ...metricSample(), recordedAtMs: Date.now() - 1_000, model: "matching" };
+    store.recordBatch([
+      { ...current, provider: "deepseek" },
+      { ...current, provider: "openai", turnId: "turn-2", status: "failed" },
+      { ...current, provider: "other" },
+      { ...current, provider: "openai", model: "excluded" },
+    ]);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    const scope = "range=all&provider=deepseek&provider=openai&provider=deepseek&model=matching";
+    const read = async (path: string) => {
+      const response = await fetch(`${origin}/api/v1/${path}`);
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const first = await read(`requests?${scope}&limit=1`);
+    const second = await read(`requests?${scope}&limit=1&offset=1`);
+    expect(first).toMatchObject({ total: 2, nextOffset: 1, aggregate: { requestCount: 2, unsuccessfulRequestCount: 1 } });
+    expect(second).toMatchObject({ total: 2, nextOffset: null, aggregate: first.aggregate });
+    expect([first.records[0].provider, second.records[0].provider].sort()).toEqual(["deepseek", "openai"]);
+    const exported = await read(`requests/export?${scope}`);
+    expect(exported.filters.provider).toEqual(["deepseek", "openai"]);
+    expect(exported.records).toEqual([...first.records, ...second.records]);
+    expect(exported.aggregate).toEqual(first.aggregate);
+    expect(await read(`threads?${scope}`)).toMatchObject({ total: 1, turnCount: 2, aggregate: first.aggregate });
+    expect(await read(`threads/thread-1/turns?${scope}`)).toMatchObject({ total: 2, aggregate: first.aggregate });
+    expect(await read(`errors?${scope}`)).toMatchObject({ total: 1, errors: { requestCount: 2, unsuccessfulRequestCount: 1 } });
+    expect(await read(`requests?range=all`)).toMatchObject({ total: 4 });
+    for (const invalid of ["provider=", "provider=openai&provider=%20", `provider=${"x".repeat(129)}`]) {
+      expect((await fetch(`${origin}/api/v1/requests?${invalid}`)).status).toBe(400);
+    }
+  });
+
   it("counts Provider Threads and Turns independently within the selected range", async () => {
     const fixture = createFixture();
     const nowMs = Date.now();
@@ -182,7 +247,7 @@ describe("webui server data API", () => {
       "threads?range=1h", "threads?from=2026-01-02", "threads?from=2026-02-30&to=2026-03-01",
       `threads?${scope}&range=7d`, "requests?turnId=turn-1", "requests?status=invalid",
       "threads/thread-1/turns?threadId=thread-2", "threads?limit=501", "threads?sort=invalid",
-      "requests?provider=a&provider=b", "requests?unsupported=value", "threads/thread-1/run?range=7d",
+      "requests?model=a&model=b", "requests?unsupported=value", "threads/thread-1/run?range=7d",
       "threads?from=1969-01-01&to=2026-01-02",
     ]) {
       expect((await fetch(`${origin}/api/v1/${path}`)).status, path).toBe(400);
