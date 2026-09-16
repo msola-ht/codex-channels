@@ -15,6 +15,7 @@ export interface DesktopAppCommandOptions {
   inspectDesktopApp?: () => DesktopAppInspection;
   restartAppServer?: () => Promise<void>;
   probeBridge?: (endpoint: string) => Promise<boolean>;
+  inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
   openDesktop?: (path: string, endpoint: string) => void | Promise<void>;
 }
 

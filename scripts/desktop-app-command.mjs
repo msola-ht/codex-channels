@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
+import { inspectAppServerSupervisorState } from "../runtime/app-server-supervisor.mjs";
+import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import {
   loadOrCreateDesktopAppBridgeToken,
@@ -23,15 +25,22 @@ import { runServiceCommand } from "./service-command.mjs";
 
 const defaultBridgePort = 47_821;
 const compatibilityMarker = Buffer.from("CODEX_APP_SERVER_WS_URL", "utf8");
+const macCompatibilityMarkers = [
+  Buffer.from("CODEX_APP_SERVER_FORCE_CLI", "utf8"),
+  Buffer.from("CODEX_CLI_PATH", "utf8"),
+  Buffer.from("CODEX_APP_TOOLS_PIPE_PATH", "utf8"),
+  Buffer.from(macDesktopAppPluginEnabledConfigKey, "utf8"),
+];
 const bridgePath = "/codex-app-server";
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const desktopAppProxyPath = join(scriptDirectory, "desktop-app-proxy.mjs");
 
 export const desktopAppCommandUsage = `用法：codexc desktop-app <enable|disable|status|open>
 
-  enable [--port 端口]   启用 Desktop App 共享桥并重启 App Server 服务
-  disable                禁用共享桥并重启 App Server 服务
-  status [--json]        只读检查 Desktop、配置和桥状态
-  open                   通过受管桥启动 Desktop App`;
+  enable [--port 端口]   启用 Desktop App 共享连接并重启 App Server 服务
+  disable                禁用共享连接并重启 App Server 服务
+  status [--json]        只读检查 Desktop、配置和连接状态
+  open                   通过共享 App Server 启动 Desktop App`;
 
 export async function runDesktopAppCommand(args, options = {}) {
   const parsed = parseDesktopAppArgs(args);
@@ -44,6 +53,8 @@ export async function runDesktopAppCommand(args, options = {}) {
   const restartAppServer = options.restartAppServer
     ?? (() => runServiceCommand(["restart", "app-server"]));
   const probeBridge = options.probeBridge ?? probeDesktopAppBridge;
+  const inspectSupervisorState = options.inspectSupervisorState
+    ?? inspectAppServerSupervisorState;
   const openDesktop = options.openDesktop
     ?? (platform === "win32"
       ? (path, endpoint) => openWindowsDesktopApp(path, endpoint, { environment })
@@ -73,8 +84,10 @@ export async function runDesktopAppCommand(args, options = {}) {
       app,
       desktopConfig,
       primaryProvider: appServer.primaryProvider,
+      primarySocketPath: appServer.primarySocketPath,
       dataDir: located.dataDir,
       probeBridge,
+      inspectSupervisorState,
     });
     if (parsed.json) {
       output.write(`${JSON.stringify(status, null, 2)}\n`);
@@ -103,12 +116,21 @@ export async function runDesktopAppCommand(args, options = {}) {
     if (desktopConfig?.enabled !== true) {
       throw new Error("Codex Desktop App 共享尚未启用，请先运行 codexc desktop-app enable");
     }
-    const token = readDesktopAppBridgeToken(located.dataDir);
-    const endpoint = privateBridgeEndpoint(desktopConfig.port, token);
-    if (!await probeBridge(endpoint)) {
-      throw new Error("Codex Desktop App 桥未就绪，请运行 codexc service restart app-server");
+    if (platform === "darwin") {
+      await assertMacDesktopAppHostReady(
+        appServer.primarySocketPath,
+        inspectSupervisorState,
+      );
+      writeMessage("note", "启动时会短暂重启主 App Server；请确认当前没有活动 Turn。");
+      await openDesktop(app.path, "");
+    } else {
+      const token = readDesktopAppBridgeToken(located.dataDir);
+      const endpoint = privateBridgeEndpoint(desktopConfig.port, token);
+      if (!await probeBridge(endpoint)) {
+        throw new Error("Codex Desktop App 桥未就绪，请运行 codexc service restart app-server");
+      }
+      await openDesktop(app.path, endpoint);
     }
-    await openDesktop(app.path, endpoint);
     writeMessage("success", "ChatGPT Desktop App 已通过共享 App Server 启动。");
     return { action: "open", opened: true };
   }
@@ -118,12 +140,19 @@ export async function runDesktopAppCommand(args, options = {}) {
       throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
     }
     const port = parsed.port ?? desktopConfig?.port ?? defaultBridgePort;
-    const token = loadOrCreateDesktopAppBridgeToken(located.dataDir);
+    const token = platform === "darwin"
+      ? undefined
+      : loadOrCreateDesktopAppBridgeToken(located.dataDir);
     const applied = { enabled: true, port };
     const previous = writeDesktopAppConfig(located.configPath, applied);
     try {
       await restartAppServer();
-      if (!await probeBridge(privateBridgeEndpoint(port, token))) {
+      if (platform === "darwin") {
+        await assertMacDesktopAppHostReady(
+          appServer.primarySocketPath,
+          inspectSupervisorState,
+        );
+      } else if (token !== undefined && !await probeBridge(privateBridgeEndpoint(port, token))) {
         throw new Error("Codex Desktop App 桥在服务重启后未就绪");
       }
     } catch (error) {
@@ -160,6 +189,18 @@ export async function runDesktopAppCommand(args, options = {}) {
   return { action: "disable", enabled: false };
 }
 
+async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisorState) {
+  const inspection = await inspectSupervisorState(primarySocketPath);
+  if (
+    inspection.status !== "ready"
+    || inspection.topology.desktopAppHostProtocolVersion !== 1
+  ) {
+    throw new Error(
+      "App Server 服务不支持当前 Desktop Host；请运行 codexc service restart app-server 后重试",
+    );
+  }
+}
+
 export function inspectMacDesktopApp({
   environment = process.env,
   candidates = [
@@ -182,7 +223,8 @@ export function inspectMacDesktopApp({
     const infoPath = join(path, "Contents", "Info.plist");
     let compatible;
     try {
-      compatible = fileContainsMarker(resourcesPath, compatibilityMarker);
+      compatible = macCompatibilityMarkers.every((marker) =>
+        fileContainsMarker(resourcesPath, marker));
     } catch {
       return desktopAppFailure(path, "无法读取 ChatGPT Desktop App 资源");
     }
@@ -345,18 +387,37 @@ async function readDesktopAppStatus({
   app,
   desktopConfig,
   primaryProvider,
+  primarySocketPath,
   dataDir,
   probeBridge,
+  inspectSupervisorState,
 }) {
   let tokenReady = false;
   let bridgeReady = false;
-  if (desktopConfig?.enabled === true && primaryProvider === "openai") {
+  let toolHostSupported = false;
+  let toolHostAttached = false;
+  if (
+    platform !== "darwin"
+    && desktopConfig?.enabled === true
+    && primaryProvider === "openai"
+  ) {
     try {
       const token = readDesktopAppBridgeToken(dataDir);
       tokenReady = true;
       bridgeReady = await probeBridge(privateBridgeEndpoint(desktopConfig.port, token));
     } catch {
       tokenReady = false;
+    }
+  }
+  if (platform === "darwin" && desktopConfig?.enabled === true) {
+    try {
+      const inspection = await inspectSupervisorState(primarySocketPath);
+      toolHostSupported = inspection.status === "ready"
+        && inspection.topology.desktopAppHostProtocolVersion === 1;
+      toolHostAttached = toolHostSupported
+        && inspection.topology.desktopAppAttached === true;
+    } catch {
+      toolHostAttached = false;
     }
   }
   return {
@@ -370,13 +431,15 @@ async function readDesktopAppStatus({
     compatible: app.compatible,
     compatibilityReason: app.reason,
     configured: desktopConfig?.enabled === true,
-    port: desktopConfig?.port ?? null,
-    endpoint: desktopConfig?.port
+    port: platform === "darwin" ? null : desktopConfig?.port ?? null,
+    endpoint: platform !== "darwin" && desktopConfig?.port
       ? `ws://127.0.0.1:${desktopConfig.port}${bridgePath}`
       : null,
     primaryProvider,
     tokenReady,
     bridgeReady,
+    toolHostSupported,
+    toolHostAttached,
     launchMode: supported ? "per-launch-environment" : "unsupported",
   };
 }
@@ -394,13 +457,22 @@ function writeDesktopAppStatus(status, writeMessage) {
       status.running === null ? "unknown" : status.running ? "running" : "stopped"
     }`);
   }
-  writeMessage(status.configured ? "success" : "note", `共享配置：${
-    status.configured ? `enabled（端口 ${status.port}）` : "disabled"
-  }`);
+  writeMessage(status.configured ? "success" : "note", `共享配置：${status.configured
+    ? status.platform === "darwin" ? "enabled（受管 stdio）" : `enabled（端口 ${status.port}）`
+    : "disabled"}`);
   if (status.configured) {
-    writeMessage(status.bridgeReady ? "success" : "failure", `共享桥：${
-      status.bridgeReady ? "ready" : "not-ready"
-    }`);
+    if (status.platform === "darwin") {
+      writeMessage(status.toolHostSupported ? "success" : "failure", `受管入口：${
+        status.toolHostSupported ? "ready" : "not-ready"
+      }`);
+      writeMessage(status.toolHostAttached ? "success" : "note", `内置工具 Host：${
+        status.toolHostAttached ? "attached" : "not-attached"
+      }`);
+    } else {
+      writeMessage(status.bridgeReady ? "success" : "failure", `共享桥：${
+        status.bridgeReady ? "ready" : "not-ready"
+      }`);
+    }
   }
 }
 
@@ -557,10 +629,25 @@ function macApplicationStatus(appPath) {
   return null;
 }
 
-function openMacDesktopApp(path, endpoint) {
+function openMacDesktopApp(path) {
+  const resourcesPath = join(path, "Contents", "Resources");
+  const nodePath = join(resourcesPath, "cua_node", "bin", "node");
   const result = spawnSync(
     "/usr/bin/open",
-    ["--env", `CODEX_APP_SERVER_WS_URL=${endpoint}`, "-a", path],
+    [
+      "--env",
+      "CODEX_APP_SERVER_FORCE_CLI=1",
+      "--env",
+      `CODEX_CLI_PATH=${desktopAppProxyPath}`,
+      "--env",
+      `CODEX_ELECTRON_RESOURCES_PATH=${resourcesPath}`,
+      "--env",
+      `CODEX_MCP_NODE_PATH=${nodePath}`,
+      "--env",
+      `CODEX_BROWSER_USE_NODE_PATH=${nodePath}`,
+      "-a",
+      path,
+    ],
     { stdio: "ignore" },
   );
   if (result.error || result.status !== 0) {

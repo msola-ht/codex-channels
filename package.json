@@ -68,6 +68,7 @@
     "scripts/debug-setup.mjs",
     "scripts/deepseek-setup.mjs",
     "scripts/desktop-app-command.mjs",
+    "scripts/desktop-app-proxy.mjs",
     "scripts/dev-all.mjs",
     "scripts/doctor.mjs",
     "scripts/feishu-application.mjs",

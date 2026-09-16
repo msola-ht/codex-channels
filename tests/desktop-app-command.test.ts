@@ -6,10 +6,11 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  loadOrCreateDesktopAppBridgeToken,
-} from "../runtime/desktop-app-bridge.mjs";
 import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import {
+  macDesktopAppPluginEnabledConfigKey,
+  parseMacDesktopAppToolsEnabled,
+} from "../runtime/desktop-app-host.mjs";
 import {
   inspectWindowsDesktopApp,
   openWindowsDesktopApp,
@@ -25,18 +26,19 @@ afterEach(() => {
 });
 
 describe("desktop-app command", () => {
-  it("enables the macOS bridge, restarts the service and verifies readiness", async () => {
+  it("enables the macOS managed host and verifies supervisor readiness", async () => {
     const fixture = createFixture();
-    const endpoints: string[] = [];
     let restarts = 0;
+    let bridgeProbed = false;
 
     const result = await runDesktopAppCommand(["enable", "--port", "49200"], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
       restartAppServer: async () => { restarts += 1; },
-      probeBridge: async (endpoint) => {
-        endpoints.push(endpoint);
+      probeBridge: async () => {
+        bridgeProbed = true;
         return true;
       },
       writeMessage: () => undefined,
@@ -47,13 +49,10 @@ describe("desktop-app command", () => {
     expect(readGatewayConfig(fixture.configPath).codex).toMatchObject({
       desktop_app: { enabled: true, port: 49_200 },
     });
-    expect(endpoints).toHaveLength(1);
-    expect(endpoints[0]).toMatch(
-      /^ws:\/\/127\.0\.0\.1:49200\/codex-app-server\?token=[A-Za-z0-9_-]{43}$/u,
-    );
+    expect(bridgeProbed).toBe(false);
   });
 
-  it("restores the previous configuration when readiness fails", async () => {
+  it("restores the previous configuration when the macOS host capability is missing", async () => {
     const fixture = createFixture();
     let restarts = 0;
 
@@ -61,16 +60,16 @@ describe("desktop-app command", () => {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: async () => ({ status: "missing" }),
       restartAppServer: async () => { restarts += 1; },
-      probeBridge: async () => false,
       writeMessage: () => undefined,
-    })).rejects.toThrow("服务重启后未就绪");
+    })).rejects.toThrow("不支持当前 Desktop Host");
 
     expect(restarts).toBe(2);
     expect(readGatewayConfig(fixture.configPath).codex).not.toHaveProperty("desktop_app");
   });
 
-  it("can disable the bridge even when the Desktop app is no longer installed", async () => {
+  it("can disable sharing even when the Desktop app is no longer installed", async () => {
     const fixture = createFixture({ enabled: true, port: 49_201 });
     let restarts = 0;
 
@@ -101,6 +100,7 @@ describe("desktop-app command", () => {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
       output: { write: (value: string | Uint8Array) => {
         output += value.toString();
         return true;
@@ -112,35 +112,64 @@ describe("desktop-app command", () => {
 
     expect(status).toMatchObject({
       configured: true,
-      port: 49_202,
+      port: null,
+      endpoint: null,
       tokenReady: false,
       bridgeReady: false,
+      toolHostSupported: true,
+      toolHostAttached: false,
     });
     expect(JSON.parse(output)).toMatchObject({
-      endpoint: "ws://127.0.0.1:49202/codex-app-server",
+      endpoint: null,
       tokenReady: false,
+      toolHostSupported: true,
+      toolHostAttached: false,
     });
     expect(output).not.toContain("?token=");
   });
 
-  it("opens the compatible macOS app with the private endpoint only after a ready probe", async () => {
+  it("opens the compatible macOS app through the managed host without a bridge endpoint", async () => {
     const fixture = createFixture({ enabled: true, port: 49_203 });
-    const token = loadOrCreateDesktopAppBridgeToken(fixture.root);
     const opened: Array<{ path: string; endpoint: string }> = [];
+    let bridgeProbed = false;
 
     await expect(runDesktopAppCommand(["open"], {
       environment: fixture.environment,
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
-      probeBridge: async () => true,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      probeBridge: async () => {
+        bridgeProbed = true;
+        return true;
+      },
       openDesktop: (path, endpoint) => { opened.push({ path, endpoint }); },
       writeMessage: () => undefined,
     })).resolves.toEqual({ action: "open", opened: true });
 
     expect(opened).toEqual([{
       path: "/Applications/ChatGPT.app",
-      endpoint: `ws://127.0.0.1:49203/codex-app-server?token=${token}`,
+      endpoint: "",
     }]);
+    expect(bridgeProbed).toBe(false);
+  });
+
+  it("parses the exact macOS Desktop tools plugin override", () => {
+    expect(parseMacDesktopAppToolsEnabled([
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=true`,
+    ])).toBe(true);
+    expect(parseMacDesktopAppToolsEnabled([
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=false`,
+    ])).toBe(false);
+    expect(() => parseMacDesktopAppToolsEnabled([]))
+      .toThrow("未提供内置工具插件配置");
+    expect(() => parseMacDesktopAppToolsEnabled([
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=true`,
+      "-c",
+      `${macDesktopAppPluginEnabledConfigKey}=false`,
+    ])).toThrow("无效的内置工具配置");
   });
 
   it("reports Windows as a per-launch preview when the current-user package is compatible", async () => {
@@ -337,5 +366,23 @@ function compatibleStoppedWindowsApp() {
     running: false,
     compatible: true,
     reason: null,
+  };
+}
+
+async function readyDesktopHostSupervisor() {
+  return {
+    status: "ready" as const,
+    topology: {
+      version: 5 as const,
+      pid: process.pid,
+      primaryProvider: "openai",
+      managedProviders: [],
+      socketPaths: ["/tmp/codex-app-server.sock"],
+      runningProviders: ["openai"],
+      releasedProviders: [],
+      leasedProviders: [],
+      desktopAppHostProtocolVersion: 1 as const,
+      desktopAppAttached: false,
+    },
   };
 }

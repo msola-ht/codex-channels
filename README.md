@@ -59,7 +59,7 @@ codexc sessions              # 交互式会话清理菜单
 codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）
 codexc update                # 源码安装更新
 codexc remote                # 连接 Gateway 共享的原生 TUI
-codexc desktop-app status    # 检查 Desktop App 会话共享连接（预览，不含内置 codex_app 工具）
+codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
 ```
 
 计划清单工具在 `codexc setup → Codex 新会话默认值 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。

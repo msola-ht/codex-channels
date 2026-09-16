@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AppServerSupervisorOwner,
   acquireAppServerProviderLease,
+  acquireMacDesktopAppHostLease,
   appServerSupervisorSocketPath,
   ensureAppServerProvider,
   inspectAppServerSupervisor,
@@ -26,6 +27,7 @@ afterEach(() => {
 
 describe("App Server supervisor", () => {
   const unixIt = process.platform === "win32" ? it.skip : it;
+  const darwinIt = process.platform === "darwin" ? it : it.skip;
   it("refuses an unsafe supervisor path before requesting a Provider", async () => {
     const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-unsafe-"));
     temporaryDirectories.push(runtimeDir);
@@ -220,6 +222,65 @@ describe("App Server supervisor", () => {
       .resolves.toEqual({ released: true, reason: "released" });
     expect(released).toEqual(["opencode-go"]);
     await owner.close();
+  });
+
+  darwinIt("holds the primary Provider until the last Desktop Host lease detaches", async () => {
+    const runtimeDir = mkdtempSync(join(unixSocketTmpdir, "codexc-supervisor-desktop-"));
+    temporaryDirectories.push(runtimeDir);
+    const primarySocketPath = join(runtimeDir, "codex-app-server.sock");
+    const attached: Array<{ appPath: string; pipePath: string; toolsEnabled: boolean }> = [];
+    const released: string[] = [];
+    let reportDetached: (() => void) | undefined;
+    const detached = new Promise<void>((resolve) => {
+      reportDetached = resolve;
+    });
+    const owner = new AppServerSupervisorOwner(primarySocketPath, {
+      primaryProvider: "openai",
+      managedProviders: [],
+      socketPaths: [primarySocketPath],
+    }, {
+      attachDesktopApp: async (attachment) => { attached.push(attachment); },
+      detachDesktopApp: async () => { reportDetached?.(); },
+      releaseProvider: async (provider) => {
+        released.push(provider);
+        return true;
+      },
+    });
+    await owner.start();
+    const lease = await acquireMacDesktopAppHostLease(primarySocketPath, {
+      provider: "openai",
+      appPath: "/Applications/ChatGPT.app",
+      pipePath: "/tmp/codex-app-tools.sock",
+      toolsEnabled: true,
+    });
+
+    try {
+      expect(attached).toEqual([{
+        appPath: "/Applications/ChatGPT.app",
+        pipePath: "/tmp/codex-app-tools.sock",
+        toolsEnabled: true,
+      }]);
+      await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+        desktopAppHostProtocolVersion: 1,
+        desktopAppAttached: true,
+        leasedProviders: ["openai"],
+      });
+      await expect(releaseAppServerProvider(primarySocketPath, "openai"))
+        .resolves.toEqual({ released: false, reason: "leased" });
+      expect(released).toEqual([]);
+
+      await lease.close();
+      await detached;
+      await expect(inspectAppServerSupervisor(primarySocketPath)).resolves.toMatchObject({
+        desktopAppAttached: false,
+        leasedProviders: [],
+      });
+      await expect(releaseAppServerProvider(primarySocketPath, "openai"))
+        .resolves.toEqual({ released: true, reason: "released" });
+      expect(released).toEqual(["openai"]);
+    } finally {
+      await owner.close();
+    }
   });
 
   it("finishes an in-flight release before granting a new Provider lease", async () => {

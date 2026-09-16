@@ -5,6 +5,11 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { resolveAppServerRuntime } from "./app-server-runtime.mjs";
 import { startDesktopAppBridge } from "./desktop-app-bridge.mjs";
 import {
+  macDesktopAppPluginEnabledConfigKey,
+  spawnMacDesktopHostedCodex,
+  validateMacDesktopAppAttachment,
+} from "./desktop-app-host.mjs";
+import {
   AppServerSupervisorOwner,
   appServerSocketAcceptsWebSocket,
   prepareAppServerSocketPaths,
@@ -242,6 +247,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   };
   const goProxyOptions = proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
+  let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
     provider.provider,
     { runtime: provider, socketPath: managedSocketPaths[index] },
@@ -278,16 +284,35 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         }
         if (await appServerSocketAcceptsWebSocket(socketPath)) return;
         await prepareAppServerSocketPaths([socketPath]);
-        const child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
+        const primaryAppServerArguments = [
           ...primaryArguments,
+          ...(desktopAppAttachment
+            ? [
+                "-c",
+                `${macDesktopAppPluginEnabledConfigKey}=${desktopAppAttachment.toolsEnabled}`,
+              ]
+            : []),
           "app-server",
           "--listen",
           `unix://${socketPath}`,
-        ], {
+        ];
+        const primarySpawnOptions = {
           stdio: "inherit",
           env: primaryChildEnvironment,
           cwd: defaultWorkspace.cwd,
-        }, runtime.environment);
+        };
+        const child = desktopAppAttachment
+          ? spawnMacDesktopHostedCodex(
+              desktopAppAttachment,
+              primaryAppServerArguments,
+              primarySpawnOptions,
+            )
+          : spawnCodexProcess(
+              runtime.environment.CODEX_BINARY,
+              primaryAppServerArguments,
+              primarySpawnOptions,
+              runtime.environment,
+            );
         children.push(child);
         childrenByProvider.set(provider, child);
         if (!waitForReady) {
@@ -453,6 +478,59 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     }`);
     return true;
   };
+  const attachDesktopApp = async ({ appPath, pipePath, toolsEnabled }) => {
+    if (
+      process.platform !== "darwin"
+      || validatedCodex.desktop_app?.enabled !== true
+      || primaryProvider !== "openai"
+    ) {
+      throw new Error("macOS Codex Desktop App 共享未启用");
+    }
+    const nextAttachment = validateMacDesktopAppAttachment({
+      appPath,
+      pipePath,
+      toolsEnabled,
+      codexBinary: runtime.environment.CODEX_BINARY,
+      environment: runtime.environment,
+    });
+    if (desktopAppAttachment?.key === nextAttachment.key) {
+      await ensureInstance(primaryProvider);
+      return;
+    }
+    await instanceLaunches.get(primaryProvider);
+    const previousAttachment = desktopAppAttachment;
+    const released = await releaseInstance(primaryProvider);
+    if (!released) {
+      throw new Error("主 OpenAI App Server 不受当前服务监管");
+    }
+    desktopAppAttachment = nextAttachment;
+    try {
+      await ensureInstance(primaryProvider);
+    } catch (error) {
+      desktopAppAttachment = previousAttachment;
+      let recoveryError;
+      try {
+        await releaseInstance(primaryProvider);
+        await ensureInstance(primaryProvider);
+      } catch (recoveryFailure) {
+        recoveryError = recoveryFailure;
+      }
+      if (recoveryError) {
+        throw new AggregateError(
+          [error, recoveryError],
+          "Desktop Host 附加失败，且主 App Server 未能恢复",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    console.log("Codex Desktop App 可信 Host 已附加");
+  };
+  const detachDesktopApp = async () => {
+    if (desktopAppAttachment === undefined) return;
+    desktopAppAttachment = undefined;
+    console.log("Codex Desktop App 可信 Host 租约已释放");
+  };
   try {
     await prepareAppServerSocketPaths(appServerRuntime.socketPaths);
     if (customPrimaryProvider) {
@@ -554,12 +632,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     supervisorOwner = new AppServerSupervisorOwner(
       socketPath,
       appServerRuntime.topology,
-      { ensureProvider: ensureInstance, releaseProvider: releaseInstance },
+      {
+        ensureProvider: ensureInstance,
+        releaseProvider: releaseInstance,
+        attachDesktopApp,
+        detachDesktopApp,
+      },
     );
     await supervisorOwner.start();
     await ensureInstance(primaryProvider, { waitForReady: false });
     supervisorOwner.markRunning(primaryProvider);
-    if (validatedCodex.desktop_app?.enabled === true) {
+    if (validatedCodex.desktop_app?.enabled === true && process.platform !== "darwin") {
       await ensureInstance(primaryProvider);
       desktopAppBridge = await startDesktopAppBridge({
         port: validatedCodex.desktop_app.port,
