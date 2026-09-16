@@ -40,7 +40,7 @@ import type {
   ProviderGroup,
 } from "@/lib/types"
 
-export function GlobalCards({ global }: { global: Aggregate | null }) {
+export function GlobalCards({ global, threadCount, turnCount }: { global: Aggregate | null; threadCount: number; turnCount: number }) {
   if (global === null) {
     return (
       <Alert>
@@ -53,7 +53,7 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
     ? `${(global.cachedInputTokens / global.inputTokens * 100).toFixed(1)}%`
     : "—"
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         value={formatTokens(global.inputTokens + global.outputTokens)}
         description={`总计 Token · 请求 ${formatCount(global.requestCount)} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
@@ -65,6 +65,10 @@ export function GlobalCards({ global }: { global: Aggregate | null }) {
       <StatCard
         value={formatTokens(global.outputTokens)}
         description="输出 Token"
+      />
+      <StatCard
+        value={formatCount(threadCount)}
+        description={`会话 · 轮次 ${formatCount(turnCount)} 轮`}
       />
     </div>
   )

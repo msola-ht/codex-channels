@@ -498,6 +498,8 @@ function handleOverview(environment, url, response) {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
       global: overview.global,
+      threadCount: overview.threadCount,
+      turnCount: overview.turnCount,
       providers: overview.providers.map((group) => ({
         ...group,
       })),
@@ -751,7 +753,7 @@ function parseRange(url, defaultRange = "90d") {
   try {
     return metricsRangeOptions(options, Date.now(), defaultRange);
   } catch {
-    throw new ApiError(400, "invalid_range", "时间范围无效；请选择五档范围，或同时指定 from/to（YYYY-MM-DD，包含结束日），不能混用");
+    throw new ApiError(400, "invalid_range", "时间范围无效；请选择预设范围，或同时指定 from/to（YYYY-MM-DD，包含结束日），不能混用");
   }
 }
 

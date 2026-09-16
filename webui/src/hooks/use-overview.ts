@@ -1,10 +1,10 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchOverview } from "@/lib/api"
-import type { RangeName } from "@/lib/types"
+import type { MetricsRangeQuery } from "@/lib/types"
 
-export function useOverview(range: RangeName) {
+export function useOverview(query: MetricsRangeQuery) {
   return useApi(
-    (signal) => fetchOverview(range, signal),
-    [range],
+    (signal) => fetchOverview(query, signal),
+    [JSON.stringify(query)],
   )
 }

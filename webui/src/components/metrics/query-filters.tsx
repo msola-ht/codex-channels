@@ -1,10 +1,11 @@
 import { useId, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { MetricsQuery } from "@/lib/types"
+import type { MetricsQuery, RangeName } from "@/lib/types"
+import { RangeSelector } from "@/components/metrics/range-selector"
 
 export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string }) {
   // 路由前进/后退和逐层跳转时重建草稿；翻页不影响已填写的筛选。
@@ -15,7 +16,7 @@ export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Par
 function QueryFiltersForm({ query, onChange, threadId }: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string }) {
   const id = useId()
   const [draft, setDraft] = useState(query)
-  const [range, setRange] = useState(query.from !== undefined || query.to !== undefined ? "custom" : query.range ?? "all")
+  const [range, setRange] = useState<RangeName | "custom">(query.from !== undefined || query.to !== undefined ? "custom" : query.range ?? "all")
   const set = (key: keyof MetricsQuery, value: string) => setDraft((previous) => ({ ...previous, [key]: value }))
   const textFields = [
     ...(!threadId ? [["threadId", "Thread ID"]] : []),
@@ -35,20 +36,7 @@ function QueryFiltersForm({ query, onChange, threadId }: { query: MetricsQuery; 
       onChange(changes)
     }}>
       <FieldGroup className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4 xl:grid-cols-6">
-        <Field>
-          <FieldLabel htmlFor={`${id}-range`}>时间范围</FieldLabel>
-          <Select value={range} onValueChange={setRange}>
-            <SelectTrigger id={`${id}-range`}><SelectValue /></SelectTrigger>
-            <SelectContent><SelectGroup>
-              {[['24h', '最近 24 小时'], ['7d', '最近 7 天'], ['30d', '最近 30 天'], ['90d', '最近 90 天'], ['all', '全部历史'], ['custom', '自定义日期']].map(([value, label]) => <SelectItem key={value} value={value!}>{label}</SelectItem>)}
-            </SelectGroup></SelectContent>
-          </Select>
-          {range === "custom" ? <FieldDescription>按服务端本地时区查询</FieldDescription> : null}
-        </Field>
-        {range === "custom" ? <>
-          <Field><FieldLabel htmlFor={`${id}-from`}>开始日期</FieldLabel><Input id={`${id}-from`} type="date" required value={draft.from ?? ""} onChange={(event) => set("from", event.target.value)} /></Field>
-          <Field><FieldLabel htmlFor={`${id}-to`}>结束日期（含当天）</FieldLabel><Input id={`${id}-to`} type="date" required min={draft.from} value={draft.to ?? ""} onChange={(event) => set("to", event.target.value)} /></Field>
-        </> : null}
+        <RangeSelector value={range} onChange={setRange} from={draft.from} to={draft.to} onDateChange={set} />
         {textFields.map(([key, label]) => (
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder={key === "filter" ? "会话 / 模型 / 错误" : "全部"} onChange={(event) => set(key, event.target.value)} /></Field>
         ))}

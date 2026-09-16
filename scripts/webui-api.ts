@@ -1,5 +1,5 @@
 export type RangeName =
-  | "24h" | "7d" | "30d" | "90d" | "all"
+  | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
 
 export interface Range<Name extends string = RangeName> {
   name: Name
@@ -30,6 +30,8 @@ export interface MetricsPageSummary {
   nextOffset: number | null
   aggregate: Aggregate | null
 }
+
+export type MetricsRangeQuery = Pick<MetricsQuery, "range" | "from" | "to">
 
 export interface CompactSummary {
   model: string | null
@@ -98,9 +100,11 @@ export interface WeeklyQuota {
 }
 
 export interface OverviewResponse {
-  range: Range
+  range: Range<string>
   generatedAt: string
   global: Aggregate | null
+  threadCount: number
+  turnCount: number
   providers: ProviderGroup[]
   errors: ErrorsReport
   weeklyQuota: WeeklyQuota | null
@@ -115,7 +119,7 @@ export interface DailyUsageRow {
 }
 
 export interface DailyUsageResponse {
-  range: Range
+  range: Range<string>
   generatedAt: string
   daily: DailyUsageRow[]
 }

@@ -4,6 +4,7 @@ import { RefreshCwIcon } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { FieldGroup } from "@/components/ui/field"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
@@ -20,19 +21,21 @@ import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
+import { cn } from "@/lib/utils"
 import type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
+  MetricsRangeQuery,
 } from "@/lib/types"
 
 export function ConsolePage() {
-  const [range, setRange] = useState<RangeName>("30d")
+  const [range, setRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const account = useOverview(range)
   const trend = useDailyUsage(range)
-  const heatmap = useDailyUsage("90d")
+  const heatmap = useDailyUsage({ range: "90d" })
   const [dashboard, setDashboard] = useState<{
     overview: OverviewResponse
     trend: DailyUsageResponse
@@ -51,7 +54,8 @@ export function ConsolePage() {
   }, [refetchHeatmap, refetchOverview, refetchTrend, refreshAccounts])
 
   useEffect(() => {
-    if (account.data?.range.name === range && trend.data?.range.name === range) {
+    const name = range.range ?? `${range.from}..${range.to}`
+    if (account.data?.range.name === name && trend.data?.range.name === name) {
       setDashboard({ overview: account.data, trend: trend.data })
     }
   }, [account.data, range, trend.data])
@@ -63,7 +67,7 @@ export function ConsolePage() {
         <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
       </div>
       <LocalDashboard
-        range={dashboard?.overview.range.name ?? range}
+        range={range}
         onRangeChange={setRange}
         onRefresh={refreshDashboard}
         data={dashboard?.overview ?? null}
@@ -101,8 +105,8 @@ function LocalDashboard({
   heatmapLoading,
   heatmapError,
 }: {
-  range: RangeName
-  onRangeChange: (range: RangeName) => void
+  range: MetricsRangeQuery
+  onRangeChange: (range: MetricsRangeQuery) => void
   onRefresh: () => void
   data: OverviewResponse | null
   loading: boolean
@@ -116,9 +120,8 @@ function LocalDashboard({
 }) {
   return (
     <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <span className="text-sm text-muted-foreground">汇总范围</span>
-        <RangeSelector value={range} onChange={onRangeChange} ariaLabel="汇总时间范围" />
+      <div className="flex flex-wrap items-end justify-end gap-3">
+        <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
         <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
           {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
           {refreshing ? "刷新中" : "刷新"}
@@ -128,7 +131,7 @@ function LocalDashboard({
       {data === null
         ? <PageSkeleton rows={4} />
         : <>
-            <GlobalCards global={data.global} />
+            <GlobalCards global={data.global} threadCount={data.threadCount} turnCount={data.turnCount} />
             <UsageCharts
               trendRows={trend?.daily ?? []}
               trendRange={trend?.range ?? data.range}
@@ -141,6 +144,32 @@ function LocalDashboard({
             <ErrorsSummary errors={data.errors} />
           </>}
     </div>
+  )
+}
+
+function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery; onChange: (query: MetricsRangeQuery) => void }) {
+  const [value, setValue] = useState<RangeName | "custom">(query.range ?? "custom")
+  const [dates, setDates] = useState({ from: query.from ?? "", to: query.to ?? "" })
+  return (
+    <form className={cn("w-full", value === "custom" ? "max-w-2xl" : "sm:w-48")} onSubmit={(event) => {
+      event.preventDefault()
+      onChange(value === "custom" ? dates : { range: value })
+    }}>
+      <FieldGroup className={cn("grid grid-cols-1 items-end gap-3", value === "custom" && "sm:grid-cols-[repeat(3,minmax(0,1fr))_auto]")}>
+        <RangeSelector
+          value={value}
+          onChange={(next) => {
+            setValue(next)
+            if (next !== "custom") onChange({ range: next })
+          }}
+          from={dates.from}
+          to={dates.to}
+          onDateChange={(key, date) => setDates((previous) => ({ ...previous, [key]: date }))}
+          label="汇总范围"
+        />
+        {value === "custom" ? <Button type="submit">查询</Button> : null}
+      </FieldGroup>
+    </form>
   )
 }
 

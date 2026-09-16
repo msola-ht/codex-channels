@@ -9,6 +9,8 @@ import type {
 } from "./request-metrics.js";
 
 export const requestMetricsRangeNames = [
+  "today",
+  "yesterday",
   "24h",
   "7d",
   "30d",
@@ -56,7 +58,14 @@ export function resolveRequestMetricsRange(
     throw new Error(`不支持的指标时间范围：${name}`);
   }
   if (name === "all") return { name, startAtMs: 0, endAtMs: nowMs };
-  const durations: Record<Exclude<RequestMetricsRangeName, "all">, number> = {
+  if (name === "today" || name === "yesterday") {
+    const midnight = new Date(nowMs);
+    midnight.setHours(0, 0, 0, 0);
+    const endAtMs = name === "today" ? nowMs : midnight.getTime();
+    if (name === "yesterday") midnight.setDate(midnight.getDate() - 1);
+    return { name, startAtMs: midnight.getTime(), endAtMs };
+  }
+  const durations: Record<Exclude<RequestMetricsRangeName, "all" | "today" | "yesterday">, number> = {
     "24h": 24 * 60 * 60 * 1_000,
     "7d": 7 * 24 * 60 * 60 * 1_000,
     "30d": 30 * 24 * 60 * 60 * 1_000,
@@ -158,8 +167,11 @@ export class RequestMetricsQueryService {
   overview(range: ResolvedRequestMetricsRange) {
     const global = this.aggregate("global", range);
     const providers = this.aggregate("provider", range);
+    const threads = this.threadList(range, { limit: 1 });
     return {
       global: global.aggregate,
+      threadCount: threads.matchedTotal,
+      turnCount: threads.turnCount,
       providers: providers.groups,
       errors: this.errors(range),
     };

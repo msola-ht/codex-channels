@@ -69,6 +69,11 @@ codexc service stop webui        # 停止
 
 ## 页面与 API
 
+控制台会话卡片的主数显示会话数，副标题显示轮次，跟随汇总时间范围，与 Threads 列表使用相同计数：只统计期间有
+Thread 和 Turn 归属的请求，会话按 Thread 去重，轮次按 Thread + Turn 去重；同一轮的多次请求
+只计一轮，子代理作为独立会话计入。这是本机指标库观测到的轮次，不代表完整官方会话历史。
+`/api/v1/overview` 通过 `threadCount`、`turnCount` 返回这两个计数。
+
 | 页面 | 路由 | API |
 | --- | --- | --- |
 | 概览 | `#/` | `GET /api/v1/overview?range=<范围>`、`GET /api/v1/daily?range=<范围>` |
@@ -81,10 +86,14 @@ codexc service stop webui        # 停止
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
-`range` 统一支持 `24h`、`7d`、`30d`、`90d`、`all`；请求、错误、Threads 和每轮明细页另有一个
-自定义日期入口，对应 `from=YYYY-MM-DD&to=YYYY-MM-DD`，必须同时提供且不得与 `range` 混用。
+控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
+全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，
+对应 `range=today|yesterday`；滚动范围为 `7d|30d`，全部历史为 `all`。
+自定义日期对应 `from=YYYY-MM-DD&to=YYYY-MM-DD`，必须同时提供且不得与 `range` 混用。
+控制台自定义日期在点击“查询”后生效，Token、会话、轮次及趋势图使用同一所选范围；热力图仍固定最近 90 天。
+既有 API 的 `24h`、`90d` 查询继续支持，但不列在时间选择菜单中。
 日期按 WebUI 服务所在主机本地时区解析，包含结束日并截断到当前时刻。
-Threads 和每轮明细默认全部保留历史，请求和错误默认最近 90 天。分页 `offset` 从 0 开始，
+Threads 和每轮明细默认全部保留历史，控制台、请求和错误页面默认最近 30 天。分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`。
 已删除的 `speed`、`ttft`、`duration` 不再接受，传入时返回 400。
@@ -117,7 +126,7 @@ Threads 和每轮明细默认全部保留历史，请求和错误默认最近 90
 缓存 Token 与命中率。用量趋势图使用输入、缓存、输出三项口径。WebUI 中的 Token 与汇总请求数统一使用
 `K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
 汇总请求数最多保留两位小数；明细表请求数仍显示精确整数。
-三张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
+四张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
 控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS
 快照超过 15 分钟或尚未采集时，账户卡片会提示刷新。控制台首次打开时自动刷新已配置的 DS 与 OCG
 账户；汇总范围旁的刷新按钮同时更新本地指标、固定 90 天热力图和账户快照。WebUI 通过私有 Gateway

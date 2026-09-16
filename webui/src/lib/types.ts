@@ -1,6 +1,7 @@
 export type {
   Aggregate,
   MetricsQuery,
+  MetricsRangeQuery,
   MetricsPageSummary,
   CompactSummary,
   DeepseekBalance,

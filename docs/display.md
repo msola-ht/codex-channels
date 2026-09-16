@@ -82,6 +82,8 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 `codexc metrics turns <Thread ID>` 仍列出指定 Thread 自身的 Turn 明细，不把子代理任务拆入公开
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
 范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
+CLI 与 WebUI 还支持 `today` / `yesterday`，分别按主机本地时区统计今天截至当前时刻、昨天完整自然日。
+WebUI 菜单只展示今天、昨天、最近 7 天、最近 30 天、全部历史和自定义日期。
 本机 CLI 需要精确自然日或账期时使用 `--from YYYY-MM-DD --to YYYY-MM-DD`。
 `threads`、`turns`、`report` 与 `export` 共用时间和请求筛选：Provider、模型、`response|compact`
 操作、`completed|failed|incomplete|unknown` 状态及关键词可组合使用。`--thread` 精确指定会话，

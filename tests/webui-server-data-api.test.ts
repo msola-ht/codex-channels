@@ -36,6 +36,72 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("keeps calendar-day and custom-date totals aligned across dashboard and detail queries", async () => {
+    const fixture = createFixture();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const date = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.recordBatch([
+      { ...metricSample(), recordedAtMs: yesterday.getTime() - 1 },
+      { ...metricSample(), recordedAtMs: yesterday.getTime(), status: "failed" },
+      { ...metricSample(), recordedAtMs: today.getTime() - 1, turnId: "turn-2" },
+      { ...metricSample(), recordedAtMs: today.getTime(), threadId: "today-thread" },
+    ]);
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    for (const scope of ["range=yesterday", `from=${date}&to=${date}`]) {
+      const read = async (path: string) => {
+        const response = await fetch(`${origin}/api/v1/${path}?${scope}`);
+        expect(response.status).toBe(200);
+        return response.json();
+      };
+      const overview = await read("overview");
+      expect(overview).toMatchObject({ threadCount: 1, turnCount: 2, global: { requestCount: 2 } });
+      expect(overview.range).toMatchObject({ startAtMs: yesterday.getTime(), endAtMs: today.getTime() });
+      const daily = await read("daily");
+      expect(daily.daily.reduce((sum: number, row: { requestCount: number }) => sum + row.requestCount, 0)).toBe(2);
+      expect(daily.range).toEqual(overview.range);
+      expect(await read("threads")).toMatchObject({ total: 1, turnCount: 2 });
+      expect(await read("threads/thread-1/turns")).toMatchObject({ total: 2 });
+      expect(await read("requests")).toMatchObject({ total: 2 });
+      expect(await read("errors")).toMatchObject({ total: 1 });
+    }
+    const current = await (await fetch(`${origin}/api/v1/overview?range=today`)).json();
+    expect(current).toMatchObject({ threadCount: 1, turnCount: 1, global: { requestCount: 1 }, range: { startAtMs: today.getTime() } });
+  });
+
+  it("counts overview Threads and Turns in the selected range without counting requests as turns", async () => {
+    const fixture = createFixture();
+    const nowMs = Date.now();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.recordBatch([
+      { ...metricSample(), recordedAtMs: nowMs - 1_000 },
+      { ...metricSample(), recordedAtMs: nowMs - 1_000 },
+      { ...metricSample(), recordedAtMs: nowMs - 1_000, turnId: "turn-2" },
+      { ...metricSample(), recordedAtMs: nowMs - 1_000, threadId: "subagent-1" },
+      { ...metricSample(), recordedAtMs: nowMs - 1_000, threadId: null, turnId: null },
+      { ...metricSample(), recordedAtMs: nowMs - 1_000, threadId: "no-turn", turnId: null },
+      { ...metricSample(), recordedAtMs: nowMs - 2 * 86_400_000, threadId: "older-thread" },
+    ]);
+    store.recordSubagentThread({ agentThreadId: "subagent-1", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    for (const [range, threadCount, turnCount] of [["24h", 2, 3], ["7d", 3, 4]] as const) {
+      const response = await fetch(`${origin}/api/v1/overview?range=${range}`);
+      expect(response.status).toBe(200);
+      const overview = await response.json();
+      expect(overview).toMatchObject({ threadCount, turnCount });
+      const threads = await (await fetch(`${origin}/api/v1/threads?range=${range}&limit=1`)).json();
+      expect(overview.threadCount).toBe(threads.total);
+      expect(overview.turnCount).toBe(threads.turnCount);
+    }
+    const empty = await (await fetch(`${origin}/api/v1/overview?from=2020-01-01&to=2020-01-01`)).json();
+    expect(empty).toMatchObject({ global: null, threadCount: 0, turnCount: 0 });
+  });
+
   it("keeps custom-date Thread, Turn, request, error and export queries consistent", async () => {
     const fixture = createFixture();
     const startAtMs = new Date(2026, 0, 2).getTime();

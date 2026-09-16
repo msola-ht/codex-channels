@@ -3,7 +3,7 @@ import type {
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
-  RangeName,
+  MetricsRangeQuery,
   MetricsQuery,
   RequestsResponse,
   SettingsSummaryResponse,
@@ -126,20 +126,20 @@ export function updateManagementSetting(
 }
 
 export function fetchOverview(
-  range: RangeName,
+  query: MetricsRangeQuery,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
   return getJson<OverviewResponse>(
-    `${API_PREFIX}/overview?range=${range}`,
+    `${API_PREFIX}/overview?${metricsQueryParams(query)}`,
     signal,
   )
 }
 
 export function fetchDailyUsage(
-  range: RangeName,
+  query: MetricsRangeQuery,
   signal?: AbortSignal,
 ): Promise<DailyUsageResponse> {
-  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?range=${range}`, signal)
+  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreads(

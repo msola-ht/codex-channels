@@ -9,7 +9,7 @@ import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { useMetricsExport } from "@/hooks/use-metrics-export"
 
 export function RequestsPage() {
-  const state = useMetricsQuery("90d")
+  const state = useMetricsQuery("30d")
   const { query, update, sorting, onSortingChange } = state
   const { data, loading, error } = useRequests(query)
   const exporter = useMetricsExport(query)

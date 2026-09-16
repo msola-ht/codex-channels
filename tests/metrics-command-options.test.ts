@@ -27,6 +27,21 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("resolves today and yesterday by local calendar boundaries", () => {
+    for (const now of [new Date(2026, 0, 1, 12), new Date(2026, 2, 9, 12), new Date(2026, 10, 2, 12)]) {
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      expect(metricsRangeOptions({ range: "today" }, now.getTime())).toEqual({
+        name: "today", startAtMs: today.getTime(), endAtMs: now.getTime(),
+      });
+      expect(metricsRangeOptions({ range: "yesterday" }, now.getTime())).toEqual({
+        name: "yesterday", startAtMs: yesterday.getTime(), endAtMs: today.getTime(),
+      });
+    }
+  });
+
   it("accepts shared scope filters for Threads, Turns, reports and exports", () => {
     const filters = ["--from", "2026-01-01", "--to", "2026-01-02", "--model", "model-1", "--status", "failed", "--operation", "compact"];
     expect(parseMetricsThreadsArgs(filters)).toMatchObject({ from: "2026-01-01", to: "2026-01-02", model: "model-1" });
@@ -93,7 +108,7 @@ describe("metrics command options", () => {
     expect(() => validateMetricsCommandArgs("quota", ["--range", "90d", "--format", "json"]))
       .not.toThrow();
     expect(() => validateMetricsCommandArgs("quota", ["--range", "365d"]))
-      .toThrow("--range 只支持 24h、7d、30d、90d 或 all");
+      .toThrow("--range 只支持 today、yesterday、24h、7d、30d、90d 或 all");
     expect(() => validateMetricsCommandArgs("quota", ["--format", "yaml"]))
       .toThrow("--format 只支持 markdown、json、csv");
   });

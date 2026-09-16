@@ -13,7 +13,7 @@
   SQLite 实现声明完整能力，各消费方按实际用途依赖窄端口。
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照、响应正文
   或流式阶段时间。
-- `request-metrics-query-service.ts`：在只读 Store 之上统一五档时间范围、自定义日期、请求筛选、聚合维度以及
+- `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
@@ -53,7 +53,7 @@
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合覆盖指标库全部保留记录，
-  可按全局、提供商或“提供商 + 模型”分组；支持 `24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
+  可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。

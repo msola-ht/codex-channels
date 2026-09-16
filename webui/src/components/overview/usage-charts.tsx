@@ -24,15 +24,9 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { formatTokens } from "@/lib/format"
 import { toUsageTrend } from "@/lib/trend"
 import type { DailyUsageRow, Range, RangeName } from "@/lib/types"
+import { metricsRangeLabels } from "@/lib/metrics-query"
 
 const dayMs = 86_400_000
-const rangeLabels: Record<RangeName, string> = {
-  "24h": "最近 24 小时",
-  "7d": "最近 7 天",
-  "30d": "最近 30 天",
-  "90d": "最近 90 天",
-  all: "全部历史",
-}
 
 export function UsageCharts({
   trendRows,
@@ -43,7 +37,7 @@ export function UsageCharts({
   error,
 }: {
   trendRows: DailyUsageRow[]
-  trendRange: Range
+  trendRange: Range<string>
   heatmapRows: DailyUsageRow[]
   heatmapEndAtMs: number
   heatmapLoading: boolean
@@ -53,7 +47,9 @@ export function UsageCharts({
   const filledHeatmapRows = heatmapLoading && heatmapRows.length === 0
     ? []
     : fillRecentDays(heatmapRows, heatmapEndAtMs, 90)
-  const rangeLabel = rangeLabels[trendRange.name]
+  const rangeLabel = trendRange.name.includes("..")
+    ? trendRange.name.replace("..", " 至 ")
+    : metricsRangeLabels[trendRange.name as RangeName]
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
@@ -201,7 +197,7 @@ function fillRecentDays(rows: DailyUsageRow[], endAtMs: number, days: number): D
   return fillDays(rows, endDay - (days - 1) * dayMs, days)
 }
 
-function fillDailyRange(rows: DailyUsageRow[], range: Range): DailyUsageRow[] {
+function fillDailyRange(rows: DailyUsageRow[], range: Range<string>): DailyUsageRow[] {
   const endDay = utcDayStart(Math.max(range.startAtMs, range.endAtMs - 1))
   const firstRecordedDay = rows[0]?.day
   const startDay = range.name === "all"

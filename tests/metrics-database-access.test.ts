@@ -65,8 +65,8 @@ describe("model request metrics database access", () => {
     expect(metricsRange("24h", now).startAtMs).toBe(now - 86_400_000);
     expect(metricsRange("90d", now).startAtMs).toBe(now - 90 * 86_400_000);
     expect(metricsRange("all", now)).toEqual({ name: "all", startAtMs: 0, endAtMs: now });
-    expect(() => metricsRange("yesterday", now))
-      .toThrow("--range 只支持 24h、7d、30d、90d 或 all");
+    expect(() => metricsRange("invalid", now))
+      .toThrow("--range 只支持 today、yesterday、24h、7d、30d、90d 或 all");
   });
 
   it("reports a missing database without creating it", () => {

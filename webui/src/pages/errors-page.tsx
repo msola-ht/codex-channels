@@ -34,7 +34,7 @@ import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { metricsLink } from "@/lib/metrics-query"
 
 export function ErrorsPage() {
-  const { query, update } = useMetricsQuery("90d")
+  const { query, update } = useMetricsQuery("30d")
   const { data, loading, error } = useErrors(query)
   const { offset, limit } = query
   const pageNumber = Math.floor(offset / limit) + 1
