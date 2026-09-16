@@ -172,7 +172,11 @@ export class RequestMetricsQueryService {
       global: global.aggregate,
       threadCount: threads.matchedTotal,
       turnCount: threads.turnCount,
-      providers: providers.groups,
+      providers: providers.groups.map((group) => {
+        // Provider 维度直接按非空 provider 列分组；仅 global 维度会返回 null。
+        const scopedThreads = this.threadList(range, { provider: group.provider!, limit: 1 });
+        return { ...group, threadCount: scopedThreads.matchedTotal, turnCount: scopedThreads.turnCount };
+      }),
       errors: this.errors(range),
     };
   }

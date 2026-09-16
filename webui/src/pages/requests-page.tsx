@@ -28,7 +28,6 @@ export function RequestsPage() {
         <>
           <QuerySummary aggregate={data.aggregate} range={data.range} />
           <RequestsTable
-            query={query}
             records={data.records}
             pageNumber={Math.floor(query.offset / query.limit) + 1}
             hasPrevious={query.offset > 0}

@@ -36,6 +36,42 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("counts Provider Threads and Turns independently within the selected range", async () => {
+    const fixture = createFixture();
+    const nowMs = Date.now();
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const current = { ...metricSample(), recordedAtMs: nowMs - 1_000 };
+    store.recordBatch([
+      current,
+      current,
+      { ...current, turnId: "turn-2" },
+      { ...current, threadId: "subagent-1" },
+      { ...current, threadId: "no-turn", turnId: null },
+      { ...current, provider: "openai" },
+      { ...current, provider: "unbound", threadId: null, turnId: null },
+      { ...current, threadId: "older-thread", recordedAtMs: nowMs - 2 * 86_400_000 },
+    ]);
+    store.recordSubagentThread({ agentThreadId: "subagent-1", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+    for (const [range, threadCount, turnCount] of [["24h", 2, 3], ["7d", 3, 4]] as const) {
+      const response = await fetch(`${origin}/api/v1/overview?range=${range}`);
+      expect(response.status).toBe(200);
+      const overview = await response.json();
+      expect(overview).toMatchObject({ threadCount, turnCount });
+      expect(overview.providers).toEqual(expect.arrayContaining([
+        expect.objectContaining({ provider: "deepseek", threadCount, turnCount }),
+        expect.objectContaining({ provider: "openai", threadCount: 1, turnCount: 1 }),
+        expect.objectContaining({ provider: "unbound", threadCount: 0, turnCount: 0, aggregate: expect.objectContaining({ requestCount: 1 }) }),
+      ]));
+      for (const group of overview.providers) {
+        const threads = await (await fetch(`${origin}/api/v1/threads?range=${range}&provider=${group.provider}&limit=1`)).json();
+        expect(group.threadCount).toBe(threads.total);
+        expect(group.turnCount).toBe(threads.turnCount);
+      }
+    }
+  });
+
   it("keeps calendar-day and custom-date totals aligned across dashboard and detail queries", async () => {
     const fixture = createFixture();
     const today = new Date();

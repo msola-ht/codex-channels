@@ -57,6 +57,8 @@ export interface ProviderGroup {
   provider: string | null
   model: string | null
   aggregate: Aggregate
+  threadCount: number
+  turnCount: number
 }
 
 export interface ErrorGroup {

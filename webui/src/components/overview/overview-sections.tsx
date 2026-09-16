@@ -79,13 +79,15 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
     <Card>
       <CardHeader>
         <CardTitle>按 Provider</CardTitle>
-        <CardDescription>每组包含请求、Token 与压缩统计</CardDescription>
+        <CardDescription>每组包含会话、轮次、请求、Token 与压缩统计</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Provider</TableHead>
+              <TableHead>会话</TableHead>
+              <TableHead>轮次</TableHead>
               <TableHead>请求</TableHead>
               <TableHead>输入 Token</TableHead>
               <TableHead>输出 Token</TableHead>
@@ -96,6 +98,8 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             {providers.map((group) => (
               <TableRow key={group.provider ?? "unknown"}>
                 <TableCell><ProviderBadge provider={group.provider} /></TableCell>
+                <TableCell className="tabular-nums">{group.threadCount.toLocaleString("zh-CN")}</TableCell>
+                <TableCell className="tabular-nums">{group.turnCount.toLocaleString("zh-CN")}</TableCell>
                 <TableCell className="tabular-nums">{group.aggregate.requestCount.toLocaleString("zh-CN")}</TableCell>
                 <TableCell className="tabular-nums">
                   <InputTokenTooltip
@@ -118,7 +122,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
             ))}
             {providers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="h-16 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -22,6 +22,7 @@ import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useOverview } from "@/hooks/use-overview"
 import { cn } from "@/lib/utils"
+import { resolveDashboardData } from "@/lib/overview-state"
 import type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
@@ -31,15 +32,14 @@ import type {
   MetricsRangeQuery,
 } from "@/lib/types"
 
-export function ConsolePage() {
-  const [range, setRange] = useState<MetricsRangeQuery>({ range: "30d" })
+export function ConsolePage({ range, onRangeChange }: {
+  range: MetricsRangeQuery
+  onRangeChange: (range: MetricsRangeQuery) => void
+}) {
   const account = useOverview(range)
   const trend = useDailyUsage(range)
   const heatmap = useDailyUsage({ range: "90d" })
-  const [dashboard, setDashboard] = useState<{
-    overview: OverviewResponse
-    trend: DailyUsageResponse
-  } | null>(null)
+  const dashboard = resolveDashboardData(range, account.data, trend.data)
   const officialAccounts = useOfficialAccountSources()
   const refetchOverview = account.refetch
   const refetchTrend = trend.refetch
@@ -53,13 +53,6 @@ export function ConsolePage() {
     void refreshAccounts()
   }, [refetchHeatmap, refetchOverview, refetchTrend, refreshAccounts])
 
-  useEffect(() => {
-    const name = range.range ?? `${range.from}..${range.to}`
-    if (account.data?.range.name === name && trend.data?.range.name === name) {
-      setDashboard({ overview: account.data, trend: trend.data })
-    }
-  }, [account.data, range, trend.data])
-
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -68,7 +61,7 @@ export function ConsolePage() {
       </div>
       <LocalDashboard
         range={range}
-        onRangeChange={setRange}
+        onRangeChange={onRangeChange}
         onRefresh={refreshDashboard}
         data={dashboard?.overview ?? null}
         loading={account.loading || trend.loading}
@@ -81,7 +74,7 @@ export function ConsolePage() {
         heatmapError={heatmap.error}
       />
       <AccountStatusCards
-        overview={account.data}
+        overview={dashboard?.overview ?? null}
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
@@ -129,7 +122,7 @@ function LocalDashboard({
       </div>
       <ErrorBanner error={error} />
       {data === null
-        ? <PageSkeleton rows={4} />
+        ? (error === null && trendError === null ? <PageSkeleton rows={4} /> : <ErrorBanner error={trendError} />)
         : <>
             <GlobalCards global={data.global} threadCount={data.threadCount} turnCount={data.turnCount} />
             <UsageCharts
