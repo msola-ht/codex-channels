@@ -40,6 +40,7 @@ export function ConsolePage({ range, onRangeChange }: {
   const officialAccounts = useOfficialAccountSources()
   const refetchHeatmap = heatmap.refetch
   const refreshAccounts = officialAccounts.refresh
+  const refreshing = account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
     refetch()
@@ -49,17 +50,22 @@ export function ConsolePage({ range, onRangeChange }: {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">控制台</h1>
-        <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="shrink-0">
+          <h1 className="text-xl font-semibold">控制台</h1>
+          <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
+        </div>
+        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
+          <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
+          <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
+            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {refreshing ? "刷新中" : "刷新"}
+          </Button>
+        </div>
       </div>
       <LocalDashboard
-        range={range}
-        onRangeChange={onRangeChange}
-        onRefresh={refreshDashboard}
         data={trend.data === null ? null : account.data}
         loading={account.loading || trend.loading}
-        refreshing={account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing}
         error={account.error}
         trend={trend.data}
         trendError={trend.error}
@@ -79,12 +85,8 @@ export function ConsolePage({ range, onRangeChange }: {
 }
 
 function LocalDashboard({
-  range,
-  onRangeChange,
-  onRefresh,
   data,
   loading,
-  refreshing,
   error,
   trend,
   trendError,
@@ -92,12 +94,8 @@ function LocalDashboard({
   heatmapLoading,
   heatmapError,
 }: {
-  range: MetricsRangeQuery
-  onRangeChange: (range: MetricsRangeQuery) => void
-  onRefresh: () => void
   data: OverviewResponse | null
   loading: boolean
-  refreshing: boolean
   error: string | null
   trend: DailyUsageResponse | null
   trendError: string | null
@@ -107,13 +105,6 @@ function LocalDashboard({
 }) {
   return (
     <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
-      <div className="flex flex-wrap items-end justify-end gap-3">
-        <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
-        <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-          {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-          {refreshing ? "刷新中" : "刷新"}
-        </Button>
-      </div>
       <ErrorBanner error={error} />
       {data === null
         ? (error === null && trendError === null ? <PageSkeleton rows={4} /> : <ErrorBanner error={trendError} />)

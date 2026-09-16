@@ -80,7 +80,7 @@ function UsageTrendCard({
     <Card className="h-[340px]">
       <CardHeader>
         <CardTitle>用量趋势</CardTitle>
-        <CardDescription>{rangeLabel} Token 变化</CardDescription>
+        <CardDescription>{rangeLabel} Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
       </CardHeader>
       <CardContent>
         {!hasData ? (
@@ -100,11 +100,12 @@ function UsageTrendCard({
               </defs>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={(day) => String(day).slice(5)} />
-              <YAxis tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="input" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="output" orientation="right" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} tick={{ style: { fill: "var(--color-outputTokens)" } }} />
               <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
-              <Area dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
-              <Area dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
-              <Area dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
+              <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
+              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
