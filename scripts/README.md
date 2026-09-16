@@ -10,6 +10,13 @@
 - `runtime-environment.mjs`：在已定位的用户配置上统一装配 Gateway、App Server 与管理脚本使用的
   `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
+- `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc desktop-app` 的严格
+  参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
+  写入与回滚、App Server 服务重启、受认证桥就绪探测和单次环境启动；状态不输出桥令牌，两个
+  平台均明确标为预览。macOS 已通过 Thread 双向共享实机验收，但外部 App Server 无法满足
+  Desktop 内置 `codex_app` MCP 的私有工具 Pipe 与可信进程要求；Windows 尚未实机验收。
+- `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
+  和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
 - `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
   源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
   版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，确认

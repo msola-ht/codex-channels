@@ -43,6 +43,10 @@ export interface GatewayConfigDocument {
     };
     upstream_user_agent?: string;
     terminal_identity?: string;
+    desktop_app?: {
+      enabled: boolean;
+      port: number;
+    };
   };
   approval: { timeout_seconds: number };
   conversation: { idle_release_minutes: number };

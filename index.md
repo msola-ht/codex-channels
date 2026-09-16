@@ -31,6 +31,8 @@
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
   当前边界、实现入口、验证范围与正式发布门槛。
+- [`docs/codex-desktop-app-development.md`](docs/codex-desktop-app-development.md)：Codex Desktop App
+  与 Gateway 共享主 OpenAI App Server 的桥接架构、实机限制、跨平台边界与下一阶段决策。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。

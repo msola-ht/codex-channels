@@ -27,6 +27,10 @@
   选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   在 TUI 生命周期内持有对应实例的 Supervisor 租约，直接运行的 `codex --remote` 不具备该保护；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
+- `desktop-app`：只读检查或在 macOS / Windows 预览中启用、禁用并启动 ChatGPT Desktop App 的
+  共享 App Server 连接；完整退出检查、构建兼容探测、配置事务、服务重启、回环桥就绪、单次
+  子进程环境和令牌脱敏由 `scripts/desktop-app-command.mjs` 负责。当前预览只承诺会话共享，
+  不承诺 Desktop 内置 `codex_app` MCP 可用。
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。

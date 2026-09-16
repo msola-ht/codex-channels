@@ -178,6 +178,41 @@ codexc remote --profile sf-deepseek resume
 直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，空闲释放可能停止对应实例；
 共享 App Server 的 TUI 请统一使用 `codexc remote`。
 
+### Codex Desktop App 共享（macOS / Windows 预览）
+
+同一台 Mac 或 Windows 电脑上的 ChatGPT Desktop App 可以通过受认证的本机回环桥连接主 OpenAI
+App Server。启用前必须完全退出 ChatGPT App，并确保主 Provider 是 OpenAI、App Server 后台服务
+已经安装；Windows 还需要 PowerShell 7 和当前用户安装的 `OpenAI.Codex` 包：
+
+```bash
+codexc desktop-app status
+codexc desktop-app enable
+codexc desktop-app open
+```
+
+以后每次都使用 `codexc desktop-app open` 启动；从 Dock 或开始菜单直接打开不会继承本次共享端点。
+关闭功能前同样先完全退出 App，再执行：
+
+```bash
+codexc desktop-app disable
+```
+
+`status --json` 只输出不带令牌的回环地址和脱敏状态。桥只支持主 OpenAI App Server，不接入
+Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属于未公开兼容入口，当前功能是
+预览；构建不兼容时命令会拒绝启用。`bridgeReady` 只表示受认证回环桥可以连接，不表示 Desktop
+内置工具全部可用。
+
+macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
+Thread，App Server 重启后也能恢复连接；但 Desktop 内置 `codex_app` MCP 会因为外部 App Server
+没有 Desktop 私有工具 Pipe 的可信进程上下文而启动失败。因此当前预览只提供会话共享，不提供完整
+Desktop 工具等价性。需要使用该内置 MCP 时，应先执行 `codexc desktop-app disable`，再让 Desktop
+使用自身管理的 App Server；两种模式当前不能同时满足。Windows 只查询当前用户的正式安装包，并
+直接创建带单次环境的包内 Desktop 子进程，不写当前用户或系统级持久环境；Windows 的会话双向互通
+及内置工具兼容均尚未实机验收，不能据此视为正式平台支持。
+
+实现边界、阶段状态和验收标准见
+[`Codex Desktop App 共享 App Server 实施方案`](codex-desktop-app-development.md)。
+
 ## 5. 后台服务与更新
 
 安装、检查和重启：

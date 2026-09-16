@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 import { resolveAppServerRuntime } from "./app-server-runtime.mjs";
+import { startDesktopAppBridge } from "./desktop-app-bridge.mjs";
 import {
   AppServerSupervisorOwner,
   appServerSocketAcceptsWebSocket,
@@ -89,6 +90,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     managedSocketPaths,
     primaryProvider,
   } = appServerRuntime;
+  if (validatedCodex.desktop_app?.enabled === true && primaryProvider !== "openai") {
+    throw new Error("Codex Desktop App 共享只支持 OpenAI 主 Provider");
+  }
   const customSwitchingProvidersById = new Map(
     customSwitchingProviders.map((provider) => [provider.provider, provider]),
   );
@@ -98,6 +102,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   } = await import("../dist/provider-proxy/index.js");
   const upstreamAgents = new Set();
   let supervisorOwner;
+  let desktopAppBridge;
   const upstreamAgentFor = (upstreamUrl) => {
     const proxyUrl = selectHttpProxyUrl({
       http: runtime.environment.HTTP_PROXY,
@@ -537,6 +542,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     const lifecycle = forwardChildrenLifecycle(children, async () => {
+      await desktopAppBridge?.close();
       await supervisorOwner?.close();
       await Promise.all(
         providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),
@@ -553,7 +559,26 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     await supervisorOwner.start();
     await ensureInstance(primaryProvider, { waitForReady: false });
     supervisorOwner.markRunning(primaryProvider);
+    if (validatedCodex.desktop_app?.enabled === true) {
+      await ensureInstance(primaryProvider);
+      desktopAppBridge = await startDesktopAppBridge({
+        port: validatedCodex.desktop_app.port,
+        socketPath,
+        primaryProvider,
+        codexBinary: runtime.environment.CODEX_BINARY,
+        dataDir: runtime.dataDir,
+        onEvent: (event) => {
+          if (event.type === "connection-error") {
+            console.error(`Codex Desktop App 桥连接失败：${event.stage}`);
+          }
+        },
+      });
+      console.log(
+        `Codex Desktop App 桥已启动：127.0.0.1:${validatedCodex.desktop_app.port}`,
+      );
+    }
   } catch (error) {
+    await desktopAppBridge?.close();
     await supervisorOwner?.close();
     await Promise.all(
       providerProxyRuntimes.values().map(({ proxy }) => proxy.close()),

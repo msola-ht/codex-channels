@@ -13,6 +13,13 @@ App Server 合同与发布候选的渠道/Provider 验收仍未闭环。公开�
 
 - `WindowsProxyTransport` 通过固定 Codex CLI 的 `codex app-server proxy --sock` 接入 App Server
   UDS；Unix 继续使用原有私有 Socket 合同。
+- 开发中的 Desktop App 桥只绑定回环地址并要求私有随机令牌，每个连接仍通过
+  `WindowsProxyTransport` 接入同一私有 UDS；它不把 App Server 改为 TCP 监听，也不替换固定
+  Transport。公开 `desktop-app` 命令只读查询当前用户 `OpenAI.Codex` 包和兼容入口，`open` 直接
+  创建只继承本次共享端点的包内 Desktop 子进程，不写持久环境。macOS 已确认该方案可以共享
+  Thread，但不能把 Desktop 私有 `CODEX_APP_TOOLS_PIPE_PATH` 交给外部 App Server，且内置
+  `codex_app` MCP 的可信进程校验失败；Windows 不能沿用 macOS 的会话结果推断工具兼容。Windows
+  真实双向互通和内置工具均尚未验收，因此状态明确保留为预览，不视为正式平台支持。
 - Gateway Owner、App Server Supervisor、Provider Metrics 与 Thread Writer Lock 使用当前用户
   私有 IPC；Windows 路径按当前 SID/ACL 校验，不套用 POSIX UID、mode 或文件类型判断。
 - 配置、数据库、日志、媒体、备份和安全记录使用当前用户私有 ACL；渠道和 Provider 凭据使用

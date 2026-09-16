@@ -58,6 +58,10 @@
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
   传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份
   `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
+- `desktop-app-bridge.mjs` / `desktop-app-bridge.d.mts`：在功能显式启用时，为 Codex Desktop App
+  提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
+  Transport 与主 Provider 租约，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
+  仍通过锁定 Codex CLI 的 `app-server proxy --sock` 连接私有 UDS。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
@@ -67,8 +71,8 @@
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
-  实例子进程、按需启动/释放、Supervisor 和退出清理生命周期；CLI 与脚本只负责准备已校验的运行环境
-  和默认 Workspace。
+  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；CLI 与脚本只
+  负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
