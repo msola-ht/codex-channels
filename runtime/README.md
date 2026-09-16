@@ -86,6 +86,9 @@
   未受监管的活动 App Server；Windows 通过官方 `app-server proxy` 检查 UDS 健康并把失效 rendezvous
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
+- `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按共享代理键合并并发
+  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 OpenCode Go
+  多账户同时启动时重复创建或过早关闭共享代理。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权

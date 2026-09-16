@@ -35,17 +35,10 @@ export interface SessionListView {
 }
 
 const requestMetricsTimeRanges = new Set<RequestMetricsTimeRange>([
-  "today",
-  "yesterday",
-  "this-week",
-  "last-week",
-  "this-month",
-  "last-month",
   "24h",
   "7d",
   "30d",
   "90d",
-  "365d",
   "all",
 ]);
 
@@ -65,7 +58,7 @@ export function parseMetricsCommand(input: string): RequestMetricsCommandQuery {
   ) {
     throw new UserFacingError(
       "metrics.usage",
-      "Metrics 参数无效；范围支持 today、yesterday、this-week、last-week、this-month、last-month、24h、7d、30d、90d、365d、all",
+      "Metrics 参数无效；范围支持 24h、7d、30d、90d、all",
     );
   }
   return {

@@ -1,3 +1,12 @@
+import type { ModelRequestMetricsFilters, StoredModelRequestMetricsAggregate } from "../dist/observability/index.js";
+
+export interface MetricsQueryOptions extends ModelRequestMetricsFilters {
+  range?: string;
+  from?: string;
+  to?: string;
+  nowMs?: number;
+}
+
 export interface MetricsDatabaseStatus {
   compatible: boolean;
   count: number | null;
@@ -32,6 +41,7 @@ export interface MetricsReportDocument {
   version: 3;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
+  filters: ModelRequestMetricsFilters;
   report: {
     dimension: unknown;
     startAtMs: number;
@@ -49,6 +59,8 @@ export interface MetricsExportDocument {
   version: 3;
   generatedAt: string;
   range: { name: string; startAtMs: number; endAtMs: number };
+  filters: ModelRequestMetricsFilters;
+  aggregate: StoredModelRequestMetricsAggregate | null;
   records: unknown[];
   weeklyQuota: unknown;
 }
@@ -66,6 +78,8 @@ export interface MetricsThreadsDocument {
   format: "codex-connect-request-metrics-threads";
   version: 1;
   generatedAt: string;
+  range: { name: string; startAtMs: number; endAtMs: number };
+  filters: ModelRequestMetricsFilters;
   threads: Array<{
     threadId: string;
     provider: string | null;
@@ -84,6 +98,8 @@ export interface MetricsTurnsDocument {
   format: "codex-connect-request-metrics-turns";
   version: 2;
   generatedAt: string;
+  range: { name: string; startAtMs: number; endAtMs: number };
+  filters: ModelRequestMetricsFilters;
   threadId: string;
   turns: Array<Record<string, unknown> & { recordedAtMs: number }>;
 }
@@ -186,12 +202,12 @@ export function cleanupMetricsDatabaseWithGatewayRestart(
 
 export function readMetricsReport(
   environment?: NodeJS.ProcessEnv,
-  options?: { range?: string; from?: string; to?: string; group?: "global" | "providers" | "models"; nowMs?: number },
+  options?: MetricsQueryOptions & { group?: "global" | "providers" | "models" },
 ): MetricsReportDocument;
 
 export function readMetricsExport(
   environment?: NodeJS.ProcessEnv,
-  options?: { range?: string; from?: string; to?: string; nowMs?: number; threadId?: string },
+  options?: MetricsQueryOptions,
 ): MetricsExportDocument;
 
 export function readMetricsRun(
@@ -201,9 +217,11 @@ export function readMetricsRun(
 
 export function readMetricsThreads(
   environment?: NodeJS.ProcessEnv,
+  options?: MetricsQueryOptions,
 ): MetricsThreadsDocument;
 
 export function readMetricsTurns(
   environment?: NodeJS.ProcessEnv,
   threadId?: string,
+  options?: MetricsQueryOptions,
 ): MetricsTurnsDocument;

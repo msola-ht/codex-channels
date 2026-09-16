@@ -1,6 +1,7 @@
 import {
   csvCell,
   formatLocalTime,
+  formatRequestCount,
   formatTokenCount,
   markdownCell,
 } from "./metrics-export-format.mjs";
@@ -54,7 +55,7 @@ export function printQuotaHistory(result, format = "markdown") {
     const used = period.latestUsedPercentMillionths === null
       ? "未记录历史百分比"
       : `${(period.latestUsedPercentMillionths / 1_000_000).toFixed(2)}%`;
-    console.log(`- ${period.provider} · ${period.windowId} · 周期 ${start} ～ ${reset} · 最新使用 ${used} · 请求 ${period.requestCount} · Token ${formatTokenCount(period.totalTokens)}`);
+    console.log(`- ${period.provider} · ${period.windowId} · 周期 ${start} ～ ${reset} · 最新使用 ${used} · 请求 ${formatRequestCount(period.requestCount)} · Token ${formatTokenCount(period.totalTokens)}`);
   }
 }
 
@@ -152,8 +153,8 @@ export function printMetricsReport(result, format) {
     console.log("本时间范围没有请求记录。");
     return;
   }
-  console.log(`- 模型请求：${aggregate.requestCount}`);
-  console.log(`- 异常或未完整观测：${aggregate.unsuccessfulRequestCount}`);
+  console.log(`- 模型请求：${formatRequestCount(aggregate.requestCount)}`);
+  console.log(`- 异常或未完整观测：${formatRequestCount(aggregate.unsuccessfulRequestCount)}`);
   console.log(`- 输入 Token：${aggregate.inputTokens}`);
   console.log(`- 缓存输入 Token：${aggregate.cachedInputTokens ?? "未知"}`);
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
@@ -345,9 +346,9 @@ function formatCompactSummary(compact) {
     ? "混合模型"
     : compact.model ?? "模型未知";
   const failures = compact.unsuccessfulRequestCount > 0
-    ? `（异常 ${compact.unsuccessfulRequestCount} 次）`
+    ? `（异常 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次）`
     : "";
-  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
+  return `${formatRequestCount(compact.requestCount)} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
 }
 
 export function printMetricsRun(result, format) {
@@ -425,6 +426,7 @@ export function printMetricsTurns(result, format) {
     return;
   }
   console.log(`# 会话对话明细 · ${result.threadId}`);
+  console.log(`- 时间范围：${result.range.name} · 当前会话自身的期间统计`);
   console.log("");
   if (result.turns.length === 0) {
     console.log("该会话暂无可导出的对话记录。");
@@ -483,6 +485,7 @@ export function printMetricsThreads(result, format) {
     return;
   }
   console.log(`# 指标会话列表（${result.threads.length}）`);
+  console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
   console.log("");
   console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- |");
@@ -517,7 +520,7 @@ function printTurnSummary(summary) {
     console.log(`- 思考等级：${summary.reasoningEffort}`);
   }
   console.log(
-    `- 模型请求：${summary.requestCount} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${summary.unsuccessfulRequestCount} 次）` : ""}`,
+    `- 模型请求：${formatRequestCount(summary.requestCount)} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(summary.unsuccessfulRequestCount)} 次）` : ""}`,
   );
   console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
   if (summary.cachedInputTokens === null) {

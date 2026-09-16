@@ -33,8 +33,8 @@
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
-- `request-metrics-query-adapter.ts`：把 Observability 指标查询、时间范围和 Provider 显示名映射为
-  Application 的 `/metrics` 窄端口；不改变 Store 查询模型，也不让 Application 依赖 SQLite 实现。
+- `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
+  显示名映射为 Application 的 `/metrics` 窄端口；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
   有界装配 DeepSeek、OpenCode Go 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。

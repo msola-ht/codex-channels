@@ -1,6 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+
+import ts from "typescript";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -27,6 +30,73 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("loads command help and validates queries without loading SQLite", () => {
+    const loader = `export function resolve(specifier, context, nextResolve) {
+      if (specifier === "node:sqlite") throw new Error("Query options must not load SQLite");
+      return nextResolve(specifier, context);
+    }`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { register } from "node:module";
+      register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(loader)}`)});
+      const { metricsCommandUsage, validateMetricsCommandArgs } =
+        await import("./scripts/metrics-command-options.mjs");
+      validateMetricsCommandArgs("report", ["--range", "today"]);
+      console.log(metricsCommandUsage.report);
+    `], { cwd: process.cwd(), encoding: "utf8" });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("codexc metrics report");
+  });
+
+  it("resolves metrics declaration imports without build artifacts", () => {
+    const config = ts.readConfigFile(resolve("tsconfig.json"), ts.sys.readFile);
+    expect(config.error).toBeUndefined();
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, process.cwd());
+    expect(parsed.errors).toEqual([]);
+    const dist = resolve("dist") + sep;
+    const host = {
+      ...ts.sys,
+      fileExists: (file: string) => !resolve(file).startsWith(dist) && ts.sys.fileExists(file),
+    };
+    for (const name of ["metrics-command-options", "metrics-database"]) {
+      const file = resolve(`scripts/${name}.d.mts`);
+      const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+      const imports = source.statements.filter(ts.isImportDeclaration);
+      expect(imports.length).toBeGreaterThan(0);
+      for (const entry of imports) {
+        if (!ts.isStringLiteral(entry.moduleSpecifier)) throw new Error("Expected a module path");
+        const module = ts.resolveModuleName(entry.moduleSpecifier.text, file, parsed.options, host).resolvedModule;
+        expect(module, `${name}: ${entry.moduleSpecifier.text}`).toBeDefined();
+      }
+    }
+  });
+
+  it("resolves today and yesterday by local calendar boundaries", () => {
+    for (const now of [new Date(2026, 0, 1, 12), new Date(2026, 2, 9, 12), new Date(2026, 10, 2, 12)]) {
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      expect(metricsRangeOptions({ range: "today" }, now.getTime())).toEqual({
+        name: "today", startAtMs: today.getTime(), endAtMs: now.getTime(),
+      });
+      expect(metricsRangeOptions({ range: "yesterday" }, now.getTime())).toEqual({
+        name: "yesterday", startAtMs: yesterday.getTime(), endAtMs: today.getTime(),
+      });
+    }
+  });
+
+  it("accepts shared scope filters for Threads, Turns, reports and exports", () => {
+    const filters = ["--from", "2026-01-01", "--to", "2026-01-02", "--model", "model-1", "--status", "failed", "--operation", "compact"];
+    expect(parseMetricsThreadsArgs(filters)).toMatchObject({ from: "2026-01-01", to: "2026-01-02", model: "model-1" });
+    expect(parseMetricsTurnsArgs(["thread-1", ...filters, "--turn", "turn-1"])).toMatchObject({ threadId: "thread-1", turn: "turn-1" });
+    expect(() => validateMetricsCommandArgs("export", [...filters, "--thread", "thread-1", "--turn", "turn-1"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("report", filters)).not.toThrow();
+    expect(() => validateMetricsCommandArgs("export", ["--turn", "turn-1"])).toThrow("必须同时指定 Thread");
+    expect(() => parseMetricsThreadsArgs(["--status", "invalid"])).toThrow("status");
+    expect(() => parseMetricsTurnsArgs(["thread-1", "--range", "7d", "--from", "2026-01-01", "--to", "2026-01-02"])).toThrow("不能与 --range");
+  });
+
   it("resolves explicit local date ranges without exceeding now", () => {
     const nowMs = new Date(2026, 7, 12, 12).getTime();
 
@@ -38,6 +108,8 @@ describe("metrics command options", () => {
       });
     expect(() => metricsRangeOptions({ from: "2026-08-10" }, nowMs))
       .toThrow("自定义日期必须同时使用 --from 和 --to");
+    expect(() => metricsRangeOptions({ from: "1969-01-01", to: "2026-08-12" }, nowMs))
+      .toThrow("自定义日期范围无效");
   });
 
   it("parses shared report and cleanup options", () => {
@@ -76,9 +148,11 @@ describe("metrics command options", () => {
       .toThrow("codexc metrics status [--json]");
   });
 
-  it("accepts historical quota ranges and formats", () => {
-    expect(() => validateMetricsCommandArgs("quota", ["--range", "365d", "--format", "json"]))
+  it("accepts canonical quota ranges and formats", () => {
+    expect(() => validateMetricsCommandArgs("quota", ["--range", "90d", "--format", "json"]))
       .not.toThrow();
+    expect(() => validateMetricsCommandArgs("quota", ["--range", "365d"]))
+      .toThrow("--range 只支持 today、yesterday、24h、7d、30d、90d 或 all");
     expect(() => validateMetricsCommandArgs("quota", ["--format", "yaml"]))
       .toThrow("--format 只支持 markdown、json、csv");
   });

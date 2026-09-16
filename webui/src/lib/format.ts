@@ -1,13 +1,26 @@
 export type DisplayLanguage = "zh" | "en"
 
-const compactTokenFormatter = new Intl.NumberFormat("en-US", {
+const compactTwoDecimalFormatter = new Intl.NumberFormat("en-US", {
   notation: "compact",
   compactDisplay: "short",
-  maximumFractionDigits: 1,
+  maximumFractionDigits: 2,
+})
+
+const compactThreeDecimalFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 3,
 })
 
 export function formatTokens(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : compactTokenFormatter.format(value)
+  if (value === null || value === undefined) return "—"
+  return Math.abs(value) >= 1_000_000_000
+    ? compactThreeDecimalFormatter.format(value)
+    : compactTwoDecimalFormatter.format(value)
+}
+
+export function formatCount(value: number): string {
+  return compactTwoDecimalFormatter.format(value)
 }
 
 export function formatTime(value: number | null | undefined): string {
@@ -119,6 +132,11 @@ export function formatErrorMessage(value: string, language: DisplayLanguage): st
 export function formatSuccessRate(requestCount: number, unsuccessful: number): string {
   if (requestCount <= 0) return "—"
   return `${((requestCount - unsuccessful) / requestCount * 100).toFixed(1)}%`
+}
+
+export function formatFailureRate(requestCount: number, unsuccessful: number): string {
+  if (requestCount <= 0) return "—"
+  return `${(unsuccessful / requestCount * 100).toFixed(1)}%`
 }
 
 export function shortThreadId(threadId: string): string {

@@ -293,6 +293,7 @@ describe("ProviderProxy WebSocket metrics", () => {
           status: 429,
           error: {
             type: "usage_limit_reached",
+            code: "usage_limit_exceeded",
             message: "You've hit your usage limit.",
           },
         }));
@@ -353,6 +354,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       status: "failed",
       httpStatus: 429,
       errorType: "usage_limit_reached",
+      errorCode: "usage_limit_exceeded",
       errorMessage: "You've hit your usage limit.",
       threadId: "thread-err",
       turnId: "turn-err",

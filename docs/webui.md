@@ -69,26 +69,62 @@ codexc service stop webui        # 停止
 
 ## 页面与 API
 
+控制台会话卡片的主数显示会话数，副标题显示轮次，跟随汇总时间范围，与 Threads 列表使用相同计数：只统计期间有
+Thread 和 Turn 归属的请求，会话按 Thread 去重，轮次按 Thread + Turn 去重；同一轮的多次请求
+只计一轮，子代理作为独立会话计入。这是本机指标库观测到的轮次，不代表完整官方会话历史。
+`/api/v1/overview` 通过 `threadCount`、`turnCount` 返回这两个计数。
+“按 Provider”表格及 `providers[]` 同样提供 `threadCount`、`turnCount`，按所选时间范围内该
+Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别计入对应行，行间相加不代表全局去重总数；
+表格中的会话、轮次与请求数均显示精确整数。
+
 | 页面 | 路由 | API |
 | --- | --- | --- |
 | 概览 | `#/` | `GET /api/v1/overview?range=<范围>`、`GET /api/v1/daily?range=<范围>` |
-| Threads | `#/threads` | `GET /api/v1/threads`（包含指标库首个请求开始时间） |
+| Threads | `#/threads` | `GET /api/v1/threads?range=&offset=&limit=&sort=&direction=`（包含期间首个匹配请求的开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
+| 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
-`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
-`this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
-WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
+控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
+全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，
+对应 `range=today|yesterday`；滚动范围为 `7d|30d`，全部历史为 `all`。
+自定义日期对应 `from=YYYY-MM-DD&to=YYYY-MM-DD`，必须同时提供且不得与 `range` 混用。
+控制台自定义日期在点击“查询”后生效，Token、会话、轮次及趋势图使用同一所选范围；热力图仍固定最近 90 天。
+同一页面会话内切换到其他页面再返回控制台时，保留已应用的范围并重新查询；未提交的自定义日期不保留。
+切换范围或手动刷新时，只展示本轮加载返回的结果，不混用上一轮概览与趋势；重新加载整个 WebUI 后恢复默认最近 30 天。
+OpenAI 周额度使用本轮概览独立展示，不因趋势加载失败而隐藏已返回的额度。
+既有 API 的 `24h`、`90d` 查询继续支持，但不列在时间选择菜单中。
+日期按 WebUI 服务所在主机本地时区解析，包含结束日并截断到当前时刻。
+Threads 和每轮明细默认全部保留历史，控制台、请求和错误页面默认最近 30 天。分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`。
 已删除的 `speed`、`ttft`、`duration` 不再接受，传入时返回 400。
 默认按 `time desc` 查询整个时间范围后再分页。请求接口
-还支持 `filter` 关键字（最多 128 字符），在 Provider、模型、操作、状态、错误类型、错误码与
+还支持 `filter` 关键字（最多 128 字符），在 Thread ID、Turn ID、Provider、模型、操作、状态、错误类型、错误码与
 错误消息中全库匹配后再分页，响应 `total` 为筛选后的匹配总数。
+请求、错误、Threads 和 `/threads/:id/turns` 共用精确筛选 `threadId`、`turnId`、`provider`、
+`model`、`operation`、`status` 及关键词 `filter`；Provider 筛选为可多选下拉，未选表示全部，点击“查询”后生效。
+选项由 `GET /api/v1/providers` 返回指标库全部保留记录中的 Provider 名单，不受当前页或概览前 20 组限制；该接口不接受查询参数。
+多选使用重复参数（如 `provider=openai&provider=deepseek`），Provider 之间取并集并去重，其余条件取交集；
+分页、汇总、逐层跳转及 JSON 导出保留同一组 Provider。`turnId` 必须有对应 Thread
+（每轮接口使用路径中的 Thread）。操作支持 `response|compact`，状态支持
+`completed|failed|incomplete|unknown`；未知字段、除 `provider` 外的重复参数或无效值明确返回 400。
+会话与轮次排序支持 `time`、`last`、`provider`、`model`、`requests`、`input`、`output`、`compact`；
+会话另支持 `thread`、`turns`，轮次另支持 `turn`、`failures`。默认按最近记录倒序，先筛选、汇总和
+排序后分页；汇总覆盖全部匹配记录，独立于当前页。错误汇总的分母为相同筛选条件下的全部请求，
+错误列表只显示其中未成功的记录。
+
+查询条件保存在页面地址中；Thread → Turn → 请求的跳转保留时间和筛选，重新从第一页查询。
+期间统计按请求记录时间的左闭右开区间计算，跨界 Turn 只计入期间请求。Threads 列表和每轮明细
+只统计自身，子代理独立列出；详情中的“全部保留历史累计”明确包含子代理，不受期间筛选影响，
+对应 `/threads/:id/run`，该累计接口不接受筛选参数。轮数仅表示本机指标库观测到的不同 Turn。
+请求页可导出全部匹配结果为 JSON，导出包含所用时间范围、筛选条件与汇总，不限于当前页。
+请求明细表不展示 Thread、Turn 列，筛选栏也不提供 Thread ID、Turn ID 输入；从会话或轮次跳转时仍保留
+链接中的关联范围，点击“重置”可清除。其他页面的会话与轮次筛选、API 和 JSON 导出的归属字段仍保留。
 错误统计同时包含代理观测到的失败模型请求和未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限），
 后者显示为无 Token 的 failed 记录；失败记录保存受限长度的错误消息。错误页以发生时间倒序分页
 展示每一条失败请求，响应同时保留错误汇总供概览页展示。
@@ -97,10 +133,12 @@ WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开�
 已知 OpenAI 用量上限/额度类错误消息默认以中文展示。
 全局深色/浅色主题默认深色，顶部导航右侧按钮切换，选择持久化，刷新后保持。
 
-控制台顶部卡片使用总计、输入、缓存、输出四项 Token 口径；总计卡附带请求次数与成功率，
-缓存卡附带命中率。用量趋势图使用输入、缓存、输出三项口径。WebUI 中的 Token 数值统一使用
-`K`、`M`、`B` 英文紧凑单位，最多保留一位小数。
-四卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换四张汇总卡片、趋势图、Provider 和错误汇总。
+控制台顶部卡片使用总计、输入、输出三项 Token 口径；总计卡附带请求次数与成功率，输入卡附带
+缓存 Token 与命中率。用量趋势图使用输入、缓存、输出三项口径：输入与缓存共用左轴，输出使用右轴独立刻度，
+两轴均从零开始；曲线高度不代表跨轴数量相同，悬浮提示保留实际数值。WebUI 中的 Token 与汇总请求数统一使用
+`K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
+汇总请求数最多保留两位小数；明细表请求数仍显示精确整数。
+四张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
 控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；OCG 与 DS
 快照超过 15 分钟或尚未采集时，账户卡片会提示刷新。控制台首次打开时自动刷新已配置的 DS 与 OCG
 账户；汇总范围旁的刷新按钮同时更新本地指标、固定 90 天热力图和账户快照。WebUI 通过私有 Gateway
@@ -166,10 +204,10 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 时按官方未登录处理，不把“OpenAI 官方”作为主 Provider 展示，而是显示“未登录”状态。
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
-支持当前已加载页的搜索筛选、列显隐和行选择，表格在视口内内部滚动，输入、输出与
+支持服务端组合筛选、排序与分页，以及列显隐和行选择，表格在视口内内部滚动，输入、输出与
 缓存列悬浮显示明细；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
 悬浮查看完整值，Schema v13 起入库，当前 Schema v14 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
-分页，每页条数支持 10–500。Threads 的“开始时间”表示指标库中该 Thread 首个请求的
+分页，每页条数支持 10–500。Threads 的“期间首次请求”表示匹配条件中首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
 Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，
 子代理标记与请求统计一同持久化在指标库中。

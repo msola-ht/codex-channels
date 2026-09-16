@@ -24,22 +24,9 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { formatTokens } from "@/lib/format"
 import { toUsageTrend } from "@/lib/trend"
 import type { DailyUsageRow, Range, RangeName } from "@/lib/types"
+import { metricsRangeLabels } from "@/lib/metrics-query"
 
 const dayMs = 86_400_000
-const rangeLabels: Record<RangeName, string> = {
-  today: "今天",
-  yesterday: "昨天",
-  "this-week": "本周",
-  "last-week": "上周",
-  "this-month": "本月",
-  "last-month": "上月",
-  "24h": "最近 24 小时",
-  "7d": "最近 7 天",
-  "30d": "最近 30 天",
-  "90d": "最近 90 天",
-  "365d": "最近 365 天",
-  all: "全部历史",
-}
 
 export function UsageCharts({
   trendRows,
@@ -50,7 +37,7 @@ export function UsageCharts({
   error,
 }: {
   trendRows: DailyUsageRow[]
-  trendRange: Range
+  trendRange: Range<string>
   heatmapRows: DailyUsageRow[]
   heatmapEndAtMs: number
   heatmapLoading: boolean
@@ -60,7 +47,9 @@ export function UsageCharts({
   const filledHeatmapRows = heatmapLoading && heatmapRows.length === 0
     ? []
     : fillRecentDays(heatmapRows, heatmapEndAtMs, 90)
-  const rangeLabel = rangeLabels[trendRange.name]
+  const rangeLabel = trendRange.name.includes("..")
+    ? trendRange.name.replace("..", " 至 ")
+    : metricsRangeLabels[trendRange.name as RangeName]
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
@@ -91,7 +80,7 @@ function UsageTrendCard({
     <Card className="h-[340px]">
       <CardHeader>
         <CardTitle>用量趋势</CardTitle>
-        <CardDescription>{rangeLabel} Token 变化</CardDescription>
+        <CardDescription>{rangeLabel} Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
       </CardHeader>
       <CardContent>
         {!hasData ? (
@@ -111,11 +100,12 @@ function UsageTrendCard({
               </defs>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={(day) => String(day).slice(5)} />
-              <YAxis tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="input" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
+              <YAxis yAxisId="output" orientation="right" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} tick={{ style: { fill: "var(--color-outputTokens)" } }} />
               <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
-              <Area dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
-              <Area dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
-              <Area dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
+              <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
+              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
@@ -208,7 +198,7 @@ function fillRecentDays(rows: DailyUsageRow[], endAtMs: number, days: number): D
   return fillDays(rows, endDay - (days - 1) * dayMs, days)
 }
 
-function fillDailyRange(rows: DailyUsageRow[], range: Range): DailyUsageRow[] {
+function fillDailyRange(rows: DailyUsageRow[], range: Range<string>): DailyUsageRow[] {
   const endDay = utcDayStart(Math.max(range.startAtMs, range.endAtMs - 1))
   const firstRecordedDay = rows[0]?.day
   const startDay = range.name === "all"

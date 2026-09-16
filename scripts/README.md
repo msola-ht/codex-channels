@@ -64,13 +64,14 @@
   提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和
   SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
-  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
+  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
+  统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
-  report/export v3、run/turns v2，未改变结构的 threads 保持 v1；JSON/CSV 同时保留可视化字段；
+  report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
   与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v13
   检查点回写、私有备份后，在单一事务中重建为 v14；模型请求记录只复制当前保留字段，删除旧价格、
@@ -86,7 +87,8 @@
   行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
-  时间范围、分组、格式及维护命令参数，并向顶层帮助导出规范用法行；不访问配置、数据库或服务，
+  时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
+  导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到
@@ -96,8 +98,8 @@
   App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
-- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token/时间格式化与
-  Markdown/CSV 转义；Token 格式复用 Application/Surface 导出。
+- `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
+  以及 Markdown/CSV 转义；紧凑数字格式复用 Surface 导出。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
@@ -123,7 +125,8 @@
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
-  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors` 只读 JSON 接口；
+  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
+  Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Daily 按 `range` 返回本地 Token 的 UTC 日聚合；Threads 返回指标库首个请求开始时间，
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次

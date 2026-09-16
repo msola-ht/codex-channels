@@ -9,6 +9,21 @@ const openAiPostPaths = new Set([
   "/realtime/calls",
 ]);
 
+export type ProxyRouteKind =
+  | "response"
+  | "compact"
+  | "models"
+  | "openai-http"
+  | "openai-websocket"
+  | "unsupported";
+
+export interface ResolvedProxyRoute {
+  accountId?: string;
+  externalRole?: true;
+  kind: ProxyRouteKind;
+  path: string;
+}
+
 export function parseListenAddress(value: string): { host: string; port: number } {
   const separatorIndex = value.lastIndexOf(":");
   if (separatorIndex <= 0 || separatorIndex === value.length - 1) {
@@ -25,12 +40,12 @@ export function parseListenAddress(value: string): { host: string; port: number 
   return { host, port };
 }
 
-export function resolveAccountPath(
+export function resolveProxyRoute(
   value: string | undefined,
   accounts: readonly string[] | undefined,
   defaultAccountId: string | undefined,
   externalRoleEnabled = false,
-): { accountId?: string; path: string; externalRole?: true } | undefined {
+): ResolvedProxyRoute | undefined {
   if (!value) return undefined;
   let url: URL;
   try {
@@ -46,11 +61,10 @@ export function resolveAccountPath(
   ) {
     if (!externalRoleEnabled) return undefined;
     const rest = pathname.slice(externalRolePrefix.length);
-    return {
+    return resolvedRoute(rest || "/", url.search, {
       ...(defaultAccountId === undefined ? {} : { accountId: defaultAccountId }),
-      path: `${rest || "/"}${url.search}`,
       externalRole: true,
-    };
+    });
   }
   if (pathname === "/go" || pathname.startsWith("/go/")) {
     const segments = pathname.split("/");
@@ -63,76 +77,57 @@ export function resolveAccountPath(
       return undefined;
     }
     const rest = `/${segments.slice(3).join("/")}`;
-    return {
+    return resolvedRoute(rest === "/" ? "" : rest, url.search, {
       accountId,
-      path: `${rest === "/" ? "" : rest}${url.search}`,
-    };
+    });
   }
-  return {
+  return resolvedRoute(pathname, url.search, {
     ...(defaultAccountId === undefined ? {} : { accountId: defaultAccountId }),
-    path: `${pathname}${url.search}`,
-  };
+  });
 }
 
-export function isSupportedHttpRequest(
+export function isSupportedHttpRoute(
   method: string | undefined,
-  value: string | undefined,
+  route: ResolvedProxyRoute,
   allowOpenAiApiPaths: boolean,
 ): boolean {
-  if (!value) return false;
-  try {
-    const path = new URL(value, "http://127.0.0.1").pathname;
-    if (path === "/models") return method === "GET";
-    if (allowOpenAiApiPaths && openAiPostPaths.has(path)) return method === "POST";
-    return path === "/responses" || path === "/responses/compact";
-  } catch {
-    return false;
+  if (route.kind === "models") return method === "GET";
+  if (route.kind === "openai-http") {
+    return allowOpenAiApiPaths && method === "POST";
   }
-}
-
-export function isResponsesPath(value: string | undefined): boolean {
-  if (!value) return false;
-  try {
-    return new URL(value, "http://127.0.0.1").pathname === "/responses";
-  } catch {
-    return false;
-  }
-}
-
-export function isOpenAiRealtimeWebSocketPath(value: string | undefined): boolean {
-  if (!value) return false;
-  try {
-    const path = new URL(value, "http://127.0.0.1").pathname;
-    return path === "/v1/realtime"
-      || path === "/v1/live"
-      || /^\/v1\/live\/[a-zA-Z0-9_-]{1,128}$/u.test(path);
-  } catch {
-    return false;
-  }
-}
-
-export function isResponsesRequestPath(value: string | undefined): boolean {
-  if (!value) return false;
-  try {
-    const path = new URL(value, "http://127.0.0.1").pathname;
-    return path === "/responses" || path === "/responses/compact";
-  } catch {
-    return false;
-  }
+  return route.kind === "response" || route.kind === "compact";
 }
 
 export function responseOperation(
-  value: string | undefined,
+  route: ResolvedProxyRoute,
   metadataOperation: "response" | "compact",
 ): "response" | "compact" {
-  if (!value) return metadataOperation;
-  try {
-    return new URL(value, "http://127.0.0.1").pathname === "/responses/compact"
-      ? "compact"
-      : metadataOperation;
-  } catch {
-    return metadataOperation;
-  }
+  return route.kind === "compact" ? "compact" : metadataOperation;
+}
+
+function resolvedRoute(
+  pathname: string,
+  search: string,
+  identity: Pick<ResolvedProxyRoute, "accountId" | "externalRole">,
+): ResolvedProxyRoute {
+  return {
+    ...identity,
+    kind: routeKind(pathname),
+    path: `${pathname}${search}`,
+  };
+}
+
+function routeKind(pathname: string): ProxyRouteKind {
+  if (pathname === "/responses") return "response";
+  if (pathname === "/responses/compact") return "compact";
+  if (pathname === "/models") return "models";
+  if (openAiPostPaths.has(pathname)) return "openai-http";
+  if (
+    pathname === "/v1/realtime"
+    || pathname === "/v1/live"
+    || /^\/v1\/live\/[a-zA-Z0-9_-]{1,128}$/u.test(pathname)
+  ) return "openai-websocket";
+  return "unsupported";
 }
 
 export function upstreamPath(

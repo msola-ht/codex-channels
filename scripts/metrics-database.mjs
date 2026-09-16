@@ -47,6 +47,7 @@ import {
   assertExportFormat,
   isPrunableMetricsProviderId,
   metricsProviderIds,
+  metricsQueryOptions,
   parseCleanupOptions,
   parseLocalDate,
   parseMetricsOptions,
@@ -850,7 +851,7 @@ if (
     } else if (command === "report") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--from", "--to", "--group", "--format"]),
+        new Set([...metricsQueryOptions, "--group", "--format"]),
       );
       const format = options.format ?? "markdown";
       assertExportFormat(format, ["markdown", "json", "csv"]);
@@ -858,7 +859,7 @@ if (
     } else if (command === "export") {
       const options = parseMetricsOptions(
         process.argv.slice(3),
-        new Set(["--range", "--from", "--to", "--format", "--thread"]),
+        new Set([...metricsQueryOptions, "--format"]),
       );
       const format = options.format ?? "json";
       assertExportFormat(format, ["json", "csv", "markdown"]);
@@ -879,10 +880,10 @@ if (
       printMetricsRun(readMetricsRun(process.env, options.threadId), options.format);
     } else if (command === "threads") {
       const options = parseMetricsThreadsArgs(process.argv.slice(3));
-      printMetricsThreads(readMetricsThreads(process.env), options.format);
+      printMetricsThreads(readMetricsThreads(process.env, options), options.format);
     } else if (command === "turns") {
       const options = parseMetricsTurnsArgs(process.argv.slice(3));
-      printMetricsTurns(readMetricsTurns(process.env, options.threadId), options.format);
+      printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
     } else {
       throw new Error(
         "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|cleanup|prune>",

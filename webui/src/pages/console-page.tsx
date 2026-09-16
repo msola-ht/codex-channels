@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 import { RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { FieldGroup } from "@/components/ui/field"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
@@ -19,58 +20,54 @@ import { UsageCharts } from "@/components/overview/usage-charts"
 import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
-import { useOverview } from "@/hooks/use-overview"
+import { useDashboard } from "@/hooks/use-dashboard"
+import { cn } from "@/lib/utils"
 import type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
+  MetricsRangeQuery,
 } from "@/lib/types"
 
-export function ConsolePage() {
-  const [range, setRange] = useState<RangeName>("30d")
-  const account = useOverview(range)
-  const trend = useDailyUsage(range)
-  const heatmap = useDailyUsage("90d")
-  const [dashboard, setDashboard] = useState<{
-    overview: OverviewResponse
-    trend: DailyUsageResponse
-  } | null>(null)
+export function ConsolePage({ range, onRangeChange }: {
+  range: MetricsRangeQuery
+  onRangeChange: (range: MetricsRangeQuery) => void
+}) {
+  const { account, trend, refetch } = useDashboard(range)
+  const heatmap = useDailyUsage({ range: "90d" })
   const officialAccounts = useOfficialAccountSources()
-  const refetchOverview = account.refetch
-  const refetchTrend = trend.refetch
   const refetchHeatmap = heatmap.refetch
   const refreshAccounts = officialAccounts.refresh
+  const refreshing = account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
-    refetchOverview()
-    refetchTrend()
+    refetch()
     refetchHeatmap()
     void refreshAccounts()
-  }, [refetchHeatmap, refetchOverview, refetchTrend, refreshAccounts])
-
-  useEffect(() => {
-    if (account.data?.range.name === range && trend.data?.range.name === range) {
-      setDashboard({ overview: account.data, trend: trend.data })
-    }
-  }, [account.data, range, trend.data])
+  }, [refetchHeatmap, refetch, refreshAccounts])
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">控制台</h1>
-        <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="shrink-0">
+          <h1 className="text-xl font-semibold">控制台</h1>
+          <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
+        </div>
+        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
+          <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
+          <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
+            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {refreshing ? "刷新中" : "刷新"}
+          </Button>
+        </div>
       </div>
       <LocalDashboard
-        range={dashboard?.overview.range.name ?? range}
-        onRangeChange={setRange}
-        onRefresh={refreshDashboard}
-        data={dashboard?.overview ?? null}
+        data={trend.data === null ? null : account.data}
         loading={account.loading || trend.loading}
-        refreshing={account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing}
         error={account.error}
-        trend={dashboard?.trend ?? null}
+        trend={trend.data}
         trendError={trend.error}
         heatmap={heatmap.data}
         heatmapLoading={heatmap.loading}
@@ -88,12 +85,8 @@ export function ConsolePage() {
 }
 
 function LocalDashboard({
-  range,
-  onRangeChange,
-  onRefresh,
   data,
   loading,
-  refreshing,
   error,
   trend,
   trendError,
@@ -101,12 +94,8 @@ function LocalDashboard({
   heatmapLoading,
   heatmapError,
 }: {
-  range: RangeName
-  onRangeChange: (range: RangeName) => void
-  onRefresh: () => void
   data: OverviewResponse | null
   loading: boolean
-  refreshing: boolean
   error: string | null
   trend: DailyUsageResponse | null
   trendError: string | null
@@ -116,19 +105,11 @@ function LocalDashboard({
 }) {
   return (
     <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
-      <div className="flex flex-wrap items-center justify-end gap-3">
-        <span className="text-sm text-muted-foreground">汇总范围</span>
-        <RangeSelector value={range} onChange={onRangeChange} ariaLabel="汇总时间范围" />
-        <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-          {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-          {refreshing ? "刷新中" : "刷新"}
-        </Button>
-      </div>
       <ErrorBanner error={error} />
       {data === null
-        ? <PageSkeleton rows={4} />
+        ? (error === null && trendError === null ? <PageSkeleton rows={4} /> : <ErrorBanner error={trendError} />)
         : <>
-            <GlobalCards global={data.global} />
+            <GlobalCards global={data.global} threadCount={data.threadCount} turnCount={data.turnCount} />
             <UsageCharts
               trendRows={trend?.daily ?? []}
               trendRange={trend?.range ?? data.range}
@@ -144,6 +125,32 @@ function LocalDashboard({
   )
 }
 
+function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery; onChange: (query: MetricsRangeQuery) => void }) {
+  const [value, setValue] = useState<RangeName | "custom">(query.range ?? "custom")
+  const [dates, setDates] = useState({ from: query.from ?? "", to: query.to ?? "" })
+  return (
+    <form className={cn("w-full", value === "custom" ? "max-w-2xl" : "sm:w-48")} onSubmit={(event) => {
+      event.preventDefault()
+      onChange(value === "custom" ? dates : { range: value })
+    }}>
+      <FieldGroup className={cn("grid grid-cols-1 items-end gap-3", value === "custom" && "sm:grid-cols-[repeat(3,minmax(0,1fr))_auto]")}>
+        <RangeSelector
+          value={value}
+          onChange={(next) => {
+            setValue(next)
+            if (next !== "custom") onChange({ range: next })
+          }}
+          from={dates.from}
+          to={dates.to}
+          onDateChange={(key, date) => setDates((previous) => ({ ...previous, [key]: date }))}
+          label="汇总范围"
+        />
+        {value === "custom" ? <Button type="submit">查询</Button> : null}
+      </FieldGroup>
+    </form>
+  )
+}
+
 function AccountStatusCards({
   overview,
   balance,
@@ -151,7 +158,7 @@ function AccountStatusCards({
   freshness,
   accountError,
 }: {
-  overview: ReturnType<typeof useOverview>["data"]
+  overview: OverviewResponse | null
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }

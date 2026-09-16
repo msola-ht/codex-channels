@@ -1,6 +1,7 @@
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import { readAppServerUserAgent } from "../runtime/app-server-read.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { RequestMetricsQueryService } from "../dist/observability/index.js";
 import { metricsRange } from "./metrics-database-access.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readManagedServiceErrorAsync } from "./service-status.mjs";
@@ -128,9 +129,7 @@ function latestRecordedUserAgent(environment, openMetricsStore) {
   try {
     store = openMetricsStore(environment);
     const range = metricsRange("all", Date.now());
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
+    const page = new RequestMetricsQueryService(store).page(range, {
       offset: 0,
       limit: 1,
       sortKey: "recordedAtMs",

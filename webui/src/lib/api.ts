@@ -3,9 +3,9 @@ import type {
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
-  RangeName,
-  RequestSortDirection,
-  RequestSortKey,
+  MetricsRangeQuery,
+  MetricsQuery,
+  MetricsProvidersResponse,
   RequestsResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
@@ -32,6 +32,7 @@ import type {
   ThreadTurnsResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
+import { metricsQueryParams } from "@/lib/metrics-query"
 
 export { getToken, setToken } from "@/lib/token-storage"
 
@@ -126,26 +127,31 @@ export function updateManagementSetting(
 }
 
 export function fetchOverview(
-  range: RangeName,
+  query: MetricsRangeQuery,
   signal?: AbortSignal,
 ): Promise<OverviewResponse> {
   return getJson<OverviewResponse>(
-    `${API_PREFIX}/overview?range=${range}`,
+    `${API_PREFIX}/overview?${metricsQueryParams(query)}`,
     signal,
   )
 }
 
+export function fetchMetricsProviders(signal?: AbortSignal): Promise<MetricsProvidersResponse> {
+  return getJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
+}
+
 export function fetchDailyUsage(
-  range: RangeName,
+  query: MetricsRangeQuery,
   signal?: AbortSignal,
 ): Promise<DailyUsageResponse> {
-  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?range=${range}`, signal)
+  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreads(
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadsResponse> {
-  return getJson<ThreadsResponse>(`${API_PREFIX}/threads`, signal)
+  return getJson<ThreadsResponse>(`${API_PREFIX}/threads?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreadRun(
@@ -160,47 +166,32 @@ export function fetchThreadRun(
 
 export function fetchThreadTurns(
   threadId: string,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ThreadTurnsResponse> {
   return getJson<ThreadTurnsResponse>(
-    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`,
+    `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns?${metricsQueryParams(query)}`,
     signal,
   )
 }
 
 export function fetchRequests(
-  range: RangeName,
-  offset: number,
-  limit: number,
-  sort: RequestSortKey,
-  direction: RequestSortDirection,
-  filter: string,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<RequestsResponse> {
-  const params = new URLSearchParams({
-    range,
-    offset: String(offset),
-    limit: String(limit),
-    sort,
-    direction,
-  })
-  if (filter.trim() !== "") params.set("filter", filter.trim())
-  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${params.toString()}`, signal)
+  return getJson<RequestsResponse>(`${API_PREFIX}/requests?${metricsQueryParams(query)}`, signal)
+}
+
+export function fetchMetricsExport(query: MetricsQuery, signal?: AbortSignal): Promise<unknown> {
+  return getJson(`${API_PREFIX}/requests/export?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchErrors(
-  range: RangeName,
-  offset: number,
-  limit: number,
+  query: MetricsQuery,
   signal?: AbortSignal,
 ): Promise<ErrorsResponse> {
-  const params = new URLSearchParams({
-    range,
-    offset: String(offset),
-    limit: String(limit),
-  })
   return getJson<ErrorsResponse>(
-    `${API_PREFIX}/errors?${params.toString()}`,
+    `${API_PREFIX}/errors?${metricsQueryParams(query)}`,
     signal,
   )
 }

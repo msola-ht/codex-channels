@@ -11,7 +11,10 @@ import {
   PrivateIpcServer,
 } from "../../runtime/private-ipc.mjs";
 
-import type { ProviderProxyMetrics } from "./proxy.js";
+import {
+  boundedString,
+  type ProviderProxyMetrics,
+} from "./response-metrics-observer.js";
 
 const maximumMetricsBytes = 8_192;
 
@@ -264,7 +267,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   return {
     ...record,
     userAgent: typeof userAgent === "string" ? userAgent : null,
-    reasoningEffort: normalizeReasoningEffort(record.reasoningEffort),
+    reasoningEffort: boundedString(record.reasoningEffort),
     errorMessage: typeof record.errorMessage === "string"
       ? record.errorMessage
       : null,
@@ -275,15 +278,6 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
       ? null
       : quotaWindows,
   } as unknown as ProviderProxyMetrics;
-}
-
-function normalizeReasoningEffort(value: unknown): string | null {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 128
-    && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u.test(value)
-    ? value
-    : null;
 }
 
 function nullableQuotaWindows(value: unknown): boolean {

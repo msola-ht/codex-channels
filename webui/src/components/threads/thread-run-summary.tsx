@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { StatCard } from "@/components/metrics/stat-card"
 import {
+  formatCount,
   formatTokens,
 } from "@/lib/format"
 import type { Aggregate, TurnSummary } from "@/lib/types"
@@ -25,12 +26,12 @@ export function ThreadRunSummary({
       <StatCard
         title="Turn"
         value={threadAggregate.turnCount}
-        description={latestTurn === null ? "无最近 Turn" : `最近 Turn ${latestTurn.requestCount} 次请求`}
+        description={latestTurn === null ? "无最近 Turn" : `最近 Turn ${formatCount(latestTurn.requestCount)} 次请求`}
       />
       <StatCard
         title="请求数"
-        value={threadAggregate.requestCount.toLocaleString("zh-CN")}
-        description={`失败 ${threadAggregate.unsuccessfulRequestCount}`}
+        value={formatCount(threadAggregate.requestCount)}
+        description={`失败 ${formatCount(threadAggregate.unsuccessfulRequestCount)}`}
       />
       <StatCard
         title="Token"

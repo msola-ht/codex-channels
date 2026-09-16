@@ -5,6 +5,8 @@
 ## 文件
 
 - `index.ts`：本模块的公开导出入口。
+- `query/index.ts`：供 CLI 参数预检使用的无状态公开入口，只导出范围、日期、筛选和聚合维度解析，
+  不加载 SQLite 实现；其他业务模块仍通过模块根入口访问完整能力。
 - `logger.ts`：根据配置创建 Pino Logger，并对 Token、App Secret、Authorization、Cookie、密码等
   字段进行脱敏；`err` 和进程边界复用 `safeErrorMetadata`，只保留受约束的异常类型和机器错误码，
   不保留 message、stack 或附加响应对象。
@@ -13,6 +15,9 @@
   SQLite 实现声明完整能力，各消费方按实际用途依赖窄端口。
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照、响应正文
   或流式阶段时间。
+- `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
+  会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
+  各自只负责授权、参数边界和结果呈现。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
   每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
   持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
@@ -44,11 +49,14 @@
   Bootstrap 映射到 Application 的 `/metrics` 只读端口；会话归纳（模型、思考等级与 Token）
   递归纳入显式父 Thread 的子代理后代；Schema v11 的 `subagent_turns` 按子 Thread 与子 Turn
   保存运行级父 Turn 关系，父 Turn 任务合计只纳入这些精确运行关系；
-  与每次对话明细查询由 `threadList()`、`threadTurnSummaries()` 提供，父 Turn 任务窄查询由
+  会话与每轮期间查询由 `threadList(query)`、`threadTurnSummaries(threadId, query)` 提供，先按请求
+  记录时间及精确条件筛选，再按自身 Thread/Turn 汇总、排序和分页，返回匹配总数和不受分页影响的
+  汇总；Provider 筛选支持单值或多值并集，`providers()` 返回库内完整去重名单供筛选选项使用。
+  Provider、模型和思考等级取匹配范围内最后一条记录，不混入范围外的最新设置。父 Turn 任务窄查询由
   `threadTurnTaskSummary()` 提供，子代理完成卡片通过 `threadTurnSummary()` 精确读取官方终态对应
   Turn，再按需合并该 Turn 的子任务；`threadList()` 与 `threadTurnSummaries()` 供
   `codexc metrics threads` 和 `turns` 导出复用。时间范围聚合覆盖指标库全部保留记录，
-  可按全局、提供商或“提供商 + 模型”分组；支持自然日/周/月、24 小时至 365 天滚动窗口、全部保留历史和 CLI 自定义日期范围，最多
+  可按全局、提供商或“提供商 + 模型”分组；支持 `today`、`yesterday`、`24h`、`7d`、`30d`、`90d`、`all` 和自定义日期范围，最多
   返回请求量最高的 20 组。OpenAI 请求还可保存统计代理归一化的周额度定点快照与账户套餐等级；
   同一重置周期内
   从首个基线开始累计请求，只在后续快照正向增长时形成加权估算区间，重置或倒退会断开区间。

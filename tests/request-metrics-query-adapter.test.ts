@@ -79,16 +79,13 @@ describe("RequestMetricsQueryAdapter", () => {
     expect(errors).toHaveBeenCalledWith({ startAtMs: 0, endAtMs: 2 });
   });
 
-  it("resolves bounded and calendar ranges from one captured time", () => {
+  it("resolves supported ranges from one captured time", () => {
     const now = new Date(2026, 7, 24, 10, 30).getTime();
     expect(resolveRequestMetricsRange("24h", now)).toEqual({
       startAtMs: now - 24 * 60 * 60 * 1_000,
       endAtMs: now,
     });
-    const today = new Date(2026, 7, 24).getTime();
-    expect(resolveRequestMetricsRange("today", now)).toEqual({
-      startAtMs: today,
-      endAtMs: now,
-    });
+    expect(resolveRequestMetricsRange("all", now))
+      .toEqual({ startAtMs: 0, endAtMs: now });
   });
 });

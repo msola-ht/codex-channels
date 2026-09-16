@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
@@ -17,6 +17,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
+import type { MetricsRangeQuery } from "@/lib/types"
 
 const ConsolePage = lazy(() =>
   import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
@@ -69,6 +70,7 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
 function Layout() {
   const { pathname } = useLocation()
   const { language, setLanguage } = useLanguage()
+  const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
 
   return (
     <SidebarProvider className="min-h-0 min-w-0">
@@ -95,7 +97,7 @@ function Layout() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
           <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
             <Routes>
-              <Route path="/" element={<ConsolePage />} />
+              <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />
               <Route path="/threads" element={<ThreadsPage />} />
               <Route path="/threads/:id" element={<ThreadDetailPage />} />
               <Route path="/requests" element={<RequestsPage />} />

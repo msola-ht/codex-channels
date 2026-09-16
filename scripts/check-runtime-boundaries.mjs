@@ -17,6 +17,7 @@ const allowedDistEntries = new Map([
     "dist/codex-client/index.js",
     "dist/config/index.js",
     "dist/observability/index.js",
+    "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",
     "dist/storage/index.js",
     "dist/surfaces/feishu/index.js",

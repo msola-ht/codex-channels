@@ -82,7 +82,7 @@ export const conversationCommandHelpSections = [
       "/plugin <名称、完整 ID 或序号> [任务]",
       "/usage · /limits · /permissions",
       "/metrics session",
-      "/metrics <global|providers|models|errors> [24h|7d|30d]",
+      "/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]",
     ],
   },
   {

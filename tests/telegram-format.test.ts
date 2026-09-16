@@ -292,7 +292,7 @@ describe("formatStartupNotification", () => {
 });
 
 describe("formatUsage", () => {
-  it("formats token totals in millions and shows the latest seven daily buckets", () => {
+  it("formats token totals with compact units and shows the latest seven daily buckets", () => {
     const text = formatUsage({
       summary: {
         lifetimeTokens: 5_054_682_221n,
@@ -313,7 +313,7 @@ describe("formatUsage", () => {
       ],
     });
 
-    expect(text).toContain("累计 Tokens：5,054.68 M");
+    expect(text).toContain("累计 Tokens：5.055 B");
     expect(text).toContain("单日峰值：202.77 M");
     expect(text).toContain("最长 Turn：10小时46分24秒");
     expect(text).toContain("- 2026-07-22：12.35 M");

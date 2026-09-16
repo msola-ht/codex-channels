@@ -1,14 +1,23 @@
+const compactTwoDecimalFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 2,
+});
+
+const compactThreeDecimalFormatter = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 3,
+});
+
 export function formatTokenCount(value: number): string {
-  if (Math.abs(value) >= 1_000_000) {
-    return `${(value / 1_000_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} M`;
-  }
-  if (Math.abs(value) >= 1_000) {
-    return `${(value / 1_000).toLocaleString("zh-CN", {
-      maximumFractionDigits: 2,
-    })} K`;
-  }
+  if (Math.abs(value) >= 1_000_000_000) return formatCompactNumber(value, 3);
+  if (Math.abs(value) >= 1_000) return formatCompactNumber(value, 2);
+  return value.toLocaleString("zh-CN");
+}
+
+export function formatRequestCount(value: number): string {
+  if (Math.abs(value) >= 1_000) return formatCompactNumber(value, 2);
   return value.toLocaleString("zh-CN");
 }
 
@@ -25,4 +34,14 @@ export function formatCacheHitRate(
         maximumFractionDigits: 2,
       })}%`
     : "未知";
+}
+
+function formatCompactNumber(
+  value: number,
+  maximumFractionDigits: number,
+): string {
+  const formatted = maximumFractionDigits === 3
+    ? compactThreeDecimalFormatter.format(value)
+    : compactTwoDecimalFormatter.format(value);
+  return formatted.replace(/([A-Z]+)$/u, " $1");
 }

@@ -1,9 +1,9 @@
-import { useState } from "react"
+import { Link } from "react-router"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
-import { RangeSelector } from "@/components/metrics/range-selector"
+import { QueryFilters } from "@/components/metrics/query-filters"
 import { StatCard } from "@/components/metrics/stat-card"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { Button } from "@/components/ui/button"
@@ -29,16 +29,15 @@ import {
 } from "@/components/ui/tooltip"
 import { useErrors } from "@/hooks/use-errors"
 import { useLanguage } from "@/hooks/language-context"
-import { formatErrorMessage, formatErrorType, formatSuccessRate, formatTime } from "@/lib/format"
-import type { RangeName } from "@/lib/types"
-
-const PAGE_SIZE = 50
+import { formatCount, formatErrorMessage, formatErrorType, formatSuccessRate, formatTime } from "@/lib/format"
+import { useMetricsQuery } from "@/hooks/use-metrics-query"
+import { metricsLink } from "@/lib/metrics-query"
 
 export function ErrorsPage() {
-  const [range, setRange] = useState<RangeName>("90d")
-  const [offset, setOffset] = useState(0)
-  const [pageNumber, setPageNumber] = useState(1)
-  const { data, loading, error } = useErrors(range, offset, PAGE_SIZE)
+  const { query, update } = useMetricsQuery("30d")
+  const { data, loading, error } = useErrors(query)
+  const { offset, limit } = query
+  const pageNumber = Math.floor(offset / limit) + 1
   const { language } = useLanguage()
 
   return (
@@ -48,25 +47,18 @@ export function ErrorsPage() {
           <h1 className="text-xl font-semibold">错误</h1>
           <p className="text-sm text-muted-foreground">失败请求记录，按发生时间倒序</p>
         </div>
-        <RangeSelector
-          value={range}
-          onChange={(next) => {
-            setRange(next)
-            setOffset(0)
-            setPageNumber(1)
-          }}
-        />
       </div>
+      <QueryFilters query={query} onChange={update} />
 
       <ErrorBanner error={error} />
 
-      {loading || data === null ? <PageSkeleton rows={5} /> : (
+      {error !== null ? null : loading || data === null ? <PageSkeleton rows={5} /> : (
         <>
           <div className="grid gap-4 sm:grid-cols-2">
             <StatCard
               title="请求总数"
-              value={data.errors.requestCount.toLocaleString("zh-CN")}
-              description={`失败 ${data.errors.unsuccessfulRequestCount}`}
+              value={formatCount(data.errors.requestCount)}
+              description={`失败 ${formatCount(data.errors.unsuccessfulRequestCount)}`}
             />
             <StatCard
               title="成功率"
@@ -90,6 +82,7 @@ export function ErrorsPage() {
                       <TableHead>时间</TableHead>
                       <TableHead>Provider</TableHead>
                       <TableHead>模型</TableHead>
+                      <TableHead>会话 / 轮次</TableHead>
                       <TableHead>错误明细</TableHead>
                       <TableHead>HTTP</TableHead>
                       <TableHead>状态</TableHead>
@@ -105,6 +98,7 @@ export function ErrorsPage() {
                           <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">{formatTime(record.recordedAtMs)}</TableCell>
                           <TableCell><ProviderBadge provider={record.provider} /></TableCell>
                           <TableCell className="max-w-48 truncate">{record.model ?? "—"}</TableCell>
+                          <TableCell>{record.threadId === null ? "—" : <Link className="block max-w-40 truncate underline-offset-4 hover:underline" title={record.turnId ?? record.threadId} to={metricsLink("/requests", query, { threadId: record.threadId, turnId: record.turnId ?? undefined, status: undefined })}>{record.turnId ?? record.threadId}</Link>}</TableCell>
                           <TableCell className="max-w-md">
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -122,7 +116,7 @@ export function ErrorsPage() {
                     })}
                     {data.records.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="h-16 text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
                           没有异常请求
                         </TableCell>
                       </TableRow>
@@ -140,8 +134,7 @@ export function ErrorsPage() {
                     disabled={offset === 0}
                     onClick={() => {
                       if (offset === 0) return
-                      setOffset(Math.max(0, offset - PAGE_SIZE))
-                      setPageNumber((current) => current - 1)
+                      update({ offset: Math.max(0, offset - limit) }, false)
                     }}
                   >上一页</Button>
                   <Button
@@ -151,8 +144,7 @@ export function ErrorsPage() {
                     disabled={data.nextOffset === null}
                     onClick={() => {
                       if (data.nextOffset === null) return
-                      setOffset(data.nextOffset)
-                      setPageNumber((current) => current + 1)
+                      update({ offset: data.nextOffset }, false)
                     }}
                   >下一页</Button>
                 </div>

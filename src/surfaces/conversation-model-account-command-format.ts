@@ -18,7 +18,7 @@ import {
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
-import { formatTokenCount } from "./token-format.js";
+import { formatRequestCount, formatTokenCount } from "./token-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
 const maximumThreadUsageGroups = 8;
@@ -211,8 +211,8 @@ export function formatConversationUsage(
     .slice(0, 7);
   const lines = [
     "OpenAI Codex 账户用量摘要：",
-    `累计 Tokens：${formatMillions(result.result.usage.summary.lifetimeTokens)}`,
-    `单日峰值：${formatMillions(result.result.usage.summary.peakDailyTokens)}`,
+    `累计 Tokens：${formatUsageTokens(result.result.usage.summary.lifetimeTokens)}`,
+    `单日峰值：${formatUsageTokens(result.result.usage.summary.peakDailyTokens)}`,
     `最长 Turn：${formatAccountDuration(result.result.usage.summary.longestRunningTurnSec)}`,
     `当前连续天数：${formatMetric(result.result.usage.summary.currentStreakDays)}`,
     `最长连续天数：${formatMetric(result.result.usage.summary.longestStreakDays)}`,
@@ -221,7 +221,7 @@ export function formatConversationUsage(
     ...(daily.length === 0
       ? ["暂无每日数据"]
       : daily.map(
-          (entry) => `- ${entry.startDate}：${formatMillions(entry.tokens)}`,
+          (entry) => `- ${entry.startDate}：${formatUsageTokens(entry.tokens)}`,
         )),
   ];
   appendThreadUsage(lines, result.result.threadUsage);
@@ -367,7 +367,7 @@ export function formatConversationLimits(
             : weeklyEstimates.flatMap((estimate) => {
                 return [
                 "本周期本机实际：",
-                `  - 请求：${estimate.periodRequestCount ?? estimate.requestCount} 次`,
+                `  - 请求：${formatRequestCount(estimate.periodRequestCount ?? estimate.requestCount)} 次`,
                 `  - Token：${formatTokenCount(estimate.periodTotalTokens ?? estimate.totalTokensPerPercent)}`,
                 `观测变化 ${formatPercent(estimate.observedDeltaPercent)}（${estimate.intervalCount} 个区间）`,
                 `每 1%：约 ${formatTokenCount(estimate.totalTokensPerPercent)} Token`,
@@ -401,11 +401,6 @@ function formatAccountDuration(value: bigint | number | null): string {
   return value === null ? "未知" : formatElapsedSeconds(value);
 }
 
-function formatMillions(value: bigint | number | null): string {
-  return value === null
-    ? "未知"
-    : `${(Number(value) / 1_000_000).toLocaleString("zh-CN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} M`;
+function formatUsageTokens(value: bigint | number | null): string {
+  return value === null ? "未知" : formatTokenCount(Number(value));
 }

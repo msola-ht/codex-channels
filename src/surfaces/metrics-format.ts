@@ -10,6 +10,7 @@ import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCacheHitRate,
+  formatRequestCount,
   formatTokenCount,
 } from "./token-format.js";
 export function formatConversationMetrics(
@@ -34,7 +35,7 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 最近运行聚合",
-      `模型请求：${turn.requestCount} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${turn.unsuccessfulRequestCount} 次）` : ""}`,
+      `模型请求：${formatRequestCount(turn.requestCount)} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(turn.unsuccessfulRequestCount)} 次）` : ""}`,
       `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -60,7 +61,7 @@ export function formatConversationMetrics(
       "",
       "### 当前会话指标累计",
       `Turn：${aggregate.turnCount} 次`,
-      `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+      `模型请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
       `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
       ...(aggregate.cachedInputTokens === null
         ? ["  - 缓存：上游未提供完整数据"]
@@ -94,8 +95,8 @@ function formatErrorMetricsReport(
     "## 请求指标 · 异常请求",
     `范围：${formatMetricsRange(report.range)}`,
     "",
-    `模型请求：${report.requestCount} 次`,
-    `异常请求：${report.unsuccessfulRequestCount} 次`,
+    `模型请求：${formatRequestCount(report.requestCount)} 次`,
+    `异常请求：${formatRequestCount(report.unsuccessfulRequestCount)} 次`,
     `异常率：${formatPercent(failureRate)}`,
   ];
   if (report.groups.length === 0) {
@@ -111,7 +112,7 @@ function formatErrorMetricsReport(
       const httpStatus = group.httpStatus === null
         ? ""
         : ` · HTTP ${group.httpStatus}`;
-      return `${index + 1}. ${provider} / ${group.model ?? "未知模型"} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${group.requestCount} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
+      return `${index + 1}. ${provider} / ${group.model ?? "未知模型"} · ${formatMetricsErrorType(group.errorType)} · ${status}${httpStatus} · ${formatRequestCount(group.requestCount)} 次 · 最近发生：${formatMetricOccurredAt(group.lastOccurredAtMs)}`;
     }),
   );
   const hidden = report.totalGroupCount - report.groups.length;
@@ -217,7 +218,7 @@ function formatMetricsAggregate(
   },
 ): string[] {
   return [
-    `模型请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+    `模型请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
     `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,
     ...(aggregate.cachedInputTokens === null
       ? ["  - 缓存：上游未提供完整数据"]
@@ -257,7 +258,7 @@ function formatMetricsGroup(
     : "";
   return [
     `${index + 1}. ${label}`,
-    `  - 请求：${aggregate.requestCount} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${aggregate.unsuccessfulRequestCount} 次）` : ""}`,
+    `  - 请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
     ...(aggregate.cachedInputTokens === null
       ? []
       : [
@@ -295,23 +296,16 @@ export function formatCompactMetricsValue(
     : compact.model ?? "模型未知";
   const failures = compact.unsuccessfulRequestCount === 0
     ? ""
-    : `（异常 ${compact.unsuccessfulRequestCount} 次）`;
-  return `${compact.requestCount} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
+    : `（异常 ${formatRequestCount(compact.unsuccessfulRequestCount)} 次）`;
+  return `${formatRequestCount(compact.requestCount)} 次${failures} · ${model} · ${formatTokenCount(compact.inputTokens + compact.outputTokens)} Token`;
 }
 
 function formatMetricsRange(range: RequestMetricsTimeRange): string {
   return {
-    today: "今天",
-    yesterday: "昨天",
-    "this-week": "本周",
-    "last-week": "上周",
-    "this-month": "本月",
-    "last-month": "上月",
     "24h": "最近 24 小时",
     "7d": "最近 7 天",
     "30d": "最近 30 天",
     "90d": "最近 90 天",
-    "365d": "最近 365 天",
     all: "全部历史",
   }[range];
 }

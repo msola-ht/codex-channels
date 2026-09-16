@@ -394,7 +394,7 @@ describe("Feishu output renderer", () => {
     expect(limits).toContain("限流状态：Workspace 用量上限已达到");
   });
 
-  it("formats usage token totals in millions", () => {
+  it("formats usage token totals with compact units", () => {
     const rendered = renderFeishuCommandResult({
       kind: "usage",
       result: {
@@ -416,7 +416,7 @@ describe("Feishu output renderer", () => {
       },
     });
 
-    expect(rendered).toContain("累计 Tokens：6,439.12 M");
+    expect(rendered).toContain("累计 Tokens：6.439 B");
     expect(rendered).toContain("单日峰值：389.15 M");
     expect(rendered).toContain("2026-07-26：128.02 M");
     expect(rendered).toContain("最长 Turn：18分58秒");

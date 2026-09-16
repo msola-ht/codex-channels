@@ -101,8 +101,8 @@ describe("conversation metrics formatting", () => {
 
   it("renders unified provider and model request aggregates", () => {
     const aggregate = {
-      requestCount: 12,
-      unsuccessfulRequestCount: 1,
+      requestCount: 7_955,
+      unsuccessfulRequestCount: 1_234,
       inputTokens: 120_000,
       cachedInputTokens: 96_000,
       outputTokens: 2_400,
@@ -132,7 +132,7 @@ describe("conversation metrics formatting", () => {
         }, {
           provider: "custom",
           model: "gpt-5.6-luna",
-          aggregate: { ...aggregate, requestCount: 3 },
+          aggregate: { ...aggregate, requestCount: 999_999 },
         }],
         totalGroupCount: 2,
       },
@@ -140,8 +140,10 @@ describe("conversation metrics formatting", () => {
 
     expect(rendered).toContain("请求指标 · 按模型");
     expect(rendered).toContain("范围：最近 7 天");
+    expect(rendered).toContain("模型请求：7.96 K 次（异常 1.23 K 次）");
     expect(rendered).toContain("OpenAI 官方 / gpt-5.6-sol");
     expect(rendered).toContain("custom / gpt-5.6-luna");
+    expect(rendered).toContain("请求：1 M 次（异常 1.23 K 次）");
     expect(rendered).toContain("上下文压缩：2 次 · gpt-5.6-sol · 21 K Token");
     expect(rendered).not.toContain("耗时");
     expect(rendered).not.toContain("延迟");

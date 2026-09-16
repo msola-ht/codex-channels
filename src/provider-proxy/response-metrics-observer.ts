@@ -1,5 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
+import { StringDecoder } from "node:string_decoder";
 
+const maximumJsonMetadataBytes = 1_048_576;
+const maximumSseMetadataLineCharacters = 1_048_576;
 const weeklyWindowMinutes = 7 * 24 * 60;
 const percentScale = 1_000_000;
 
@@ -188,10 +191,10 @@ export function observeResponseEvent(
     const error = asRecord(event?.error);
     const errorType = boundedString(error?.type) ?? "upstream_error";
     metrics.httpStatus = finiteNonNegativeNumber(event?.status);
+    markMetricsFailed(metrics, errorType, receivedAtMs);
     metrics.errorType = errorType;
     metrics.errorCode = boundedString(error?.code);
     metrics.errorMessage = boundedMessage(error?.message);
-    markMetricsFailed(metrics, errorType, receivedAtMs);
     metrics.responseCompletedAtMs = receivedAtMs;
     return true;
   }
@@ -264,6 +267,96 @@ export function observeJsonResponse(
   observeResponseCompletion(metrics, eventType, { response });
   metrics.responseCompletedAtMs = receivedAtMs;
   return true;
+}
+
+export class HttpResponseMetricsObserver {
+  private readonly decoder = new StringDecoder("utf8");
+  private readonly jsonChunks: Buffer[] = [];
+  private currentEvent = "";
+  private jsonBytes = 0;
+  private jsonOverflow = false;
+  private pending = "";
+  private sseMetadataOverflow = false;
+
+  constructor(private readonly metrics: MetricsState) {}
+
+  observeChunk(chunk: Buffer, receivedAtMs: number): boolean {
+    const completed = this.metrics.responseFormat === "sse"
+      || this.metrics.responseFormat === "unknown"
+      ? this.processText(this.decoder.write(chunk), receivedAtMs)
+      : false;
+    if (this.metrics.responseFormat === "json" && !this.jsonOverflow) {
+      this.jsonBytes += chunk.length;
+      if (this.jsonBytes <= maximumJsonMetadataBytes) this.jsonChunks.push(chunk);
+      else {
+        this.jsonOverflow = true;
+        this.jsonChunks.length = 0;
+      }
+    }
+    return completed;
+  }
+
+  finish(receivedAtMs: number): boolean {
+    const completed = this.metrics.responseFormat === "sse"
+      || this.metrics.responseFormat === "unknown"
+      ? this.processText(this.decoder.end(), receivedAtMs)
+        || (this.pending
+          ? this.processLine(this.pending.trimEnd(), receivedAtMs)
+          : false)
+      : this.metrics.responseFormat === "json" && !this.jsonOverflow
+        ? observeJsonResponse(
+            this.metrics,
+            parseJsonPayload(Buffer.concat(this.jsonChunks).toString("utf8")),
+            receivedAtMs,
+          )
+        : false;
+    finalizeHttpStatus(this.metrics, receivedAtMs);
+    return completed;
+  }
+
+  private processLine(line: string, receivedAtMs: number): boolean {
+    if (line === "") {
+      this.currentEvent = "";
+      return false;
+    }
+    if (line.startsWith("event:")) {
+      this.currentEvent = line.slice(6).trim();
+      return false;
+    }
+    if (!line.startsWith("data:")) return false;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === "[DONE]") return false;
+    const observed = inspectResponseEvent(payload, this.currentEvent);
+    if (
+      this.metrics.responseFormat === "unknown"
+      && observed.type.startsWith("response.")
+    ) {
+      this.metrics.responseFormat = "sse";
+    }
+    return observeResponseEvent(
+      this.metrics,
+      observed.type,
+      observed.event,
+      receivedAtMs,
+    );
+  }
+
+  private processText(text: string, receivedAtMs: number): boolean {
+    if (this.sseMetadataOverflow) return false;
+    this.pending += text;
+    const lines = this.pending.split(/\r?\n/u);
+    this.pending = lines.pop() ?? "";
+    if (
+      this.pending.length > maximumSseMetadataLineCharacters
+      || lines.some((line) => line.length > maximumSseMetadataLineCharacters)
+    ) {
+      this.sseMetadataOverflow = true;
+      this.pending = "";
+      this.currentEvent = "";
+      return false;
+    }
+    return lines.some((line) => this.processLine(line, receivedAtMs));
+  }
 }
 
 export function finalizeHttpStatus(

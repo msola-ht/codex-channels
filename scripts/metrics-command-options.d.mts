@@ -1,3 +1,5 @@
+import type { ModelRequestMetricsFilters } from "../dist/observability/index.js";
+
 export interface MetricsRange {
   name: string;
   startAtMs: number;
@@ -9,6 +11,22 @@ export interface MetricsRangeOptions {
   from?: string;
   to?: string;
 }
+
+export interface MetricsFilterOptions extends MetricsRangeOptions {
+  thread?: string;
+  turn?: string;
+  provider?: string;
+  model?: string;
+  operation?: string;
+  status?: string;
+  filter?: string;
+}
+
+export const metricsQueryOptions: readonly string[];
+
+export function metricsFilterOptions(
+  options: MetricsFilterOptions & { threadId?: string; turnId?: string },
+): ModelRequestMetricsFilters;
 
 export interface MetricsCleanupOptions {
   before?: string;
@@ -27,7 +45,7 @@ export function isMetricsProviderId(
 export function isPrunableMetricsProviderId(value: string): boolean;
 
 export const metricsCommandUsage: Readonly<Record<
-  "run" | "turns" | "threads" | "report" | "export",
+  "run" | "turns" | "threads" | "report" | "export" | "quota",
   string
 >>;
 
@@ -36,6 +54,7 @@ export function metricsRange(name: string, nowMs: number): MetricsRange;
 export function metricsRangeOptions(
   options: MetricsRangeOptions,
   nowMs: number,
+  defaultRange?: string,
 ): MetricsRange;
 
 export function metricsDimension(
@@ -60,11 +79,11 @@ export function parseMetricsRunArgs(
 
 export function parseMetricsTurnsArgs(
   args: string[],
-): { threadId: string; format: MetricsOutputFormat };
+): MetricsFilterOptions & { threadId: string; format: MetricsOutputFormat };
 
 export function parseMetricsThreadsArgs(
   args: string[],
-): { format: MetricsOutputFormat };
+): MetricsFilterOptions & { format: MetricsOutputFormat };
 
 export function assertExportFormat(
   value: string,

@@ -6,9 +6,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   inspectMetricsDatabase,
   metricsDatabaseCanUpgrade,
-  metricsRange,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
+import { metricsRangeOptions } from "./metrics-command-options.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -20,7 +20,11 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
-import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
+import {
+  RequestMetricsQueryService,
+  parseRequestMetricsFilters,
+  SqliteModelRequestMetricsStore,
+} from "../dist/observability/index.js";
 import {
   ConfigManagementError,
   loadGatewaySettings,
@@ -406,6 +410,16 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
   }
   const apiPath = path.slice(API_PREFIX.length);
+  if (apiPath === "/providers") {
+    if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "Provider 列表不接受查询参数");
+    const store = openMetricsStore(environment, Date.now());
+    try {
+      sendJson(response, 200, { providers: store.providers() });
+    } finally {
+      store.close();
+    }
+    return;
+  }
   if (apiPath === "/overview") {
     handleOverview(environment, url, response);
     return;
@@ -431,6 +445,10 @@ async function routeApi(environment, url, response, serviceStatusCache) {
   }
   if (apiPath === "/requests") {
     handleRequests(environment, url, response);
+    return;
+  }
+  if (apiPath === "/requests/export") {
+    handleRequestsExport(environment, url, response);
     return;
   }
   if (apiPath === "/errors") {
@@ -485,28 +503,17 @@ function handleOverview(environment, url, response) {
   const range = parseRange(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const global = store.aggregate({
-      dimension: "global",
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
-    const providers = store.aggregate({
-      dimension: "provider",
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
-    const errors = store.errors({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
+    const overview = new RequestMetricsQueryService(store).overview(range);
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      global: global.aggregate,
-      providers: providers.groups.map((group) => ({
+      global: overview.global,
+      threadCount: overview.threadCount,
+      turnCount: overview.turnCount,
+      providers: overview.providers.map((group) => ({
         ...group,
       })),
-      errors,
+      errors: overview.errors,
       weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
     });
   } finally {
@@ -518,10 +525,7 @@ function handleDaily(environment, url, response) {
   const range = parseRange(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const daily = store.daily({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
+    const daily = new RequestMetricsQueryService(store).daily(range);
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
@@ -533,11 +537,16 @@ function handleDaily(environment, url, response) {
 }
 
 function handleThreads(environment, url, response) {
-  const store = openMetricsStore(environment);
+  const range = parseRange(url, "all");
+  const query = parseThreadQuery(url);
+  const store = openMetricsStore(environment, range.endAtMs);
   try {
+    const { matchedTotal, ...page } = new RequestMetricsQueryService(store).threadList(range, query);
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
-      threads: store.threadList(),
+      range,
+      ...page,
+      total: matchedTotal,
     });
   } finally {
     store.close();
@@ -546,11 +555,15 @@ function handleThreads(environment, url, response) {
 
 function handleThreadDetail(environment, rawThreadId, view, url, response) {
   const threadId = parseThreadId(rawThreadId);
+  if (view === "run" && url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "run 返回全部历史累计；期间查询请使用 turns");
+  const range = parseRange(url, "all");
+  const query = view === "run" ? null : parseThreadQuery(url, threadId);
   const store = openMetricsStore(environment);
   try {
+    const queries = new RequestMetricsQueryService(store);
     if (view === "run") {
-      const summary = store.threadSummary(threadId);
-      const subagent = store.subagentThread(threadId);
+      const summary = queries.threadSummary(threadId);
+      const subagent = queries.subagentThread(threadId);
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
         threadId,
@@ -562,10 +575,13 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
       });
       return;
     }
+    const { matchedTotal, ...page } = queries.threadTurnSummaries(threadId, range, query);
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       threadId,
-      turns: store.threadTurnSummaries(threadId),
+      range,
+      ...page,
+      total: matchedTotal,
     });
   } finally {
     store.close();
@@ -590,17 +606,15 @@ function handleRequests(environment, url, response) {
     500,
     100,
   );
-  const filter = parseRequestFilter(url);
+  const filters = parseMetricsFilters(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
+    const page = new RequestMetricsQueryService(store).page(range, {
       offset,
       limit,
       sortKey: sort.key,
       sortDirection: sort.direction,
-      filter,
+      ...filters,
     });
     sendJson(response, 200, {
       range,
@@ -608,6 +622,31 @@ function handleRequests(environment, url, response) {
       records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
+      aggregate: page.aggregate,
+    });
+  } finally {
+    store.close();
+  }
+}
+
+function handleRequestsExport(environment, url, response) {
+  const range = parseRange(url);
+  const filters = parseMetricsFilters(url);
+  const sort = parseRequestSort(url);
+  const store = openMetricsStore(environment, range.endAtMs);
+  try {
+    const queries = new RequestMetricsQueryService(store);
+    const records = [];
+    let offset = 0;
+    do {
+      const page = queries.page(range, { ...filters, sortKey: sort.key, sortDirection: sort.direction, offset, limit: 500 });
+      records.push(...page.records);
+      offset = page.nextOffset ?? -1;
+    } while (offset >= 0);
+    sendJson(response, 200, {
+      range, filters, generatedAt: new Date(range.endAtMs).toISOString(),
+      records, total: records.length,
+      aggregate: queries.aggregate("global", range, filters).aggregate,
     });
   } finally {
     store.close();
@@ -616,6 +655,8 @@ function handleRequests(environment, url, response) {
 
 function handleErrors(environment, url, response) {
   const range = parseRange(url);
+  const filters = parseMetricsFilters(url);
+  const sort = parseRequestSort(url);
   const offset = parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0);
   const limit = parseBoundedInt(
     url.searchParams.get("limit"),
@@ -626,25 +667,23 @@ function handleErrors(environment, url, response) {
   );
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
+    const queries = new RequestMetricsQueryService(store);
+    const page = queries.page(range, {
+      ...filters,
       offset,
       limit,
-      sortKey: "recordedAtMs",
-      sortDirection: "desc",
+      sortKey: sort.key,
+      sortDirection: sort.direction,
       onlyFailures: true,
     });
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      errors: store.errors({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
+      errors: queries.errors(range, filters),
       records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
+      aggregate: page.aggregate,
     });
   } finally {
     store.close();
@@ -719,13 +758,50 @@ function toWebuiWeeklyQuota(quota) {
   };
 }
 
-function parseRange(url) {
-  const name = url.searchParams.get("range") ?? "90d";
+function parseRange(url, defaultRange = "90d") {
+  const options = Object.fromEntries(["range", "from", "to"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
   try {
-    return metricsRange(name, Date.now());
+    return metricsRangeOptions(options, Date.now(), defaultRange);
   } catch {
-    throw new ApiError(400, "invalid_range", "range 不支持该时间范围");
+    throw new ApiError(400, "invalid_range", "时间范围无效；请选择预设范围，或同时指定 from/to（YYYY-MM-DD，包含结束日），不能混用");
   }
+}
+
+function parseMetricsFilters(url, threadId) {
+  const allowed = new Set(["range", "from", "to", "threadId", "turnId", "provider", "model", "operation", "status", "filter", "offset", "limit", "sort", "direction"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) throw new ApiError(400, "unsupported_parameter", "包含不支持的指标查询参数");
+    if (key !== "provider" && url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "除 provider 外的指标查询参数不能重复");
+  }
+  const values = Object.fromEntries(["threadId", "turnId", "provider", "model", "operation", "status"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
+  if (url.searchParams.has("provider")) values.provider = url.searchParams.getAll("provider");
+  if (threadId !== undefined) {
+    if (values.threadId !== undefined && values.threadId !== threadId) throw new ApiError(400, "invalid_filter", "Thread ID 与路径不一致");
+    values.threadId = threadId;
+  }
+  const filter = parseRequestFilter(url);
+  try {
+    return parseRequestMetricsFilters({ ...values, ...(filter ? { filter } : {}) });
+  } catch (error) {
+    throw new ApiError(400, "invalid_filter", error.message);
+  }
+}
+
+function parseThreadQuery(url, threadId) {
+  const sortKey = url.searchParams.get("sort") ?? "last";
+  const sortDirection = url.searchParams.get("direction") ?? "desc";
+  const sortKeys = threadId === undefined
+    ? ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]
+    : ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"];
+  if (!sortKeys.includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
+  if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");
+  return {
+    ...parseMetricsFilters(url, threadId),
+    offset: parseBoundedInt(url.searchParams.get("offset"), "offset", 0, null, 0),
+    limit: parseBoundedInt(url.searchParams.get("limit"), "limit", 1, 500, 100),
+    sortKey,
+    sortDirection,
+  };
 }
 
 function parseRequestSort(url) {

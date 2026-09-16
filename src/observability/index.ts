@@ -9,6 +9,12 @@ export type {
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
+  ModelRequestMetricsFilters,
+  ModelRequestMetricsScope,
+  ModelRequestMetricsThreadQuery,
+  ModelRequestMetricsThreadSortKey,
+  StoredThreadListPage,
+  StoredThreadTurnsPage,
   ModelRequestMetricsQuotaAccountStore,
   ModelRequestMetricsRequestQueryStore,
   ModelRequestMetricsSortKey,
@@ -44,6 +50,21 @@ export type {
   WeeklyQuotaEstimateQuery,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
+export {
+  isRequestMetricsRangeName,
+  queryRequestMetricsAggregate,
+  queryRequestMetricsErrors,
+  requestMetricsAggregationDimension,
+  requestMetricsRangeNames,
+  RequestMetricsQueryService,
+  resolveRequestMetricsRange,
+  resolveRequestMetricsDates,
+  parseRequestMetricsDate,
+  parseRequestMetricsFilters,
+  type RequestMetricsQueryStore,
+  type RequestMetricsRangeName,
+  type ResolvedRequestMetricsRange,
+} from "./request-metrics-query-service.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {
   acquireRequestMetricsDatabaseLock,

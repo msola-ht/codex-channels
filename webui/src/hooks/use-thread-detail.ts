@@ -1,5 +1,6 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchThreadRun, fetchThreadTurns } from "@/lib/api"
+import type { MetricsQuery } from "@/lib/types"
 
 export function useThreadRun(threadId: string) {
   return useApi(
@@ -8,9 +9,9 @@ export function useThreadRun(threadId: string) {
   )
 }
 
-export function useThreadTurns(threadId: string) {
+export function useThreadTurns(threadId: string, query: MetricsQuery) {
   return useApi(
-    (signal) => fetchThreadTurns(threadId, signal),
-    [threadId],
+    (signal) => fetchThreadTurns(threadId, query, signal),
+    [threadId, JSON.stringify(query)],
   )
 }
