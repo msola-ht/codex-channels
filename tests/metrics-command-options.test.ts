@@ -76,9 +76,11 @@ describe("metrics command options", () => {
       .toThrow("codexc metrics status [--json]");
   });
 
-  it("accepts historical quota ranges and formats", () => {
-    expect(() => validateMetricsCommandArgs("quota", ["--range", "365d", "--format", "json"]))
+  it("accepts canonical quota ranges and formats", () => {
+    expect(() => validateMetricsCommandArgs("quota", ["--range", "90d", "--format", "json"]))
       .not.toThrow();
+    expect(() => validateMetricsCommandArgs("quota", ["--range", "365d"]))
+      .toThrow("--range 只支持 24h、7d、30d、90d 或 all");
     expect(() => validateMetricsCommandArgs("quota", ["--format", "yaml"]))
       .toThrow("--format 只支持 markdown、json、csv");
   });

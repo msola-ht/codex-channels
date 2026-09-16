@@ -142,7 +142,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 和整个 Thread 的请求累计；输入量是多次请求的
-  累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d` 按统一口径聚合，
+  累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d|90d|all` 按统一口径聚合，
   不为 DeepSeek 建立专属统计表。Gateway 不在本地计算或估算 DeepSeek 价格与费用，`/metrics` 只展示
   请求、Token、异常和官方账户数据。
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。

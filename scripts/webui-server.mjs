@@ -20,7 +20,10 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
-import { SqliteModelRequestMetricsStore } from "../dist/observability/index.js";
+import {
+  RequestMetricsQueryService,
+  SqliteModelRequestMetricsStore,
+} from "../dist/observability/index.js";
 import {
   ConfigManagementError,
   loadGatewaySettings,
@@ -485,28 +488,15 @@ function handleOverview(environment, url, response) {
   const range = parseRange(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const global = store.aggregate({
-      dimension: "global",
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
-    const providers = store.aggregate({
-      dimension: "provider",
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
-    const errors = store.errors({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
+    const overview = new RequestMetricsQueryService(store).overview(range);
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      global: global.aggregate,
-      providers: providers.groups.map((group) => ({
+      global: overview.global,
+      providers: overview.providers.map((group) => ({
         ...group,
       })),
-      errors,
+      errors: overview.errors,
       weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
     });
   } finally {
@@ -518,10 +508,7 @@ function handleDaily(environment, url, response) {
   const range = parseRange(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const daily = store.daily({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
-    });
+    const daily = new RequestMetricsQueryService(store).daily(range);
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
@@ -537,7 +524,7 @@ function handleThreads(environment, url, response) {
   try {
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
-      threads: store.threadList(),
+      threads: new RequestMetricsQueryService(store).threadList(),
     });
   } finally {
     store.close();
@@ -548,9 +535,10 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   const threadId = parseThreadId(rawThreadId);
   const store = openMetricsStore(environment);
   try {
+    const queries = new RequestMetricsQueryService(store);
     if (view === "run") {
-      const summary = store.threadSummary(threadId);
-      const subagent = store.subagentThread(threadId);
+      const summary = queries.threadSummary(threadId);
+      const subagent = queries.subagentThread(threadId);
       sendJson(response, 200, {
         generatedAt: new Date().toISOString(),
         threadId,
@@ -565,7 +553,7 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
     sendJson(response, 200, {
       generatedAt: new Date().toISOString(),
       threadId,
-      turns: store.threadTurnSummaries(threadId),
+      turns: queries.threadTurnSummaries(threadId),
     });
   } finally {
     store.close();
@@ -593,9 +581,7 @@ function handleRequests(environment, url, response) {
   const filter = parseRequestFilter(url);
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
+    const page = new RequestMetricsQueryService(store).page(range, {
       offset,
       limit,
       sortKey: sort.key,
@@ -626,9 +612,8 @@ function handleErrors(environment, url, response) {
   );
   const store = openMetricsStore(environment, range.endAtMs);
   try {
-    const page = store.page({
-      startAtMs: range.startAtMs,
-      endAtMs: range.endAtMs,
+    const queries = new RequestMetricsQueryService(store);
+    const page = queries.page(range, {
       offset,
       limit,
       sortKey: "recordedAtMs",
@@ -638,10 +623,7 @@ function handleErrors(environment, url, response) {
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      errors: store.errors({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
+      errors: queries.errors(range),
       records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,

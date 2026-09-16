@@ -1,8 +1,5 @@
 export type RangeName =
-  | "today" | "yesterday"
-  | "this-week" | "last-week"
-  | "this-month" | "last-month"
-  | "24h" | "7d" | "30d" | "90d" | "365d" | "all"
+  | "24h" | "7d" | "30d" | "90d" | "all"
 
 export interface Range {
   name: RangeName

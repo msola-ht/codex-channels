@@ -1,6 +1,12 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { isOpencodeGoProvider } from "../runtime/opencode-go-accounts.mjs";
 import {
+  isRequestMetricsRangeName,
+  requestMetricsAggregationDimension,
+  requestMetricsRangeNames,
+  resolveRequestMetricsRange,
+} from "../dist/observability/index.js";
+import {
   loadConfiguredCustomPrimaryModelProvider,
   readPrimaryProviderBackup,
 } from "../runtime/model-provider-runtime.mjs";
@@ -30,45 +36,24 @@ export function isPrunableMetricsProviderId(value) {
     && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(value);
 }
 
+const metricsRangeUsage = requestMetricsRangeNames.join("|");
+
 export const metricsCommandUsage = Object.freeze({
   run: "用法：codexc metrics run <Thread ID> [--format markdown|json|csv] [--stdout]",
   turns: "用法：codexc metrics turns <Thread ID> [--format markdown|json|csv] [--stdout]",
   threads: "用法：codexc metrics threads [--format markdown|json|csv] [--stdout]",
-  report: "用法：codexc metrics report [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]",
-  export: "用法：codexc metrics export [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>] [--stdout]",
-  quota: "用法：codexc metrics quota [--range <today|yesterday|this-week|last-week|this-month|last-month|24h|7d|30d|90d|365d|all> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format markdown|json|csv] [--stdout]",
+  report: `用法：codexc metrics report [--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD] [--group <global|providers|models>] [--format markdown|json|csv] [--stdout]`,
+  export: `用法：codexc metrics export [--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format <json|csv|markdown>] [--thread <Thread ID>] [--stdout]`,
+  quota: `用法：codexc metrics quota [--range <${metricsRangeUsage}> | --from YYYY-MM-DD --to YYYY-MM-DD] [--format markdown|json|csv] [--stdout]`,
 });
 
 export function metricsRange(name, nowMs) {
-  const duration = {
-    "24h": 24 * 60 * 60 * 1_000,
-    "7d": 7 * 24 * 60 * 60 * 1_000,
-    "30d": 30 * 24 * 60 * 60 * 1_000,
-    "90d": 90 * 24 * 60 * 60 * 1_000,
-    "365d": 365 * 24 * 60 * 60 * 1_000,
-  }[name];
-  if (duration !== undefined) {
-    return { name, startAtMs: Math.max(0, nowMs - duration), endAtMs: nowMs };
+  if (isRequestMetricsRangeName(name)) {
+    return resolveRequestMetricsRange(name, nowMs);
   }
-  if (name === "all") return { name, startAtMs: 0, endAtMs: nowMs };
-  const today = startOfLocalDay(nowMs);
-  if (name === "today") return { name, startAtMs: today, endAtMs: nowMs };
-  if (name === "yesterday") {
-    return { name, startAtMs: addLocalDays(today, -1), endAtMs: today };
-  }
-  const thisWeek = startOfLocalWeek(nowMs);
-  if (name === "this-week") return { name, startAtMs: thisWeek, endAtMs: nowMs };
-  if (name === "last-week") {
-    return { name, startAtMs: addLocalDays(thisWeek, -7), endAtMs: thisWeek };
-  }
-  const thisMonth = startOfLocalMonth(nowMs);
-  if (name === "this-month") return { name, startAtMs: thisMonth, endAtMs: nowMs };
-  if (name === "last-month") {
-    const startAtMs = previousLocalMonth(thisMonth);
-    return { name, startAtMs, endAtMs: thisMonth };
-  }
+  const finalRange = requestMetricsRangeNames.at(-1);
   throw new Error(
-    "--range 只支持 today、yesterday、this-week、last-week、this-month、last-month、24h、7d、30d、90d、365d 或 all",
+    `--range 只支持 ${requestMetricsRangeNames.slice(0, -1).join("、")} 或 ${finalRange}`,
   );
 }
 
@@ -91,9 +76,10 @@ export function metricsRangeOptions(options, nowMs) {
 }
 
 export function metricsDimension(value) {
-  const result = { global: "global", providers: "provider", models: "model" }[value];
-  if (!result) throw new Error("--group 只支持 global、providers 或 models");
-  return result;
+  if (value !== "global" && value !== "providers" && value !== "models") {
+    throw new Error("--group 只支持 global、providers 或 models");
+  }
+  return requestMetricsAggregationDimension(value);
 }
 
 export function parseMetricsOptions(args, allowed) {
@@ -287,30 +273,8 @@ export function parseLocalDate(value) {
   return date.getTime();
 }
 
-function startOfLocalDay(nowMs) {
-  const date = new Date(nowMs);
-  date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
 function addLocalDays(timestamp, days) {
   const date = new Date(timestamp);
   date.setDate(date.getDate() + days);
   return date.getTime();
-}
-
-function startOfLocalWeek(nowMs) {
-  const date = new Date(startOfLocalDay(nowMs));
-  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-  return date.getTime();
-}
-
-function startOfLocalMonth(nowMs) {
-  const date = new Date(nowMs);
-  return new Date(date.getFullYear(), date.getMonth(), 1).getTime();
-}
-
-function previousLocalMonth(timestamp) {
-  const date = new Date(timestamp);
-  return new Date(date.getFullYear(), date.getMonth() - 1, 1).getTime();
 }

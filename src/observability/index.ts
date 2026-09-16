@@ -44,6 +44,18 @@ export type {
   WeeklyQuotaEstimateQuery,
   StoredThreadRequestMetricsAggregate,
 } from "./request-metrics.js";
+export {
+  isRequestMetricsRangeName,
+  queryRequestMetricsAggregate,
+  queryRequestMetricsErrors,
+  requestMetricsAggregationDimension,
+  requestMetricsRangeNames,
+  RequestMetricsQueryService,
+  resolveRequestMetricsRange,
+  type RequestMetricsQueryStore,
+  type RequestMetricsRangeName,
+  type ResolvedRequestMetricsRange,
+} from "./request-metrics-query-service.js";
 export { BufferedModelRequestMetricsWriter } from "./request-metrics-writer.js";
 export {
   acquireRequestMetricsDatabaseLock,

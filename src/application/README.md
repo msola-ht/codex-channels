@@ -152,7 +152,7 @@ Thread 时并行读取账户摘要和精确 Thread 官方估算，估算失败�
 新增第三方时实现 `ProviderAccountAdapter` 并在 Bootstrap 登记，不能伪造 OpenAI Thread 估算；未提供的账户能力保持不支持。
 Application 和 Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
-`providers`、`models` 和 `errors` 使用严格的 `24h`、`7d`、`30d` 时间范围；`errors` 只展示
+`providers`、`models` 和 `errors` 统一使用 `24h`、`7d`、`30d`、`90d` 或全部保留历史；`errors` 只展示
 脱敏后的状态、HTTP 状态、错误类型、次数和最近发生时间。Bootstrap 把独立指标库映射为稳定摘要，
 Application 不读取数据库。OpenAI `/limits` 还通过该端口按周窗口查询统计代理已经按相邻额度
 快照归约的增量样本，估算每 1% 的 Token；没有完整周窗口、有效重置时间或正向

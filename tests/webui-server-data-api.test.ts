@@ -258,11 +258,11 @@ describe("webui server data API", () => {
       error: { code: "invalid_range" },
     });
 
-    const calendarRange = await fetch(`${origin}/api/v1/overview?range=yesterday`);
-    expect(calendarRange.status).toBe(200);
+    const rollingRange = await fetch(`${origin}/api/v1/overview?range=90d`);
+    expect(rollingRange.status).toBe(200);
 
-    const longRange = await fetch(`${origin}/api/v1/overview?range=365d`);
-    expect(longRange.status).toBe(200);
+    const removedRange = await fetch(`${origin}/api/v1/overview?range=365d`);
+    expect(removedRange.status).toBe(400);
 
     const invalidLimit = await fetch(`${origin}/api/v1/requests?limit=501`);
     expect(invalidLimit.status).toBe(400);

@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   modelRequestMetricsSchemaVersion,
+  RequestMetricsQueryService,
   requestMetricsDatabasePath,
   requireCurrentModelRequestMetricsSchema,
   SqliteModelRequestMetricsStore,
@@ -127,21 +128,15 @@ export function readMetricsReport(environment = process.env, options = {}) {
     { readOnly: true },
   );
   try {
+    const queries = new RequestMetricsQueryService(store);
     return {
       format: "codex-connect-request-metrics-report",
       version: 3,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
       weeklyQuota: readWeeklyQuota(store, range.endAtMs),
-      report: store.aggregate({
-        dimension,
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
-      errors: store.errors({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
-      }),
+      report: queries.aggregate(dimension, range),
+      errors: queries.errors(range),
     };
   } finally {
     store.close();
@@ -158,12 +153,11 @@ export function readMetricsExport(environment = process.env, options = {}) {
     { readOnly: true },
   );
   try {
+    const queries = new RequestMetricsQueryService(store);
     const records = [];
     let offset = 0;
     do {
-      const page = store.page({
-        startAtMs: range.startAtMs,
-        endAtMs: range.endAtMs,
+      const page = queries.page(range, {
         offset,
         limit: 500,
         sortKey: "recordedAtMs",
@@ -194,12 +188,13 @@ export function readQuotaHistory(environment = process.env, options = {}) {
   const databasePath = requireCompatibleMetricsDatabase(environment);
   const store = new SqliteModelRequestMetricsStore(databasePath, range.endAtMs, { readOnly: true });
   try {
+    const queries = new RequestMetricsQueryService(store);
     return {
       format: "codex-connect-quota-history",
       version: 1,
       generatedAt: new Date(range.endAtMs).toISOString(),
       range,
-      periods: store.quotaHistory({ startAtMs: range.startAtMs, endAtMs: range.endAtMs }),
+      periods: queries.quotaHistory(range),
     };
   } finally {
     store.close();
@@ -207,14 +202,15 @@ export function readQuotaHistory(environment = process.env, options = {}) {
 }
 
 export function readWeeklyQuota(store, nowMs) {
-  const window = store.latestWeeklyQuota("openai", nowMs);
+  const queries = new RequestMetricsQueryService(store);
+  const window = queries.latestWeeklyQuota("openai", nowMs);
   if (window === null) return null;
-  const estimate = store.weeklyQuotaEstimate({
-    provider: "openai",
-    limitId: window.limitId,
-    resetsAt: window.resetsAt,
+  const estimate = queries.weeklyQuotaEstimate(
+    "openai",
+    window.limitId,
+    window.resetsAt,
     nowMs,
-  });
+  );
   const usedPercent = window.usedPercentMillionths / 1_000_000;
   return {
     limitId: window.limitId,
@@ -252,7 +248,7 @@ export function readMetricsRun(environment = process.env, threadId) {
     { readOnly: true },
   );
   try {
-    const summary = store.threadSummary(threadId);
+    const summary = new RequestMetricsQueryService(store).threadSummary(threadId);
     return {
       format: "codex-connect-request-metrics-run",
       version: 2,
@@ -278,7 +274,7 @@ export function readMetricsThreads(environment = process.env) {
       format: "codex-connect-request-metrics-threads",
       version: 1,
       generatedAt: new Date().toISOString(),
-      threads: store.threadList(),
+      threads: new RequestMetricsQueryService(store).threadList(),
     };
   } finally {
     store.close();
@@ -298,7 +294,7 @@ export function readMetricsTurns(environment = process.env, threadId) {
       version: 2,
       generatedAt: new Date().toISOString(),
       threadId,
-      turns: store.threadTurnSummaries(threadId),
+      turns: new RequestMetricsQueryService(store).threadTurnSummaries(threadId),
     };
   } finally {
     store.close();

@@ -78,11 +78,11 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 压缩和错误统计；历史无 Turn 记录不再形成单独的会话分栏。
 `/metrics errors` 按提供商、模型、状态、HTTP 状态和错误类型汇总异常请求，显示异常率与最近
 发生时间。它不会替代 `/status` 的 App Server 上下文统计。
-`/metrics run` 的会话累计使用上述递归口径；`/metrics turns` 仍列出当前 Thread 自身的 Turn 明细，
-不把子代理任务拆入公开 Turn 行，避免改变既有输出结构。
-范围支持自然日 `today` / `yesterday`、自然周期 `this-week` / `last-week` / `this-month` /
-`last-month`、滚动窗口 `24h` / `7d` / `30d` / `90d` / `365d` 和 `all`。自然范围按 Gateway
-服务器本地时区计算，周一为每周第一天。
+本机 `codexc metrics run <Thread ID>` 的会话累计使用上述递归口径；
+`codexc metrics turns <Thread ID>` 仍列出指定 Thread 自身的 Turn 明细，不把子代理任务拆入公开
+Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
+范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
+本机 CLI 需要精确自然日或账期时使用 `--from YYYY-MM-DD --to YYYY-MM-DD`。
 未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token 的
 failed 请求计入异常记录，避免这类错误完全不可见。
 

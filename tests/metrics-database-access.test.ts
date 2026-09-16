@@ -38,17 +38,13 @@ function fixture() {
 }
 
 describe("model request metrics database access", () => {
-  it("resolves rolling and local calendar ranges", () => {
+  it("resolves the canonical rolling ranges", () => {
     const now = new Date(2026, 7, 9, 11, 30).getTime();
-    expect(metricsRange("yesterday", now)).toEqual({
-      name: "yesterday",
-      startAtMs: new Date(2026, 7, 8).getTime(),
-      endAtMs: new Date(2026, 7, 9).getTime(),
-    });
-    expect(metricsRange("this-month", now).startAtMs)
-      .toBe(new Date(2026, 7, 1).getTime());
+    expect(metricsRange("24h", now).startAtMs).toBe(now - 86_400_000);
     expect(metricsRange("90d", now).startAtMs).toBe(now - 90 * 86_400_000);
     expect(metricsRange("all", now)).toEqual({ name: "all", startAtMs: 0, endAtMs: now });
+    expect(() => metricsRange("yesterday", now))
+      .toThrow("--range 只支持 24h、7d、30d、90d 或 all");
   });
 
   it("reports a missing database without creating it", () => {

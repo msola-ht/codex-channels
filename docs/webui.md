@@ -80,9 +80,7 @@ codexc service stop webui        # 停止
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
-`range` 支持 `today`、`yesterday`、`this-week`、`last-week`、
-`this-month`、`last-month`、`24h`、`7d`、`30d`、`90d`、`365d`、`all`；自然范围按
-WebUI 服务所在主机的本地时区计算。请求分页 `offset` 从 0 开始，
+`range` 统一支持 `24h`、`7d`、`30d`、`90d`、`all`。请求分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`。
 已删除的 `speed`、`ttft`、`duration` 不再接受，传入时返回 400。

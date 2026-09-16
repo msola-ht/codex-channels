@@ -13,7 +13,6 @@ const ranges: Array<{ value: RangeName; label: string }> = [
   { value: "7d", label: "最近 7 天" },
   { value: "30d", label: "最近 30 天" },
   { value: "90d", label: "最近 90 天" },
-  { value: "365d", label: "最近 365 天" },
   { value: "all", label: "全部历史" },
 ]
 

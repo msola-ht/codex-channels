@@ -64,7 +64,8 @@
   提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和
   SqliteScheduledTaskStore 保持失败关闭。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
-  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；只打开只读 Store，不加载服务控制或数据库维护流程。
+  `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
+  统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
@@ -86,7 +87,8 @@
   行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
-  时间范围、分组、格式及维护命令参数，并向顶层帮助导出规范用法行；不访问配置、数据库或服务，
+  时间范围、分组、格式及维护命令参数，复用 Observability 的规范范围与聚合维度，并向顶层帮助
+  导出规范用法行；不访问配置、数据库或服务，
   `metrics-database.mjs` 保留原有公开入口与 `metricsRange` 导出。
 - `channel-send-image-options.mjs`：集中解析 `codexc channel send-image` 参数，使顶层 CLI 在读取配置前拒绝非法输入。
 - `channel-send-image.mjs`：`codexc channel send-image` 的实现，把本地图片复制到

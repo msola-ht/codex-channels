@@ -259,17 +259,10 @@ function selectMetricsRange(prompts) {
     message: "时间范围",
     showInstructions: false,
     options: [
-      { value: "today", label: "今天" },
-      { value: "yesterday", label: "昨天" },
-      { value: "this-week", label: "本周" },
-      { value: "last-week", label: "上周" },
-      { value: "this-month", label: "本月" },
-      { value: "last-month", label: "上月" },
       { value: "24h", label: "最近 24 小时" },
       { value: "7d", label: "最近 7 天" },
       { value: "30d", label: "最近 30 天" },
       { value: "90d", label: "最近 90 天" },
-      { value: "365d", label: "最近 365 天" },
       { value: "all", label: "全部保留历史" },
     ],
   });

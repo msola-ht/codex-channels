@@ -301,17 +301,10 @@ export function formatCompactMetricsValue(
 
 function formatMetricsRange(range: RequestMetricsTimeRange): string {
   return {
-    today: "今天",
-    yesterday: "昨天",
-    "this-week": "本周",
-    "last-week": "上周",
-    "this-month": "本月",
-    "last-month": "上月",
     "24h": "最近 24 小时",
     "7d": "最近 7 天",
     "30d": "最近 30 天",
     "90d": "最近 90 天",
-    "365d": "最近 365 天",
     all: "全部历史",
   }[range];
 }

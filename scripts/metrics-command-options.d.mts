@@ -27,7 +27,7 @@ export function isMetricsProviderId(
 export function isPrunableMetricsProviderId(value: string): boolean;
 
 export const metricsCommandUsage: Readonly<Record<
-  "run" | "turns" | "threads" | "report" | "export",
+  "run" | "turns" | "threads" | "report" | "export" | "quota",
   string
 >>;
 
