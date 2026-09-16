@@ -1,6 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+
+import ts from "typescript";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -27,6 +29,29 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("resolves metrics declaration imports without build artifacts", () => {
+    const config = ts.readConfigFile(resolve("tsconfig.json"), ts.sys.readFile);
+    expect(config.error).toBeUndefined();
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, process.cwd());
+    expect(parsed.errors).toEqual([]);
+    const dist = resolve("dist") + sep;
+    const host = {
+      ...ts.sys,
+      fileExists: (file: string) => !resolve(file).startsWith(dist) && ts.sys.fileExists(file),
+    };
+    for (const name of ["metrics-command-options", "metrics-database"]) {
+      const file = resolve(`scripts/${name}.d.mts`);
+      const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+      const imports = source.statements.filter(ts.isImportDeclaration);
+      expect(imports.length).toBeGreaterThan(0);
+      for (const entry of imports) {
+        if (!ts.isStringLiteral(entry.moduleSpecifier)) throw new Error("Expected a module path");
+        const module = ts.resolveModuleName(entry.moduleSpecifier.text, file, parsed.options, host).resolvedModule;
+        expect(module, `${name}: ${entry.moduleSpecifier.text}`).toBeDefined();
+      }
+    }
+  });
+
   it("resolves today and yesterday by local calendar boundaries", () => {
     for (const now of [new Date(2026, 0, 1, 12), new Date(2026, 2, 9, 12), new Date(2026, 10, 2, 12)]) {
       const today = new Date(now);
