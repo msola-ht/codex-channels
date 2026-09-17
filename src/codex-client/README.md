@@ -14,8 +14,8 @@
   再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
-  子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，关闭 Gateway
-  Client 时只终止对应 Proxy，不终止独立 App Server。
+  子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
+  有界超时并清理静默 Proxy，关闭 Gateway Client 时只终止对应 Proxy，不终止独立 App Server。
 - `stdio-transport.ts`：用于受控开发和测试场景的 stdio Transport。
 - `json-rpc.ts`：使用生成的 `ClientRequest` / `ClientNotification` 约束出站消息，并处理
   initialize、请求关联、通知与 Server Request 分流、超时、断线清理及安全重试；通知不附加本地接收时间戳。
@@ -94,7 +94,9 @@
   不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
-  供跨 Provider 会话展示和冷恢复定位使用。
+  供跨 Provider 会话展示和冷恢复定位使用；macOS Desktop 启动前的只读检查使用官方分页
+  `thread/loaded/list` 枚举当前内存中的持久及临时 Thread，再通过 `thread/read` 读取权威状态，只返回
+  活动 Thread 数量。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
   `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
   Provider，不得跨 Provider 或自行扩大权限。

@@ -1,4 +1,5 @@
 const maximumFormattedMarkdownCharacters = 3_500;
+const markdownBackslashEscapePattern = /\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/gu;
 
 export function formatMarkdownAsTelegramHtml(markdown: string): string | undefined {
   if (Array.from(markdown).length > maximumFormattedMarkdownCharacters) {
@@ -105,13 +106,14 @@ function formatInlineMarkdown(text: string): string {
     const index = protectedHtml.push(html) - 1;
     return `\uE000HTML${index}\uE001`;
   };
-  const withPlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
+  const withCodePlaceholders = text.replace(/`([^`\n]+)`/g, (_match, content: string) => {
     const rendered = isBotCommand(content.trim())
       ? escapeHtml(content.trim())
       : `<code>${escapeHtml(content)}</code>`;
     return protect(rendered);
-  }).replace(
-    /(?<!!)\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi,
+  });
+  const withLinkPlaceholders = withCodePlaceholders.replace(
+    /(?<![!\\])\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi,
     (match, label: string, destination: string) => {
       if (!isSafeHttpUrl(destination)) {
         return match;
@@ -121,7 +123,11 @@ function formatInlineMarkdown(text: string): string {
       );
     },
   );
-  const formatted = escapeHtml(withPlaceholders)
+  const withEscapePlaceholders = withLinkPlaceholders.replace(
+    markdownBackslashEscapePattern,
+    (_match, punctuation: string) => protect(escapeHtml(punctuation)),
+  );
+  const formatted = escapeHtml(withEscapePlaceholders)
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/~~([^~\n]+)~~/g, "<s>$1</s>")
@@ -131,6 +137,45 @@ function formatInlineMarkdown(text: string): string {
     /\uE000HTML(\d+)\uE001/g,
     (_match, index: string) => protectedHtml[Number(index)] ?? "",
   );
+}
+
+export function decodeMarkdownBackslashEscapes(markdown: string): string {
+  const lines = markdown.split("\n");
+  let fence: { marker: "`" | "~"; length: number } | undefined;
+  return lines.map((line) => {
+    const fenceRun = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (fence !== undefined) {
+      if (
+        fenceRun !== null
+        && fenceRun[1]![0] === fence.marker
+        && fenceRun[1]!.length >= fence.length
+        && fenceRun[2]!.trim().length === 0
+      ) {
+        fence = undefined;
+      }
+      return line;
+    }
+    if (fenceRun !== null) {
+      fence = {
+        marker: fenceRun[1]![0] as "`" | "~",
+        length: fenceRun[1]!.length,
+      };
+      return line;
+    }
+    return decodeInlineMarkdownBackslashEscapes(line);
+  }).join("\n");
+}
+
+function decodeInlineMarkdownBackslashEscapes(text: string): string {
+  let output = "";
+  let cursor = 0;
+  for (const match of text.matchAll(/`([^`\n]+)`/gu)) {
+    const index = match.index;
+    output += text.slice(cursor, index).replace(markdownBackslashEscapePattern, "$1");
+    output += match[0];
+    cursor = index + match[0].length;
+  }
+  return `${output}${text.slice(cursor).replace(markdownBackslashEscapePattern, "$1")}`;
 }
 
 function parseMarkdownTableRow(line: string): string[] | undefined {

@@ -119,8 +119,15 @@ jobs:
           npx vitest run
           tests/stdio-transport.test.ts
           tests/unix-websocket-transport.test.ts
+          tests/windows-proxy-transport.test.ts
           tests/systemd-install.test.ts
           tests/executable.test.ts
+
+      - name: Windows Desktop compatibility tests
+        run: >-
+          npx vitest run
+          tests/windows-desktop-app-command.test.ts
+          tests/desktop-app-bridge.test.ts
 
   app-server-contract:
     name: Codex 0.154.0 App Server contract
@@ -152,6 +159,7 @@ jobs:
         run: >-
           TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run
           tests/real-app-server.test.ts
+          tests/real-app-server-desktop-bridge.test.ts
           tests/real-app-server-isolated-state.test.ts
           tests/real-app-server-queue.test.ts
           tests/real-app-server-supervised-provider.test.ts

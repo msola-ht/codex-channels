@@ -80,4 +80,22 @@ describe("Telegram Markdown compatibility formatter", () => {
       "<pre><code class=\"language-text\">/status\nnpm test</code></pre>",
     ].join("\n"));
   });
+
+  it("consumes Markdown backslash escapes without changing code or paths", () => {
+    expect(formatMarkdownAsTelegramHtml([
+      "DESKTOP\\_TO\\_CHANNEL\\_OK",
+      "\\*literal\\*",
+      String.raw`C:\Users\heforge`,
+      "`DESKTOP\\_TO\\_CHANNEL\\_OK`",
+      "```text",
+      "DESKTOP\\_TO\\_CHANNEL\\_OK",
+      "```",
+    ].join("\n"))).toBe([
+      "DESKTOP_TO_CHANNEL_OK",
+      "*literal*",
+      String.raw`C:\Users\heforge`,
+      "<code>DESKTOP\\_TO\\_CHANNEL\\_OK</code>",
+      "<pre><code class=\"language-text\">DESKTOP\\_TO\\_CHANNEL\\_OK</code></pre>",
+    ].join("\n"));
+  });
 });

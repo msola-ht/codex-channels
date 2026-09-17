@@ -53,7 +53,10 @@ import {
   renderTelegramSubagentCompleted,
   splitTelegramText,
 } from "./format.js";
-import { formatMarkdownAsTelegramHtml } from "./markdown-format.js";
+import {
+  decodeMarkdownBackslashEscapes,
+  formatMarkdownAsTelegramHtml,
+} from "./markdown-format.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import {
   planLongFinalMessage,
@@ -1601,7 +1604,7 @@ export class TelegramOutbox {
 }
 
 function formatTelegramCliInput(text: string): string {
-  const quote = text
+  const quote = decodeMarkdownBackslashEscapes(text)
     .trim()
     .split("\n")
     .map((line) => `│ ${line}`)

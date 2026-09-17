@@ -47,6 +47,7 @@ CI 的隔离合同要求安装项目锁定版本的 Codex CLI，但不需要登�
 ```bash
 TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
   tests/real-app-server.test.ts \
+  tests/real-app-server-desktop-bridge.test.ts \
   tests/real-app-server-isolated-state.test.ts \
   tests/real-app-server-queue.test.ts \
   tests/real-app-server-supervised-provider.test.ts \
@@ -55,9 +56,12 @@ TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
 ```
 
 非 Windows 门禁把临时根固定为 `/tmp`，避免 macOS 默认临时目录使 Unix Socket 路径超过系统限制；
-各合同仍使用独立随机子目录。合同覆盖真实握手、跨 Client 状态、Provider 监管、Queue、设置更新、
-Goal、Skill、MCP、Plugin、Permission Profile 和工具审批等当前支持矩阵中的能力。跳过或环境拒绝
-不计为通过。
+各合同仍使用独立随机子目录。合同覆盖真实握手、Desktop JSONL stdio 到 Unix WebSocket 的
+`initialize` 转换、Desktop 回环桥的双 Client Thread 共享、跨 Client
+状态、Provider 监管、Queue、设置更新、Goal、Skill、MCP、Plugin、Permission Profile 和工具审批
+等当前支持矩阵中的能力。Desktop 桥合同使用普通 App Server Client，不覆盖打包 Desktop 动态创建
+的 `CODEX_APP_TOOLS_PIPE_PATH`、代码签名校验或内置 `codex_app` MCP 生命周期；这些能力必须单独
+实机验收。跳过或环境拒绝不计为通过。
 
 ## 当前用户配置集成冒烟
 

@@ -193,8 +193,10 @@ export class FakeTransport extends BaseTransport {
   };
   disconnectAfterInitialized = false;
   threadListData: Array<Record<string, unknown>> = [];
+  threadLoadedListData: string[] = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
   threadReadData: Record<string, unknown> = appServerThread();
+  threadReadDataById = new Map<string, Record<string, unknown>>();
   metadataUpdateThreadData: Record<string, unknown> | undefined;
   goal = appServerGoal();
 
@@ -240,6 +242,15 @@ export class FakeTransport extends BaseTransport {
           JSON.stringify({
             id: decoded.id,
             result: { data: this.threadListData, nextCursor: null },
+          }),
+        ),
+      );
+    } else if (decoded.method === "thread/loaded/list") {
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: { data: this.threadLoadedListData, nextCursor: null },
           }),
         ),
       );
@@ -317,10 +328,14 @@ export class FakeTransport extends BaseTransport {
         this.emitMessage(JSON.stringify({ id: decoded.id, result: {} })),
       );
     } else if (decoded.method === "thread/read") {
+      const params = decoded.params as { threadId?: string } | undefined;
+      const thread = params?.threadId
+        ? this.threadReadDataById.get(params.threadId) ?? this.threadReadData
+        : this.threadReadData;
       queueMicrotask(() =>
         this.emitMessage(JSON.stringify({
           id: decoded.id,
-          result: { thread: this.threadReadData },
+          result: { thread },
         })),
       );
     } else if (decoded.method === "model/list") {

@@ -49,6 +49,24 @@ describe("Gateway config.toml", () => {
       .toThrow("[codex]");
   });
 
+  it("validates the optional Codex Desktop App bridge configuration", () => {
+    expect(validateCodexConfigDocument({
+      desktop_app: { enabled: true },
+    }).desktop_app).toEqual({ enabled: true, port: 47_821 });
+    expect(validateCodexConfigDocument({
+      desktop_app: { enabled: false, port: 12_345 },
+    }).desktop_app).toEqual({ enabled: false, port: 12_345 });
+    expect(() => validateCodexConfigDocument({
+      desktop_app: { enabled: true, port: 0 },
+    })).toThrow("[codex]");
+    expect(() => validateCodexConfigDocument({
+      desktop_app: { enabled: true, port: 65_536 },
+    })).toThrow("[codex]");
+    expect(() => validateCodexConfigDocument({
+      desktop_app: { enabled: true, port: 47_821, host: "0.0.0.0" },
+    })).toThrow("[codex]");
+  });
+
   it("derives global debug mode from debug and trace log levels", () => {
     expect(isDebugLogLevel("debug")).toBe(true);
     expect(isDebugLogLevel("trace")).toBe(true);

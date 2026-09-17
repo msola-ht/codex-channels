@@ -19,8 +19,9 @@ import {
 import { terminateChildProcess } from "./process-lifecycle.mjs";
 
 const protocolVersion = 5;
+const desktopAppHostProtocolVersion = 1;
 const maximumResponseBytes = 16_384;
-const maximumRequestBytes = 1_024;
+const maximumRequestBytes = 4_096;
 const connectionTimeoutMs = 1_000;
 const minimumUnixSocketPathLimitBytes = 104;
 const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
@@ -34,17 +35,27 @@ export class AppServerSupervisorOwner {
   #closing = false;
   #ensureProvider;
   #releaseProvider;
+  #attachDesktopApp;
+  #detachDesktopApp;
   #topology;
   #runningProviders = new Set();
   #releasedProviders = new Set();
   #providerLeases = new Map();
+  #desktopAppLeases = new Set();
+  #desktopAppAttachmentKey;
   #providerOperations = new Map();
 
-  constructor(primarySocketPath, topology, { ensureProvider, releaseProvider } = {}) {
+  constructor(
+    primarySocketPath,
+    topology,
+    { ensureProvider, releaseProvider, attachDesktopApp, detachDesktopApp } = {},
+  ) {
     this.#socketPath = appServerSupervisorSocketPath(primarySocketPath);
     this.#topology = topology;
     this.#ensureProvider = ensureProvider;
     this.#releaseProvider = releaseProvider;
+    this.#attachDesktopApp = attachDesktopApp;
+    this.#detachDesktopApp = detachDesktopApp;
     const listener = (socket) => {
       this.#sockets.add(socket);
       const chunks = [];
@@ -87,8 +98,100 @@ export class AppServerSupervisorOwner {
         socketPaths: this.#topology.socketPaths,
         runningProviders: [...this.#runningProviders],
         releasedProviders: [...this.#releasedProviders],
-        leasedProviders: [...this.#providerLeases.keys()],
+        leasedProviders: this.#leasedProviders(),
+        ...(process.platform === "darwin" && this.#attachDesktopApp && this.#detachDesktopApp
+          ? { desktopAppHostProtocolVersion }
+          : {}),
+        desktopAppAttached: this.#desktopAppLeases.size > 0,
       })}\n`);
+      return;
+    }
+    if (request?.action === "leaseDesktopApp") {
+      if (
+        process.platform !== "darwin"
+        || request.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+        || request.provider !== this.#topology.primaryProvider
+        || typeof request.pipePath !== "string"
+        || request.pipePath.length === 0
+        || request.pipePath.length > 1_024
+        || typeof request.appPath !== "string"
+        || request.appPath.length === 0
+        || request.appPath.length > 1_024
+        || typeof request.toolsEnabled !== "boolean"
+        || !this.#attachDesktopApp
+        || !this.#detachDesktopApp
+      ) {
+        socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
+        return;
+      }
+      socket.setTimeout(20_000, () => socket.destroy());
+      const attachmentKey = JSON.stringify([
+        request.appPath,
+        request.pipePath,
+        request.toolsEnabled,
+      ]);
+      const removeLease = () => {
+        if (!this.#desktopAppLeases.delete(socket)) return;
+        if (this.#desktopAppLeases.size > 0 || !this.#detachDesktopApp) return;
+        this.#desktopAppAttachmentKey = undefined;
+        void this.#runProviderOperation(request.provider, async () => {
+          if (this.#desktopAppLeases.size === 0) await this.#detachDesktopApp();
+        }).catch((error) => {
+          if (!this.#closing) {
+            console.error(
+              `Codex Desktop App Host 租约清理失败：${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        });
+      };
+      socket.once("close", removeLease);
+      try {
+        await this.#runProviderOperation(request.provider, async () => {
+          if (socket.destroyed) return;
+          if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+            throw new Error("主 OpenAI App Server 正被其他客户端租约占用");
+          }
+          if (
+            this.#desktopAppLeases.size > 0
+            && this.#desktopAppAttachmentKey !== attachmentKey
+          ) {
+            throw new Error("另一个 Codex Desktop App Host 租约仍在使用中");
+          }
+          await this.#attachDesktopApp({
+            appPath: request.appPath,
+            pipePath: request.pipePath,
+            toolsEnabled: request.toolsEnabled,
+          });
+          if (socket.destroyed) {
+            await this.#detachDesktopApp?.();
+            return;
+          }
+          this.#desktopAppLeases.add(socket);
+          this.#desktopAppAttachmentKey = attachmentKey;
+          this.#releasedProviders.delete(request.provider);
+          this.#runningProviders.add(request.provider);
+        });
+        if (socket.destroyed) return;
+        socket.setTimeout(0);
+        socket.resume();
+        socket.write(`${JSON.stringify({
+          version: protocolVersion,
+          desktopAppHostProtocolVersion,
+          ok: true,
+          provider: request.provider,
+        })}\n`);
+      } catch (error) {
+        removeLease();
+        socket.end(`${JSON.stringify({
+          version: protocolVersion,
+          desktopAppHostProtocolVersion,
+          ok: false,
+          provider: request.provider,
+          error: error instanceof Error ? error.message.slice(0, 512) : "Desktop Host 附加失败",
+        })}\n`);
+      }
       return;
     }
     if (request?.action === "leaseProvider") {
@@ -144,7 +247,7 @@ export class AppServerSupervisorOwner {
         socket.end(`${JSON.stringify({ version: protocolVersion, ok: false })}\n`);
         return;
       }
-      if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+      if (this.#hasProviderLease(request.provider)) {
         socket.end(`${JSON.stringify({
           version: protocolVersion,
           ok: true,
@@ -157,7 +260,7 @@ export class AppServerSupervisorOwner {
       socket.setTimeout(15_000, () => socket.destroy());
       try {
         const result = await this.#runProviderOperation(request.provider, async () => {
-          if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+          if (this.#hasProviderLease(request.provider)) {
             return { released: false, reason: "leased" };
           }
           const wasRunning = this.#runningProviders.has(request.provider);
@@ -165,7 +268,7 @@ export class AppServerSupervisorOwner {
           this.#releasedProviders.add(request.provider);
           try {
             const didRelease = await this.#releaseProvider(request.provider);
-            if ((this.#providerLeases.get(request.provider)?.size ?? 0) > 0) {
+            if (this.#hasProviderLease(request.provider)) {
               await this.#ensureProvider(request.provider);
               this.#releasedProviders.delete(request.provider);
               this.#runningProviders.add(request.provider);
@@ -242,6 +345,20 @@ export class AppServerSupervisorOwner {
       }
     }).catch(() => undefined);
     return current;
+  }
+
+  #hasProviderLease(provider) {
+    return (this.#providerLeases.get(provider)?.size ?? 0) > 0
+      || (
+        provider === this.#topology.primaryProvider
+        && this.#desktopAppLeases.size > 0
+      );
+  }
+
+  #leasedProviders() {
+    const providers = new Set(this.#providerLeases.keys());
+    if (this.#desktopAppLeases.size > 0) providers.add(this.#topology.primaryProvider);
+    return [...providers];
   }
 
   async start() {
@@ -433,6 +550,96 @@ export async function acquireAppServerProviderLease(primarySocketPath, provider)
     });
     socket.once("error", () => fail(`模型 Provider 租约连接失败：${provider}`));
     socket.once("end", () => fail(`模型 Provider 租约连接提前关闭：${provider}`));
+  });
+}
+
+export async function acquireMacDesktopAppHostLease(
+  primarySocketPath,
+  { provider, pipePath, appPath, toolsEnabled },
+) {
+  if (process.platform !== "darwin") {
+    throw new Error("Codex Desktop App 可信 Host 只支持 macOS");
+  }
+  const socketPath = appServerSupervisorSocketPath(primarySocketPath);
+  assertSafeSupervisorSocket(socketPath);
+  return new Promise((resolveLease, rejectLease) => {
+    const socket = createConnection(socketPath);
+    let response = Buffer.alloc(0);
+    let settled = false;
+    const fail = (message) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      rejectLease(new Error(message));
+    };
+    const timer = setTimeout(
+      () => fail("Codex Desktop App Host 附加超时"),
+      20_000,
+    );
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify({
+        action: "leaseDesktopApp",
+        desktopAppHostProtocolVersion,
+        provider,
+        pipePath,
+        appPath,
+        toolsEnabled,
+      })}\n`);
+    });
+    socket.on("data", (chunk) => {
+      response = Buffer.concat([response, chunk]);
+      if (response.length > maximumResponseBytes) {
+        fail("Codex Desktop App Host 响应过大");
+        return;
+      }
+      const newline = response.indexOf(0x0a);
+      if (newline < 0) return;
+      let value;
+      try {
+        value = JSON.parse(response.subarray(0, newline).toString("utf8"));
+      } catch {
+        fail("Codex Desktop App Host 没有有效响应");
+        return;
+      }
+      if (
+        value?.version !== protocolVersion
+        || value.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+        || value.provider !== provider
+        || value.ok !== true
+      ) {
+        fail(
+          supervisorVersionMismatch(value)
+            ? supervisorVersionMismatchMessage(value)
+            : value?.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+              ? "App Server 服务不支持当前 Desktop Host；请重启 App Server 服务后重试"
+              : typeof value?.error === "string" && value.error
+                ? value.error
+                : "Codex Desktop App Host 附加失败",
+        );
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      socket.pause();
+      socket.on("error", () => undefined);
+      let closePromise;
+      resolveLease({
+        close() {
+          closePromise ??= new Promise((resolveClose) => {
+            if (socket.destroyed) {
+              resolveClose();
+              return;
+            }
+            socket.once("close", resolveClose);
+            socket.end();
+          });
+          return closePromise;
+        },
+      });
+    });
+    socket.once("error", () => fail("Codex Desktop App Host 连接失败"));
+    socket.once("end", () => fail("Codex Desktop App Host 连接提前关闭"));
   });
 }
 
@@ -674,6 +881,14 @@ function parseTopology(response) {
     || !validProviderStateList(value.runningProviders, providerIds(value))
     || !validProviderStateList(value.releasedProviders, providerIds(value))
     || !validProviderStateList(value.leasedProviders, providerIds(value))
+    || (
+      value.desktopAppHostProtocolVersion !== undefined
+      && value.desktopAppHostProtocolVersion !== desktopAppHostProtocolVersion
+    )
+    || (
+      value.desktopAppAttached !== undefined
+      && typeof value.desktopAppAttached !== "boolean"
+    )
   ) {
     return undefined;
   }

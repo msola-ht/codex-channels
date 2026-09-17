@@ -167,6 +167,10 @@ const codexSchema = z.strictObject({
   client_identity: clientIdentitySchema.optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
   terminal_identity: terminalIdentitySchema.optional(),
+  desktop_app: z.strictObject({
+    enabled: z.boolean().default(false),
+    port: z.number().int().min(1).max(65_535).default(47_821),
+  }).optional(),
 });
 
 const gatewayDocumentSchema = z.strictObject({

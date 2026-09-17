@@ -13,6 +13,8 @@ export interface InspectedAppServerTopology {
   runningProviders: string[];
   releasedProviders: string[];
   leasedProviders: string[];
+  desktopAppHostProtocolVersion?: 1;
+  desktopAppAttached?: boolean;
 }
 
 export interface AppServerProviderLease {
@@ -35,6 +37,12 @@ export class AppServerSupervisorOwner {
     options?: {
       ensureProvider?: (provider: string) => Promise<void>;
       releaseProvider?: (provider: string) => Promise<boolean>;
+      attachDesktopApp?: (attachment: {
+        appPath: string;
+        pipePath: string;
+        toolsEnabled: boolean;
+      }) => Promise<void>;
+      detachDesktopApp?: () => Promise<void>;
     },
   );
   start(): Promise<void>;
@@ -56,6 +64,15 @@ export function ensureAppServerProvider(
 export function acquireAppServerProviderLease(
   primarySocketPath: string,
   provider: string,
+): Promise<AppServerProviderLease>;
+export function acquireMacDesktopAppHostLease(
+  primarySocketPath: string,
+  attachment: {
+    provider: string;
+    pipePath: string;
+    appPath: string;
+    toolsEnabled: boolean;
+  },
 ): Promise<AppServerProviderLease>;
 export function releaseAppServerProvider(
   primarySocketPath: string,

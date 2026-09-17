@@ -58,6 +58,15 @@
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
   传输，其余平台走私有 Unix WebSocket，不承担会话业务。Doctor 以官方非全局客户端身份
   `codex_app_server_daemon` 握手，不改变 App Server 进程级 originator 或 UA 后缀。
+- `desktop-app-bridge.mjs` / `desktop-app-bridge.d.mts`：在 Windows 功能显式启用时，为 Codex Desktop App
+  提供只绑定 `127.0.0.1` 的受令牌保护 WebSocket 桥；每个下游连接复用现有跨平台 App Server
+  Transport 与主 Provider 租约，只转发有序文本帧，不解析 JSON-RPC 或保存会话状态。Windows
+  仍在锁定 Codex CLI 的裸字节 `app-server proxy --sock` 之上建立 WebSocket 并连接私有 UDS；同一
+  模块还供 macOS 受管入口把 Desktop JSONL stdio 与 Unix WebSocket 文本帧按消息边界双向转换。
+- `desktop-app-host.mjs` / `desktop-app-host.d.mts`：只在 macOS Desktop Host 租约附加时校验当前
+  用户私有工具 Pipe、正式 ChatGPT Bundle 的 OpenAI 签名 Node、项目锁定版本的 OpenAI 签名
+  Codex 原生可执行文件，并用签名 Node 托管原主 App Server；只接受 Desktop 明确传入的内置插件
+  布尔启用值，动态 Pipe 与附加状态不落盘。
 - `terminal-identity.mjs`：按当前锁定 Codex CLI 的终端探测顺序从进程环境推导模型上游
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
@@ -67,8 +76,8 @@
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
-  实例子进程、按需启动/释放、Supervisor 和退出清理生命周期；CLI 与脚本只负责准备已校验的运行环境
-  和默认 Workspace。
+  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；CLI 与脚本只
+  负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
@@ -77,7 +86,9 @@
   认证令牌，连接首帧必须认证，关闭时只删除当前所有者发布的描述文件。
 - `app-server-supervisor.mjs`：以当前用户私有 IPC 持有 App Server 监管入口互斥锁，
   对前台启动器公开有界、版本化的 Provider 拓扑身份，并提供主 App Server 与受控 Provider 的按需
-  启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`）；
+  启动、释放与 Remote TUI 生命周期租约（`ensureProvider` / `releaseProvider` / `leaseProvider`），
+  并为 macOS Desktop 受管 stdio Proxy 提供带独立能力版本的可信 Host 租约；该租约阻止主实例被
+  空闲释放，最后一个租约关闭后清除未来启动所用的临时 Pipe 附加状态；
   拓扑同时区分已配置、运行中、主动释放和持有租约的实例。租约由私有 Socket 连接持有，断开时自动撤销，
   存在租约时拒绝释放；同一实例的启动、释放与租约获取串行执行，释放结果明确区分已释放、
   租约占用和实例未运行，启动、释放与账户删除遇到旧版或无效监管响应时失败关闭并提示重启服务。

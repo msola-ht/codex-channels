@@ -49,6 +49,10 @@ import {
 } from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
 import {
+  desktopAppCommandUsage,
+  runDesktopAppCommand,
+} from "../scripts/desktop-app-command.mjs";
+import {
   metricsCommandUsage,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
@@ -83,6 +87,7 @@ const helpText = {
 
 项目与 Codex：
   remote [参数]                启动共享 App Server 的 Codex TUI
+  desktop-app                 管理 Codex Desktop App 共享连接
   work                         管理 Workspace（交互菜单或子命令）
   rules                        管理项目 Codex 命令预设
   agents                       管理共享第三方子代理
@@ -131,6 +136,7 @@ DeepSeek 与 OpenCode Go 子菜单中的“修改模型设置”会打开同一�
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
 切换模式可用 --profile sf-deepseek、sf-ocg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
+  desktop_app: desktopAppCommandUsage,
   service: `用法：codexc service <命令>
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway
@@ -374,6 +380,16 @@ try {
         workingDirectory: process.cwd(),
         failureReportedByChild: true,
       });
+      break;
+    case "desktop-app":
+      if (showRequestedHelp(args, "desktop_app")) {
+        break;
+      }
+      if (args.some(isHelpArgument)) {
+        console.log(desktopAppCommandUsage);
+        break;
+      }
+      await runDesktopAppCommand(args);
       break;
     case "work":
       await runWorkspaceCommand(args);

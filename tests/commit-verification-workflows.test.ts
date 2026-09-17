@@ -20,6 +20,17 @@ describe("commit verification workflows", () => {
     expect(workflow).toContain("  workflow_dispatch:");
   });
 
+  it("runs Windows Desktop contracts by file without test-name filters", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows", "ci.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("tests/windows-desktop-app-command.test.ts");
+    expect(workflow).toContain("tests/desktop-app-bridge.test.ts");
+    expect(workflow).not.toMatch(/(?:^|\s)-t(?:\s|$)/u);
+  });
+
   it.each(workflows)("installs WebUI dependencies before verification in %s", (name) => {
     const workflow = readFileSync(
       join(process.cwd(), ".github/workflows", name),

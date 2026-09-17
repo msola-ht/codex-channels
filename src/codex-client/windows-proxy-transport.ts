@@ -179,6 +179,13 @@ export class WindowsProxyTransport extends BaseTransport {
 
     try {
       await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error(
+            `连接 Codex Windows Proxy 超时：${this.connectTimeoutMs}ms`,
+          ));
+        }, this.connectTimeoutMs);
+        timeout.unref();
         const onOpen = (): void => {
           opened = true;
           cleanup();
@@ -201,6 +208,7 @@ export class WindowsProxyTransport extends BaseTransport {
           reject(new Error("Codex Windows Proxy 在握手完成前退出"));
         };
         const cleanup = (): void => {
+          clearTimeout(timeout);
           socket.off("open", onOpen);
           socket.off("error", onError);
           socket.off("close", onClose);

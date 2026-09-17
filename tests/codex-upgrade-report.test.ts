@@ -99,6 +99,7 @@ describe("Codex release upgrade preview", () => {
       },
       args: expect.arrayContaining([
         "tests/real-app-server.test.ts",
+        "tests/real-app-server-desktop-bridge.test.ts",
         "tests/real-app-server-isolated-state.test.ts",
         "tests/real-app-server-queue.test.ts",
         "tests/real-app-server-supervised-provider.test.ts",
