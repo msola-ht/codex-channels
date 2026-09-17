@@ -19,6 +19,11 @@ import {
 
 /** 单条记录的正文上限；超出后按记录切分，转储内存占用保持有界。 */
 const recordPayloadLimitBytes = 1_048_576;
+/**
+ * 开启精简时先整段缓冲正文再折叠：分片只能是完整正文的一半，无法折叠半截 JSON。
+ * 超过该上限时按原样分片写出，避免为超大正文无限占用内存。
+ */
+const compactionBufferLimitBytes = 32 * 1_048_576;
 /** 单个转储文件上限，达到后写入下一个文件。 */
 const fileSizeLimitBytes = 64 * 1_048_576;
 /** 同一目录保留的转储文件数量，超出后删除最旧文件。 */
@@ -46,6 +51,11 @@ export interface ModelTrafficDumpOptions {
    * 大于 `0` 时同时折叠响应回显的 `instructions` 与 `tools`。
    */
   inputItems?: number;
+  /**
+   * 单个数组条目的正文上限（字节）；超过时只保留头尾并写入截断标记。
+   * `0` 或不设置表示按原样转储。
+   */
+  itemMaxBytes?: number;
   /** 文件名前缀，用于区分主 Provider 与隔离 Provider。 */
   label: string;
   onError: (error: Error) => void;
@@ -73,6 +83,7 @@ export interface ModelTrafficWebSocketExchangeInput {
 export class ModelTrafficDump {
   private readonly directory: string;
   private readonly inputItems: number;
+  private readonly itemMaxBytes: number;
   private readonly label: string;
   private readonly onError: (error: Error) => void;
   private readonly streams = new Set<WriteStream>();
@@ -88,6 +99,7 @@ export class ModelTrafficDump {
   constructor(options: ModelTrafficDumpOptions) {
     this.directory = options.directory;
     this.inputItems = options.inputItems ?? 0;
+    this.itemMaxBytes = options.itemMaxBytes ?? 0;
     this.label = options.label.replace(/[^A-Za-z0-9._-]+/gu, "_");
     this.onError = options.onError;
   }
@@ -140,6 +152,7 @@ export class ModelTrafficDump {
       },
       (record) => this.write(record),
       this.inputItems,
+      this.itemMaxBytes,
     );
   }
 
@@ -239,6 +252,7 @@ export class ModelTrafficDump {
 export class ModelTrafficExchange {
   private readonly requestBody: BodyAccumulator;
   private readonly responseBody: BodyAccumulator;
+  private readonly partNumbers = new Map<string, number>();
   private requestBytes = 0;
   private responseBytes = 0;
   private failureRecorded = false;
@@ -251,12 +265,18 @@ export class ModelTrafficExchange {
     },
     private readonly sink: (record: Record<string, unknown>) => void,
     private readonly inputItems: number,
+    private readonly itemMaxBytes: number,
   ) {
+    const limitBytes = inputItems > 0 || itemMaxBytes > 0
+      ? compactionBufferLimitBytes
+      : recordPayloadLimitBytes;
     this.requestBody = new BodyAccumulator(
-      (part, chunk) => this.writeBody("request_body", part, chunk),
+      (chunk) => this.writeBody("request_body", chunk),
+      limitBytes,
     );
     this.responseBody = new BodyAccumulator(
-      (part, chunk) => this.writeBody("response_body", part, chunk),
+      (chunk) => this.writeBody("response_body", chunk),
+      limitBytes,
     );
   }
 
@@ -310,7 +330,7 @@ export class ModelTrafficExchange {
     if (!isBinary) {
       const text = buffer.toString("utf8");
       if (this.dropsStreamDelta(text)) return;
-      const parts = splitText(compactText(text, this.inputItems));
+      const parts = splitText(compactText(text, this.inputItems, this.itemMaxBytes));
       parts.forEach((text, index) => {
         this.write({
           kind: "websocket_frame",
@@ -366,41 +386,60 @@ export class ModelTrafficExchange {
     });
   }
 
-  private writeBody(kind: string, part: number, chunk: Buffer): void {
+  /** 正文先折叠再按记录上限分片：一条记录可能来自压缩后的多段，编号仍按写入顺序递增。 */
+  private writeBody(kind: string, chunk: Buffer): void {
     const decoded = decodeUtf8(chunk);
-    const text = decoded === null ? null : compactText(decoded, this.inputItems);
-    this.write({
-      kind,
-      part,
-      bytes: chunk.length,
-      ...(text === null
-        ? { encoding: "base64", data: chunk.toString("base64") }
-        : { encoding: "utf8", text }),
-    });
+    if (decoded === null) {
+      for (const part of splitBuffer(chunk)) {
+        this.write({
+          kind,
+          part: this.nextPart(kind),
+          bytes: part.length,
+          encoding: "base64",
+          data: part.toString("base64"),
+        });
+      }
+      return;
+    }
+    const text = compactText(decoded, this.inputItems, this.itemMaxBytes);
+    for (const part of splitText(text)) {
+      this.write({
+        kind,
+        part: this.nextPart(kind),
+        bytes: Buffer.byteLength(part),
+        encoding: "utf8",
+        text: part,
+      });
+    }
+  }
+
+  private nextPart(kind: string): number {
+    const next = (this.partNumbers.get(kind) ?? 0) + 1;
+    this.partNumbers.set(kind, next);
+    return next;
   }
 }
 
 class BodyAccumulator {
   private readonly chunks: Buffer[] = [];
   private bytes = 0;
-  private part = 1;
 
   constructor(
-    private readonly emit: (part: number, chunk: Buffer) => void,
+    private readonly emit: (chunk: Buffer) => void,
+    private readonly limitBytes: number,
   ) {}
 
   append(chunk: Buffer): void {
     this.chunks.push(chunk);
     this.bytes += chunk.length;
-    if (this.bytes >= recordPayloadLimitBytes) this.drain();
+    if (this.bytes >= this.limitBytes) this.drain();
   }
 
   drain(): void {
     if (this.chunks.length === 0) return;
-    this.emit(this.part, Buffer.concat(this.chunks));
+    this.emit(Buffer.concat(this.chunks));
     this.chunks.length = 0;
     this.bytes = 0;
-    this.part += 1;
   }
 }
 
@@ -434,15 +473,15 @@ function decodeUtf8(chunk: Buffer): string | null {
  * 精简模式：丢弃流式增量事件，`input` 只保留末尾若干条，并折叠响应回显的 `instructions`
  * 与 `tools`。完整 JSON 直接折叠；SSE 正文按事件折叠，但不改变保留事件的分帧。
  */
-function compactText(text: string, inputItems: number): string {
-  if (inputItems <= 0) return text;
-  const whole = compactJson(text, inputItems);
+function compactText(text: string, inputItems: number, itemMaxBytes: number): string {
+  if (inputItems <= 0 && itemMaxBytes <= 0) return text;
+  const whole = compactJson(text, inputItems, itemMaxBytes);
   if (whole !== undefined) return whole;
-  return compactSseText(text, inputItems);
+  return compactSseText(text, inputItems, itemMaxBytes);
 }
 
 /** 末尾不完整的 SSE 分块原样保留：它可能只是跨分片事件的半截，无法判断类型。 */
-function compactSseText(text: string, inputItems: number): string {
+function compactSseText(text: string, inputItems: number, itemMaxBytes: number): string {
   const blocks = text.split("\n\n");
   const tail = blocks.pop() ?? "";
   const kept: string[] = [];
@@ -457,20 +496,28 @@ function compactSseText(text: string, inputItems: number): string {
     const data = lines[index]!.slice("data: ".length);
     const parsed = parseJsonValue(data);
     if (isStreamDelta(parsed) || isStreamDeltaType(eventNameOf(eventLine))) continue;
-    const compacted = compactJsonValue(parsed, inputItems);
+    const compacted = compactJsonValue(parsed, inputItems, itemMaxBytes);
     if (compacted !== undefined) lines[index] = `data: ${compacted}`;
     kept.push(lines.join("\n"));
   }
   return [...kept, tail].join("\n\n");
 }
 
-function compactJson(text: string, inputItems: number): string | undefined {
-  return compactJsonValue(parseJsonValue(text), inputItems);
+function compactJson(
+  text: string,
+  inputItems: number,
+  itemMaxBytes: number,
+): string | undefined {
+  return compactJsonValue(parseJsonValue(text), inputItems, itemMaxBytes);
 }
 
-function compactJsonValue(parsed: unknown, inputItems: number): string | undefined {
+function compactJsonValue(
+  parsed: unknown,
+  inputItems: number,
+  itemMaxBytes: number,
+): string | undefined {
   if (typeof parsed !== "object" || parsed === null) return undefined;
-  return JSON.stringify(compactValue(parsed, inputItems, false));
+  return JSON.stringify(compactValue(parsed, inputItems, false, itemMaxBytes));
 }
 
 function parseJsonValue(text: string): unknown {
@@ -496,22 +543,70 @@ function eventNameOf(eventLine: string | undefined): string | undefined {
   return eventLine === undefined ? undefined : eventLine.slice("event: ".length).trim();
 }
 
-function compactValue(value: unknown, inputItems: number, inResponse: boolean): unknown {
+function compactValue(
+  value: unknown,
+  inputItems: number,
+  inResponse: boolean,
+  itemMaxBytes: number,
+): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => compactValue(item, inputItems, inResponse));
+    return value.map((item) =>
+      capEntry(compactValue(item, inputItems, inResponse, itemMaxBytes), itemMaxBytes));
   }
   if (typeof value !== "object" || value === null) return value;
   const compacted: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (key === "input" && Array.isArray(item)) {
-      compacted[key] = compactInput(item, inputItems);
+      compacted[key] = compactInput(item, inputItems).map((entry) =>
+        capEntry(entry, itemMaxBytes));
     } else if (inResponse && foldableEcho(key, item)) {
       compacted[key] = omittedMarker(byteLengthOf(item));
     } else {
-      compacted[key] = compactValue(item, inputItems, inResponse || key === "response");
+      compacted[key] = capValue(
+        compactValue(item, inputItems, inResponse || key === "response", itemMaxBytes),
+        itemMaxBytes,
+      );
     }
   }
   return compacted;
+}
+
+/**
+ * 单个条目或超长字符串字段超过上限时只保留头尾：完整正文通常没有再读的价值，头尾足以定位问题。
+ * 数组与对象本身不在这里截断，它们的元素和字段由递归处理。
+ * 上限按 UTF-8 字节计算，截断处可能落在多字节字符上，此时以替换字符收尾。
+ */
+function capEntry(value: unknown, itemMaxBytes: number): unknown {
+  if (itemMaxBytes <= 0) return value;
+  const bytes = byteLengthOf(value);
+  if (bytes <= itemMaxBytes) return value;
+  return truncatedMarker(value, itemMaxBytes, bytes);
+}
+
+function capValue(value: unknown, itemMaxBytes: number): unknown {
+  if (itemMaxBytes <= 0 || typeof value !== "string") return value;
+  return capEntry(value, itemMaxBytes);
+}
+
+function truncatedMarker(
+  value: unknown,
+  itemMaxBytes: number,
+  bytes: number,
+): Record<string, unknown> {
+  const half = Math.floor(itemMaxBytes / 2);
+  return {
+    type: "truncated",
+    bytes,
+    head: excerpt(value, half, false),
+    tail: excerpt(value, half, true),
+  };
+}
+
+function excerpt(value: unknown, maxBytes: number, fromEnd: boolean): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  const buffer = Buffer.from(text, "utf8");
+  const start = fromEnd ? Math.max(0, buffer.length - maxBytes) : 0;
+  return buffer.subarray(start, start + maxBytes).toString("utf8");
 }
 
 /** 只折叠有内容的响应回显字段，空字符串与空数组原样保留。 */
@@ -522,7 +617,7 @@ function foldableEcho(key: string, value: unknown): boolean {
 }
 
 function compactInput(items: unknown[], inputItems: number): unknown[] {
-  if (items.length <= inputItems) return items;
+  if (inputItems <= 0 || items.length <= inputItems) return items;
   const omitted = items.slice(0, items.length - inputItems);
   return [
     {

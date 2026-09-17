@@ -89,6 +89,8 @@ export interface ProviderProxyOptions {
     directory: string;
     /** 精简模式保留的 `input` 末尾条目数；缺省或 `0` 时转储完整报文。 */
     inputItems?: number;
+    /** 单个数组条目的正文上限（字节）；缺省或 `0` 时按原样转储。 */
+    itemMaxBytes?: number;
     label: string;
   };
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
@@ -179,6 +181,9 @@ export class ProviderProxy {
           ...(options.trafficDump.inputItems === undefined
             ? {}
             : { inputItems: options.trafficDump.inputItems }),
+          ...(options.trafficDump.itemMaxBytes === undefined
+            ? {}
+            : { itemMaxBytes: options.trafficDump.itemMaxBytes }),
           onError: (error) => {
             this.onError?.(error);
           },

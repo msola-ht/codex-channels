@@ -314,6 +314,101 @@ describe("ProviderProxy traffic dump", () => {
     expect(bodyText(records, "response_body")).not.toContain("response.output_text.delta");
   });
 
+  it("caps oversized entries when only the per-entry limit is set", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, itemMaxBytes: 512, label: "openai" },
+    });
+    await proxy.start();
+
+    const big = { content: "x".repeat(2_000), type: "function_call_output" };
+    const small = { content: "ok", type: "message" };
+    const requestBody = JSON.stringify({
+      input: [big, small],
+      instructions: "s".repeat(5_000),
+      model: "gpt-capped",
+    });
+    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
+    await proxy.close();
+
+    const request = JSON.parse(
+      bodyText(readDumpRecords(directory), "request_body"),
+    ) as { input: Array<Record<string, unknown>> };
+    // 只设置单条上限时 input 不折叠，只把超限条目换成头尾摘要。
+    expect(request.input).toHaveLength(2);
+    expect(request.input[1]).toEqual(small);
+    const capped = request.input[0]!;
+    expect(capped["type"]).toBe("truncated");
+    expect(capped["bytes"]).toBe(Buffer.byteLength(JSON.stringify(big)));
+    expect(Buffer.byteLength(String(capped["head"]))).toBe(256);
+    expect(Buffer.byteLength(String(capped["tail"]))).toBe(256);
+    expect(String(capped["head"]).startsWith('{"content":"xxx')).toBe(true);
+    expect(String(capped["tail"]).endsWith('"type":"function_call_output"}')).toBe(true);
+    // 超长字符串字段同样只保留头尾。
+    const instructions = (request as unknown as { instructions: Record<string, unknown> }).instructions;
+    expect(instructions["type"]).toBe("truncated");
+    expect(instructions["bytes"]).toBe(5_000);
+    expect(String(instructions["head"])).toBe("s".repeat(256));
+    expect(String(instructions["tail"])).toBe("s".repeat(256));
+  });
+
+  it("folds multi-megabyte bodies that span several record parts", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, inputItems: 3, itemMaxBytes: 65_536, label: "openai" },
+    });
+    await proxy.start();
+
+    const items = Array.from({ length: 250 }, (_, index) => ({
+      content: "x".repeat(20_000),
+      index,
+      type: "function_call_output",
+    }));
+    const requestBody = JSON.stringify({ input: items, model: "gpt-multi-part" });
+    expect(requestBody.length).toBeGreaterThan(4 * 1_048_576);
+    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
+    await proxy.close();
+
+    const records = readDumpRecords(directory);
+    // 开启精简时先整段缓冲再折叠，5 MB 正文折叠后不足一条记录上限。
+    expect(records.filter((record) => record.kind === "request_body")).toHaveLength(1);
+    const text = bodyText(records, "request_body");
+    // 折叠发生在整段正文上：分片只影响记录条数，不会因为半截 JSON 而跳过折叠。
+    const stored = JSON.parse(text) as { input: Array<Record<string, unknown>> };
+    expect(stored.input).toHaveLength(4);
+    expect(stored.input[0]).toMatchObject({
+      omitted_items: items.length - 3,
+      type: "omitted",
+    });
+    expect(Buffer.byteLength(text)).toBeLessThan(300_000);
+  });
+
   it("compacts websocket client frames and echoed upstream fields", async () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });

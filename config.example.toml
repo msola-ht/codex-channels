@@ -74,11 +74,14 @@ plugin_api = false
 # 转储包含完整 prompt、工具输出、代码和 SSE 事件，但不包含 Authorization、Cookie 等凭据；
 # 单文件达到上限后轮转，目录只保留最近的转储文件；写入失败只停止转储，不影响模型请求。
 model_traffic_dump = false
-# 转储体积控制：大于 0 时只保留请求 input 的末尾若干条完整条目（更早的折叠为条数与字节数
-# 摘要），丢弃逐条流式 .delta 事件（完整文本仍由 *.done 事件承载），并把响应里重复回显的
-# instructions 与 tools 折叠为长度占位；请求头、请求体其它字段和保留的响应事件保持完整。
-# 0 表示按原样转储完整报文，默认关闭精简。
-model_traffic_input_items = 0
+# 转储体积控制：每次请求都会重发完整会话历史，按原样落盘会让单个请求就有几 MB。默认只保留请求
+# input 的末尾 3 条完整条目（更早的折叠为条数与字节数摘要）、丢弃逐条流式 .delta 事件（完整文本
+# 仍由 *.done 事件承载），并把响应里重复回显的 instructions 与 tools 折叠为长度占位；
+# 需要按原样转储完整报文时改为 0。
+model_traffic_input_items = 3
+# 单条正文上限：请求 input 条目、响应 output 条目等单个数组条目超过该字节数时只保留头尾，并写入
+# {"type":"truncated","bytes":…,"head":…,"tail":…} 标记；0 表示不限制。
+model_traffic_item_max_bytes = 65536
 
 [scheduled_tasks]
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。

@@ -6,12 +6,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { TrafficPayload } from "@/components/traffic/traffic-payload"
 import { formatBytes, formatTime } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
 export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
-  const requestBody = prettyJson(detail.request?.body ?? "")
-  const responseBody = prettyJson(detail.response?.body ?? "")
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -41,9 +40,9 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
                   {frame.direction === "client" ? "→ App Server 发出" : "← 上游返回"}
                   {frame.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                  {prettyJson(frame.text)}
-                </pre>
+                <div className="rounded-md border bg-muted/50 p-3">
+                  <TrafficPayload text={frame.text} />
+                </div>
               </section>
             ))}
           </CardContent>
@@ -68,7 +67,7 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <HeaderTable title="请求头" headers={detail.request.headers} />
-            <PayloadBlock title="请求体" text={requestBody} />
+            <PayloadBlock title="请求体" text={detail.request.body} />
           </CardContent>
         </Card>
       )}
@@ -86,7 +85,7 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
           <CardContent className="flex flex-col gap-3">
             <HeaderTable title="响应头" headers={detail.response.headers} />
             {detail.events.length === 0 ? (
-              <PayloadBlock title="响应体" text={responseBody} />
+              <PayloadBlock title="响应体" text={detail.response.body} />
             ) : (
               <section className="flex flex-col gap-2">
                 <p className="text-xs font-medium">SSE 事件（{detail.events.length} 条）</p>
@@ -94,9 +93,7 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
                   {detail.events.map((event, index) => (
                     <div key={`${event.type}-${index}`} className="mb-2 last:mb-0">
                       <p className="font-mono text-xs text-muted-foreground">[{event.type}]</p>
-                      <pre className="font-mono text-xs whitespace-pre-wrap break-all">
-                        {event.payload}
-                      </pre>
+                      <TrafficPayload text={event.payload} />
                     </div>
                   ))}
                 </div>
@@ -151,20 +148,9 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
 
 function PayloadBlock({ title, text }: { title: string; text: string }) {
   return (
-    <section className="flex flex-col gap-1">
+    <section className="flex flex-col gap-2">
       <p className="text-xs font-medium">{title}</p>
-      <pre className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-        {text}
-      </pre>
+      <TrafficPayload text={text} />
     </section>
   )
-}
-
-function prettyJson(text: string): string {
-  if (text.length === 0) return ""
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
 }

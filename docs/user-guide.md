@@ -357,7 +357,8 @@ App Server 发给统计代理的每个模型请求、上游返回的响应头和
 转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储文件包含完整 prompt、工具
 输出、代码和 SSE 事件，排查完成后关闭开关并删除文件，不要分享原始转储。
 
-流被提前终止时（例如重启 App Server 或中断 Turn），转储会先写出已经收到的部分响应体，再写一条
+转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时
+（例如重启 App Server 或中断 Turn），转储会先写出已经收到的部分响应体，再写一条
 `"kind": "error"` 记录，`scope` 常见取值是 `client_disconnected` 或 `websocket_closed`。这类记录
 表示流没有正常收尾，不代表上游一定失败。
 
@@ -377,28 +378,41 @@ codexc traffic --follow                        # 从现有文件末尾开始持�
 或直接传入转储文件路径。`codexc traffic -h` 列出全部选项。
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
-选中某条即展开请求与响应字段，页面地址保留标签和 exchange 编号。该页只接受本机回环访问，
-展示内容同样是未脱敏原文。
+点开某条即进入该条的请求与响应字段，页面地址保留标签、exchange 编号与分页位置，返回列表回到原处。
+请求体与响应体默认按顶层字段折叠、只显示字段名与体积，展开某段后先渲染前 64 KiB，需要时继续加载；
+该页只接受本机回环访问，展示内容同样是未脱敏原文。
 
 ### 转储体积控制
 
-每次请求都会重发完整会话历史，长会话下一轮就有几百 KB，转储增长很快。需要长时间开启时，用
-`[debug].model_traffic_input_items` 启用精简转储：
+每次请求都会重发完整会话历史，长会话一轮就有几 MB；转储默认按下面的规则裁剪后落盘，不需要额外
+配置：
 
 ```toml
 [debug]
 model_traffic_dump = true
 model_traffic_input_items = 3
+model_traffic_item_max_bytes = 65536
 ```
 
-大于 `0` 时只保留请求 `input` 数组末尾这么多条完整条目，更早的条目合并成一条
-`{"type": "omitted", "omitted_items": …, "omitted_bytes": …}` 摘要；响应里重复回显的
-`response.instructions` 与 `response.tools` 折叠为 `<omitted N 字节>` 占位；逐条流式增量事件
+- `model_traffic_input_items`（默认 `3`）：只保留请求 `input` 数组末尾这么多条完整条目，更早的
+  条目合并成一条 `{"type": "omitted", "omitted_items": …, "omitted_bytes": …}` 摘要；
+  `0` 表示按原样保留整个 `input`；
+- `model_traffic_item_max_bytes`（默认 `65536`，即 64 KiB）：单个数组条目（请求 `input` 条目、
+  响应 `output` 条目、其中嵌套的数组元素）和超长字符串字段超过该字节数时只保留头尾各一半，替换为
+  `{"type": "truncated", "bytes": …, "head": …, "tail": …}` 标记；`0` 表示不限制。它独立于
+  `model_traffic_input_items` 生效，只设上限不会折叠 `input`。
+
+精简开启时还会折叠响应里重复回显的 `response.instructions` 与 `response.tools`
+（`<omitted N 字节>` 占位），并丢弃逐条流式增量事件
 （`response.output_text.delta`、`response.reasoning_text.delta`、
 `response.function_call_arguments.delta` 等以 `.delta` 结尾的事件）不再写入转储，它们的完整文本
 由同一条目的 `*.done` 事件和 `response.completed.response.output` 承载。请求头、请求体其它字段、
-`model`、保留的响应事件和事件顺序保持完整，`0` 表示按原样转储全部字段（默认）。使用
-`codexc traffic` 查看时不需要额外参数，折叠与丢弃结果会直接显示在对应位置。
+`model`、保留的响应事件和事件顺序保持完整。需要逐个字段核对原文时，把两项参数都设为 `0` 按原样
+转储。两项参数都在 App Server 启动时读取，改完需要重启服务；使用 `codexc traffic` 查看时不需要
+额外参数，折叠、截断与丢弃结果会直接显示在对应位置。
+
+开启精简时正文先整段缓冲再折叠，然后按 1 MiB 分片写入；单个正文超过 32 MiB 时退化为按原样分片，
+避免为超大正文占用过多内存。
 
 WebSocket 提供方（OpenAI 官方）同样生效：客户端 `response.create` 帧的 `input` 按同样规则保留
 末尾条目，上游 `response.created`、`response.in_progress`、`response.completed` 里重复的工具与

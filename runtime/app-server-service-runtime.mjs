@@ -150,6 +150,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
             trafficDump: {
               directory: trafficDumpDirectory,
               inputItems: validatedDebug.model_traffic_input_items,
+              itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
               label: provider,
             },
           }),
