@@ -1,3 +1,4 @@
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Card,
   CardContent,
@@ -40,7 +41,7 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
                   {frame.direction === "client" ? "→ App Server 发出" : "← 上游返回"}
                   {frame.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
                   {prettyJson(frame.text)}
                 </pre>
               </section>
@@ -48,14 +49,12 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
           </CardContent>
         </Card>
       ) : detail.request === null ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>请求头缺失</CardTitle>
-            <CardDescription>
-              转储里没有这次交换的请求头记录，通常是被文件轮转清除了
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        <Alert>
+          <AlertTitle>请求头缺失</AlertTitle>
+          <AlertDescription>
+            转储里没有这次交换的请求头记录，通常是被文件轮转清除了
+          </AlertDescription>
+        </Alert>
       ) : (
         <Card>
           <CardHeader>
@@ -91,7 +90,7 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
             ) : (
               <section className="flex flex-col gap-2">
                 <p className="text-xs font-medium">SSE 事件（{detail.events.length} 条）</p>
-                <div className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3">
+                <div className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3">
                   {detail.events.map((event, index) => (
                     <div key={`${event.type}-${index}`} className="mb-2 last:mb-0">
                       <p className="font-mono text-xs text-muted-foreground">[{event.type}]</p>
@@ -139,7 +138,7 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
   return (
     <section className="flex flex-col gap-1">
       <p className="text-xs font-medium">{title}</p>
-      <div className="rounded-md border bg-muted/40 p-3 font-mono text-xs">
+      <div className="rounded-md border bg-muted/50 p-3 font-mono text-xs">
         {entries.map(([name, value]) => (
           <p key={name} className="break-all">
             {name}: {Array.isArray(value) ? value.join(", ") : value}
@@ -154,7 +153,7 @@ function PayloadBlock({ title, text }: { title: string; text: string }) {
   return (
     <section className="flex flex-col gap-1">
       <p className="text-xs font-medium">{title}</p>
-      <pre className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+      <pre className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
         {text}
       </pre>
     </section>

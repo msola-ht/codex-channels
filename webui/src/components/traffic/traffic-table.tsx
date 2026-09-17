@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -12,10 +14,12 @@ import type { TrafficExchangeSummary } from "@/lib/types"
 export function TrafficTable({
   exchanges,
   selectedId,
+  detailAnchorId,
   onSelect,
 }: {
   exchanges: TrafficExchangeSummary[]
   selectedId: number | null
+  detailAnchorId: string
   onSelect: (id: number) => void
 }) {
   return (
@@ -41,7 +45,20 @@ export function TrafficTable({
               className="cursor-pointer"
               onClick={() => onSelect(exchange.id)}
             >
-              <TableCell className="tabular-nums">#{exchange.id}</TableCell>
+              <TableCell className="tabular-nums">
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto px-0 font-mono"
+                  aria-controls={detailAnchorId}
+                  aria-expanded={exchange.id === selectedId}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelect(exchange.id)
+                  }}
+                >#{exchange.id}</Button>
+              </TableCell>
               <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                 {formatTime(exchange.startedAtMs)}
               </TableCell>
@@ -60,7 +77,7 @@ export function TrafficTable({
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status ?? "—"}
-                {exchange.hasError ? <span className="ml-2 text-destructive">中断</span> : null}
+                {exchange.hasError ? <Badge className="ml-2" variant="destructive">中断</Badge> : null}
               </TableCell>
             </TableRow>
           ))}

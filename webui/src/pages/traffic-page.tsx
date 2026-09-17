@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react"
-import { useSearchParams } from "react-router"
+import { ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
+import { useId } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { TrafficDetail } from "@/components/traffic/traffic-detail"
 import { TrafficTable } from "@/components/traffic/traffic-table"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -13,101 +14,98 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Spinner } from "@/components/ui/spinner"
 import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
+import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
 
-const pageSize = 50
+const detailAnchorId = "traffic-exchange-detail"
 
 export function TrafficPage() {
-  const [params, setParams] = useSearchParams()
-  const label = params.get("label") ?? undefined
-  const selectedParam = params.get("id")
-  const selected = selectedParam !== null && /^[0-9]+$/u.test(selectedParam)
-    ? Number(selectedParam)
-    : null
-  const [offset, setOffset] = useState(0)
-  const detailRef = useRef<HTMLDivElement | null>(null)
-  const list = useTrafficExchanges({ label, limit: pageSize, offset })
-  const detail = useTrafficExchange(selected === null ? null : { id: selected, label })
-  const pageNumber = Math.floor(offset / pageSize) + 1
-  const select = (id: number | null) => {
-    const next = new URLSearchParams(params)
-    if (id === null) next.delete("id")
-    else next.set("id", String(id))
-    setParams(next)
-  }
-  useEffect(() => {
-    if (selected === null) return
-    detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }, [selected, detail.data])
+  const labelSelectId = useId()
+  const pageSizeSelectId = useId()
+  const { query, update } = useTrafficQuery()
+  const list = useTrafficExchanges(query)
+  const detail = useTrafficExchange(
+    query.id === null
+      ? null
+      : { id: query.id, ...(query.label === undefined ? {} : { label: query.label }) },
+  )
+  const pageNumber = Math.floor(query.offset / query.limit) + 1
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="shrink-0">
           <h1 className="text-xl font-semibold">转储</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
             记录的模型请求与响应字段；只读本机数据目录，默认展示最新标签
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
           {list.data !== null && list.data.labels.length > 1 ? (
-            <Select
-              value={label ?? list.data.label}
-              onValueChange={(value) => {
-                const next = new URLSearchParams(params)
-                next.set("label", value)
-                next.delete("id")
-                setParams(next)
-                setOffset(0)
-              }}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {list.data.labels.map((entry) => (
-                  <SelectItem key={entry.label} value={entry.label}>
-                    {entry.label}（{entry.files} 文件）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Field className="w-48">
+              <FieldLabel htmlFor={labelSelectId}>标签</FieldLabel>
+              <Select
+                value={query.label ?? list.data.label}
+                onValueChange={(value) => update({ label: value, id: null }, true)}
+              >
+                <SelectTrigger id={labelSelectId} size="sm" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {list.data.labels.map((entry) => (
+                      <SelectItem key={entry.label} value={entry.label}>
+                        {entry.label}（{entry.files} 文件）
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
           ) : null}
-          <Button type="button" variant="outline" size="sm" onClick={() => list.refetch()}>
-            刷新
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={list.loading}
+            onClick={() => list.refetch()}
+          >
+            {list.loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {list.loading ? "刷新中" : "刷新"}
           </Button>
         </div>
       </div>
 
       <ErrorBanner error={list.error} />
-      {list.error !== null && label !== undefined ? (
+      {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => {
-            const next = new URLSearchParams(params)
-            next.delete("id")
-            next.delete("label")
-            setParams(next)
-            setOffset(0)
-          }}
+          onClick={() => update({ id: null, label: null }, true)}
         >改看最新标签</Button>
       ) : null}
       {list.data !== null && !list.data.enabled ? (
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-          当前未开启 <code className="rounded bg-muted px-1">[debug].model_traffic_dump</code>
-          ，这里显示的是已存在的历史转储文件。
-        </p>
+        <Alert>
+          <AlertTitle>当前未开启转储</AlertTitle>
+          <AlertDescription>
+            配置里 <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
+            关闭时不会再写入新记录，这里显示的是已存在的历史转储文件。
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {list.error !== null ? null : list.loading || list.data === null ? <PageSkeleton rows={8} /> : (
@@ -121,41 +119,64 @@ export function TrafficPage() {
           <CardContent>
             <TrafficTable
               exchanges={list.data.exchanges}
-              selectedId={selected}
-              onSelect={(id) => select(id === selected ? null : id)}
+              selectedId={query.id}
+              detailAnchorId={detailAnchorId}
+              onSelect={(id) => update({ id: id === query.id ? null : id })}
             />
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">第 {pageNumber} 页</p>
-              <div className="flex gap-2">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Label htmlFor={pageSizeSelectId} className="text-sm">每页</Label>
+                <Select
+                  value={String(query.limit)}
+                  onValueChange={(value) => update({ limit: Number(value) }, true)}
+                >
+                  <SelectTrigger id={pageSizeSelectId} size="sm" className="w-20">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    <SelectGroup>
+                      {trafficPageSizeOptions.map((size) => (
+                        <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-muted-foreground">条 · 共 {list.data.total} 条</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
-                  disabled={offset === 0}
-                  onClick={() => {
-                    setOffset(Math.max(0, offset - pageSize))
-                    select(null)
-                  }}
-                >上一页</Button>
+                  size="icon"
+                  aria-label="上一页"
+                  disabled={query.offset === 0}
+                  onClick={() => update({ offset: Math.max(0, query.offset - query.limit), id: null })}
+                >
+                  <ChevronLeftIcon />
+                </Button>
+                <span className="min-w-14 text-center text-sm font-medium">第 {pageNumber} 页</span>
                 <Button
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="icon"
+                  aria-label="下一页"
                   disabled={list.data.nextOffset === null}
                   onClick={() => {
-                    if (list.data?.nextOffset === null || list.data === null) return
-                    setOffset(list.data.nextOffset)
-                    select(null)
+                    const next = list.data?.nextOffset ?? null
+                    if (next === null) return
+                    update({ offset: next, id: null })
                   }}
-                >下一页</Button>
+                >
+                  <ChevronRightIcon />
+                </Button>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {selected === null ? null : (
-        <Card ref={detailRef}>
+      {query.id === null ? null : (
+        <Card id={detailAnchorId}>
           <CardHeader>
             <CardTitle>明细</CardTitle>
             <CardDescription>
