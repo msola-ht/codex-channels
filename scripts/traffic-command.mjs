@@ -241,6 +241,17 @@ function renderFiles(paths, options) {
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line)));
   const exchanges = groupExchanges(records);
+  if (options.exchange !== undefined && !exchanges.some(({ id }) => id === options.exchange)) {
+    const ids = exchanges.map(({ id }) => id);
+    console.error(
+      `没有找到 exchange #${options.exchange}：${paths.join("、")} `
+      + (ids.length === 0
+        ? "没有 exchange 记录。"
+        : `编号范围是 #${Math.min(...ids)}–#${Math.max(...ids)}。`),
+    );
+    process.exitCode = 1;
+    return;
+  }
   console.log(`\n### ${paths.join("\n### ")}（${exchanges.length} 个 exchange）`);
   const detail = !options.list && (options.all || options.exchange !== undefined);
   if (!detail) {

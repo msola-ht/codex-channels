@@ -79,21 +79,20 @@ export function parseTrafficCommandArgs(args) {
 }
 
 function positiveInteger(raw, name) {
-  if (raw === undefined || raw.startsWith("-")) {
-    throw new Error(`${name} 缺少值`);
-  }
-  if (!/^[0-9]+$/u.test(raw) || Number(raw) < 1) {
-    throw new Error(`${name} 需要正整数值`);
-  }
-  return Number(raw);
+  return boundedInteger(raw, name, "正整数值", 1);
 }
 
 function nonNegativeInteger(raw, name) {
-  if (raw === undefined || raw.startsWith("-")) {
+  return boundedInteger(raw, name, "非负整数值", 0);
+}
+
+/** `-1` 这类负数是非法取值，`--all` 这类以 `-` 开头的才是缺少值，两者提示不同。 */
+function boundedInteger(raw, name, description, minimum) {
+  if (raw === undefined || (raw.startsWith("-") && !/^-[0-9]+$/u.test(raw))) {
     throw new Error(`${name} 缺少值`);
   }
-  if (!/^[0-9]+$/u.test(raw)) {
-    throw new Error(`${name} 需要非负整数值`);
+  if (!/^-?[0-9]+$/u.test(raw) || Number(raw) < minimum) {
+    throw new Error(`${name} 需要${description}`);
   }
   return Number(raw);
 }

@@ -77,7 +77,8 @@ describe("traffic command options", () => {
     [["--exchange"], "--exchange 缺少值"],
     [["--exchange", "abc"], "--exchange 需要正整数值"],
     [["--exchange", "0"], "--exchange 需要正整数值"],
-    [["--max-bytes", "-1"], "--max-bytes 缺少值"],
+    [["--max-bytes", "-1"], "--max-bytes 需要非负整数值"],
+    [["--exchange", "-2"], "--exchange 需要正整数值"],
     [["--max-bytes", "1.5"], "--max-bytes 需要非负整数值"],
     [["--grep", "--all"], "--grep 缺少值"],
     [["--dir"], "--dir 缺少值"],
@@ -212,6 +213,28 @@ describe("traffic command rendering", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("没有找到转储文件");
+  });
+
+  it("reports a missing exchange instead of printing an empty header", () => {
+    const directory = trafficDirectory();
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      httpExchange(1),
+      websocketExchange(2),
+    );
+
+    const missing = runTraffic(["--dir", directory, "--exchange", "9"]);
+
+    expect(missing.status).toBe(1);
+    expect(missing.stdout).toBe("");
+    expect(missing.stderr).toContain("没有找到 exchange #9");
+    expect(missing.stderr).toContain("编号范围是 #1–#2");
+
+    const found = runTraffic(["--dir", directory, "--exchange", "2"]);
+    expect(found.status).toBe(0);
+    expect(found.stdout).toContain("#2");
   });
 
   it("rejects unknown words instead of treating them as files", () => {
