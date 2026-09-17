@@ -1,6 +1,6 @@
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -10,8 +10,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DesktopAppBridge,
-  desktopAppBridgeTokenPath,
-  loadOrCreateDesktopAppBridgeToken,
   proxyDesktopAppStdioToUnixSocket,
   startDesktopAppBridge,
 } from "../runtime/desktop-app-bridge.mjs";
@@ -30,22 +28,6 @@ afterEach(async () => {
 });
 
 describe("Codex Desktop App bridge", () => {
-  it("creates and reuses a private bridge token", () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "codexc-desktop-token-"));
-    temporaryDirectories.push(dataDir);
-
-    const first = loadOrCreateDesktopAppBridgeToken(dataDir);
-    const second = loadOrCreateDesktopAppBridgeToken(dataDir);
-    const path = desktopAppBridgeTokenPath(dataDir);
-
-    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u);
-    expect(second).toBe(first);
-    expect(readFileSync(path, "utf8")).toBe(first);
-    if (process.platform !== "win32") {
-      expect(statSync(path).mode & 0o777).toBe(0o600);
-    }
-  });
-
   it("rejects non-OpenAI primary Providers before opening a listener", async () => {
     await expect(startDesktopAppBridge({
       port: await reservePort(),

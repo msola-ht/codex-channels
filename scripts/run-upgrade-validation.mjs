@@ -50,6 +50,7 @@ export const defaultUpgradeValidationStages = [
       "--",
       "--run",
       "tests/real-app-server.test.ts",
+      "tests/real-app-server-desktop-bridge.test.ts",
       "tests/real-app-server-isolated-state.test.ts",
       "tests/real-app-server-queue.test.ts",
       "tests/real-app-server-supervised-provider.test.ts",

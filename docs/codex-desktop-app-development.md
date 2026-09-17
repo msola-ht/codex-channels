@@ -291,7 +291,8 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 ### Linux
 
 当前没有官方 Codex Desktop App 支持目标，命令明确返回不支持。桥不因 Linux 可运行 Gateway
-而自动启用；若官方 Desktop 后续支持 Linux，必须重新完成兼容探测和真实验收。
+而自动启用；配置中启用 `[codex.desktop_app]` 时 App Server 服务明确拒绝启动，不静默忽略该配置。
+若官方 Desktop 后续支持 Linux，必须重新完成兼容探测和真实验收。
 
 ## 实现落点
 

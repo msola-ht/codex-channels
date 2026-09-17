@@ -397,7 +397,7 @@ async function readDesktopAppStatus({
   let toolHostSupported = false;
   let toolHostAttached = false;
   if (
-    platform !== "darwin"
+    platform === "win32"
     && desktopConfig?.enabled === true
     && primaryProvider === "openai"
   ) {
@@ -431,8 +431,8 @@ async function readDesktopAppStatus({
     compatible: app.compatible,
     compatibilityReason: app.reason,
     configured: desktopConfig?.enabled === true,
-    port: platform === "darwin" ? null : desktopConfig?.port ?? null,
-    endpoint: platform !== "darwin" && desktopConfig?.port
+    port: platform === "win32" ? desktopConfig?.port ?? null : null,
+    endpoint: platform === "win32" && desktopConfig?.port
       ? `ws://127.0.0.1:${desktopConfig.port}${bridgePath}`
       : null,
     primaryProvider,
@@ -457,10 +457,14 @@ function writeDesktopAppStatus(status, writeMessage) {
       status.running === null ? "unknown" : status.running ? "running" : "stopped"
     }`);
   }
-  writeMessage(status.configured ? "success" : "note", `共享配置：${status.configured
-    ? status.platform === "darwin" ? "enabled（受管 stdio）" : `enabled（端口 ${status.port}）`
-    : "disabled"}`);
-  if (status.configured) {
+  if (!status.supported && status.configured) {
+    writeMessage("failure", "共享配置：unsupported（当前平台不支持）");
+  } else {
+    writeMessage(status.configured ? "success" : "note", `共享配置：${status.configured
+      ? status.platform === "darwin" ? "enabled（受管 stdio）" : `enabled（端口 ${status.port}）`
+      : "disabled"}`);
+  }
+  if (status.configured && status.supported) {
     if (status.platform === "darwin") {
       writeMessage(status.toolHostSupported ? "success" : "failure", `受管入口：${
         status.toolHostSupported ? "ready" : "not-ready"

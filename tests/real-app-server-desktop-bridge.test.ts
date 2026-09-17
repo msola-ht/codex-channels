@@ -9,9 +9,11 @@ import { PassThrough } from "node:stream";
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 
+import { UnixWebSocketTransport } from "../src/codex-client/index.js";
 import {
   desktopAppBridgeTokenPath,
   proxyDesktopAppStdioToUnixSocket,
+  startDesktopAppBridge,
 } from "../runtime/desktop-app-bridge.mjs";
 import { inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
@@ -53,7 +55,9 @@ contractSuite("real Codex Desktop App bridge", () => {
         binary: codexBinary,
         socket_path: socketPath,
         sandbox: "read-only",
-        desktop_app: { enabled: true, port: bridgePort },
+        ...(process.platform === "darwin" || process.platform === "win32"
+          ? { desktop_app: { enabled: true, port: bridgePort } }
+          : {}),
       },
       approval: { timeout_seconds: 300 },
       storage: { database_path: join(testRuntime, "gateway.sqlite3") },
@@ -88,12 +92,13 @@ contractSuite("real Codex Desktop App bridge", () => {
     });
     let first: RawBridgeClient | undefined;
     let second: RawBridgeClient | undefined;
+    let bridge: Awaited<ReturnType<typeof startDesktopAppBridge>> | undefined;
     let threadId: string | undefined;
     try {
       const tokenPath = desktopAppBridgeTokenPath(testRuntime);
       await waitFor(
         () => existsSync(socketPath) && (
-          process.platform === "darwin"
+          process.platform !== "win32"
           || (
             existsSync(tokenPath)
             && stdout.includes("Codex Desktop App 桥已启动")
@@ -107,6 +112,17 @@ contractSuite("real Codex Desktop App bridge", () => {
               `${stdout}\n${stderr}`,
             )),
       );
+      if (process.platform !== "darwin" && process.platform !== "win32") {
+        expect(existsSync(tokenPath)).toBe(false);
+        bridge = await startDesktopAppBridge({
+          port: bridgePort,
+          socketPath,
+          primaryProvider: "openai",
+          codexBinary,
+          dataDir: testRuntime,
+          createTransport: () => new UnixWebSocketTransport(socketPath),
+        });
+      }
       if (process.platform !== "win32") {
         const input = new PassThrough();
         const output = new PassThrough();
@@ -182,6 +198,7 @@ contractSuite("real Codex Desktop App bridge", () => {
       }
       await first?.close().catch(() => undefined);
       await second?.close().catch(() => undefined);
+      await bridge?.close().catch(() => undefined);
       if (service.exitCode === null && service.signalCode === null) {
         await stopDetachedTestProcess(service, 10_000);
       }

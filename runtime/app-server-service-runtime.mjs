@@ -56,6 +56,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
+  if (
+    validatedCodex.desktop_app?.enabled === true
+    && process.platform !== "darwin"
+    && process.platform !== "win32"
+  ) {
+    throw new Error("Codex Desktop App 共享当前只支持 macOS 与 Windows");
+  }
   runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
   applyAppServerTerminalIdentity(runtime.environment, validatedCodex.terminal_identity);
   const defaultWorkspace = resolveDefaultWorkspace();
@@ -642,7 +649,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     await supervisorOwner.start();
     await ensureInstance(primaryProvider, { waitForReady: false });
     supervisorOwner.markRunning(primaryProvider);
-    if (validatedCodex.desktop_app?.enabled === true && process.platform !== "darwin") {
+    if (validatedCodex.desktop_app?.enabled === true && process.platform === "win32") {
       await ensureInstance(primaryProvider);
       desktopAppBridge = await startDesktopAppBridge({
         port: validatedCodex.desktop_app.port,
