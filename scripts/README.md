@@ -129,8 +129,8 @@
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-traffic-route.mjs`：WebUI 的模型转储只读路由，列出转储 exchange 摘要并提供单条完整
-  请求与响应字段；只接受回环连接，只按已知标签读取用户数据目录下的 `traffic/` JSON Lines，
-  不接受任意路径，单段正文超过上限时返回截断标记。
+  请求与响应字段；只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录下的
+  `traffic/` JSON Lines，不接受任意路径，单段正文超过上限时返回截断标记。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。

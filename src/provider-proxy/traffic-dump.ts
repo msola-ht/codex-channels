@@ -30,6 +30,8 @@ const fileSizeLimitBytes = 64 * 1_048_576;
 const retainedFileCount = 5;
 /** 待写缓冲达到该大小后立即落盘，不等待请求结束。 */
 const flushThresholdBytes = 262_144;
+/** 低流量时的最长落盘等待，兼顾实时查看与小记录合并。 */
+const flushIntervalMs = 100;
 
 /** 只保留认证方案，凭据本身不写盘。 */
 const credentialHeaderNames = new Set([
@@ -86,10 +88,12 @@ export class ModelTrafficDump {
   private readonly itemMaxBytes: number;
   private readonly label: string;
   private readonly onError: (error: Error) => void;
+  private readonly writerSession = new Date().toISOString().replace(/[:.]/gu, "-");
   private readonly streams = new Set<WriteStream>();
   private stream: WriteStream | undefined;
   private pending: string[] = [];
   private pendingBytes = 0;
+  private flushTimer: NodeJS.Timeout | undefined;
   private writtenBytes = 0;
   private fileIndex = 1;
   private exchangeCount = 0;
@@ -161,10 +165,18 @@ export class ModelTrafficDump {
     const line = `${JSON.stringify({ ts: Date.now(), ...record })}\n`;
     this.pending.push(line);
     this.pendingBytes += Buffer.byteLength(line);
-    if (this.pendingBytes >= flushThresholdBytes) this.flush();
+    if (this.pendingBytes >= flushThresholdBytes) {
+      this.flush();
+      return;
+    }
+    this.scheduleFlush();
   }
 
   private flush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
     if (this.failed || this.pending.length === 0) return;
     const content = this.pending.join("");
     const contentBytes = Buffer.byteLength(content);
@@ -179,6 +191,15 @@ export class ModelTrafficDump {
     } catch (error) {
       this.fail(error);
     }
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = undefined;
+      this.flush();
+    }, flushIntervalMs);
+    this.flushTimer.unref();
   }
 
   private rotate(): void {
@@ -218,16 +239,22 @@ export class ModelTrafficDump {
   }
 
   private fileName(): string {
-    const startedAt = new Date().toISOString().replace(/[:.]/gu, "-");
-    return `${this.label}-${startedAt}-${this.fileIndex}.jsonl`;
+    return `${this.label}-${this.writerSession}-${this.fileIndex}.jsonl`;
   }
 
   private retainNewestFiles(): void {
-    const prefix = `${this.label}-`;
     const own = readdirSync(this.directory)
-      .filter((name) => name.startsWith(prefix) && name.endsWith(".jsonl"))
-      .sort();
-    for (const name of own.slice(0, Math.max(0, own.length - retainedFileCount))) {
+      .flatMap((name) => {
+        const identity = dumpFileIdentity(name);
+        return identity?.label === this.label ? [{ identity, name }] : [];
+      })
+      .sort((left, right) => {
+        const bySession = left.identity.writerSession.localeCompare(
+          right.identity.writerSession,
+        );
+        return bySession || left.identity.fileIndex - right.identity.fileIndex;
+      });
+    for (const { name } of own.slice(0, Math.max(0, own.length - retainedFileCount))) {
       try {
         rmSync(join(this.directory, name), { force: true });
       } catch (error) {
@@ -243,6 +270,10 @@ export class ModelTrafficDump {
     this.stream = undefined;
     this.pending = [];
     this.pendingBytes = 0;
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = undefined;
+    }
     stream?.destroy();
     this.onError(error instanceof Error ? error : new Error(String(error)));
   }
@@ -453,12 +484,22 @@ function splitBuffer(buffer: Buffer): Buffer[] {
 }
 
 function splitText(text: string): string[] {
-  if (Buffer.byteLength(text) <= recordPayloadLimitBytes) return [text];
+  const buffer = Buffer.from(text, "utf8");
+  if (buffer.length <= recordPayloadLimitBytes) return [text];
   const parts: string[] = [];
-  for (let offset = 0; offset < text.length; offset += recordPayloadLimitBytes) {
-    parts.push(text.slice(offset, offset + recordPayloadLimitBytes));
+  for (let offset = 0; offset < buffer.length;) {
+    let end = Math.min(offset + recordPayloadLimitBytes, buffer.length);
+    if (end < buffer.length) {
+      while (end > offset && isUtf8ContinuationByte(buffer[end]!)) end -= 1;
+    }
+    parts.push(buffer.subarray(offset, end).toString("utf8"));
+    offset = end;
   }
   return parts;
+}
+
+function isUtf8ContinuationByte(byte: number): boolean {
+  return (byte & 0xc0) === 0x80;
 }
 
 function decodeUtf8(chunk: Buffer): string | null {
@@ -482,11 +523,11 @@ function compactText(text: string, inputItems: number, itemMaxBytes: number): st
 
 /** 末尾不完整的 SSE 分块原样保留：它可能只是跨分片事件的半截，无法判断类型。 */
 function compactSseText(text: string, inputItems: number, itemMaxBytes: number): string {
-  const blocks = text.split("\n\n");
+  const blocks = text.split(/\r?\n\r?\n/u);
   const tail = blocks.pop() ?? "";
   const kept: string[] = [];
   for (const block of blocks) {
-    const lines = block.split("\n");
+    const lines = block.split(/\r?\n/u);
     const index = lines.findIndex((line) => line.startsWith("data: "));
     const eventLine = lines.find((line) => line.startsWith("event: "));
     if (index === -1) {
@@ -559,7 +600,7 @@ function compactValue(
     if (key === "input" && Array.isArray(item)) {
       compacted[key] = compactInput(item, inputItems).map((entry) =>
         capEntry(entry, itemMaxBytes));
-    } else if (inResponse && foldableEcho(key, item)) {
+    } else if (inputItems > 0 && inResponse && foldableEcho(key, item)) {
       compacted[key] = omittedMarker(byteLengthOf(item));
     } else {
       compacted[key] = capValue(
@@ -672,6 +713,27 @@ function redactedValue(value: string): string {
 
 function isFileExistsError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "EEXIST";
+}
+
+function dumpFileIdentity(name: string): {
+  fileIndex: number;
+  label: string;
+  writerSession: string;
+} | undefined {
+  const match = /^(.+)-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)-(\d+)\.jsonl$/u
+    .exec(name);
+  if (match === null) return undefined;
+  const label = match[1];
+  const writerSession = match[2];
+  const rawFileIndex = match[3];
+  if (label === undefined || writerSession === undefined || rawFileIndex === undefined) {
+    return undefined;
+  }
+  return {
+    fileIndex: Number(rawFileIndex),
+    label,
+    writerSession,
+  };
 }
 
 function errorText(error: unknown): string {

@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router"
 
 export const trafficPageSizeOptions = [25, 50, 100, 200]
@@ -7,6 +7,7 @@ const defaultLimit = 50
 
 export interface TrafficQuery {
   label?: string
+  session?: string
   id: number | null
   limit: number
   offset: number
@@ -19,19 +20,28 @@ export function useTrafficQuery() {
     const search = new URLSearchParams(encoded)
     const rawId = search.get("id")
     const rawLabel = search.get("label")
+    const rawSession = search.get("session")
     const offset = Number(search.get("offset") ?? 0)
     const limit = Number(search.get("limit") ?? defaultLimit)
     return {
       ...(rawLabel === null ? {} : { label: rawLabel }),
+      ...(rawSession === null ? {} : { session: rawSession }),
       id: rawId !== null && /^[0-9]+$/u.test(rawId) ? Number(rawId) : null,
       limit: trafficPageSizeOptions.includes(limit) ? limit : defaultLimit,
       offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
     } as TrafficQuery
   }, [encoded])
 
-  const update = (
-    changes: { label?: string | null; id?: number | null; limit?: number; offset?: number },
+  const update = useCallback((
+    changes: {
+      label?: string | null
+      session?: string | null
+      id?: number | null
+      limit?: number
+      offset?: number
+    },
     resetPage = false,
+    replace = false,
   ) => {
     setParams((previous) => {
       const next = new URLSearchParams(previous)
@@ -42,8 +52,8 @@ export function useTrafficQuery() {
         next.set(key, String(value))
       }
       return next
-    })
-  }
+    }, { replace })
+  }, [setParams])
 
   return { query, update }
 }

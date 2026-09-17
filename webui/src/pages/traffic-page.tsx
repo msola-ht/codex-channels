@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
-import { useId } from "react"
+import { useEffect, useId } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
@@ -36,9 +36,22 @@ export function TrafficPage() {
   const detail = useTrafficExchange(
     query.id === null
       ? null
-      : { id: query.id, ...(query.label === undefined ? {} : { label: query.label }) },
+      : {
+          id: query.id,
+          ...(query.label === undefined ? {} : { label: query.label }),
+          ...(query.session === undefined ? {} : { session: query.session }),
+        },
   )
+  const listData = list.data
+  const detailData = detail.data
   const pageNumber = Math.floor(query.offset / query.limit) + 1
+
+  useEffect(() => {
+    const loaded = query.id === null ? listData : detailData
+    if (loaded === null) return
+    if (query.label === loaded.label && query.session === loaded.session) return
+    update({ label: loaded.label, session: loaded.session }, false, true)
+  }, [detailData, listData, query.id, query.label, query.session, update])
 
   if (query.id !== null) {
     return (
@@ -58,9 +71,9 @@ export function TrafficPage() {
           >返回列表</Button>
         </div>
         <ErrorBanner error={detail.error} />
-        {detail.error !== null ? null : detail.loading || detail.data === null
+        {detail.error !== null ? null : detail.loading || detailData === null
           ? <PageSkeleton rows={6} />
-          : <TrafficDetail detail={detail.data.exchange} />}
+          : <TrafficDetail detail={detailData.exchange} />}
       </div>
     )
   }
@@ -76,19 +89,19 @@ export function TrafficPage() {
           </p>
         </div>
         <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
-          {list.data !== null && list.data.labels.length > 1 ? (
+          {listData !== null && listData.labels.length > 1 ? (
             <Field className="w-48">
               <FieldLabel htmlFor={labelSelectId}>标签</FieldLabel>
               <Select
-                value={query.label ?? list.data.label}
-                onValueChange={(value) => update({ label: value, id: null }, true)}
+                value={query.label ?? listData.label}
+                onValueChange={(value) => update({ label: value, session: null, id: null }, true)}
               >
                 <SelectTrigger id={labelSelectId} size="sm" className="w-40">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    {list.data.labels.map((entry) => (
+                    {listData.labels.map((entry) => (
                       <SelectItem key={entry.label} value={entry.label}>
                         {entry.label}（{entry.files} 文件）
                       </SelectItem>
@@ -118,10 +131,10 @@ export function TrafficPage() {
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => update({ id: null, label: null }, true)}
+          onClick={() => update({ id: null, label: null, session: null }, true)}
         >改看最新标签</Button>
       ) : null}
-      {list.data !== null && !list.data.enabled ? (
+      {listData !== null && !listData.enabled ? (
         <Alert>
           <AlertTitle>当前未开启转储</AlertTitle>
           <AlertDescription>
@@ -131,25 +144,29 @@ export function TrafficPage() {
         </Alert>
       ) : null}
 
-      {list.error !== null ? null : list.loading || list.data === null ? <PageSkeleton rows={8} /> : (
+      {list.error !== null ? null : list.loading || listData === null ? <PageSkeleton rows={8} /> : (
         <Card>
           <CardHeader>
-            <CardTitle>Exchange（{list.data.total}）</CardTitle>
+            <CardTitle>Exchange（{listData.total}）</CardTitle>
             <CardDescription className="break-all">
-              {list.data.label} · {list.data.files.join("、")}
+              {listData.label} · {listData.files.join("、")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <TrafficTable
-              exchanges={list.data.exchanges}
-              onOpen={(id) => update({ id })}
+              exchanges={listData.exchanges}
+              onOpen={(id) => update({ id, label: listData.label, session: listData.session })}
             />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Label htmlFor={pageSizeSelectId} className="text-sm">每页</Label>
                 <Select
                   value={String(query.limit)}
-                  onValueChange={(value) => update({ limit: Number(value) }, true)}
+                  onValueChange={(value) => update({
+                    label: listData.label,
+                    session: listData.session,
+                    limit: Number(value),
+                  }, true)}
                 >
                   <SelectTrigger id={pageSizeSelectId} size="sm" className="w-20">
                     <SelectValue />
@@ -162,7 +179,7 @@ export function TrafficPage() {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-                <span className="text-sm text-muted-foreground">条 · 共 {list.data.total} 条</span>
+                <span className="text-sm text-muted-foreground">条 · 共 {listData.total} 条</span>
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -171,7 +188,12 @@ export function TrafficPage() {
                   size="icon"
                   aria-label="上一页"
                   disabled={query.offset === 0}
-                  onClick={() => update({ offset: Math.max(0, query.offset - query.limit), id: null })}
+                  onClick={() => update({
+                    id: null,
+                    label: listData.label,
+                    session: listData.session,
+                    offset: Math.max(0, query.offset - query.limit),
+                  })}
                 >
                   <ChevronLeftIcon />
                 </Button>
@@ -181,11 +203,16 @@ export function TrafficPage() {
                   variant="outline"
                   size="icon"
                   aria-label="下一页"
-                  disabled={list.data.nextOffset === null}
+                  disabled={listData.nextOffset === null}
                   onClick={() => {
-                    const next = list.data?.nextOffset ?? null
+                    const next = listData.nextOffset
                     if (next === null) return
-                    update({ offset: next, id: null })
+                    update({
+                      id: null,
+                      label: listData.label,
+                      session: listData.session,
+                      offset: next,
+                    })
                   }}
                 >
                   <ChevronRightIcon />

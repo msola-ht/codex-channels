@@ -4,7 +4,6 @@ import {
   closeSync,
   fstatSync,
   openSync,
-  readFileSync,
   readSync,
   statSync,
 } from "node:fs";
@@ -14,19 +13,23 @@ import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
 import {
   findRecord,
+  filesOfLabel,
+  forEachDumpExchange,
   formatTime,
   frameText,
-  groupExchanges,
   joinBodies,
   labelOf,
   listDumpFiles,
   parseSseEvents,
   parseTurnMetadata,
+  readDumpExchange,
   requestMetadata,
   requestModelOf,
   responseModelsOf,
   shortId,
+  summarizeDumpFiles,
   websocketFrames,
+  writerSessionOf,
 } from "./traffic-dump-reader.mjs";
 
 const followIntervalMs = 1_000;
@@ -42,7 +45,7 @@ function defaultTrafficDirectory() {
 if (options.follow) {
   await followTraffic();
 } else {
-  renderFiles(selectedFiles(), options);
+  await renderFiles(selectedFiles(), options);
 }
 
 function selectedFiles() {
@@ -55,12 +58,12 @@ function newestDumpFiles(target) {
   const newest = files.at(-1);
   if (newest === undefined) return [];
   const label = labelOf(newest);
-  return files.filter((path) => labelOf(path) === label).slice(-2);
+  return filesOfLabel(target, label);
 }
 
 async function followTraffic() {
   const initialFiles = selectedFiles();
-  if (options.files.length > 0) renderFiles(initialFiles, options);
+  if (options.files.length > 0) await renderFiles(initialFiles, options);
   else if (initialFiles.length > 0) {
     console.log(`从现有文件末尾开始跟随：${initialFiles.join("、")}`);
   }
@@ -79,7 +82,9 @@ async function followTraffic() {
   process.on("SIGTERM", stop);
   while (!stopped) {
     await sleep(followIntervalMs);
-    for (const path of listDumpFiles(directory)) {
+    const files = listDumpFiles(directory);
+    pruneFollowState(files, tails, sseBuffers, frameBuffers);
+    for (const path of files) {
       const tail = tails.get(path) ?? { offset: 0, remainder: "" };
       tails.set(path, tail);
       const content = readFrom(path, tail.offset);
@@ -89,7 +94,13 @@ async function followTraffic() {
       tail.remainder = lines.pop() ?? "";
       for (const line of lines) {
         if (line.length === 0) continue;
-        renderFollowRecord(JSON.parse(line), sseBuffers, frameBuffers);
+        let record;
+        try {
+          record = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        renderFollowRecord(record, followScope(path), sseBuffers, frameBuffers);
       }
     }
   }
@@ -131,8 +142,9 @@ function readFrom(path, offset) {
   }
 }
 
-function renderFollowRecord(record, sseBuffers, frameBuffers) {
+function renderFollowRecord(record, scope, sseBuffers, frameBuffers) {
   if (options.exchange !== undefined && record.exchange !== options.exchange) return;
+  const exchangeKey = `${scope}\0${record.exchange}`;
   const prefix = `[${formatTime(record.ts ?? record.startedAtMs)}] #${record.exchange}`;
   const emit = (text) => {
     if (options.grep !== undefined && !text.includes(options.grep)) return;
@@ -154,9 +166,9 @@ function renderFollowRecord(record, sseBuffers, frameBuffers) {
       emit(`响应状态 ${record.status}`);
       break;
     case "response_body": {
-      const pending = `${sseBuffers.get(record.exchange) ?? ""}${record.text ?? ""}`;
-      const blocks = pending.split("\n\n");
-      sseBuffers.set(record.exchange, blocks.pop() ?? "");
+      const pending = `${sseBuffers.get(exchangeKey) ?? ""}${record.text ?? ""}`;
+      const blocks = pending.split(/\r?\n\r?\n/u);
+      sseBuffers.set(exchangeKey, blocks.pop() ?? "");
       for (const block of blocks) {
         for (const event of parseSseEvents(`${block}\n\n`)) {
           emit(`[${event.type}]\n${renderEventPayload(event, options.maxBytes)}`);
@@ -167,8 +179,8 @@ function renderFollowRecord(record, sseBuffers, frameBuffers) {
     case "response_end":
     case "websocket_close":
     case "error": {
-      flushSseBuffer(record.exchange, sseBuffers, emit);
-      flushFrameBuffers(record.exchange, frameBuffers, emit);
+      flushSseBuffer(exchangeKey, sseBuffers, emit);
+      flushFrameBuffers(exchangeKey, frameBuffers, emit);
       if (record.kind === "response_end") {
         emit(`响应结束 ${record.bytes ?? 0} 字节，用时 ${record.durationMs ?? "-"} ms`);
       } else if (record.kind === "websocket_close") {
@@ -183,7 +195,7 @@ function renderFollowRecord(record, sseBuffers, frameBuffers) {
       emit(`WebSocket ${record.url}`);
       break;
     case "websocket_frame": {
-      const key = `${record.exchange}:${record.direction}`;
+      const key = `${exchangeKey}\0${record.direction}`;
       const text = `${frameBuffers.get(key) ?? ""}${frameText(record)}`;
       if (record.part < record.parts) {
         frameBuffers.set(key, text);
@@ -199,26 +211,46 @@ function renderFollowRecord(record, sseBuffers, frameBuffers) {
   }
 }
 
-function flushSseBuffer(exchangeId, sseBuffers, emit) {
-  const pending = sseBuffers.get(exchangeId);
-  sseBuffers.delete(exchangeId);
+function flushSseBuffer(exchangeKey, sseBuffers, emit) {
+  const pending = sseBuffers.get(exchangeKey);
+  sseBuffers.delete(exchangeKey);
   if (pending === undefined || pending.trim().length === 0) return;
   for (const event of parseSseEvents(`${pending}\n\n`)) {
     emit(`[${event.type}]\n${renderEventPayload(event, options.maxBytes)}`);
   }
 }
 
-function flushFrameBuffers(exchangeId, frameBuffers, emit) {
+function flushFrameBuffers(exchangeKey, frameBuffers, emit) {
+  const prefix = `${exchangeKey}\0`;
   for (const [key, text] of [...frameBuffers]) {
-    if (!key.startsWith(`${exchangeId}:`)) continue;
+    if (!key.startsWith(prefix)) continue;
     frameBuffers.delete(key);
-    const direction = key.slice(key.indexOf(":") + 1);
+    const direction = key.slice(prefix.length);
     emit(`${direction === "client" ? "发出" : "返回"}：\n`
       + jsonOrText(text, options.maxBytes));
   }
 }
 
-function renderFiles(paths, options) {
+function followScope(path) {
+  const writerSession = writerSessionOf(path);
+  return writerSession === undefined ? path : `${labelOf(path)}:${writerSession}`;
+}
+
+function pruneFollowState(files, tails, sseBuffers, frameBuffers) {
+  const paths = new Set(files);
+  for (const path of tails.keys()) {
+    if (!paths.has(path)) tails.delete(path);
+  }
+  const scopes = new Set(files.map(followScope));
+  for (const key of sseBuffers.keys()) {
+    if (![...scopes].some((scope) => key.startsWith(`${scope}\0`))) sseBuffers.delete(key);
+  }
+  for (const key of frameBuffers.keys()) {
+    if (![...scopes].some((scope) => key.startsWith(`${scope}\0`))) frameBuffers.delete(key);
+  }
+}
+
+async function renderFiles(paths, options) {
   if (paths.length === 0) {
     console.error(`没有找到转储文件：${options.directory ?? directory}`);
     process.exitCode = 1;
@@ -236,11 +268,7 @@ function renderFiles(paths, options) {
     process.exitCode = 1;
     return;
   }
-  const records = paths.flatMap((path) => readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line)));
-  const exchanges = groupExchanges(records);
+  const { exchanges } = await summarizeDumpFiles(paths);
   if (options.exchange !== undefined && !exchanges.some(({ id }) => id === options.exchange)) {
     const ids = exchanges.map(({ id }) => id);
     console.error(
@@ -255,37 +283,41 @@ function renderFiles(paths, options) {
   console.log(`\n### ${paths.join("\n### ")}（${exchanges.length} 个 exchange）`);
   const detail = !options.list && (options.all || options.exchange !== undefined);
   if (!detail) {
-    for (const exchange of exchanges) {
-      if (options.exchange !== undefined && exchange.id !== options.exchange) continue;
-      const line = summaryLine(exchange);
+    for (const summary of exchanges) {
+      if (options.exchange !== undefined && summary.id !== options.exchange) continue;
+      const line = summaryLine(summary);
       if (options.grep !== undefined && !line.includes(options.grep)) continue;
       console.log(line);
     }
     return;
   }
-  for (const exchange of exchanges) {
-    if (options.exchange !== undefined && exchange.id !== options.exchange) continue;
+  const emitExchange = (exchange) => {
     const text = renderExchange(exchange, options);
-    if (options.grep !== undefined && !text.includes(options.grep)) continue;
+    if (options.grep !== undefined && !text.includes(options.grep)) return;
     console.log(text);
+  };
+  if (options.exchange !== undefined) {
+    const exchange = await readDumpExchange(paths, options.exchange);
+    if (exchange !== null) emitExchange(exchange);
+    return;
   }
+  await forEachDumpExchange(paths, emitExchange);
 }
 
-function summaryLine(exchange) {
-  const head = findRecord(exchange, "request_head");
-  const handshake = findRecord(exchange, "websocket_handshake");
-  const responseHead = findRecord(exchange, "response_head");
-  const metadata = requestMetadata(exchange);
+function summaryLine(summary) {
+  const target = summary.transport === "websocket"
+    ? `WebSocket ${summary.url ?? ""}`
+    : `${summary.method ?? "HTTP"} ${summary.path ?? ""}`.trim();
   const parts = [
-    `#${exchange.id}`,
-    formatTime(exchange.startedAtMs),
-    head !== undefined ? `${head.method} ${head.path}` : `WebSocket ${handshake?.url ?? ""}`,
-    `线程=${shortId(metadata.threadId)}`,
-    `轮次=${shortId(metadata.turnId)}`,
-    `类型=${metadata.requestKind ?? "-"}`,
+    `#${summary.id}`,
+    formatTime(summary.startedAtMs),
+    target,
+    `线程=${shortId(summary.threadId)}`,
+    `轮次=${shortId(summary.turnId)}`,
+    `类型=${summary.requestKind ?? "-"}`,
   ];
-  if (responseHead !== undefined) parts.push(`状态=${responseHead.status}`);
-  if (findRecord(exchange, "error") !== undefined) parts.push("有中断记录");
+  if (summary.status !== undefined) parts.push(`状态=${summary.status}`);
+  if (summary.hasError) parts.push("有中断记录");
   return parts.join("  ");
 }
 

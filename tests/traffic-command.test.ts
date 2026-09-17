@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   appendFileSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
   utimesSync,
@@ -80,6 +81,7 @@ describe("traffic command options", () => {
     [["--max-bytes", "-1"], "--max-bytes 需要非负整数值"],
     [["--exchange", "-2"], "--exchange 需要正整数值"],
     [["--max-bytes", "1.5"], "--max-bytes 需要非负整数值"],
+    [["--max-bytes", "9007199254740992"], "--max-bytes 需要非负整数值"],
     [["--grep", "--all"], "--grep 缺少值"],
     [["--dir"], "--dir 缺少值"],
     [["--list", "--all"], "--list 与 --all 不能同时使用"],
@@ -104,11 +106,27 @@ describe("traffic command options", () => {
 });
 
 describe("traffic command rendering", () => {
+  it("ignores non-file JSONL directory entries", () => {
+    const directory = trafficDirectory();
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      httpExchange(1),
+    );
+    mkdirSync(join(directory, "ignored.jsonl"));
+
+    const result = runTraffic(["--dir", directory]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("#1");
+  });
+
   it("lists exchanges from the newest label and merges rotated files", () => {
     const directory = trafficDirectory();
     writeDumpFile(directory, "ocg-account-2026-09-17T00-00-05-000Z-1.jsonl", 5, httpExchange(1));
     writeDumpFile(directory, "openai-2026-09-17T00-00-00-000Z-1.jsonl", 10, httpExchange(1));
-    writeDumpFile(directory, "openai-2026-09-17T00-00-01-000Z-2.jsonl", 20, websocketExchange(2));
+    writeDumpFile(directory, "openai-2026-09-17T00-00-00-000Z-2.jsonl", 20, websocketExchange(2));
 
     const result = runTraffic(["--dir", directory]);
 
@@ -124,6 +142,32 @@ describe("traffic command rendering", () => {
     expect(result.stdout).toContain("WebSocket wss://chatgpt.com/backend-api/codex/responses");
     expect(result.stdout).toContain("有中断记录");
     expect(result.stdout).not.toContain("ocg-account");
+  });
+
+  it("streams complete exchanges when one line in the latest session is malformed", () => {
+    const directory = trafficDirectory();
+    const first = writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      httpExchange(1),
+    );
+    appendFileSync(first, "{malformed\n");
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-2.jsonl",
+      20,
+      websocketExchange(2),
+    );
+
+    const result = runTraffic(["--all", "--dir", directory]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("2 个 exchange");
+    expect(result.stdout).toContain("#1 ");
+    expect(result.stdout).toContain("POST /responses");
+    expect(result.stdout).toContain("#2 ");
+    expect(result.stdout).toContain("WebSocket wss://chatgpt.com/backend-api/codex/responses");
   });
 
   it("renders the full HTTP request and response of one exchange", () => {
@@ -286,7 +330,7 @@ describe("traffic command rendering", () => {
     });
     await waitFor(() => output.includes("按 Ctrl-C 停止"), () => `${output}\n${errors}`);
 
-    appendFileSync(path, dumpLines(websocketExchange(2)));
+    appendFileSync(path, `{malformed\n${dumpLines(websocketExchange(2))}`);
     await waitFor(() => output.includes("gpt-6-astra"), () => `${output}\n${errors}`);
 
     child.kill("SIGINT");
@@ -300,6 +344,60 @@ describe("traffic command rendering", () => {
     expect(output).toContain("返回：");
     expect(output).toContain("中断 client_disconnected 连接被客户端关闭");
     expect(output).not.toContain("#1 ");
+  }, 20_000);
+
+  it("isolates follow buffers when exchange numbers restart in a new writer session", async () => {
+    const directory = trafficDirectory();
+    const older = writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      httpExchange(1),
+    );
+    const child = spawn(
+      process.execPath,
+      [trafficScript, "--follow", "--dir", directory, "--max-bytes", "400"],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    runningChildren.add(child);
+    let output = "";
+    let errors = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      errors += chunk;
+    });
+    await waitFor(() => output.includes("按 Ctrl-C 停止"), () => `${output}\n${errors}`);
+
+    appendFileSync(older, dumpLines([{
+      direction: "client",
+      exchange: 2,
+      kind: "websocket_frame",
+      part: 1,
+      parts: 2,
+      startedAtMs: 1_700_000_000_000,
+      text: "{\"old\":",
+    }]));
+    await new Promise((resolveTick) => setTimeout(resolveTick, 1_200));
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-01-00-000Z-1.jsonl",
+      20,
+      websocketExchange(2),
+    );
+    await waitFor(() => output.includes("gpt-6-astra"), () => `${output}\n${errors}`);
+
+    child.kill("SIGINT");
+    const code = await new Promise<number | null>((resolveExit) => {
+      child.once("exit", resolveExit);
+    });
+    runningChildren.delete(child);
+
+    expect(code).toBe(0);
+    expect(output).not.toContain("{\"old\":");
   }, 20_000);
 });
 

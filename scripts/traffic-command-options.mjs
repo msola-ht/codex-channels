@@ -17,7 +17,7 @@ export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [转储文件...]
   --dir <目录>         指定转储目录，默认当前用户数据目录下的 traffic
   -h, --help           显示本帮助
 
-不传文件时读取 --dir 下最新标签的最新两个文件，因为轮转可能把同一次 exchange 的记录切到两个文件。
+不传文件时读取 --dir 下最新标签、最新 writer session 的全部保留文件，以还原跨多次轮转的 exchange。
 --follow 从现有文件的末尾开始，显式传入文件时先完整输出再跟随。`;
 
 export function parseTrafficCommandArgs(args) {
@@ -91,10 +91,11 @@ function boundedInteger(raw, name, description, minimum) {
   if (raw === undefined || (raw.startsWith("-") && !/^-[0-9]+$/u.test(raw))) {
     throw new Error(`${name} 缺少值`);
   }
-  if (!/^-?[0-9]+$/u.test(raw) || Number(raw) < minimum) {
+  const value = Number(raw);
+  if (!/^-?[0-9]+$/u.test(raw) || !Number.isSafeInteger(value) || value < minimum) {
     throw new Error(`${name} 需要${description}`);
   }
-  return Number(raw);
+  return value;
 }
 
 function requiredValue(raw, name) {

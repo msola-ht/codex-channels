@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -95,6 +95,62 @@ describe("webui traffic API", () => {
       .toEqual(["response.created", "response.output_text.done"]);
   });
 
+  it("bounds SSE event payloads with the response body limit", async () => {
+    const fixture = createFixture();
+    const oversized = "x".repeat(4 * 1_048_576 + 1_024);
+    const records = httpExchange(8).map((record) => (
+      record.kind === "response_body"
+        ? {
+            ...record,
+            text: `event: response.output_text.done\ndata: ${JSON.stringify({
+              text: oversized,
+              type: "response.output_text.done",
+            })}\n\n`,
+          }
+        : record
+    ));
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      records,
+    );
+    const server = await startServer(fixture.environment);
+
+    const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=8`);
+
+    expect(detail.body.exchange.response).toMatchObject({ bodyTruncated: true });
+    expect(Buffer.byteLength(detail.body.exchange.events[0]!.payload))
+      .toBeLessThanOrEqual(4 * 1_048_576);
+  });
+
+  it("parses CRLF-delimited SSE events independently", async () => {
+    const fixture = createFixture();
+    const responseBody = [
+      "event: response.created\r\n",
+      `data: ${JSON.stringify({ response: { model: "gpt-test" }, type: "response.created" })}\r\n\r\n`,
+      "event: response.output_text.done\r\n",
+      `data: ${JSON.stringify({ text: "done", type: "response.output_text.done" })}\r\n\r\n`,
+    ].join("");
+    const records = httpExchange(10).map((record) => (
+      record.kind === "response_body" ? { ...record, text: responseBody } : record
+    ));
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      records,
+    );
+    const server = await startServer(fixture.environment);
+
+    const detail = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=10`,
+    );
+
+    expect(detail.body.exchange.events.map((event) => event.type)).toEqual([
+      "response.created",
+      "response.output_text.done",
+    ]);
+  });
+
   it("keeps a rotated HTTP exchange HTTP when its request head is gone", async () => {
     const fixture = createFixture();
     writeDumpFile(
@@ -108,6 +164,60 @@ describe("webui traffic API", () => {
 
     expect(detail.body.exchange).toMatchObject({ id: 9, request: null, transport: "http" });
     expect(detail.body.exchange.response).toMatchObject({ status: 200 });
+  });
+
+  it("reads only the newest writer session when exchange numbers restart", async () => {
+    const fixture = createFixture();
+    const older = writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      rewriteHttpExchange(httpExchange(1), 1_700_000_000_001, "/older"),
+    );
+    const newer = writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-01-00-000Z-1.jsonl",
+      rewriteHttpExchange(httpExchange(1), 1_700_000_060_001, "/newer"),
+    );
+    utimesSync(older, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    utimesSync(newer, new Date(1_700_000_060_000), new Date(1_700_000_060_000));
+    const server = await startServer(fixture.environment);
+
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=1`);
+
+    expect(list.body.total).toBe(1);
+    expect(list.body.exchanges[0]).toMatchObject({
+      id: 1,
+      path: "/newer",
+      startedAtMs: 1_700_000_060_001,
+    });
+    expect(detail.body.exchange.request).toMatchObject({ path: "/newer" });
+  });
+
+  it("keeps list and detail on the same writer session after a restart", async () => {
+    const fixture = createFixture();
+    const older = writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      rewriteHttpExchange(httpExchange(1), 1_700_000_000_001, "/older"),
+    );
+    utimesSync(older, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+
+    const newer = writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-01-00-000Z-1.jsonl",
+      rewriteHttpExchange(httpExchange(1), 1_700_000_060_001, "/newer"),
+    );
+    utimesSync(newer, new Date(1_700_000_060_000), new Date(1_700_000_060_000));
+    const detail = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=1&label=openai&session=${list.body.session}`,
+    );
+
+    expect(list.body.session).toBe("2026-09-17T00-00-00-000Z");
+    expect(detail.body.session).toBe(list.body.session);
+    expect(detail.body.exchange.request).toMatchObject({ path: "/older" });
   });
 
   it("selects the requested label and rejects unknown parameters", async () => {
@@ -128,12 +238,40 @@ describe("webui traffic API", () => {
       .toMatchObject({ body: { error: { code: "unsupported_parameter" } }, status: 400 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic?label=nope`))
       .toMatchObject({ body: { error: { code: "traffic_label_not_found" } }, status: 404 });
+    expect(await getJson<TrafficErrorBody>(
+      `${server.origin}/api/v1/traffic?label=openai&session=missing`,
+    )).toMatchObject({ body: { error: { code: "traffic_session_not_found" } }, status: 404 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic?limit=0`))
       .toMatchObject({ body: { error: { code: "invalid_parameter" } }, status: 400 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange`))
       .toMatchObject({ body: { error: { code: "missing_parameter" } }, status: 400 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange?id=99`))
       .toMatchObject({ body: { error: { code: "traffic_exchange_not_found" } }, status: 404 });
+  });
+
+  it("keeps hyphenated provider labels distinct", async () => {
+    const fixture = createFixture();
+    const first = writeDumpFile(
+      fixture.trafficDir,
+      "custom-alpha-2026-09-17T00-00-00-000Z-1.jsonl",
+      httpExchange(1),
+    );
+    const second = writeDumpFile(
+      fixture.trafficDir,
+      "custom-beta-2026-09-17T00-01-00-000Z-1.jsonl",
+      httpExchange(2),
+    );
+    utimesSync(first, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    utimesSync(second, new Date(1_700_000_060_000), new Date(1_700_000_060_000));
+    const server = await startServer(fixture.environment);
+
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+
+    expect(list.body.label).toBe("custom-beta");
+    expect(list.body.labels.map((entry) => entry.label)).toEqual([
+      "custom-beta",
+      "custom-alpha",
+    ]);
   });
 
   it("reports an unavailable dump directory with an actionable message", async () => {
@@ -145,6 +283,22 @@ describe("webui traffic API", () => {
     expect(list.status).toBe(503);
     expect(list.body.error.code).toBe("traffic_unavailable");
     expect(list.body.error.message).toContain("model_traffic_dump");
+  });
+
+  it("reads traffic beside an explicitly selected config file", async () => {
+    const fixture = createFixture({ explicitConfig: true });
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      httpExchange(1),
+    );
+    const server = await startServer(fixture.environment);
+
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+
+    expect(list.status).toBe(200);
+    expect(list.body.exchanges).toHaveLength(1);
+    expect(list.body.label).toBe("openai");
   });
 
   it("rejects non-loopback callers", async () => {
@@ -161,16 +315,21 @@ describe("webui traffic API", () => {
   });
 });
 
-function createFixture() {
-  const home = mkdtempSync(join(tmpdir(), "codexc-webui-traffic-"));
-  temporaryDirectories.push(home);
+function createFixture({ explicitConfig = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "codexc-webui-traffic-"));
+  temporaryDirectories.push(root);
+  const home = explicitConfig ? join(root, "default-home") : root;
+  const dataDir = explicitConfig ? join(root, "configured") : root;
+  mkdirSync(home, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
+  const configPath = join(dataDir, "config.toml");
   const environment = {
     ...process.env,
-    CODEX_CONNECT_CONFIG_FILE: "",
+    CODEX_CONNECT_CONFIG_FILE: explicitConfig ? configPath : "",
     CODEX_CONNECT_HOME: home,
     CODEX_HOME: join(home, "codex"),
   };
-  writeGatewayConfig(join(home, "config.toml"), {
+  writeGatewayConfig(configPath, {
     codex: { binary: "codex", socket_path: "runtime/app-server.sock" },
     debug: { model_traffic_dump: true, model_traffic_input_items: 3 },
     default_workspace: "main",
@@ -179,9 +338,9 @@ function createFixture() {
     version: 1,
     workspaces: [{ cwd: join(home, "workspace"), id: "main", name: "Main" }],
   });
-  const trafficDir = join(home, "traffic");
+  const trafficDir = join(dataDir, "traffic");
   mkdirSync(trafficDir, { recursive: true });
-  return { environment, home, trafficDir };
+  return { environment, trafficDir };
 }
 
 function startServer(environment: NodeJS.ProcessEnv) {
@@ -208,12 +367,14 @@ interface TrafficListBody {
   label: string;
   labels: TrafficLabelBody[];
   nextOffset: number | null;
+  session: string;
   total: number;
 }
 
 interface TrafficDetailBody {
+  session: string;
   exchange: TrafficExchangeBody & {
-    events: Array<{ type: string }>;
+    events: Array<{ payload: string; type: string }>;
     request: Record<string, unknown> | null;
     response: Record<string, unknown> | null;
   };
@@ -223,12 +384,30 @@ interface TrafficErrorBody {
   error: { code: string; message: string };
 }
 
-function writeDumpFile(directory: string, name: string, records: Array<Record<string, unknown>>) {
+function writeDumpFile(
+  directory: string,
+  name: string,
+  records: Array<Record<string, unknown>>,
+): string {
+  const path = join(directory, name);
   writeFileSync(
-    join(directory, name),
+    path,
     records.map((record) => `${JSON.stringify({ ts: 1_700_000_000_000, ...record })}\n`).join(""),
     { mode: 0o600 },
   );
+  return path;
+}
+
+function rewriteHttpExchange(
+  records: Array<Record<string, unknown>>,
+  startedAtMs: number,
+  path: string,
+): Array<Record<string, unknown>> {
+  return records.map((record) => ({
+    ...record,
+    startedAtMs,
+    ...(record.kind === "request_head" ? { path } : {}),
+  }));
 }
 
 function httpExchange(id: number): Array<Record<string, unknown>> {

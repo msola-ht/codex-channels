@@ -3,17 +3,20 @@ import {
   request as httpRequest,
 } from "node:http";
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 
 import {
@@ -30,6 +33,7 @@ const openServers: ProviderProxyTestServer[] = [];
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await cleanupProviderProxyTestServers(openServers);
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -37,6 +41,72 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy traffic dump", () => {
+  it("retains the five newest numeric indexes after a writer session reaches ten files", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-18T00:00:00.000Z"));
+    const directory = trafficDumpDirectory();
+    mkdirSync(directory, { recursive: true });
+    for (let index = 1; index <= 9; index += 1) {
+      writeFileSync(
+        join(directory, `openai-2026-09-18T00-00-00-000Z-${index}.jsonl`),
+        "",
+        { mode: 0o600 },
+      );
+    }
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, label: "openai" },
+    });
+    await proxy.start();
+
+    try {
+      expect(await postResponses(proxy.address(), "{}"), "upstream response").toBe(200);
+    } finally {
+      await proxy.close();
+    }
+
+    const indexes = readdirSync(directory)
+      .map((name) => Number(/-(\d+)\.jsonl$/u.exec(name)?.[1]))
+      .sort((left, right) => left - right);
+    expect(indexes).toEqual([6, 7, 8, 9, 10]);
+  });
+
+  it("makes a completed exchange readable before the proxy closes", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, label: "openai" },
+    });
+    await proxy.start();
+
+    try {
+      expect(await postResponses(proxy.address(), "{}"), "upstream response").toBe(200);
+      const content = await waitForDumpContent(directory, "response_end");
+      expect(content).toContain('"kind":"request_end"');
+      expect(content).toContain('"kind":"response_end"');
+    } finally {
+      await proxy.close();
+    }
+  });
+
   it("records the full request and response while keeping metrics intact", async () => {
     const responseBody = sse("response.output_text.delta", { delta: "OK" })
       + sse("response.completed", { response: { id: "r1" } });
@@ -123,6 +193,36 @@ describe("ProviderProxy traffic dump", () => {
       parts.map((_record, index) => index + 1),
     );
     expect(bodyText(records, "request_body")).toBe(requestBody);
+  });
+
+  it("keeps multibyte UTF-8 body records within the one MiB payload limit", async () => {
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, inputItems: 0, itemMaxBytes: 0, label: "openai" },
+    });
+    await proxy.start();
+
+    const requestBody = JSON.stringify({ input: "汉".repeat(360_000) });
+    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
+    await proxy.close();
+
+    const records = readDumpRecords(directory);
+    const parts = records
+      .filter((record) => record.kind === "request_body")
+      .map((record) => String(record.text));
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.every((part) => Buffer.byteLength(part) <= 1_048_576)).toBe(true);
+    expect(parts.join("")).toBe(requestBody);
   });
 
   it("keeps the partial response when the client disconnects mid-stream", async () => {
@@ -315,11 +415,15 @@ describe("ProviderProxy traffic dump", () => {
   });
 
   it("caps oversized entries when only the per-entry limit is set", async () => {
+    const echoed = {
+      instructions: "keep the complete instructions",
+      tools: [{ name: "shell", type: "function" }],
+    };
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ ok: true }));
+        response.end(JSON.stringify({ response: echoed, type: "response.created" }));
       });
     });
     await listen(upstream);
@@ -344,9 +448,10 @@ describe("ProviderProxy traffic dump", () => {
     expect(await postResponses(proxy.address(), requestBody)).toBe(200);
     await proxy.close();
 
-    const request = JSON.parse(
-      bodyText(readDumpRecords(directory), "request_body"),
-    ) as { input: Array<Record<string, unknown>> };
+    const records = readDumpRecords(directory);
+    const request = JSON.parse(bodyText(records, "request_body")) as {
+      input: Array<Record<string, unknown>>;
+    };
     // 只设置单条上限时 input 不折叠，只把超限条目换成头尾摘要。
     expect(request.input).toHaveLength(2);
     expect(request.input[1]).toEqual(small);
@@ -363,6 +468,10 @@ describe("ProviderProxy traffic dump", () => {
     expect(instructions["bytes"]).toBe(5_000);
     expect(String(instructions["head"])).toBe("s".repeat(256));
     expect(String(instructions["tail"])).toBe("s".repeat(256));
+    const response = JSON.parse(bodyText(records, "response_body")) as {
+      response: typeof echoed;
+    };
+    expect(response.response).toEqual(echoed);
   });
 
   it("folds multi-megabyte bodies that span several record parts", async () => {
@@ -498,6 +607,22 @@ function trafficDumpDirectory(): string {
   const parent = mkdtempSync(join(tmpdir(), "codex-traffic-dump-"));
   temporaryDirectories.push(parent);
   return join(parent, "traffic");
+}
+
+async function waitForDumpContent(
+  directory: string,
+  expected: string,
+  timeoutMs = 1_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(directory)) {
+      const content = readDumpContent(directory);
+      if (content.includes(expected)) return content;
+    }
+    await new Promise((resolveTick) => setTimeout(resolveTick, 10));
+  }
+  throw new Error(`等待转储内容超时：${expected}`);
 }
 
 function closeServer(server: ReturnType<typeof createServer>): ProviderProxyTestServer {

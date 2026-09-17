@@ -10,41 +10,75 @@ import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 
 export function listDumpFiles(directory) {
+  return dumpFileEntries(directory).map((entry) => entry.path);
+}
+
+function dumpFileEntries(directory) {
+  let names;
   try {
-    return readdirSync(directory)
-      .filter((name) => name.endsWith(".jsonl"))
-      .map((name) => join(directory, name))
-      .sort((left, right) => statSync(left).mtimeMs - statSync(right).mtimeMs);
+    names = readdirSync(directory);
   } catch {
     return [];
   }
+  const entries = [];
+  for (const name of names) {
+    if (!name.endsWith(".jsonl")) continue;
+    const path = join(directory, name);
+    try {
+      const stats = statSync(path);
+      if (stats.isFile()) entries.push({ mtimeMs: stats.mtimeMs, path });
+    } catch {
+      // 轮转可能在 readdir 与 stat 之间删除旧文件；只跳过该条目。
+    }
+  }
+  return entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
 }
 
 export function labelOf(path) {
-  return basename(path).split("-")[0];
+  return dumpFileIdentity(path).label;
 }
 
 /** 标签列表按最新文件时间倒序排列，供选择要查看的 Provider。 */
 export function dumpLabels(directory) {
   const byLabel = new Map();
-  for (const path of listDumpFiles(directory)) {
+  for (const { mtimeMs, path } of dumpFileEntries(directory)) {
     const label = labelOf(path);
     const entry = byLabel.get(label) ?? { files: 0, label, latestAtMs: 0 };
     entry.files += 1;
-    entry.latestAtMs = Math.max(entry.latestAtMs, statSync(path).mtimeMs);
+    entry.latestAtMs = Math.max(entry.latestAtMs, mtimeMs);
     byLabel.set(label, entry);
   }
   return [...byLabel.values()].sort((left, right) => right.latestAtMs - left.latestAtMs);
 }
 
-/**
- * 同一标签的最新两个文件：轮转可能把同一次 exchange 的记录切到两个文件，
- * 单个文件不足以还原完整报文。
- */
-export function filesOfLabel(directory, label) {
-  return listDumpFiles(directory)
-    .filter((path) => labelOf(path) === label)
-    .slice(-2);
+/** 同一标签最新 writer session 的全部保留文件，完整覆盖跨多次轮转的 exchange。 */
+export function filesOfLabel(directory, label, requestedSession) {
+  const files = listDumpFiles(directory).filter((path) => labelOf(path) === label);
+  const newest = files.at(-1);
+  if (newest === undefined) return [];
+  const writerSession = requestedSession ?? writerSessionOf(newest);
+  return writerSession === undefined
+    ? [newest]
+    : files
+      .filter((path) => writerSessionOf(path) === writerSession)
+      .sort((left, right) => fileIndexOf(left) - fileIndexOf(right));
+}
+
+export function writerSessionOf(path) {
+  return dumpFileIdentity(path).writerSession;
+}
+
+function fileIndexOf(path) {
+  return dumpFileIdentity(path).fileIndex ?? 0;
+}
+
+function dumpFileIdentity(path) {
+  const name = basename(path);
+  const match = /^(.+)-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)-(\d+)\.jsonl$/u
+    .exec(name);
+  return match === null
+    ? { fileIndex: undefined, label: basename(name, ".jsonl"), writerSession: undefined }
+    : { fileIndex: Number(match[3]), label: match[1], writerSession: match[2] };
 }
 
 /** 逐行流式读取转储文件；单行解析失败时跳过，不中断其余记录。 */
@@ -206,10 +240,10 @@ export function responsePayloads(exchange) {
 
 export function parseSseEvents(text) {
   const events = [];
-  for (const block of text.split("\n\n")) {
+  for (const block of text.split(/\r?\n\r?\n/u)) {
     let type;
     const dataLines = [];
-    for (const line of block.split("\n")) {
+    for (const line of block.split(/\r?\n/u)) {
       if (line.startsWith("event:")) type = line.slice(6).trim();
       else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
     }
@@ -348,14 +382,42 @@ export async function summarizeDumpFiles(files, { limit, offset = 0 } = {}) {
   };
 }
 
-/** 详情：只保留目标 exchange 的记录，再按组提取结构化字段。 */
-export async function describeDumpExchange(files, id, { maxSectionBytes = 262_144 } = {}) {
+/** 流式归组并在 exchange 明确结束后立即释放正文；文件末尾仍未结束的记录最后输出。 */
+export async function forEachDumpExchange(files, visit) {
+  const active = new Map();
+  await forEachDumpRecord(files, (record) => {
+    let exchange = active.get(record.exchange);
+    if (exchange === undefined) {
+      exchange = {
+        account: record.account,
+        id: record.exchange,
+        records: [],
+        startedAtMs: record.startedAtMs,
+      };
+      active.set(record.exchange, exchange);
+    }
+    exchange.records.push(record);
+    if (!exchangeComplete(exchange, record)) return;
+    active.delete(record.exchange);
+    visit(exchange);
+  });
+  for (const exchange of active.values()) visit(exchange);
+}
+
+/** 详情读取只保留目标 exchange，内存占用不随其他 exchange 的正文增长。 */
+export async function readDumpExchange(files, id) {
   const selected = [];
   await forEachDumpRecord(files, (record) => {
     if (record.exchange === id) selected.push(record);
   });
   if (selected.length === 0) return null;
-  return exchangeDetail(groupExchanges(selected)[0], maxSectionBytes);
+  return groupExchanges(selected)[0];
+}
+
+/** 详情：只保留目标 exchange 的记录，再按组提取结构化字段。 */
+export async function describeDumpExchange(files, id, { maxSectionBytes = 262_144 } = {}) {
+  const exchange = await readDumpExchange(files, id);
+  return exchange === null ? null : exchangeDetail(exchange, maxSectionBytes);
 }
 
 export function exchangeDetail(exchange, maxSectionBytes = 262_144) {
@@ -363,8 +425,10 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144) {
   const handshake = findRecord(exchange, "websocket_handshake");
   const responseHead = findRecord(exchange, "response_head");
   const metadata = requestMetadata(exchange);
-  const requestBody = boundedText(joinBodies(exchange, "request_body"), maxSectionBytes);
-  const responseBody = boundedText(joinBodies(exchange, "response_body"), maxSectionBytes);
+  const requestBodyText = joinBodies(exchange, "request_body");
+  const responseBodyText = joinBodies(exchange, "response_body");
+  const requestBody = boundedText(requestBodyText, maxSectionBytes);
+  const responseBody = boundedText(responseBodyText, maxSectionBytes);
   return {
     account: exchange.account,
     closes: recordsOfKind(exchange, "websocket_close").map((record) => ({
@@ -376,10 +440,12 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144) {
       message: record.message,
       scope: record.scope,
     })),
-    events: parseSseEvents(joinBodies(exchange, "response_body")).map((event) => ({
-      payload: event.parsed === undefined ? event.raw : JSON.stringify(event.parsed, null, 2),
-      type: event.type,
-    })),
+    events: parseSseEvents(responseBody.text).map((event) => {
+      const payload = event.parsed === undefined
+        ? event.raw
+        : JSON.stringify(event.parsed, null, 2);
+      return { payload: boundedText(payload, maxSectionBytes).text, type: event.type };
+    }),
     frames: websocketFrames(exchange).map((frame) => {
       const bounded = boundedText(frame.text, maxSectionBytes);
       return { direction: frame.direction, text: bounded.text, truncated: bounded.truncated };
@@ -436,6 +502,15 @@ function transportOf(exchange) {
   if (websocketRecordKinds.some((kind) => kinds.has(kind))) return "websocket";
   if (httpRecordKinds.some((kind) => kinds.has(kind))) return "http";
   return undefined;
+}
+
+function exchangeComplete(exchange, record) {
+  if (record.kind === "response_end") return true;
+  const transport = transportOf(exchange);
+  if (record.kind === "error") return transport === "http";
+  if (record.kind !== "websocket_close") return false;
+  const peers = new Set(recordsOfKind(exchange, "websocket_close").map((close) => close.peer));
+  return peers.has("client") && peers.has("upstream");
 }
 
 function boundedText(text, maxBytes) {

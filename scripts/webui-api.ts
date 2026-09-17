@@ -805,6 +805,7 @@ export interface TrafficListResponse {
   enabled: boolean
   label: string
   labels: TrafficLabel[]
+  session: string
   files: string[]
   generatedAt: string
   exchanges: TrafficExchangeSummary[]
@@ -853,6 +854,7 @@ export interface TrafficDetailResponse {
   directory: string
   enabled: boolean
   label: string
+  session: string
   files: string[]
   generatedAt: string
   exchange: TrafficExchangeDetail
