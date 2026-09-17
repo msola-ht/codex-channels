@@ -146,7 +146,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         : {}),
       ...(trafficDumpDirectory === undefined
         ? {}
-        : { trafficDump: { directory: trafficDumpDirectory, label: provider } }),
+        : {
+            trafficDump: {
+              directory: trafficDumpDirectory,
+              inputItems: validatedDebug.model_traffic_input_items,
+              label: provider,
+            },
+          }),
     };
     const opencodeGo = provider === "ocg";
     const modelProxy = new ProviderProxy("127.0.0.1:0", {

@@ -376,6 +376,27 @@ codexc traffic --follow                        # 从现有文件末尾开始持�
 目录下 `traffic/` 中最新的标签，并自动合并轮转切开的两个文件；也可以用 `--dir` 指定目录，
 或直接传入转储文件路径。`codexc traffic -h` 列出全部选项。
 
+### 转储体积控制
+
+每次请求都会重发完整会话历史，长会话下一轮就有几百 KB，转储增长很快。需要长时间开启时，用
+`[debug].model_traffic_input_items` 启用精简转储：
+
+```toml
+[debug]
+model_traffic_dump = true
+model_traffic_input_items = 3
+```
+
+大于 `0` 时只保留请求 `input` 数组末尾这么多条完整条目，更早的条目合并成一条
+`{"type": "omitted", "omitted_items": …, "omitted_bytes": …}` 摘要；响应里重复回显的
+`response.instructions` 与 `response.tools` 折叠为 `<omitted N 字节>` 占位。请求头、请求体其它
+字段、`model`、响应正文和事件顺序保持完整，`0` 表示按原样转储全部字段（默认）。使用
+`codexc traffic` 查看时不需要额外参数，折叠结果会直接显示在对应位置。
+
+WebSocket 提供方（OpenAI 官方）同样生效：客户端 `response.create` 帧的 `input` 按同样规则保留
+末尾条目，上游 `response.created`、`response.in_progress`、`response.completed` 里重复的工具与
+指令回显按同样规则折叠。
+
 ## 9. 开发与验证
 
 ```bash

@@ -513,13 +513,26 @@ cwd = "/tmp/workspace"
 `);
 
     expect(validateGatewayConfigDocument(document).debug)
-      .toEqual({ model_traffic_dump: true });
-    expect(validateDebugConfigDocument({})).toEqual({ model_traffic_dump: false });
+      .toEqual({ model_traffic_dump: true, model_traffic_input_items: 0 });
+    expect(validateDebugConfigDocument({})).toEqual({
+      model_traffic_dump: false,
+      model_traffic_input_items: 0,
+    });
+    expect(validateDebugConfigDocument({
+      model_traffic_dump: true,
+      model_traffic_input_items: 3,
+    })).toEqual({ model_traffic_dump: true, model_traffic_input_items: 3 });
     expect(capturedError(() => validateDebugConfigDocument({
       model_traffic_dump: "yes",
     }))).toContain("[debug]");
     expect(capturedError(() => validateDebugConfigDocument({
       traffic_dump: true,
+    }))).toContain("[debug]");
+    expect(capturedError(() => validateDebugConfigDocument({
+      model_traffic_input_items: -1,
+    }))).toContain("[debug]");
+    expect(capturedError(() => validateDebugConfigDocument({
+      model_traffic_input_items: 1.5,
     }))).toContain("[debug]");
   });
 

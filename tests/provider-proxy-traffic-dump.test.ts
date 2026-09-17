@@ -240,6 +240,153 @@ describe("ProviderProxy traffic dump", () => {
     expect(frameTexts(records, "upstream").join("")).toContain("response.completed");
     expect(readDumpContent(directory)).not.toContain("sk-secret");
   });
+
+  it("keeps only the newest input items and folds duplicated response fields", async () => {
+    const responseBody = sse("response.created", {
+      response: {
+        id: "r1",
+        instructions: "x".repeat(300),
+        tools: [{ name: "shell", type: "function" }],
+      },
+      type: "response.created",
+    }) + sse("response.output_text.delta", { delta: "OK" });
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(responseBody);
+      });
+    });
+    await listen(upstream);
+    const upstreamAddress = upstream.address() as AddressInfo;
+    openServers.push(closeServer(upstream));
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, inputItems: 2, label: "openai" },
+    });
+    await proxy.start();
+
+    const items = ["a", "b", "c", "d", "e"].map((text, index) => ({
+      content: text.repeat(200),
+      role: index % 2 === 0 ? "user" : "assistant",
+      type: "message",
+    }));
+    const tools = [{ name: "shell", type: "function" }];
+    const requestBody = JSON.stringify({
+      input: items,
+      instructions: "system prompt",
+      model: "gpt-compact",
+      tools,
+    });
+    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
+    await proxy.close();
+
+    const records = readDumpRecords(directory);
+    const request = JSON.parse(bodyText(records, "request_body")) as {
+      input: Array<Record<string, unknown>>;
+      instructions: string;
+      tools: unknown;
+    };
+    expect(request.input).toHaveLength(3);
+    expect(request.input[0]).toEqual({
+      omitted_bytes: Buffer.byteLength(JSON.stringify(items.slice(0, 3))),
+      omitted_items: 3,
+      type: "omitted",
+    });
+    expect(request.input.slice(1)).toEqual(items.slice(-2));
+    expect(request.instructions).toBe("system prompt");
+    expect(request.tools).toEqual(tools);
+
+    const events = sseData(bodyText(records, "response_body"));
+    expect(events[0]?.["response"]).toEqual({
+      id: "r1",
+      instructions: `<omitted ${Buffer.byteLength("x".repeat(300))} 字节>`,
+      tools: `<omitted ${Buffer.byteLength(JSON.stringify(tools))} 字节>`,
+    });
+    expect(events[1]).toEqual({ delta: "OK" });
+  });
+
+  it("compacts websocket client frames and echoed upstream fields", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    upstreamWebSocket.on("connection", (socket) => {
+      socket.on("message", () => {
+        socket.send(JSON.stringify({
+          response: {
+            instructions: "y".repeat(120),
+            tools: [{ name: "shell" }],
+          },
+          type: "response.created",
+        }));
+        socket.send(JSON.stringify({ type: "response.completed" }));
+      });
+    });
+    await listen(upstreamServer);
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await closeServer(upstreamServer).close();
+      },
+    });
+    const directory = trafficDumpDirectory();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      trafficDump: { directory, inputItems: 1, label: "openai" },
+    });
+    await proxy.start();
+
+    const items = ["a", "b", "c"].map((text) => ({ content: text.repeat(120), type: "message" }));
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const completed = new Promise<void>((resolveCompleted, rejectCompleted) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({
+          input: items,
+          instructions: "frame prompt",
+          model: "gpt-ws",
+          type: "response.create",
+        }));
+      });
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString("utf8")) as { type?: string };
+        if (message.type === "response.completed") resolveCompleted();
+      });
+      client.on("error", rejectCompleted);
+    });
+    await completed;
+    client.close();
+    await proxy.close();
+
+    const records = readDumpRecords(directory);
+    const frame = JSON.parse(frameTexts(records, "client")[0]!) as {
+      input: Array<Record<string, unknown>>;
+      instructions: string;
+    };
+    expect(frame.input).toEqual([
+      {
+        omitted_bytes: Buffer.byteLength(JSON.stringify(items.slice(0, 2))),
+        omitted_items: 2,
+        type: "omitted",
+      },
+      items[2],
+    ]);
+    expect(frame.instructions).toBe("frame prompt");
+
+    const upstreamEvents = frameTexts(records, "upstream").map(
+      (text) => JSON.parse(text) as Record<string, unknown>,
+    );
+    expect(upstreamEvents[0]?.["response"]).toEqual({
+      instructions: `<omitted ${Buffer.byteLength("y".repeat(120))} 字节>`,
+      tools: `<omitted ${Buffer.byteLength(JSON.stringify([{ name: "shell" }]))} 字节>`,
+    });
+    expect(upstreamEvents[1]).toEqual({ type: "response.completed" });
+  });
 });
 
 function trafficDumpDirectory(): string {
@@ -326,4 +473,11 @@ function frameTexts(
   return records
     .filter((record) => record.kind === "websocket_frame" && record.direction === direction)
     .map((record) => String(record.text));
+}
+
+function sseData(text: string): Array<Record<string, unknown>> {
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith("data: "))
+    .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
 }

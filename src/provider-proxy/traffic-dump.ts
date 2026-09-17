@@ -41,6 +41,11 @@ const credentialHeaderNames = new Set([
 export interface ModelTrafficDumpOptions {
   /** 转储目录，通常为 Gateway 数据目录下的 traffic 目录。 */
   directory: string;
+  /**
+   * 精简模式下 `input` 保留的末尾条目数；`0` 表示按原样转储完整报文。
+   * 大于 `0` 时同时折叠响应回显的 `instructions` 与 `tools`。
+   */
+  inputItems?: number;
   /** 文件名前缀，用于区分主 Provider 与隔离 Provider。 */
   label: string;
   onError: (error: Error) => void;
@@ -67,6 +72,7 @@ export interface ModelTrafficWebSocketExchangeInput {
  */
 export class ModelTrafficDump {
   private readonly directory: string;
+  private readonly inputItems: number;
   private readonly label: string;
   private readonly onError: (error: Error) => void;
   private readonly streams = new Set<WriteStream>();
@@ -81,6 +87,7 @@ export class ModelTrafficDump {
 
   constructor(options: ModelTrafficDumpOptions) {
     this.directory = options.directory;
+    this.inputItems = options.inputItems ?? 0;
     this.label = options.label.replace(/[^A-Za-z0-9._-]+/gu, "_");
     this.onError = options.onError;
   }
@@ -132,6 +139,7 @@ export class ModelTrafficDump {
         ...(input.accountId === undefined ? {} : { account: input.accountId }),
       },
       (record) => this.write(record),
+      this.inputItems,
     );
   }
 
@@ -242,6 +250,7 @@ export class ModelTrafficExchange {
       account?: string;
     },
     private readonly sink: (record: Record<string, unknown>) => void,
+    private readonly inputItems: number,
   ) {
     this.requestBody = new BodyAccumulator(
       (part, chunk) => this.writeBody("request_body", part, chunk),
@@ -294,7 +303,7 @@ export class ModelTrafficExchange {
   ): void {
     const buffer = rawDataBuffer(data);
     if (!isBinary) {
-      const parts = splitText(buffer.toString("utf8"));
+      const parts = splitText(compactText(buffer.toString("utf8"), this.inputItems));
       parts.forEach((text, index) => {
         this.write({
           kind: "websocket_frame",
@@ -351,7 +360,8 @@ export class ModelTrafficExchange {
   }
 
   private writeBody(kind: string, part: number, chunk: Buffer): void {
-    const text = decodeUtf8(chunk);
+    const decoded = decodeUtf8(chunk);
+    const text = decoded === null ? null : compactText(decoded, this.inputItems);
     this.write({
       kind,
       part,
@@ -411,6 +421,80 @@ function decodeUtf8(chunk: Buffer): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 精简模式：`input` 只保留末尾若干条，并折叠响应回显的 `instructions` 与 `tools`。
+ * 完整 JSON 直接折叠；SSE 正文按 `data:` 行逐条折叠，不改变事件分帧。
+ */
+function compactText(text: string, inputItems: number): string {
+  if (inputItems <= 0) return text;
+  const whole = compactJson(text, inputItems);
+  if (whole !== undefined) return whole;
+  return text.split("\n").map((line) => {
+    if (!line.startsWith("data: ")) return line;
+    const data = compactJson(line.slice("data: ".length), inputItems);
+    return data === undefined ? line : `data: ${data}`;
+  }).join("\n");
+}
+
+function compactJson(text: string, inputItems: number): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  return JSON.stringify(compactValue(parsed, inputItems, false));
+}
+
+function compactValue(value: unknown, inputItems: number, inResponse: boolean): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => compactValue(item, inputItems, inResponse));
+  }
+  if (typeof value !== "object" || value === null) return value;
+  const compacted: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "input" && Array.isArray(item)) {
+      compacted[key] = compactInput(item, inputItems);
+    } else if (inResponse && foldableEcho(key, item)) {
+      compacted[key] = omittedMarker(byteLengthOf(item));
+    } else {
+      compacted[key] = compactValue(item, inputItems, inResponse || key === "response");
+    }
+  }
+  return compacted;
+}
+
+/** 只折叠有内容的响应回显字段，空字符串与空数组原样保留。 */
+function foldableEcho(key: string, value: unknown): boolean {
+  if (key === "instructions") return typeof value === "string" && value.length > 0;
+  if (key === "tools") return Array.isArray(value) && value.length > 0;
+  return false;
+}
+
+function compactInput(items: unknown[], inputItems: number): unknown[] {
+  if (items.length <= inputItems) return items;
+  const omitted = items.slice(0, items.length - inputItems);
+  return [
+    {
+      omitted_bytes: byteLengthOf(omitted),
+      omitted_items: omitted.length,
+      type: "omitted",
+    },
+    ...items.slice(items.length - inputItems),
+  ];
+}
+
+function omittedMarker(bytes: number): string {
+  return `<omitted ${bytes} 字节>`;
+}
+
+function byteLengthOf(value: unknown): number {
+  return typeof value === "string"
+    ? Buffer.byteLength(value)
+    : Buffer.byteLength(JSON.stringify(value) ?? "");
 }
 
 function rawDataBuffer(data: RawData): Buffer {

@@ -175,6 +175,7 @@ const codexSchema = z.strictObject({
 
 const debugSchema = z.strictObject({
   model_traffic_dump: z.boolean().default(false),
+  model_traffic_input_items: z.number().int().min(0).default(0),
 });
 
 const gatewayDocumentSchema = z.strictObject({

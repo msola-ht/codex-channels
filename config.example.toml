@@ -74,6 +74,10 @@ plugin_api = false
 # 转储包含完整 prompt、工具输出、代码和 SSE 事件，但不包含 Authorization、Cookie 等凭据；
 # 单文件达到上限后轮转，目录只保留最近的转储文件；写入失败只停止转储，不影响模型请求。
 model_traffic_dump = false
+# 转储体积控制：大于 0 时只保留请求 input 的末尾若干条完整条目（更早的折叠为条数与字节数
+# 摘要），同时把响应里重复回显的 instructions 与 tools 折叠为长度占位；发送的请求头、请求体
+# 其它字段和响应正文保持完整。0 表示按原样转储完整报文，默认关闭精简。
+model_traffic_input_items = 0
 
 [scheduled_tasks]
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。

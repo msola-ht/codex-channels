@@ -87,6 +87,8 @@ export interface ProviderProxyOptions {
    */
   trafficDump?: {
     directory: string;
+    /** 精简模式保留的 `input` 末尾条目数；缺省或 `0` 时转储完整报文。 */
+    inputItems?: number;
     label: string;
   };
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
@@ -174,6 +176,9 @@ export class ProviderProxy {
       : new ModelTrafficDump({
           directory: options.trafficDump.directory,
           label: options.trafficDump.label,
+          ...(options.trafficDump.inputItems === undefined
+            ? {}
+            : { inputItems: options.trafficDump.inputItems }),
           onError: (error) => {
             this.onError?.(error);
           },
