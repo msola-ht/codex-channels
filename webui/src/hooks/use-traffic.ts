@@ -1,9 +1,13 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchTrafficExchange, fetchTrafficExchanges } from "@/lib/api"
 
-export function useTrafficExchanges(query: { label?: string; limit?: number; offset?: number }) {
+export function useTrafficExchanges(
+  query: { label?: string; limit?: number; offset?: number } | null,
+) {
   return useApi(
-    (signal) => fetchTrafficExchanges(query, signal),
+    (signal) => query === null
+      ? Promise.resolve(null)
+      : fetchTrafficExchanges(query, signal),
     [JSON.stringify(query)],
   )
 }

@@ -13,14 +13,10 @@ import type { TrafficExchangeSummary } from "@/lib/types"
 
 export function TrafficTable({
   exchanges,
-  selectedId,
-  detailAnchorId,
-  onSelect,
+  onOpen,
 }: {
   exchanges: TrafficExchangeSummary[]
-  selectedId: number | null
-  detailAnchorId: string
-  onSelect: (id: number) => void
+  onOpen: (id: number) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -41,9 +37,8 @@ export function TrafficTable({
           {exchanges.map((exchange) => (
             <TableRow
               key={exchange.id}
-              data-state={exchange.id === selectedId ? "selected" : undefined}
               className="cursor-pointer"
-              onClick={() => onSelect(exchange.id)}
+              onClick={() => onOpen(exchange.id)}
             >
               <TableCell className="tabular-nums">
                 <Button
@@ -51,11 +46,10 @@ export function TrafficTable({
                   variant="link"
                   size="sm"
                   className="h-auto px-0 font-mono"
-                  aria-controls={detailAnchorId}
-                  aria-expanded={exchange.id === selectedId}
+                  aria-label={`查看 exchange #${exchange.id} 明细`}
                   onClick={(event) => {
                     event.stopPropagation()
-                    onSelect(exchange.id)
+                    onOpen(exchange.id)
                   }}
                 >#{exchange.id}</Button>
               </TableCell>

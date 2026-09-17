@@ -28,19 +28,42 @@ import { Spinner } from "@/components/ui/spinner"
 import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
 import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
 
-const detailAnchorId = "traffic-exchange-detail"
-
 export function TrafficPage() {
   const labelSelectId = useId()
   const pageSizeSelectId = useId()
   const { query, update } = useTrafficQuery()
-  const list = useTrafficExchanges(query)
+  const list = useTrafficExchanges(query.id === null ? query : null)
   const detail = useTrafficExchange(
     query.id === null
       ? null
       : { id: query.id, ...(query.label === undefined ? {} : { label: query.label }) },
   )
   const pageNumber = Math.floor(query.offset / query.limit) + 1
+
+  if (query.id !== null) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="shrink-0">
+            <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
+            <p className="text-sm text-muted-foreground">
+              转储包含完整 prompt、代码与工具输出，请勿分享；单段正文超过 4 MiB 时只显示前 4 MiB
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => update({ id: null })}
+          >返回列表</Button>
+        </div>
+        <ErrorBanner error={detail.error} />
+        {detail.error !== null ? null : detail.loading || detail.data === null
+          ? <PageSkeleton rows={6} />
+          : <TrafficDetail detail={detail.data.exchange} />}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -119,9 +142,7 @@ export function TrafficPage() {
           <CardContent>
             <TrafficTable
               exchanges={list.data.exchanges}
-              selectedId={query.id}
-              detailAnchorId={detailAnchorId}
-              onSelect={(id) => update({ id: id === query.id ? null : id })}
+              onOpen={(id) => update({ id })}
             />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2">
@@ -171,23 +192,6 @@ export function TrafficPage() {
                 </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {query.id === null ? null : (
-        <Card id={detailAnchorId}>
-          <CardHeader>
-            <CardTitle>明细</CardTitle>
-            <CardDescription>
-              转储包含完整 prompt、代码与工具输出，请勿分享；单段正文超过 4 MiB 时只显示前 4 MiB
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ErrorBanner error={detail.error} />
-            {detail.error !== null ? null : detail.loading || detail.data === null
-              ? <PageSkeleton rows={6} />
-              : <TrafficDetail detail={detail.data.exchange} />}
           </CardContent>
         </Card>
       )}
