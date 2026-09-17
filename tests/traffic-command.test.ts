@@ -214,6 +214,28 @@ describe("traffic command rendering", () => {
     expect(result.stderr).toContain("没有找到转储文件");
   });
 
+  it("rejects unknown words instead of treating them as files", () => {
+    const directory = trafficDirectory();
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      httpExchange(1),
+    );
+
+    const result = runTraffic(["--dir", directory, "list"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("转储文件不存在：");
+    expect(result.stderr).toContain("--list");
+    expect(result.stderr).not.toContain("at readFileSync");
+
+    const directoryAsFile = runTraffic([directory]);
+    expect(directoryAsFile.status).toBe(1);
+    expect(directoryAsFile.stderr).toContain("转储文件不存在：");
+    expect(directoryAsFile.stderr).not.toContain("EISDIR");
+  });
+
   it("follows new records until interrupted", async () => {
     const directory = trafficDirectory();
     const path = writeDumpFile(

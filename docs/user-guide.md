@@ -389,13 +389,16 @@ model_traffic_input_items = 3
 
 大于 `0` 时只保留请求 `input` 数组末尾这么多条完整条目，更早的条目合并成一条
 `{"type": "omitted", "omitted_items": …, "omitted_bytes": …}` 摘要；响应里重复回显的
-`response.instructions` 与 `response.tools` 折叠为 `<omitted N 字节>` 占位。请求头、请求体其它
-字段、`model`、响应正文和事件顺序保持完整，`0` 表示按原样转储全部字段（默认）。使用
-`codexc traffic` 查看时不需要额外参数，折叠结果会直接显示在对应位置。
+`response.instructions` 与 `response.tools` 折叠为 `<omitted N 字节>` 占位；逐条流式增量事件
+（`response.output_text.delta`、`response.reasoning_text.delta`、
+`response.function_call_arguments.delta` 等以 `.delta` 结尾的事件）不再写入转储，它们的完整文本
+由同一条目的 `*.done` 事件和 `response.completed.response.output` 承载。请求头、请求体其它字段、
+`model`、保留的响应事件和事件顺序保持完整，`0` 表示按原样转储全部字段（默认）。使用
+`codexc traffic` 查看时不需要额外参数，折叠与丢弃结果会直接显示在对应位置。
 
 WebSocket 提供方（OpenAI 官方）同样生效：客户端 `response.create` 帧的 `input` 按同样规则保留
 末尾条目，上游 `response.created`、`response.in_progress`、`response.completed` 里重复的工具与
-指令回显按同样规则折叠。
+指令回显按同样规则折叠，`.delta` 帧直接跳过。
 
 ## 9. 开发与验证
 

@@ -249,7 +249,10 @@ describe("ProviderProxy traffic dump", () => {
         tools: [{ name: "shell", type: "function" }],
       },
       type: "response.created",
-    }) + sse("response.output_text.delta", { delta: "OK" });
+    })
+      + sse("response.output_text.delta", { delta: "O" })
+      + sse("response.output_text.delta", { delta: "K" })
+      + sse("response.output_text.done", { text: "OK" });
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
@@ -306,7 +309,9 @@ describe("ProviderProxy traffic dump", () => {
       instructions: `<omitted ${Buffer.byteLength("x".repeat(300))} 字节>`,
       tools: `<omitted ${Buffer.byteLength(JSON.stringify(tools))} 字节>`,
     });
-    expect(events[1]).toEqual({ delta: "OK" });
+    expect(events[1]).toEqual({ text: "OK" });
+    expect(events).toHaveLength(2);
+    expect(bodyText(records, "response_body")).not.toContain("response.output_text.delta");
   });
 
   it("compacts websocket client frames and echoed upstream fields", async () => {
@@ -321,6 +326,8 @@ describe("ProviderProxy traffic dump", () => {
           },
           type: "response.created",
         }));
+        socket.send(JSON.stringify({ delta: "O", type: "response.output_text.delta" }));
+        socket.send(JSON.stringify({ text: "OK", type: "response.output_text.done" }));
         socket.send(JSON.stringify({ type: "response.completed" }));
       });
     });
@@ -385,7 +392,10 @@ describe("ProviderProxy traffic dump", () => {
       instructions: `<omitted ${Buffer.byteLength("y".repeat(120))} 字节>`,
       tools: `<omitted ${Buffer.byteLength(JSON.stringify([{ name: "shell" }]))} 字节>`,
     });
-    expect(upstreamEvents[1]).toEqual({ type: "response.completed" });
+    expect(upstreamEvents.slice(1)).toEqual([
+      { text: "OK", type: "response.output_text.done" },
+      { type: "response.completed" },
+    ]);
   });
 });
 

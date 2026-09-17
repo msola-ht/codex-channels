@@ -224,6 +224,18 @@ function renderFiles(paths, options) {
     process.exitCode = 1;
     return;
   }
+  const unreadable = paths.filter((path) => {
+    const stats = statSync(path, { throwIfNoEntry: false });
+    return stats === undefined || !stats.isFile();
+  });
+  if (unreadable.length > 0) {
+    console.error(
+      `转储文件不存在：${unreadable.join("、")}\n`
+      + "列出 exchange 摘要请使用 --list，查看全部选项请使用 -h。",
+    );
+    process.exitCode = 1;
+    return;
+  }
   const records = paths.flatMap((path) => readFileSync(path, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)

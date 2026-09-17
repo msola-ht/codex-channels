@@ -264,6 +264,11 @@ export class ModelTrafficExchange {
     this.sink({ ...this.prefix, ...record });
   }
 
+  /** 精简模式丢弃流式增量：逐条增量只重复框架字段，完整文本由 `*.done` 事件承载。 */
+  private dropsStreamDelta(text: string): boolean {
+    return this.inputItems > 0 && isStreamDelta(parseJsonValue(text));
+  }
+
   requestChunk(chunk: Buffer): void {
     this.requestBytes += chunk.length;
     this.requestBody.append(chunk);
@@ -303,7 +308,9 @@ export class ModelTrafficExchange {
   ): void {
     const buffer = rawDataBuffer(data);
     if (!isBinary) {
-      const parts = splitText(compactText(buffer.toString("utf8"), this.inputItems));
+      const text = buffer.toString("utf8");
+      if (this.dropsStreamDelta(text)) return;
+      const parts = splitText(compactText(text, this.inputItems));
       parts.forEach((text, index) => {
         this.write({
           kind: "websocket_frame",
@@ -424,29 +431,69 @@ function decodeUtf8(chunk: Buffer): string | null {
 }
 
 /**
- * 精简模式：`input` 只保留末尾若干条，并折叠响应回显的 `instructions` 与 `tools`。
- * 完整 JSON 直接折叠；SSE 正文按 `data:` 行逐条折叠，不改变事件分帧。
+ * 精简模式：丢弃流式增量事件，`input` 只保留末尾若干条，并折叠响应回显的 `instructions`
+ * 与 `tools`。完整 JSON 直接折叠；SSE 正文按事件折叠，但不改变保留事件的分帧。
  */
 function compactText(text: string, inputItems: number): string {
   if (inputItems <= 0) return text;
   const whole = compactJson(text, inputItems);
   if (whole !== undefined) return whole;
-  return text.split("\n").map((line) => {
-    if (!line.startsWith("data: ")) return line;
-    const data = compactJson(line.slice("data: ".length), inputItems);
-    return data === undefined ? line : `data: ${data}`;
-  }).join("\n");
+  return compactSseText(text, inputItems);
+}
+
+/** 末尾不完整的 SSE 分块原样保留：它可能只是跨分片事件的半截，无法判断类型。 */
+function compactSseText(text: string, inputItems: number): string {
+  const blocks = text.split("\n\n");
+  const tail = blocks.pop() ?? "";
+  const kept: string[] = [];
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const index = lines.findIndex((line) => line.startsWith("data: "));
+    const eventLine = lines.find((line) => line.startsWith("event: "));
+    if (index === -1) {
+      kept.push(block);
+      continue;
+    }
+    const data = lines[index]!.slice("data: ".length);
+    const parsed = parseJsonValue(data);
+    if (isStreamDelta(parsed) || isStreamDeltaType(eventNameOf(eventLine))) continue;
+    const compacted = compactJsonValue(parsed, inputItems);
+    if (compacted !== undefined) lines[index] = `data: ${compacted}`;
+    kept.push(lines.join("\n"));
+  }
+  return [...kept, tail].join("\n\n");
 }
 
 function compactJson(text: string, inputItems: number): string | undefined {
-  let parsed: unknown;
+  return compactJsonValue(parseJsonValue(text), inputItems);
+}
+
+function compactJsonValue(parsed: unknown, inputItems: number): string | undefined {
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  return JSON.stringify(compactValue(parsed, inputItems, false));
+}
+
+function parseJsonValue(text: string): unknown {
   try {
-    parsed = JSON.parse(text);
+    return JSON.parse(text);
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  return JSON.stringify(compactValue(parsed, inputItems, false));
+}
+
+/** 流式增量事件：逐条只重复框架字段，完整文本由同一条目的 `*.done` 事件承载。 */
+function isStreamDelta(parsed: unknown): boolean {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  return isStreamDeltaType((parsed as { type?: unknown }).type);
+}
+
+/** SSE 类型既可能写在 `event:` 行，也可能写在 data 的 `type` 字段，两者都要识别。 */
+function isStreamDeltaType(type: unknown): boolean {
+  return typeof type === "string" && type.endsWith(".delta");
+}
+
+function eventNameOf(eventLine: string | undefined): string | undefined {
+  return eventLine === undefined ? undefined : eventLine.slice("event: ".length).trim();
 }
 
 function compactValue(value: unknown, inputItems: number, inResponse: boolean): unknown {
