@@ -13,6 +13,14 @@ export function listDumpFiles(directory) {
   return dumpFileEntries(directory).map((entry) => entry.path);
 }
 
+export function dumpCatalog(directory) {
+  const entries = dumpFileEntries(directory);
+  return {
+    files: entries.map((entry) => entry.path),
+    labels: dumpLabelsOf(entries),
+  };
+}
+
 function dumpFileEntries(directory) {
   let names;
   try {
@@ -38,10 +46,9 @@ export function labelOf(path) {
   return dumpFileIdentity(path).label;
 }
 
-/** 标签列表按最新文件时间倒序排列，供选择要查看的 Provider。 */
-export function dumpLabels(directory) {
+function dumpLabelsOf(entries) {
   const byLabel = new Map();
-  for (const { mtimeMs, path } of dumpFileEntries(directory)) {
+  for (const { mtimeMs, path } of entries) {
     const label = labelOf(path);
     const entry = byLabel.get(label) ?? { files: 0, label, latestAtMs: 0 };
     entry.files += 1;
@@ -51,15 +58,14 @@ export function dumpLabels(directory) {
   return [...byLabel.values()].sort((left, right) => right.latestAtMs - left.latestAtMs);
 }
 
-/** 同一标签最新 writer session 的全部保留文件，完整覆盖跨多次轮转的 exchange。 */
-export function filesOfLabel(directory, label, requestedSession) {
-  const files = listDumpFiles(directory).filter((path) => labelOf(path) === label);
-  const newest = files.at(-1);
+export function selectFilesOfLabel(files, label, requestedSession) {
+  const matchingFiles = files.filter((path) => labelOf(path) === label);
+  const newest = matchingFiles.at(-1);
   if (newest === undefined) return [];
   const writerSession = requestedSession ?? writerSessionOf(newest);
   return writerSession === undefined
     ? [newest]
-    : files
+    : matchingFiles
       .filter((path) => writerSessionOf(path) === writerSession)
       .sort((left, right) => fileIndexOf(left) - fileIndexOf(right));
 }
@@ -153,7 +159,10 @@ export function parseTurnMetadata(value) {
 /** 请求侧模型名：HTTP 请求体与 WebSocket 客户端帧都放在顶层 `model`。 */
 export function requestModelOfText(text) {
   const model = parseJson(text)?.model;
-  return typeof model === "string" ? model : undefined;
+  if (typeof model === "string") return model;
+  const scanner = createTopLevelStringFieldScanner("model");
+  scanTopLevelStringField(scanner, text);
+  return scanner.value;
 }
 
 /** 响应侧模型名：SSE 事件与 WebSocket 上游帧都放在 `response.model` 或顶层 `model`。 */
@@ -317,7 +326,8 @@ export function applyRecordToSummary(summary, record) {
     }
     case "request_body":
       if (summary.requestModel === undefined) {
-        const model = requestModelOfText(record.text ?? "");
+        scanTopLevelStringField(summary.requestModelScanner, record.text ?? "");
+        const model = summary.requestModelScanner.value;
         if (model !== undefined) summary.requestModel = model;
       }
       break;
@@ -341,7 +351,7 @@ export function applyRecordToSummary(summary, record) {
 }
 
 export function emptySummary(record) {
-  return {
+  const summary = {
     account: record.account,
     hasError: false,
     id: record.exchange,
@@ -357,6 +367,11 @@ export function emptySummary(record) {
     turnId: undefined,
     url: undefined,
   };
+  Object.defineProperty(summary, "requestModelScanner", {
+    enumerable: false,
+    value: createTopLevelStringFieldScanner("model"),
+  });
+  return summary;
 }
 
 /** 列表数据：按行流式汇总后排序分页，响应里不包含任何正文。 */
@@ -414,21 +429,67 @@ export async function readDumpExchange(files, id) {
   return groupExchanges(selected)[0];
 }
 
-/** 详情：只保留目标 exchange 的记录，再按组提取结构化字段。 */
+/** WebUI 详情只累计正文展示上限；其它 exchange 和目标正文的超限部分都随读取释放。 */
 export async function describeDumpExchange(files, id, { maxSectionBytes = 262_144 } = {}) {
-  const exchange = await readDumpExchange(files, id);
-  return exchange === null ? null : exchangeDetail(exchange, maxSectionBytes);
+  const selected = [];
+  const requestBodyState = createBoundedTextState();
+  const responseBodyState = createBoundedTextState();
+  const requestModelScanner = createTopLevelStringFieldScanner("model");
+  let identity;
+  await forEachDumpRecord(files, (record) => {
+    if (record.exchange !== id) return;
+    identity ??= record;
+    if (record.kind === "request_body") {
+      const text = bodyRecordText(record);
+      appendBoundedText(requestBodyState, text, maxSectionBytes);
+      scanTopLevelStringField(requestModelScanner, text);
+      return;
+    }
+    if (record.kind === "response_body") {
+      appendBoundedText(responseBodyState, bodyRecordText(record), maxSectionBytes);
+      return;
+    }
+    selected.push(record);
+  });
+  if (identity === undefined) return null;
+  const requestBody = finishBoundedText(requestBodyState);
+  const responseBody = finishBoundedText(responseBodyState);
+  if (requestBodyState.seen) {
+    selected.push({
+      account: identity.account,
+      exchange: id,
+      kind: "request_body",
+      part: 1,
+      startedAtMs: identity.startedAtMs,
+      text: requestBody.text,
+    });
+  }
+  if (responseBodyState.seen) {
+    selected.push({
+      account: identity.account,
+      exchange: id,
+      kind: "response_body",
+      part: 1,
+      startedAtMs: identity.startedAtMs,
+      text: responseBody.text,
+    });
+  }
+  return exchangeDetail(groupExchanges(selected)[0], maxSectionBytes, {
+    requestBody,
+    requestModel: requestModelScanner.value,
+    responseBody,
+  });
 }
 
-export function exchangeDetail(exchange, maxSectionBytes = 262_144) {
+export function exchangeDetail(exchange, maxSectionBytes = 262_144, bodyOverrides) {
   const head = findRecord(exchange, "request_head");
   const handshake = findRecord(exchange, "websocket_handshake");
   const responseHead = findRecord(exchange, "response_head");
   const metadata = requestMetadata(exchange);
-  const requestBodyText = joinBodies(exchange, "request_body");
-  const responseBodyText = joinBodies(exchange, "response_body");
-  const requestBody = boundedText(requestBodyText, maxSectionBytes);
-  const responseBody = boundedText(responseBodyText, maxSectionBytes);
+  const requestBody = bodyOverrides?.requestBody
+    ?? boundedText(joinBodies(exchange, "request_body"), maxSectionBytes);
+  const responseBody = bodyOverrides?.responseBody
+    ?? boundedText(joinBodies(exchange, "response_body"), maxSectionBytes);
   return {
     account: exchange.account,
     closes: recordsOfKind(exchange, "websocket_close").map((record) => ({
@@ -462,7 +523,7 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144) {
           path: head.path,
         },
     requestKind: metadata.requestKind,
-    requestModel: requestModelOf(exchange),
+    requestModel: bodyOverrides?.requestModel ?? requestModelOf(exchange),
     response: responseHead === undefined
       ? null
       : {
@@ -506,8 +567,6 @@ function transportOf(exchange) {
 
 function exchangeComplete(exchange, record) {
   if (record.kind === "response_end") return true;
-  const transport = transportOf(exchange);
-  if (record.kind === "error") return transport === "http";
   if (record.kind !== "websocket_close") return false;
   const peers = new Set(recordsOfKind(exchange, "websocket_close").map((close) => close.peer));
   return peers.has("client") && peers.has("upstream");
@@ -520,4 +579,164 @@ function boundedText(text, maxBytes) {
     text: `${Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8")}\n…（共 ${bytes} 字节，已截断）`,
     truncated: true,
   };
+}
+
+function createBoundedTextState() {
+  return { buffers: [], keptBytes: 0, seen: false, totalBytes: 0 };
+}
+
+function appendBoundedText(state, text, maxBytes) {
+  const buffer = Buffer.from(text, "utf8");
+  state.seen = true;
+  state.totalBytes += buffer.length;
+  const remaining = Math.max(0, maxBytes - state.keptBytes);
+  if (remaining === 0) return;
+  const kept = buffer.subarray(0, remaining);
+  state.buffers.push(kept);
+  state.keptBytes += kept.length;
+}
+
+function finishBoundedText(state) {
+  const text = Buffer.concat(state.buffers, state.keptBytes).toString("utf8");
+  if (state.totalBytes <= state.keptBytes) return { text, truncated: false };
+  return {
+    text: `${text}\n…（共 ${state.totalBytes} 字节，已截断）`,
+    truncated: true,
+  };
+}
+
+function bodyRecordText(record) {
+  return typeof record.text === "string"
+    ? record.text
+    : `<${record.encoding ?? "binary"} ${record.bytes ?? 0} 字节>`;
+}
+
+const maximumJsonFieldCharacters = 4_096;
+
+/** 只保存键名和目标字符串，跳过其它值；可以跨 JSONL 正文分片持续扫描。 */
+function createTopLevelStringFieldScanner(field) {
+  return {
+    capture: "",
+    captureOverflow: false,
+    field,
+    nestedDepth: 0,
+    pendingKey: undefined,
+    phase: "start",
+    stringEscaped: false,
+    stringPurpose: undefined,
+    value: undefined,
+  };
+}
+
+function scanTopLevelStringField(scanner, text) {
+  if (scanner.phase === "done") return;
+  for (const character of text) {
+    if (scanner.stringPurpose !== undefined) {
+      scanJsonStringCharacter(scanner, character);
+      continue;
+    }
+    if (scanner.phase === "skipNested") {
+      if (character === '"') beginJsonString(scanner, "nested");
+      else if (character === "{" || character === "[") scanner.nestedDepth += 1;
+      else if (character === "}" || character === "]") {
+        scanner.nestedDepth -= 1;
+        if (scanner.nestedDepth === 0) scanner.phase = "afterValue";
+      }
+      continue;
+    }
+    if (scanner.phase === "skipPrimitive") {
+      if (character === ",") scanner.phase = "key";
+      else if (character === "}") scanner.phase = "done";
+      continue;
+    }
+    if (/\s/u.test(character)) continue;
+    switch (scanner.phase) {
+      case "start":
+        scanner.phase = character === "{" ? "key" : "done";
+        break;
+      case "key":
+        if (character === '"') beginJsonString(scanner, "key");
+        else scanner.phase = "done";
+        break;
+      case "colon":
+        scanner.phase = character === ":" ? "value" : "done";
+        break;
+      case "value":
+        if (scanner.pendingKey === scanner.field && character === '"') {
+          beginJsonString(scanner, "target");
+        } else {
+          beginSkippedJsonValue(scanner, character);
+        }
+        break;
+      case "afterValue":
+        if (character === ",") scanner.phase = "key";
+        else if (character === "}") scanner.phase = "done";
+        else scanner.phase = "done";
+        break;
+      default:
+        scanner.phase = "done";
+        break;
+    }
+  }
+}
+
+function beginSkippedJsonValue(scanner, character) {
+  if (character === '"') {
+    beginJsonString(scanner, "skipValue");
+  } else if (character === "{" || character === "[") {
+    scanner.nestedDepth = 1;
+    scanner.phase = "skipNested";
+  } else {
+    scanner.phase = "skipPrimitive";
+  }
+}
+
+function beginJsonString(scanner, purpose) {
+  scanner.capture = purpose === "key" || purpose === "target" ? '"' : "";
+  scanner.captureOverflow = false;
+  scanner.stringEscaped = false;
+  scanner.stringPurpose = purpose;
+}
+
+function scanJsonStringCharacter(scanner, character) {
+  const purpose = scanner.stringPurpose;
+  if ((purpose === "key" || purpose === "target") && !scanner.captureOverflow) {
+    scanner.capture += character;
+    if (scanner.capture.length > maximumJsonFieldCharacters) {
+      scanner.capture = "";
+      scanner.captureOverflow = true;
+    }
+  }
+  if (scanner.stringEscaped) {
+    scanner.stringEscaped = false;
+    return;
+  }
+  if (character === "\\") {
+    scanner.stringEscaped = true;
+    return;
+  }
+  if (character !== '"') return;
+  scanner.stringPurpose = undefined;
+  if (purpose === "nested") return;
+  if (purpose === "skipValue") {
+    scanner.phase = "afterValue";
+    return;
+  }
+  let value;
+  if (!scanner.captureOverflow) {
+    try {
+      value = JSON.parse(scanner.capture);
+    } catch {
+      scanner.phase = "done";
+      return;
+    }
+  }
+  scanner.capture = "";
+  if (purpose === "key") {
+    scanner.pendingKey = value;
+    scanner.phase = "colon";
+    return;
+  }
+  if (typeof value === "string") scanner.value = value;
+  scanner.phase = "done";
 }

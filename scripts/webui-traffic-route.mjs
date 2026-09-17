@@ -13,8 +13,8 @@ import {
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   describeDumpExchange,
-  dumpLabels,
-  filesOfLabel,
+  dumpCatalog,
+  selectFilesOfLabel,
   summarizeDumpFiles,
   writerSessionOf,
 } from "./traffic-dump-reader.mjs";
@@ -32,7 +32,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   }
   const located = locateOptionalUserConfig(environment);
   const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
-  const labels = dumpLabels(directory);
+  const catalog = dumpCatalog(directory);
+  const labels = catalog.labels;
   if (labels.length === 0) {
     throw new ApiError(
       503,
@@ -44,7 +45,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   if (apiPath === "/traffic") {
     assertParameters(url, ["label", "limit", "offset", "session"]);
     const label = readLabel(url, labels);
-    const { files, session } = readSessionFiles(url, directory, label);
+    const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
       limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
       offset: readInteger(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER),
@@ -64,7 +65,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   assertParameters(url, ["id", "label", "session"]);
   const label = readLabel(url, labels);
   const id = readInteger(url, "id", undefined, 1, Number.MAX_SAFE_INTEGER);
-  const { files, session } = readSessionFiles(url, directory, label);
+  const { files, session } = readSessionFiles(url, catalog.files, label);
   const exchange = await describeDumpExchange(files, id, {
     maxSectionBytes: maximumSectionBytes,
   });
@@ -118,13 +119,13 @@ function readLabel(url, labels) {
   return label;
 }
 
-function readSessionFiles(url, directory, label) {
+function readSessionFiles(url, catalogFiles, label) {
   const values = url.searchParams.getAll("session");
   if (values.length > 1) {
     throw new ApiError(400, "unsupported_parameter", "session 只能出现一次");
   }
   const requested = values[0];
-  const files = filesOfLabel(directory, label, requested);
+  const files = selectFilesOfLabel(catalogFiles, label, requested);
   if (files.length === 0) {
     throw new ApiError(
       404,

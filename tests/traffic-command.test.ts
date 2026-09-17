@@ -170,6 +170,28 @@ describe("traffic command rendering", () => {
     expect(result.stdout).toContain("WebSocket wss://chatgpt.com/backend-api/codex/responses");
   });
 
+  it("keeps consecutive HTTP interruption records in one streamed exchange", () => {
+    const directory = trafficDirectory();
+    const prefix = { exchange: 1, startedAtMs: 1_700_000_000_000 };
+    writeDumpFile(
+      directory,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      10,
+      [
+        { ...prefix, headers: {}, kind: "request_head", method: "POST", path: "/responses" },
+        { ...prefix, kind: "error", message: "上游中断", scope: "upstream_response" },
+        { ...prefix, kind: "error", message: "客户端关闭", scope: "client_disconnected" },
+      ],
+    );
+
+    const result = runTraffic(["--all", "--dir", directory]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.match(/\n#1 /gu)).toHaveLength(1);
+    expect(result.stdout).toContain("中断：upstream_response 上游中断");
+    expect(result.stdout).toContain("中断：client_disconnected 客户端关闭");
+  });
+
   it("renders the full HTTP request and response of one exchange", () => {
     const directory = trafficDirectory();
     writeDumpFile(

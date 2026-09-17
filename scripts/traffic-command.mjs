@@ -13,7 +13,6 @@ import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
 import {
   findRecord,
-  filesOfLabel,
   forEachDumpExchange,
   formatTime,
   frameText,
@@ -26,6 +25,7 @@ import {
   requestMetadata,
   requestModelOf,
   responseModelsOf,
+  selectFilesOfLabel,
   shortId,
   summarizeDumpFiles,
   websocketFrames,
@@ -58,7 +58,7 @@ function newestDumpFiles(target) {
   const newest = files.at(-1);
   if (newest === undefined) return [];
   const label = labelOf(newest);
-  return filesOfLabel(target, label);
+  return selectFilesOfLabel(files, label);
 }
 
 async function followTraffic() {

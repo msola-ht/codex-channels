@@ -123,6 +123,51 @@ describe("webui traffic API", () => {
       .toBeLessThanOrEqual(4 * 1_048_576);
   });
 
+  it("bounds split request bodies while preserving their top-level model", async () => {
+    const fixture = createFixture();
+    const maximumBodyBytes = 4 * 1_048_576;
+    const requestBody = JSON.stringify({
+      input: {
+        model: "nested-input-model",
+        text: "x".repeat(maximumBodyBytes + 1_048_576),
+      },
+      model: "gpt-large-request",
+    });
+    const records = httpExchange(9).flatMap((record) => {
+      if (record.kind === "request_end") {
+        return [{ ...record, bytes: Buffer.byteLength(requestBody) }];
+      }
+      if (record.kind !== "request_body") return [record];
+      const parts = [];
+      for (let offset = 0; offset < requestBody.length; offset += 1_048_576) {
+        parts.push({
+          ...record,
+          part: parts.length + 1,
+          text: requestBody.slice(offset, offset + 1_048_576),
+        });
+      }
+      return parts;
+    });
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      records,
+    );
+    const server = await startServer(fixture.environment);
+
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=9`);
+
+    expect(list.body.exchanges[0]).toMatchObject({ requestModel: "gpt-large-request" });
+    expect(detail.body.exchange).toMatchObject({ requestModel: "gpt-large-request" });
+    expect(detail.body.exchange.request).toMatchObject({
+      bodyTruncated: true,
+      bytes: Buffer.byteLength(requestBody),
+    });
+    expect(Buffer.byteLength(String(detail.body.exchange.request?.body)))
+      .toBeLessThan(maximumBodyBytes + 100);
+  });
+
   it("parses CRLF-delimited SSE events independently", async () => {
     const fixture = createFixture();
     const responseBody = [
