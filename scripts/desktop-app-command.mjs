@@ -6,11 +6,6 @@ import { fileURLToPath } from "node:url";
 
 import WebSocket from "ws";
 
-import {
-  CodexAppServerClient,
-  createAppServerTransport,
-  JsonRpcClient,
-} from "../dist/codex-client/index.js";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { inspectAppServerSupervisorState } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
@@ -235,6 +230,11 @@ async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisor
 }
 
 async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
+  const {
+    CodexAppServerClient,
+    createAppServerTransport,
+    JsonRpcClient,
+  } = await import("../dist/codex-client/index.js");
   const transport = createAppServerTransport(
     { kind: "local-app-server", socketPath },
     { codexBinary, connectTimeoutMs: 3_000 },
