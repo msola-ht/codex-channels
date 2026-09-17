@@ -1,18 +1,12 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { acquireMacDesktopAppHostLease } from "../runtime/app-server-supervisor.mjs";
+import { proxyDesktopAppStdioToUnixSocket } from "../runtime/desktop-app-bridge.mjs";
 import { parseMacDesktopAppToolsEnabled } from "../runtime/desktop-app-host.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
-import {
-  childProcessIsRunning,
-  installProcessSignalHandlers,
-  terminateChildProcess,
-} from "../runtime/process-lifecycle.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 try {
@@ -51,37 +45,11 @@ async function runDesktopAppProxy() {
     appPath,
     toolsEnabled,
   });
-  let child;
-  let cleanupSignals = () => undefined;
   try {
-    const invocation = resolveExecutableInvocation(environment.CODEX_BINARY, [
-      "app-server",
-      "proxy",
-      "--sock",
-      appServer.primarySocketPath,
-    ], environment);
-    child = spawn(invocation.file, invocation.args, {
-      env: environment,
-      stdio: "inherit",
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    await proxyDesktopAppStdioToUnixSocket({
+      socketPath: appServer.primarySocketPath,
     });
-    cleanupSignals = installProcessSignalHandlers({
-      SIGINT: () => childProcessIsRunning(child) && child.kill("SIGINT"),
-      SIGTERM: () => childProcessIsRunning(child) && child.kill("SIGTERM"),
-      SIGHUP: () => childProcessIsRunning(child) && child.kill("SIGHUP"),
-    });
-    const result = await new Promise((resolveResult, rejectResult) => {
-      child.once("error", rejectResult);
-      child.once("exit", (code, signal) => resolveResult({ code, signal }));
-    });
-    if (result.signal) {
-      process.exitCode = 1;
-      return;
-    }
-    process.exitCode = result.code ?? 1;
   } finally {
-    cleanupSignals();
-    if (childProcessIsRunning(child)) await terminateChildProcess(child);
     await lease.close();
   }
 }

@@ -908,16 +908,20 @@ describe("TelegramOutbox", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "user-1",
-      text: "从 CLI 发来的输入\n第二行",
+      text: "从 Desktop 发来的输入\nDESKTOP\\_TO\\_CHANNEL\\_OK",
     });
-    outbox.handle(textCompleted("final", "同步回复"));
+    outbox.handle(textCompleted(
+      "final",
+      "DESKTOP\\_TO\\_CHANNEL\\_OK",
+      "final_answer",
+    ));
     outbox.handle(turnCompleted());
     await settle();
     await outbox.close();
 
     expect(api.sent).toEqual([
-      "<b>CLI 输入</b>\n\n<blockquote>从 CLI 发来的输入\n第二行</blockquote>",
-      "同步回复",
+      "<b>CLI 输入</b>\n\n<blockquote>从 Desktop 发来的输入\nDESKTOP_TO_CHANNEL_OK</blockquote>",
+      "DESKTOP_TO_CHANNEL_OK",
       turnCompletedPanel,
     ]);
     expect(api.sendOptions[0]).toEqual({

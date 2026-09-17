@@ -3,11 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 
-import { desktopAppBridgeTokenPath } from "../runtime/desktop-app-bridge.mjs";
+import {
+  desktopAppBridgeTokenPath,
+  proxyDesktopAppStdioToUnixSocket,
+} from "../runtime/desktop-app-bridge.mjs";
 import { inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
@@ -87,9 +92,13 @@ contractSuite("real Codex Desktop App bridge", () => {
     try {
       const tokenPath = desktopAppBridgeTokenPath(testRuntime);
       await waitFor(
-        () => existsSync(socketPath)
-          && existsSync(tokenPath)
-          && stdout.includes("Codex Desktop App 桥已启动"),
+        () => existsSync(socketPath) && (
+          process.platform === "darwin"
+          || (
+            existsSync(tokenPath)
+            && stdout.includes("Codex Desktop App 桥已启动")
+          )
+        ),
         15_000,
         () => service.exitCode === null && service.signalCode === null
           ? undefined
@@ -98,6 +107,40 @@ contractSuite("real Codex Desktop App bridge", () => {
               `${stdout}\n${stderr}`,
             )),
       );
+      if (process.platform !== "win32") {
+        const input = new PassThrough();
+        const output = new PassThrough();
+        const responses = createInterface({ input: output, crlfDelay: Infinity });
+        const initialized = new Promise<Record<string, unknown>>((resolvePromise) => {
+          responses.once("line", (line) => {
+            resolvePromise(JSON.parse(line) as Record<string, unknown>);
+          });
+        });
+        const proxy = proxyDesktopAppStdioToUnixSocket({ socketPath, input, output });
+        input.write(`${JSON.stringify({
+          method: "initialize",
+          id: 1,
+          params: {
+            clientInfo: {
+              name: "codex_connect_desktop_stdio_contract",
+              title: "Codex Desktop Stdio Contract",
+              version: "0.154.0",
+            },
+            capabilities: {
+              experimentalApi: false,
+              requestAttestation: false,
+              optOutNotificationMethods: null,
+              extensions: null,
+            },
+          },
+        })}\n`);
+        await expect(initialized).resolves.toMatchObject({ id: 1, result: {} });
+        input.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+        input.end();
+        await proxy;
+        responses.close();
+      }
+      if (process.platform === "darwin") return;
       const bridgeToken = readPrivateFileSync(tokenPath, 128);
       const endpoint = `ws://127.0.0.1:${bridgePort}/codex-app-server?token=${bridgeToken}`;
       first = new RawBridgeClient(endpoint, "codex_connect_bridge_contract_first");

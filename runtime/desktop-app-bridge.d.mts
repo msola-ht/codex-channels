@@ -32,6 +32,13 @@ export interface DesktopAppBridgeOptions {
   onEvent?: (event: DesktopAppBridgeEvent) => void;
 }
 
+export interface DesktopAppStdioProxyOptions {
+  socketPath: string;
+  input?: NodeJS.ReadableStream;
+  output?: NodeJS.WritableStream;
+  connectTimeoutMs?: number;
+}
+
 export class DesktopAppBridge {
   constructor(options: Pick<
     DesktopAppBridgeOptions,
@@ -49,6 +56,9 @@ export class DesktopAppBridge {
 export function desktopAppBridgeTokenPath(dataDir: string): string;
 export function loadOrCreateDesktopAppBridgeToken(dataDir: string): string;
 export function readDesktopAppBridgeToken(dataDir: string): string;
+export function proxyDesktopAppStdioToUnixSocket(
+  options: DesktopAppStdioProxyOptions,
+): Promise<void>;
 export function startDesktopAppBridge(
   options: DesktopAppBridgeOptions,
 ): Promise<DesktopAppBridge>;

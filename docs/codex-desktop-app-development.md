@@ -18,11 +18,12 @@ ID、二维码和移动端不进入本方案。
 `untrusted-code-signing-identity`。后续隔离验证已经把问题收敛到进程链：项目锁定的 OpenAI 签名
 Codex CLI 0.154.0 由 Desktop 随包的 OpenAI 签名 Node 托管时，同一 Pipe 成功启动
 `codex_app` 0.1.0，并返回 38 个工具且无工具发现错误。这证明共享 App Server 不需要改由 Desktop
-所有，也不需要修改应用包、伪造签名或增加 Pipe Relay；macOS 下一阶段改为受管 stdio Proxy 动态
-交付 Pipe，并只重启现有主 App Server 子进程以切换可信父进程链。
+所有，也不需要修改应用包、伪造签名或增加 Pipe Relay；macOS 受管 stdio Proxy 动态交付 Pipe，
+并只重启现有主 App Server 子进程以切换可信父进程链。
 
 实现保留现有 App Server 服务、Provider 代理、指标采集、私有 UDS、Supervisor 和
-`codexc remote` 架构。macOS Desktop 的 stdio 连接由受管 Proxy 直接转到现有私有 UDS；Windows
+`codexc remote` 架构。macOS Desktop 的 JSONL stdio 连接由受管 Proxy 转换为 WebSocket 文本帧，
+再连接现有私有 UDS；Windows
 在主 OpenAI App Server 前使用仅监听回环地址、带随机令牌的 WebSocket 桥。两条路径都不解析
 JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件。
 
@@ -46,12 +47,18 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 - macOS 完整兼容第二阶段的代码已经落地：受管 stdio Proxy、带独立能力版本的 Supervisor Host
   租约、内置插件布尔配置传递、签名与精确版本校验、主实例串行切换和状态均已完成；macOS 不再
   启动或探测回环桥。macOS 命令测试已经改为受管入口合同，Supervisor Host 租约、插件布尔值解析
-  与现有 Windows 桥的定向测试均已通过。完整 Proxy 隔离合同已通过，但源码部署后的真实 Desktop
-  启动、服务重启自动恢复和退出重开仍待实机复核，因此当前发布状态仍是预览；完整提交门禁仍需在
-  提交时由 pre-commit hook 执行。
+  与现有 Windows 桥的定向测试均已通过。完整 Proxy 隔离合同以及源码部署后的真实 Desktop 启动、
+  双向接续和服务重启自动恢复也已通过实机复核；当前发布状态仍是预览，Windows 实机路径尚未
+  验收，完整提交门禁仍需在提交时由 pre-commit hook 执行。
+- 2026-09-17 源码实机测试发现，受管入口错误地把 Desktop JSONL stdio 裸转发给
+  WebSocket-over-UDS，导致 `initialize` 一直等待、Desktop 停在 `Codex is still starting`，并使
+  `codex_app` 的 `tools/list` 超时。当前修复由项目 Proxy 自行完成 WebSocket 握手和 JSONL/文本帧
+  边界转换；定向测试与锁定 Codex 0.154.0 的真实 `initialize` 合同已通过。源码重新部署后，打包
+  Desktop 已通过受管启动、渠道到 Desktop、Desktop 到渠道以及 App Server 重启断线恢复测试；启动
+  过程中不再出现 `codex_app` 工具发现错误或 `Codex is still starting` 卡住。
 
-因此当前代码与本机可执行门禁已经完成，macOS 会话双向共享和签名 Host 隔离合同已经通过，但
-完整 Desktop 用户路径尚未完成最终验收；Windows 的会话共享、内置工具和平台专属检查均未完成。
+因此当前代码与本机可执行门禁已经完成，macOS 受管入口的会话双向共享、签名 Host、内置工具启动
+和服务重启恢复均已通过；Windows 的会话共享、内置工具和平台专属检查仍未完成。
 当前实现不能宣称全平台完成或正式支持。
 
 ## 事实基线
@@ -62,8 +69,10 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   `upstream/openai-codex` 的 `rust-v0.154.0` 锁定源码为准。
 - 官方远程客户端以 WebSocket 连接 App Server；每个连接独立执行一次
   `initialize` / `initialized`。
-- Unix 客户端可以直接通过 WebSocket-over-UDS 连接。Windows 使用官方
-  `codex app-server proxy --sock <path>` 把 stdio WebSocket 转到同一私有 UDS。
+- Unix 客户端可以直接通过 WebSocket-over-UDS 连接。官方
+  `codex app-server proxy --sock <path>` 只是 stdio 与 UDS 之间的裸字节中继；Windows
+  `WindowsProxyTransport` 在该中继之上建立 WebSocket。Desktop 的 JSONL stdio 不能直接送入这个
+  裸中继。
 - 官方 `app-server daemon` 是实验性生命周期工具，会自行选择二进制、环境、控制 Socket 与更新
   方式。它不能代替本项目现有的 Provider 代理、指标采集和 Supervisor，因此本轮不采用。
 
@@ -120,16 +129,17 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 ## 架构与数据流
 
 ```text
-macOS Desktop ─ stdio ─ 受管 Proxy ─ private UDS ─┐
-                                                   ├─ 主 OpenAI App Server
-Windows Desktop ─ token WebSocket ─ 回环桥 ─ UDS ─┘          ▲
+macOS Desktop ─ JSONL stdio ─ 受管 Proxy ─ WebSocket/UDS ─┐
+                                                          ├─ 主 OpenAI App Server
+Windows Desktop ─ token WebSocket ─ 回环桥 ─ UDS ─────────┘          ▲
                                                               │
                                                 Gateway / codexc remote
 ```
 
 macOS Proxy 和 Windows 桥都不终止 JSON-RPC 语义，Desktop 自己发送 `initialize`；它们不能替
-Desktop 生成、删除、重写或缓存业务消息。Windows 桥只转发文本帧，二进制帧以 WebSocket `1003`
-关闭，单帧上限为 128 MiB。
+Desktop 生成、删除、重写或缓存业务消息。macOS Proxy 只在 JSONL 行与 WebSocket 文本帧之间保留
+一一对应的消息边界；Windows 桥只转发文本帧，二进制帧以 WebSocket `1003` 关闭，单帧上限为
+128 MiB。
 
 两条平台路径都在连接期间持有主 Provider 租约，空闲释放不能终止主实例。macOS 最后一个 Host
 租约关闭时只清除服务内存中的临时 Pipe 附加状态，不终止共享主实例；Windows 桥连接关闭时释放
@@ -237,16 +247,16 @@ codexc desktop-app open
 
 ## macOS 实机验收记录
 
-2026-09-16 使用 ChatGPT `26.908.70816` 与 Codex CLI `0.154.0` 验证：
+2026-09-16 至 2026-09-17 使用 ChatGPT `26.908.70816` 与 Codex CLI `0.154.0` 验证：
 
 | 项目 | 结果 | 结论 |
 | --- | --- | --- |
 | `desktop-app enable/open/status` | 通过 | 配置、令牌、桥、单次启动环境和服务重启主路径可用 |
 | Desktop 与渠道双向发现并继续 Thread | 通过 | 两端连接同一主 OpenAI App Server |
-| App Server 重启后的 Desktop 恢复 | 待复核 | 旧回环桥路径通过；受管 stdio 路径仍需源码部署后复核 |
-| Desktop 内置 `codex_app` MCP | 失败 | 缺少 `CODEX_APP_TOOLS_PIPE_PATH`；直接注入后仍被可信进程校验拒绝 |
+| App Server 重启后的 Desktop 恢复 | 通过 | 重启期间渠道收到断线提示，主实例就绪后自动重连并继续双向接续 |
+| Desktop 内置 `codex_app` MCP | 通过 | 签名 Host 隔离探针返回 38 个工具；修复后的受管启动不再出现 Pipe 缺失、`tools/list` 超时或启动卡住 |
 | 签名 Host 隔离合同 | 通过 | 受管 stdio Proxy 连接同一 UDS，`codex_app` 0.1.0 返回 38 个工具且无错误 |
-| 完整 macOS Desktop 兼容 | 待复核 | 仍需源码部署后验证真实启动、服务重启恢复和完全退出后重开 |
+| 完整 macOS Desktop 受管入口 | 通过 | 源码部署后的启动、双向接续和服务重启恢复已实测；仍须使用 `codexc desktop-app open` 注入单次启动环境 |
 
 自动化真实 App Server 合同只能证明两个普通 App Server Client 通过桥共享 Thread，不能模拟打包
 Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周期。后续验收必须把这部分列为独立
@@ -259,7 +269,8 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 - Desktop 探测限定正式 `ChatGPT.app`，读取 Bundle 版本和资源内兼容入口，不修改签名内容。
 - App Server 上游继续使用现有 WebSocket-over-UDS。
 - `open --env` 改为同时设置 `CODEX_APP_SERVER_FORCE_CLI=1` 和受管 `CODEX_CLI_PATH`。受管入口把
-  Desktop 的 stdio WebSocket 转到现有私有 UDS，并把动态工具 Pipe 通过当前用户私有 Supervisor
+  Desktop 的 JSONL stdio 逐条转换为 WebSocket 文本帧并连接现有私有 UDS，同时把动态工具 Pipe
+  通过当前用户私有 Supervisor
   连接交给服务；Desktop 提供的内置插件布尔启用值原样受控应用到共享主实例。该平台不启动回环
   桥，不创建桥令牌，也不解析 JSON-RPC 业务消息。
 - 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 必须
@@ -285,14 +296,16 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 ## 实现落点
 
 - `runtime/desktop-app-bridge.mjs` 与声明文件：令牌文件、回环 WebSocket Server、认证、每连接
-  Transport、帧转发、租约与关闭。
+  Transport、帧转发、租约与关闭，以及 macOS Desktop JSONL stdio 到私有 Unix WebSocket 的消息
+  边界转换。
 - `runtime/app-server-service-runtime.mjs`：macOS 装配受管 Host，Windows 在配置启用且主 Provider
   为 OpenAI 时装配桥，并纳入 App Server 服务关闭顺序。
 - `runtime/gateway-config.mjs` 与声明文件：严格 `[codex.desktop_app]` Schema 和安全默认值。
 - `scripts/desktop-app-command.mjs` 与声明文件：平台化兼容探测、配置事务、服务控制、状态与单次环境
   启动；macOS 不读取桥令牌或探测桥端口。
 - `scripts/desktop-app-proxy.mjs`：macOS Desktop 的受管 CLI 入口；只接受 App Server 启动调用，
-  获取 Desktop Host 租约后执行锁定 CLI 的 `app-server proxy --sock`，标准输入输出保持透明。
+  获取 Desktop Host 租约后在标准输入输出与主 App Server Unix WebSocket 之间转换文本消息，不
+  解析 JSON-RPC 业务字段。
 - `runtime/desktop-app-host.mjs` 与声明文件：校验 Desktop 动态 Pipe、签名 Node 和精确 Codex 原生
   可执行文件，并用签名 Node 托管主 App Server 子进程；动态 Pipe 状态只保存在服务内存中。
 - `runtime/app-server-supervisor.mjs` 与声明文件：增加有界、独立能力版本化的 macOS Desktop Host

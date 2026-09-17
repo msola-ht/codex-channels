@@ -1,15 +1,18 @@
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
-import WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DesktopAppBridge,
   desktopAppBridgeTokenPath,
   loadOrCreateDesktopAppBridgeToken,
+  proxyDesktopAppStdioToUnixSocket,
   startDesktopAppBridge,
 } from "../runtime/desktop-app-bridge.mjs";
 
@@ -224,6 +227,53 @@ describe("Codex Desktop App bridge", () => {
 
     expect(leaseCloses).toBe(1);
   });
+
+  it.skipIf(process.platform === "win32")(
+    "translates Desktop JSONL stdio to Unix WebSocket text frames",
+    async () => {
+      const directory = mkdtempSync(join(tmpdir(), "codexc-desktop-stdio-"));
+      temporaryDirectories.push(directory);
+      const socketPath = join(directory, "app-server.sock");
+      const server = createHttpServer();
+      const webSocketServer = new WebSocketServer({ noServer: true });
+      server.on("upgrade", (request, socket, head) => {
+        webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+          webSocketServer.emit("connection", webSocket, request);
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(socketPath, resolve);
+      });
+
+      const input = new PassThrough();
+      const output = new PassThrough();
+      output.setEncoding("utf8");
+      let outputText = "";
+      output.on("data", (chunk: string) => { outputText += chunk; });
+      const received: string[] = [];
+      webSocketServer.on("connection", (socket) => {
+        socket.on("message", (data, isBinary) => {
+          expect(isBinary).toBe(false);
+          received.push(data.toString("utf8"));
+          socket.send('{"id":1,"result":{"ready":true}}');
+        });
+      });
+
+      const proxy = proxyDesktopAppStdioToUnixSocket({ socketPath, input, output });
+      input.write('{"id":1,"method":"initialize","params":{}}\n');
+      await waitUntil(() => outputText.endsWith("\n"));
+      expect(received).toEqual(['{"id":1,"method":"initialize","params":{}}']);
+      expect(outputText).toBe('{"id":1,"result":{"ready":true}}\n');
+
+      input.end();
+      await proxy;
+      webSocketServer.close();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    },
+  );
 });
 
 class FakeTransport {

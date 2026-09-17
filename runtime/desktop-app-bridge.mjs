@@ -1,6 +1,8 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
+import { createConnection } from "node:net";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 
 import WebSocket, { WebSocketServer } from "ws";
 
@@ -86,6 +88,89 @@ export async function startDesktopAppBridge({
   });
   await bridge.start();
   return bridge;
+}
+
+export async function proxyDesktopAppStdioToUnixSocket({
+  socketPath,
+  input = process.stdin,
+  output = process.stdout,
+  connectTimeoutMs = 10_000,
+}) {
+  if (typeof socketPath !== "string" || !socketPath || socketPath.includes("\0")) {
+    throw new Error("Codex Desktop App Proxy 缺少有效的 Unix Socket 路径");
+  }
+  if (!Number.isInteger(connectTimeoutMs) || connectTimeoutMs < 1) {
+    throw new Error("Codex Desktop App Proxy 连接超时必须是正整数");
+  }
+  const socket = new WebSocket("ws://localhost/", {
+    perMessageDeflate: false,
+    handshakeTimeout: connectTimeoutMs,
+    maxPayload: maximumPayloadBytes,
+    createConnection: () => createConnection(socketPath),
+  });
+  await waitForWebSocketOpen(socket, connectTimeoutMs);
+
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let upstreamQueue = Promise.resolve();
+  let downstreamQueue = Promise.resolve();
+  let closeTimer;
+  let settled = false;
+  let resolveCompletion;
+  let rejectCompletion;
+  const completion = new Promise((resolvePromise, rejectPromise) => {
+    resolveCompletion = resolvePromise;
+    rejectCompletion = rejectPromise;
+  });
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    rejectCompletion(error instanceof Error ? error : new Error(String(error)));
+    socket.terminate();
+  };
+  const complete = () => {
+    if (settled) return;
+    settled = true;
+    resolveCompletion();
+  };
+
+  socket.on("message", (data, isBinary) => {
+    if (isBinary) {
+      fail(new Error("Codex App Server 返回了不支持的二进制 WebSocket 帧"));
+      return;
+    }
+    downstreamQueue = downstreamQueue.then(() =>
+      writeLine(output, decodeTextMessage(data))
+    );
+    void downstreamQueue.catch(fail);
+  });
+  socket.once("error", fail);
+  socket.once("close", complete);
+  lines.on("line", (line) => {
+    upstreamQueue = upstreamQueue.then(() => sendText(socket, line));
+    void upstreamQueue.catch(fail);
+  });
+  lines.once("close", () => {
+    void upstreamQueue.then(() => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        complete();
+        return;
+      }
+      socket.close(1000, "Desktop stdio closed");
+      closeTimer = setTimeout(() => socket.terminate(), 2_000);
+      closeTimer.unref();
+    }).catch(fail);
+  });
+
+  try {
+    await completion;
+    await upstreamQueue;
+    await downstreamQueue;
+  } finally {
+    if (closeTimer !== undefined) clearTimeout(closeTimer);
+    lines.close();
+    socket.removeAllListeners();
+    if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+  }
 }
 
 export class DesktopAppBridge {
@@ -348,6 +433,45 @@ function sendText(webSocket, message) {
       return;
     }
     webSocket.send(message, (error) => error ? rejectPromise(error) : resolvePromise());
+  });
+}
+
+function writeLine(output, message) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    output.write(`${message}\n`, (error) =>
+      error ? rejectPromise(error) : resolvePromise());
+  });
+}
+
+function waitForWebSocketOpen(socket, timeoutMs) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      socket.terminate();
+      rejectPromise(new Error(`连接 Codex Unix WebSocket 超时：${timeoutMs}ms`));
+    }, timeoutMs);
+    timeout.unref();
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.off("open", onOpen);
+      socket.off("error", onError);
+      socket.off("close", onClose);
+    };
+    const onOpen = () => {
+      cleanup();
+      resolvePromise();
+    };
+    const onError = (error) => {
+      cleanup();
+      rejectPromise(error);
+    };
+    const onClose = () => {
+      cleanup();
+      rejectPromise(new Error("Codex Unix WebSocket 在握手完成前关闭"));
+    };
+    socket.once("open", onOpen);
+    socket.once("error", onError);
+    socket.once("close", onClose);
   });
 }
 
