@@ -128,6 +128,9 @@
   路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-traffic-route.mjs`：WebUI 的模型转储只读路由，列出转储 exchange 摘要并提供单条完整
+  请求与响应字段；只接受回环连接，只按已知标签读取用户数据目录下的 `traffic/` JSON Lines，
+  不接受任意路径，单段正文超过上限时返回截断标记。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
@@ -494,6 +497,9 @@
   JSON Lines 转储渲染成人可读文本；解转义并展开请求头与请求体，把 SSE 响应和 WebSocket 双向帧
   按事件逐条解码，支持按 exchange 过滤、关键字过滤与按字节截断，`--follow` 以只读方式增量跟随
   新写入的记录；不修改转储文件，也不访问网络或凭据。
+- `traffic-dump-reader.mjs`：转储读取与解析的共享实现，负责定位标签与轮转文件、流式遍历记录、
+  按 exchange 归组，并产出摘要行与完整字段结构；`codexc traffic` 与 WebUI 转储接口都从这里取
+  同一份解析结果，只读打开文件，不修改转储内容。
 
 ## 构建、打包与服务
 

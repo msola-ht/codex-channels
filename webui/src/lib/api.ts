@@ -30,6 +30,8 @@ import type {
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
+  TrafficDetailResponse,
+  TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
 import { metricsQueryParams } from "@/lib/metrics-query"
@@ -307,6 +309,30 @@ export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
+}
+
+export function fetchTrafficExchanges(
+  query: { label?: string; limit?: number; offset?: number },
+  signal?: AbortSignal,
+): Promise<TrafficListResponse> {
+  const params = new URLSearchParams()
+  if (query.label !== undefined) params.set("label", query.label)
+  if (query.limit !== undefined) params.set("limit", String(query.limit))
+  if (query.offset !== undefined) params.set("offset", String(query.offset))
+  const suffix = params.size === 0 ? "" : `?${params.toString()}`
+  return getJson<TrafficListResponse>(`${API_PREFIX}/traffic${suffix}`, signal)
+}
+
+export function fetchTrafficExchange(
+  query: { id: number; label?: string },
+  signal?: AbortSignal,
+): Promise<TrafficDetailResponse> {
+  const params = new URLSearchParams({ id: String(query.id) })
+  if (query.label !== undefined) params.set("label", query.label)
+  return getJson<TrafficDetailResponse>(
+    `${API_PREFIX}/traffic/exchange?${params.toString()}`,
+    signal,
+  )
 }
 
 export function refreshOfficialAccountSnapshot(

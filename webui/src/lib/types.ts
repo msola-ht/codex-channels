@@ -51,6 +51,12 @@ export type {
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
+  TrafficDetailResponse,
+  TrafficExchangeDetail,
+  TrafficExchangeSummary,
+  TrafficHeaderValue,
+  TrafficLabel,
+  TrafficListResponse,
   TurnSummary,
   WeeklyQuota,
 } from "../../../scripts/webui-api"

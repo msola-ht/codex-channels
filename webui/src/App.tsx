@@ -31,11 +31,14 @@ const ThreadsPage = lazy(() =>
   import("@/pages/threads-page").then((module) => ({ default: module.ThreadsPage })))
 const SettingsPage = lazy(() =>
   import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })))
+const TrafficPage = lazy(() =>
+  import("@/pages/traffic-page").then((module) => ({ default: module.TrafficPage })))
 
 function pageTitle(pathname: string): string {
   if (pathname.startsWith("/threads/")) return "Thread 详情"
   if (pathname === "/threads") return "Threads"
   if (pathname === "/requests") return "请求"
+  if (pathname === "/traffic") return "转储"
   if (pathname === "/errors") return "错误"
   if (pathname === "/settings") return "设置"
   return "控制台"
@@ -101,6 +104,7 @@ function Layout() {
               <Route path="/threads" element={<ThreadsPage />} />
               <Route path="/threads/:id" element={<ThreadDetailPage />} />
               <Route path="/requests" element={<RequestsPage />} />
+              <Route path="/traffic" element={<TrafficPage />} />
               <Route path="/errors" element={<ErrorsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>

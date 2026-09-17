@@ -6,13 +6,28 @@ import {
   openSync,
   readFileSync,
   readSync,
-  readdirSync,
   statSync,
 } from "node:fs";
 import { join } from "node:path";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
+import {
+  findRecord,
+  formatTime,
+  frameText,
+  groupExchanges,
+  joinBodies,
+  labelOf,
+  listDumpFiles,
+  parseSseEvents,
+  parseTurnMetadata,
+  requestMetadata,
+  requestModelOf,
+  responseModelsOf,
+  shortId,
+  websocketFrames,
+} from "./traffic-dump-reader.mjs";
 
 const followIntervalMs = 1_000;
 
@@ -35,27 +50,12 @@ function selectedFiles() {
   return newestDumpFiles(directory);
 }
 
-function listDumpFiles(target = directory) {
-  try {
-    return readdirSync(target)
-      .filter((name) => name.endsWith(".jsonl"))
-      .map((name) => join(target, name))
-      .sort((left, right) => statSync(left).mtimeMs - statSync(right).mtimeMs);
-  } catch {
-    return [];
-  }
-}
-
 function newestDumpFiles(target) {
   const files = listDumpFiles(target);
   const newest = files.at(-1);
   if (newest === undefined) return [];
   const label = labelOf(newest);
   return files.filter((path) => labelOf(path) === label).slice(-2);
-}
-
-function labelOf(path) {
-  return path.split("/").pop().split("-")[0];
 }
 
 async function followTraffic() {
@@ -66,7 +66,7 @@ async function followTraffic() {
   }
   console.log(`跟随 ${directory} 中的新内容，按 Ctrl-C 停止`);
   const tails = new Map();
-  for (const path of listDumpFiles()) {
+  for (const path of listDumpFiles(directory)) {
     tails.set(path, { offset: fileSize(path), remainder: "" });
   }
   const sseBuffers = new Map();
@@ -79,7 +79,7 @@ async function followTraffic() {
   process.on("SIGTERM", stop);
   while (!stopped) {
     await sleep(followIntervalMs);
-    for (const path of listDumpFiles()) {
+    for (const path of listDumpFiles(directory)) {
       const tail = tails.get(path) ?? { offset: 0, remainder: "" };
       tails.set(path, tail);
       const content = readFrom(path, tail.offset);
@@ -271,24 +271,6 @@ function renderFiles(paths, options) {
   }
 }
 
-function groupExchanges(records) {
-  const byId = new Map();
-  for (const record of records) {
-    let exchange = byId.get(record.exchange);
-    if (exchange === undefined) {
-      exchange = {
-        account: record.account,
-        id: record.exchange,
-        records: [],
-        startedAtMs: record.startedAtMs,
-      };
-      byId.set(record.exchange, exchange);
-    }
-    exchange.records.push(record);
-  }
-  return [...byId.values()];
-}
-
 function summaryLine(exchange) {
   const head = findRecord(exchange, "request_head");
   const handshake = findRecord(exchange, "websocket_handshake");
@@ -375,32 +357,6 @@ function renderEventPayload(event, maxBytes) {
     : bounded(JSON.stringify(event.parsed, null, 2), maxBytes);
 }
 
-function parseSseEvents(text) {
-  const events = [];
-  for (const block of text.split("\n\n")) {
-    let type;
-    const dataLines = [];
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) type = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-    }
-    if (dataLines.length === 0) continue;
-    const raw = dataLines.join("\n");
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = undefined;
-    }
-    events.push({
-      parsed,
-      raw,
-      type: type ?? (typeof parsed?.type === "string" ? parsed.type : "data"),
-    });
-  }
-  return events;
-}
-
 function jsonOrText(text, maxBytes) {
   try {
     return bounded(JSON.stringify(JSON.parse(text), null, 2), maxBytes);
@@ -425,124 +381,4 @@ function headerLines(headers) {
   return Object.entries(headers ?? {}).map(([name, value]) => (
     `  ${name}: ${Array.isArray(value) ? value.join(", ") : String(value)}`
   ));
-}
-
-function joinBodies(exchange, kind) {
-  return recordsOfKind(exchange, kind)
-    .sort((left, right) => left.part - right.part)
-    .map((record) => (typeof record.text === "string"
-      ? record.text
-      : `<${record.encoding ?? "binary"} ${record.bytes ?? 0} 字节>`))
-    .join("");
-}
-
-function requestMetadata(exchange) {
-  const head = findRecord(exchange, "request_head");
-  if (head !== undefined) return parseTurnMetadata(head.headers?.["x-codex-turn-metadata"]);
-  for (const frame of websocketFrames(exchange)) {
-    if (frame.direction !== "client") continue;
-    const parsed = parseJson(String(frame.text ?? ""));
-    const metadata = parseTurnMetadata(parsed?.client_metadata?.["x-codex-turn-metadata"]);
-    if (metadata.threadId !== undefined) return metadata;
-    const threadId = parsed?.client_metadata?.thread_id;
-    if (typeof threadId === "string") return { threadId };
-  }
-  return {};
-}
-
-function requestModelOf(exchange) {
-  const body = joinBodies(exchange, "request_body");
-  const parsed = body.length > 0 ? parseJson(body) : undefined;
-  if (typeof parsed?.model === "string") return parsed.model;
-  for (const frame of websocketFrames(exchange)) {
-    if (frame.direction !== "client") continue;
-    const model = parseJson(String(frame.text ?? ""))?.model;
-    if (typeof model === "string") return model;
-  }
-  return undefined;
-}
-
-function responseModelsOf(exchange) {
-  const found = new Set();
-  for (const payload of responsePayloads(exchange)) {
-    const model = payload?.response?.model ?? payload?.model;
-    if (typeof model === "string") found.add(model);
-  }
-  return [...found];
-}
-
-function responsePayloads(exchange) {
-  const payloads = [];
-  for (const event of parseSseEvents(joinBodies(exchange, "response_body"))) {
-    if (event.parsed !== undefined) payloads.push(event.parsed);
-  }
-  for (const frame of websocketFrames(exchange)) {
-    if (frame.direction !== "upstream") continue;
-    const parsed = parseJson(String(frame.text ?? ""));
-    if (parsed !== undefined) payloads.push(parsed);
-  }
-  return payloads;
-}
-
-/**
- * 单帧超过转储上限时会被切分为多条 `part` 记录，这里按方向和连续序号还原成完整帧；
- * 二进制帧只保留长度占位，不参与 JSON 解析。
- */
-function websocketFrames(exchange) {
-  const frames = [];
-  for (const record of recordsOfKind(exchange, "websocket_frame")) {
-    const last = frames.at(-1);
-    if (last !== undefined && last.direction === record.direction && record.part === last.part + 1) {
-      last.part = record.part;
-      last.text += frameText(record);
-      continue;
-    }
-    frames.push({ direction: record.direction, part: record.part, text: frameText(record) });
-  }
-  return frames;
-}
-
-function frameText(record) {
-  return typeof record.text === "string"
-    ? record.text
-    : `<二进制帧 ${record.bytes ?? 0} 字节>`;
-}
-
-function parseTurnMetadata(value) {
-  const parsed = typeof value === "string" ? parseJson(value) : value;
-  if (typeof parsed !== "object" || parsed === null) return {};
-  return {
-    requestKind: typeof parsed.request_kind === "string" ? parsed.request_kind : undefined,
-    threadId: typeof parsed.thread_id === "string" ? parsed.thread_id : undefined,
-    turnId: typeof parsed.turn_id === "string" && parsed.turn_id.length > 0
-      ? parsed.turn_id
-      : undefined,
-  };
-}
-
-function parseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
-function recordsOfKind(exchange, kind) {
-  return exchange.records.filter((record) => record.kind === kind);
-}
-
-function findRecord(exchange, kind) {
-  return exchange.records.find((record) => record.kind === kind);
-}
-
-function shortId(value) {
-  return typeof value === "string" && value.length > 0 ? value.slice(0, 8) : "-";
-}
-
-function formatTime(atMs) {
-  if (typeof atMs !== "number") return "-";
-  const date = new Date(atMs);
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }

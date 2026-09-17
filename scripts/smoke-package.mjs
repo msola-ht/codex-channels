@@ -145,6 +145,7 @@ try {
     "scripts/traffic-command-options.d.mts",
     "scripts/traffic-command-options.mjs",
     "scripts/traffic-command.mjs",
+    "scripts/traffic-dump-reader.mjs",
     "scripts/validate-config.mjs",
     "systemd/codex-connect-app-server.service.template",
     "systemd/codex-connect-gateway.service.template",

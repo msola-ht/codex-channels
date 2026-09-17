@@ -57,6 +57,7 @@ import {
   isHighRiskManagementPath,
   ManagementOperationError,
 } from "./webui-management-operations.mjs";
+import { routeTrafficApi } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -200,7 +201,7 @@ async function handleRequest(environment, staticDir, host, token, serviceStatusC
         });
         return;
       }
-      await routeApi(environment, url, response, serviceStatusCache);
+      await routeApi(environment, url, request, response, serviceStatusCache);
       return;
     }
     serveStatic(staticDir, url.pathname, response);
@@ -404,7 +405,7 @@ function readJsonMetadata(path) {
   }
 }
 
-async function routeApi(environment, url, response, serviceStatusCache) {
+async function routeApi(environment, url, request, response, serviceStatusCache) {
   const path = url.pathname;
   if (!path.startsWith(`${API_PREFIX}/`)) {
     throw new ApiError(404, "not_found", `未知 API：${path}`);
@@ -467,6 +468,7 @@ async function routeApi(environment, url, response, serviceStatusCache) {
     sendAccountSnapshots(environment, response, openMetricsStore);
     return;
   }
+  if (await routeTrafficApi({ apiPath, environment, request, response, url })) return;
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 function openMetricsStore(environment, endAtMs = Date.now()) {

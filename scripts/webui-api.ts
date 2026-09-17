@@ -775,3 +775,85 @@ export interface OfficialAccountSnapshotsResponse {
     message: string
   }>
 }
+
+export interface TrafficLabel {
+  label: string
+  files: number
+  latestAtMs: number
+}
+
+export interface TrafficExchangeSummary {
+  id: number
+  startedAtMs: number
+  account?: string
+  /** 请求头记录可能已被轮转清理，缺失证据时省略。 */
+  transport?: "http" | "websocket"
+  method?: string
+  path?: string
+  url?: string
+  threadId?: string
+  turnId?: string
+  requestKind?: string
+  status?: number
+  hasError: boolean
+  requestModel?: string
+  responseModels: string[]
+}
+
+export interface TrafficListResponse {
+  directory: string
+  enabled: boolean
+  label: string
+  labels: TrafficLabel[]
+  files: string[]
+  generatedAt: string
+  exchanges: TrafficExchangeSummary[]
+  total: number
+  nextOffset: number | null
+}
+
+export type TrafficHeaderValue = string | string[]
+
+export interface TrafficExchangeDetail {
+  id: number
+  startedAtMs: number
+  account?: string
+  /** 记录不足时省略：转储里可能只剩中断记录，没有能判断传输类型的证据。 */
+  transport?: "http" | "websocket"
+  threadId?: string
+  turnId?: string
+  requestKind?: string
+  requestModel?: string
+  responseModels: string[]
+  url?: string
+  websocketHeaders: Record<string, TrafficHeaderValue> | null
+  request: {
+    method: string
+    path: string
+    headers: Record<string, TrafficHeaderValue>
+    body: string
+    bodyTruncated: boolean
+    bytes?: number
+  } | null
+  response: {
+    status: number | null
+    headers: Record<string, TrafficHeaderValue>
+    body: string
+    bodyTruncated: boolean
+    bytes?: number
+    durationMs?: number
+  } | null
+  events: Array<{ type: string; payload: string }>
+  frames: Array<{ direction: "client" | "upstream"; text: string; truncated: boolean }>
+  closes: Array<{ peer: string; code: number; reason?: string }>
+  errors: Array<{ scope: string; message?: string }>
+}
+
+export interface TrafficDetailResponse {
+  directory: string
+  enabled: boolean
+  label: string
+  files: string[]
+  generatedAt: string
+  exchange: TrafficExchangeDetail
+}

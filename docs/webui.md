@@ -2,6 +2,7 @@
 
 `codexc webui` 启动本地指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）中的全局统计、
 会话、请求明细与错误聚合；设置页还可修改结构化配置，并通过白名单异步任务执行受保护的服务与维护动作。回环监听未配置令牌时复用真实回环连接与 Origin 约束；配置令牌或绑定非回环地址时使用同一令牌鉴权。WebUI 不读取业务会话库，不接受任意命令。
+“转储”页另有一份只读视图，展示 `[debug].model_traffic_dump` 落盘的模型请求与响应原文，只对回环连接开放。
 
 ## 命令
 
@@ -84,11 +85,20 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
+| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&offset=&limit=`（摘要，默认 100、上限 500）、`GET /api/v1/traffic/exchange?id=&label=`（单条完整字段） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+
+转储页读取用户数据目录 `traffic/` 下 `[debug].model_traffic_dump` 生成的 JSON Lines，默认展示最新
+标签，标签与选中的 exchange 编号保留在页面地址中，刷新或分享链接可回到同一条记录。摘要表只显示编号、
+时间、路径或 WebSocket URL、线程、轮次、请求类型、请求模型与响应模型、状态；选中某条后才会读取并
+显示请求头、请求体、响应头、SSE 事件或 WebSocket 双向帧。单段正文超过 4 MiB 时只返回前 4 MiB，
+并在响应里带 `bodyTruncated`。`label` 只接受 `traffic/` 中已存在的标签，非法或无来源的取值分别返回
+400 与 404；目录中还没有转储文件、或请求不来自回环地址时返回 503，响应里的 `enabled` 表示
+`[debug].model_traffic_dump` 当前是否开启。
 控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
 全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，
 对应 `range=today|yesterday`；滚动范围为 `7d|30d`，全部历史为 `all`。
@@ -157,6 +167,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
               scripts/webui-server.mjs（codexc webui 服务）
                 ├─ /api/v1/* 指标只读 JSON API（Observability Store 只读模式）
                 ├─ /api/v1/management/* 回环限定、令牌按配置启用的结构化配置管理 API
+                ├─ /api/v1/traffic* 回环限定的模型转储只读 API
                 └─ webui/dist 静态托管
                             ▲
                             │ /api/v1/*（同源，令牌可选）
@@ -182,6 +193,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 边界约束：
 
 - WebUI 不读取、不解析业务会话库；App Server 用户设置通过后端结构化 RPC 适配器访问，不把协议或凭据暴露给前端；
+- 转储页只接受真实回环连接，且只按已知标签读取用户数据目录下 `traffic/` 的 JSON Lines，不接受任意
+  路径；该页展示的是未脱敏的原始 prompt、代码与工具输出，不要分享截图或展开内容；
 - 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改对应结构化入口；敏感 Provider 凭据只写入私有凭据目录；
 - 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH/DELETE；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
 - 配置的令牌只用于 API 鉴权；服务端不写入日志或响应体，浏览器端访问令牌按前述约定保存在 `localStorage`。
@@ -194,8 +207,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 webui/src/
   lib/         API 客户端、共享类型转出与格式化（Token/时间）
   hooks/       资源数据 hook（统一 loading/error/refetch）
-  components/  Sidebar 布局、指标区块与共享数据表格组件
-  pages/       概览、Threads、Thread 详情、请求、错误、设置
+  components/  Sidebar 布局、指标区块、共享数据表格组件与转储摘要/明细区块
+  pages/       概览、Threads、Thread 详情、请求、错误、转储、设置
 ```
 
 设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、上下文管理、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。
