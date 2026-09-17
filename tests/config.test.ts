@@ -19,6 +19,8 @@ import {
   parseGatewayConfig,
   readGatewayConfig,
   validateCodexConfigDocument,
+  validateDebugConfigDocument,
+  validateGatewayConfigDocument,
   withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
@@ -468,6 +470,7 @@ describe("Gateway config.toml", () => {
       reasoning: true,
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
+    expect(persisted.debug).toBeUndefined();
     expect(persisted.scheduled_tasks).toEqual({ enabled: false });
     expect(persisted.storage).toEqual({
       database_path: "data/gateway.sqlite3",
@@ -485,6 +488,39 @@ describe("Gateway config.toml", () => {
       "# 自动补齐前的注释",
     );
     if (process.platform !== "win32") expect(statSync(fixture.configPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("accepts the debug model traffic dump switch only with strict keys", () => {
+    const document = parseGatewayConfig(`
+version = 1
+default_workspace = "main"
+
+[telegram]
+bot_token = "token"
+allowed_user_ids = [1]
+
+[codex]
+binary = "codex"
+socket_path = "runtime/codex-app-server.sock"
+
+[debug]
+model_traffic_dump = true
+
+[[workspaces]]
+id = "main"
+name = "Main"
+cwd = "/tmp/workspace"
+`);
+
+    expect(validateGatewayConfigDocument(document).debug)
+      .toEqual({ model_traffic_dump: true });
+    expect(validateDebugConfigDocument({})).toEqual({ model_traffic_dump: false });
+    expect(capturedError(() => validateDebugConfigDocument({
+      model_traffic_dump: "yes",
+    }))).toContain("[debug]");
+    expect(capturedError(() => validateDebugConfigDocument({
+      traffic_dump: true,
+    }))).toContain("[debug]");
   });
 
   it("does not materialize defaults when semantic validation fails", () => {

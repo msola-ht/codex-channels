@@ -300,6 +300,7 @@ codexc metrics threads
 codexc metrics report --range 30d --group models
 codexc metrics export --range 30d --format json
 codexc webui
+codexc traffic
 ```
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
@@ -332,6 +333,48 @@ codexc service logs -n 100
 - 日志需要脱敏后再分享；不要分享 Token、Cookie、Authorization Header 或完整命令工作内容。
 
 错误码见 [`错误字典`](errors.md)，渠道展示口径见 [`展示说明`](display.md)，协议与支持矩阵见 [`官方文档与源码索引`](index.md)。
+
+### 模型请求转储
+
+需要查看模型请求和响应的完整字段时，在 Gateway 配置中临时开启转储并重启服务：
+
+```toml
+[debug]
+model_traffic_dump = true
+```
+
+```bash
+codexc service restart all
+```
+
+App Server 发给统计代理的每个模型请求、上游返回的响应头和响应块，以及 WebSocket 握手和双向帧，
+都会按 JSON Lines 写入 `~/.codex-connect/traffic/` 下的 `0600` 文件；HTTP 请求头
+`x-codex-turn-metadata`、WebSocket 首帧 `client_metadata` 里的 `thread_id` 与 `turn_id`
+可以对齐到具体会话和轮次。转储是统计代理的旁路复制，不改变转发路径、指标采集和流式背压，
+也不是抓包代理。Authorization、Cookie 等凭据字段只保留认证方案，替换为 `<redacted>`。
+
+单条记录正文超过 1 MiB 时按 `part` 切分，单文件达到 64 MiB 后轮转，目录只保留最近 5 个文件；
+转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储文件包含完整 prompt、工具
+输出、代码和 SSE 事件，排查完成后关闭开关并删除文件，不要分享原始转储。
+
+流被提前终止时（例如重启 App Server 或中断 Turn），转储会先写出已经收到的部分响应体，再写一条
+`"kind": "error"` 记录，`scope` 常见取值是 `client_disconnected` 或 `websocket_closed`。这类记录
+表示流没有正常收尾，不代表上游一定失败。
+
+转储是 JSON Lines，字段被转义且正文可能分片，直接读不方便；用 `codexc traffic` 渲染成人可读文本：
+
+```bash
+codexc traffic                                 # 列出最新转储文件中每个 exchange 的摘要
+codexc traffic --exchange 12                   # 展开某一次的请求头、请求体、响应头、SSE 事件或 WebSocket 帧
+codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的 exchange 并展开正文
+codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
+codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
+```
+
+摘要行包含 exchange 编号、时间、请求路径或 WebSocket URL、线程、轮次、请求类型和响应状态；
+正文按请求与响应分别标注 `模型`，便于核对请求模型和响应模型是否一致。不传文件时读取用户数据
+目录下 `traffic/` 中最新的标签，并自动合并轮转切开的两个文件；也可以用 `--dir` 指定目录，
+或直接传入转储文件路径。`codexc traffic -h` 列出全部选项。
 
 ## 9. 开发与验证
 

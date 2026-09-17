@@ -56,6 +56,7 @@ export interface GatewayConfigDocument {
     reasoning: boolean;
   };
   experimental: { plugin_api: boolean };
+  debug?: { model_traffic_dump: boolean };
   scheduled_tasks: { enabled: boolean };
   storage: { database_path: string };
   logging: { level: "fatal" | "error" | "warn" | "info" | "debug" | "trace" };
@@ -94,6 +95,9 @@ export function validateWebuiConfigDocument(
   port: number;
   token?: string;
 };
+export function validateDebugConfigDocument(
+  document: unknown,
+): { model_traffic_dump: boolean };
 export function readGatewayConfig(configPath: string): TomlTable;
 export function materializeGatewayConfigDefaults(
   configPath: string,

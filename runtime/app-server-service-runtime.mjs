@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -16,7 +17,10 @@ import {
 } from "./app-server-supervisor.mjs";
 import { writeCliMessage as printCliMessage } from "./cli-presentation.mjs";
 import { executableInvocation, resolveExecutable } from "./executable.mjs";
-import { validateCodexConfigDocument } from "./gateway-config.mjs";
+import {
+  validateCodexConfigDocument,
+  validateDebugConfigDocument,
+} from "./gateway-config.mjs";
 import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
@@ -53,6 +57,10 @@ import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.
 
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
+  const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
+  const trafficDumpDirectory = validatedDebug.model_traffic_dump
+    ? join(runtime.dataDir, "traffic")
+    : undefined;
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
@@ -136,6 +144,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       ...(validatedCodex.upstream_user_agent
         ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
         : {}),
+      ...(trafficDumpDirectory === undefined
+        ? {}
+        : { trafficDump: { directory: trafficDumpDirectory, label: provider } }),
     };
     const opencodeGo = provider === "ocg";
     const modelProxy = new ProviderProxy("127.0.0.1:0", {

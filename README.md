@@ -54,6 +54,7 @@ codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
 codexc metrics               # 查询、导出和维护本机模型请求指标
+codexc traffic               # 查看模型请求与响应转储（列表、详情或持续跟随）
 codexc webui                 # 启动本地指标与设置 WebUI
 codexc sessions              # 交互式会话清理菜单
 codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）

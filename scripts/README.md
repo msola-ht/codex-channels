@@ -487,6 +487,13 @@
   阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
+- `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
+  转储目录、exchange、正文长度、关键字与跟随参数，使顶层 CLI 在读取配置前拒绝非法输入，
+  并向顶层帮助导出规范用法行。
+- `traffic-command.mjs`：`codexc traffic` 的实现，把 `[debug].model_traffic_dump` 生成的
+  JSON Lines 转储渲染成人可读文本；解转义并展开请求头与请求体，把 SSE 响应和 WebSocket 双向帧
+  按事件逐条解码，支持按 exchange 过滤、关键字过滤与按字节截断，`--follow` 以只读方式增量跟随
+  新写入的记录；不修改转储文件，也不访问网络或凭据。
 
 ## 构建、打包与服务
 
