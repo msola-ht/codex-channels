@@ -62,6 +62,7 @@ import type {
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadListResponse,
+  ThreadLoadedListResponse,
   ThreadMetadataUpdateResponse,
   ThreadReadResponse,
   ThreadQueueAddResponse,
@@ -227,6 +228,39 @@ export class CodexAppServerClient implements
       }
     } while (cursor);
     return threads;
+  }
+
+  async countActiveLoadedThreads(): Promise<number> {
+    const activeThreadIds = new Set<string>();
+    const loadedThreadIds = new Set<string>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const result: ThreadLoadedListResponse = await this.rpc.request<ThreadLoadedListResponse>({
+        method: "thread/loaded/list",
+        params: {
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        },
+      }, { retryOverload: true });
+      for (const threadId of result.data) {
+        if (loadedThreadIds.has(threadId)) continue;
+        loadedThreadIds.add(threadId);
+        const thread = await this.readThread(threadId);
+        if (thread.id !== threadId) {
+          throw new Error("Codex 已加载 Thread 读取目标不一致");
+        }
+        if (thread.status.type === "active") activeThreadIds.add(thread.id);
+      }
+      cursor = result.nextCursor;
+      if (cursor) {
+        if (cursors.has(cursor)) {
+          throw new Error("Codex 已加载 Thread 查询返回了循环分页游标");
+        }
+        cursors.add(cursor);
+      }
+    } while (cursor);
+    return activeThreadIds.size;
   }
 
   async listCollaborationModes(): Promise<CollaborationModePreset[]> {

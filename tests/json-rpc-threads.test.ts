@@ -66,6 +66,49 @@ describe("JsonRpcClient threads", () => {
       }]);
     });
 
+    it("counts active loaded Threads including ephemeral sessions", async () => {
+      const transport = new FakeTransport();
+      transport.threadLoadedListData = ["thread-idle", "thread-active"];
+      transport.threadReadDataById.set(
+        "thread-idle",
+        appServerThread({ id: "thread-idle", ephemeral: true }),
+      );
+      transport.threadReadDataById.set(
+        "thread-active",
+        appServerThread({
+          id: "thread-active",
+          ephemeral: true,
+          status: { type: "active", activeFlags: [] },
+          source: { subAgent: { threadSpawn: { parentThreadId: "thread-parent" } } },
+        }),
+      );
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "read-only",
+      });
+      await client.connect();
+
+      await expect(client.countActiveLoadedThreads())
+        .resolves.toBe(1);
+
+      expect(transport.sent.find((message) => message.method === "thread/loaded/list")?.params)
+        .toEqual({ limit: 100 });
+      expect(transport.sent.filter((message) => message.method === "thread/read"))
+        .toHaveLength(2);
+    });
+
+    it("fails closed when a loaded Thread read returns another target", async () => {
+      const transport = new FakeTransport();
+      transport.threadLoadedListData = ["thread-requested"];
+      transport.threadReadData = appServerThread({ id: "thread-other" });
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "read-only",
+      });
+      await client.connect();
+
+      await expect(client.countActiveLoadedThreads())
+        .rejects.toThrow("读取目标不一致");
+    });
+
     it("maps the official automation Feature source to the closed stable source", async () => {
       const transport = new FakeTransport();
       transport.threadListData = [appServerThread({ threadSource: "automation" })];

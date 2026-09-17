@@ -94,7 +94,9 @@
   不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和
   `section_position` 排序，并显式传空
   `modelProviders` 获取当前 Workspace 的全部 Provider，
-  供跨 Provider 会话展示和冷恢复定位使用。
+  供跨 Provider 会话展示和冷恢复定位使用；macOS Desktop 启动前的只读检查使用官方分页
+  `thread/loaded/list` 枚举当前内存中的持久及临时 Thread，再通过 `thread/read` 读取权威状态，只返回
+  活动 Thread 数量。
   新 Thread 可显式携带官方 `modelProvider`、受控 `threadSource=automation` 与实验
   `dynamicTools`；Fork 由 Session Router 注入当前 Workspace 的权限参数，调用方只允许选择模型
   Provider，不得跨 Provider 或自行扩大权限。

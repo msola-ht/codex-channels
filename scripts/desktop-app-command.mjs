@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 
 import WebSocket from "ws";
 
+import {
+  CodexAppServerClient,
+  createAppServerTransport,
+  JsonRpcClient,
+} from "../dist/codex-client/index.js";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { inspectAppServerSupervisorState } from "../runtime/app-server-supervisor.mjs";
 import { macDesktopAppPluginEnabledConfigKey } from "../runtime/desktop-app-host.mjs";
@@ -117,11 +122,38 @@ export async function runDesktopAppCommand(args, options = {}) {
       throw new Error("Codex Desktop App 共享尚未启用，请先运行 codexc desktop-app enable");
     }
     if (platform === "darwin") {
-      await assertMacDesktopAppHostReady(
+      const topology = await assertMacDesktopAppHostReady(
         appServer.primarySocketPath,
         inspectSupervisorState,
       );
-      writeMessage("note", "启动时会短暂重启主 App Server；请确认当前没有活动 Turn。");
+      if (topology.leasedProviders.includes(appServer.primaryProvider)) {
+        throw new Error(
+          topology.desktopAppAttached === true
+            ? "现有 Codex Desktop App Host 租约尚未释放；请稍后重试"
+            : "主 OpenAI App Server 正由 codexc remote 使用；请退出 Remote TUI 后重试",
+        );
+      }
+      const inspectActiveThreads = options.inspectActiveThreads
+        ?? inspectMacDesktopAppActiveThreads;
+      let activeThreadCount;
+      try {
+        activeThreadCount = await inspectActiveThreads({
+          socketPath: appServer.primarySocketPath,
+          codexBinary: runtimeEnvironment.CODEX_BINARY,
+        });
+      } catch (error) {
+        throw new Error(
+          "无法确认主 OpenAI App Server 当前是否空闲；已取消启动",
+          { cause: error },
+        );
+      }
+      if (activeThreadCount > 0) {
+        throw new Error(
+          `主 OpenAI App Server 当前有 ${activeThreadCount} 个活动 Thread；`
+          + "请等待 Turn 完成后重试",
+        );
+      }
+      writeMessage("note", "已确认当前没有活动 Turn；启动时会短暂重启主 App Server。");
       await openDesktop(app.path, "");
     } else {
       const token = readDesktopAppBridgeToken(located.dataDir);
@@ -198,6 +230,30 @@ async function assertMacDesktopAppHostReady(primarySocketPath, inspectSupervisor
     throw new Error(
       "App Server 服务不支持当前 Desktop Host；请运行 codexc service restart app-server 后重试",
     );
+  }
+  return inspection.topology;
+}
+
+async function inspectMacDesktopAppActiveThreads({ socketPath, codexBinary }) {
+  const transport = createAppServerTransport(
+    { kind: "local-app-server", socketPath },
+    { codexBinary, connectTimeoutMs: 3_000 },
+  );
+  const client = new CodexAppServerClient(
+    new JsonRpcClient(
+      transport,
+      10_000,
+      undefined,
+      64,
+      { name: "codex_app_server_daemon", title: "Codex Desktop App launch check" },
+    ),
+    { sandbox: "read-only" },
+  );
+  await client.connect();
+  try {
+    return await client.countActiveLoadedThreads();
+  } finally {
+    await client.close();
   }
 }
 

@@ -209,8 +209,11 @@ macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与�
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
 Node 托管项目锁定的 Codex CLI 0.154.0；Desktop 传入的内置插件启用值会受控应用到共享主实例，
-Host 租约存在时空闲释放不会停止主实例。不要在活动 Turn 或 `codexc remote` 租约存在时执行
-`desktop-app open`。隔离实测已经确认该进程链可启动 `codex_app`，服务重启恢复和退出重开仍需按
+Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会先通过 App Server 的官方
+`thread/loaded/list` 和 `thread/read` 检查全部已加载的持久及临时 Thread；发现活动 Thread、
+`codexc remote` 主实例租约，或无法完成
+只读状态检查时都会拒绝启动，不会进入子进程切换。隔离实测已经确认该进程链可启动 `codex_app`，
+服务重启恢复和退出重开仍需按
 当前 Desktop 构建完成实机复核，因此支持级别
 继续是预览。Windows 只查询当前用户的正式安装包，并直接创建带单次环境的包内 Desktop 子进程，
 不写当前用户或系统级持久环境；Windows 的会话双向互通及内置工具兼容均尚未实机验收，不能据此

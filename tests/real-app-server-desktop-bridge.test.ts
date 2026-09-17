@@ -9,7 +9,12 @@ import { PassThrough } from "node:stream";
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 
-import { UnixWebSocketTransport } from "../src/codex-client/index.js";
+import {
+  CodexAppServerClient,
+  createAppServerTransport,
+  JsonRpcClient,
+  UnixWebSocketTransport,
+} from "../src/codex-client/index.js";
 import {
   desktopAppBridgeTokenPath,
   proxyDesktopAppStdioToUnixSocket,
@@ -93,6 +98,7 @@ contractSuite("real Codex Desktop App bridge", () => {
     let first: RawBridgeClient | undefined;
     let second: RawBridgeClient | undefined;
     let bridge: Awaited<ReturnType<typeof startDesktopAppBridge>> | undefined;
+    let activityClient: CodexAppServerClient | undefined;
     let threadId: string | undefined;
     try {
       const tokenPath = desktopAppBridgeTokenPath(testRuntime);
@@ -112,6 +118,23 @@ contractSuite("real Codex Desktop App bridge", () => {
               `${stdout}\n${stderr}`,
             )),
       );
+      activityClient = new CodexAppServerClient(
+        new JsonRpcClient(
+          createAppServerTransport(
+            { kind: "local-app-server", socketPath },
+            { codexBinary, connectTimeoutMs: 3_000 },
+          ),
+          10_000,
+          undefined,
+          64,
+          { name: "codex_app_server_daemon", title: "Desktop launch check contract" },
+        ),
+        { sandbox: "read-only" },
+      );
+      await activityClient.connect();
+      await expect(activityClient.countActiveLoadedThreads()).resolves.toBe(0);
+      await activityClient.close();
+      activityClient = undefined;
       if (process.platform !== "darwin" && process.platform !== "win32") {
         expect(existsSync(tokenPath)).toBe(false);
         bridge = await startDesktopAppBridge({
@@ -198,6 +221,7 @@ contractSuite("real Codex Desktop App bridge", () => {
       }
       await first?.close().catch(() => undefined);
       await second?.close().catch(() => undefined);
+      await activityClient?.close().catch(() => undefined);
       await bridge?.close().catch(() => undefined);
       if (service.exitCode === null && service.signalCode === null) {
         await stopDetachedTestProcess(service, 10_000);

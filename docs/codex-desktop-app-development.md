@@ -223,6 +223,10 @@ codexc desktop-app open
 
 - 只在配置、平台兼容探测与对应服务路径就绪时启动 Desktop。
 - Desktop 已运行时拒绝，提示先完全退出；不强制结束用户进程。
+- macOS 在启动前先拒绝仍由 `codexc remote` 持有的主实例租约，再通过官方
+  `thread/loaded/list` 分页枚举全部已加载的持久及临时 Thread，并逐项使用 `thread/read` 读取状态；
+  存在活动 Thread 或无法完成只读检查时拒绝启动，不进入
+  会短暂替换主 App Server 子进程的 Pipe 附加阶段。Windows 不执行该检查，因为其桥接不替换子进程。
 - macOS 使用 `/usr/bin/open --env CODEX_APP_SERVER_FORCE_CLI=1 --env CODEX_CLI_PATH=<受管入口>
   -a ChatGPT` 启动，并传入随包资源与签名 Node 路径。受管入口只接受 Desktop 实际提供的工具 Pipe
   和内置插件布尔启用值；不使用 `launchctl setenv`，也不连接回环桥。
@@ -378,8 +382,8 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 6. Desktop 入口退出时释放 Supervisor 租约并终止自己持有的 Proxy 子进程，不结束共享 App Server。
    Pipe 失效后的下一次 `open` 必须用新 Pipe 重新附加，不能复用旧路径或静默启动 Desktop 私有
    App Server。
-   首次附加和 Pipe 切换会短暂重启主 App Server 子进程；`desktop-app open` 必须明确提示不要在活动
-   Turn 中执行，且不能把这次切换伪装成无中断操作。
+   首次附加和 Pipe 切换会短暂重启主 App Server 子进程；`desktop-app open` 必须先检查主实例租约与
+   全部已加载 Thread 的活动状态，状态不空闲或无法确认时失败关闭，且不能把切换伪装成无中断操作。
 7. 先运行现有类型、Lint、文档、服务与真实 App Server 合同，再在 ChatGPT `26.908.70816` 上实机
    验证 Thread 双向共享、`codex_app` 工具目录、App Server 服务重启恢复、Desktop 完全退出后重开
    和禁用回滚。Windows 保持原预览状态，本阶段不据 macOS 结果改变其支持结论。

@@ -16,6 +16,10 @@ export interface DesktopAppCommandOptions {
   restartAppServer?: () => Promise<void>;
   probeBridge?: (endpoint: string) => Promise<boolean>;
   inspectSupervisorState?: typeof import("../runtime/app-server-supervisor.mjs").inspectAppServerSupervisorState;
+  inspectActiveThreads?: (options: {
+    socketPath: string;
+    codexBinary: string;
+  }) => Promise<number>;
   openDesktop?: (path: string, endpoint: string) => void | Promise<void>;
 }
 

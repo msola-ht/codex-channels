@@ -134,6 +134,7 @@ describe("desktop-app command", () => {
       platform: "darwin",
       inspectDesktopApp: compatibleStoppedApp,
       inspectSupervisorState: readyDesktopHostSupervisor,
+      inspectActiveThreads: async () => 0,
       probeBridge: async () => {
         bridgeProbed = true;
         return true;
@@ -147,6 +148,68 @@ describe("desktop-app command", () => {
       endpoint: "",
     }]);
     expect(bridgeProbed).toBe(false);
+  });
+
+  it("refuses to open the macOS app while the primary App Server has an active Thread", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let opened = false;
+
+    await expect(runDesktopAppCommand(["open"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      inspectActiveThreads: async () => 2,
+      openDesktop: () => { opened = true; },
+      writeMessage: () => undefined,
+    })).rejects.toThrow("当前有 2 个活动 Thread");
+
+    expect(opened).toBe(false);
+  });
+
+  it("fails closed when the macOS active Thread check is unavailable", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let opened = false;
+
+    await expect(runDesktopAppCommand(["open"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: readyDesktopHostSupervisor,
+      inspectActiveThreads: async () => { throw new Error("socket unavailable"); },
+      openDesktop: () => { opened = true; },
+      writeMessage: () => undefined,
+    })).rejects.toThrow("无法确认主 OpenAI App Server 当前是否空闲");
+
+    expect(opened).toBe(false);
+  });
+
+  it("refuses to open the macOS app while codexc remote holds the primary lease", async () => {
+    const fixture = createFixture({ enabled: true, port: 49_203 });
+    let activityInspected = false;
+    let opened = false;
+
+    await expect(runDesktopAppCommand(["open"], {
+      environment: fixture.environment,
+      platform: "darwin",
+      inspectDesktopApp: compatibleStoppedApp,
+      inspectSupervisorState: async () => ({
+        ...await readyDesktopHostSupervisor(),
+        topology: {
+          ...(await readyDesktopHostSupervisor()).topology,
+          leasedProviders: ["openai"],
+        },
+      }),
+      inspectActiveThreads: async () => {
+        activityInspected = true;
+        return 0;
+      },
+      openDesktop: () => { opened = true; },
+      writeMessage: () => undefined,
+    })).rejects.toThrow("正由 codexc remote 使用");
+
+    expect(activityInspected).toBe(false);
+    expect(opened).toBe(false);
   });
 
   it("parses the exact macOS Desktop tools plugin override", () => {
