@@ -47,6 +47,7 @@ import {
   type ProviderProxyMetrics,
   type ProviderQuotaWindowSnapshot,
 } from "./response-metrics-observer.js";
+import { ModelTrafficDump } from "./traffic-dump.js";
 
 export type {
   ProviderProxyMetrics,
@@ -72,6 +73,8 @@ export interface ProviderProxyOptions {
   upstreamBasePath?: string;
   /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.154.0 API 路径。 */
   allowOpenAiApiPaths?: boolean;
+  /** 仅确认的官方 OpenAI 上游请求 Responses WebSocket timing 事件。 */
+  requestOpenAiTimingMetrics?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
   /** 共享代理无账户前缀请求归属的默认账户。 */
@@ -80,6 +83,20 @@ export interface ProviderProxyOptions {
   externalRoleReasoningEffort?: string;
   /** 覆盖发给模型上游的完整 User-Agent；缺省时原样转发 App Server 生成的 UA。 */
   upstreamUserAgent?: string;
+  /**
+   * 模型请求与响应的完整报文转储；缺省时不记录。
+   * 仅在 `[debug].model_traffic_dump` 开启时由组合层传入。
+   */
+  trafficDump?: {
+    directory: string;
+    /** 精简模式保留的 `input` 末尾条目数；缺省或 `0` 时转储完整报文。 */
+    inputItems?: number;
+    /** 单个数组条目的正文上限（字节）；缺省或 `0` 时按原样转储。 */
+    itemMaxBytes?: number;
+    /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
+    retentionDays?: number;
+    label: string;
+  };
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
   timeoutMs?: number;
   quotaWindowsProvider?: (
@@ -112,6 +129,8 @@ export class ProviderProxy {
   private readonly externalRoleReasoningEffort: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
+  private readonly requestOpenAiTimingMetrics: boolean;
+  private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
         accountId?: string,
@@ -159,10 +178,29 @@ export class ProviderProxy {
     }
     this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
+    this.requestOpenAiTimingMetrics = options.requestOpenAiTimingMetrics ?? false;
+    this.onError = options.onError;
+    this.trafficDump = options.trafficDump === undefined
+      ? undefined
+      : new ModelTrafficDump({
+          directory: options.trafficDump.directory,
+          label: options.trafficDump.label,
+          ...(options.trafficDump.inputItems === undefined
+            ? {}
+            : { inputItems: options.trafficDump.inputItems }),
+          ...(options.trafficDump.itemMaxBytes === undefined
+            ? {}
+            : { itemMaxBytes: options.trafficDump.itemMaxBytes }),
+          ...(options.trafficDump.retentionDays === undefined
+            ? {}
+            : { retentionDays: options.trafficDump.retentionDays }),
+          onError: (error) => {
+            this.onError?.(error);
+          },
+        });
     this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
-    this.onError = options.onError;
     this.server = createServer((request, response) => {
       this.handleHttpRequest(request, response);
     });
@@ -218,6 +256,7 @@ export class ProviderProxy {
         quotaRefreshCloseTimeoutMs,
       ),
     ]);
+    await this.trafficDump?.close();
   }
 
   private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
@@ -240,13 +279,21 @@ export class ProviderProxy {
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
+    const startedAtMs = Date.now();
     const metrics = createMetricsState(
       turnMetadata,
-      Date.now(),
+      startedAtMs,
       "http",
       responseOperation(route, turnMetadata.operation),
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
     );
+    const exchange = this.trafficDump?.beginHttpExchange({
+      ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+      headers: request.headers,
+      method: request.method ?? "GET",
+      path: request.url ?? "",
+      startedAtMs,
+    });
     if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
     }
@@ -277,10 +324,15 @@ export class ProviderProxy {
       metrics.httpStatus = upstreamResponse.statusCode ?? null;
       metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
       metrics.weeklyQuota = weeklyQuotaFromHeaders(upstreamResponse.headers);
+      exchange?.responseHead(
+        upstreamResponse.statusCode ?? null,
+        upstreamResponse.headers,
+      );
       writeUpstreamHead(response, upstreamResponse);
       const metricsObserver = new HttpResponseMetricsObserver(metrics);
       let forwarding = Promise.resolve();
       upstreamResponse.on("data", (chunk: Buffer) => {
+        exchange?.responseChunk(chunk);
         const completed = metricsObserver.observeChunk(chunk, Date.now());
         if (!completed) {
           if (!response.write(chunk)) {
@@ -303,6 +355,7 @@ export class ProviderProxy {
       upstreamResponse.on("end", () => {
         const endedAtMs = Date.now();
         const completed = metricsObserver.finish(endedAtMs);
+        exchange?.responseEnd();
         forwarding = forwarding.then(async () => {
           if (completed || recordsResponseMetrics) await emitMetrics();
           response.end();
@@ -316,6 +369,7 @@ export class ProviderProxy {
           response.destroy();
           return;
         }
+        exchange?.failure("upstream_response", error);
         markMetricsFailed(metrics, "upstream_response_error", Date.now(), error);
         void emitMetrics();
         response.destroy();
@@ -326,6 +380,7 @@ export class ProviderProxy {
       upstream.destroy(new Error(`模型上游响应超时：${this.timeoutMs}ms`));
     });
     upstream.on("error", (error) => {
+      exchange?.failure("upstream_request", error);
       markMetricsFailed(metrics, "upstream_request_error", Date.now(), error);
       void emitMetrics();
       if (!response.headersSent) {
@@ -337,6 +392,7 @@ export class ProviderProxy {
       this.onError?.(asError(error));
     });
     request.on("error", (error) => {
+      exchange?.failure("client_request", error);
       markMetricsFailed(metrics, "client_request_error", Date.now(), error);
       void emitMetrics();
       upstream.destroy();
@@ -345,6 +401,7 @@ export class ProviderProxy {
     });
     response.on("close", () => {
       if (!response.writableEnded) {
+        exchange?.failure("client_disconnected");
         if (metrics.status !== "completed") {
           markMetricsFailed(metrics, "client_disconnected", Date.now());
           void emitMetrics();
@@ -352,6 +409,8 @@ export class ProviderProxy {
         upstream.destroy();
       }
     });
+    request.on("data", (chunk: Buffer) => exchange?.requestChunk(chunk));
+    request.on("end", () => exchange?.requestEnd());
     request.pipe(upstream);
   }
 
@@ -401,6 +460,12 @@ export class ProviderProxy {
       recordsResponseMetrics,
     )}`;
     const protocols = websocketProtocols(request.headers["sec-websocket-protocol"]);
+    const exchange = this.trafficDump?.beginWebSocketExchange({
+      ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+      headers: request.headers,
+      startedAtMs: Date.now(),
+      url,
+    });
     const upstream = new WebSocket(url, protocols, {
       ...(target.agent ?? this.upstreamAgent
         ? { agent: target.agent ?? this.upstreamAgent }
@@ -410,6 +475,7 @@ export class ProviderProxy {
         target.host,
         target.port,
         this.upstreamUserAgent,
+        recordsResponseMetrics && this.requestOpenAiTimingMetrics,
       ),
       handshakeTimeout: this.timeoutMs,
     });
@@ -429,6 +495,7 @@ export class ProviderProxy {
     };
 
     client.on("message", (data, isBinary) => {
+      exchange?.webSocketFrame("client", data, isBinary);
       const sanitized = recordsResponseMetrics
         ? sanitizeClientWebSocketMessage(data, isBinary)
         : { data };
@@ -465,6 +532,7 @@ export class ProviderProxy {
     upstream.on("unexpected-response", (_request, response) => {
       const receivedAtMs = Date.now();
       const statusCode = response.statusCode ?? 502;
+      exchange?.failure("upstream_handshake", `HTTP ${statusCode}`);
       if (!recordsResponseMetrics) {
         response.resume();
         client.terminate();
@@ -498,6 +566,7 @@ export class ProviderProxy {
       upstream.terminate();
     });
     upstream.on("message", (data, isBinary) => {
+      exchange?.webSocketFrame("upstream", data, isBinary);
       const receivedAtMs = Date.now();
       let completedMetrics: MetricsState | undefined;
       if (!isBinary && activeMetrics) {
@@ -545,10 +614,12 @@ export class ProviderProxy {
     };
     client.on("close", (code, reason) => {
       noteFailureType("client_disconnected");
+      exchange?.webSocketClose("client", code, reason);
       closePeer(upstream, code, reason);
     });
     upstream.on("close", (code, reason) => {
       noteFailureType("websocket_closed");
+      exchange?.webSocketClose("upstream", code, reason);
       closePeer(client, code, reason);
       if (!activeMetrics) return;
       const reasonType = websocketCloseErrorType(reason);
@@ -568,11 +639,13 @@ export class ProviderProxy {
     });
     client.on("error", (error) => {
       noteFailureType("client_disconnected");
+      exchange?.failure("client_error", error);
       this.onError?.(asError(error));
       upstream.terminate();
     });
     upstream.on("error", (error) => {
       noteFailureType("websocket_closed");
+      exchange?.failure("upstream_error", error);
       this.onError?.(asError(error));
       client.terminate();
     });

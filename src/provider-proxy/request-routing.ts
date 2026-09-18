@@ -170,6 +170,7 @@ export function forwardedWebSocketHeaders(
   upstreamHost: string,
   upstreamPort: number | undefined,
   userAgent?: string,
+  includeTimingMetrics = false,
 ): IncomingHttpHeaders {
   const forwarded = endToEndHeaders(headers);
   for (const name of [
@@ -179,9 +180,13 @@ export function forwardedWebSocketHeaders(
     "sec-websocket-extensions",
     "sec-websocket-protocol",
     "x-codex-turn-metadata",
+    "x-responsesapi-include-timing-metrics",
   ]) delete forwarded[name];
   if (userAgent !== undefined) {
     forwarded["user-agent"] = userAgent;
+  }
+  if (includeTimingMetrics) {
+    forwarded["x-responsesapi-include-timing-metrics"] = "true";
   }
   forwarded.host = upstreamPort === undefined ? upstreamHost : `${upstreamHost}:${upstreamPort}`;
   return forwarded;

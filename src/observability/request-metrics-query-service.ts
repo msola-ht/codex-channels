@@ -29,7 +29,7 @@ export interface ResolvedRequestMetricsRange {
 export type RequestMetricsQueryStore =
   & Pick<
     ModelRequestMetricsRequestQueryStore,
-    "aggregate" | "daily" | "errors" | "page"
+    "aggregate" | "daily" | "hourly" | "errors" | "page"
   >
   & Pick<
     ModelRequestMetricsThreadQueryStore,
@@ -198,6 +198,27 @@ export class RequestMetricsQueryService {
       startAtMs: range.startAtMs,
       endAtMs: range.endAtMs,
     });
+  }
+
+  trend(range: ResolvedRequestMetricsRange) {
+    const [from, to] = range.name.split("..");
+    const singleDay = range.name === "today" || range.name === "yesterday"
+      || (to !== undefined && from === to);
+    if (!singleDay) return { granularity: "day" as const, daily: this.daily(range) };
+
+    const rows = this.store.hourly(range);
+    const rowsByHour = new Map(rows.map((row) => [row.hour, row]));
+    const start = new Date(range.startAtMs);
+    const day = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+    const lastHour = new Date(Math.max(range.startAtMs, range.endAtMs - 1)).getHours();
+    // 按本地钟表小时合计：夏令时回拨的重复小时合并，跳过及无记录的小时补零。
+    const hourly = Array.from({ length: lastHour + 1 }, (_, index) => {
+      const hour = `${day} ${String(index).padStart(2, "0")}:00`;
+      return rowsByHour.get(hour) ?? {
+        hour, requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
+      };
+    });
+    return { granularity: "hour" as const, hourly };
   }
 
   page(

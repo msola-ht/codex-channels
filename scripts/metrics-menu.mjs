@@ -142,13 +142,14 @@ export async function runMetricsMenu({
       writeCliMessage("note", "指标库中暂无可导出的会话记录。");
       return;
     }
+    const { formatLocalTime } = await import("./metrics-export-format.mjs");
     const selected = await prompts.select({
       message: "选择会话",
       showInstructions: false,
       options: threads.map((thread) => ({
         value: thread.threadId,
         label: `${thread.threadId.slice(0, 12)}… · ${thread.turnCount} 次对话 · ${thread.requestCount} 次请求`,
-        hint: new Date(thread.lastRecordedAtMs).toISOString(),
+        hint: formatLocalTime(thread.lastRecordedAtMs),
       })),
     });
     if (prompts.isCancel(selected)) {

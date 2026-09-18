@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +11,73 @@ const directories: string[] = [];
 afterEach(() => { vi.useRealTimers(); for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics aggregate reports", () => {
+  it.each(["Asia/Shanghai", "America/New_York", "Asia/Kathmandu", "UTC"])("groups by system calendar day and hour in %s", (timeZone) => {
+    const directory = temporaryDirectory();
+    const result = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+      import { SqliteModelRequestMetricsStore } from './src/observability/index.ts';
+      import { resolveRequestMetricsRange, RequestMetricsQueryService } from './src/observability/request-metrics-query-service.ts';
+      import { sample } from './tests/request-metrics-fixtures.ts';
+      const results = [];
+      for (const [month, day] of [[8, 18], [2, 8], [10, 1]]) {
+        const start = new Date(2026, month, day).getTime();
+        const end = new Date(2026, month, day + 1).getTime();
+        const store = new SqliteModelRequestMetricsStore(process.argv[1] + '/' + month + '.sqlite3', end);
+        store.recordBatch([start - 1, start, end - 1, end].map(recordedAtMs => ({...sample(), recordedAtMs})));
+        const range = resolveRequestMetricsRange('yesterday', end);
+        const service = new RequestMetricsQueryService(store);
+        const hours = service.trend(range).hourly;
+        const today = service.trend(resolveRequestMetricsRange('today', start + 1)).hourly;
+        results.push({rows: store.daily(range), hours, today, count: store.aggregate({...range, dimension:'global'}).aggregate.requestCount});
+        if (process.env.TZ === 'America/New_York' && month === 10) {
+          store.recordBatch(['2026-11-01T05:30:00Z', '2026-11-01T06:30:00Z'].map(value => ({...sample(), recordedAtMs: Date.parse(value)})));
+          const repeated = service.trend(range).hourly[1];
+          if (repeated.requestCount !== 2) throw new Error('Repeated local hour lost requests');
+        }
+        store.close();
+      }
+      console.log(JSON.stringify(results));
+    `, directory], { env: { ...process.env, TZ: timeZone }, encoding: "utf8" });
+    const reports = JSON.parse(result) as Array<{
+      rows: Array<{ day: string; requestCount: number }>;
+      hours: Array<{ hour: string; requestCount: number }>;
+      today: Array<{ hour: string; requestCount: number }>;
+      count: number;
+    }>;
+    expect(reports.map((report) => report.rows)).toMatchObject([
+      [{ day: "2026-09-18", requestCount: 2 }],
+      [{ day: "2026-03-08", requestCount: 2 }],
+      [{ day: "2026-11-01", requestCount: 2 }],
+    ]);
+    expect(reports.map((report) => report.count)).toEqual([2, 2, 2]);
+    for (const report of reports) {
+      expect(report.hours).toHaveLength(24);
+      expect(report.hours[0]).toMatchObject({ hour: `${report.rows[0]!.day} 00:00`, requestCount: 1 });
+      expect(report.hours[23]).toMatchObject({ hour: `${report.rows[0]!.day} 23:00`, requestCount: 1 });
+      expect(report.hours.reduce((sum, row) => sum + row.requestCount, 0)).toBe(report.count);
+      expect(report.today).toEqual([report.hours[0]]);
+    }
+  });
+
+  it("keeps a read snapshot stable across concurrent writes and releases it after failure", () => {
+    const path = join(temporaryDirectory(), "request-metrics.sqlite3");
+    const writer = new SqliteModelRequestMetricsStore(path);
+    writer.record({ ...sample(), recordedAtMs: 100 });
+    const reader = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true });
+    const query = { startAtMs: 0, endAtMs: Date.now() + 1, dimension: "global" as const };
+    try {
+      reader.readSnapshot(() => {
+        expect(reader.aggregate(query).aggregate?.requestCount).toBe(1);
+        writer.record({ ...sample(), recordedAtMs: 200 });
+        expect(reader.daily(query).reduce((sum, row) => sum + row.requestCount, 0)).toBe(1);
+      });
+      expect(reader.aggregate(query).aggregate?.requestCount).toBe(2);
+      expect(() => reader.readSnapshot(() => { throw new Error("snapshot failed"); })).toThrow("snapshot failed");
+      expect(reader.readSnapshot(() => reader.aggregate(query).aggregate?.requestCount)).toBe(2);
+    } finally {
+      reader.close();
+      writer.close();
+    }
+  });
   it("aggregates all request sources uniformly by provider and model within a time range", () => {
     vi.useFakeTimers();
     const now = new Date("2026-08-03T12:00:00.000Z");

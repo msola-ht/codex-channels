@@ -4,6 +4,14 @@ import { mergeCompletionTiming } from "../src/bootstrap/completion-timing.js";
 import type { StoredTurnRequestMetricsSummary } from "../src/observability/index.js";
 
 describe("mergeCompletionTiming", () => {
+  it("restores persisted TTFT instead of a later live sample after restart", () => {
+    expect(mergeCompletionTiming(turnSummary({ upstreamTtftMs: 569 }), "turn-1",
+      { upstreamTtftMs: 720 })?.upstreamTtftMs).toBe(569);
+    expect(mergeCompletionTiming(turnSummary({ upstreamTtftMs: 0 }), "turn-1",
+      undefined)?.upstreamTtftMs).toBe(0);
+    expect(mergeCompletionTiming(turnSummary({ upstreamTtftMs: null }), "turn-1",
+      undefined)).not.toHaveProperty("upstreamTtftMs");
+  });
   it("rebuilds a recovered Turn from the persisted local proxy summary", () => {
     const latestTurn = turnSummary({
       requestCount: 2,

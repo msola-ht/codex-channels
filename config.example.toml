@@ -68,6 +68,23 @@ reasoning = true
 # Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。
 plugin_api = false
 
+[debug]
+# 把模型请求和响应的完整报文写入 Gateway 数据目录下的 traffic 转储文件，默认关闭；
+# 仅在排查模型请求字段时临时开启，重启服务后生效。
+# V2 转储按逻辑模型调用保存一条请求和一个终态响应，完整 SSE/WS 传输轨迹另存为 trace；
+# 包含 prompt、工具输出和代码，但不包含 Authorization、Cookie 等凭据。写入失败不影响模型请求。
+model_traffic_dump = false
+# 转储体积控制：每次请求都会重发完整会话历史，按原样落盘会让单个请求就有几 MB。默认只保留请求
+# input 的末尾 3 条完整条目（更早的折叠为条数与字节数摘要）、丢弃逐条流式 .delta 事件（完整文本
+# 仍由 *.done 事件承载），并把响应里重复回显的 instructions 与 tools 折叠为长度占位；
+# 需要按原样转储完整报文时改为 0。
+model_traffic_input_items = 3
+# 单条正文上限：请求 input 条目、响应 output 条目等单个数组条目超过该字节数时只保留头尾，并写入
+# {"type":"truncated","bytes":…,"head":…,"tail":…} 标记；0 表示不限制。
+model_traffic_item_max_bytes = 65536
+# 历史转储保留天数；App Server 启动及新记录批次建立时按最后活动时间清理，0 表示关闭按时间清理。
+model_traffic_retention_days = 30
+
 [scheduled_tasks]
 # Gateway 计划任务默认关闭；启用后使用独立私有数据库并由 App Server 执行 Turn。
 enabled = false

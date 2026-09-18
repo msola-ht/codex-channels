@@ -23,10 +23,17 @@ describe("ProviderProxy WebSocket metrics", () => {
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
     let upstreamMessage: Record<string, unknown> | undefined;
     let upstreamPath = "";
+    let upstreamTimingHeader: string | undefined;
     upstreamWebSocket.on("connection", (socket, request) => {
       upstreamPath = request.url ?? "";
+      const timingHeader = request.headers["x-responsesapi-include-timing-metrics"];
+      upstreamTimingHeader = Array.isArray(timingHeader) ? timingHeader[0] : timingHeader;
       socket.on("message", (data) => {
         upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
+        socket.send(JSON.stringify({ type: "response.created", response: { id: "r1" } }));
+        socket.send(JSON.stringify({ type: "responsesapi.websocket_timing", timing_metrics: {
+          response_id: "r1", timing_scope: "logical_turn", first_sampled_message_ttft_ms: 569,
+        } }));
         socket.send(JSON.stringify({
           type: "codex.rate_limits",
           plan_type: "plus",
@@ -79,6 +86,8 @@ describe("ProviderProxy WebSocket metrics", () => {
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
       upstreamBasePath: "/backend-api/codex",
+      allowOpenAiApiPaths: true,
+      requestOpenAiTimingMetrics: true,
       onMetrics: (metric) => {
         metrics.push(metric);
       },
@@ -86,7 +95,9 @@ describe("ProviderProxy WebSocket metrics", () => {
     await proxy.start();
     openServers.push(proxy);
 
-    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`, {
+      headers: { "x-responsesapi-include-timing-metrics": "true" },
+    });
     const completed = new Promise<void>((resolve, reject) => {
       client.on("open", () => {
         client.send(JSON.stringify({
@@ -121,9 +132,11 @@ describe("ProviderProxy WebSocket metrics", () => {
       },
     });
     expect(upstreamPath).toBe("/backend-api/codex/responses");
+    expect(upstreamTimingHeader).toBe("true");
     expect(metrics).toHaveLength(1);
     expect(metrics[0]).toMatchObject({
       operation: "compact",
+      upstreamTtftMs: 569,
       threadId: "thread-ws",
       turnId: "turn-ws",
       reasoningEffort: "medium",
@@ -148,7 +161,10 @@ describe("ProviderProxy WebSocket metrics", () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
     let upstreamMessage: Record<string, unknown> | undefined;
-    upstreamWebSocket.on("connection", (socket) => {
+    let upstreamTimingHeader: string | undefined;
+    upstreamWebSocket.on("connection", (socket, request) => {
+      const timingHeader = request.headers["x-responsesapi-include-timing-metrics"];
+      upstreamTimingHeader = Array.isArray(timingHeader) ? timingHeader[0] : timingHeader;
       socket.on("message", (data) => {
         upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
         socket.send(JSON.stringify({
@@ -183,6 +199,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
+      allowOpenAiApiPaths: true,
       onMetrics: (metric) => {
         metrics.push(metric);
       },
@@ -190,7 +207,9 @@ describe("ProviderProxy WebSocket metrics", () => {
     await proxy.start();
     openServers.push(proxy);
 
-    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`, {
+      headers: { "x-responsesapi-include-timing-metrics": "true" },
+    });
     await new Promise<void>((resolve, reject) => {
       client.on("open", () => {
         client.send(JSON.stringify({
@@ -217,6 +236,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       generate: false,
       client_metadata: {},
     });
+    expect(upstreamTimingHeader).toBeUndefined();
     expect(metrics).toEqual([]);
   });
 

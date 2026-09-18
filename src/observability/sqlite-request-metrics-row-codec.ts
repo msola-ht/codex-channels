@@ -38,6 +38,7 @@ export interface MetricRow {
   weekly_quota_plan_type: string | null;
   quota_windows: string | null;
   user_agent: string | null;
+  upstream_ttft_ms: number | null;
 }
 
 export interface CompactSummaryRow {
@@ -53,6 +54,7 @@ export interface CompactSummaryRow {
 }
 
 export interface TurnSummaryRow extends CompactSummaryRow {
+  upstream_ttft_ms?: number | null;
   provider?: string | null;
   model?: string | null;
   reasoning_effort?: string | null;
@@ -108,6 +110,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     threadId: row.thread_id,
     turnId: row.turn_id,
     userAgent: row.user_agent,
+    upstreamTtftMs: row.upstream_ttft_ms,
     model: row.model,
     serviceTier: row.service_tier,
     reasoningEffort: row.reasoning_effort,
@@ -153,6 +156,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
   return {
+    ...(row.upstream_ttft_ms === undefined ? {} : { upstreamTtftMs: row.upstream_ttft_ms }),
     provider: row.provider ?? null,
     model: row.model ?? null,
     reasoningEffort: row.reasoning_effort ?? null,

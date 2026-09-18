@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 
 import { useApi } from "@/hooks/use-api"
-import { fetchDailyUsage, fetchOverview } from "@/lib/api"
+import { fetchOverview } from "@/lib/api"
 import { resolveDashboardData } from "@/lib/overview-state"
 import type { MetricsRangeQuery } from "@/lib/types"
 
@@ -12,14 +12,10 @@ export function useDashboard(query: MetricsRangeQuery) {
   const overview = useApi(async (signal) => ({
     request, data: await fetchOverview(request.query, signal),
   }), [request])
-  const trend = useApi(async (signal) => ({
-    request, data: await fetchDailyUsage(request.query, signal),
-  }), [request])
-  const current = resolveDashboardData(request, overview.data, trend.data)
+  const current = resolveDashboardData(request, overview.data)
   const refetch = useCallback(() => setRevision((value) => value + 1), [])
   return {
-    account: { data: current.overview, loading: overview.loading, error: overview.error },
-    trend: { data: current.trend, loading: trend.loading, error: trend.error },
+    data: current, loading: overview.loading, error: overview.error,
     refetch,
   }
 }

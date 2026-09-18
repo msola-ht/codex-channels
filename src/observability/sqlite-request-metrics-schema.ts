@@ -11,7 +11,7 @@ export const metricStorageColumns = [
   "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens",
   "request_started_at_ms", "response_completed_at_ms", "recorded_at_ms",
   "weekly_quota_limit_id", "weekly_used_percent_millionths", "weekly_resets_at",
-  "weekly_quota_plan_type", "quota_windows", "user_agent",
+  "weekly_quota_plan_type", "quota_windows", "user_agent", "upstream_ttft_ms",
 ] as const;
 
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
@@ -56,7 +56,8 @@ export const modelRequestMetricsTableSql = `
     ),
     weekly_quota_plan_type TEXT,
     quota_windows TEXT,
-    user_agent TEXT
+    user_agent TEXT,
+    upstream_ttft_ms REAL CHECK (upstream_ttft_ms IS NULL OR upstream_ttft_ms >= 0)
   );
 `;
 

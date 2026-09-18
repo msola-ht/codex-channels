@@ -1,5 +1,6 @@
 export type {
   Aggregate,
+  ServerTimeResponse,
   MetricsQuery,
   MetricsProvidersResponse,
   MetricsRangeQuery,
@@ -9,6 +10,8 @@ export type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
   DailyUsageRow,
+  HourlyUsageRow,
+  UsageTrendResponse,
   ErrorGroup,
   ErrorsReport,
   ErrorsResponse,
@@ -51,6 +54,12 @@ export type {
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
+  TrafficDetailResponse,
+  TrafficExchangeDetail,
+  TrafficExchangeSummary,
+  TrafficHeaderValue,
+  TrafficLabel,
+  TrafficListResponse,
   TurnSummary,
   WeeklyQuota,
 } from "../../../scripts/webui-api"

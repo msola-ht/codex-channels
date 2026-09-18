@@ -287,6 +287,8 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
 存在原 Thread 时，`/new` 的结果会显示 `恢复会话：/r <Thread ID>`，可直接复制该命令恢复旧会话。
+`/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
+重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。
 可使用 `codexc sessions cleanup <最大轮数>` 预览并按轮数批量归档短会话；追加 `--idle-days <天数>` 可进一步要求会话连续空闲达到指定天数（两个条件同时满足）。在交互终端追加 `--confirm` 后会再次展示候选并询问确认。执行前需停止 Gateway；命令覆盖配置中的全部 Workspace 和 Provider，Provider 不可连接时失败关闭，使用本机轮数缓存，归档不会永久删除会话。
 
@@ -300,6 +302,7 @@ codexc metrics threads
 codexc metrics report --range 30d --group models
 codexc metrics export --range 30d --format json
 codexc webui
+codexc traffic
 ```
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
@@ -332,6 +335,115 @@ codexc service logs -n 100
 - 日志需要脱敏后再分享；不要分享 Token、Cookie、Authorization Header 或完整命令工作内容。
 
 错误码见 [`错误字典`](errors.md)，渠道展示口径见 [`展示说明`](display.md)，协议与支持矩阵见 [`官方文档与源码索引`](index.md)。
+
+### 模型请求转储
+
+需要查看模型请求和响应的完整字段时，运行 `codexc config`，选择“系统设置 → 模型请求转储 → 开启”，
+再按提示重启 App Server。也可以手工设置：
+
+```toml
+[debug]
+model_traffic_dump = true
+model_traffic_retention_days = 30
+```
+
+```bash
+codexc service restart app-server
+```
+
+App Server 发给统计代理的模型调用会写入 `~/.codex-connect/traffic/` 下的 V2 私有 session 目录；
+HTTP 的一次请求对应一条逻辑调用，同一 WebSocket 连接中的每个 `response.create` 也分别对应一条。
+每条逻辑调用只保存一条请求索引和一个完成、失败或不完整终态响应，原始 HTTP/SSE 块、WebSocket
+握手和双向帧另存为默认不展示的 trace。HTTP 请求头
+`x-codex-turn-metadata`、WebSocket 首帧 `client_metadata` 里的 `thread_id` 与 `turn_id`
+可以对齐到具体会话和轮次。转储是统计代理的旁路复制，不改变转发路径、指标采集和流式背压，
+也不是抓包代理。Authorization、Cookie 等凭据字段只保留认证方案，替换为 `<redacted>`。
+
+每个 session 的 `manifest.json` 声明精确版本，`interactions.jsonl` 保存小型索引，正文通过
+offset/bytes 引用轮转的 `payload-*.bin`，原始传输轨迹位于 `trace-*.jsonl`。正文和 trace 文件达到
+64 MiB 后轮转；长驻进程约每 24 小时让新逻辑调用进入新的 writer session，已在执行的并发调用继续
+写入原 session，因此请求与响应不会被拆分。
+同一 Provider 的历史完整 session 约保留 320 MiB，当前写入 session 不在中途删除。
+转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储包含 prompt、工具输出和代码，
+排查完成后关闭开关并删除 session，不要分享原始转储。
+
+`model_traffic_retention_days` 默认 `30`。App Server 服务每次启动，以及开启转储后建立新 writer
+session 时，都会按 session 最后活动时间删除超过该天数的可识别 V2 历史批次；启动清理即使当前已
+关闭转储也会执行。清理以完整 session 为单位，含保留期内记录的批次会整体保留；设为 `0` 可关闭按
+时间自动清理。旧版逐帧 JSONL、未知文件和未知目录不会自动删除。升级后首次启动会按同一规则处理
+已有 V2 历史批次；需要回滚到不识别该键的旧版时，先从 `[debug]` 删除
+`model_traffic_retention_days`。
+
+转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时，
+该逻辑调用会得到 `failed` 或 `incomplete` 终态及明确的 `errorScope`；已收到的传输块仍在 trace 中。
+
+正文与索引分开存储，直接读不方便；用 `codexc traffic` 渲染成人可读文本：
+
+```bash
+codexc traffic                                 # 列出最新 session 中的逻辑模型调用
+codexc traffic --exchange 12                   # 展开某次调用的一条请求和一个终态响应
+codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的逻辑调用并展开正文
+codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
+codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
+codexc traffic cleanup                         # 预览全部可清理转储，不删除
+codexc traffic cleanup --confirm               # 停止全部 App Server 后永久删除预览范围
+```
+
+摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”
+与“响应”，并补充参数、Token 用量和已完成输出条目。列表区分模型列表查询、连接预热与模型请求。
+不传路径时读取 `traffic/` 中最新标签的最新 writer session；也可以用 `--dir` 指定根
+目录，或传入一个 V2 session 目录。旧版逐帧 JSONL 原样保留但不自动迁移或混读，重启 App Server
+后会生成 V2 session；回滚旧版本时旧文件仍可继续使用。`codexc traffic -h` 列出全部选项。
+`cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session 和旧版逐帧 JSONL，
+未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
+`codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
+`codexc service start app-server`。
+
+同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
+点开某条即进入该条的请求参数、实际输出与用量摘要。终态未携带输出时，从已存 trace 的完成条目
+提取；原始正文、逐条用量归因与传输 trace 默认收起，数据不会回写。页面地址保留标签、writer session、调用编号与分页位置，
+返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号调用。
+该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。页面
+同时显示自动保留天数，并提供“清空转储”的预览确认入口；实际删除前必须先停止全部 App Server。
+
+### 转储体积控制
+
+每次请求都会重发完整会话历史，长会话一轮就有几 MB；转储默认按下面的规则裁剪后落盘，不需要额外
+配置：
+
+```toml
+[debug]
+model_traffic_dump = true
+model_traffic_input_items = 3
+model_traffic_item_max_bytes = 65536
+model_traffic_retention_days = 30
+```
+
+- `model_traffic_input_items`（默认 `3`）：只保留请求 `input` 数组末尾这么多条完整条目，更早的
+  条目合并成一条 `{"type": "omitted", "omitted_items": …, "omitted_bytes": …}` 摘要；
+  `0` 表示按原样保留整个 `input`；
+- `model_traffic_item_max_bytes`（默认 `65536`，即 64 KiB）：单个数组条目（请求 `input` 条目、
+  响应 `output` 条目、其中嵌套的数组元素）和超长字符串字段超过该字节数时只保留头尾各一半，替换为
+  `{"type": "truncated", "bytes": …, "head": …, "tail": …}` 标记；`0` 表示不限制。它独立于
+  `model_traffic_input_items` 生效，只设上限不会折叠 `input`。
+- `model_traffic_retention_days`（默认 `30`）：App Server 启动及新 writer session 建立时，按最后活动
+  时间清理超过天数的完整 V2 历史批次；`0` 关闭按时间清理。按 Provider 约 320 MiB 的体积上限继续生效。
+
+精简开启时还会折叠响应里重复回显的 `response.instructions` 与 `response.tools`
+（`<omitted N 字节>` 占位），并丢弃逐条流式增量事件
+（`response.output_text.delta`、`response.reasoning_text.delta`、
+`response.function_call_arguments.delta` 等以 `.delta` 结尾的事件）不再写入转储，它们的完整文本
+由同一条目的 `*.done` 事件和 `response.completed.response.output` 承载。请求头、请求体其它字段、
+`model`、保留的响应事件和事件顺序保持完整。需要逐个字段核对原文时，把两项参数都设为 `0` 按原样
+转储。这些参数都在 App Server 启动时读取，改完需要重启服务；使用 `codexc traffic` 查看时不需要
+额外参数，折叠、截断与丢弃结果会直接显示在对应位置。
+
+开启精简时正文先整段缓冲再折叠，然后按 1 MiB 分片写入；单个正文超过 32 MiB 时退化为按原样分片，
+避免为超大正文占用过多内存。
+
+WebSocket 提供方（OpenAI 官方）同样生效：客户端 `response.create` 帧的 `input` 按同样规则保留
+末尾条目，上游 `response.created`、`response.in_progress`、`response.completed` 里重复的工具与
+指令回显按同样规则折叠，`.delta` 帧直接跳过。
 
 ## 9. 开发与验证
 

@@ -15,6 +15,20 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
+  it.each([0, 569, 720.25])("shows OpenAI TTFT %s without requiring Turn duration", (ttftMs) => {
+    const event = {
+      type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
+      threadId: "thread-1", turnId: "turn-1", status: "completed", modelProvider: "openai",
+      timing: { upstreamTtftMs: ttftMs },
+    } as const;
+    const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
+    expect(rendered).toContain(`首字耗时：${ttftMs}毫秒`);
+    expect(rendered).not.toContain("总耗时");
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
+      modelProvider: "deepseek" }))).not.toContain("首字耗时");
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
+      timing: {} }))).not.toContain("首字耗时");
+  });
   beforeEach(() => {
     setConfiguredCustomPrimaryProviderId(undefined);
   });

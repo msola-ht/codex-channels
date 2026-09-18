@@ -55,6 +55,7 @@ describe("webui server access and settings resolution", () => {
 
     const unauthorized = await fetch(`${origin}/api/v1/health`);
     expect(unauthorized.status).toBe(401);
+    expect((await fetch(`${origin}/api/v1/time`)).status).toBe(401);
     const authorized = await fetch(`${origin}/api/v1/health`, {
       headers: { authorization: "Bearer webui-token" },
     });

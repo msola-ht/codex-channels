@@ -50,6 +50,9 @@
 - `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
+- `traffic`：把 `[debug].model_traffic_dump` 生成的 JSON Lines 转储渲染成人可读文本，支持列出
+  exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
+  记录；参数在读取用户配置前完成校验，命令只读转储目录，不访问网络或凭据。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。

@@ -22,40 +22,36 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { formatTokens } from "@/lib/format"
-import { toUsageTrend } from "@/lib/trend"
-import type { DailyUsageRow, Range, RangeName } from "@/lib/types"
+import { fillRecentDays, usageTrendRows, type UsageTrendRow } from "@/lib/trend"
+import type { DailyUsageRow, RangeName, UsageTrendResponse } from "@/lib/types"
 import { metricsRangeLabels } from "@/lib/metrics-query"
 
-const dayMs = 86_400_000
-
 export function UsageCharts({
-  trendRows,
-  trendRange,
+  trend,
   heatmapRows,
   heatmapEndAtMs,
   heatmapLoading,
   error,
 }: {
-  trendRows: DailyUsageRow[]
-  trendRange: Range<string>
+  trend: UsageTrendResponse
   heatmapRows: DailyUsageRow[]
   heatmapEndAtMs: number
   heatmapLoading: boolean
   error: string | null
 }) {
-  const filledTrendRows = fillDailyRange(trendRows, trendRange)
+  const filledTrendRows = usageTrendRows(trend)
   const filledHeatmapRows = heatmapLoading && heatmapRows.length === 0
     ? []
     : fillRecentDays(heatmapRows, heatmapEndAtMs, 90)
-  const rangeLabel = trendRange.name.includes("..")
-    ? trendRange.name.replace("..", " 至 ")
-    : metricsRangeLabels[trendRange.name as RangeName]
+  const rangeLabel = trend.range.name.includes("..")
+    ? trend.range.name.replace("..", " 至 ")
+    : metricsRangeLabels[trend.range.name as RangeName]
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
       <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <ActivityHeatmapCard rows={filledHeatmapRows} loading={heatmapLoading} />
-        <UsageTrendCard rows={filledTrendRows} rangeLabel={rangeLabel} />
+        <UsageTrendCard rows={filledTrendRows} rangeLabel={rangeLabel} granularity={trend.granularity} />
       </div>
     </div>
   )
@@ -64,11 +60,13 @@ export function UsageCharts({
 function UsageTrendCard({
   rows,
   rangeLabel,
+  granularity,
 }: {
-  rows: DailyUsageRow[]
+  rows: UsageTrendRow[]
   rangeLabel: string
+  granularity: UsageTrendResponse["granularity"]
 }) {
-  const data = toUsageTrend(rows)
+  const data = rows
   const hasData = rows.some((row) => row.requestCount > 0)
   const chartConfig: ChartConfig = {
     inputTokens: { label: "输入", color: "var(--chart-1)" },
@@ -80,7 +78,7 @@ function UsageTrendCard({
     <Card className="h-[340px]">
       <CardHeader>
         <CardTitle>用量趋势</CardTitle>
-        <CardDescription>{rangeLabel} Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
+        <CardDescription>{rangeLabel} · 按{granularity === "hour" ? "小时" : "天"}统计 Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
       </CardHeader>
       <CardContent>
         {!hasData ? (
@@ -99,13 +97,13 @@ function UsageTrendCard({
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} />
-              <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={(day) => String(day).slice(5)} />
+              <XAxis dataKey="period" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} interval="preserveStartEnd" tickFormatter={(period) => String(period).slice(granularity === "hour" ? 11 : 5)} />
               <YAxis yAxisId="input" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} />
               <YAxis yAxisId="output" orientation="right" domain={[0, "auto"]} tickLine={false} axisLine={false} tickFormatter={formatTokens} width={52} tick={{ style: { fill: "var(--color-outputTokens)" } }} />
               <ChartTooltip content={<ChartTooltipContent valueFormatter={formatTokens} />} />
-              <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" />
-              <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" />
-              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} />
+              <Area yAxisId="input" dataKey="inputTokens" type="monotone" stroke="var(--color-inputTokens)" fill="url(#fillInput)" dot={data.length === 1} />
+              <Area yAxisId="input" dataKey="cachedInputTokens" type="monotone" stroke="var(--color-cachedInputTokens)" fill="url(#fillCachedInput)" dot={data.length === 1} />
+              <Area yAxisId="output" dataKey="outputTokens" type="monotone" stroke="var(--color-outputTokens)" fill="none" strokeWidth={2} dot={data.length === 1} />
               <ChartLegend content={<ChartLegendContent />} />
             </AreaChart>
           </ChartContainer>
@@ -191,46 +189,4 @@ function ActivityHeatmapCard({
       </CardContent>
     </Card>
   )
-}
-
-function fillRecentDays(rows: DailyUsageRow[], endAtMs: number, days: number): DailyUsageRow[] {
-  const endDay = utcDayStart(Math.max(0, endAtMs - 1))
-  return fillDays(rows, endDay - (days - 1) * dayMs, days)
-}
-
-function fillDailyRange(rows: DailyUsageRow[], range: Range<string>): DailyUsageRow[] {
-  const endDay = utcDayStart(Math.max(range.startAtMs, range.endAtMs - 1))
-  const firstRecordedDay = rows[0]?.day
-  const startDay = range.name === "all"
-    ? firstRecordedDay === undefined
-      ? endDay
-      : Date.parse(`${firstRecordedDay}T00:00:00.000Z`)
-    : utcDayStart(range.startAtMs)
-  const days = Math.max(1, Math.floor((endDay - startDay) / dayMs) + 1)
-  return fillDays(rows, startDay, days)
-}
-
-function fillDays(rows: DailyUsageRow[], startDay: number, days: number): DailyUsageRow[] {
-  const rowsByDay = new Map(rows.map((row) => [row.day, row]))
-  const result: DailyUsageRow[] = []
-  for (let index = 0; index < days; index += 1) {
-    const day = toUtcDay(new Date(startDay + index * dayMs))
-    result.push(rowsByDay.get(day) ?? {
-      day,
-      requestCount: 0,
-      inputTokens: 0,
-      cachedInputTokens: 0,
-      outputTokens: 0,
-    })
-  }
-  return result
-}
-
-function utcDayStart(timestamp: number): number {
-  const date = new Date(timestamp)
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-}
-
-function toUtcDay(date: Date): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`
 }

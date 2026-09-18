@@ -87,8 +87,8 @@
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v13
-  检查点回写、私有备份后，在单一事务中重建为 v14；模型请求记录只复制当前保留字段，删除旧价格、
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v14
+  检查点回写、私有备份后，在单一事务中重建为 v15；模型请求记录只复制当前保留字段，新增上游 TTFT 为 NULL，删除旧价格、
   成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
   `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
@@ -128,6 +128,10 @@
   路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
+- `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
+  响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位。
+  只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
+  路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
@@ -138,10 +142,12 @@
   具体资源处理留在对应管理路由。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
-  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
+  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
+  `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
-  Daily 按 `range` 返回本地 Token 的 UTC 日聚合；Threads 返回指标库首个请求开始时间，
+  Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
+  Threads 返回指标库首个请求开始时间，
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
@@ -267,7 +273,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
-  （调试快捷开关、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
+  （调试快捷开关、模型请求转储、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
@@ -289,10 +295,11 @@
   开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试快捷开关、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
+- `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份与模型上游终端标识；快捷开关只在 `info` / `debug`
-  间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；终端标识预填运行该
-  命令的终端探测结果并允许编辑，留空即删除配置。
+  间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
+  `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
+  编辑，留空即删除配置。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
@@ -487,6 +494,20 @@
   阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
+- `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
+  转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
+  并向顶层帮助导出规范用法行。
+- `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc traffic cleanup`；默认只预览
+  已识别的 V2 session 与旧版逐帧 JSONL，确认全部 App Server 已停止后才按 `--confirm` 永久删除，
+  未识别文件与目录保持不变。
+- `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
+  每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
+- `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
+  payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
+  分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。正文和独立 trace
+  均有界读取，旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
+- `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误；从终态或
+  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，不回写转储。
 
 ## 构建、打包与服务
 

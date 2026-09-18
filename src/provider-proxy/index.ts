@@ -8,3 +8,4 @@ export {
   ProviderProxyMetricsServer,
   sendProviderProxyMetrics,
 } from "./metrics-channel.js";
+export { pruneModelTrafficDumpSessions } from "./traffic-dump.js";

@@ -17,10 +17,10 @@ npm run lint       # oxlint
 ```text
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
-  lib/         API 客户端、令牌存取、共享类型转出与格式化；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台结果属于当前加载批次
-  hooks/       数据 hook（useApi 统一 loading/error/refetch，use-dashboard 协调概览与趋势的加载批次）、use-metrics-query（URL 筛选/排序/分页）、use-metrics-export（可取消请求导出）、设置管理（共用版本化预览/确认状态机）与全局货币上下文
-  components/  layout（Sidebar）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、settings（按设置域拆分的卡片与控件）
-  pages/       概览、Threads、Thread 详情、请求、错误、设置（只负责组合设置域组件）
+  lib/         API 客户端、令牌存取、共享类型转出与格式化；format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，traffic-state.ts 隔离不同转储查询的结果
+  hooks/       数据 hook（useApi 统一 loading/error/refetch，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（转储页 URL 提供商、批次筛选、独立明细批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、设置管理（共用版本化预览/确认状态机）与全局货币上下文
+  components/  layout（Sidebar）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、traffic（转储摘要、明细、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件）
+  pages/       概览、Threads、Thread 详情、请求、错误、转储、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 

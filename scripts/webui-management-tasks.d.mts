@@ -1,4 +1,4 @@
-export type ManagementTaskOperation = "service" | "metrics" | "update";
+export type ManagementTaskOperation = "service" | "metrics" | "traffic" | "update";
 export interface ManagementTaskInput {
   operation: ManagementTaskOperation;
   action?: string;

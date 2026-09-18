@@ -215,7 +215,7 @@ Provider ID 字符串插值到全局 UA。
   避免在 App Server 会话遥测中保留 Gateway 标识。
 - `src/provider-proxy`：由 `runtime/app-server-service-runtime.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
   统一函数中覆盖；不修改入站 Header，但把该请求实际发往上游的 UA 一并写入指标记录
-  `model_request_metrics.user_agent`（Schema v13 引入，当前 Schema v14，限长 512），供 WebUI 请求明细逐条展示。
+  `model_request_metrics.user_agent`（Schema v13 引入，当前 Schema v15，限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
   只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。

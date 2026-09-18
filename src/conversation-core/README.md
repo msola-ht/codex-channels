@@ -12,7 +12,8 @@
   `misalignmentPolicyViolation` 与 Luna Reserve 触发所需的 `usageLimitExceeded` 只以窄分类
   传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入
   交给 `turn-timing-accumulator.ts`，不读取 SQLite。完成卡片消费官方 Turn 总耗时以及请求结果、
-  Token 与压缩摘要；统计摘要不计算或携带模型请求聚合耗时、首段回复延迟或生成速度；
+  Token 与压缩摘要，以及本轮首个有效上游 `upstreamTtftMs` 样本；统计摘要不计算模型请求聚合耗时、
+  本地首段回复延迟或生成速度；
   Thread Token 指标对所有 Provider 保持通用，OpenAI 账户周限只附加到 OpenAI Thread；可重试错误
   不污染最终完成状态，Thread 与全局 warning 分开路由；MCP OAuth 完成结果按 Thread 精确投递，
   无 Thread 的结果只广播给相同 Provider 的会话。

@@ -1,4 +1,4 @@
-import type { DailyUsageResponse, OverviewResponse } from "./types"
+import type { OverviewResponse } from "./types"
 
 export interface DashboardResponse<T> {
   request: object
@@ -7,11 +7,7 @@ export interface DashboardResponse<T> {
 
 export function resolveDashboardData(
   request: object,
-  overview: DashboardResponse<OverviewResponse> | null,
-  trend: DashboardResponse<DailyUsageResponse> | null,
+  response: DashboardResponse<OverviewResponse> | null,
 ) {
-  return {
-    overview: overview?.request === request ? overview.data : null,
-    trend: trend?.request === request ? trend.data : null,
-  }
+  return response?.request === request ? response.data : null
 }

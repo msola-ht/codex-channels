@@ -119,6 +119,7 @@ describe("Codex Connect config menu", () => {
     expect(rendered).toContain("Gateway 配置总览");
     expect(rendered).toContain("通讯渠道：Telegram");
     expect(rendered).toContain("计划任务：开启");
+    expect(rendered).toContain("模型请求转储：关闭");
     expect(rendered).toContain("显式网络代理：https_proxy");
     expect(rendered).toContain("Codex 官方与第三方 Provider 配置由 codexc setup 管理");
     expect(rendered).not.toContain("telegram-secret");
@@ -395,6 +396,69 @@ describe("Codex Connect config menu", () => {
     expect(debugSetup).toHaveBeenCalledWith(expect.objectContaining({
       environment: fixture.environment,
     }));
+  });
+
+  it("toggles the model traffic dump through the system settings", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("model_traffic_dump")
+        .mockResolvedValueOnce("enabled"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      modelTrafficDumpEnabled: true,
+      configPath: fixture.configPath,
+      activation: "restart-app-server",
+      activationResult: configActivationResult("restart-app-server"),
+    });
+    expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({
+      model_traffic_dump: true,
+    });
+    expect(output.join("")).toContain("模型请求转储已开启");
+    expect(output.join("")).toContain("codexc service restart app-server");
+  });
+
+  it("updates model traffic retention through the system settings", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("model_traffic_retention"),
+      text: vi.fn().mockResolvedValueOnce("7"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      modelTrafficRetentionDays: 7,
+      configPath: fixture.configPath,
+      activation: "restart-app-server",
+      activationResult: configActivationResult("restart-app-server"),
+    });
+    expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({
+      model_traffic_retention_days: 7,
+    });
+    expect(output.join("")).toContain("保留 7 天");
   });
 
   it("toggles the operation detail display mode through the menu", async () => {

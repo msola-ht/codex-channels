@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 import { HttpsProxyAgent } from "https-proxy-agent";
 
@@ -16,7 +17,10 @@ import {
 } from "./app-server-supervisor.mjs";
 import { writeCliMessage as printCliMessage } from "./cli-presentation.mjs";
 import { executableInvocation, resolveExecutable } from "./executable.mjs";
-import { validateCodexConfigDocument } from "./gateway-config.mjs";
+import {
+  validateCodexConfigDocument,
+  validateDebugConfigDocument,
+} from "./gateway-config.mjs";
 import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
@@ -51,8 +55,12 @@ import {
 import { createProxyFetch } from "./proxy-fetch.mjs";
 import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
 
+const openAiTimingMetricsHosts = new Set(["api.openai.com", "chatgpt.com"]);
+
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
+  const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
+  const trafficDumpDirectory = join(runtime.dataDir, "traffic");
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
@@ -110,6 +118,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   const upstreamAgents = new Set();
@@ -136,6 +145,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       ...(validatedCodex.upstream_user_agent
         ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
         : {}),
+      ...(!validatedDebug.model_traffic_dump
+        ? {}
+        : {
+            trafficDump: {
+              directory: trafficDumpDirectory,
+              inputItems: validatedDebug.model_traffic_input_items,
+              itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
+              retentionDays: validatedDebug.model_traffic_retention_days,
+              label: provider,
+            },
+          }),
     };
     const opencodeGo = provider === "ocg";
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
@@ -560,9 +580,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
+      const configuredOpenAiUrl = configuredOpenAiBaseUrl
+        ? new URL(configuredOpenAiBaseUrl)
+        : undefined;
       let openAiProxyOptions;
-      if (configuredOpenAiBaseUrl) {
-        openAiProxyOptions = proxyOptionsForUrl(new URL(configuredOpenAiBaseUrl));
+      if (configuredOpenAiUrl) {
+        openAiProxyOptions = proxyOptionsForUrl(configuredOpenAiUrl);
       } else {
         const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
         const apiUrl = new URL("https://api.openai.com/v1");
@@ -587,6 +610,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy("openai", {
         ...openAiProxyOptions,
         allowOpenAiApiPaths: true,
+        requestOpenAiTimingMetrics: configuredOpenAiUrl === undefined
+          || openAiTimingMetricsHosts.has(configuredOpenAiUrl.hostname),
       });
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
     } else {
@@ -647,6 +672,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       },
     );
     await supervisorOwner.start();
+    try {
+      pruneModelTrafficDumpSessions({
+        directory: trafficDumpDirectory,
+        retentionDays: validatedDebug.model_traffic_retention_days,
+      });
+    } catch (error) {
+      console.error(
+        "模型请求转储自动清理失败："
+        + (error instanceof Error ? error.message : String(error)),
+      );
+    }
     await ensureInstance(primaryProvider, { waitForReady: false });
     supervisorOwner.markRunning(primaryProvider);
     if (validatedCodex.desktop_app?.enabled === true && process.platform === "win32") {

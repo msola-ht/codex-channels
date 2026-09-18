@@ -117,6 +117,10 @@
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
 用户设置入口在显式确认后复用下表已有的版本化配置事务，不新增协议方法，也不修改登录状态。
+渠道选择 OpenAI 模型时，`model-selection-service.ts` 复用 `writeDefaultFastMode(false)` / `config/batchWrite`
+把用户级 `service_tier` 保存为 `default`，同时保留下一 Turn 的显式 Standard 覆盖；保存失败不切换会话。
+第三方模型选择不修改 OpenAI 默认值；`model-selection-service.test.ts` 和
+`real-app-server-isolated-state.test.ts` 的模型切换与真实 App Server 重启合同覆盖该行为。
 固定版的公开用户配置只接受 `approval_policy = "on-request" | "never"`；协议内部的 `untrusted`
 仍可作为 Workspace Thread 设置传给 App Server，但 `codexc remote` 不把它转换为固定版已退役的
 CLI 参数，未显式覆盖时失败关闭。
@@ -189,7 +193,9 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 为 `subagent_threads` 新增可空 `parent_turn_id`，Schema v11 新增按子 Thread + Turn 记录精确父 Turn
 归属的 `subagent_turns`，Schema v12 新增官方账户快照表，Schema v13 为每个请求新增记录实际发往
 模型上游 `User-Agent` 的 `user_agent` 列；Schema v14 删除价格、成本、旧计时列与派生 View，只保留
-当前采集和展示合同。旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，保留请求、
+当前采集和展示合同；Schema v15 新增可空 `upstream_ttft_ms`，保留 OpenAI 上游首 Token 统计，
+请求明细逐条展示，完成卡片取当前 Turn 首个有效样本，不由 App Server 通知或本地时间估算。
+旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，历史 TTFT 保持 NULL，保留请求、
 子代理关系与账户快照，历史运行归属不按时间猜测；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider

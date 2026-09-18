@@ -2,6 +2,7 @@ export type GatewaySettingActivation =
   | "none"
   | "restart-gateway"
   | "restart-webui"
+  | "restart-app-server"
   | "restart-all"
   | "reinstall-services";
 
@@ -30,6 +31,8 @@ export interface GatewaySettings {
     sandbox: "read-only" | "workspace-write";
     defaultWorkspace: string | null;
     defaultModel: string | null;
+    modelTrafficDumpEnabled: boolean;
+    modelTrafficRetentionDays: number;
     officialTuiIdentity: {
       clientIdentity: {
         name: string | null;
@@ -89,6 +92,8 @@ export type GatewaySettingInput =
   | { kind: "system.sandbox"; value: "read-only" | "workspace-write" }
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }
+  | { kind: "system.model-traffic-dump"; value: boolean }
+  | { kind: "system.model-traffic-retention-days"; value: number }
   | {
       kind: "system.official-tui-identity";
       value: {

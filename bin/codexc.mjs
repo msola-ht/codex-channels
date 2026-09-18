@@ -49,6 +49,12 @@ import {
 } from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
 import {
+  parseTrafficCleanupArgs,
+  parseTrafficCommandArgs,
+  TRAFFIC_CLEANUP_USAGE,
+  TRAFFIC_USAGE,
+} from "../scripts/traffic-command-options.mjs";
+import {
   desktopAppCommandUsage,
   runDesktopAppCommand,
 } from "../scripts/desktop-app-command.mjs";
@@ -96,6 +102,7 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
+  traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
   sessions                     管理会话（包括按 Turn 清理旧会话）
   channel                      发送渠道图片
   webui                        启动指标 WebUI
@@ -246,6 +253,8 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
+  traffic: TRAFFIC_USAGE,
+  "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -457,6 +466,17 @@ try {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "traffic":
+      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup")) break;
+      if (args.some(isHelpArgument)) throw new Error(TRAFFIC_USAGE);
+      if (args[0] === "cleanup") {
+        parseTrafficCleanupArgs(args.slice(1));
+        runStandaloneScript("scripts/traffic-cleanup.mjs", args.slice(1));
+        break;
+      }
+      parseTrafficCommandArgs(args);
+      runStandaloneScript("scripts/traffic-command.mjs", args);
       break;
     case "sessions":
       if (showRequestedHelp(args, "sessions") || showSubcommandHelp(args, "cleanup", "sessions.cleanup")) break;

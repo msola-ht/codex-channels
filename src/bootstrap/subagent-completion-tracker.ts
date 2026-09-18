@@ -25,6 +25,7 @@ interface ActiveSubagent {
 
 interface SubagentMetricsSummary {
   latestTurn: {
+    upstreamTtftMs?: number | null;
     model: string | null;
     provider: string | null;
     reasoningEffort: string | null;
@@ -619,6 +620,8 @@ export class SubagentCompletionTracker {
       model: summary?.latestTurn?.model ?? null,
       modelProvider: summary?.latestTurn?.provider ?? null,
       reasoningEffort: summary?.latestTurn?.reasoningEffort ?? null,
+      ...(entry.terminalTurnId !== undefined && summary?.latestTurn?.upstreamTtftMs != null
+        ? { upstreamTtftMs: summary.latestTurn.upstreamTtftMs } : {}),
       status: entry.terminalStatus ?? "errored",
       requestCount: aggregate?.requestCount ?? 0,
       unsuccessfulRequestCount: aggregate?.unsuccessfulRequestCount ?? 0,

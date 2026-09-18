@@ -26,6 +26,20 @@ afterEach(() => {
 });
 
 describe("Provider proxy metrics channel", () => {
+  it("accepts finite nonnegative TTFT and rejects malformed values at IPC", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-ttft-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    const received: ProviderProxyMetrics[] = [];
+    const server = new ProviderProxyMetricsServer(socketPath, (value) => { received.push(value); });
+    await server.start();
+    try {
+      for (const value of [0, 569.25, -1, "123", null]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: value } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.upstreamTtftMs)).toEqual([0, 569.25]);
+    } finally { await server.close(); }
+  });
   const unixIt = process.platform === "win32" ? it.skip : it;
   unixIt("delivers one bounded metrics record over a private Unix socket", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-"));

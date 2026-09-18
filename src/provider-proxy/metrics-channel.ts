@@ -251,6 +251,9 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableTokenCount(record.totalTokens)
     || !finiteNumber(record.requestStartedAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
+    || (record.upstreamTtftMs !== undefined
+      && (typeof record.upstreamTtftMs !== "number"
+        || !Number.isFinite(record.upstreamTtftMs) || record.upstreamTtftMs < 0))
   ) {
     return undefined;
   }

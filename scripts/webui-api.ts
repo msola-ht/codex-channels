@@ -37,6 +37,11 @@ export interface MetricsProvidersResponse {
   providers: string[]
 }
 
+export interface ServerTimeResponse {
+  timeZone: string
+  nowMs: number
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean
@@ -114,6 +119,8 @@ export interface OverviewResponse {
   providers: ProviderGroup[]
   errors: ErrorsReport
   weeklyQuota: WeeklyQuota | null
+  trend: UsageTrendResponse
+  heatmap: DailyUsageResponse
 }
 
 export interface DailyUsageRow {
@@ -129,6 +136,15 @@ export interface DailyUsageResponse {
   generatedAt: string
   daily: DailyUsageRow[]
 }
+
+export interface HourlyUsageRow extends Omit<DailyUsageRow, "day"> {
+  hour: string
+}
+
+export type UsageTrendResponse = { range: Range<string>; generatedAt: string } & (
+  | { granularity: "day"; daily: DailyUsageRow[] }
+  | { granularity: "hour"; hourly: HourlyUsageRow[] }
+)
 
 export interface ThreadListItem {
   threadId: string
@@ -186,6 +202,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  upstreamTtftMs: number | null
   id: number
   provider: string | null
   model: string | null
@@ -260,6 +277,8 @@ export interface SettingsSummaryResponse {
       sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
+      modelTrafficDumpEnabled: boolean
+      modelTrafficRetentionDays: number
     }
     automation: { scheduledTasksEnabled: boolean }
     network: { configuredFields: string[] }
@@ -351,7 +370,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -427,7 +446,7 @@ export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
 
 export interface ManagementTask {
   id: string
-  operation: "service" | "metrics" | "update"
+  operation: "service" | "metrics" | "traffic" | "update"
   action: string
   target: string | null
   state: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
@@ -445,6 +464,7 @@ export type ManagementTaskInput =
   | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
   | { operation: "metrics"; action: "upgrade" | "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
+  | { operation: "traffic"; action: "cleanup" }
 
 export interface ManagementTaskPreview {
   operation: ManagementTaskInput["operation"]
@@ -774,4 +794,145 @@ export interface OfficialAccountSnapshotsResponse {
     code: "registry_unavailable"
     message: string
   }>
+}
+
+export interface TrafficLabel {
+  label: string
+  sessions: number
+  latestAtMs: number
+}
+
+export interface TrafficExchangeSummary {
+  id: number
+  session: string
+  startedAtMs: number
+  account?: string
+  /** 请求头记录可能已被轮转清理，缺失证据时省略。 */
+  transport?: "http" | "websocket"
+  method?: string
+  path?: string
+  url?: string
+  threadId?: string
+  turnId?: string
+  requestKind?: string
+  category: "models" | "prewarm" | "model"
+  status?: number
+  state: "completed" | "failed" | "incomplete" | "pending"
+  durationMs?: number
+  hasError: boolean
+  requestModel?: string
+  responseModels: string[]
+}
+
+export interface TrafficListResponse {
+  directory: string
+  enabled: boolean
+  retentionDays: number
+  label: string
+  labels: TrafficLabel[]
+  session: string | null
+  sessions: Array<{ session: string; createdAtMs: number }>
+  generatedAt: string
+  exchanges: TrafficExchangeSummary[]
+  total: number
+  maximumOffset: number
+  nextOffset: number | null
+}
+
+export type TrafficHeaderValue = string | string[]
+
+export interface TrafficExchangeDetail {
+  parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
+  id: number
+  startedAtMs: number
+  account?: string
+  transport: "http" | "websocket"
+  threadId?: string
+  turnId?: string
+  requestKind?: string
+  category: "models" | "prewarm" | "model"
+  requestModel?: string
+  responseModels: string[]
+  state: "completed" | "failed" | "incomplete" | "pending"
+  url?: string
+  request: {
+    method?: string
+    path?: string
+    url?: string
+    headers: Record<string, TrafficHeaderValue>
+    body: string
+    bodyTruncated: boolean
+    bytes?: number
+    storedBytes?: number
+    parameters: {
+      reasoningEffort?: string
+      serviceTier?: string
+      previousResponseId?: string
+      generate?: boolean
+    }
+    content: {
+      instructions: string | null
+      input: Array<{
+        type: string; role?: string; name?: string; callId?: string; text: string; omittedItems?: number
+      }> | null
+      tools: Array<{ type: string; name?: string; definition: string }> | null
+    }
+  }
+  response: {
+    state: "completed" | "failed" | "incomplete"
+    status: number | null
+    headers: Record<string, TrafficHeaderValue>
+    body: string
+    bodyTruncated: boolean
+    bytes?: number
+    durationMs?: number
+    httpTiming: {
+      receiveRequestMs?: number
+      waitResponseHeadMs?: number
+      receiveResponseMs?: number
+    } | null
+    eventType?: string
+    errorScope?: string
+    error?: string
+    storedBytes?: number
+    responseId?: string
+    serviceTier?: string
+    usage: {
+      inputTokens?: number
+      cachedTokens?: number
+      outputTokens?: number
+      reasoningTokens?: number
+      totalTokens?: number
+    } | null
+    failure?: string
+    output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
+    outputTruncated: boolean
+    outputSource: "terminal" | "trace"
+    timing: {
+      scope: "logical_turn"
+      responseId: string
+      totalMs?: number
+      firstTokenMs?: number
+      queueMaxMs?: number
+      samplingMs?: number
+      toolPauseMs?: number
+    } | null
+  } | null
+  tracePage: {
+    offset: number
+    total: number
+    previousOffset: number | null
+    nextOffset: number | null
+  }
+  trace: Array<{ atMs: number; kind: string; text: string; truncated: boolean }>
+}
+
+export interface TrafficDetailResponse {
+  directory: string
+  enabled: boolean
+  retentionDays: number
+  label: string
+  session: string
+  generatedAt: string
+  exchange: TrafficExchangeDetail
 }

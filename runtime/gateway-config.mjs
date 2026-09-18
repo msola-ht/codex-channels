@@ -173,6 +173,13 @@ const codexSchema = z.strictObject({
   }).optional(),
 });
 
+const debugSchema = z.strictObject({
+  model_traffic_dump: z.boolean().default(false),
+  model_traffic_input_items: z.number().int().min(0).default(3),
+  model_traffic_item_max_bytes: z.number().int().min(0).default(65_536),
+  model_traffic_retention_days: z.number().int().min(0).max(36_500).default(30),
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -204,6 +211,7 @@ const gatewayDocumentSchema = z.strictObject({
   experimental: z.strictObject({
     plugin_api: z.boolean().default(false),
   }).default({ plugin_api: false }),
+  debug: debugSchema.optional(),
   scheduled_tasks: z.strictObject({
     enabled: z.boolean().default(false),
   }).default({ enabled: false }),
@@ -284,6 +292,16 @@ export function validateWebuiConfigDocument(document) {
   );
   if (!parsed.success) {
     throw new Error(`config.toml 的 [webui] 配置无效：\n${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
+export function validateDebugConfigDocument(document) {
+  const parsed = debugSchema.safeParse(
+    document !== null && typeof document === "object" ? document : {},
+  );
+  if (!parsed.success) {
+    throw new Error(`config.toml 的 [debug] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }

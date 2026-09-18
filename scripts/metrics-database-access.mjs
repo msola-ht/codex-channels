@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   modelRequestMetricsSchemaVersion,
+  metricStorageColumns,
   RequestMetricsQueryService,
   requestMetricsDatabasePath,
   requireCurrentModelRequestMetricsSchema,
@@ -20,7 +21,7 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
 const legacyMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
@@ -90,6 +91,10 @@ export function validateMetricsDatabaseStructure(
   try {
     if (status.compatible) {
       requireCurrentModelRequestMetricsSchema(database);
+    } else if (status.schemaVersion === 14) {
+      requireColumns(database, "model_request_metrics", [
+        "id", ...metricStorageColumns.filter((column) => column !== "upstream_ttft_ms"),
+      ]);
     } else {
       const requiredColumns = [
         ...legacyMetricsColumns,

@@ -29,6 +29,7 @@ export type {
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
   StoredModelRequestMetricsDailyRow,
+  StoredModelRequestMetricsHourlyRow,
   StoredModelRequestMetricsErrorGroup,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsPage,

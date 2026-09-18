@@ -39,6 +39,32 @@ function fixture() {
 }
 
 describe("model request metrics database upgrades", () => {
+  it("backs up v14 and preserves history with unknown TTFT on explicit upgrade", () => {
+    const { environment, databasePath } = fixture();
+    const current = new SqliteModelRequestMetricsStore(databasePath);
+    current.recordBatch([metricSample(), metricSample()]);
+    current.close();
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`ALTER TABLE model_request_metrics DROP COLUMN upstream_ttft_ms;
+      UPDATE schema_metadata SET value = 14 WHERE name = 'schema_version';`);
+    legacy.close();
+    expect(() => new SqliteModelRequestMetricsStore(databasePath)).toThrow(/版本不兼容/u);
+    expect(() => validateMetricsDatabaseStructure(environment, { allowUpgradeable: true })).not.toThrow();
+    const result = upgradeMetricsDatabase(environment, {
+      gatewayRunning: () => false, now: () => new Date("2026-09-18T00:00:00.000Z"),
+    });
+    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 14, schemaVersion: 15 });
+    const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
+    expect(backup.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(14);
+    expect(backup.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(2);
+    backup.close();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    expect(store.recent(10).map((row) => row.upstreamTtftMs)).toEqual([null, null]);
+    store.record({ ...metricSample(), provider: "openai", upstreamTtftMs: 569.25 });
+    expect(store.recent(1)[0]?.upstreamTtftMs).toBe(569.25);
+    store.close();
+    expect(upgradeMetricsDatabase(environment, { gatewayRunning: () => false }).changed).toBe(false);
+  });
   it("backs up and explicitly upgrades a v3 metrics database in place", () => {
     const { environment, databasePath } = fixture();
     createLegacyV3Database(databasePath, 2);
@@ -350,7 +376,7 @@ describe("model request metrics database upgrades", () => {
     upgraded.close();
   });
 
-  it("backs up and rebuilds v13 as the compact v14 schema", () => {
+  it("backs up and rebuilds v13 as the current schema", () => {
     const { environment, databasePath } = fixture();
     const store = new SqliteModelRequestMetricsStore(databasePath);
     store.record({ ...metricSample(), userAgent: "codex-tui/0.154.0" });
@@ -407,7 +433,7 @@ describe("model request metrics database upgrades", () => {
     expect(result).toMatchObject({
       changed: true,
       previousSchemaVersion: 13,
-      schemaVersion: 14,
+      schemaVersion: modelRequestMetricsSchemaVersion,
     });
     expect(result.backupPath).toContain(".v13.2026-09-14T12-34-56-789Z.bak");
     if (process.platform !== "win32") {
@@ -552,7 +578,7 @@ describe("model request metrics database upgrades", () => {
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
       now: () => new Date("2026-09-14T13:45:00.000Z"),
-    })).toThrow(/Schema 14 结构不完整/u);
+    })).toThrow(/Schema 15 结构不完整/u);
 
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(13);
     expect(existsSync(
@@ -576,7 +602,7 @@ describe("model request metrics database upgrades", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13 升级到 v14/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13\/v14 升级到 v15/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 

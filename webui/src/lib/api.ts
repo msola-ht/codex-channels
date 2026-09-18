@@ -1,5 +1,5 @@
 import type {
-  DailyUsageResponse,
+  ServerTimeResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
@@ -30,6 +30,8 @@ import type {
   ThreadRunResponse,
   ThreadsResponse,
   ThreadTurnsResponse,
+  TrafficDetailResponse,
+  TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
 import { metricsQueryParams } from "@/lib/metrics-query"
@@ -101,6 +103,10 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return requestJson<T>(path, {}, signal)
 }
 
+export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {
+  return getJson<ServerTimeResponse>(`${API_PREFIX}/time`, signal)
+}
+
 export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {
   return getJson<ManagementSettingsResponse>(`${API_PREFIX}/management/settings`, signal)
 }
@@ -138,13 +144,6 @@ export function fetchOverview(
 
 export function fetchMetricsProviders(signal?: AbortSignal): Promise<MetricsProvidersResponse> {
   return getJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
-}
-
-export function fetchDailyUsage(
-  query: MetricsRangeQuery,
-  signal?: AbortSignal,
-): Promise<DailyUsageResponse> {
-  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreads(
@@ -307,6 +306,33 @@ export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
+}
+
+export function fetchTrafficExchanges(
+  query: { label?: string; limit?: number; offset?: number; session?: string },
+  signal?: AbortSignal,
+): Promise<TrafficListResponse> {
+  const params = new URLSearchParams()
+  if (query.label !== undefined) params.set("label", query.label)
+  if (query.limit !== undefined) params.set("limit", String(query.limit))
+  if (query.offset !== undefined) params.set("offset", String(query.offset))
+  if (query.session !== undefined) params.set("session", query.session)
+  const suffix = params.size === 0 ? "" : `?${params.toString()}`
+  return getJson<TrafficListResponse>(`${API_PREFIX}/traffic${suffix}`, signal)
+}
+
+export function fetchTrafficExchange(
+  query: { traceOffset?: number; id: number; label?: string; session?: string },
+  signal?: AbortSignal,
+): Promise<TrafficDetailResponse> {
+  const params = new URLSearchParams({ id: String(query.id) })
+  if (query.traceOffset !== undefined) params.set("traceOffset", String(query.traceOffset))
+  if (query.label !== undefined) params.set("label", query.label)
+  if (query.session !== undefined) params.set("session", query.session)
+  return getJson<TrafficDetailResponse>(
+    `${API_PREFIX}/traffic/exchange?${params.toString()}`,
+    signal,
+  )
 }
 
 export function refreshOfficialAccountSnapshot(

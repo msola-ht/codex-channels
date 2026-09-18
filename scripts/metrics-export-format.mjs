@@ -18,6 +18,13 @@ export function formatLocalTime(ms) {
   ].join(" ");
 }
 
+export function formatLocalTimeZone(ms = Date.now()) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const offset = new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "longOffset" })
+    .formatToParts(ms).find((part) => part.type === "timeZoneName").value.replace("GMT", "UTC");
+  return `${timeZone}（${offset}）`;
+}
+
 export function markdownCell(value) {
   return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
 }

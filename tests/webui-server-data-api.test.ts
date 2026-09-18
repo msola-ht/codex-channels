@@ -37,6 +37,31 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("returns the server time zone before a metrics database exists", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+    const before = Date.now();
+    const response = await fetch(`${origin}/api/v1/time`);
+    expect(response.status).toBe(200);
+    const result = await response.json() as { timeZone: string; nowMs: number };
+    expect(result.timeZone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(result.nowMs).toBeGreaterThanOrEqual(before);
+    expect(result.nowMs).toBeLessThanOrEqual(Date.now());
+    expect((await fetch(`${origin}/api/v1/time?timeZone=UTC`)).status).toBe(400);
+  });
+  it("returns persisted TTFT in request details and export with missing values left null", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, { ...metricSample(), provider: "openai", upstreamTtftMs: 569.25 });
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(fixture.environment);
+    for (const path of ["requests", "requests/export"]) {
+      const response = await fetch(`${origin}/api/v1/${path}?range=all`);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
+      expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
+      expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
+    }
+  });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };
     expect(new URLSearchParams(metricsQueryParams(query)).getAll("provider")).toEqual(query.provider);
@@ -164,7 +189,18 @@ describe("webui server data API", () => {
       expect(overview.range).toMatchObject({ startAtMs: yesterday.getTime(), endAtMs: today.getTime() });
       const daily = await read("daily");
       expect(daily.daily.reduce((sum: number, row: { requestCount: number }) => sum + row.requestCount, 0)).toBe(2);
+      expect(daily.daily).toHaveLength(1);
+      expect(daily.daily[0]).toMatchObject({ day: date, requestCount: 2 });
       expect(daily.range).toEqual(overview.range);
+      expect(overview.trend).toMatchObject({ range: overview.range, generatedAt: overview.generatedAt, granularity: "hour" });
+      expect(overview.trend.hourly).toHaveLength(24);
+      expect(overview.trend.hourly[0]).toMatchObject({ hour: `${date} 00:00`, requestCount: 1 });
+      expect(overview.trend.hourly[23]).toMatchObject({ hour: `${date} 23:00`, requestCount: 1 });
+      expect(overview.trend.hourly[12]).toMatchObject({ requestCount: 0, inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 });
+      for (const key of ["requestCount", "inputTokens", "outputTokens"]) {
+        expect(overview.trend.hourly.reduce((sum: number, row: Record<string, number>) => sum + row[key]!, 0)).toBe(overview.global[key]);
+      }
+      expect(overview.heatmap.generatedAt).toBe(overview.generatedAt);
       expect(await read("threads")).toMatchObject({ total: 1, turnCount: 2 });
       expect(await read("threads/thread-1/turns")).toMatchObject({ total: 2 });
       expect(await read("requests")).toMatchObject({ total: 2 });
@@ -172,6 +208,20 @@ describe("webui server data API", () => {
     }
     const current = await (await fetch(`${origin}/api/v1/overview?range=today`)).json();
     expect(current).toMatchObject({ threadCount: 1, turnCount: 1, global: { requestCount: 1 }, range: { startAtMs: today.getTime() } });
+    expect(current.trend.range).toEqual(current.range);
+    expect(current.heatmap.range.endAtMs).toBe(current.range.endAtMs);
+    expect(current.trend.granularity).toBe("hour");
+    expect(current.trend.hourly).toHaveLength(new Date(current.range.endAtMs - 1).getHours() + 1);
+    expect(current.heatmap.daily.at(-1)).toMatchObject({
+      inputTokens: current.global.inputTokens, outputTokens: current.global.outputTokens,
+      requestCount: current.global.requestCount,
+    });
+    for (const key of ["requestCount", "inputTokens", "outputTokens"]) {
+      expect(current.trend.hourly.reduce((sum: number, row: Record<string, number>) => sum + row[key]!, 0)).toBe(current.global[key]);
+    }
+    const multi = await (await fetch(`${origin}/api/v1/overview?range=7d`)).json();
+    expect(multi.trend.granularity).toBe("day");
+    expect(multi.trend.daily.length).toBeGreaterThan(1);
   });
 
   it("counts overview Threads and Turns in the selected range without counting requests as turns", async () => {
