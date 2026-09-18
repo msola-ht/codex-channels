@@ -2,8 +2,8 @@
  * 模型报文转储的共享解析模块：`codexc traffic` 与 WebUI 转储页共用同一套文件选择、
  * 记录解析、exchange 归组与字段提取，避免出现两套解析口径。
  *
- * 列表汇总按行流式处理且只保留摘要字段，详情只保留目标 exchange 的记录，
- * 因此单次请求的内存占用不随转储文件大小增长。
+ * 列表汇总按行流式处理且只保留摘要字段；WebUI 详情按展示上限累计 HTTP 正文、
+ * 单个 WebSocket 帧和帧页，因此正文内存不随其它 exchange、帧数量或单段超限正文增长。
  */
 import { createReadStream, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -39,7 +39,15 @@ function dumpFileEntries(directory) {
       // 轮转可能在 readdir 与 stat 之间删除旧文件；只跳过该条目。
     }
   }
-  return entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
+  return entries.sort((left, right) => (
+    left.mtimeMs - right.mtimeMs || compareCodeUnits(left.path, right.path)
+  ));
+}
+
+function compareCodeUnits(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 export function labelOf(path) {
@@ -48,14 +56,21 @@ export function labelOf(path) {
 
 function dumpLabelsOf(entries) {
   const byLabel = new Map();
-  for (const { mtimeMs, path } of entries) {
+  for (const [order, { mtimeMs, path }] of entries.entries()) {
     const label = labelOf(path);
-    const entry = byLabel.get(label) ?? { files: 0, label, latestAtMs: 0 };
+    const entry = byLabel.get(label) ?? { files: 0, label, latestAtMs: 0, latestOrder: 0 };
     entry.files += 1;
-    entry.latestAtMs = Math.max(entry.latestAtMs, mtimeMs);
+    if (mtimeMs >= entry.latestAtMs) {
+      entry.latestAtMs = mtimeMs;
+      entry.latestOrder = order;
+    }
     byLabel.set(label, entry);
   }
-  return [...byLabel.values()].sort((left, right) => right.latestAtMs - left.latestAtMs);
+  return [...byLabel.values()]
+    .sort((left, right) => (
+      right.latestAtMs - left.latestAtMs || right.latestOrder - left.latestOrder
+    ))
+    .map(({ files, label, latestAtMs }) => ({ files, label, latestAtMs }));
 }
 
 export function selectFilesOfLabel(files, label, requestedSession) {
@@ -303,25 +318,7 @@ export function applyRecordToSummary(summary, record) {
       break;
     case "websocket_frame": {
       summary.transport = "websocket";
-      const parsed = parseJson(String(record.text ?? ""));
-      if (record.direction === "client") {
-        if (summary.requestModel === undefined) {
-          const model = requestModelOfText(String(record.text ?? ""));
-          if (model !== undefined) summary.requestModel = model;
-        }
-        if (summary.threadId === undefined) {
-          const metadata = parseTurnMetadata(parsed?.client_metadata?.["x-codex-turn-metadata"]);
-          const threadId = metadata.threadId
-            ?? (typeof parsed?.client_metadata?.thread_id === "string"
-              ? parsed.client_metadata.thread_id
-              : undefined);
-          if (threadId !== undefined) summary.threadId = threadId;
-        }
-        break;
-      }
-      if (parsed !== undefined) {
-        for (const model of responseModelsOfPayload(parsed)) summary.responseModels.add(model);
-      }
+      appendWebSocketFrame(summary.webSocketState, record);
       break;
     }
     case "request_body":
@@ -371,6 +368,15 @@ export function emptySummary(record) {
     enumerable: false,
     value: createTopLevelStringFieldScanner("model"),
   });
+  Object.defineProperty(summary, "webSocketState", {
+    enumerable: false,
+    value: createWebSocketScanState({
+      captureFrames: false,
+      frameOffset: 0,
+      maxFramePageSize: 0,
+      maxSectionBytes: 0,
+    }),
+  });
   return summary;
 }
 
@@ -385,6 +391,7 @@ export async function summarizeDumpFiles(files, { limit, offset = 0 } = {}) {
     }
     applyRecordToSummary(summary, record);
   });
+  for (const summary of entries.values()) finishSummaryWebSocketState(summary);
   const all = [...entries.values()]
     .sort((left, right) => (left.startedAtMs ?? 0) - (right.startedAtMs ?? 0) || left.id - right.id)
     .map((summary) => ({ ...summary, responseModels: [...summary.responseModels] }));
@@ -395,6 +402,16 @@ export async function summarizeDumpFiles(files, { limit, offset = 0 } = {}) {
     nextOffset: end < all.length ? end : null,
     total: all.length,
   };
+}
+
+function finishSummaryWebSocketState(summary) {
+  const state = summary.webSocketState;
+  finishWebSocketFrame(state);
+  summary.requestModel ??= state.requestModel;
+  summary.requestKind ??= state.requestMetadata?.requestKind;
+  summary.threadId ??= state.requestMetadata?.threadId;
+  summary.turnId ??= state.requestMetadata?.turnId;
+  for (const model of state.responseModels) summary.responseModels.add(model);
 }
 
 /** 流式归组并在 exchange 明确结束后立即释放正文；文件末尾仍未结束的记录最后输出。 */
@@ -429,12 +446,25 @@ export async function readDumpExchange(files, id) {
   return groupExchanges(selected)[0];
 }
 
-/** WebUI 详情只累计正文展示上限；其它 exchange 和目标正文的超限部分都随读取释放。 */
-export async function describeDumpExchange(files, id, { maxSectionBytes = 262_144 } = {}) {
+/** WebUI 详情只累计正文、单帧和帧页展示上限；其它 exchange 和超限部分都随读取释放。 */
+export async function describeDumpExchange(
+  files,
+  id,
+  {
+    frameOffset = 0,
+    maxFramePageSize = 100,
+    maxSectionBytes = 262_144,
+  } = {},
+) {
   const selected = [];
   const requestBodyState = createBoundedTextState();
   const responseBodyState = createBoundedTextState();
   const requestModelScanner = createTopLevelStringFieldScanner("model");
+  const webSocketState = createWebSocketScanState({
+    frameOffset,
+    maxFramePageSize,
+    maxSectionBytes,
+  });
   let identity;
   await forEachDumpRecord(files, (record) => {
     if (record.exchange !== id) return;
@@ -449,9 +479,14 @@ export async function describeDumpExchange(files, id, { maxSectionBytes = 262_14
       appendBoundedText(responseBodyState, bodyRecordText(record), maxSectionBytes);
       return;
     }
+    if (record.kind === "websocket_frame") {
+      appendWebSocketFrame(webSocketState, record);
+      return;
+    }
     selected.push(record);
   });
   if (identity === undefined) return null;
+  finishWebSocketFrame(webSocketState);
   const requestBody = finishBoundedText(requestBodyState);
   const responseBody = finishBoundedText(responseBodyState);
   if (requestBodyState.seen) {
@@ -474,22 +509,57 @@ export async function describeDumpExchange(files, id, { maxSectionBytes = 262_14
       text: responseBody.text,
     });
   }
+  for (const frame of webSocketState.frames) {
+    selected.push({
+      account: identity.account,
+      direction: frame.direction,
+      exchange: id,
+      kind: "websocket_frame",
+      part: 1,
+      startedAtMs: identity.startedAtMs,
+      text: frame.text,
+    });
+  }
+  if (webSocketState.frameTotal > 0 && webSocketState.frames.length === 0) {
+    selected.push({
+      account: identity.account,
+      direction: webSocketState.firstDirection,
+      exchange: id,
+      kind: "websocket_frame",
+      part: 1,
+      startedAtMs: identity.startedAtMs,
+      text: "",
+    });
+  }
   return exchangeDetail(groupExchanges(selected)[0], maxSectionBytes, {
     requestBody,
-    requestModel: requestModelScanner.value,
+    requestModel: requestModelScanner.value
+      ?? (webSocketState.frameTotal > 0 ? webSocketState.requestModel : undefined),
     responseBody,
+    ...(webSocketState.frameTotal === 0
+      ? {}
+      : {
+          framePage: framePageOf(webSocketState),
+          frames: webSocketState.frames,
+          requestMetadata: webSocketState.requestMetadata,
+          responseModels: [...webSocketState.responseModels],
+        }),
   });
 }
 
-export function exchangeDetail(exchange, maxSectionBytes = 262_144, bodyOverrides) {
+export function exchangeDetail(exchange, maxSectionBytes = 262_144, overrides) {
   const head = findRecord(exchange, "request_head");
   const handshake = findRecord(exchange, "websocket_handshake");
   const responseHead = findRecord(exchange, "response_head");
-  const metadata = requestMetadata(exchange);
-  const requestBody = bodyOverrides?.requestBody
+  const metadata = overrides?.requestMetadata ?? requestMetadata(exchange);
+  const requestBody = overrides?.requestBody
     ?? boundedText(joinBodies(exchange, "request_body"), maxSectionBytes);
-  const responseBody = bodyOverrides?.responseBody
+  const responseBody = overrides?.responseBody
     ?? boundedText(joinBodies(exchange, "response_body"), maxSectionBytes);
+  const frames = overrides?.frames ?? websocketFrames(exchange).map((frame) => {
+    const bounded = boundedText(frame.text, maxSectionBytes);
+    return { direction: frame.direction, text: bounded.text, truncated: bounded.truncated };
+  });
   return {
     account: exchange.account,
     closes: recordsOfKind(exchange, "websocket_close").map((record) => ({
@@ -507,10 +577,13 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144, bodyOverride
         : JSON.stringify(event.parsed, null, 2);
       return { payload: boundedText(payload, maxSectionBytes).text, type: event.type };
     }),
-    frames: websocketFrames(exchange).map((frame) => {
-      const bounded = boundedText(frame.text, maxSectionBytes);
-      return { direction: frame.direction, text: bounded.text, truncated: bounded.truncated };
-    }),
+    framePage: overrides?.framePage ?? {
+      nextOffset: null,
+      offset: 0,
+      previousOffset: null,
+      total: frames.length,
+    },
+    frames,
     id: exchange.id,
     request: head === undefined
       ? null
@@ -523,7 +596,7 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144, bodyOverride
           path: head.path,
         },
     requestKind: metadata.requestKind,
-    requestModel: bodyOverrides?.requestModel ?? requestModelOf(exchange),
+    requestModel: overrides?.requestModel ?? requestModelOf(exchange),
     response: responseHead === undefined
       ? null
       : {
@@ -534,7 +607,7 @@ export function exchangeDetail(exchange, maxSectionBytes = 262_144, bodyOverride
           headers: responseHead.headers ?? {},
           status: responseHead.status,
         },
-    responseModels: responseModelsOf(exchange),
+    responseModels: overrides?.responseModels ?? responseModelsOf(exchange),
     startedAtMs: exchange.startedAtMs,
     threadId: metadata.threadId,
     transport: transportOf(exchange),
@@ -611,14 +684,162 @@ function bodyRecordText(record) {
     : `<${record.encoding ?? "binary"} ${record.bytes ?? 0} 字节>`;
 }
 
+function createWebSocketScanState({
+  captureFrames = true,
+  frameOffset,
+  maxFramePageSize,
+  maxSectionBytes,
+}) {
+  return {
+    active: undefined,
+    captureFrames,
+    firstDirection: undefined,
+    frameOffset,
+    framePageBytes: 0,
+    framePageClosed: false,
+    frameTotal: 0,
+    frames: [],
+    maxFramePageSize,
+    maxSectionBytes,
+    previousFrameOffset: null,
+    previousPageBytes: 0,
+    previousPageSize: 0,
+    previousPageStart: 0,
+    requestMetadata: undefined,
+    requestModel: undefined,
+    responseModels: new Set(),
+  };
+}
+
+function appendWebSocketFrame(state, record) {
+  const part = typeof record.part === "number" ? record.part : 1;
+  if (
+    state.active === undefined
+    || state.active.direction !== record.direction
+    || part !== state.active.part + 1
+  ) {
+    finishWebSocketFrame(state);
+    state.firstDirection ??= record.direction;
+    const captureText = state.captureFrames
+      && state.frameTotal >= state.frameOffset
+      && !state.framePageClosed;
+    state.active = createWebSocketFrameState(
+      record.direction,
+      part,
+      state.frameTotal,
+      captureText,
+    );
+  } else {
+    state.active.part = part;
+  }
+  const text = frameText(record);
+  appendBoundedText(
+    state.active.text,
+    text,
+    state.active.captureText ? state.maxSectionBytes : 0,
+  );
+  if (record.direction === "client") {
+    scanTopLevelStringField(state.active.model, text);
+    scanTopLevelStringField(state.active.threadId, text);
+    scanTopLevelStringField(state.active.turnMetadata, text);
+  } else if (record.direction === "upstream") {
+    scanTopLevelStringField(state.active.model, text);
+    scanTopLevelStringField(state.active.responseModel, text);
+  }
+}
+
+function createWebSocketFrameState(direction, part, index, captureText) {
+  return {
+    captureText,
+    direction,
+    index,
+    model: createTopLevelStringFieldScanner("model"),
+    part,
+    responseModel: createTopLevelStringFieldScanner("response", "model"),
+    text: createBoundedTextState(),
+    threadId: createTopLevelStringFieldScanner("client_metadata", "thread_id"),
+    turnMetadata: createTopLevelStringFieldScanner(
+      "client_metadata",
+      "x-codex-turn-metadata",
+    ),
+  };
+}
+
+function finishWebSocketFrame(state) {
+  const active = state.active;
+  if (active === undefined) return;
+  const frameBytes = Math.min(active.text.totalBytes, state.maxSectionBytes);
+  if (state.captureFrames && active.index < state.frameOffset) {
+    advancePreviousFramePage(state, active.index, frameBytes);
+  } else if (state.captureFrames && !state.framePageClosed) {
+    const exceedsPage = state.frames.length > 0 && (
+      state.frames.length >= state.maxFramePageSize
+      || state.framePageBytes + frameBytes > state.maxSectionBytes
+    );
+    if (exceedsPage) {
+      state.framePageClosed = true;
+    } else {
+      const bounded = finishBoundedText(active.text);
+      state.frames.push({
+        direction: active.direction,
+        text: bounded.text,
+        truncated: bounded.truncated,
+      });
+      state.framePageBytes += frameBytes;
+    }
+  }
+  if (active.direction === "client") {
+    state.requestModel ??= active.model.value;
+    if (state.requestMetadata === undefined) {
+      const metadata = parseTurnMetadata(active.turnMetadata.value);
+      if (metadata.threadId !== undefined) state.requestMetadata = metadata;
+      else if (active.threadId.value !== undefined) {
+        state.requestMetadata = { threadId: active.threadId.value };
+      }
+    }
+  } else if (active.direction === "upstream") {
+    const model = active.responseModel.value ?? active.model.value;
+    if (model !== undefined) state.responseModels.add(model);
+  }
+  state.frameTotal += 1;
+  state.active = undefined;
+}
+
+function advancePreviousFramePage(state, index, frameBytes) {
+  const startsNextPage = state.previousPageSize > 0 && (
+    state.previousPageSize >= state.maxFramePageSize
+    || state.previousPageBytes + frameBytes > state.maxSectionBytes
+  );
+  if (startsNextPage) {
+    state.previousPageStart = index;
+    state.previousPageBytes = 0;
+    state.previousPageSize = 0;
+  }
+  state.previousPageBytes += frameBytes;
+  state.previousPageSize += 1;
+  state.previousFrameOffset = state.previousPageStart;
+}
+
+function framePageOf(state) {
+  const end = state.frameOffset + state.frames.length;
+  return {
+    nextOffset: end < state.frameTotal ? end : null,
+    offset: state.frameOffset,
+    previousOffset: state.frameOffset === 0 ? null : state.previousFrameOffset,
+    total: state.frameTotal,
+  };
+}
+
 const maximumJsonFieldCharacters = 4_096;
 
 /** 只保存键名和目标字符串，跳过其它值；可以跨 JSONL 正文分片持续扫描。 */
-function createTopLevelStringFieldScanner(field) {
+function createTopLevelStringFieldScanner(field, nestedField) {
   return {
     capture: "",
     captureOverflow: false,
+    childScanner: undefined,
     field,
+    nestedField,
     nestedDepth: 0,
     pendingKey: undefined,
     phase: "start",
@@ -631,6 +852,16 @@ function createTopLevelStringFieldScanner(field) {
 function scanTopLevelStringField(scanner, text) {
   if (scanner.phase === "done") return;
   for (const character of text) {
+    if (scanner.childScanner !== undefined) {
+      scanTopLevelStringField(scanner.childScanner, character);
+      if (scanner.childScanner.value !== undefined) {
+        scanner.value = scanner.childScanner.value;
+        scanner.phase = "done";
+      } else if (scanner.childScanner.phase === "done") {
+        scanner.phase = "done";
+      }
+      continue;
+    }
     if (scanner.stringPurpose !== undefined) {
       scanJsonStringCharacter(scanner, character);
       continue;
@@ -662,8 +893,15 @@ function scanTopLevelStringField(scanner, text) {
         scanner.phase = character === ":" ? "value" : "done";
         break;
       case "value":
-        if (scanner.pendingKey === scanner.field && character === '"') {
-          beginJsonString(scanner, "target");
+        if (scanner.pendingKey === scanner.field) {
+          if (scanner.nestedField !== undefined && character === "{") {
+            scanner.childScanner = createTopLevelStringFieldScanner(scanner.nestedField);
+            scanTopLevelStringField(scanner.childScanner, character);
+          } else if (scanner.nestedField === undefined && character === '"') {
+            beginJsonString(scanner, "target");
+          } else {
+            scanner.phase = "done";
+          }
         } else {
           beginSkippedJsonValue(scanner, character);
         }

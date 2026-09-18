@@ -1,15 +1,25 @@
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
 import { formatBytes, formatTime } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
-export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
+export function TrafficDetail({
+  detail,
+  onFramePageChange,
+}: {
+  detail: TrafficExchangeDetail
+  onFramePageChange: (offset: number) => void
+}) {
   const requestBody = prettyJson(detail.request?.body ?? "")
   const responseBody = prettyJson(detail.response?.body ?? "")
   return (
@@ -31,7 +41,10 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
         <Card>
           <CardHeader>
             <CardTitle>WebSocket 连接</CardTitle>
-            <CardDescription>{detail.url}</CardDescription>
+            <CardDescription>
+              {detail.url} · 帧 {detail.framePage.total === 0 ? 0 : detail.framePage.offset + 1}
+              –{detail.framePage.offset + detail.frames.length} / {detail.framePage.total}
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <HeaderTable title="握手请求头" headers={detail.websocketHeaders ?? {}} />
@@ -47,6 +60,40 @@ export function TrafficDetail({ detail }: { detail: TrafficExchangeDetail }) {
               </section>
             ))}
           </CardContent>
+          {detail.framePage.previousOffset === null && detail.framePage.nextOffset === null
+            ? null
+            : (
+                <CardFooter className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={detail.framePage.previousOffset === null}
+                    onClick={() => {
+                      if (detail.framePage.previousOffset !== null) {
+                        onFramePageChange(detail.framePage.previousOffset)
+                      }
+                    }}
+                  >
+                    <ChevronLeftIcon data-icon="inline-start" />
+                    上一页
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={detail.framePage.nextOffset === null}
+                    onClick={() => {
+                      if (detail.framePage.nextOffset !== null) {
+                        onFramePageChange(detail.framePage.nextOffset)
+                      }
+                    }}
+                  >
+                    下一页
+                    <ChevronRightIcon data-icon="inline-end" />
+                  </Button>
+                </CardFooter>
+              )}
         </Card>
       ) : detail.request === null ? (
         <Alert>

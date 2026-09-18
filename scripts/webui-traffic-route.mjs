@@ -24,6 +24,8 @@ const defaultPageSize = 100;
 const maximumPageSize = 500;
 /** 单段正文回传上限；浏览器可承受该体量，超出时响应里带截断标记。 */
 const maximumSectionBytes = 4 * 1_048_576;
+/** WebSocket 帧页同时受正文总量和帧数约束，避免大量空帧绕过字节上限。 */
+const maximumFramePageSize = 100;
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
   if (apiPath !== "/traffic" && apiPath !== "/traffic/exchange") return false;
@@ -62,15 +64,27 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     });
     return true;
   }
-  assertParameters(url, ["id", "label", "session"]);
+  assertParameters(url, ["frameOffset", "id", "label", "session"]);
   const label = readLabel(url, labels);
   const id = readInteger(url, "id", undefined, 1, Number.MAX_SAFE_INTEGER);
+  const frameOffset = readInteger(
+    url,
+    "frameOffset",
+    0,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
   const { files, session } = readSessionFiles(url, catalog.files, label);
   const exchange = await describeDumpExchange(files, id, {
+    frameOffset,
+    maxFramePageSize: maximumFramePageSize,
     maxSectionBytes: maximumSectionBytes,
   });
   if (exchange === null) {
     throw new ApiError(404, "traffic_exchange_not_found", `没有找到 exchange #${id}`);
+  }
+  if (frameOffset > 0 && frameOffset >= exchange.framePage.total) {
+    throw new ApiError(400, "invalid_parameter", "frameOffset 超出允许范围");
   }
   sendJson(response, 200, {
     directory,

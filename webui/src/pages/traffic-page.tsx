@@ -37,6 +37,7 @@ export function TrafficPage() {
     query.id === null
       ? null
       : {
+          frameOffset: query.frameOffset,
           id: query.id,
           ...(query.label === undefined ? {} : { label: query.label }),
           ...(query.session === undefined ? {} : { session: query.session }),
@@ -60,20 +61,25 @@ export function TrafficPage() {
           <div className="shrink-0">
             <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
             <p className="text-sm text-muted-foreground">
-              转储包含完整 prompt、代码与工具输出，请勿分享；单段正文超过 4 MiB 时只显示前 4 MiB
+              转储包含完整 prompt、代码与工具输出，请勿分享；正文与 WebSocket 帧页最多展示 4 MiB
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => update({ id: null })}
+            onClick={() => update({ frameOffset: null, id: null })}
           >返回列表</Button>
         </div>
         <ErrorBanner error={detail.error} />
         {detail.error !== null ? null : detail.loading || detailData === null
           ? <PageSkeleton rows={6} />
-          : <TrafficDetail detail={detailData.exchange} />}
+          : (
+              <TrafficDetail
+                detail={detailData.exchange}
+                onFramePageChange={(frameOffset) => update({ frameOffset })}
+              />
+            )}
       </div>
     )
   }
@@ -155,7 +161,12 @@ export function TrafficPage() {
           <CardContent>
             <TrafficTable
               exchanges={listData.exchanges}
-              onOpen={(id) => update({ id, label: listData.label, session: listData.session })}
+              onOpen={(id) => update({
+                frameOffset: null,
+                id,
+                label: listData.label,
+                session: listData.session,
+              })}
             />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2">

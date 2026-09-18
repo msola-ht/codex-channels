@@ -13,7 +13,7 @@ export function useTrafficExchanges(
 }
 
 export function useTrafficExchange(
-  query: { id: number; label?: string; session?: string } | null,
+  query: { frameOffset?: number; id: number; label?: string; session?: string } | null,
 ) {
   return useApi(
     (signal) => query === null

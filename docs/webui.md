@@ -85,7 +85,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
-| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（摘要，默认 100、上限 500）、`GET /api/v1/traffic/exchange?id=&label=&session=`（单条完整字段） |
+| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（摘要，默认 100、上限 500）、`GET /api/v1/traffic/exchange?id=&label=&session=&frameOffset=`（单条字段及 WebSocket 帧分页） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
@@ -98,8 +98,10 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 与响应模型、状态；点开某条后列表收起、只显示该条的请求头、请求体、响应头、SSE 事件或 WebSocket
 双向帧，「返回列表」回到原来的标签与页码。正文按原样显示；转储按
 [`转储体积控制`](user-guide.md#转储体积控制) 裁剪过的条目会直接显示
-`{"type": "truncated", …}` / `{"type": "omitted", …}` 标记。单段正文超过 4 MiB 时只返回前 4 MiB，
-并在响应里带 `bodyTruncated`。`label` 只接受 `traffic/` 中已存在的标签，`session` 只接受该标签下
+`{"type": "truncated", …}` / `{"type": "omitted", …}` 标记。HTTP 请求体、响应体或单个 WebSocket 帧超过
+4 MiB 时只返回前 4 MiB；WebSocket 帧页同时限制为 4 MiB、最多 100 帧，并通过 `framePage` 返回总数与
+前后页 offset，页面可继续翻阅。HTTP 响应通过 `bodyTruncated` 标明截断。`label` 只接受 `traffic/`
+中已存在的标签，`session` 只接受该标签下
 实际存在的 writer session；非法或无来源的取值分别返回 400 与 404。目录中还没有转储文件、或请求不来自回环地址时返回 503，响应里的 `enabled` 表示
 `[debug].model_traffic_dump` 当前是否开启。
 控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、

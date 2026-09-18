@@ -325,10 +325,11 @@ export function fetchTrafficExchanges(
 }
 
 export function fetchTrafficExchange(
-  query: { id: number; label?: string; session?: string },
+  query: { frameOffset?: number; id: number; label?: string; session?: string },
   signal?: AbortSignal,
 ): Promise<TrafficDetailResponse> {
   const params = new URLSearchParams({ id: String(query.id) })
+  if (query.frameOffset !== undefined) params.set("frameOffset", String(query.frameOffset))
   if (query.label !== undefined) params.set("label", query.label)
   if (query.session !== undefined) params.set("session", query.session)
   return getJson<TrafficDetailResponse>(

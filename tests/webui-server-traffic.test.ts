@@ -168,6 +168,141 @@ describe("webui traffic API", () => {
       .toBeLessThan(maximumBodyBytes + 100);
   });
 
+  it("bounds split WebSocket frames while preserving their metadata and models", async () => {
+    const fixture = createFixture();
+    const maximumBodyBytes = 4 * 1_048_576;
+    const turnMetadata = JSON.stringify({
+      request_kind: "turn",
+      thread_id: "th-large-websocket",
+      turn_id: "tu-large-websocket",
+    });
+    const clientFrame = JSON.stringify({
+      input: {
+        model: "nested-input-model",
+        text: "x".repeat(maximumBodyBytes + 1_048_576),
+      },
+      model: "gpt-large-client",
+      client_metadata: {
+        "x-codex-turn-metadata": turnMetadata,
+        thread_id: "th-direct-websocket",
+      },
+      type: "response.create",
+    });
+    const upstreamFrame = JSON.stringify({
+      output: { text: "y".repeat(maximumBodyBytes + 1_048_576) },
+      response: { model: "gpt-large-response" },
+      type: "response.completed",
+    });
+    const records = [
+      websocketExchange(11)[0]!,
+      ...splitWebSocketFrame(11, "client", clientFrame),
+      ...splitWebSocketFrame(11, "upstream", upstreamFrame),
+    ];
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      records,
+    );
+    const server = await startServer(fixture.environment);
+
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    const firstPage = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=11`,
+    );
+    const secondPage = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=11&frameOffset=1`,
+    );
+
+    expect(list.body.exchanges[0]).toMatchObject({
+      requestKind: "turn",
+      requestModel: "gpt-large-client",
+      responseModels: ["gpt-large-response"],
+      threadId: "th-large-websocket",
+      transport: "websocket",
+      turnId: "tu-large-websocket",
+    });
+    expect(firstPage.body.exchange).toMatchObject({
+      framePage: {
+        nextOffset: 1,
+        offset: 0,
+        previousOffset: null,
+        total: 2,
+      },
+      requestKind: "turn",
+      requestModel: "gpt-large-client",
+      responseModels: ["gpt-large-response"],
+      threadId: "th-large-websocket",
+      transport: "websocket",
+      turnId: "tu-large-websocket",
+    });
+    expect(firstPage.body.exchange.frames).toMatchObject([
+      { direction: "client", truncated: true },
+    ]);
+    expect(secondPage.body.exchange).toMatchObject({
+      framePage: {
+        nextOffset: null,
+        offset: 1,
+        previousOffset: 0,
+        total: 2,
+      },
+      requestKind: "turn",
+      requestModel: "gpt-large-client",
+      responseModels: ["gpt-large-response"],
+      threadId: "th-large-websocket",
+      transport: "websocket",
+      turnId: "tu-large-websocket",
+    });
+    expect(secondPage.body.exchange.frames).toMatchObject([
+      { direction: "upstream", truncated: true },
+    ]);
+    for (const frame of [
+      ...firstPage.body.exchange.frames,
+      ...secondPage.body.exchange.frames,
+    ]) {
+      expect(Buffer.byteLength(frame.text)).toBeLessThan(maximumBodyBytes + 100);
+    }
+  });
+
+  it("limits a WebSocket frame page to one hundred frames", async () => {
+    const fixture = createFixture();
+    const prefix = { exchange: 12, startedAtMs: 1_700_000_000_012 };
+    const frames = Array.from({ length: 101 }, (_, index) => ({
+      ...prefix,
+      direction: "upstream",
+      kind: "websocket_frame",
+      part: 1,
+      text: JSON.stringify({ index, type: "response.output_text.delta" }),
+    }));
+    writeDumpFile(
+      fixture.trafficDir,
+      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
+      [websocketExchange(12)[0]!, ...frames],
+    );
+    const server = await startServer(fixture.environment);
+
+    const firstPage = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=12`,
+    );
+    const secondPage = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=12&frameOffset=100`,
+    );
+
+    expect(firstPage.body.exchange.frames).toHaveLength(100);
+    expect(firstPage.body.exchange.framePage).toEqual({
+      nextOffset: 100,
+      offset: 0,
+      previousOffset: null,
+      total: 101,
+    });
+    expect(secondPage.body.exchange.frames).toHaveLength(1);
+    expect(secondPage.body.exchange.framePage).toEqual({
+      nextOffset: null,
+      offset: 100,
+      previousOffset: 0,
+      total: 101,
+    });
+  });
+
   it("parses CRLF-delimited SSE events independently", async () => {
     const fixture = createFixture();
     const responseBody = [
@@ -290,32 +425,39 @@ describe("webui traffic API", () => {
       .toMatchObject({ body: { error: { code: "invalid_parameter" } }, status: 400 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange`))
       .toMatchObject({ body: { error: { code: "missing_parameter" } }, status: 400 });
+    expect(await getJson<TrafficErrorBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=1&frameOffset=-1`,
+    )).toMatchObject({ body: { error: { code: "invalid_parameter" } }, status: 400 });
+    expect(await getJson<TrafficErrorBody>(
+      `${server.origin}/api/v1/traffic/exchange?id=3&label=openai&frameOffset=99`,
+    )).toMatchObject({ body: { error: { code: "invalid_parameter" } }, status: 400 });
     expect(await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange?id=99`))
       .toMatchObject({ body: { error: { code: "traffic_exchange_not_found" } }, status: 404 });
   });
 
-  it("keeps hyphenated provider labels distinct", async () => {
+  it("keeps provider labels distinct and orders tied mtimes by code unit", async () => {
     const fixture = createFixture();
     const first = writeDumpFile(
       fixture.trafficDir,
-      "custom-alpha-2026-09-17T00-00-00-000Z-1.jsonl",
+      "custom-Z-2026-09-17T00-00-00-000Z-1.jsonl",
       httpExchange(1),
     );
     const second = writeDumpFile(
       fixture.trafficDir,
-      "custom-beta-2026-09-17T00-01-00-000Z-1.jsonl",
+      "custom_a-2026-09-17T00-01-00-000Z-1.jsonl",
       httpExchange(2),
     );
-    utimesSync(first, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
-    utimesSync(second, new Date(1_700_000_060_000), new Date(1_700_000_060_000));
+    const sameTimestamp = new Date(1_700_000_000_000);
+    utimesSync(first, sameTimestamp, sameTimestamp);
+    utimesSync(second, sameTimestamp, sameTimestamp);
     const server = await startServer(fixture.environment);
 
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
 
-    expect(list.body.label).toBe("custom-beta");
+    expect(list.body.label).toBe("custom_a");
     expect(list.body.labels.map((entry) => entry.label)).toEqual([
-      "custom-beta",
-      "custom-alpha",
+      "custom_a",
+      "custom-Z",
     ]);
   });
 
@@ -420,6 +562,13 @@ interface TrafficDetailBody {
   session: string;
   exchange: TrafficExchangeBody & {
     events: Array<{ payload: string; type: string }>;
+    framePage: {
+      nextOffset: number | null;
+      offset: number;
+      previousOffset: number | null;
+      total: number;
+    };
+    frames: Array<{ direction: string; text: string; truncated: boolean }>;
     request: Record<string, unknown> | null;
     response: Record<string, unknown> | null;
   };
@@ -519,4 +668,24 @@ function websocketExchange(id: number): Array<Record<string, unknown>> {
       text: JSON.stringify({ response: { model: "gpt-6-astra" }, type: "response.completed" }),
     },
   ];
+}
+
+function splitWebSocketFrame(
+  exchange: number,
+  direction: "client" | "upstream",
+  text: string,
+): Array<Record<string, unknown>> {
+  const chunks = [];
+  for (let offset = 0; offset < text.length; offset += 1_048_576) {
+    chunks.push(text.slice(offset, offset + 1_048_576));
+  }
+  return chunks.map((chunk, index) => ({
+    direction,
+    exchange,
+    kind: "websocket_frame",
+    part: index + 1,
+    parts: chunks.length,
+    startedAtMs: 1_700_000_000_000 + exchange,
+    text: chunk,
+  }));
 }

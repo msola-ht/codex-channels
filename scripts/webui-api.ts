@@ -845,6 +845,12 @@ export interface TrafficExchangeDetail {
     durationMs?: number
   } | null
   events: Array<{ type: string; payload: string }>
+  framePage: {
+    offset: number
+    total: number
+    previousOffset: number | null
+    nextOffset: number | null
+  }
   frames: Array<{ direction: "client" | "upstream"; text: string; truncated: boolean }>
   closes: Array<{ peer: string; code: number; reason?: string }>
   errors: Array<{ scope: string; message?: string }>
