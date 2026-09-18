@@ -15,7 +15,7 @@ export function TrafficRequestContent({ content }: { content: TrafficExchangeDet
         {content.input === null ? <p className="text-sm text-muted-foreground">未提取到输入，见原始正文。</p>
           : content.input.length === 0 ? <p className="text-sm text-muted-foreground">输入为空。</p>
             : content.input.map((item, index) => (
-              <details key={index} open={index === content.input!.length - 1}>
+              <details key={index}>
                 <summary className="cursor-pointer break-all text-sm">
                   {inputLabel(item)}{item.name === undefined ? "" : ` · ${item.name}`}
                   {item.callId === undefined ? "" : ` · ${item.callId}`}
