@@ -19,7 +19,8 @@ import {
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
-import type { McpRuntimeStatus } from "../src/application/index.js";
+import { ModelSelectionService, type McpRuntimeStatus } from "../src/application/index.js";
+import type { SessionRouter } from "../src/session-routing/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
   handleApprovalServerRequest,
@@ -209,6 +210,11 @@ contractSuite("isolated Codex App Server state contract", () => {
         "",
       ].join("\n"),
     );
+    await startIsolatedServer();
+  }, 15_000);
+
+  async function startIsolatedServer() {
+    appServerStderr = "";
     processHandle = spawn(
       process.env.CODEX_BINARY ?? "codex",
       ["app-server", "--listen", `unix://${socketPath}`],
@@ -239,7 +245,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     peerClient = new CodexAppServerClient(peerRpc, { sandbox: "read-only" });
     await ownerClient.connect();
     await peerClient.connect();
-  }, 15_000);
+  }
 
   afterAll(async () => {
     await peerClient?.close();
@@ -611,7 +617,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       mode.mode === "plan" && mode.effort === "medium")).toBe(true);
   });
 
-  it("persists Fast defaults for peer reads and subsequently started threads", async () => {
+  it("persists model-switch Fast reset across App Server restart", async () => {
     const startedThreadIds: string[] = [];
     try {
       await ownerClient.writeDefaultFastMode(false);
@@ -627,7 +633,27 @@ contractSuite("isolated Codex App Server state contract", () => {
       startedThreadIds.push(fastThread.thread.id);
       expect(fastThread.serviceTier).toBe("priority");
 
-      await ownerClient.writeDefaultFastMode(false);
+      const target = { surface: "telegram" as const, accountId: "contract", conversationId: "fast-reset" };
+      const selection = new ModelSelectionService(ownerClient, {
+        modelSettings: () => fastThread,
+      } as unknown as SessionRouter);
+      const nextModel = (await ownerClient.listModels()).find((model) => model.model !== fastThread.model && model.available !== false);
+      expect(nextModel).toBeDefined();
+      await selection.selectModel(target, nextModel!.model);
+      expect(selection.turnOverrides(target).serviceTier).toBe("default");
+      await expectConfiguredTier(peerClient, workdir, "default");
+      expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8")).service_tier).toBe("default");
+
+      // 未开始 Turn 的测试 Thread 尚无持久历史，重启前通过官方 API 清理。
+      for (const threadId of startedThreadIds.splice(0)) {
+        await ownerClient.unsubscribeThread(threadId);
+        await ownerClient.deleteThread(threadId);
+      }
+      await peerClient.close();
+      await ownerClient.close();
+      await stopDetachedTestProcess(processHandle, 10_000);
+      socketPath = join(testRuntime, "restarted-app-server.sock");
+      await startIsolatedServer();
       await expectConfiguredTier(peerClient, workdir, "default");
       const restoredThread = await ownerClient.startThread(workdir);
       startedThreadIds.push(restoredThread.thread.id);
@@ -638,7 +664,7 @@ contractSuite("isolated Codex App Server state contract", () => {
         await ownerClient.deleteThread(threadId);
       }
     }
-  }, 15_000);
+  }, 30_000);
 
   it("maps Turn and Goal results through the stable Application contract", async () => {
     const started = await ownerClient.startThread(workdir);

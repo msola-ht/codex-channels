@@ -117,6 +117,10 @@
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
 用户设置入口在显式确认后复用下表已有的版本化配置事务，不新增协议方法，也不修改登录状态。
+渠道选择 OpenAI 模型时，`model-selection-service.ts` 复用 `writeDefaultFastMode(false)` / `config/batchWrite`
+把用户级 `service_tier` 保存为 `default`，同时保留下一 Turn 的显式 Standard 覆盖；保存失败不切换会话。
+第三方模型选择不修改 OpenAI 默认值；`model-selection-service.test.ts` 和
+`real-app-server-isolated-state.test.ts` 的模型切换与真实 App Server 重启合同覆盖该行为。
 固定版的公开用户配置只接受 `approval_policy = "on-request" | "never"`；协议内部的 `untrusted`
 仍可作为 Workspace Thread 设置传给 App Server，但 `codexc remote` 不把它转换为固定版已退役的
 CLI 参数，未显式覆盖时失败关闭。

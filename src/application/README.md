@@ -44,6 +44,8 @@
   `modelProvider` 的 Thread；思考等级优先采用目标 Provider App Server 的有效配置，目标模型不支持
   或未配置时才回落其目录默认值，避免把原 Provider 的设置或专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
   含内联图片或本地音频的输入在创建或追加 Turn 前必须分别通过当前模型的 `image` 或 `audio` 能力检查；
+  选择 OpenAI 模型时，先通过模型窄端口保存关闭 Fast 的用户默认层级，再设置下一 Turn 的 Standard
+  覆盖；保存失败不更新选择或解绑旧 Thread，App Server 重启后不再加载旧 Fast 默认值。
   Fast 只允许当前模型目录明确声明支持时切换，并通过模型窄端口保存用户级默认层级；第三方模型
   不得借关闭 Fast 改写 OpenAI 默认设置。
 - `luna-reserve-port.ts`：定义账户额度读取、隐藏 Reserve 模型解析和 Thread 设置更新的窄端口；

@@ -721,13 +721,17 @@ describe("ModelSelectionService", () => {
   });
 
   it("resets Fast when switching between OpenAI models", async () => {
+    let savedTier = "fast";
+    const writeDefaultFastMode = vi.fn(async (enabled: boolean) => {
+      savedTier = enabled ? "fast" : "default";
+    });
     const tierModels = [
       model("gpt-main", ["medium"], "medium", true, true),
       model("gpt-other", ["medium"], "medium", false, true, "fast"),
     ];
     const codex = {
       listModels: async () => tierModels,
-      writeDefaultFastMode: async () => undefined,
+      writeDefaultFastMode,
       readDefaultReasoningEffort: async () => null,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
@@ -747,15 +751,37 @@ describe("ModelSelectionService", () => {
       effort: "medium",
       serviceTier: "default",
     });
+    expect(writeDefaultFastMode).toHaveBeenCalledExactlyOnceWith(false);
+    expect(savedTier).toBe("default");
+  });
+
+  it("keeps the current session and selection when saving the Fast reset fails", async () => {
+    const newSession = vi.fn();
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: vi.fn().mockRejectedValue(new Error("config write failed")),
+      readDefaultReasoningEffort: async () => "medium",
+      readDefaultServiceTier: async () => "fast",
+    } satisfies ModelSelectionPort;
+    const router = {
+      newSession,
+      workspace: () => ({ cwd: "/workspace" }),
+      modelSettings: () => ({ model: "deepseek-flash", modelProvider: "deepseek", effort: "high", serviceTier: "default" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router);
+    await expect(service.selectModel(target, "gpt-main")).rejects.toThrow("config write failed");
+    expect(newSession).not.toHaveBeenCalled();
+    expect(service.turnOverrides(target)).toEqual({});
   });
 
   it("uses the target Provider configured effort when selecting a model from another provider", async () => {
     const newSession = vi.fn().mockResolvedValue(undefined);
     const fork = vi.fn().mockResolvedValue(undefined);
     const readDefaultReasoningEffort = vi.fn().mockResolvedValue("high");
+    const writeDefaultFastMode = vi.fn().mockResolvedValue(undefined);
     const codex = {
       listModels: async () => models,
-      writeDefaultFastMode: async () => undefined,
+      writeDefaultFastMode,
       readDefaultReasoningEffort,
       readDefaultServiceTier: async () => "default",
     } satisfies ModelSelectionPort;
@@ -780,6 +806,7 @@ describe("ModelSelectionService", () => {
     const state = await service.selectModel(target, "deepseek-v4-flash");
 
     expect(newSession).toHaveBeenCalledOnce();
+    expect(writeDefaultFastMode).not.toHaveBeenCalled();
     expect(fork).not.toHaveBeenCalled();
     expect(readDefaultReasoningEffort).toHaveBeenCalledWith("/workspace", "deepseek");
     expect(state).toMatchObject({

@@ -162,6 +162,10 @@ export class ModelSelectionService {
           selectedProvider,
         )
       : undefined;
+    if (resetOfficialFast) {
+      // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
+      await this.codex.writeDefaultFastMode(false);
+    }
     if (providerChanged) {
       await this.router.newSession(target);
     }
