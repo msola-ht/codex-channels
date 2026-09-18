@@ -21,11 +21,13 @@ export function TrafficDetail({
   onTracePageChange: (offset: number) => void
 }) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 shrink-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
         <StateBadge state={detail.state} />
+        <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
+          : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
         <span>
           模型：<span className="font-mono">{detail.requestModel ?? "未提供"}</span> →{" "}
           <span className="font-mono">{detail.responseModels.join("、") || "未提供"}</span>
@@ -36,18 +38,32 @@ export function TrafficDetail({
         </span>
       </div>
 
-      <Card>
+      <Card className="min-w-0 shrink-0">
         <CardHeader>
           <CardTitle>请求</CardTitle>
           <CardDescription>
             {requestLabel(detail)}
-            {detail.request.bytes === undefined ? "" : ` · ${formatBytes(detail.request.bytes)}`}
+            {detail.transport !== "http" || detail.request.bytes === undefined ? "" : ` · 原始 ${formatBytes(detail.request.bytes)}`}
+            {detail.request.storedBytes === undefined ? "" : ` · 正文存储 ${formatBytes(detail.request.storedBytes)}`}
             {detail.request.bodyTruncated ? " · 展示已截断" : ""}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <HeaderTable title="请求头" headers={detail.request.headers} />
-          <PayloadBlock title="请求正文" text={prettyJson(detail.request.body)} />
+          <div className="flex flex-wrap gap-3 text-sm">
+            <span>思考等级：{detail.request.parameters.reasoningEffort ?? "未提供"}</span>
+            <span>请求服务层级：{detail.request.parameters.serviceTier ?? "未提供"}</span>
+            {detail.request.parameters.generate === false ? <Badge variant="outline">不生成输出</Badge> : null}
+          </div>
+          {detail.request.parameters.previousResponseId === undefined ? null : (
+            <p className="break-all font-mono text-xs text-muted-foreground">接续响应：{detail.request.parameters.previousResponseId}</p>
+          )}
+          <details>
+            <summary className="cursor-pointer text-sm">请求头与原始正文{detail.request.bodyTruncated ? "（展示已截断）" : ""}</summary>
+            <div className="flex flex-col gap-3 pt-3">
+              <HeaderTable title="请求头" headers={detail.request.headers} />
+              <PayloadBlock title="请求正文" text={prettyJson(detail.request.body)} />
+            </div>
+          </details>
         </CardContent>
       </Card>
 
@@ -57,7 +73,7 @@ export function TrafficDetail({
           <AlertDescription>请求已记录，但尚未收到完成、失败或不完整终态。</AlertDescription>
         </Alert>
       ) : (
-        <Card>
+        <Card className="min-w-0 shrink-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               响应
@@ -66,14 +82,37 @@ export function TrafficDetail({
             <CardDescription>
               {detail.response.status === null ? "" : `HTTP ${detail.response.status}`}
               {detail.response.eventType === undefined ? "" : ` · ${detail.response.eventType}`}
-              {detail.response.bytes === undefined ? "" : ` · 原始 ${formatBytes(detail.response.bytes)}`}
-              {detail.response.durationMs === undefined ? "" : ` · ${detail.response.durationMs} ms`}
+              {detail.transport !== "http" || detail.response.bytes === undefined ? "" : ` · 传输 ${formatBytes(detail.response.bytes)}`}
+              {detail.response.storedBytes === undefined ? "" : ` · 终态存储 ${formatBytes(detail.response.storedBytes)}`}
               {detail.response.bodyTruncated ? " · 展示已截断" : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <HeaderTable title="响应头" headers={detail.response.headers} />
-            <PayloadBlock title="终态响应" text={prettyJson(detail.response.body)} />
+            <p className="text-sm">实际服务层级：{detail.response.serviceTier ?? "未提供"}</p>
+            {detail.response.responseId === undefined ? null : (
+              <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
+            )}
+            <UsageSummary usage={detail.response.usage} />
+            <TimingSummary response={detail.response} />
+            {detail.response.output.map((item, index) => (
+              <PayloadBlock key={index} title={outputLabel(item)} text={item.text || "（没有可展示的文本）"} />
+            ))}
+            {detail.response.output.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{detail.category === "prewarm" ? "连接预热，不生成回答。"
+                : detail.category === "models" ? "模型列表查询，完整结果见原始正文。"
+                  : "未提取到完成的输出条目，可展开原始正文与传输轨迹查看。"}</p>
+            ) : null}
+            {detail.response.outputTruncated ? (
+              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始转储未被修改。</AlertDescription></Alert>
+            ) : null}
+            {detail.response.failure === undefined ? null : <PayloadBlock title="终态错误 / 不完整原因" text={prettyJson(detail.response.failure)} />}
+            <details>
+              <summary className="cursor-pointer text-sm">响应头与原始终态（含逐条用量归因）{detail.response.bodyTruncated ? " · 展示已截断" : ""}</summary>
+              <div className="flex flex-col gap-3 pt-3">
+                <HeaderTable title="响应头" headers={detail.response.headers} />
+                <PayloadBlock title="原始终态" text={prettyJson(detail.response.body)} />
+              </div>
+            </details>
             {detail.response.errorScope === undefined ? null : (
               <p className="font-mono text-xs text-destructive">
                 {detail.response.errorScope}
@@ -85,17 +124,17 @@ export function TrafficDetail({
       )}
 
       {detail.tracePage.total === 0 ? null : (
-        <details className="rounded-lg border bg-card text-card-foreground shadow-sm">
+        <details className="min-w-0 shrink-0 rounded-lg border bg-card text-card-foreground shadow-sm">
           <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
             原始传输轨迹（{detail.tracePage.total} 条，默认收起）
           </summary>
           <div className="flex flex-col gap-3 border-t px-6 py-4">
             {detail.trace.map((item, index) => (
-              <section key={`${item.atMs}-${item.kind}-${index}`} className="flex flex-col gap-1">
+              <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                 <p className="font-mono text-xs text-muted-foreground">
                   {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
                   {prettyJson(item.text)}
                 </pre>
               </section>
@@ -139,6 +178,57 @@ function StateBadge({ state }: { state: TrafficExchangeDetail["state"] }) {
   return <Badge variant={state === "completed" ? "secondary" : state === "pending" ? "outline" : "destructive"}>{label}</Badge>
 }
 
+function UsageSummary({ usage }: { usage: NonNullable<TrafficExchangeDetail["response"]>["usage"] }) {
+  if (usage === null) return <p className="text-sm text-muted-foreground">上游未提供可解析的用量。</p>
+  const rate = usage.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined
+    ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
+  return (
+    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm tabular-nums">
+      <span>输入 Token：{usage.inputTokens?.toLocaleString() ?? "—"}</span>
+      <span>缓存：{usage.cachedTokens?.toLocaleString() ?? "—"}（{rate}）</span>
+      <span>输出 Token：{usage.outputTokens?.toLocaleString() ?? "—"}</span>
+      <span>其中推理：{usage.reasoningTokens?.toLocaleString() ?? "—"}</span>
+    </div>
+  )
+}
+
+function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
+  const timing = response.timing
+  const metrics = [
+    ["本地请求耗时", response.durationMs],
+    ["上游首 Token", timing?.firstTokenMs],
+    ["上游最大排队", timing?.queueMaxMs],
+    ["上游生成阶段", timing?.samplingMs],
+    ["上游 logical turn", timing?.totalMs],
+    ["客户端工具暂停", timing?.toolPauseMs],
+  ] as const
+  return (
+    <section className="flex flex-col gap-2" aria-label="耗时摘要">
+      <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-3">
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value === undefined ? "未提供" : `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-xs text-muted-foreground">
+        {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
+        各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
+      </p>
+    </section>
+  )
+}
+
+function outputLabel(item: NonNullable<TrafficExchangeDetail["response"]>["output"][number]): string {
+  if (item.type === "message") return item.phase === "commentary" ? "过程说明" : "回答"
+  if (item.type === "reasoning") return "推理摘要"
+  if (item.type === "function_call" || item.type === "custom_tool_call") {
+    return `工具调用：${item.name ?? "未提供名称"}${item.callId === undefined ? "" : ` · ${item.callId}`}`
+  }
+  return item.type
+}
+
 function requestLabel(detail: TrafficExchangeDetail): string {
   if (detail.transport === "websocket") return `WebSocket ${detail.request.url ?? detail.url ?? ""}`
   return `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim()
@@ -149,7 +239,7 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
   if (entries.length === 0) return null
   return (
     <section className="flex flex-col gap-1">
-      <p className="text-xs font-medium">{title}</p>
+      <p className="break-all text-xs font-medium">{title}</p>
       <div className="rounded-md border bg-muted/50 p-3 font-mono text-xs">
         {entries.map(([name, value]) => (
           <p key={name} className="break-all">{name}: {Array.isArray(value) ? value.join(", ") : value}</p>
@@ -161,9 +251,9 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
 
 function PayloadBlock({ title, text }: { title: string; text: string }) {
   return (
-    <section className="flex flex-col gap-1">
-      <p className="text-xs font-medium">{title}</p>
-      <pre className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+    <section className="flex min-w-0 flex-col gap-1">
+      <p className="break-all text-xs font-medium">{title}</p>
+      <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
         {text || "（空）"}
       </pre>
     </section>

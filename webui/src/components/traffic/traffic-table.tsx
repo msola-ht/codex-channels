@@ -65,7 +65,8 @@ export function TrafficTable({
               <TableCell className="max-w-32 truncate font-mono text-xs" title={exchange.turnId}>
                 {exchange.turnId ?? "—"}
               </TableCell>
-              <TableCell className="text-xs">{exchange.requestKind ?? "—"}</TableCell>
+              <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
+                : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
               <TableCell className="max-w-56 truncate text-xs">
                 {exchange.requestModel ?? "—"} → {exchange.responseModels.join("、") || "—"}
               </TableCell>

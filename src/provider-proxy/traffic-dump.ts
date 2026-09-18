@@ -1138,8 +1138,10 @@ function requestFieldsOf(
     && object.client_metadata !== null
     ? object.client_metadata as Record<string, unknown>
     : {};
-  const rawTurnMetadata = headers?.["x-codex-turn-metadata"]
-    ?? clientMetadata["x-codex-turn-metadata"];
+  // WebSocket 握手属于连接，不能代表复用连接上的下一次调用。
+  const rawTurnMetadata = parsed === undefined
+    ? headers?.["x-codex-turn-metadata"]
+    : clientMetadata["x-codex-turn-metadata"];
   const turnMetadataValue: unknown = Array.isArray(rawTurnMetadata)
     ? (rawTurnMetadata as unknown[])[0]
     : rawTurnMetadata;
@@ -1153,14 +1155,17 @@ function requestFieldsOf(
   const threadId = typeof metadata.thread_id === "string"
     ? metadata.thread_id
     : typeof clientMetadata.thread_id === "string" ? clientMetadata.thread_id : undefined;
+  const turnId = typeof metadata.turn_id === "string"
+    ? metadata.turn_id
+    : typeof clientMetadata.turn_id === "string" ? clientMetadata.turn_id : undefined;
   return {
     ...(typeof metadata.request_kind === "string"
       ? { requestKind: metadata.request_kind }
       : {}),
     ...(model === undefined ? {} : { requestModel: model }),
     ...(threadId === undefined ? {} : { threadId }),
-    ...(typeof metadata.turn_id === "string" && metadata.turn_id.length > 0
-      ? { turnId: metadata.turn_id }
+    ...(turnId !== undefined && turnId.length > 0
+      ? { turnId }
       : {}),
   };
 }

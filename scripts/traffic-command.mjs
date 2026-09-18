@@ -142,6 +142,7 @@ function summaryLine(summary) {
     `线程=${shortId(summary.threadId)}`,
     `轮次=${shortId(summary.turnId)}`,
     `模型=${summary.requestModel ?? "-"}→${summary.responseModels.join("、") || "-"}`,
+    `类型=${summary.category === "models" ? "模型列表" : summary.category === "prewarm" ? "连接预热" : summary.requestKind ?? "模型请求"}`,
     `结果=${stateLabel(summary.state)}`,
   ].join("  ");
 }
@@ -159,6 +160,10 @@ function renderDetail(detail) {
   if (detail.account !== undefined) lines.push(`账户：${detail.account}`);
   lines.push("", "请求头：", ...headerLines(detail.request.headers));
   lines.push("", "请求：", indent(pretty(detail.request.body)));
+  if (detail.request.bodyTruncated) lines.push("（请求正文展示已截断）");
+  const parameters = detail.request.parameters;
+  lines.push(`思考等级：${parameters.reasoningEffort ?? "未提供"} · 请求服务层级：${parameters.serviceTier ?? "未提供"}`);
+  if (parameters.previousResponseId !== undefined) lines.push(`接续响应：${parameters.previousResponseId}`);
   if (detail.response === null) {
     lines.push("", "响应：等待终态");
   } else {
@@ -166,6 +171,13 @@ function renderDetail(detail) {
       + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`)
       + (detail.response.durationMs === undefined ? "" : ` ${detail.response.durationMs} ms`));
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
+    if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");
+    const usage = detail.response.usage;
+    if (usage !== null) lines.push(`Token：输入 ${usage.inputTokens ?? "—"} · 缓存 ${usage.cachedTokens ?? "—"} · 输出 ${usage.outputTokens ?? "—"} · 其中推理 ${usage.reasoningTokens ?? "—"}`);
+    for (const item of detail.response.output) {
+      lines.push("", `输出 ${item.type}${item.name === undefined ? "" : ` · ${item.name}`}：`, indent(item.text));
+    }
+    if (detail.response.outputTruncated) lines.push("（输出展示不完整：超出上限或传输记录残缺、无法解析）");
     if (detail.response.errorScope !== undefined) {
       lines.push(`错误：${detail.response.errorScope}`
         + (detail.response.error === undefined ? "" : ` ${detail.response.error}`));

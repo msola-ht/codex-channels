@@ -56,12 +56,12 @@ export function TrafficPage() {
 
   if (query.id !== null) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex min-w-0 shrink-0 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="shrink-0">
+          <div className="min-w-0">
             <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
             <p className="text-sm text-muted-foreground">
-              一次模型调用对应一条请求和一个终态响应；原始传输轨迹默认收起，单页最多展示 4 MiB
+              请求参数、实际输出与用量摘要；原始正文和传输轨迹可展开，每段最多展示 4 MiB
             </p>
           </div>
           <Button
@@ -153,7 +153,7 @@ export function TrafficPage() {
       {list.error !== null ? null : list.loading || listData === null ? <PageSkeleton rows={8} /> : (
         <Card>
           <CardHeader>
-            <CardTitle>模型调用（{listData.total}）</CardTitle>
+            <CardTitle>请求记录（{listData.total}）</CardTitle>
             <CardDescription className="break-all">
               {listData.label} · session {listData.session}
             </CardDescription>

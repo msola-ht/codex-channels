@@ -207,6 +207,26 @@ describe("ModelTrafficDump V2", () => {
       .toHaveLength(2);
   });
 
+  it("uses per-call WebSocket metadata instead of the prewarm handshake", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginWebSocketExchange({
+      headers: { "x-codex-turn-metadata": JSON.stringify({ request_kind: "prewarm" }) },
+      startedAtMs: Date.now(), url: "wss://example.test/responses",
+    });
+    exchange.webSocketFrame("client", textFrame({
+      type: "response.create", model: "model-test",
+      client_metadata: {
+        thread_id: "thread-current", turn_id: "turn-current",
+        "x-codex-turn-metadata": JSON.stringify({ request_kind: "turn", turn_id: "turn-current" }),
+      },
+    }), false);
+    exchange.webSocketClose("upstream", 1000, Buffer.alloc(0));
+    await dump.close();
+    expect(readIndex(listDumpFiles(directory)[0]!)[0]).toMatchObject({
+      requestKind: "turn", turnId: "turn-current", threadId: "thread-current",
+    });
+  });
+
   it("does not reuse a previous WebSocket response model after the next call closes", async () => {
     const { directory, dump } = fixture();
     const exchange = dump.beginWebSocketExchange({

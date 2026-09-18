@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { routeTrafficApi } from "../scripts/webui-traffic-route.mjs";
+// @ts-expect-error JavaScript reader intentionally has no declaration file.
+import { describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupWebuiTestFixtures,
   startWebuiTestServer,
@@ -55,6 +57,142 @@ describe("webui traffic V2 API", () => {
       type: "response.completed",
     });
     expect(detail.body.exchange.tracePage.total).toBe(2);
+  });
+
+  it("projects stored per-call metadata, usage and completed output beyond the trace page", async () => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1, Array.from({ length: 101 }, () => ({
+      interaction: 1, kind: "websocket_frame", direction: "upstream", text: "{}",
+    })));
+    call.request.requestKind = "prewarm";
+    call.requestBody = JSON.stringify({
+      model: "model-test", reasoning: { effort: "high" }, service_tier: "priority",
+      previous_response_id: "resp-before",
+      client_metadata: { thread_id: "thread-current", turn_id: "turn-current",
+        "x-codex-turn-metadata": JSON.stringify({ request_kind: "turn", turn_id: "turn-current" }) },
+    });
+    const event = JSON.stringify({ type: "response.output_item.done", output_index: 0,
+      item: { id: "msg-result", type: "message", content: [{ type: "output_text", text: "actual answer" }] } });
+    call.trace.push(...[event.slice(0, 40), event.slice(40)].map((text, index) => ({
+      interaction: 1, kind: "websocket_frame", direction: "upstream", text, part: index + 1, parts: 2,
+    })));
+    call.responseBody = JSON.stringify({ type: "response.completed", response: {
+      id: "resp-current", output: [], service_tier: "default",
+      usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 80 },
+        output_tokens: 10, output_tokens_details: { reasoning_tokens: 2 } },
+    } });
+    writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [call]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.body.exchanges[0]).toMatchObject({ requestKind: "turn", turnId: "turn-current" });
+    const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=1`);
+    expect(detail.body.exchange).toMatchObject({
+      request: { parameters: { reasoningEffort: "high", serviceTier: "priority", previousResponseId: "resp-before" } },
+      response: { responseId: "resp-current", serviceTier: "default",
+        usage: { inputTokens: 100, cachedTokens: 80, outputTokens: 10, reasoningTokens: 2 },
+        output: [{ type: "message", text: "actual answer" }], outputTruncated: false },
+    });
+    expect(detail.body.exchange.trace).toHaveLength(100);
+  });
+
+  it("assembles SSE completed items across chunks and bounds their combined output", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    const events = [0, 1].map((index) => `data: ${JSON.stringify({
+      type: "response.output_item.done", output_index: index,
+      item: { type: "message", content: [{ type: "output_text", text: "a".repeat(150) }] },
+    })}\n\n`).join("");
+    call.trace = [events.slice(0, 30), events.slice(30)].map((text) => ({
+      interaction: 1, kind: "response_body", encoding: "utf8", text,
+    }));
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1, { maxSectionBytes: 350 });
+    expect(detail.response.output).toHaveLength(1);
+    expect(detail.response.output[0].text).toBe("a".repeat(150));
+    expect(detail.response.outputTruncated).toBe(true);
+  });
+
+  it.each([
+    ['data: {"type":"response.output_item.done","item":', true],
+    ['data: {"type":"response.completed"}', false],
+    ['data: [DONE]\n', false],
+    [': keepalive\n', false],
+  ])("reports incomplete SSE tail %s", async (tail, truncated) => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.trace = [{ interaction: 1, kind: "response_body", encoding: "utf8", text: tail }];
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.outputTruncated).toBe(truncated);
+  });
+
+  it("extracts scoped timing beyond the trace page even when terminal output exists", async () => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1, Array.from({ length: 101 }, () => ({
+      interaction: 1, kind: "websocket_frame", direction: "upstream", text: "{}",
+    })));
+    call.responseBody = JSON.stringify({ response: { id: "resp-current",
+      output: [{ type: "message", content: "answer" }] } });
+    const timing = JSON.stringify({ type: "responsesapi.websocket_timing", timing_metrics: {
+      timing_scope: "logical_turn", response_id: "resp-current", total_turn_time_s: 5.421,
+      first_sampled_message_ttft_ms: 2843, engine_queue_max_ms: 1738,
+      engine_service_sampling_total_ms: 2327.393, client_tool_pause_total_ms: 0,
+    } });
+    call.trace.push(...[timing.slice(0, 30), timing.slice(30)].map((text, index) => ({
+      interaction: 1, kind: "websocket_frame", direction: "upstream", text, part: index + 1, parts: 2,
+    })));
+    call.trace.push({ interaction: 1, kind: "websocket_frame", direction: "upstream",
+      text: timing.replace("resp-current", "resp-other") });
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.timing).toEqual({ scope: "logical_turn", responseId: "resp-current",
+      totalMs: 5421, firstTokenMs: 2843, queueMaxMs: 1738, samplingMs: 2327.393, toolPauseMs: 0 });
+    expect(detail.response.output).toMatchObject([{ text: "answer" }]);
+    expect(detail.response.outputTruncated).toBe(false);
+    expect(detail.trace).toHaveLength(100);
+  });
+
+  it.each([
+    ["logical_turn", "resp-current", "resp-current", true],
+    ["engine_call", "resp-current", "resp-current", false],
+    ["logical_turn", "resp-other", "resp-current", false],
+    ["logical_turn", undefined, undefined, false],
+  ])("keeps missing timing explicit and rejects unmatched scope or response: %s %s %s", async (scope, id, terminalId, matched) => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1, [{ interaction: 1, kind: "websocket_frame", direction: "upstream",
+      text: JSON.stringify({ type: "responsesapi.websocket_timing", timing_metrics: {
+        timing_scope: scope, response_id: id, total_turn_time_s: null,
+        first_sampled_message_ttft_ms: "123", engine_queue_max_ms: -1, client_tool_pause_total_ms: 0,
+      } }),
+    }]);
+    call.responseBody = JSON.stringify({ response: { id: terminalId, output: [] } });
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    if (matched) {
+      expect(detail.response.timing).toEqual({ scope, responseId: id, toolPauseMs: 0,
+        totalMs: undefined, firstTokenMs: undefined, queueMaxMs: undefined, samplingMs: undefined });
+    } else expect(detail.response.timing).toBeNull();
+  });
+
+  it("prefers terminal output without duplicating its trace items and distinguishes model discovery", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1, "{}", JSON.stringify({ output: [{ type: "message", content: "terminal answer" }] }));
+    call.trace.push({ interaction: 1, kind: "websocket_frame", direction: "upstream",
+      text: JSON.stringify({ type: "response.output_item.done", output_index: 0, item: { type: "message", content: "trace answer" } }) });
+    const models = httpInteraction(2);
+    Object.assign(models.request, { method: "GET", path: "/models?client_version=1" });
+    writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [call, models]);
+    const server = await startServer(fixture.environment);
+    const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?id=1`);
+    expect(detail.body.exchange.response).toMatchObject({
+      output: [{ text: "terminal answer" }], outputSource: "terminal", outputTruncated: false,
+    });
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.body.exchanges[1]).toMatchObject({ category: "models" });
   });
 
   it("paginates raw trace independently from the logical response", async () => {

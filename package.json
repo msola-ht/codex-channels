@@ -129,6 +129,7 @@
     "scripts/terminal-prompter.mjs",
     "scripts/traffic-command-options.mjs",
     "scripts/traffic-command.mjs",
+    "scripts/traffic-dump-presentation.mjs",
     "scripts/traffic-dump-reader.mjs",
     "scripts/upgrade-state.mjs",
     "scripts/validate-config.mjs",

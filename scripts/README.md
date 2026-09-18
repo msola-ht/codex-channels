@@ -499,6 +499,8 @@
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按逻辑调用产出摘要和详情；`codexc traffic` 与 WebUI 共用。正文和独立 trace 均
   有界读取，旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
+- `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误；从终态或
+  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件，不回写转储。
 
 ## 构建、打包与服务
 

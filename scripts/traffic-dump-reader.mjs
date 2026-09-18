@@ -12,6 +12,8 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
+import { createOutputCollector, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
 
@@ -88,10 +90,15 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0 } = {}) {
   const interactions = await readInteractions(paths);
   const summaries = [...interactions.values()]
     .filter((entry) => entry.request !== undefined)
-    .sort((left, right) => left.request.id - right.request.id)
-    .map(summaryOf);
+    .sort((left, right) => left.request.id - right.request.id);
   const boundedLimit = limit ?? summaries.length;
-  const exchanges = summaries.slice(offset, offset + boundedLimit);
+  const exchanges = summaries.slice(offset, offset + boundedLimit).map((entry) => {
+    const body = entry.request.transport === "websocket"
+      && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm")
+      ? parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576).text)
+      : undefined;
+    return summaryOf(entry, body);
+  });
   return {
     exchanges,
     total: summaries.length,
@@ -122,9 +129,13 @@ export async function describeDumpExchange(
   const directory = interaction.directory;
   const requestPayload = readPayload(directory, interaction.request.payload, maxSectionBytes);
   const responsePayload = readPayload(directory, interaction.response?.payload, maxSectionBytes);
-  const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes);
+  const requestBody = parseJson(requestPayload.text);
+  const responseBody = parseJson(responsePayload.text);
+  const facts = responseFacts(responseBody);
+  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, facts.responseId);
+  const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   return {
-    ...summaryOf(interaction),
+    ...summaryOf(interaction, requestBody),
     request: {
       headers: interaction.request.headers ?? {},
       method: interaction.request.method,
@@ -133,6 +144,8 @@ export async function describeDumpExchange(
       body: requestPayload.text,
       bodyTruncated: requestPayload.truncated,
       bytes: interaction.request.bytes ?? interaction.request.payload?.bytes,
+      storedBytes: interaction.request.payload?.bytes,
+      parameters: requestParameters(requestBody),
     },
     response: interaction.response === undefined ? null : {
       state: interaction.response.state,
@@ -145,6 +158,9 @@ export async function describeDumpExchange(
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
       error: interaction.response.error,
+      storedBytes: interaction.response.payload?.bytes,
+      ...facts,
+      ...output.result(),
     },
     trace: trace.items,
     tracePage: trace.page,
@@ -219,9 +235,11 @@ async function readInteractions(paths) {
   return interactions;
 }
 
-function summaryOf(interaction) {
+function summaryOf(interaction, body) {
   const request = interaction.request;
   const response = interaction.response;
+  const metadata = requestMetadata(body);
+  const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   return {
     id: request.id,
     startedAtMs: request.startedAtMs,
@@ -234,6 +252,11 @@ function summaryOf(interaction) {
     ...(request.turnId === undefined ? {} : { turnId: request.turnId }),
     ...(request.requestKind === undefined ? {} : { requestKind: request.requestKind }),
     ...(request.requestModel === undefined ? {} : { requestModel: request.requestModel }),
+    ...(metadata.threadId === undefined ? {} : { threadId: metadata.threadId }),
+    ...(metadata.turnId === undefined ? {} : { turnId: metadata.turnId }),
+    ...(requestKind === undefined ? {} : { requestKind }),
+    category: request.method === "GET" && request.path?.split("?")[0] === "/models"
+      ? "models" : requestKind === "prewarm" ? "prewarm" : "model",
     responseModels: response?.responseModels ?? [],
     state: response?.state ?? "pending",
     status: response?.status,
@@ -292,7 +315,7 @@ function readFileSlice(path, offset, length) {
   }
 }
 
-async function readTrace(directory, id, offset, limit, maxBytes) {
+async function readTrace(directory, id, offset, limit, maxBytes, output) {
   const items = [];
   let remaining = maxBytes;
   let total = 0;
@@ -304,6 +327,7 @@ async function readTrace(directory, id, offset, limit, maxBytes) {
     for await (const line of lines) {
       const record = parseJson(line);
       if (record?.interaction !== id) continue;
+      output.consume(record);
       if (total >= offset && items.length < limit && remaining > 0) {
         const raw = JSON.stringify(record);
         const buffer = Buffer.from(raw, "utf8");

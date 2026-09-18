@@ -794,6 +794,7 @@ export interface TrafficExchangeSummary {
   threadId?: string
   turnId?: string
   requestKind?: string
+  category: "models" | "prewarm" | "model"
   status?: number
   state: "completed" | "failed" | "incomplete" | "pending"
   durationMs?: number
@@ -824,6 +825,7 @@ export interface TrafficExchangeDetail {
   threadId?: string
   turnId?: string
   requestKind?: string
+  category: "models" | "prewarm" | "model"
   requestModel?: string
   responseModels: string[]
   state: "completed" | "failed" | "incomplete" | "pending"
@@ -836,6 +838,13 @@ export interface TrafficExchangeDetail {
     body: string
     bodyTruncated: boolean
     bytes?: number
+    storedBytes?: number
+    parameters: {
+      reasoningEffort?: string
+      serviceTier?: string
+      previousResponseId?: string
+      generate?: boolean
+    }
   }
   response: {
     state: "completed" | "failed" | "incomplete"
@@ -848,6 +857,29 @@ export interface TrafficExchangeDetail {
     eventType?: string
     errorScope?: string
     error?: string
+    storedBytes?: number
+    responseId?: string
+    serviceTier?: string
+    usage: {
+      inputTokens?: number
+      cachedTokens?: number
+      outputTokens?: number
+      reasoningTokens?: number
+      totalTokens?: number
+    } | null
+    failure?: string
+    output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
+    outputTruncated: boolean
+    outputSource: "terminal" | "trace"
+    timing: {
+      scope: "logical_turn"
+      responseId: string
+      totalMs?: number
+      firstTokenMs?: number
+      queueMaxMs?: number
+      samplingMs?: number
+      toolPauseMs?: number
+    } | null
   } | null
   tracePage: {
     offset: number
