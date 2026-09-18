@@ -48,12 +48,13 @@ export function createRefreshableHttpProxySelector(
   environment?: NodeJS.ProcessEnv,
   options?: {
     platform?: NodeJS.Platform;
-    readSystemProxy?: (platform: NodeJS.Platform) => ProxySettings;
+    readSystemProxy?: (platform: NodeJS.Platform, signal: AbortSignal) => Promise<ProxySettings>;
   },
 ): {
-  validate(target: string | URL, explicitProxy?: string): void;
-  select(target: string | URL, explicitProxy?: string): string | undefined;
+  validate(target: string | URL, explicitProxy?: string): Promise<void>;
+  select(target: string | URL, explicitProxy?: string): Promise<string | undefined>;
   invalidate(): void;
+  close(): Promise<void>;
 };
 
 export function readMacSystemProxy(output?: string): ProxySettings;

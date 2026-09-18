@@ -31,18 +31,18 @@ interface RuntimeEnvironment {
 }
 
 describe("runtime environment proxy provenance", () => {
-  it("does not promote a discovered system proxy to inherited configuration", () => {
+  it("does not promote a discovered system proxy to inherited configuration", async () => {
     state.system = { https_proxy: "http://127.0.0.1:7890" };
     const runtime = configuredEnvironment({}) as RuntimeEnvironment;
     expect(runtime.environment.HTTPS_PROXY).toBe(state.system.https_proxy);
     expect(runtime.unresolvedProxyEnvironment.HTTPS_PROXY).toBeUndefined();
     const selector = createRefreshableHttpProxySelector({}, runtime.unresolvedProxyEnvironment, {
-      readSystemProxy: () => state.system,
+      readSystemProxy: async () => state.system,
     });
-    expect(selector.select("https://api.openai.com")).toBe("http://127.0.0.1:7890/");
+    expect(await selector.select("https://api.openai.com")).toBe("http://127.0.0.1:7890/");
     state.system = { https_proxy: "http://127.0.0.1:7891" };
     selector.invalidate();
-    expect(selector.select("https://api.openai.com")).toBe("http://127.0.0.1:7891/");
+    expect(await selector.select("https://api.openai.com")).toBe("http://127.0.0.1:7891/");
   });
 
   it("preserves explicitly inherited proxy variables", () => {

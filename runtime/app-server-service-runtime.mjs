@@ -129,8 +129,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   let supervisorOwner;
   let desktopAppBridge;
-  const upstreamAgentFor = (upstreamUrl) => {
-    const proxyUrl = proxySelector.select(upstreamUrl);
+  const upstreamAgentFor = async (upstreamUrl) => {
+    const proxyUrl = await proxySelector.select(upstreamUrl);
     if (!proxyUrl) return undefined;
     const existing = upstreamAgentsByProxyUrl.get(proxyUrl);
     if (existing) return existing;
@@ -268,15 +268,15 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     }
   };
-  const proxyOptionsForUrl = (upstreamUrl) => {
-    proxySelector.validate(upstreamUrl);
+  const proxyOptionsForUrl = async (upstreamUrl) => {
+    await proxySelector.validate(upstreamUrl);
     return {
       upstreamHost: upstreamUrl.hostname,
       ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
       upstreamProtocol: upstreamUrl.protocol === "http:" ? "http" : "https",
       upstreamBasePath: upstreamUrl.pathname,
-      resolveUpstream: () => {
-        const agent = upstreamAgentFor(upstreamUrl);
+      resolveUpstream: async () => {
+        const agent = await upstreamAgentFor(upstreamUrl);
         return {
           ...(agent ? { agent } : {}),
           host: upstreamUrl.hostname,
@@ -408,8 +408,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         const startedProxy = await startProviderProxy(
           proxyKey,
           withExternalRoleMetrics(provider, isGoProvider(provider)
-            ? goProxyOptions()
-            : proxyOptionsForUrl(new URL(
+            ? await goProxyOptions()
+            : await proxyOptionsForUrl(new URL(
                 definition?.baseUrl ?? customDefinition.baseUrl,
               ))),
         );
@@ -581,7 +581,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         primaryProvider,
         withExternalRoleMetrics(
           customPrimaryProvider.id,
-          proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
+          await proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
         ),
       );
       primaryArguments = withProviderBaseUrl(
@@ -601,19 +601,19 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         : undefined;
       let openAiProxyOptions;
       if (configuredOpenAiUrl) {
-        openAiProxyOptions = proxyOptionsForUrl(configuredOpenAiUrl);
+        openAiProxyOptions = await proxyOptionsForUrl(configuredOpenAiUrl);
       } else {
         const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
         const apiUrl = new URL("https://api.openai.com/v1");
-        proxySelector.validate(chatgptUrl);
-        proxySelector.validate(apiUrl);
+        await proxySelector.validate(chatgptUrl);
+        await proxySelector.validate(apiUrl);
         openAiProxyOptions = {
           upstreamHost: apiUrl.hostname,
           upstreamProtocol: "https",
           upstreamBasePath: apiUrl.pathname,
-          resolveUpstream: (headers) => {
+          resolveUpstream: async (headers) => {
             const target = headers["chatgpt-account-id"] === undefined ? apiUrl : chatgptUrl;
-            const agent = upstreamAgentFor(target);
+            const agent = await upstreamAgentFor(target);
             return {
               ...(agent ? { agent } : {}),
               host: target.hostname,
@@ -637,8 +637,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
-          ? goProxyOptions()
-          : proxyOptionsForUrl(new URL(definition.baseUrl))),
+          ? await goProxyOptions()
+          : await proxyOptionsForUrl(new URL(definition.baseUrl))),
       );
       const primaryBaseUrl = isGoProvider(definition.id)
         ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
@@ -662,12 +662,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)
-          ? goProxyOptions()
-          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
+          ? await goProxyOptions()
+          : await proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
       );
       refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     const lifecycle = forwardChildrenLifecycle(children, async () => {
+      await proxySelector.close();
       await desktopAppBridge?.close();
       await supervisorOwner?.close();
       await Promise.all(
@@ -720,6 +721,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     }
   } catch (error) {
+    await proxySelector.close();
     await desktopAppBridge?.close();
     await supervisorOwner?.close();
     await Promise.all(

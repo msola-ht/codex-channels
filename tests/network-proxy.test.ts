@@ -118,36 +118,36 @@ describe("network proxy discovery", async () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("refreshes system proxy selection only after the caller invalidates a failed route", () => {
+  it("refreshes system proxy selection only after the caller invalidates a failed route", async () => {
     let systemProxy: { https_proxy?: string } = {};
-    const readSystemProxy = vi.fn(() => systemProxy);
+    const readSystemProxy = vi.fn(async () => systemProxy);
     const selector = createRefreshableHttpProxySelector({}, {}, {
       platform: "darwin",
       readSystemProxy,
     });
 
-    expect(selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
+    expect(await selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
     systemProxy = { https_proxy: "http://127.0.0.1:7890" };
-    expect(selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
+    expect(await selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
 
     selector.invalidate();
-    expect(selector.select("https://api.openai.com/v1/responses"))
+    expect(await selector.select("https://api.openai.com/v1/responses"))
       .toBe("http://127.0.0.1:7890/");
     expect(readSystemProxy).toHaveBeenCalledTimes(2);
   });
 
-  it("validates the initial route without keeping the discovery snapshot", () => {
+  it("validates the initial route without keeping the discovery snapshot", async () => {
     let systemProxy = { https_proxy: "not-a-url" };
     const selector = createRefreshableHttpProxySelector({}, {}, {
       platform: "darwin",
-      readSystemProxy: () => systemProxy,
+      readSystemProxy: async () => systemProxy,
     });
 
-    expect(() => selector.validate("https://api.openai.com/v1/responses"))
-      .toThrow("HTTP(S) 代理不是有效 URL");
+    await expect(selector.validate("https://api.openai.com/v1/responses"))
+      .rejects.toThrow("HTTP(S) 代理不是有效 URL");
 
     systemProxy = { https_proxy: "http://127.0.0.1:7890" };
-    expect(selector.select("https://api.openai.com/v1/responses"))
+    expect(await selector.select("https://api.openai.com/v1/responses"))
       .toBe("http://127.0.0.1:7890/");
   });
 

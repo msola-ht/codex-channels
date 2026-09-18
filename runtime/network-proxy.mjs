@@ -66,33 +66,73 @@ export function createRefreshableHttpProxySelector(
   options = {},
 ) {
   let resolved;
+  let inFlight;
+  let generation = 0;
+  const controller = new AbortController();
+  const platform = options.platform ?? process.platform;
+  const readSystemProxy = options.readSystemProxy ?? optionalSystemProxyAsync;
+  const resolve = async () => {
+    controller.signal.throwIfAborted();
+    if (resolved) return resolved;
+    if (!inFlight) {
+      const currentGeneration = generation;
+      inFlight = (async () => {
+        let needsSystemProxy = false;
+        const explicit = resolveProxyEnvironment(configured, environment, {
+          readSystemProxy: () => { needsSystemProxy = true; return {}; },
+        });
+        const system = needsSystemProxy
+          ? await readSystemProxy(platform, controller.signal)
+          : undefined;
+        controller.signal.throwIfAborted();
+        const result = system === undefined ? explicit : resolveProxyEnvironment(
+          configured, environment, { readSystemProxy: () => system },
+        );
+        if (generation === currentGeneration) resolved = result;
+        return result;
+      })().finally(() => { inFlight = undefined; });
+    }
+    return await inFlight;
+  };
+  const select = async (target, explicitProxy) => {
+    const proxy = await resolve();
+    controller.signal.throwIfAborted();
+    return selectHttpProxyUrl({
+      http: proxy.HTTP_PROXY,
+      https: proxy.HTTPS_PROXY,
+      all: proxy.ALL_PROXY,
+      no: proxy.NO_PROXY,
+    }, target, explicitProxy);
+  };
+  const invalidate = () => {
+    generation += 1;
+    resolved = undefined;
+  };
   return {
-    validate(target, explicitProxy) {
-      resolved ??= resolveProxyEnvironment(configured, environment, options);
+    async validate(target, explicitProxy) {
       try {
-        selectHttpProxyUrl({
-          http: resolved.HTTP_PROXY,
-          https: resolved.HTTPS_PROXY,
-          all: resolved.ALL_PROXY,
-          no: resolved.NO_PROXY,
-        }, target, explicitProxy);
+        await select(target, explicitProxy);
       } finally {
-        resolved = undefined;
+        invalidate();
       }
     },
-    select(target, explicitProxy) {
-      resolved ??= resolveProxyEnvironment(configured, environment, options);
-      return selectHttpProxyUrl({
-        http: resolved.HTTP_PROXY,
-        https: resolved.HTTPS_PROXY,
-        all: resolved.ALL_PROXY,
-        no: resolved.NO_PROXY,
-      }, target, explicitProxy);
-    },
-    invalidate() {
-      resolved = undefined;
+    select,
+    invalidate,
+    async close() {
+      controller.abort();
+      await inFlight?.catch(() => undefined);
     },
   };
+}
+
+async function optionalSystemProxyAsync(platform, signal) {
+  try {
+    return await readSystemProxyAsync(platform, signal);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    // Match startup discovery: system settings are optional (e.g. headless Linux).
+    return {};
+  }
 }
 
 function validateHttpProxyUrl(value) {

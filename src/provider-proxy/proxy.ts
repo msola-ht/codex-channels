@@ -97,7 +97,7 @@ export interface ProviderProxyOptions {
     retentionDays?: number;
     label: string;
   };
-  resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
+  resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
   timeoutMs?: number;
   quotaWindowsProvider?: (
     accountId?: string,
@@ -121,9 +121,8 @@ export class ProviderProxy {
   private readonly websocketServer = new WebSocketServer({ noServer: true });
   private readonly upstreamAgent: Agent | undefined;
   private readonly defaultUpstream: ProviderProxyUpstream;
-  private readonly resolveUpstream:
-    | ((headers: IncomingHttpHeaders) => ProviderProxyUpstream)
-    | undefined;
+  private readonly resolveUpstream: ProviderProxyOptions["resolveUpstream"];
+  private readonly pendingUpgrades = new Set<Duplex>();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
   private readonly externalRoleReasoningEffort: string | undefined;
@@ -202,10 +201,16 @@ export class ProviderProxy {
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
     this.server = createServer((request, response) => {
-      this.handleHttpRequest(request, response);
+      void this.handleHttpRequest(request, response).catch((error: unknown) => {
+        response.destroy();
+        this.onError?.(asError(error));
+      });
     });
     this.server.on("upgrade", (request, socket, head) => {
-      this.handleWebSocketUpgrade(request, socket, head);
+      void this.handleWebSocketUpgrade(request, socket, head).catch((error: unknown) => {
+        socket.destroy();
+        this.onError?.(asError(error));
+      });
     });
   }
 
@@ -243,6 +248,7 @@ export class ProviderProxy {
   async close(): Promise<void> {
     if (!this.started || this.stopped) return;
     this.stopped = true;
+    for (const socket of this.pendingUpgrades) socket.destroy();
     const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
     for (const refresh of quotaRefreshes) refresh.controller.abort();
     for (const client of this.websocketServer.clients) client.terminate();
@@ -259,7 +265,7 @@ export class ProviderProxy {
     await this.trafficDump?.close();
   }
 
-  private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
+  private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -276,15 +282,20 @@ export class ProviderProxy {
       return;
     }
     let upstreamTarget: ProviderProxyUpstream;
+    const onPendingError = () => response.destroy();
+    request.on("error", onPendingError);
     try {
-      upstreamTarget = this.upstreamFor(request.headers);
+      upstreamTarget = await this.upstreamFor(request.headers);
     } catch (error) {
       request.resume();
       response.writeHead(502, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { type: "provider_proxy_route_error" } }));
       this.onError?.(asError(error));
       return;
+    } finally {
+      request.removeListener("error", onPendingError);
     }
+    if (this.stopped || response.destroyed) return;
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
@@ -423,11 +434,11 @@ export class ProviderProxy {
     request.pipe(upstream);
   }
 
-  private handleWebSocketUpgrade(
+  private async handleWebSocketUpgrade(
     request: IncomingMessage,
     socket: Duplex,
     head: Buffer,
-  ): void {
+  ): Promise<void> {
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -445,13 +456,20 @@ export class ProviderProxy {
       return;
     }
     let target: ProviderProxyUpstream;
+    const onPendingError = () => socket.destroy();
+    socket.on("error", onPendingError);
+    this.pendingUpgrades.add(socket);
     try {
-      target = this.upstreamFor(request.headers);
+      target = await this.upstreamFor(request.headers);
     } catch (error) {
       socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       this.onError?.(asError(error));
       return;
+    } finally {
+      this.pendingUpgrades.delete(socket);
+      socket.removeListener("error", onPendingError);
     }
+    if (this.stopped || socket.destroyed) return;
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
       this.proxyWebSocket(
         request,
@@ -669,7 +687,7 @@ export class ProviderProxy {
     });
   }
 
-  private upstreamFor(headers: IncomingHttpHeaders): ProviderProxyUpstream {
+  private async upstreamFor(headers: IncomingHttpHeaders): Promise<ProviderProxyUpstream> {
     return this.resolveUpstream?.(headers) ?? this.defaultUpstream;
   }
 

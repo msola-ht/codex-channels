@@ -25,7 +25,97 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP routing", () => {
-  it("isolates HTTP and WebSocket route failures and can serve after route recovery", async () => {
+  it("waits for an asynchronous route without losing HTTP bodies or WebSocket messages", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let ready!: () => void;
+    const routesReady = new Promise<void>((resolve) => { ready = resolve; });
+    let routeCalls = 0;
+    let body = "";
+    const upstream = createServer((request, response) => {
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      request.on("end", () => response.end("ok"));
+    });
+    const websocket = new WebSocketServer({ server: upstream });
+    websocket.on("connection", (client) => client.on("message", (data) => client.send(data)));
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    openServers.push({ close: () => new Promise<void>((resolve) => websocket.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: async () => {
+        if (++routeCalls === 2) ready();
+        await gate;
+        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port, protocol: "http" };
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const httpResponse = requestProxy(Number(proxy.address().split(":")[1]), "/responses", "POST");
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const message = new Promise<string>((resolve, reject) => {
+      client.on("error", reject);
+      client.on("open", () => client.send("hello"));
+      client.on("message", (data) => { resolve(data.toString()); client.close(); });
+    });
+    await routesReady;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(body).toBe("");
+    release();
+    await expect(httpResponse).resolves.toEqual({ status: 200 });
+    await expect(message).resolves.toBe("hello");
+    expect(body).toBe("{}");
+  });
+
+  it.each([
+    ["http", "shutdown"], ["websocket", "shutdown"],
+    ["http", "disconnect"], ["websocket", "disconnect"],
+  ])("does not forward pending %s routing after %s", async (transport, action) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let ready!: () => void;
+    const routeReady = new Promise<void>((resolve) => { ready = resolve; });
+    let upstreamRequests = 0;
+    const upstream = createServer((_request, response) => { upstreamRequests += 1; response.end(); });
+    upstream.on("upgrade", (_request, socket) => { upstreamRequests += 1; socket.destroy(); });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: async () => {
+        ready();
+        await gate;
+        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port, protocol: "http" };
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    let disconnect!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      if (transport === "http") {
+        const client = httpRequest(`http://${proxy.address()}/responses`, { method: "POST" });
+        client.on("error", () => undefined);
+        client.on("close", () => resolve());
+        client.end("{}");
+        disconnect = () => client.destroy();
+      } else {
+        const client = new WebSocket(`ws://${proxy.address()}/responses`);
+        client.on("error", () => undefined);
+        client.on("close", () => resolve());
+        disconnect = () => client.terminate();
+      }
+    });
+    await routeReady;
+    if (action === "shutdown") await proxy.close();
+    else disconnect();
+    await closed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(upstreamRequests).toBe(0);
+  });
+
+  it.each([false, true])("isolates route failures and recovers (async=%s)", async (asynchronous) => {
     const failure = new Error("invalid proxy route");
     const errors: Error[] = [];
     let failing = true;
@@ -38,9 +128,13 @@ describe("ProviderProxy HTTP routing", () => {
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       resolveUpstream: () => {
-        if (failing) throw failure;
-        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port,
-          protocol: "http", basePath: "" };
+        if (failing) {
+          if (asynchronous) return Promise.reject(failure);
+          throw failure;
+        }
+        const target = { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port,
+          protocol: "http" as const, basePath: "" };
+        return asynchronous ? Promise.resolve(target) : target;
       },
       onError: (error) => errors.push(error),
     });

@@ -164,7 +164,8 @@ Codex CLI）；Node.js 运行时、连接方式和 App Server User-Agent 仍作�
 “运行环境”小节。OpenAI 连通性检查先从 App Server 读取当前认证路由，再只探测对应的 API Key
 或 ChatGPT 官方线路；自定义 Base URL 按 API 线路检查。代理连接失败会在总计 12 秒的启动窗口内
 有限重试；该总时限包含 `account/read`，超时会取消未完成的 RPC。仍不可达、Base URL 路径无效、
-线路响应异常或路由读取失败时才在启动通知中显示脱敏告警；
+线路响应异常或路由读取失败时才在启动通知中显示脱敏告警；推理端点返回 5xx 同样提示线路异常，
+不因 `/models` 正常而忽略；
 检查不发送凭据，也不阻断渠道启动。真实模型请求统一经过 App Server 服务持有的本地 Provider Proxy；
 若代理软件在服务之后才写入系统代理，第一次上游连接失败会使发现缓存失效，下一次请求重新读取系统代理，
 这仅覆盖 Provider Proxy 的模型出站连接，不代表整条链路已刷新。Gateway 渠道与 App Server 账户请求

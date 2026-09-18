@@ -92,7 +92,10 @@ async function probeOpenAiRoute(
   const timeout = setTimeout(abort, timeoutMs);
   timeout.unref();
   try {
-    await requestAndDiscard(fetchImpl, plan.inferenceUrl, "HEAD", controller.signal);
+    const inference = await requestAndDiscard(fetchImpl, plan.inferenceUrl, "HEAD", controller.signal);
+    if (inference.status >= 500) {
+      return "route-warning";
+    }
     if (plan.routeProbeUrl === undefined) {
       return "reachable";
     }

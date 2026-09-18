@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { checkOpenAiConnectivity } from "../src/bootstrap/openai-connectivity.js";
 
 describe("OpenAI startup connectivity", () => {
+  it.each(["chatgpt", "api"] as const)("reports a failing inference endpoint on the %s route", async (route) => {
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
+      new Response(null, { status: init?.method === "HEAD" ? 503 : 200 }));
+    await expect(checkOpenAiConnectivity({ proxy: {}, route, fetchImpl }))
+      .resolves.toBe("route-warning");
+  });
+
+  it.each([401, 403, 405])("accepts an unauthenticated HEAD response with status %s", async (status) => {
+    await expect(checkOpenAiConnectivity({
+      proxy: {}, route: "chatgpt",
+      fetchImpl: async () => new Response(null, { status }),
+    })).resolves.toBe("reachable");
+  });
+
   it("does not start requests after cancellation", async () => {
     const controller = new AbortController();
     controller.abort(new Error("shutdown"));

@@ -82,7 +82,8 @@
   Doctor 的端点规则只探测活动线路。API 与自定义 `openai_base_url` 使用 `/responses` 传输探测和
   `/models` 路径校验，ChatGPT 使用 `/backend-api/codex/responses`；`account/read` 与 HTTP 探测共同受
   总计 12 秒的启动窗口约束，传输失败在剩余时间内有限退避重试，以覆盖已解析代理地址的监听稍晚于
-  App Server/Gateway 就绪的情况。失败和路径异常形成脱敏状态
+  App Server/Gateway 就绪的情况。推理端点 HEAD 返回 5xx 时报告线路异常，不被 `/models` 成功掩盖。
+  失败和路径异常形成脱敏状态
   供渠道上线通知使用，但不阻断 Gateway；停止过程会取消仍在进行的探测。
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
