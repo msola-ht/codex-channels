@@ -19,6 +19,46 @@ export function requestParameters(body) {
   };
 }
 
+/** 仅投影已保存的输入；裁剪标记、非文本内容和未知条目保留为 JSON。 */
+export function requestContent(body) {
+  const input = body?.input;
+  return {
+    instructions: body?.instructions == null ? null : displayText(body.instructions),
+    input: input == null ? null : (Array.isArray(input) ? input : [input]).map((item) => {
+      if (typeof item === "string") return { type: "message", role: "user", text: item };
+      const type = stringValue(item?.type) ?? (typeof item?.role === "string" ? "message" : "unknown");
+      return {
+        ...outputItem({ ...item, type }),
+        role: stringValue(item?.role),
+        omittedItems: type === "omitted" ? tokenCount(item.omitted_items) : undefined,
+      };
+    }),
+    tools: Array.isArray(body?.tools) ? body.tools.map((tool) => ({
+      type: stringValue(tool?.type) ?? "unknown",
+      name: stringValue(tool?.name),
+      definition: displayText(tool),
+    })) : null,
+  };
+}
+
+export function parameterComparison(request, body) {
+  const response = body?.response ?? body;
+  const fields = ["reasoning.effort", "reasoning.summary", "text.verbosity", "text.format",
+    "tool_choice", "parallel_tool_calls", "temperature", "top_p", "frequency_penalty",
+    "presence_penalty", "max_output_tokens", "service_tier"];
+  return fields.map((field) => {
+    const read = (value) => field.split(".").reduce((part, key) => part?.[key], value);
+    const sent = read(request);
+    const reported = read(response);
+    return { field, request: sent == null ? null : displayText(sent),
+      response: reported == null ? null : displayText(reported) };
+  }).filter((row) => row.request !== null || row.response !== null);
+}
+
+function displayText(value) {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
 export function responseFacts(body) {
   const response = body?.response ?? body;
   const usage = response?.usage;
@@ -174,6 +214,8 @@ function outputItem(item) {
   } else if (item.type === "function_call" || item.type === "custom_tool_call") {
     const input = item.arguments ?? item.input;
     text = typeof input === "string" ? input : JSON.stringify(input ?? null);
+  } else if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+    text = displayText(item.output ?? null);
   } else text = JSON.stringify(item);
   return {
     type: stringValue(item.type) ?? "unknown",

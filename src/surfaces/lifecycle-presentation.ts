@@ -284,6 +284,12 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
+  if (event.modelProvider === "openai" && event.upstreamTtftMs !== undefined) {
+    fields.push({
+      label: "首字耗时",
+      value: `${event.upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
+    });
+  }
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -603,13 +609,21 @@ export function createTurnCompletedPresentation(
     ];
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
-  if (event.durationMs !== undefined) {
+  const upstreamTtftMs = usesOpenAiAccount(event.modelProvider)
+    ? event.timing?.upstreamTtftMs : undefined;
+  if (event.durationMs !== undefined || upstreamTtftMs !== undefined) {
     runFields.push({
       title: "性能",
-      fields: [{
-        label: "总耗时",
-        value: formatElapsedDuration(event.durationMs),
-      }],
+      fields: [
+        ...(upstreamTtftMs === undefined ? [] : [{
+          label: "首字耗时",
+          value: `${upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
+        }]),
+        ...(event.durationMs === undefined ? [] : [{
+          label: "总耗时",
+          value: formatElapsedDuration(event.durationMs),
+        }]),
+      ],
     });
   }
   if (Object.hasOwn(event, "gitBranch")) {

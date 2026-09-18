@@ -87,8 +87,8 @@
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v13
-  检查点回写、私有备份后，在单一事务中重建为 v14；模型请求记录只复制当前保留字段，删除旧价格、
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v14
+  检查点回写、私有备份后，在单一事务中重建为 v15；模型请求记录只复制当前保留字段，新增上游 TTFT 为 NULL，删除旧价格、
   成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
   `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
@@ -500,7 +500,7 @@
   payload 引用，按逻辑调用产出摘要和详情；`codexc traffic` 与 WebUI 共用。正文和独立 trace 均
   有界读取，旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
 - `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误；从终态或
-  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件，不回写转储。
+  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，不回写转储。
 
 ## 构建、打包与服务
 

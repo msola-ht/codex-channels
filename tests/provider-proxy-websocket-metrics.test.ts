@@ -27,6 +27,10 @@ describe("ProviderProxy WebSocket metrics", () => {
       upstreamPath = request.url ?? "";
       socket.on("message", (data) => {
         upstreamMessage = JSON.parse(data.toString("utf8")) as Record<string, unknown>;
+        socket.send(JSON.stringify({ type: "response.created", response: { id: "r1" } }));
+        socket.send(JSON.stringify({ type: "responsesapi.websocket_timing", timing_metrics: {
+          response_id: "r1", timing_scope: "logical_turn", first_sampled_message_ttft_ms: 569,
+        } }));
         socket.send(JSON.stringify({
           type: "codex.rate_limits",
           plan_type: "plus",
@@ -124,6 +128,7 @@ describe("ProviderProxy WebSocket metrics", () => {
     expect(metrics).toHaveLength(1);
     expect(metrics[0]).toMatchObject({
       operation: "compact",
+      upstreamTtftMs: 569,
       threadId: "thread-ws",
       turnId: "turn-ws",
       reasoningEffort: "medium",

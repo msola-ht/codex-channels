@@ -15,7 +15,7 @@
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，普通增量只扫描事件类型并立即透传，不解析事件 JSON、记录首尾
-  时间或等待指标处理；只对完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  时间或等待指标处理；只对创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
@@ -56,7 +56,9 @@
   `agents.external` 选择的默认账户并在转发前剥离该前缀。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
-  平台输出。普通增量只扫描事件类型，需要终态正文的事件才解析 JSON；错误消息、标识符和
+  平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
+  同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录、不估算本地首字。
+  普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。

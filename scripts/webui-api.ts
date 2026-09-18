@@ -186,6 +186,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  upstreamTtftMs: number | null
   id: number
   provider: string | null
   model: string | null
@@ -818,6 +819,7 @@ export interface TrafficListResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
   id: number
   startedAtMs: number
   account?: string
@@ -845,6 +847,13 @@ export interface TrafficExchangeDetail {
       previousResponseId?: string
       generate?: boolean
     }
+    content: {
+      instructions: string | null
+      input: Array<{
+        type: string; role?: string; name?: string; callId?: string; text: string; omittedItems?: number
+      }> | null
+      tools: Array<{ type: string; name?: string; definition: string }> | null
+    }
   }
   response: {
     state: "completed" | "failed" | "incomplete"
@@ -854,6 +863,11 @@ export interface TrafficExchangeDetail {
     bodyTruncated: boolean
     bytes?: number
     durationMs?: number
+    httpTiming: {
+      receiveRequestMs?: number
+      waitResponseHeadMs?: number
+      receiveResponseMs?: number
+    } | null
     eventType?: string
     errorScope?: string
     error?: string

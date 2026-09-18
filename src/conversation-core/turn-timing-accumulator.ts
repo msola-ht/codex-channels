@@ -12,6 +12,7 @@ type FallbackUsage = Pick<
 >;
 
 export class TurnTimingAccumulator {
+  private upstreamTtftMs: number | undefined;
   private modelRequestCount = 0;
   private completedModelRequestCount = 0;
   private interruptedModelRequestCount = 0;
@@ -40,6 +41,7 @@ export class TurnTimingAccumulator {
 
   recordModelTiming(event: ModelTimingEvent): void {
     if (event.turnId !== this.turnId) return;
+    if (event.operation !== "compact") this.upstreamTtftMs ??= event.upstreamTtftMs;
     this.modelRequestCount += 1;
     switch (event.outcome ?? "completed") {
       case "completed":
@@ -89,6 +91,7 @@ export class TurnTimingAccumulator {
   ): TurnOutputTiming | undefined {
     if (turnId !== this.turnId) return undefined;
     const result: TurnOutputTiming = {};
+    if (this.upstreamTtftMs !== undefined) result.upstreamTtftMs = this.upstreamTtftMs;
     this.appendModelRequestSummary(result);
     const tokenCounts = this.outputTokenCounts(fallbackUsage);
     if (

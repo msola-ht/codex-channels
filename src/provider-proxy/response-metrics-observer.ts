@@ -42,6 +42,8 @@ export interface ProviderProxyMetrics {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
+  /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
+  upstreamTtftMs?: number;
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
@@ -58,6 +60,8 @@ export interface ResponseMetricsMetadata {
 export interface MetricsState extends ProviderProxyMetrics {
   responseCompletedAtMs: number;
 }
+
+const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -178,11 +182,30 @@ export function observeResponseEvent(
   event: Record<string, unknown> | undefined,
   receivedAtMs: number,
 ): boolean {
+  if (metrics.transport === "websocket" && type === "response.created") {
+    const responseId = boundedString(asRecord(event?.response)?.id);
+    if (responseId !== null) timingByMetrics.set(metrics, { responseId });
+  }
+  if (metrics.transport === "websocket" && type === "responsesapi.websocket_timing") {
+    const timing = asRecord(event?.timing_metrics);
+    const pending = timingByMetrics.get(metrics);
+    const ttftMs = finiteNonNegativeNumber(timing?.first_sampled_message_ttft_ms);
+    if (pending && timing?.timing_scope === "logical_turn"
+      && timing.response_id === pending.responseId && ttftMs !== null) {
+      pending.ttftMs = ttftMs;
+    }
+  }
   if (
     type === "response.completed"
     || type === "response.failed"
     || type === "response.incomplete"
   ) {
+    const pending = timingByMetrics.get(metrics);
+    if (pending?.ttftMs !== undefined
+      && asRecord(event?.response)?.id === pending.responseId) {
+      metrics.upstreamTtftMs = pending.ttftMs;
+    }
+    timingByMetrics.delete(metrics);
     observeResponseCompletion(metrics, type, event);
     metrics.responseCompletedAtMs = receivedAtMs;
     return true;
@@ -463,6 +486,8 @@ export function inspectResponseEvent(
 }
 
 const responseEventBodyTypeNames = [
+  "response.created",
+  "responsesapi.websocket_timing",
   "response.completed",
   "response.failed",
   "response.incomplete",
@@ -471,7 +496,9 @@ const responseEventBodyTypeNames = [
 ] as const;
 
 function requiresResponseEventBody(type: string): boolean {
-  return type === "response.completed"
+  return type === "response.created"
+    || type === "responsesapi.websocket_timing"
+    || type === "response.completed"
     || type === "response.failed"
     || type === "response.incomplete"
     || type === "codex.rate_limits"

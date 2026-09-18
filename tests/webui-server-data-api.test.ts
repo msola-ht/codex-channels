@@ -37,6 +37,19 @@ function startServer(
 }
 
 describe("webui server data API", () => {
+  it("returns persisted TTFT in request details and export with missing values left null", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, { ...metricSample(), provider: "openai", upstreamTtftMs: 569.25 });
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(fixture.environment);
+    for (const path of ["requests", "requests/export"]) {
+      const response = await fetch(`${origin}/api/v1/${path}?range=all`);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
+      expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
+      expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
+    }
+  });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };
     expect(new URLSearchParams(metricsQueryParams(query)).getAll("provider")).toEqual(query.provider);

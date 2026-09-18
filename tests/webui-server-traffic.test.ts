@@ -23,6 +23,67 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("projects retained inputs, declared tools and reported parameters without inventing missing content", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1, JSON.stringify({
+      instructions: "top-level instructions", input: [
+        { type: "omitted", omitted_items: 2, omitted_bytes: 123 },
+        { role: "developer", content: "developer message" },
+        { type: "message", role: "user", content: [{ type: "input_text", text: "question" }, { type: "input_image", image_url: "local-image" }] },
+        { type: "function_call_output", call_id: "call-1", output: "tool result" },
+        { type: "truncated", head: "prefix", tail: "suffix", bytes: 100 },
+      ],
+      tools: [{ type: "function", name: "test_tool", parameters: { type: "object" } }],
+      reasoning: { effort: "high" }, parallel_tool_calls: false, temperature: 0,
+    }), JSON.stringify({ response: { reasoning: { effort: "low" }, temperature: 1, top_p: null, output: [] } }));
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "ocg", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `ocg-${session}`)], 1);
+    expect(detail.request.content).toMatchObject({ instructions: "top-level instructions", input: [
+      { type: "omitted", omittedItems: 2 },
+      { type: "message", role: "developer", text: "developer message" },
+      { type: "message", role: "user", text: expect.stringContaining("input_image") },
+      { type: "function_call_output", callId: "call-1", text: "tool result" },
+      { type: "truncated", text: expect.stringContaining("prefix") },
+    ], tools: [{ name: "test_tool", type: "function", definition: expect.stringContaining("parameters") }] });
+    expect(detail.parameterComparison).toEqual([
+      { field: "reasoning.effort", request: "high", response: "low" },
+      { field: "parallel_tool_calls", request: "false", response: null },
+      { field: "temperature", request: "0", response: "1" },
+    ]);
+    expect(detail.response.output).toEqual([]);
+  });
+
+  it("derives local HTTP stages across trace pages and does not reuse them for WebSocket", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.request.startedAtMs = 100;
+    call.trace = [
+      { kind: "request_end", ts: 110 }, { kind: "response_head", ts: 150 }, { kind: "response_end", ts: 150 },
+    ].map((record) => ({ ...record, interaction: 1 }));
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "deepseek", session, [call, websocketInteraction(2)]);
+    const paths = [join(fixture.trafficDir, `deepseek-${session}`)];
+    const detail = await describeDumpExchange(paths, 1, { maxTracePageSize: 1 });
+    expect(detail.response.httpTiming).toEqual({ receiveRequestMs: 10, waitResponseHeadMs: 40, receiveResponseMs: 0 });
+    expect(detail.trace).toHaveLength(1);
+    expect((await describeDumpExchange(paths, 2)).response.httpTiming).toBeNull();
+  });
+
+  it("does not replace unavailable request content or invalid stage timestamps with defaults", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1, "{incomplete");
+    call.trace = [
+      { interaction: 1, kind: "response_head", ts: 50 },
+      { interaction: 1, kind: "response_end", ts: 40 },
+    ];
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "ocg", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `ocg-${session}`)], 1);
+    expect(detail.request.content).toEqual({ instructions: null, input: null, tools: null });
+    expect(detail.response.httpTiming).toEqual({ receiveRequestMs: undefined, waitResponseHeadMs: undefined, receiveResponseMs: undefined });
+  });
+
   it("lists logical calls without payloads and returns one request with one response", async () => {
     const fixture = createFixture();
     writeSession(fixture.trafficDir, "ocg", "2026-09-17T00-00-00-000Z", [

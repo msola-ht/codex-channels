@@ -190,7 +190,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         INSERT INTO model_request_metrics (
           ${metricStorageColumnsSql}
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -290,6 +290,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ? null
         : JSON.stringify(sample.quotaWindows),
       sample.userAgent ?? null,
+      sample.upstreamTtftMs ?? null,
     );
     return recordedAtMs;
   }
@@ -975,6 +976,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   ): TurnSummaryRow | undefined {
     return this.database.prepare(`
       SELECT
+        (
+          SELECT upstream_ttft_ms FROM model_request_metrics AS first_timing
+          WHERE first_timing.thread_id = model_request_metrics.thread_id
+            AND first_timing.turn_id = model_request_metrics.turn_id
+            AND first_timing.provider = 'openai'
+            AND first_timing.operation = 'response'
+            AND first_timing.upstream_ttft_ms IS NOT NULL
+          ORDER BY first_timing.id LIMIT 1
+        ) AS upstream_ttft_ms,
         (
           SELECT provider
           FROM model_request_metrics AS latest_provider

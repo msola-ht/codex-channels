@@ -27,15 +27,15 @@ afterEach(() => {
 });
 
 describe("ProviderMetricsComposition", () => {
-  it("persists proxy samples but forwards only request and Token facts to Core", async () => {
+  it.each(["openai", "deepseek"])("forwards TTFT only from the OpenAI channel: %s", async (provider) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-metrics-composition-"));
     temporaryDirectories.push(directory);
-    const socketPath = join(directory, "deepseek.sock");
+    const socketPath = join(directory, `${provider}.sock`);
     const record = vi.fn<ModelRequestMetricsStore["record"]>();
     const close = vi.fn<ModelRequestMetricsStore["close"]>();
     const timings: unknown[] = [];
     const composition = new ProviderMetricsComposition({
-      providers: ["deepseek"],
+      providers: [provider],
       socketPath: () => socketPath,
       writer: new BufferedModelRequestMetricsWriter({
         record,
@@ -55,12 +55,13 @@ describe("ProviderMetricsComposition", () => {
     });
     await composition.start();
 
-    await sendProviderProxyMetrics(socketPath, metrics());
+    await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: 569 });
 
     await vi.waitFor(() => {
       expect(record).toHaveBeenCalledWith({
-        provider: "deepseek",
+        provider,
         ...metrics(),
+        ...(provider === "openai" ? { upstreamTtftMs: 569 } : {}),
         reasoningEffort: null,
       });
     });
@@ -75,6 +76,7 @@ describe("ProviderMetricsComposition", () => {
       cachedInputTokens: 80,
       outputTokens: 20,
       reasoningOutputTokens: 5,
+      ...(provider === "openai" ? { upstreamTtftMs: 569 } : {}),
     }]);
     await composition.close();
     expect(close).toHaveBeenCalledOnce();

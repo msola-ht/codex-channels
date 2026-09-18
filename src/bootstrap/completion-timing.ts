@@ -14,6 +14,7 @@ export function mergeCompletionTiming(
     requestOutputTokens: latestTurn.outputTokens,
   };
   reconcileModelRequestStatuses(timing, latestTurn);
+  assignOptionalMetric(timing, "upstreamTtftMs", latestTurn.upstreamTtftMs ?? null);
   assignOptionalMetric(
     timing,
     "requestCachedInputTokens",

@@ -37,6 +37,7 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   output: "输出 Token",
   reasoningOutput: "推理输出",
+  upstreamTtft: "首字耗时",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -110,6 +111,18 @@ export function RequestsTable({
       cell: ({ getValue }) => (
         <span className="tabular-nums text-muted-foreground">
           {formatTime(getValue<number>())}
+        </span>
+      ),
+    },
+    {
+      id: "upstreamTtft",
+      accessorFn: (record) => record.upstreamTtftMs,
+      enableSorting: false,
+      header: "首字耗时",
+      cell: ({ row }) => (
+        <span className="tabular-nums" title="OpenAI 上游 logical_turn 首 Token 统计，不是客户端首字延迟；每条请求保留上游原值。">
+          {row.original.upstreamTtftMs == null ? "—"
+            : `${row.original.upstreamTtftMs.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}
         </span>
       ),
     },

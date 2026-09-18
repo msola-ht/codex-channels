@@ -75,6 +75,7 @@ export type ConversationInputEvent =
       model?: string;
       outcome?: "completed" | "interrupted" | "incomplete" | "failed";
       retryableFailure?: boolean;
+      upstreamTtftMs?: number;
       inputTokens?: number;
       cachedInputTokens?: number;
       outputTokens?: number;

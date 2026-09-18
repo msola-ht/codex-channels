@@ -1,4 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +26,14 @@ export function TrafficDetail({
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
+        <span
+          className="tabular-nums"
+          title="来源：responsesapi.websocket_timing.timing_metrics.first_sampled_message_ttft_ms；仅使用与响应 ID 匹配的 logical_turn 统计，不代表客户端看到首字的时间。"
+        >
+          首字耗时：{detail.response?.timing?.firstTokenMs === undefined
+            ? "未提供"
+            : `${detail.response.timing.firstTokenMs.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}
+        </span>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
@@ -57,6 +66,8 @@ export function TrafficDetail({
           {detail.request.parameters.previousResponseId === undefined ? null : (
             <p className="break-all font-mono text-xs text-muted-foreground">接续响应：{detail.request.parameters.previousResponseId}</p>
           )}
+          <TrafficRequestContent content={detail.request.content} />
+          <TrafficParameterComparison rows={detail.parameterComparison} />
           <details>
             <summary className="cursor-pointer text-sm">请求头与原始正文{detail.request.bodyTruncated ? "（展示已截断）" : ""}</summary>
             <div className="flex flex-col gap-3 pt-3">
@@ -196,11 +207,17 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
   const timing = response.timing
   const metrics = [
     ["本地请求耗时", response.durationMs],
-    ["上游首 Token", timing?.firstTokenMs],
+    ...(response.httpTiming === null ? [] : [
+      ["代理收齐请求体", response.httpTiming.receiveRequestMs],
+      ["收齐请求体至响应头", response.httpTiming.waitResponseHeadMs],
+      ["响应头至结束", response.httpTiming.receiveResponseMs],
+    ] as const),
+    ...(timing === null ? [] : [
     ["上游最大排队", timing?.queueMaxMs],
     ["上游生成阶段", timing?.samplingMs],
     ["上游 logical turn", timing?.totalMs],
     ["客户端工具暂停", timing?.toolPauseMs],
+    ] as const),
   ] as const
   return (
     <section className="flex flex-col gap-2" aria-label="耗时摘要">
@@ -212,8 +229,12 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
           </div>
         ))}
       </dl>
+      {response.httpTiming === null ? null : (
+        <p className="text-xs text-muted-foreground">HTTP 阶段基于代理本地时间戳，不是首 Token 延迟或纯生成耗时；缺失或时间倒序的阶段不计算。</p>
+      )}
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
+        顶部首字耗时取自上游 first_sampled_message_ttft_ms（首 Token），不代表客户端看到首字的时间。
         各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
       </p>
     </section>

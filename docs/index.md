@@ -189,7 +189,9 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 为 `subagent_threads` 新增可空 `parent_turn_id`，Schema v11 新增按子 Thread + Turn 记录精确父 Turn
 归属的 `subagent_turns`，Schema v12 新增官方账户快照表，Schema v13 为每个请求新增记录实际发往
 模型上游 `User-Agent` 的 `user_agent` 列；Schema v14 删除价格、成本、旧计时列与派生 View，只保留
-当前采集和展示合同。旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，保留请求、
+当前采集和展示合同；Schema v15 新增可空 `upstream_ttft_ms`，保留 OpenAI 上游首 Token 统计，
+请求明细逐条展示，完成卡片取当前 Turn 首个有效样本，不由 App Server 通知或本地时间估算。
+旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，历史 TTFT 保持 NULL，保留请求、
 子代理关系与账户快照，历史运行归属不按时间猜测；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider

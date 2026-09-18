@@ -25,6 +25,26 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists TTFT and restores the first eligible sample for the exact Turn", () => {
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    const store = new SqliteModelRequestMetricsStore(path, 5_000);
+    const base = { ...sample(), provider: "openai", recordedAtMs: 2_000 };
+    store.recordBatch([
+      base,
+      { ...base, turnId: "other", upstreamTtftMs: 10 },
+      { ...base, threadId: "child", upstreamTtftMs: 20 },
+      { ...base, operation: "compact", upstreamTtftMs: 30 },
+      { ...base, provider: "deepseek", upstreamTtftMs: 40 },
+      { ...base, upstreamTtftMs: 0 },
+      { ...base, upstreamTtftMs: 720.25 },
+    ]);
+    expect(store.recent(1)[0]?.upstreamTtftMs).toBe(720.25);
+    store.close();
+    const reader = new SqliteModelRequestMetricsStore(path, 5_000, { readOnly: true });
+    expect(reader.threadTurnSummary("thread-1", "turn-1")?.upstreamTtftMs).toBe(0);
+    expect(reader.threadSummary("thread-1").latestTurn?.upstreamTtftMs).toBe(0);
+    reader.close();
+  });
   it("scopes Thread, Turn and request totals before grouping and pagination", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
     store.recordBatch([

@@ -27,6 +27,7 @@ export interface ModelRequestMetricSample {
   totalTokens: number | null;
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
+  upstreamTtftMs?: number | null;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
   weeklyQuota: {
@@ -119,6 +120,8 @@ export interface StoredCompactRequestMetricsSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
+  upstreamTtftMs?: number | null;
   provider: string | null;
   model: string | null;
   reasoningEffort: string | null;

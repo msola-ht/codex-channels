@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { createOutputCollector, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { createOutputCollector, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -136,6 +136,7 @@ export async function describeDumpExchange(
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   return {
     ...summaryOf(interaction, requestBody),
+    parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
       method: interaction.request.method,
@@ -146,6 +147,7 @@ export async function describeDumpExchange(
       bytes: interaction.request.bytes ?? interaction.request.payload?.bytes,
       storedBytes: interaction.request.payload?.bytes,
       parameters: requestParameters(requestBody),
+      content: requestContent(requestBody),
     },
     response: interaction.response === undefined ? null : {
       state: interaction.response.state,
@@ -155,6 +157,11 @@ export async function describeDumpExchange(
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
       durationMs: interaction.response.durationMs,
+      httpTiming: interaction.request.transport !== "http" ? null : {
+        receiveRequestMs: elapsedMs(interaction.request.startedAtMs, trace.milestones.request_end),
+        waitResponseHeadMs: elapsedMs(trace.milestones.request_end, trace.milestones.response_head),
+        receiveResponseMs: elapsedMs(trace.milestones.response_head, trace.milestones.response_end),
+      },
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
       error: interaction.response.error,
@@ -317,6 +324,7 @@ function readFileSlice(path, offset, length) {
 
 async function readTrace(directory, id, offset, limit, maxBytes, output) {
   const items = [];
+  const milestones = {};
   let remaining = maxBytes;
   let total = 0;
   const paths = readdirSync(directory)
@@ -327,6 +335,9 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
     for await (const line of lines) {
       const record = parseJson(line);
       if (record?.interaction !== id) continue;
+      if (["request_end", "response_head", "response_end"].includes(record.kind)) {
+        milestones[record.kind] = record.ts;
+      }
       output.consume(record);
       if (total >= offset && items.length < limit && remaining > 0) {
         const raw = JSON.stringify(record);
@@ -341,6 +352,7 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
   }
   return {
     items,
+    milestones,
     page: {
       offset,
       total,
@@ -348,6 +360,10 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
       nextOffset: offset + items.length < total ? offset + items.length : null,
     },
   };
+}
+
+function elapsedMs(start, end) {
+  return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : undefined;
 }
 
 function numericSuffix(name) {

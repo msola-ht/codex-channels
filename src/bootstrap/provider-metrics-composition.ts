@@ -66,6 +66,8 @@ export class ProviderMetricsComposition {
   }
 
   private handle(provider: string, metrics: ProviderProxyMetrics): void {
+    // 此指标只接受 OpenAI 通道；其他 Provider 不借同名字段声明该统计口径。
+    if (provider !== "openai") delete metrics.upstreamTtftMs;
     try {
       this.options.writer.enqueue({
         provider,
@@ -109,6 +111,7 @@ export function toModelTimingEvent(
     threadId: metrics.threadId,
     turnId: metrics.turnId,
     operation: metrics.operation,
+    ...(metrics.upstreamTtftMs === undefined ? {} : { upstreamTtftMs: metrics.upstreamTtftMs }),
     ...(metrics.model === null ? {} : { model: metrics.model }),
     outcome: metrics.status === "completed"
       ? "completed" as const

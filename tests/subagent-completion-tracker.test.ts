@@ -494,7 +494,7 @@ describe("SubagentCompletionTracker", () => {
       const value = summary();
       const requestCount = turnId === "agent-turn-1" ? 1 : 2;
       return {
-        latestTurn: value.latestTurn,
+        latestTurn: { ...value.latestTurn, provider: "openai", upstreamTtftMs: requestCount * 100 },
         threadAggregate: {
           ...value.threadAggregate,
           requestCount,
@@ -543,6 +543,7 @@ describe("SubagentCompletionTracker", () => {
       ["agent-1", "agent-turn-1"],
       ["agent-1", "agent-turn-2"],
     ]);
+    expect(publish.mock.calls.map(([event]) => event.upstreamTtftMs)).toEqual([100, 200]);
     expect(onRunStarted.mock.calls).toEqual([
       [{
         agentThreadId: "agent-1",
