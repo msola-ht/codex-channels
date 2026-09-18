@@ -1,5 +1,5 @@
 import type {
-  DailyUsageResponse,
+  ServerTimeResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,
@@ -103,6 +103,10 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return requestJson<T>(path, {}, signal)
 }
 
+export function fetchServerTime(signal?: AbortSignal): Promise<ServerTimeResponse> {
+  return getJson<ServerTimeResponse>(`${API_PREFIX}/time`, signal)
+}
+
 export function fetchManagementSettings(signal?: AbortSignal): Promise<ManagementSettingsResponse> {
   return getJson<ManagementSettingsResponse>(`${API_PREFIX}/management/settings`, signal)
 }
@@ -140,13 +144,6 @@ export function fetchOverview(
 
 export function fetchMetricsProviders(signal?: AbortSignal): Promise<MetricsProvidersResponse> {
   return getJson<MetricsProvidersResponse>(`${API_PREFIX}/providers`, signal)
-}
-
-export function fetchDailyUsage(
-  query: MetricsRangeQuery,
-  signal?: AbortSignal,
-): Promise<DailyUsageResponse> {
-  return getJson<DailyUsageResponse>(`${API_PREFIX}/daily?${metricsQueryParams(query)}`, signal)
 }
 
 export function fetchThreads(

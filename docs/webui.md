@@ -81,7 +81,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 
 | 页面 | 路由 | API |
 | --- | --- | --- |
-| 概览 | `#/` | `GET /api/v1/overview?range=<范围>`、`GET /api/v1/daily?range=<范围>` |
+| 概览 | `#/` | `GET /api/v1/overview?range=<范围>`（同一快照返回汇总、趋势和热力图）；`GET /api/v1/daily?range=<范围>` 可单独查询每日统计 |
 | Threads | `#/threads` | `GET /api/v1/threads?range=&offset=&limit=&sort=&direction=`（包含期间首个匹配请求的开始时间） |
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
@@ -91,11 +91,17 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
-指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的 UTC 日聚合，供控制台热力图和趋势图使用。设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
+指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
+页面加载时先通过 `GET /api/v1/time` 获取服务端系统 IANA 时区与当前时间；该接口同样受访问令牌鉴权，
+不接受浏览器覆盖时区。加载失败时明确报错，不按浏览器时区显示。请求、转储、额度重置和更新时间等
+统一按服务端时区格式化，页头标明时区及 UTC 偏移；夏令时按该时区在各时间点的规则计算。
+设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 
 转储页读取用户数据目录 `traffic/` 下 `[debug].model_traffic_dump` 生成的 V2 session，默认展示最新
-标签；标签、writer session、选中的逻辑调用编号、页码与每页条数（25/50/100/200）都保留在页面地址中，
-刷新可回到同一条记录。摘要表的一行就是一次模型调用，显示编号、时间、路径或 WebSocket URL、线程、
+提供商的全部保留批次，按请求开始时间倒序分页；“记录批次”可筛选单个 writer session，
+重启产生新批次不会隐藏仍保留的旧记录。提供商、批次筛选、选中的逻辑调用、页码与每页条数
+（25/50/100/200）都保留在页面地址中；列表筛选使用 `session`，明细定位使用 `exchangeSession` 和编号，
+返回列表保留原筛选与页码，刷新可回到同一条记录。摘要表的一行就是一次模型调用，显示编号、时间、路径或 WebSocket URL、线程、
 轮次、请求类型、请求/响应模型和终态，并区分模型列表查询、连接预热与模型请求。
 点开后固定显示一张请求卡和一张响应卡：请求卡展示思考等级、请求服务层级和接续响应 ID；响应卡
 展示实际服务层级、输入/缓存/输出/推理 Token，以及按顺序排列的回答、推理摘要与工具调用。
@@ -130,19 +136,30 @@ WebSocket 帧位于默认收起的“原始传输轨迹”，不再与逻辑响�
 `outputTruncated` 标明不完整。HTTP 传输字节数与裁剪后正文存储字节数分别展示，WebSocket 不把
 终态存储体积标为整次传输大小。`label` 只接受 `traffic/`
 中已存在的标签，`session` 只接受该标签下
-实际存在的 writer session；非法或无来源的取值分别返回 400 与 404。旧版逐帧 JSONL 不自动迁移或
+实际存在的 writer session。列表未传 `session` 时汇总全部批次，响应的 `session` 为 null，
+`sessions` 返回可选批次，每条摘要带所属 `session`；明细 API 使用 `session` 和 `id` 精确定位，
+多个批次时缺少 `session` 返回 400，避免重启后的重复编号串读。非法或无来源的取值分别返回 400 与 404。旧版逐帧 JSONL 不自动迁移或
 混读，只有旧格式时返回明确的 503；请求不来自回环地址时同样返回 503。响应里的 `enabled` 表示
 `[debug].model_traffic_dump` 当前是否开启。
 控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
 全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，
 对应 `range=today|yesterday`；滚动范围为 `7d|30d`，全部历史为 `all`。
 自定义日期对应 `from=YYYY-MM-DD&to=YYYY-MM-DD`，必须同时提供且不得与 `range` 混用。
-控制台自定义日期在点击“查询”后生效，Token、会话、轮次及趋势图使用同一所选范围；热力图仍固定最近 90 天。
+控制台自定义日期在点击“查询”后生效，Token、会话、轮次及趋势图使用同一所选范围；热力图固定展示
+包括今天在内的最近 90 个服务端自然日，从首日零点到当前时刻。
+用量趋势在今天、昨天及自定义单日范围按服务端本地小时聚合：今天（含自定义选择今天）从 00 点到
+当前小时，历史单日展示 00–23 点，缺少记录的小时补零；多日和全部历史仍按天展示。
+`trend.granularity` 为 `hour` 时返回 `hourly`（`hour` 为 `YYYY-MM-DD HH:00`），为 `day` 时返回 `daily`。
+夏令时回拨的重复钟表小时合并，跳过的小时补零；请求及 Token 不重复计数，小时合计与所选范围汇总一致。
+热力图及独立 `/api/v1/daily` 始终按天统计，不受趋势粒度影响。
 同一页面会话内切换到其他页面再返回控制台时，保留已应用的范围并重新查询；未提交的自定义日期不保留。
-切换范围或手动刷新时，只展示本轮加载返回的结果，不混用上一轮概览与趋势；重新加载整个 WebUI 后恢复默认最近 30 天。
-OpenAI 周额度使用本轮概览独立展示，不因趋势加载失败而隐藏已返回的额度。
+切换范围或手动刷新时，`overview` 在同一 SQLite 读快照中返回汇总、`trend` 和 `heatmap`；
+一次请求只取一次服务端当前时间，今天汇总、趋势和热力图今天格子的截止时间一致，历史范围保留自身结束边界。
+前端整批替换结果，不混用上次图表；重新加载整个 WebUI 后恢复默认最近 30 天。
+OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余额和外部额度仍保留独立获取时间，不伪装成指标快照。
 既有 API 的 `24h`、`90d` 查询继续支持，但不列在时间选择菜单中。
 日期按 WebUI 服务所在主机本地时区解析，包含结束日并截断到当前时刻。
+存储毫秒时间戳、API/JSON/CSV 中的时间戳和 UTC ISO 时间保持不变；原始上游正文不改写。
 Threads 和每轮明细默认全部保留历史，控制台、请求和错误页面默认最近 30 天。分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、
 `model`、`operation`、`status`、`http`、`error`、`input`、`output`、`reasoningOutput`。

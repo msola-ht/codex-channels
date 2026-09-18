@@ -37,6 +37,11 @@ export interface MetricsProvidersResponse {
   providers: string[]
 }
 
+export interface ServerTimeResponse {
+  timeZone: string
+  nowMs: number
+}
+
 export interface CompactSummary {
   model: string | null
   hasMixedModels: boolean
@@ -114,6 +119,8 @@ export interface OverviewResponse {
   providers: ProviderGroup[]
   errors: ErrorsReport
   weeklyQuota: WeeklyQuota | null
+  trend: UsageTrendResponse
+  heatmap: DailyUsageResponse
 }
 
 export interface DailyUsageRow {
@@ -129,6 +136,15 @@ export interface DailyUsageResponse {
   generatedAt: string
   daily: DailyUsageRow[]
 }
+
+export interface HourlyUsageRow extends Omit<DailyUsageRow, "day"> {
+  hour: string
+}
+
+export type UsageTrendResponse = { range: Range<string>; generatedAt: string } & (
+  | { granularity: "day"; daily: DailyUsageRow[] }
+  | { granularity: "hour"; hourly: HourlyUsageRow[] }
+)
 
 export interface ThreadListItem {
   threadId: string
@@ -785,6 +801,7 @@ export interface TrafficLabel {
 
 export interface TrafficExchangeSummary {
   id: number
+  session: string
   startedAtMs: number
   account?: string
   /** 请求头记录可能已被轮转清理，缺失证据时省略。 */
@@ -809,7 +826,8 @@ export interface TrafficListResponse {
   enabled: boolean
   label: string
   labels: TrafficLabel[]
-  session: string
+  session: string | null
+  sessions: Array<{ session: string; createdAtMs: number }>
   generatedAt: string
   exchanges: TrafficExchangeSummary[]
   total: number

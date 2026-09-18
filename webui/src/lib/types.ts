@@ -1,5 +1,6 @@
 export type {
   Aggregate,
+  ServerTimeResponse,
   MetricsQuery,
   MetricsProvidersResponse,
   MetricsRangeQuery,
@@ -9,6 +10,8 @@ export type {
   DeepseekBalanceResponse,
   DailyUsageResponse,
   DailyUsageRow,
+  HourlyUsageRow,
+  UsageTrendResponse,
   ErrorGroup,
   ErrorsReport,
   ErrorsResponse,

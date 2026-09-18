@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -27,9 +27,11 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
 import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
+import { formatTime } from "@/lib/format"
 
 export function TrafficPage() {
   const labelSelectId = useId()
+  const sessionSelectId = useId()
   const pageSizeSelectId = useId()
   const { query, update } = useTrafficQuery()
   const list = useTrafficExchanges(query.id === null ? query : null)
@@ -40,7 +42,8 @@ export function TrafficPage() {
           traceOffset: query.traceOffset,
           id: query.id,
           ...(query.label === undefined ? {} : { label: query.label }),
-          ...(query.session === undefined ? {} : { session: query.session }),
+          ...((query.exchangeSession ?? query.session) === undefined
+            ? {} : { session: query.exchangeSession ?? query.session }),
         },
   )
   const listData = list.data
@@ -50,9 +53,13 @@ export function TrafficPage() {
   useEffect(() => {
     const loaded = query.id === null ? listData : detailData
     if (loaded === null) return
-    if (query.label === loaded.label && query.session === loaded.session) return
-    update({ label: loaded.label, session: loaded.session }, false, true)
-  }, [detailData, listData, query.id, query.label, query.session, update])
+    if (query.id === null) {
+      if (query.label !== loaded.label) update({ label: loaded.label }, false, true)
+    } else if (detailData !== null
+      && (query.label !== detailData.label || query.exchangeSession !== detailData.session)) {
+      update({ label: detailData.label, exchangeSession: detailData.session }, false, true)
+    }
+  }, [detailData, listData, query.id, query.label, query.exchangeSession, update])
 
   if (query.id !== null) {
     return (
@@ -61,14 +68,14 @@ export function TrafficPage() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
             <p className="text-sm text-muted-foreground">
-              请求参数、实际输出与用量摘要；原始正文和传输轨迹可展开，每段最多展示 4 MiB
+              批次 {detailData?.session ?? query.exchangeSession ?? query.session} · 原始正文和传输轨迹可展开，每段最多展示 4 MiB
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => update({ traceOffset: null, id: null })}
+            onClick={() => update({ traceOffset: null, id: null, exchangeSession: null })}
           >返回列表</Button>
         </div>
         <ErrorBanner error={detail.error} />
@@ -86,37 +93,64 @@ export function TrafficPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="shrink-0">
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold">转储</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            记录的模型请求与响应字段；只读本机数据目录，默认展示最新标签
+            记录的模型请求与响应字段；默认汇总所选提供商全部保留批次，按请求时间倒序展示
           </p>
         </div>
-        <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
-          {listData !== null && listData.labels.length > 1 ? (
-            <Field className="w-48">
-              <FieldLabel htmlFor={labelSelectId}>标签</FieldLabel>
-              <Select
-                value={query.label ?? listData.label}
-                onValueChange={(value) => update({ label: value, session: null, id: null }, true)}
-              >
-                <SelectTrigger id={labelSelectId} size="sm" className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {listData.labels.map((entry) => (
-                      <SelectItem key={entry.label} value={entry.label}>
-                        {entry.label}（{entry.sessions} 个会话）
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : null}
+        <div className="flex w-full flex-wrap items-end gap-3">
+          <FieldGroup className="min-w-0 flex-1 flex-row flex-wrap items-end gap-3">
+            {listData !== null ? (
+              <Field className="w-48">
+                <FieldLabel htmlFor={labelSelectId}>提供商</FieldLabel>
+                <Select
+                  value={query.label ?? listData.label}
+                  onValueChange={(value) => update({ label: value, session: null, exchangeSession: null, id: null }, true)}
+                >
+                  <SelectTrigger id={labelSelectId} size="sm" className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {listData.labels.map((entry) => (
+                        <SelectItem key={entry.label} value={entry.label}>
+                          {entry.label}（{entry.sessions} 个批次）
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : null}
+            {listData !== null ? (
+              <Field className="w-64">
+                <FieldLabel htmlFor={sessionSelectId}>记录批次</FieldLabel>
+                <Select
+                  value={query.session ?? "all"}
+                  onValueChange={(value) => update({
+                    session: value === "all" ? null : value, exchangeSession: null, id: null,
+                  }, true)}
+                >
+                  <SelectTrigger id={sessionSelectId} size="sm" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="all">全部批次</SelectItem>
+                      {listData.sessions.map((entry) => (
+                        <SelectItem key={entry.session} value={entry.session}>
+                          {formatTime(entry.createdAtMs)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : null}
+          </FieldGroup>
           <Button
             type="button"
             variant="outline"
@@ -137,8 +171,8 @@ export function TrafficPage() {
           variant="outline"
           size="sm"
           className="self-start"
-          onClick={() => update({ id: null, label: null, session: null }, true)}
-        >改看最新标签</Button>
+          onClick={() => update({ id: null, label: null, session: null, exchangeSession: null }, true)}
+        >改看最新提供商的全部批次</Button>
       ) : null}
       {listData !== null && !listData.enabled ? (
         <Alert>
@@ -155,17 +189,18 @@ export function TrafficPage() {
           <CardHeader>
             <CardTitle>请求记录（{listData.total}）</CardTitle>
             <CardDescription className="break-all">
-              {listData.label} · session {listData.session}
+              {listData.label} · {listData.session === null
+                ? `全部 ${listData.sessions.length} 个保留批次` : `批次 ${listData.session}`}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <TrafficTable
               exchanges={listData.exchanges}
-              onOpen={(id) => update({
+              onOpen={(exchange) => update({
                 traceOffset: null,
-                id,
+                id: exchange.id,
                 label: listData.label,
-                session: listData.session,
+                exchangeSession: exchange.session,
               })}
             />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">

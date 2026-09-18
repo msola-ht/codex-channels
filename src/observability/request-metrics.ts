@@ -241,6 +241,10 @@ export interface StoredModelRequestMetricsDailyRow {
   outputTokens: number;
 }
 
+export interface StoredModelRequestMetricsHourlyRow extends Omit<StoredModelRequestMetricsDailyRow, "day"> {
+  hour: string;
+}
+
 export type ModelRequestMetricsErrorQuery = ModelRequestMetricsScope;
 
 export interface ModelRequestMetricsPageQuery extends ModelRequestMetricsScope {
@@ -367,6 +371,10 @@ export interface ModelRequestMetricsRequestQueryStore {
     startAtMs: number;
     endAtMs: number;
   }): StoredModelRequestMetricsDailyRow[];
+  hourly(query: {
+    startAtMs: number;
+    endAtMs: number;
+  }): StoredModelRequestMetricsHourlyRow[];
   errors(
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport;

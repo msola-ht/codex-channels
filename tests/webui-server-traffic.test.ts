@@ -96,19 +96,16 @@ describe("webui traffic V2 API", () => {
     expect(list.status).toBe(200);
     expect(list.body).toMatchObject({ enabled: true, label: "ocg", total: 2, nextOffset: 1 });
     expect(list.body.exchanges[0]).toMatchObject({
-      id: 1,
-      path: "/responses",
-      requestKind: "turn",
-      requestModel: "deepseek-flash",
-      responseModels: ["deepseek-flash"],
+      id: 2,
+      requestModel: "gpt-6-astra",
+      responseModels: ["gpt-6-astra"],
       state: "completed",
-      threadId: "thread-http-1",
-      transport: "http",
+      transport: "websocket",
     });
     expect(JSON.stringify(list.body)).not.toContain("hello");
 
     const detail = await getJson<TrafficDetailBody>(
-      `${server.origin}/api/v1/traffic/exchange?id=1&session=${list.body.session}`,
+      `${server.origin}/api/v1/traffic/exchange?id=1&session=${list.body.exchanges[0]?.session}`,
     );
     expect(detail.status).toBe(200);
     expect(JSON.parse(detail.body.exchange.request.body)).toEqual({
@@ -253,7 +250,7 @@ describe("webui traffic V2 API", () => {
       output: [{ text: "terminal answer" }], outputSource: "terminal", outputTruncated: false,
     });
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
-    expect(list.body.exchanges[1]).toMatchObject({ category: "models" });
+    expect(list.body.exchanges.find((entry) => entry.id === 2)).toMatchObject({ category: "models" });
   });
 
   it("paginates raw trace independently from the logical response", async () => {
@@ -339,6 +336,45 @@ describe("webui traffic V2 API", () => {
       `${server.origin}/api/v1/traffic/exchange?id=1&label=openai&session=2026-09-17T00-00-00-000Z`,
     );
     expect(older.body.exchange.request.body).toBe("older");
+  });
+
+  it("paginates all retained sessions by request time without merging repeated ids", async () => {
+    const fixture = createFixture();
+    const oldSession = "2026-09-17T00-00-00-000Z";
+    const newSession = "2026-09-18T00-00-00-000Z";
+    const older = httpInteraction(1, "older request", "older response");
+    const newer = httpInteraction(1, "newer request", "newer response");
+    older.request.startedAtMs = 100;
+    newer.request.startedAtMs = 300;
+    const overlapping = httpInteraction(2);
+    overlapping.request.startedAtMs = 400;
+    writeSession(fixture.trafficDir, "openai", oldSession, [older, overlapping], 100);
+    writeSession(fixture.trafficDir, "openai", newSession, [newer], 200);
+    writeSession(fixture.trafficDir, "deepseek", "other", [httpInteraction(1)], 300);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=openai&limit=2`);
+    expect(list.body).toMatchObject({ total: 3, session: null, nextOffset: 2,
+      sessions: [{ session: newSession }, { session: oldSession }],
+      exchanges: [{ id: 2, session: oldSession }, { id: 1, session: newSession }],
+    });
+    const next = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=openai&limit=2&offset=2`);
+    expect(next.body).toMatchObject({ total: 3, nextOffset: null, exchanges: [{ id: 1, session: oldSession }] });
+    for (const [session, body] of [[oldSession, "older"], [newSession, "newer"]]) {
+      const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?label=openai&session=${session}&id=1`);
+      expect(detail.body.exchange.request.body).toBe(`${body} request`);
+      expect(detail.body.exchange.response?.body).toBe(`${body} response`);
+    }
+    const filtered = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=openai&session=${oldSession}`);
+    expect(filtered.body).toMatchObject({ total: 2, session: oldSession });
+    const ambiguous = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange?label=openai&id=1`);
+    expect(ambiguous.status).toBe(400);
+    expect(ambiguous.body.error.code).toBe("missing_parameter");
+    writeSession(fixture.trafficDir, "openai", "2026-09-19T00-00-00-000Z", [httpInteraction(1)], 500);
+    const refreshed = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=openai`);
+    expect(refreshed.body).toMatchObject({ total: 4, session: null });
+    const unknown = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic?label=openai&session=other`);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error.code).toBe("traffic_session_not_found");
   });
 
   it("reports legacy JSONL explicitly and rejects unsupported parameters", async () => {
@@ -503,7 +539,7 @@ interface TrafficListBody {
   label: string;
   labels: Array<{ label: string; sessions: number }>;
   nextOffset: number | null;
-  session: string;
+  session: string | null;
   total: number;
 }
 

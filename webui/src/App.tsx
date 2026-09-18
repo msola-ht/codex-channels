@@ -5,6 +5,8 @@ import { AuthGate } from "@/components/layout/auth-gate"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
+import { ErrorBanner } from "@/components/metrics/error-banner"
+import { Button } from "@/components/ui/button"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -17,6 +19,8 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
+import { useServerTime } from "@/hooks/use-server-time"
+import { formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
 
 const ConsolePage = lazy(() =>
@@ -74,6 +78,16 @@ function Layout() {
   const { pathname } = useLocation()
   const { language, setLanguage } = useLanguage()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
+  const time = useServerTime()
+
+  if (time.data === null) {
+    return <div className="flex flex-col gap-3 p-4">
+      {time.error === null ? <p>正在读取服务端时区…</p> : <>
+        <ErrorBanner error={time.error} />
+        <Button variant="outline" onClick={time.refetch}>重新读取时区</Button>
+      </>}
+    </div>
+  }
 
   return (
     <SidebarProvider className="min-h-0 min-w-0">
@@ -93,11 +107,17 @@ function Layout() {
             </BreadcrumbList>
           </Breadcrumb>
           <div className="flex shrink-0 items-center gap-1">
+            <span className="hidden text-xs text-muted-foreground lg:inline" title="页面时间与统计日期均使用服务端系统时区">
+              {formatTimeZoneLabel(time.data.nowMs)}
+            </span>
             <LanguageToggle value={language} onChange={setLanguage} />
             <ModeToggle />
           </div>
         </header>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
+          <p className="mb-3 text-xs text-muted-foreground lg:hidden">
+            服务端时区：{formatTimeZoneLabel(time.data.nowMs)}
+          </p>
           <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
             <Routes>
               <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />

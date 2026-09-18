@@ -1,5 +1,34 @@
 export type DisplayLanguage = "zh" | "en"
 
+let serverTimeZone: string | undefined
+
+/** 页面加载前由服务端时间接口设置；禁止静默使用浏览器时区。 */
+export function setServerTimeZone(timeZone: string): void {
+  if (!timeZone) throw new Error("服务端未提供时区")
+  new Intl.DateTimeFormat("en", { timeZone }).format(0)
+  serverTimeZone = timeZone
+}
+
+export function getServerTimeZone(): string {
+  if (serverTimeZone === undefined) throw new Error("服务端时区尚未加载")
+  return serverTimeZone
+}
+
+export function formatCalendarDay(value: number, timeZone = getServerTimeZone()): string {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(value)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)!.value
+  return `${part("year")}-${part("month")}-${part("day")}`
+}
+
+export function formatTimeZoneLabel(value: number): string {
+  const timeZone = getServerTimeZone()
+  const offset = new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "longOffset" })
+    .formatToParts(value).find((part) => part.type === "timeZoneName")!.value.replace("GMT", "UTC")
+  return `${timeZone}（${offset}）`
+}
+
 const compactTwoDecimalFormatter = new Intl.NumberFormat("en-US", {
   notation: "compact",
   compactDisplay: "short",
@@ -30,13 +59,12 @@ export function formatBytes(value: number | null | undefined): string {
   return `${(value / (1024 * 1024)).toFixed(2)} MB`
 }
 
-export function formatTime(value: number | null | undefined): string {
+export function formatTime(value: number | null | undefined, timeZone = getServerTimeZone()): string {
   if (value === null || value === undefined) return "—"
-  const date = new Date(value)
-  const pad = (part: number) => String(part).padStart(2, "0")
-  const year = date.getFullYear() === new Date().getFullYear() ? "" : `${date.getFullYear()}-`
-  return `${year}${pad(date.getMonth() + 1)}-${pad(date.getDate())} `
-    + `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).format(value)
+  return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
 const planTypeNames: Record<string, string> = {

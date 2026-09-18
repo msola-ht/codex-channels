@@ -17,14 +17,12 @@ import {
   WeeklyQuotaCard,
 } from "@/components/overview/overview-sections"
 import { UsageCharts } from "@/components/overview/usage-charts"
-import { useDailyUsage } from "@/hooks/use-daily-usage"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
 import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
 import { useDashboard } from "@/hooks/use-dashboard"
 import { cn } from "@/lib/utils"
 import type {
   DeepseekBalanceResponse,
-  DailyUsageResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
   RangeName,
@@ -35,18 +33,16 @@ export function ConsolePage({ range, onRangeChange }: {
   range: MetricsRangeQuery
   onRangeChange: (range: MetricsRangeQuery) => void
 }) {
-  const { account, trend, refetch } = useDashboard(range)
-  const heatmap = useDailyUsage({ range: "90d" })
+  const dashboard = useDashboard(range)
+  const refetch = dashboard.refetch
   const officialAccounts = useOfficialAccountSources()
-  const refetchHeatmap = heatmap.refetch
   const refreshAccounts = officialAccounts.refresh
-  const refreshing = account.loading || trend.loading || heatmap.loading || officialAccounts.refreshing
+  const refreshing = dashboard.loading || officialAccounts.refreshing
 
   const refreshDashboard = useCallback(() => {
     refetch()
-    refetchHeatmap()
     void refreshAccounts()
-  }, [refetchHeatmap, refetch, refreshAccounts])
+  }, [refetch, refreshAccounts])
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,17 +60,12 @@ export function ConsolePage({ range, onRangeChange }: {
         </div>
       </div>
       <LocalDashboard
-        data={trend.data === null ? null : account.data}
-        loading={account.loading || trend.loading}
-        error={account.error}
-        trend={trend.data}
-        trendError={trend.error}
-        heatmap={heatmap.data}
-        heatmapLoading={heatmap.loading}
-        heatmapError={heatmap.error}
+        data={dashboard.data}
+        loading={dashboard.loading}
+        error={dashboard.error}
       />
       <AccountStatusCards
-        overview={account.data}
+        overview={dashboard.data}
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
@@ -88,35 +79,24 @@ function LocalDashboard({
   data,
   loading,
   error,
-  trend,
-  trendError,
-  heatmap,
-  heatmapLoading,
-  heatmapError,
 }: {
   data: OverviewResponse | null
   loading: boolean
   error: string | null
-  trend: DailyUsageResponse | null
-  trendError: string | null
-  heatmap: DailyUsageResponse | null
-  heatmapLoading: boolean
-  heatmapError: string | null
 }) {
   return (
-    <div className="flex flex-col gap-6" aria-busy={loading || heatmapLoading}>
+    <div className="flex flex-col gap-6" aria-busy={loading}>
       <ErrorBanner error={error} />
       {data === null
-        ? (error === null && trendError === null ? <PageSkeleton rows={4} /> : <ErrorBanner error={trendError} />)
+        ? (error === null ? <PageSkeleton rows={4} /> : null)
         : <>
             <GlobalCards global={data.global} threadCount={data.threadCount} turnCount={data.turnCount} />
             <UsageCharts
-              trendRows={trend?.daily ?? []}
-              trendRange={trend?.range ?? data.range}
-              heatmapRows={heatmap?.daily ?? []}
-              heatmapEndAtMs={heatmap?.range.endAtMs ?? data.range.endAtMs}
-              heatmapLoading={heatmapLoading}
-              error={trendError ?? heatmapError}
+              trend={data.trend}
+              heatmapRows={data.heatmap.daily}
+              heatmapEndAtMs={data.heatmap.range.endAtMs}
+              heatmapLoading={loading}
+              error={error}
             />
             <ProviderTable providers={data.providers} />
             <ErrorsSummary errors={data.errors} />

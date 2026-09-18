@@ -38,7 +38,7 @@ function selectedSessions() {
   const sessions = listDumpFiles(directory);
   const newest = sessions.at(-1);
   if (newest === undefined) return [];
-  return selectFilesOfLabel(sessions, labelOf(newest));
+  return selectFilesOfLabel(sessions, labelOf(newest)).slice(-1);
 }
 
 async function followTraffic() {

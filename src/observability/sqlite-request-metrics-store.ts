@@ -43,6 +43,7 @@ import type {
   ModelRequestMetricsStore,
   StoredModelRequestMetric,
   StoredModelRequestMetricsDailyRow,
+  StoredModelRequestMetricsHourlyRow,
   StoredModelRequestMetricsErrorReport,
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
@@ -720,14 +721,41 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     };
   }
 
+  /** 多个同步查询共享同一 SQLite 读快照；不持有写锁。 */
+  readSnapshot<T>(read: () => T): T {
+    this.requireOpen();
+    this.database.exec("BEGIN");
+    try {
+      const result = read();
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   daily(
     query: { startAtMs: number; endAtMs: number },
   ): StoredModelRequestMetricsDailyRow[] {
+    return this.usageBuckets(query, "%Y-%m-%d").map(({ period, ...usage }) => ({ day: period, ...usage }));
+  }
+
+  hourly(
+    query: { startAtMs: number; endAtMs: number },
+  ): StoredModelRequestMetricsHourlyRow[] {
+    return this.usageBuckets(query, "%Y-%m-%d %H:00").map(({ period, ...usage }) => ({ hour: period, ...usage }));
+  }
+
+  private usageBuckets(
+    query: { startAtMs: number; endAtMs: number },
+    format: "%Y-%m-%d" | "%Y-%m-%d %H:00",
+  ) {
     this.requireOpen();
     validateMetricsTimeRange(query);
     const rows = this.database.prepare(`
       SELECT
-        date(recorded_at_ms / 1000, 'unixepoch') AS day,
+        strftime(?, recorded_at_ms / 1000, 'unixepoch', 'localtime') AS period,
         COUNT(*) AS request_count,
         SUM(input_tokens) AS input_tokens,
         SUM(cached_input_tokens) AS cached_input_tokens,
@@ -737,10 +765,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       FROM model_request_metrics
       WHERE recorded_at_ms >= ?
         AND recorded_at_ms < ?
-      GROUP BY day
-      ORDER BY day ASC
-    `).all(query.startAtMs, query.endAtMs) as Array<{
-      day: string;
+      GROUP BY period
+      ORDER BY period ASC
+    `).all(format, query.startAtMs, query.endAtMs) as Array<{
+      period: string;
       request_count: number;
       input_tokens: number | null;
       cached_input_tokens: number | null;
@@ -749,7 +777,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       output_tokens: number | null;
     }>;
     return rows.map((row) => ({
-      day: row.day,
+      period: row.period,
       requestCount: row.request_count,
       inputTokens: row.input_tokens ?? 0,
       cachedInputTokens: row.input_token_count > 0

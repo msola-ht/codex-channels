@@ -129,7 +129,8 @@
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-traffic-route.mjs`：WebUI 的模型转储只读路由，列出 V2 逻辑调用摘要并提供单条请求与终态
-  响应；只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
+  响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位。
+  只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
@@ -141,10 +142,12 @@
   具体资源处理留在对应管理路由。
 - `webui-management-tasks.mjs` / `webui-management-tasks.d.mts`：白名单服务、指标维护和源码更新异步任务；
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
-  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
+  默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
+  `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
   `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
-  Daily 按 `range` 返回本地 Token 的 UTC 日聚合；Threads 返回指标库首个请求开始时间，
+  Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
+  Threads 返回指标库首个请求开始时间，
   请求明细按受控字段在整个时间范围排序后偏移分页；
   `webui-api.ts` 声明接口响应类型，前端统一从该文件导入；监听参数优先取命令行，其次
   `config.toml` 的 `[webui]` 段，默认回环无令牌；绑定非回环地址（`0.0.0.0`）时必须设置
@@ -497,7 +500,7 @@
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
-  payload 引用，按逻辑调用产出摘要和详情；`codexc traffic` 与 WebUI 共用。正文和独立 trace 均
+  payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。正文和独立 trace 均
   有界读取，旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
 - `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，不回写转储。

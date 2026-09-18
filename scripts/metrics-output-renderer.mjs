@@ -1,6 +1,7 @@
 import {
   csvCell,
   formatLocalTime,
+  formatLocalTimeZone,
   formatRequestCount,
   formatTokenCount,
   markdownCell,
@@ -45,6 +46,7 @@ export function printQuotaHistory(result, format = "markdown") {
     return;
   }
   console.log(`额度历史（${result.range.name}）`);
+  console.log(`时区：${formatLocalTimeZone()}`);
   if (result.periods.length === 0) {
     console.log("暂无已记录的额度周期快照。");
     return;
@@ -141,10 +143,11 @@ export function printMetricsReport(result, format) {
   const aggregate = result.report.aggregate;
   console.log("# Codex Connect 请求指标报告");
   console.log("");
-  console.log(`- 生成时间：${result.generatedAt}`);
+  console.log(`- 时区：${formatLocalTimeZone()}`);
+  console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
   console.log(`- 时间范围：${result.range.name}`);
-  console.log(`- 起始时间：${new Date(result.range.startAtMs).toISOString()}`);
-  console.log(`- 截止时间：${new Date(result.range.endAtMs).toISOString()}`);
+  console.log(`- 起始时间：${formatLocalTime(result.range.startAtMs)}`);
+  console.log(`- 截止时间：${formatLocalTime(result.range.endAtMs)}`);
   printWeeklyQuotaMarkdown(result.weeklyQuota);
   console.log("");
   console.log("## 汇总");
@@ -205,7 +208,8 @@ export function printMetricsExport(result, format) {
   if (format === "markdown") {
     console.log("# Codex Connect 请求明细");
     console.log("");
-    console.log(`- 生成时间：${result.generatedAt}`);
+    console.log(`- 时区：${formatLocalTimeZone()}`);
+    console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
     console.log(`- 时间范围：${result.range.name}`);
     printWeeklyQuotaMarkdown(result.weeklyQuota);
     console.log("");
@@ -266,8 +270,8 @@ function printWeeklyQuotaMarkdown(quota) {
   }
   console.log(`- 已用：${quota.usedPercent}%`);
   console.log(`- 剩余：${quota.remainingPercent}%`);
-  console.log(`- 重置时间：${new Date(quota.resetsAt * 1_000).toISOString()}`);
-  console.log(`- 观测时间：${new Date(quota.observedAtMs).toISOString()}`);
+  console.log(`- 重置时间：${formatLocalTime(quota.resetsAt * 1_000)}`);
+  console.log(`- 观测时间：${formatLocalTime(quota.observedAtMs)}`);
   if (quota.estimate === null) {
     console.log("- 每 1% 估算：正在采样，尚未观测到额度增长");
     return;
@@ -372,7 +376,8 @@ export function printMetricsRun(result, format) {
   console.log("# Codex Connect 本次运行统计");
   console.log("");
   console.log(`- Thread：${result.threadId}`);
-  console.log(`- 生成时间：${result.generatedAt}`);
+  console.log(`- 时区：${formatLocalTimeZone()}`);
+  console.log(`- 生成时间：${formatLocalTime(Date.parse(result.generatedAt))}`);
   console.log("");
   console.log("## 最近运行聚合");
   console.log("");
@@ -426,6 +431,7 @@ export function printMetricsTurns(result, format) {
     return;
   }
   console.log(`# 会话对话明细 · ${result.threadId}`);
+  console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 当前会话自身的期间统计`);
   console.log("");
   if (result.turns.length === 0) {
@@ -485,6 +491,7 @@ export function printMetricsThreads(result, format) {
     return;
   }
   console.log(`# 指标会话列表（${result.threads.length}）`);
+  console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
   console.log("");
   console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 上下文压缩 | 最近记录 |");

@@ -16,7 +16,7 @@ export function TrafficTable({
   onOpen,
 }: {
   exchanges: TrafficExchangeSummary[]
-  onOpen: (id: number) => void
+  onOpen: (exchange: TrafficExchangeSummary) => void
 }) {
   return (
     <div className="overflow-x-auto">
@@ -36,9 +36,9 @@ export function TrafficTable({
         <TableBody>
           {exchanges.map((exchange) => (
             <TableRow
-              key={exchange.id}
+              key={`${exchange.session}:${exchange.id}`}
               className="cursor-pointer"
-              onClick={() => onOpen(exchange.id)}
+              onClick={() => onOpen(exchange)}
             >
               <TableCell className="tabular-nums">
                 <Button
@@ -46,10 +46,10 @@ export function TrafficTable({
                   variant="link"
                   size="sm"
                   className="h-auto px-0 font-mono"
-                  aria-label={`查看模型调用 #${exchange.id} 明细`}
+                  aria-label={`查看批次 ${exchange.session} 的模型调用 #${exchange.id} 明细`}
                   onClick={(event) => {
                     event.stopPropagation()
-                    onOpen(exchange.id)
+                    onOpen(exchange)
                   }}
                 >#{exchange.id}</Button>
               </TableCell>

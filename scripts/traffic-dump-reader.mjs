@@ -22,7 +22,7 @@ export function listDumpFiles(directory) {
 }
 
 export function dumpCatalog(directory) {
-  if (!existsSync(directory)) return { files: [], labels: [], legacyFiles: [] };
+  if (!existsSync(directory)) return { files: [], labels: [], sessions: [], legacyFiles: [] };
   const sessions = [];
   const legacyFiles = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -51,7 +51,10 @@ export function dumpCatalog(directory) {
     })
     .sort((left, right) => right.latestAtMs - left.latestAtMs
       || (left.label < right.label ? -1 : left.label > right.label ? 1 : 0));
-  return { files: sessions.map((entry) => entry.path), labels, legacyFiles };
+  return {
+    files: sessions.map((entry) => entry.path), labels, legacyFiles,
+    sessions: sessions.map(({ label, session, createdAtMs }) => ({ label, session, createdAtMs })),
+  };
 }
 
 export function labelOf(path) {
@@ -63,12 +66,11 @@ export function writerSessionOf(path) {
 }
 
 export function selectFilesOfLabel(paths, label, requestedSession) {
-  const matching = paths.filter((path) => {
+  return paths.filter((path) => {
     const manifest = readManifest(sessionDirectoryOf(path));
     return manifest?.label === label
       && (requestedSession === undefined || manifest.session === requestedSession);
   });
-  return matching.slice(-1);
 }
 
 export async function forEachDumpRecord(paths, visit) {
@@ -86,11 +88,14 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
-export async function summarizeDumpFiles(paths, { limit, offset = 0 } = {}) {
+export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
   const interactions = await readInteractions(paths);
   const summaries = [...interactions.values()]
     .filter((entry) => entry.request !== undefined)
-    .sort((left, right) => left.request.id - right.request.id);
+    .sort((left, right) => newestFirst
+      ? right.request.startedAtMs - left.request.startedAtMs
+        || right.session.localeCompare(left.session) || right.request.id - left.request.id
+      : left.request.id - right.request.id);
   const boundedLimit = limit ?? summaries.length;
   const exchanges = summaries.slice(offset, offset + boundedLimit).map((entry) => {
     const body = entry.request.transport === "websocket"
@@ -107,8 +112,11 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0 } = {}) {
 }
 
 export async function readDumpExchange(paths, id) {
+  if (sessionDirectories(paths).length !== 1) {
+    throw new Error("读取模型调用明细必须指定一个 V2 session");
+  }
   const interactions = await readInteractions(paths);
-  return interactions.get(id) ?? null;
+  return [...interactions.values()].find((entry) => entry.request?.id === id) ?? null;
 }
 
 export async function forEachDumpExchange(paths, visit) {
@@ -232,12 +240,14 @@ function sessionDirectories(paths) {
 
 async function readInteractions(paths) {
   const interactions = new Map();
+  const sessions = new Map(sessionDirectories(paths).map((directory) => [directory, writerSessionOf(directory)]));
   await forEachDumpRecord(paths, (record, directory) => {
     if (record.kind !== "request" && record.kind !== "response") return;
     if (!Number.isSafeInteger(record.id) || record.id < 1) return;
-    const entry = interactions.get(record.id) ?? { directory };
+    const key = join(directory, String(record.id));
+    const entry = interactions.get(key) ?? { directory, session: sessions.get(directory) };
     entry[record.kind] = record;
-    interactions.set(record.id, entry);
+    interactions.set(key, entry);
   });
   return interactions;
 }
@@ -249,6 +259,7 @@ function summaryOf(interaction, body) {
   const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   return {
     id: request.id,
+    session: interaction.session,
     startedAtMs: request.startedAtMs,
     ...(request.account === undefined ? {} : { account: request.account }),
     transport: request.transport,

@@ -65,6 +65,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     const label = readLabel(url, labels);
     const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
+      newestFirst: true,
       limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
       offset: readInteger(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER),
     });
@@ -75,6 +76,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
       label,
       labels,
       session,
+      sessions: catalog.sessions.filter((entry) => entry.label === label)
+        .map(({ session, createdAtMs }) => ({ session, createdAtMs })).reverse(),
       ...page,
     });
     return true;
@@ -89,7 +92,11 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     0,
     Number.MAX_SAFE_INTEGER,
   );
-  const { files, session } = readSessionFiles(url, catalog.files, label);
+  const { files } = readSessionFiles(url, catalog.files, label);
+  if (files.length !== 1) {
+    throw new ApiError(400, "missing_parameter", "查看模型调用明细需指定 session");
+  }
+  const session = writerSessionOf(files[0]);
   const exchange = await describeDumpExchange(files, id, {
     traceOffset,
     maxTracePageSize: maximumTracePageSize,
@@ -161,11 +168,7 @@ function readSessionFiles(url, catalogFiles, label) {
       `没有该标签的 writer session：${requested}`,
     );
   }
-  const session = writerSessionOf(files[0]);
-  if (session === undefined) {
-    throw new ApiError(503, "traffic_unavailable", "转储文件名不符合当前格式");
-  }
-  return { files, session };
+  return { files, session: requested ?? null };
 }
 
 function readInteger(url, name, fallback, minimum, maximum) {

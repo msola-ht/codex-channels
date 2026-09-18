@@ -411,6 +411,14 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     throw new ApiError(404, "not_found", `未知 API：${path}`);
   }
   const apiPath = path.slice(API_PREFIX.length);
+  if (apiPath === "/time") {
+    if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "服务端时间不接受查询参数");
+    sendJson(response, 200, {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      nowMs: Date.now(),
+    });
+    return;
+  }
   if (apiPath === "/providers") {
     if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "Provider 列表不接受查询参数");
     const store = openMetricsStore(environment, Date.now());
@@ -502,22 +510,31 @@ function resolveGatewayConfigPath(environment) {
 }
 
 function handleOverview(environment, url, response) {
-  const range = parseRange(url);
-  const store = openMetricsStore(environment, range.endAtMs);
+  const nowMs = Date.now();
+  const range = parseRange(url, "90d", nowMs);
+  const heatmapStart = new Date(nowMs);
+  heatmapStart.setHours(0, 0, 0, 0);
+  heatmapStart.setDate(heatmapStart.getDate() - 89);
+  const heatmapRange = { name: "90d", startAtMs: heatmapStart.getTime(), endAtMs: nowMs };
+  const generatedAt = new Date(nowMs).toISOString();
+  const store = openMetricsStore(environment, nowMs);
   try {
-    const overview = new RequestMetricsQueryService(store).overview(range);
-    sendJson(response, 200, {
-      range,
-      generatedAt: new Date(range.endAtMs).toISOString(),
-      global: overview.global,
-      threadCount: overview.threadCount,
-      turnCount: overview.turnCount,
-      providers: overview.providers.map((group) => ({
-        ...group,
-      })),
-      errors: overview.errors,
-      weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, range.endAtMs)),
+    const snapshot = store.readSnapshot(() => {
+      const service = new RequestMetricsQueryService(store);
+      const overview = service.overview(range);
+      return {
+        range, generatedAt,
+        global: overview.global,
+        threadCount: overview.threadCount,
+        turnCount: overview.turnCount,
+        providers: overview.providers,
+        errors: overview.errors,
+        weeklyQuota: toWebuiWeeklyQuota(readWeeklyQuota(store, nowMs)),
+        trend: { range, generatedAt, ...service.trend(range) },
+        heatmap: { range: heatmapRange, generatedAt, daily: service.daily(heatmapRange) },
+      };
     });
+    sendJson(response, 200, snapshot);
   } finally {
     store.close();
   }
@@ -760,10 +777,10 @@ function toWebuiWeeklyQuota(quota) {
   };
 }
 
-function parseRange(url, defaultRange = "90d") {
+function parseRange(url, defaultRange = "90d", nowMs = Date.now()) {
   const options = Object.fromEntries(["range", "from", "to"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
   try {
-    return metricsRangeOptions(options, Date.now(), defaultRange);
+    return metricsRangeOptions(options, nowMs, defaultRange);
   } catch {
     throw new ApiError(400, "invalid_range", "时间范围无效；请选择预设范围，或同时指定 from/to（YYYY-MM-DD，包含结束日），不能混用");
   }
