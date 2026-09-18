@@ -90,15 +90,11 @@ export async function forEachDumpRecord(paths, visit) {
 }
 
 export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
-  const interactions = await readInteractions(paths);
-  const summaries = [...interactions.values()]
-    .filter((entry) => entry.request !== undefined)
-    .sort((left, right) => newestFirst
-      ? right.request.startedAtMs - left.request.startedAtMs
-        || right.session.localeCompare(left.session) || right.request.id - left.request.id
-      : left.request.id - right.request.id);
-  const boundedLimit = limit ?? summaries.length;
-  const exchanges = summaries.slice(offset, offset + boundedLimit).map((entry) => {
+  const page = limit === undefined
+    ? await readAllInteractionSummaries(paths, newestFirst)
+    : await readInteractionSummaryPage(paths, offset + limit, newestFirst);
+  const boundedLimit = limit ?? page.entries.length;
+  const exchanges = page.entries.slice(offset, offset + boundedLimit).map((entry) => {
     const body = entry.request.transport === "websocket"
       && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm")
       ? parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576).text)
@@ -107,8 +103,8 @@ export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst
   });
   return {
     exchanges,
-    total: summaries.length,
-    nextOffset: offset + exchanges.length < summaries.length ? offset + exchanges.length : null,
+    total: page.total,
+    nextOffset: offset + exchanges.length < page.total ? offset + exchanges.length : null,
   };
 }
 
@@ -116,8 +112,14 @@ export async function readDumpExchange(paths, id) {
   if (sessionDirectories(paths).length !== 1) {
     throw new Error("读取模型调用明细必须指定一个 V2 session");
   }
-  const interactions = await readInteractions(paths);
-  return [...interactions.values()].find((entry) => entry.request?.id === id) ?? null;
+  const directory = sessionDirectories(paths)[0];
+  let interaction;
+  await forEachDumpRecord(paths, (record, recordDirectory) => {
+    if ((record.kind !== "request" && record.kind !== "response") || record.id !== id) return;
+    interaction ??= { directory: recordDirectory, session: writerSessionOf(directory) };
+    interaction[record.kind] = record;
+  });
+  return interaction?.request === undefined ? null : interaction;
 }
 
 export async function forEachDumpExchange(paths, visit) {
@@ -251,6 +253,82 @@ async function readInteractions(paths) {
     interactions.set(key, entry);
   });
   return interactions;
+}
+
+async function readAllInteractionSummaries(paths, newestFirst) {
+  const interactions = await readInteractions(paths);
+  const entries = [...interactions.values()]
+    .filter((entry) => entry.request !== undefined)
+    .sort((left, right) => compareInteraction(left, right, newestFirst));
+  return { entries, total: entries.length };
+}
+
+/** 只保留当前页之前的候选；响应通过 session + id 回填，不缓存页外调用。 */
+async function readInteractionSummaryPage(paths, maximumEntries, newestFirst) {
+  const entries = [];
+  const selected = new Map();
+  const compare = (left, right) => compareInteraction(left, right, newestFirst);
+  const sessions = new Map(sessionDirectories(paths)
+    .map((directory) => [directory, writerSessionOf(directory)]));
+  let total = 0;
+  await forEachDumpRecord(paths, (record, directory) => {
+    if (record.kind !== "request" && record.kind !== "response") return;
+    if (!Number.isSafeInteger(record.id) || record.id < 1) return;
+    const key = join(directory, String(record.id));
+    if (record.kind === "response") {
+      const entry = selected.get(key);
+      if (entry !== undefined) entry.response = record;
+      return;
+    }
+    total += 1;
+    if (maximumEntries <= 0) return;
+    const entry = { directory, key, request: record, session: sessions.get(directory) };
+    if (entries.length < maximumEntries) {
+      entries.push(entry);
+      selected.set(key, entry);
+      siftWorstUp(entries, entries.length - 1, compare);
+      return;
+    }
+    if (compare(entry, entries[0]) >= 0) return;
+    selected.delete(entries[0].key);
+    entries[0] = entry;
+    selected.set(key, entry);
+    siftWorstDown(entries, 0, compare);
+  });
+  entries.sort(compare);
+  return { entries, total };
+}
+
+/** 维护“最差候选在堆顶”的有界堆，避免按时间倒序时反复移动整个数组。 */
+function siftWorstUp(heap, start, compare) {
+  let index = start;
+  while (index > 0) {
+    const parent = Math.floor((index - 1) / 2);
+    if (compare(heap[parent], heap[index]) >= 0) return;
+    [heap[parent], heap[index]] = [heap[index], heap[parent]];
+    index = parent;
+  }
+}
+
+function siftWorstDown(heap, start, compare) {
+  let index = start;
+  for (;;) {
+    const left = index * 2 + 1;
+    if (left >= heap.length) return;
+    const right = left + 1;
+    let worse = left;
+    if (right < heap.length && compare(heap[right], heap[left]) > 0) worse = right;
+    if (compare(heap[index], heap[worse]) >= 0) return;
+    [heap[index], heap[worse]] = [heap[worse], heap[index]];
+    index = worse;
+  }
+}
+
+function compareInteraction(left, right, newestFirst) {
+  return newestFirst
+    ? right.request.startedAtMs - left.request.startedAtMs
+      || right.session.localeCompare(left.session) || right.request.id - left.request.id
+    : left.request.id - right.request.id;
 }
 
 function summaryOf(interaction, body) {

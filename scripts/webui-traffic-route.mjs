@@ -22,6 +22,7 @@ import { ApiError, isLoopbackAddress, sendJson } from "./webui-http.mjs";
 
 const defaultPageSize = 100;
 const maximumPageSize = 500;
+const maximumPageOffset = 50_000;
 /** 单段正文回传上限；浏览器可承受该体量，超出时响应里带截断标记。 */
 const maximumSectionBytes = 4 * 1_048_576;
 /** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
@@ -67,7 +68,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     const page = await summarizeDumpFiles(files, {
       newestFirst: true,
       limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
-      offset: readInteger(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER),
+      offset: readInteger(url, "offset", 0, 0, maximumPageOffset),
     });
     sendJson(response, 200, {
       directory,
@@ -76,10 +77,14 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
       generatedAt: new Date().toISOString(),
       label,
       labels,
+      maximumOffset: maximumPageOffset,
       session,
       sessions: catalog.sessions.filter((entry) => entry.label === label)
         .map(({ session, createdAtMs }) => ({ session, createdAtMs })).reverse(),
       ...page,
+      nextOffset: page.nextOffset !== null && page.nextOffset <= maximumPageOffset
+        ? page.nextOffset
+        : null,
     });
     return true;
   }

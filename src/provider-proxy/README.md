@@ -64,6 +64,9 @@
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
   `[codex].upstream_user_agent` 时覆盖出站 `User-Agent`，缺省则原样透传 App Server 生成的 UA；
+  确认连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 还会显式请求上游
+  timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会移除
+  该内部请求头；
   不影响私有元数据；该请求实际发往上游的 UA 由响应指标观察器写入指标记录，供 WebUI 请求明细读取。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的
@@ -74,9 +77,11 @@
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
-  一次调用。写队列先落正文再落索引，不改变转发、背压和指标采集。App Server 启动时按
-  `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理；历史完整 session
-  仍按 Provider 约保留 320 MiB。当前写入中的 session 不会被拆除，未知目录和旧版文件不会被自动删除；
+  一次调用。每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
+  已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。写队列先落正文再落索引，不改变
+  转发、背压和指标采集；App Server 启动及新 session 建立时按 session
+  最后活动时间与 `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理。
+  历史完整 session 仍按 Provider 约保留 320 MiB；当前写入中的 session 不会被拆除，未知目录和旧版文件不会被自动删除；
   Authorization、Cookie 等凭据字段只保留认证
   方案。精简模式继续裁剪 `input` 与过大条目，并从 trace 丢弃 `.delta`；逻辑响应始终只保存
   `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。

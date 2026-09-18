@@ -52,6 +52,10 @@ export function TrafficPage() {
   const listData = list.data
   const detailData = detail.data
   const pageNumber = Math.floor(query.offset / query.limit) + 1
+  const paginationLimited = listData !== null
+    && listData.nextOffset === null
+    && query.offset + listData.exchanges.length < listData.total
+    && query.offset + listData.exchanges.length >= listData.maximumOffset
 
   useEffect(() => {
     const loaded = query.id === null ? listData : detailData
@@ -187,10 +191,19 @@ export function TrafficPage() {
           </AlertDescription>
         </Alert>
       ) : null}
+      {paginationLimited ? (
+        <Alert>
+          <AlertTitle>已达到转储分页上限</AlertTitle>
+          <AlertDescription>
+            当前最多翻到 offset {listData.maximumOffset.toLocaleString("zh-CN")}；仍有更早记录时，
+            请选择单个记录批次缩小范围，或使用 <code className="rounded bg-muted px-1 text-xs">codexc traffic</code> 查看。
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {listData !== null ? (
         <p className="text-xs text-muted-foreground">
           自动保留：{listData.retentionDays === 0 ? "已关闭" : `${listData.retentionDays} 天`}；
-          App Server 启动时清理过期历史批次。
+          App Server 启动及新记录批次建立时清理过期历史批次。
         </p>
       ) : null}
 

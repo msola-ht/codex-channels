@@ -73,6 +73,8 @@ export interface ProviderProxyOptions {
   upstreamBasePath?: string;
   /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.154.0 API 路径。 */
   allowOpenAiApiPaths?: boolean;
+  /** 仅确认的官方 OpenAI 上游请求 Responses WebSocket timing 事件。 */
+  requestOpenAiTimingMetrics?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
   /** 共享代理无账户前缀请求归属的默认账户。 */
@@ -127,6 +129,7 @@ export class ProviderProxy {
   private readonly externalRoleReasoningEffort: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
+  private readonly requestOpenAiTimingMetrics: boolean;
   private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
@@ -175,6 +178,7 @@ export class ProviderProxy {
     }
     this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
+    this.requestOpenAiTimingMetrics = options.requestOpenAiTimingMetrics ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
       ? undefined
@@ -471,6 +475,7 @@ export class ProviderProxy {
         target.host,
         target.port,
         this.upstreamUserAgent,
+        recordsResponseMetrics && this.requestOpenAiTimingMetrics,
       ),
       handshakeTimeout: this.timeoutMs,
     });

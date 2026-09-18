@@ -82,7 +82,7 @@ model_traffic_input_items = 3
 # 单条正文上限：请求 input 条目、响应 output 条目等单个数组条目超过该字节数时只保留头尾，并写入
 # {"type":"truncated","bytes":…,"head":…,"tail":…} 标记；0 表示不限制。
 model_traffic_item_max_bytes = 65536
-# 历史转储保留天数；App Server 启动时自动清理，0 表示关闭按时间清理。
+# 历史转储保留天数；App Server 启动及新记录批次建立时按最后活动时间清理，0 表示关闭按时间清理。
 model_traffic_retention_days = 30
 
 [scheduled_tasks]

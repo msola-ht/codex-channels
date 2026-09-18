@@ -55,6 +55,8 @@ import {
 import { createProxyFetch } from "./proxy-fetch.mjs";
 import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
 
+const openAiTimingMetricsHosts = new Set(["api.openai.com", "chatgpt.com"]);
+
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
   const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
@@ -578,9 +580,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
+      const configuredOpenAiUrl = configuredOpenAiBaseUrl
+        ? new URL(configuredOpenAiBaseUrl)
+        : undefined;
       let openAiProxyOptions;
-      if (configuredOpenAiBaseUrl) {
-        openAiProxyOptions = proxyOptionsForUrl(new URL(configuredOpenAiBaseUrl));
+      if (configuredOpenAiUrl) {
+        openAiProxyOptions = proxyOptionsForUrl(configuredOpenAiUrl);
       } else {
         const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
         const apiUrl = new URL("https://api.openai.com/v1");
@@ -605,6 +610,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy("openai", {
         ...openAiProxyOptions,
         allowOpenAiApiPaths: true,
+        requestOpenAiTimingMetrics: configuredOpenAiUrl === undefined
+          || openAiTimingMetricsHosts.has(configuredOpenAiUrl.hostname),
       });
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
     } else {

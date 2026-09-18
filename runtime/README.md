@@ -76,8 +76,8 @@
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
-  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；CLI 与脚本只
-  负责准备已校验的运行环境和默认 Workspace。
+  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；只为确认的官方
+  OpenAI 上游请求 Responses timing 事件。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider

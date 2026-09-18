@@ -7,7 +7,9 @@ import {
   rmSync,
   statSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
+  type WriteStream,
 } from "node:fs";
 import {
   createServer,
@@ -17,7 +19,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
@@ -32,6 +34,7 @@ const temporaryDirectories: string[] = [];
 const openServers: ProviderProxyTestServer[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   await cleanupProviderProxyTestServers(openServers);
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -404,25 +407,61 @@ describe("ModelTrafficDump V2", () => {
   });
 
   it("closes a rotated payload stream before shutdown", async () => {
-    const { dump } = fixture();
+    const { directory, dump } = fixture();
     const exchange = dump.beginHttpExchange({
       headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
     });
     exchange.requestChunk(Buffer.from("{}"));
     exchange.requestEnd();
     const internals = dump as unknown as {
-      payloadWrittenBytes: number;
+      sessions: Set<{ payloadWrittenBytes: number }>;
       streams: Set<unknown>;
       writeQueue: Promise<void>;
     };
-    internals.payloadWrittenBytes = 64 * 1_048_576;
+    const session = [...internals.sessions][0];
+    expect(session).toBeDefined();
+    session!.payloadWrittenBytes = 64 * 1_048_576;
     exchange.responseHead(200, { "content-type": "application/json" });
     exchange.responseChunk(Buffer.from("{}"));
     exchange.responseEnd();
     await internals.writeQueue;
 
+    expect(readdirSync(listDumpFiles(directory)[0]!)).toContain("payload-2.bin");
     expect(internals.streams.size).toBe(2);
     await dump.close();
+  });
+
+  it("waits for destroyed streams to close after a dump failure", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-close-failure-"));
+    temporaryDirectories.push(directory);
+    let observeFailure!: () => void;
+    const failureObserved = new Promise<void>((resolve) => {
+      observeFailure = resolve;
+    });
+    const dump = new ModelTrafficDump({
+      directory,
+      label: "openai",
+      onError: () => observeFailure(),
+    });
+    completeHttpExchange(dump, Date.now());
+    const internals = dump as unknown as {
+      streams: Set<WriteStream>;
+      writeQueue: Promise<void>;
+    };
+    await internals.writeQueue;
+    const [slowStream, failingStream] = [...internals.streams];
+    expect(slowStream).toBeDefined();
+    expect(failingStream).toBeDefined();
+    const destroySlowStream = slowStream!._destroy.bind(slowStream);
+    slowStream!._destroy = (error, callback) => {
+      setTimeout(() => destroySlowStream(error, callback), 50);
+    };
+
+    failingStream!.destroy(new Error("forced dump failure"));
+    await failureObserved;
+    await dump.close();
+
+    expect(internals.streams.size).toBe(0);
   });
 
   it("keeps compacted payload parts bounded and private", async () => {
@@ -489,6 +528,99 @@ describe("ModelTrafficDump V2", () => {
     await dump.close();
   });
 
+  it("keeps a session that contains records inside the retention window", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-retention-activity-"));
+    temporaryDirectories.push(directory);
+    const active = oldSession(
+      directory,
+      "active",
+      Date.now() - 31 * 24 * 60 * 60 * 1_000,
+      0,
+    );
+    writeFileSync(join(active, "interactions.jsonl"), "recent\n");
+    const dump = new ModelTrafficDump({
+      directory,
+      label: "openai",
+      retentionDays: 30,
+      onError: () => undefined,
+    });
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestEnd();
+
+    expect(existsSync(active)).toBe(true);
+    await dump.close();
+  });
+
+  it("rotates completed interactions into a new session after one day", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+    const { directory, dump } = fixture({ retentionDays: 30 });
+    completeHttpExchange(dump, Date.now());
+
+    vi.setSystemTime(new Date("2026-09-02T00:00:00.001Z"));
+    completeHttpExchange(dump, Date.now());
+    await dump.close();
+
+    const sessions = listDumpFiles(directory);
+    expect(sessions).toHaveLength(2);
+    await expect(Promise.all(sessions.map(async (session: string) =>
+      (await summarizeDumpFiles([session])).total))).resolves.toEqual([1, 1]);
+  });
+
+  it("starts a new session while an older interaction is still active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+    const { directory, dump } = fixture({ retentionDays: 30 });
+    const older = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    older.requestEnd();
+
+    vi.setSystemTime(new Date("2026-09-02T00:00:00.001Z"));
+    completeHttpExchange(dump, Date.now());
+    older.responseHead(200, { "content-type": "application/json" });
+    older.responseChunk(Buffer.from('{"model":"gpt-6-astra","output":[]}'));
+    older.responseEnd();
+    await dump.close();
+
+    const sessions = listDumpFiles(directory);
+    expect(sessions).toHaveLength(2);
+    await expect(Promise.all(sessions.map(async (session: string) => {
+      const summary = await summarizeDumpFiles([session]);
+      return { state: summary.exchanges[0]?.state, total: summary.total };
+    }))).resolves.toEqual([
+      { state: "completed", total: 1 },
+      { state: "completed", total: 1 },
+    ]);
+  });
+
+  it("rotates a long-lived WebSocket between logical interactions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+    const { directory, dump } = fixture({ retentionDays: 30 });
+    const socket = dump.beginWebSocketExchange({
+      headers: {}, startedAtMs: Date.now(), url: "wss://example.test/responses",
+    });
+    socket.webSocketFrame("client", textFrame({ type: "response.create", model: "gpt-6-astra" }), false);
+    socket.webSocketFrame("upstream", textFrame({
+      type: "response.completed", response: { id: "resp-1", output: [] },
+    }), false);
+
+    vi.setSystemTime(new Date("2026-09-02T00:00:00.001Z"));
+    socket.webSocketFrame("client", textFrame({ type: "response.create", model: "gpt-6-astra" }), false);
+    socket.webSocketFrame("upstream", textFrame({
+      type: "response.completed", response: { id: "resp-2", output: [] },
+    }), false);
+    await dump.close();
+
+    const sessions = listDumpFiles(directory);
+    expect(sessions).toHaveLength(2);
+    await expect(Promise.all(sessions.map(async (session: string) =>
+      (await summarizeDumpFiles([session])).total))).resolves.toEqual([1, 1]);
+  });
+
   it("keeps expired sessions when time retention is disabled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-retention-off-"));
     temporaryDirectories.push(directory);
@@ -527,6 +659,16 @@ function textFrame(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(value), "utf8");
 }
 
+function completeHttpExchange(dump: ModelTrafficDump, startedAtMs: number): void {
+  const exchange = dump.beginHttpExchange({
+    headers: {}, method: "POST", path: "/responses", startedAtMs,
+  });
+  exchange.requestEnd();
+  exchange.responseHead(200, { "content-type": "application/json" });
+  exchange.responseChunk(Buffer.from('{"model":"gpt-6-astra","output":[]}'));
+  exchange.responseEnd();
+}
+
 function readIndex(session: string): Array<Record<string, unknown> & {
   payload: { parts: Array<Record<string, unknown>> };
 }> {
@@ -539,12 +681,17 @@ function readIndex(session: string): Array<Record<string, unknown> & {
 function oldSession(directory: string, session: string, createdAtMs: number, sizeMiB = 200): string {
   const path = join(directory, `openai-${session}`);
   mkdirSync(path, { mode: 0o700 });
+  const manifest = join(path, "manifest.json");
   writeFileSync(
-    join(path, "manifest.json"),
+    manifest,
     JSON.stringify({ createdAtMs, label: "openai", session, version: 2 }),
   );
   const payload = join(path, "payload-1.bin");
   writeFileSync(payload, "");
   truncateSync(payload, sizeMiB * 1_048_576);
+  const timestamp = new Date(createdAtMs);
+  utimesSync(manifest, timestamp, timestamp);
+  utimesSync(payload, timestamp, timestamp);
+  utimesSync(path, timestamp, timestamp);
   return path;
 }

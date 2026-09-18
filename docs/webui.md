@@ -86,7 +86,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
-| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、上限 500）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
+| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
@@ -121,6 +121,9 @@ HTTP 请求从当前调用的本地 trace 提取“代理收齐请求体”“�
 转储明细顶部显示“首字耗时”，取自 `first_sampled_message_ttft_ms`，单位为毫秒；
 这是上游首 Token 统计，不代表客户端看到首字的时间，缺失时显示“未提供”，不使用本地时间估算。
 响应耗时摘要区分本地请求耗时与上游最大排队、生成阶段、logical turn 和客户端工具暂停。
+连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 由本地代理在握手时显式
+请求 timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会
+移除该内部请求头。
 上游数据从本次调用的 `responsesapi.websocket_timing.timing_metrics` 读取，仅接受
 `timing_scope=logical_turn` 且 `response_id` 与终态一致的事件，不受 trace 页码影响；缺失项显示
 “未提供”。各项口径可能重叠，不能相加，不代表完整对话轮次，差值也不作为网络延迟。
@@ -140,7 +143,8 @@ WebSocket 帧位于默认收起的“原始传输轨迹”，不再与逻辑响�
 `sessions` 返回可选批次，每条摘要带所属 `session`；明细 API 使用 `session` 和 `id` 精确定位，
 多个批次时缺少 `session` 返回 400，避免重启后的重复编号串读。非法或无来源的取值分别返回 400 与 404。旧版逐帧 JSONL 不自动迁移或
 混读，只有旧格式时返回明确的 503；请求不来自回环地址时同样返回 503。响应里的 `enabled` 表示
-`[debug].model_traffic_dump` 当前是否开启，以及 `model_traffic_retention_days` 的自动保留天数。清空按钮
+`[debug].model_traffic_dump` 当前是否开启，以及 `model_traffic_retention_days` 的自动保留天数。长驻
+App Server 约每 24 小时在完整逻辑调用之间轮转 writer session，并在新批次建立时再次清理。清空按钮
 复用管理任务的一次性确认流程，预览 V2 批次数、旧版文件数与占用；实际执行要求全部 App Server 已停止。
 控制台、请求、错误、Threads 和每轮明细共用时间选择器：今天、昨天、最近 7 天、最近 30 天、
 全部历史、自定义日期。今天为服务端本地当天 00:00 至当前时刻，昨天为前一完整自然日，

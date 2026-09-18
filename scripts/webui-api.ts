@@ -835,6 +835,7 @@ export interface TrafficListResponse {
   generatedAt: string
   exchanges: TrafficExchangeSummary[]
   total: number
+  maximumOffset: number
   nextOffset: number | null
 }
 

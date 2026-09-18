@@ -361,14 +361,18 @@ HTTP 的一次请求对应一条逻辑调用，同一 WebSocket 连接中的每�
 
 每个 session 的 `manifest.json` 声明精确版本，`interactions.jsonl` 保存小型索引，正文通过
 offset/bytes 引用轮转的 `payload-*.bin`，原始传输轨迹位于 `trace-*.jsonl`。正文和 trace 文件达到
-64 MiB 后轮转；同一 Provider 的历史完整 session 约保留 320 MiB，当前写入 session 不在中途删除。
+64 MiB 后轮转；长驻进程约每 24 小时让新逻辑调用进入新的 writer session，已在执行的并发调用继续
+写入原 session，因此请求与响应不会被拆分。
+同一 Provider 的历史完整 session 约保留 320 MiB，当前写入 session 不在中途删除。
 转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储包含 prompt、工具输出和代码，
 排查完成后关闭开关并删除 session，不要分享原始转储。
 
-`model_traffic_retention_days` 默认 `30`。App Server 服务每次启动时会删除超过该天数的可识别 V2
-历史批次，即使当前已关闭转储也会执行；设为 `0` 可关闭按时间自动清理。旧版逐帧 JSONL、未知文件
-和未知目录不会自动删除。升级后首次启动会按同一规则处理已有 V2 历史批次；需要回滚到不识别该键的
-旧版时，先从 `[debug]` 删除 `model_traffic_retention_days`。
+`model_traffic_retention_days` 默认 `30`。App Server 服务每次启动，以及开启转储后建立新 writer
+session 时，都会按 session 最后活动时间删除超过该天数的可识别 V2 历史批次；启动清理即使当前已
+关闭转储也会执行。清理以完整 session 为单位，含保留期内记录的批次会整体保留；设为 `0` 可关闭按
+时间自动清理。旧版逐帧 JSONL、未知文件和未知目录不会自动删除。升级后首次启动会按同一规则处理
+已有 V2 历史批次；需要回滚到不识别该键的旧版时，先从 `[debug]` 删除
+`model_traffic_retention_days`。
 
 转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时，
 该逻辑调用会得到 `failed` 或 `incomplete` 终态及明确的 `errorScope`；已收到的传输块仍在 trace 中。
@@ -422,8 +426,8 @@ model_traffic_retention_days = 30
   响应 `output` 条目、其中嵌套的数组元素）和超长字符串字段超过该字节数时只保留头尾各一半，替换为
   `{"type": "truncated", "bytes": …, "head": …, "tail": …}` 标记；`0` 表示不限制。它独立于
   `model_traffic_input_items` 生效，只设上限不会折叠 `input`。
-- `model_traffic_retention_days`（默认 `30`）：App Server 启动时清理超过天数的 V2 历史批次；`0`
-  关闭按时间清理。按 Provider 约 320 MiB 的体积上限继续生效。
+- `model_traffic_retention_days`（默认 `30`）：App Server 启动及新 writer session 建立时，按最后活动
+  时间清理超过天数的完整 V2 历史批次；`0` 关闭按时间清理。按 Provider 约 320 MiB 的体积上限继续生效。
 
 精简开启时还会折叠响应里重复回显的 `response.instructions` 与 `response.tools`
 （`<omitted N 字节>` 占位），并丢弃逐条流式增量事件

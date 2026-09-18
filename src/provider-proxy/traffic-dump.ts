@@ -34,6 +34,8 @@ const fileSizeLimitBytes = 64 * 1_048_576;
 /** 同一 Provider 的历史完整 session 约保留 320 MiB；当前 session 不在写入中途删除。 */
 const retainedBytesPerLabel = 5 * fileSizeLimitBytes;
 const millisecondsPerDay = 24 * 60 * 60 * 1_000;
+/** 长驻 App Server 按天切分 session，使时间保留可以持续清理完整历史批次。 */
+const sessionRotationIntervalMs = millisecondsPerDay;
 /** 待写缓冲达到该大小后立即落盘，不等待请求结束。 */
 const flushThresholdBytes = 262_144;
 /** 低流量时的最长落盘等待，兼顾实时查看与小记录合并。 */
@@ -84,13 +86,20 @@ export interface PruneModelTrafficDumpOptions {
   retentionDays: number;
   /** 当前写入目录；清理时始终保留。 */
   currentSessionDirectory?: string;
+  /** 仍有调用或文件流归属的目录；清理时始终保留。 */
+  protectedSessionDirectories?: readonly string[];
 }
 
 /** 清理可识别的 V2 历史 session；未知目录与旧版文件保持不变。 */
 export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOptions): void {
   if (!existsSync(options.directory)) return;
+  const protectedDirectories = new Set(options.protectedSessionDirectories ?? []);
+  if (options.currentSessionDirectory !== undefined) {
+    protectedDirectories.add(options.currentSessionDirectory);
+  }
   const byLabel = new Map<string, Array<{
     createdAtMs: number;
+    lastActivityAtMs: number;
     path: string;
     size: number;
   }>>();
@@ -102,27 +111,35 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
       continue;
     }
     const sessions = byLabel.get(manifest.label) ?? [];
-    sessions.push({ createdAtMs: manifest.createdAtMs, path, size: directorySize(path) });
+    const stats = directoryStats(path);
+    sessions.push({
+      createdAtMs: manifest.createdAtMs,
+      lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs),
+      path,
+      size: stats.size,
+    });
     byLabel.set(manifest.label, sessions);
   }
   const oldestRetainedAtMs = options.retentionDays === 0
     ? null
     : Date.now() - options.retentionDays * millisecondsPerDay;
   for (const sessions of byLabel.values()) {
-    sessions.sort((left, right) => right.createdAtMs - left.createdAtMs);
+    sessions.sort((left, right) => right.lastActivityAtMs - left.lastActivityAtMs
+      || right.createdAtMs - left.createdAtMs);
     let retained = 0;
     for (const session of sessions) {
+      const protectedSession = protectedDirectories.has(session.path);
       if (
-        session.path !== options.currentSessionDirectory
+        !protectedSession
         && oldestRetainedAtMs !== null
-        && session.createdAtMs < oldestRetainedAtMs
+        && session.lastActivityAtMs < oldestRetainedAtMs
       ) {
         rmSync(session.path, { force: true, recursive: true });
         continue;
       }
       retained += session.size;
       if (
-        session.path === options.currentSessionDirectory
+        protectedSession
         || retained <= retainedBytesPerLabel
       ) continue;
       rmSync(session.path, { force: true, recursive: true });
@@ -157,6 +174,25 @@ interface TrafficPayload {
   parts: TrafficPayloadPart[];
 }
 
+interface TrafficDumpSession {
+  activeInteractions: number;
+  closing: boolean;
+  flushTimer: NodeJS.Timeout | undefined;
+  interactionCount: number;
+  interactionStream: WriteStream | undefined;
+  payloadFileIndex: number;
+  payloadStream: WriteStream | undefined;
+  payloadWrittenBytes: number;
+  pending: string[];
+  pendingBytes: number;
+  sessionDirectory: string | undefined;
+  startedAtMs: number;
+  traceFileIndex: number;
+  traceStream: WriteStream | undefined;
+  traceWrittenBytes: number;
+  writerSession: string;
+}
+
 /**
  * 模型请求转储：把统计代理两侧的完整报文按 JSON Lines 写入私有文件。
  * 只做旁路复制，不改变转发、背压和指标采集行为；写入失败时停止转储并由 onError 上报。
@@ -168,21 +204,10 @@ export class ModelTrafficDump {
   private readonly label: string;
   private readonly onError: (error: Error) => void;
   private readonly retentionDays: number;
-  private readonly writerSession = new Date().toISOString().replace(/[:.]/gu, "-");
   private readonly streams = new Set<WriteStream>();
-  private sessionDirectory: string | undefined;
-  private traceStream: WriteStream | undefined;
-  private interactionStream: WriteStream | undefined;
-  private payloadStream: WriteStream | undefined;
-  private pending: string[] = [];
-  private pendingBytes = 0;
-  private flushTimer: NodeJS.Timeout | undefined;
-  private traceWrittenBytes = 0;
-  private traceFileIndex = 1;
-  private payloadWrittenBytes = 0;
-  private payloadFileIndex = 1;
+  private readonly sessions = new Set<TrafficDumpSession>();
+  private currentSession: TrafficDumpSession | undefined;
   private connectionCount = 0;
-  private interactionCount = 0;
   private writeQueue = Promise.resolve();
   private closed = false;
   private failed = false;
@@ -197,7 +222,8 @@ export class ModelTrafficDump {
   }
 
   beginHttpExchange(input: ModelTrafficHttpExchangeInput): ModelTrafficExchange {
-    const exchange = this.createExchange(input, "http");
+    const session = this.beginLogicalInteraction(input.startedAtMs);
+    const exchange = this.createExchange(input, "http", session);
     exchange.write({
       kind: "request_head",
       method: input.method,
@@ -210,7 +236,8 @@ export class ModelTrafficDump {
   beginWebSocketExchange(
     input: ModelTrafficWebSocketExchangeInput,
   ): ModelTrafficExchange {
-    const exchange = this.createExchange(input, "websocket");
+    const session = this.ensureCurrentSession(input.startedAtMs, false);
+    const exchange = this.createExchange(input, "websocket", session);
     exchange.write({
       kind: "websocket_handshake",
       url: input.url,
@@ -222,24 +249,24 @@ export class ModelTrafficDump {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.flush();
+    this.currentSession = undefined;
+    for (const session of [...this.sessions]) this.retireSession(session, true);
     await this.writeQueue;
-    this.traceStream = undefined;
-    this.interactionStream = undefined;
-    this.payloadStream = undefined;
-    await Promise.all([...this.streams].map((stream) =>
-      new Promise<void>((resolveClose) => {
-        stream.once("close", () => resolveClose());
-        stream.end();
-      })));
+    await Promise.all([...this.streams].map((stream) => {
+      if (stream.closed) return Promise.resolve();
+      return new Promise<void>((resolveClose) => {
+        stream.once("close", resolveClose);
+        if (!stream.destroyed) stream.end();
+      });
+    }));
   }
 
   private createExchange(input: {
     accountId?: string;
     startedAtMs: number;
-  }, transport: "http" | "websocket"): ModelTrafficExchange {
+  }, transport: "http" | "websocket", session: TrafficDumpSession): ModelTrafficExchange {
     this.connectionCount += 1;
-    const interactionId = transport === "http" ? this.nextInteractionId() : undefined;
+    const interactionId = transport === "http" ? this.nextInteractionId(session) : undefined;
     return new ModelTrafficExchange(
       {
         connection: this.connectionCount,
@@ -248,103 +275,155 @@ export class ModelTrafficDump {
       },
       transport,
       interactionId,
-      (record) => this.writeTrace(record),
-      (record) => this.writeInteraction(record),
-      (content, encoding) => this.writePayload(content, encoding),
-      () => this.nextInteractionId(),
+      session,
+      () => this.currentSession ?? session,
+      (target, record) => this.writeTrace(target, record),
+      (target, record) => this.writeInteraction(target, record),
+      (target, content, encoding) => this.writePayload(target, content, encoding),
+      (target) => this.nextInteractionId(target),
+      (startedAtMs) => this.beginLogicalInteraction(startedAtMs),
+      (target) => this.completeLogicalInteraction(target),
       this.inputItems,
       this.itemMaxBytes,
     );
   }
 
-  private nextInteractionId(): number {
-    this.interactionCount += 1;
-    return this.interactionCount;
+  private beginLogicalInteraction(startedAtMs: number): TrafficDumpSession {
+    const session = this.ensureCurrentSession(startedAtMs, true);
+    session.activeInteractions += 1;
+    return session;
   }
 
-  private writeTrace(record: Record<string, unknown>): void {
+  private completeLogicalInteraction(session: TrafficDumpSession): void {
+    if (session.activeInteractions > 0) session.activeInteractions -= 1;
+    if (session !== this.currentSession) this.retireSession(session);
+  }
+
+  private ensureCurrentSession(startedAtMs: number, rotate: boolean): TrafficDumpSession {
+    const current = this.currentSession;
+    if (
+      current !== undefined
+      && (!rotate || startedAtMs - current.startedAtMs < sessionRotationIntervalMs)
+    ) return current;
+    const session = this.createSession(startedAtMs);
+    this.currentSession = session;
+    if (current !== undefined) this.retireSession(current);
+    return session;
+  }
+
+  private createSession(startedAtMs: number): TrafficDumpSession {
+    const session: TrafficDumpSession = {
+      activeInteractions: 0,
+      closing: false,
+      flushTimer: undefined,
+      interactionCount: 0,
+      interactionStream: undefined,
+      payloadFileIndex: 1,
+      payloadStream: undefined,
+      payloadWrittenBytes: 0,
+      pending: [],
+      pendingBytes: 0,
+      sessionDirectory: undefined,
+      startedAtMs,
+      traceFileIndex: 1,
+      traceStream: undefined,
+      traceWrittenBytes: 0,
+      writerSession: new Date(startedAtMs).toISOString().replace(/[:.]/gu, "-"),
+    };
+    this.sessions.add(session);
+    return session;
+  }
+
+  private nextInteractionId(session: TrafficDumpSession): number {
+    session.interactionCount += 1;
+    return session.interactionCount;
+  }
+
+  private writeTrace(session: TrafficDumpSession, record: Record<string, unknown>): void {
     if (this.closed || this.failed) return;
     const line = `${JSON.stringify({ ts: Date.now(), ...record })}\n`;
-    this.pending.push(line);
-    this.pendingBytes += Buffer.byteLength(line);
-    if (this.pendingBytes >= flushThresholdBytes) {
-      this.flush();
+    session.pending.push(line);
+    session.pendingBytes += Buffer.byteLength(line);
+    if (session.pendingBytes >= flushThresholdBytes) {
+      this.flush(session);
       return;
     }
-    this.scheduleFlush();
+    this.scheduleFlush(session);
   }
 
-  private flush(): void {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = undefined;
+  private flush(session: TrafficDumpSession): void {
+    if (session.flushTimer) {
+      clearTimeout(session.flushTimer);
+      session.flushTimer = undefined;
     }
-    if (this.failed || this.pending.length === 0) return;
-    const content = this.pending.join("");
+    if (this.failed || session.pending.length === 0) return;
+    const content = session.pending.join("");
     const contentBytes = Buffer.byteLength(content);
-    this.pending = [];
-    this.pendingBytes = 0;
+    session.pending = [];
+    session.pendingBytes = 0;
     try {
-      if (this.traceStream && this.traceWrittenBytes + contentBytes > fileSizeLimitBytes) {
-        this.rotateTrace();
+      if (session.traceStream
+        && session.traceWrittenBytes + contentBytes > fileSizeLimitBytes) {
+        this.rotateTrace(session);
       }
-      this.traceWrittenBytes += contentBytes;
-      const stream = this.ensureTraceStream();
+      session.traceWrittenBytes += contentBytes;
+      const stream = this.ensureTraceStream(session);
       this.enqueueWrite(stream, content);
     } catch (error) {
       this.fail(error);
     }
   }
 
-  private scheduleFlush(): void {
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = undefined;
-      this.flush();
+  private scheduleFlush(session: TrafficDumpSession): void {
+    if (session.flushTimer) return;
+    session.flushTimer = setTimeout(() => {
+      session.flushTimer = undefined;
+      this.flush(session);
     }, flushIntervalMs);
-    this.flushTimer.unref();
+    session.flushTimer.unref();
   }
 
-  private rotateTrace(): void {
-    const stream = this.traceStream;
-    this.traceStream = undefined;
-    this.traceWrittenBytes = 0;
-    this.traceFileIndex += 1;
+  private rotateTrace(session: TrafficDumpSession): void {
+    const stream = session.traceStream;
+    session.traceStream = undefined;
+    session.traceWrittenBytes = 0;
+    session.traceFileIndex += 1;
     if (stream) this.enqueueClose(stream);
   }
 
-  private writeInteraction(record: Record<string, unknown>): void {
+  private writeInteraction(session: TrafficDumpSession, record: Record<string, unknown>): void {
     if (this.closed || this.failed) return;
     try {
       const line = `${JSON.stringify({ version: 2, ts: Date.now(), ...record })}\n`;
-      this.enqueueWrite(this.ensureInteractionStream(), line);
+      this.enqueueWrite(this.ensureInteractionStream(session), line);
     } catch (error) {
       this.fail(error);
     }
   }
 
   private writePayload(
+    session: TrafficDumpSession,
     content: Buffer,
     encoding: "base64" | "utf8",
   ): TrafficPayloadPart | undefined {
     if (this.closed || this.failed) return undefined;
     try {
-      if (this.payloadStream && this.payloadWrittenBytes > 0
-        && this.payloadWrittenBytes + content.length > fileSizeLimitBytes) {
-        const stream = this.payloadStream;
-        this.payloadStream = undefined;
-        this.payloadWrittenBytes = 0;
-        this.payloadFileIndex += 1;
+      if (session.payloadStream && session.payloadWrittenBytes > 0
+        && session.payloadWrittenBytes + content.length > fileSizeLimitBytes) {
+        const stream = session.payloadStream;
+        session.payloadStream = undefined;
+        session.payloadWrittenBytes = 0;
+        session.payloadFileIndex += 1;
         this.enqueueClose(stream);
       }
-      const stream = this.ensurePayloadStream();
+      const stream = this.ensurePayloadStream(session);
       const part = {
         bytes: content.length,
         encoding,
-        file: `payload-${this.payloadFileIndex}.bin`,
-        offset: this.payloadWrittenBytes,
+        file: `payload-${session.payloadFileIndex}.bin`,
+        offset: session.payloadWrittenBytes,
       } satisfies TrafficPayloadPart;
-      this.payloadWrittenBytes += content.length;
+      session.payloadWrittenBytes += content.length;
       this.enqueueWrite(stream, content);
       return part;
     } catch (error) {
@@ -353,26 +432,32 @@ export class ModelTrafficDump {
     }
   }
 
-  private ensureTraceStream(): WriteStream {
-    if (this.traceStream) return this.traceStream;
-    this.traceStream = this.createSessionStream(`trace-${this.traceFileIndex}.jsonl`);
-    return this.traceStream;
+  private ensureTraceStream(session: TrafficDumpSession): WriteStream {
+    if (session.traceStream) return session.traceStream;
+    session.traceStream = this.createSessionStream(
+      session,
+      `trace-${session.traceFileIndex}.jsonl`,
+    );
+    return session.traceStream;
   }
 
-  private ensureInteractionStream(): WriteStream {
-    if (this.interactionStream) return this.interactionStream;
-    this.interactionStream = this.createSessionStream("interactions.jsonl");
-    return this.interactionStream;
+  private ensureInteractionStream(session: TrafficDumpSession): WriteStream {
+    if (session.interactionStream) return session.interactionStream;
+    session.interactionStream = this.createSessionStream(session, "interactions.jsonl");
+    return session.interactionStream;
   }
 
-  private ensurePayloadStream(): WriteStream {
-    if (this.payloadStream) return this.payloadStream;
-    this.payloadStream = this.createSessionStream(`payload-${this.payloadFileIndex}.bin`);
-    return this.payloadStream;
+  private ensurePayloadStream(session: TrafficDumpSession): WriteStream {
+    if (session.payloadStream) return session.payloadStream;
+    session.payloadStream = this.createSessionStream(
+      session,
+      `payload-${session.payloadFileIndex}.bin`,
+    );
+    return session.payloadStream;
   }
 
-  private createSessionStream(name: string): WriteStream {
-    const path = join(this.ensureSessionDirectory(), name);
+  private createSessionStream(session: TrafficDumpSession, name: string): WriteStream {
+    const path = join(this.ensureSessionDirectory(session), name);
     if (!existsSync(path)) closeSync(openSync(path, "wx", 0o600));
     securePrivateFileSync(path);
     const stream = createWriteStream(path, { flags: "a" });
@@ -382,41 +467,49 @@ export class ModelTrafficDump {
     return stream;
   }
 
-  private ensureSessionDirectory(): string {
-    if (this.sessionDirectory) return this.sessionDirectory;
+  private ensureSessionDirectory(sessionState: TrafficDumpSession): string {
+    if (sessionState.sessionDirectory) return sessionState.sessionDirectory;
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     securePrivateDirectorySync(this.directory);
     let suffix = 1;
     let session: string;
     for (;;) {
-      session = `${this.writerSession}${suffix === 1 ? "" : `-${suffix}`}`;
+      session = `${sessionState.writerSession}${suffix === 1 ? "" : `-${suffix}`}`;
       const name = `${this.label}-${session}`;
       const path = join(this.directory, name);
       try {
         mkdirSync(path, { mode: 0o700 });
-        this.sessionDirectory = path;
+        sessionState.sessionDirectory = path;
         break;
       } catch (error) {
         if (!isFileExistsError(error)) throw error;
         suffix += 1;
       }
     }
-    securePrivateDirectorySync(this.sessionDirectory);
-    const manifestPath = join(this.sessionDirectory, "manifest.json");
+    securePrivateDirectorySync(sessionState.sessionDirectory);
+    const manifestPath = join(sessionState.sessionDirectory, "manifest.json");
     writeFileSync(manifestPath, `${JSON.stringify({
-      createdAtMs: Date.now(),
+      createdAtMs: sessionState.startedAtMs,
       label: this.label,
       session,
       version: 2,
     }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     securePrivateFileSync(manifestPath);
+    this.pruneSessions();
+    return sessionState.sessionDirectory;
+  }
+
+  private pruneSessions(): void {
+    const protectedSessionDirectories = [...this.sessions]
+      .flatMap((session) => session.sessionDirectory === undefined
+        ? []
+        : [session.sessionDirectory]);
     pruneModelTrafficDumpSessions({
-      currentSessionDirectory: this.sessionDirectory,
       directory: this.directory,
       label: this.label,
       retentionDays: this.retentionDays,
+      protectedSessionDirectories,
     });
-    return this.sessionDirectory;
   }
 
   private enqueueWrite(stream: WriteStream, content: string | Buffer): void {
@@ -440,18 +533,36 @@ export class ModelTrafficDump {
     }).catch((error: unknown) => this.fail(error));
   }
 
+  private retireSession(session: TrafficDumpSession, force = false): void {
+    if (session.closing || (!force && session.activeInteractions > 0)) return;
+    session.closing = true;
+    this.flush(session);
+    const streams = [session.traceStream, session.interactionStream, session.payloadStream]
+      .filter((stream): stream is WriteStream => stream !== undefined);
+    session.traceStream = undefined;
+    session.interactionStream = undefined;
+    session.payloadStream = undefined;
+    for (const stream of streams) this.enqueueClose(stream);
+    this.writeQueue = this.writeQueue.then(() => {
+      this.sessions.delete(session);
+      if (!this.failed) this.pruneSessions();
+    }).catch((error: unknown) => this.fail(error));
+  }
+
   private fail(error: unknown): void {
     if (this.failed) return;
     this.failed = true;
     const streams = [...this.streams];
-    this.traceStream = undefined;
-    this.interactionStream = undefined;
-    this.payloadStream = undefined;
-    this.pending = [];
-    this.pendingBytes = 0;
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = undefined;
+    for (const session of this.sessions) {
+      session.traceStream = undefined;
+      session.interactionStream = undefined;
+      session.payloadStream = undefined;
+      session.pending = [];
+      session.pendingBytes = 0;
+      if (session.flushTimer) {
+        clearTimeout(session.flushTimer);
+        session.flushTimer = undefined;
+      }
     }
     for (const stream of streams) stream.destroy();
     try {
@@ -474,7 +585,11 @@ export class ModelTrafficExchange {
   private readonly requestModelScanner = createTopLevelStringFieldScanner("model");
   private readonly responseModelDecoder = new StringDecoder("utf8");
   private readonly responseModelScanner = createTopLevelStringFieldScanner("model");
-  private activeWebSocket: { id: number; startedAtMs: number } | undefined;
+  private activeWebSocket: {
+    id: number;
+    session: TrafficDumpSession;
+    startedAtMs: number;
+  } | undefined;
   private requestHead: {
     headers: Record<string, string | string[]>;
     method: string;
@@ -507,13 +622,24 @@ export class ModelTrafficExchange {
     },
     private readonly transport: "http" | "websocket",
     private readonly httpInteractionId: number | undefined,
-    private readonly traceSink: (record: Record<string, unknown>) => void,
-    private readonly interactionSink: (record: Record<string, unknown>) => void,
+    private readonly initialSession: TrafficDumpSession,
+    private readonly currentSession: () => TrafficDumpSession,
+    private readonly traceSink: (
+      session: TrafficDumpSession,
+      record: Record<string, unknown>,
+    ) => void,
+    private readonly interactionSink: (
+      session: TrafficDumpSession,
+      record: Record<string, unknown>,
+    ) => void,
     private readonly payloadSink: (
+      session: TrafficDumpSession,
       content: Buffer,
       encoding: "base64" | "utf8",
     ) => TrafficPayloadPart | undefined,
-    private readonly nextInteractionId: () => number,
+    private readonly nextInteractionId: (session: TrafficDumpSession) => number,
+    private readonly beginLogicalInteraction: (startedAtMs: number) => TrafficDumpSession,
+    private readonly completeLogicalInteraction: (session: TrafficDumpSession) => void,
     private readonly inputItems: number,
     private readonly itemMaxBytes: number,
   ) {
@@ -614,19 +740,21 @@ export class ModelTrafficExchange {
       if (direction === "client" && eventTypeOf(parsed) === "response.create") {
         this.completeActiveWebSocket("incomplete", "superseded_by_next_request");
         this.responseModels = [];
-        const id = this.nextInteractionId();
-        this.activeWebSocket = { id, startedAtMs: Date.now() };
+        const startedAtMs = Date.now();
+        const session = this.beginLogicalInteraction(startedAtMs);
+        const id = this.nextInteractionId(session);
+        this.activeWebSocket = { id, session, startedAtMs };
         interaction = id;
         const compacted = compactText(text, this.inputItems, this.itemMaxBytes);
         const metadata = requestFieldsOf(parsed, this.websocketHandshake?.headers);
-        this.interactionSink({
+        this.interactionSink(session, {
           ...this.prefix,
           id,
           kind: "request",
           transport: "websocket",
           url: this.websocketHandshake?.url,
           headers: this.websocketHandshake?.headers ?? {},
-          payload: payloadOf(this.storeTextPayload(compacted)),
+          payload: payloadOf(this.storeTextPayload(session, compacted)),
           startedAtMs: this.activeWebSocket.startedAtMs,
           ...metadata,
         });
@@ -712,7 +840,7 @@ export class ModelTrafficExchange {
     const decoded = decodeUtf8(chunk);
     if (decoded === null) {
       for (const part of splitBuffer(chunk)) {
-        const stored = this.payloadSink(part, "base64");
+        const stored = this.payloadSink(this.storageSession(), part, "base64");
         if (stored) payloadParts?.push(stored);
         this.write({
           kind,
@@ -730,7 +858,11 @@ export class ModelTrafficExchange {
       if (models.length > 0) this.responseModels = models;
     }
     for (const part of splitText(text)) {
-      const stored = this.payloadSink(Buffer.from(part, "utf8"), "utf8");
+      const stored = this.payloadSink(
+        this.storageSession(),
+        Buffer.from(part, "utf8"),
+        "utf8",
+      );
       if (stored) payloadParts?.push(stored);
       this.write({
         kind,
@@ -765,7 +897,7 @@ export class ModelTrafficExchange {
   }
 
   private writeTrace(record: Record<string, unknown>): void {
-    this.traceSink({
+    this.traceSink(this.storageSession(), {
       ...this.prefix,
       ...(this.httpInteractionId === undefined ? {} : { interaction: this.httpInteractionId }),
       ...record,
@@ -775,7 +907,7 @@ export class ModelTrafficExchange {
   private recordHttpRequest(): void {
     if (this.transport !== "http" || this.requestRecorded) return;
     this.requestRecorded = true;
-    this.interactionSink({
+    this.interactionSink(this.initialSession, {
       ...this.prefix,
       id: this.httpInteractionId,
       kind: "request",
@@ -800,7 +932,7 @@ export class ModelTrafficExchange {
     let payload = payloadOf(this.responsePayloadParts);
     if (terminal !== undefined) {
       const compacted = compactText(terminal.text, this.inputItems, this.itemMaxBytes);
-      payload = payloadOf(this.storeTextPayload(compacted));
+      payload = payloadOf(this.storeTextPayload(this.initialSession, compacted));
     }
     const status = this.responseHeadRecord?.status ?? null;
     const terminalState = terminal === undefined
@@ -809,7 +941,7 @@ export class ModelTrafficExchange {
     const state = terminalState ?? forcedState ?? (this.responseIsSse
       ? "incomplete"
       : status !== null && status >= 200 && status < 400 ? "completed" : "failed");
-    this.interactionSink({
+    this.interactionSink(this.initialSession, {
       ...this.prefix,
       id: this.httpInteractionId,
       kind: "response",
@@ -826,6 +958,7 @@ export class ModelTrafficExchange {
         ? this.responseModels
         : responseModelsOf(parseJsonValue(terminal.text)),
     });
+    this.completeLogicalInteraction(this.initialSession);
   }
 
   private completeActiveWebSocket(
@@ -840,7 +973,7 @@ export class ModelTrafficExchange {
     const compacted = text === undefined
       ? undefined
       : compactText(text, this.inputItems, this.itemMaxBytes);
-    this.interactionSink({
+    this.interactionSink(active.session, {
       ...this.prefix,
       id: active.id,
       kind: "response",
@@ -849,15 +982,26 @@ export class ModelTrafficExchange {
       durationMs: Date.now() - active.startedAtMs,
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
-      payload: payloadOf(compacted === undefined ? [] : this.storeTextPayload(compacted)),
+      payload: payloadOf(compacted === undefined
+        ? []
+        : this.storeTextPayload(active.session, compacted)),
       responseModels: this.responseModels,
     });
+    this.completeLogicalInteraction(active.session);
   }
 
-  private storeTextPayload(text: string): TrafficPayloadPart[] {
+  private storageSession(): TrafficDumpSession {
+    if (this.transport === "http") return this.initialSession;
+    return this.activeWebSocket?.session ?? this.currentSession();
+  }
+
+  private storeTextPayload(
+    session: TrafficDumpSession,
+    text: string,
+  ): TrafficPayloadPart[] {
     return splitBuffer(Buffer.from(text, "utf8"))
       .flatMap((part) => {
-        const stored = this.payloadSink(part, "utf8");
+        const stored = this.payloadSink(session, part, "utf8");
         return stored === undefined ? [] : [stored];
       });
   }
@@ -1491,11 +1635,22 @@ function readManifest(directory: string): {
   }
 }
 
-function directorySize(directory: string): number {
-  return readdirSync(directory, { withFileTypes: true }).reduce((total, entry) => {
+function directoryStats(directory: string): { lastModifiedAtMs: number; size: number } {
+  let lastModifiedAtMs = statSync(directory).mtimeMs;
+  let size = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    return total + (entry.isDirectory() ? directorySize(path) : statSync(path).size);
-  }, 0);
+    if (entry.isDirectory()) {
+      const child = directoryStats(path);
+      lastModifiedAtMs = Math.max(lastModifiedAtMs, child.lastModifiedAtMs);
+      size += child.size;
+      continue;
+    }
+    const status = statSync(path);
+    lastModifiedAtMs = Math.max(lastModifiedAtMs, status.mtimeMs);
+    size += status.size;
+  }
+  return { lastModifiedAtMs, size };
 }
 
 function errorText(error: unknown): string {

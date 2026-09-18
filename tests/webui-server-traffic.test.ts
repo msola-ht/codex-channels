@@ -95,7 +95,13 @@ describe("webui traffic V2 API", () => {
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=1`);
     expect(list.status).toBe(200);
     expect(list.body.retentionDays).toBe(30);
-    expect(list.body).toMatchObject({ enabled: true, label: "ocg", total: 2, nextOffset: 1 });
+    expect(list.body).toMatchObject({
+      enabled: true,
+      label: "ocg",
+      maximumOffset: 50_000,
+      total: 2,
+      nextOffset: 1,
+    });
     expect(list.body.exchanges[0]).toMatchObject({
       id: 2,
       requestModel: "gpt-6-astra",
@@ -392,6 +398,11 @@ describe("webui traffic V2 API", () => {
     const invalid = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic?bogus=1`);
     expect(invalid.status).toBe(400);
     expect(invalid.body.error.code).toBe("unsupported_parameter");
+    const excessiveOffset = await getJson<TrafficErrorBody>(
+      `${server.origin}/api/v1/traffic?offset=50001`,
+    );
+    expect(excessiveOffset.status).toBe(400);
+    expect(excessiveOffset.body.error.code).toBe("invalid_parameter");
   });
 
   it("fails closed when a V2 session manifest is malformed", async () => {
@@ -540,6 +551,7 @@ interface TrafficListBody {
   exchanges: Array<Record<string, unknown>>;
   label: string;
   labels: Array<{ label: string; sessions: number }>;
+  maximumOffset: number;
   nextOffset: number | null;
   session: string | null;
   total: number;
