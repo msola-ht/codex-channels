@@ -1,12 +1,12 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -15,168 +15,133 @@ import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
 export function TrafficDetail({
   detail,
-  onFramePageChange,
+  onTracePageChange,
 }: {
   detail: TrafficExchangeDetail
-  onFramePageChange: (offset: number) => void
+  onTracePageChange: (offset: number) => void
 }) {
-  const requestBody = prettyJson(detail.request?.body ?? "")
-  const responseBody = prettyJson(detail.response?.body ?? "")
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
+        <StateBadge state={detail.state} />
         <span>
-          模型：请求 <span className="font-mono">{detail.requestModel ?? "未提供"}</span> 响应{" "}
+          模型：<span className="font-mono">{detail.requestModel ?? "未提供"}</span> →{" "}
           <span className="font-mono">{detail.responseModels.join("、") || "未提供"}</span>
         </span>
         <span className="text-muted-foreground">
-          线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"} · 类型{" "}
-          {detail.requestKind ?? "未提供"}
+          线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
+          {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
         </span>
       </div>
 
-      {detail.request === null && detail.transport === "websocket" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>WebSocket 连接</CardTitle>
-            <CardDescription>
-              {detail.url} · 帧 {detail.framePage.total === 0 ? 0 : detail.framePage.offset + 1}
-              –{detail.framePage.offset + detail.frames.length} / {detail.framePage.total}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <HeaderTable title="握手请求头" headers={detail.websocketHeaders ?? {}} />
-            {detail.frames.map((frame, index) => (
-              <section key={`${frame.direction}-${index}`} className="flex flex-col gap-1">
-                <p className="text-xs font-medium">
-                  {frame.direction === "client" ? "→ App Server 发出" : "← 上游返回"}
-                  {frame.truncated ? "（已截断）" : ""}
-                </p>
-                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                  {prettyJson(frame.text)}
-                </pre>
-              </section>
-            ))}
-          </CardContent>
-          {detail.framePage.previousOffset === null && detail.framePage.nextOffset === null
-            ? null
-            : (
-                <CardFooter className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={detail.framePage.previousOffset === null}
-                    onClick={() => {
-                      if (detail.framePage.previousOffset !== null) {
-                        onFramePageChange(detail.framePage.previousOffset)
-                      }
-                    }}
-                  >
-                    <ChevronLeftIcon data-icon="inline-start" />
-                    上一页
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={detail.framePage.nextOffset === null}
-                    onClick={() => {
-                      if (detail.framePage.nextOffset !== null) {
-                        onFramePageChange(detail.framePage.nextOffset)
-                      }
-                    }}
-                  >
-                    下一页
-                    <ChevronRightIcon data-icon="inline-end" />
-                  </Button>
-                </CardFooter>
-              )}
-        </Card>
-      ) : detail.request === null ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>请求</CardTitle>
+          <CardDescription>
+            {requestLabel(detail)}
+            {detail.request.bytes === undefined ? "" : ` · ${formatBytes(detail.request.bytes)}`}
+            {detail.request.bodyTruncated ? " · 展示已截断" : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <HeaderTable title="请求头" headers={detail.request.headers} />
+          <PayloadBlock title="请求正文" text={prettyJson(detail.request.body)} />
+        </CardContent>
+      </Card>
+
+      {detail.response === null ? (
         <Alert>
-          <AlertTitle>请求头缺失</AlertTitle>
-          <AlertDescription>
-            转储里没有这次交换的请求头记录，通常是被文件轮转清除了
-          </AlertDescription>
+          <AlertTitle>等待终态响应</AlertTitle>
+          <AlertDescription>请求已记录，但尚未收到完成、失败或不完整终态。</AlertDescription>
         </Alert>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>
-              请求 {detail.request.method} {detail.request.path}
+            <CardTitle className="flex items-center gap-2">
+              响应
+              <StateBadge state={detail.response.state} />
             </CardTitle>
             <CardDescription>
-              {detail.request.bytes === undefined ? "" : `原始 ${formatBytes(detail.request.bytes)}`}
-              {detail.request.bodyTruncated ? " · 正文已在服务端截断" : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <HeaderTable title="请求头" headers={detail.request.headers} />
-            <PayloadBlock title="请求体" text={requestBody} />
-          </CardContent>
-        </Card>
-      )}
-
-      {detail.response === null ? null : (
-        <Card>
-          <CardHeader>
-            <CardTitle>响应 {detail.response.status ?? "—"}</CardTitle>
-            <CardDescription>
-              {detail.response.bytes === undefined ? "" : `原始 ${formatBytes(detail.response.bytes)}`}
-              {detail.response.durationMs === undefined ? "" : ` · 用时 ${detail.response.durationMs} ms`}
-              {detail.response.bodyTruncated ? " · 正文已在服务端截断" : ""}
+              {detail.response.status === null ? "" : `HTTP ${detail.response.status}`}
+              {detail.response.eventType === undefined ? "" : ` · ${detail.response.eventType}`}
+              {detail.response.bytes === undefined ? "" : ` · 原始 ${formatBytes(detail.response.bytes)}`}
+              {detail.response.durationMs === undefined ? "" : ` · ${detail.response.durationMs} ms`}
+              {detail.response.bodyTruncated ? " · 展示已截断" : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <HeaderTable title="响应头" headers={detail.response.headers} />
-            {detail.events.length === 0 ? (
-              <PayloadBlock title="响应体" text={responseBody} />
-            ) : (
-              <section className="flex flex-col gap-2">
-                <p className="text-xs font-medium">SSE 事件（{detail.events.length} 条）</p>
-                <div className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3">
-                  {detail.events.map((event, index) => (
-                    <div key={`${event.type}-${index}`} className="mb-2 last:mb-0">
-                      <p className="font-mono text-xs text-muted-foreground">[{event.type}]</p>
-                      <pre className="font-mono text-xs whitespace-pre-wrap break-all">
-                        {event.payload}
-                      </pre>
-                    </div>
-                  ))}
-                </div>
-              </section>
+            <PayloadBlock title="终态响应" text={prettyJson(detail.response.body)} />
+            {detail.response.errorScope === undefined ? null : (
+              <p className="font-mono text-xs text-destructive">
+                {detail.response.errorScope}
+                {detail.response.error === undefined ? "" : `：${detail.response.error}`}
+              </p>
             )}
           </CardContent>
         </Card>
       )}
 
-      {detail.closes.length === 0 && detail.errors.length === 0 ? null : (
-        <Card>
-          <CardHeader>
-            <CardTitle>连接收尾</CardTitle>
-            <CardDescription>中断只表示流没有正常收尾，不代表上游一定失败</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1 text-xs">
-            {detail.closes.map((close, index) => (
-              <p key={`close-${index}`} className="font-mono">
-                连接关闭：{close.peer} code={close.code}
-                {close.reason === undefined ? "" : ` 原因=${close.reason}`}
-              </p>
+      {detail.tracePage.total === 0 ? null : (
+        <details className="rounded-lg border bg-card text-card-foreground shadow-sm">
+          <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
+            原始传输轨迹（{detail.tracePage.total} 条，默认收起）
+          </summary>
+          <div className="flex flex-col gap-3 border-t px-6 py-4">
+            {detail.trace.map((item, index) => (
+              <section key={`${item.atMs}-${item.kind}-${index}`} className="flex flex-col gap-1">
+                <p className="font-mono text-xs text-muted-foreground">
+                  {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
+                </p>
+                <pre className="max-h-72 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                  {prettyJson(item.text)}
+                </pre>
+              </section>
             ))}
-            {detail.errors.map((error, index) => (
-              <p key={`error-${index}`} className="font-mono text-destructive">
-                中断：{error.scope}
-                {error.message === undefined ? "" : ` ${error.message}`}
-              </p>
-            ))}
-          </CardContent>
-        </Card>
+            {detail.tracePage.previousOffset === null && detail.tracePage.nextOffset === null ? null : (
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={detail.tracePage.previousOffset === null}
+                  onClick={() => detail.tracePage.previousOffset === null
+                    ? undefined
+                    : onTracePageChange(detail.tracePage.previousOffset)}
+                >
+                  <ChevronLeftIcon data-icon="inline-start" />上一页
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={detail.tracePage.nextOffset === null}
+                  onClick={() => detail.tracePage.nextOffset === null
+                    ? undefined
+                    : onTracePageChange(detail.tracePage.nextOffset)}
+                >
+                  下一页<ChevronRightIcon data-icon="inline-end" />
+                </Button>
+              </div>
+            )}
+          </div>
+        </details>
       )}
     </div>
   )
+}
+
+function StateBadge({ state }: { state: TrafficExchangeDetail["state"] }) {
+  const label = state === "completed" ? "完成" : state === "failed" ? "失败"
+    : state === "incomplete" ? "不完整" : "进行中"
+  return <Badge variant={state === "completed" ? "secondary" : state === "pending" ? "outline" : "destructive"}>{label}</Badge>
+}
+
+function requestLabel(detail: TrafficExchangeDetail): string {
+  if (detail.transport === "websocket") return `WebSocket ${detail.request.url ?? detail.url ?? ""}`
+  return `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim()
 }
 
 function HeaderTable({ title, headers }: { title: string; headers: Record<string, TrafficHeaderValue> }) {
@@ -187,9 +152,7 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
       <p className="text-xs font-medium">{title}</p>
       <div className="rounded-md border bg-muted/50 p-3 font-mono text-xs">
         {entries.map(([name, value]) => (
-          <p key={name} className="break-all">
-            {name}: {Array.isArray(value) ? value.join(", ") : value}
-          </p>
+          <p key={name} className="break-all">{name}: {Array.isArray(value) ? value.join(", ") : value}</p>
         ))}
       </div>
     </section>
@@ -201,7 +164,7 @@ function PayloadBlock({ title, text }: { title: string; text: string }) {
     <section className="flex flex-col gap-1">
       <p className="text-xs font-medium">{title}</p>
       <pre className="max-h-96 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-        {text}
+        {text || "（空）"}
       </pre>
     </section>
   )

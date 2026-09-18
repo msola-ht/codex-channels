@@ -1,713 +1,487 @@
 import {
-  createServer,
-  request as httpRequest,
-} from "node:http";
-import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
+import {
+  createServer,
+  request as httpRequest,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-import WebSocket, { WebSocketServer } from "ws";
+import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  ProviderProxy,
-  type ProviderProxyMetrics,
-} from "../src/provider-proxy/index.js";
+import { ProviderProxy } from "../src/provider-proxy/index.js";
+import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
+// @ts-expect-error JavaScript reader intentionally has no declaration file.
+import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupProviderProxyTestServers,
   type ProviderProxyTestServer,
-  providerProxySse as sse,
 } from "./provider-proxy-http-test-fixture.js";
 
-const openServers: ProviderProxyTestServer[] = [];
 const temporaryDirectories: string[] = [];
+const openServers: ProviderProxyTestServer[] = [];
 
 afterEach(async () => {
-  vi.useRealTimers();
   await cleanupProviderProxyTestServers(openServers);
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-describe("ProviderProxy traffic dump", () => {
-  it("retains the five newest numeric indexes after a writer session reaches ten files", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-09-18T00:00:00.000Z"));
-    const directory = trafficDumpDirectory();
-    mkdirSync(directory, { recursive: true });
-    for (let index = 1; index <= 9; index += 1) {
-      writeFileSync(
-        join(directory, `openai-2026-09-18T00-00-00-000Z-${index}.jsonl`),
-        "",
-        { mode: 0o600 },
-      );
-    }
+describe("ModelTrafficDump V2", () => {
+  it("keeps HTTP forwarding available when dump storage initialization fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-proxy-failure-"));
+    temporaryDirectories.push(root);
+    const blocked = join(root, "not-a-directory");
+    writeFileSync(blocked, "blocked");
     const upstream = createServer((request, response) => {
       request.resume();
-      request.on("end", () => response.end("ok"));
+      request.on("end", () => response.end("upstream-ok"));
     });
-    await listen(upstream);
+    await new Promise<void>((resolveListen) => upstream.listen(0, "127.0.0.1", resolveListen));
+    openServers.push({
+      close: () => new Promise<void>((resolveClose) => upstream.close(() => resolveClose())),
+    });
     const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
+    const errors: Error[] = [];
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
+      trafficDump: { directory: blocked, label: "openai" },
+      onError: (error) => errors.push(error),
     });
     await proxy.start();
+    openServers.push(proxy);
 
-    try {
-      expect(await postResponses(proxy.address(), "{}"), "upstream response").toBe(200);
-    } finally {
-      await proxy.close();
-    }
-
-    const indexes = readdirSync(directory)
-      .map((name) => Number(/-(\d+)\.jsonl$/u.exec(name)?.[1]))
-      .sort((left, right) => left - right);
-    expect(indexes).toEqual([6, 7, 8, 9, 10]);
-  });
-
-  it("makes a completed exchange readable before the proxy closes", async () => {
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => response.end("ok"));
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
-    });
-    await proxy.start();
-
-    try {
-      expect(await postResponses(proxy.address(), "{}"), "upstream response").toBe(200);
-      const content = await waitForDumpContent(directory, "response_end");
-      expect(content).toContain('"kind":"request_end"');
-      expect(content).toContain('"kind":"response_end"');
-    } finally {
-      await proxy.close();
-    }
-  });
-
-  it("records the full request and response while keeping metrics intact", async () => {
-    const responseBody = sse("response.output_text.delta", { delta: "OK" })
-      + sse("response.completed", { response: { id: "r1" } });
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.end(responseBody);
-      });
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const metrics: ProviderProxyMetrics[] = [];
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
-      onMetrics: (metric) => {
-        metrics.push(metric);
-      },
-    });
-    await proxy.start();
-
-    const requestBody = JSON.stringify({ model: "gpt-test", input: "hello" });
-    const status = await postResponses(proxy.address(), requestBody);
-    await proxy.close();
-
-    expect(status).toBe(200);
-    expect(metrics).toEqual([expect.objectContaining({
-      status: "completed",
-      httpStatus: 200,
-      responseFormat: "sse",
-    })]);
-    const records = readDumpRecords(directory);
-    expect(records.find((record) => record.kind === "request_head")).toMatchObject({
-      method: "POST",
-      path: "/responses",
-      headers: {
-        authorization: "Bearer <redacted>",
-        "content-type": "application/json",
-      },
-    });
-    expect(records.find((record) => record.kind === "request_end"))
-      .toMatchObject({ bytes: Buffer.byteLength(requestBody) });
-    expect(bodyText(records, "request_body")).toBe(requestBody);
-    expect(records.find((record) => record.kind === "response_head"))
-      .toMatchObject({ status: 200, headers: { "content-type": "text/event-stream" } });
-    expect(bodyText(records, "response_body")).toBe(responseBody);
-    expect(records.find((record) => record.kind === "response_end"))
-      .toMatchObject({ bytes: Buffer.byteLength(responseBody) });
-    expect(readDumpContent(directory)).not.toContain("sk-secret");
-    expect(statSync(directory).mode & 0o077).toBe(0);
-    expect(statSync(dumpFile(directory)).mode & 0o077).toBe(0);
-  });
-
-  it("splits request bodies that exceed the per-record payload limit", async () => {
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => response.end("ok"));
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
-    });
-    await proxy.start();
-
-    const requestBody = "a".repeat(2_500_000);
-    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
-    await proxy.close();
-
-    const records = readDumpRecords(directory);
-    const parts = records.filter((record) => record.kind === "request_body");
-    expect(parts.length).toBeGreaterThan(1);
-    expect(parts.map((record) => record.part)).toEqual(
-      parts.map((_record, index) => index + 1),
-    );
-    expect(bodyText(records, "request_body")).toBe(requestBody);
-  });
-
-  it("keeps multibyte UTF-8 body records within the one MiB payload limit", async () => {
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => response.end("ok"));
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, inputItems: 0, itemMaxBytes: 0, label: "openai" },
-    });
-    await proxy.start();
-
-    const requestBody = JSON.stringify({ input: "汉".repeat(360_000) });
-    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
-    await proxy.close();
-
-    const records = readDumpRecords(directory);
-    const parts = records
-      .filter((record) => record.kind === "request_body")
-      .map((record) => String(record.text));
-    expect(parts.length).toBeGreaterThan(1);
-    expect(parts.every((part) => Buffer.byteLength(part) <= 1_048_576)).toBe(true);
-    expect(parts.join("")).toBe(requestBody);
-  });
-
-  it("keeps the partial response when the client disconnects mid-stream", async () => {
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.write(sse("response.output_text.delta", { delta: "partial" }));
-      });
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    let resolveFailed: () => void = () => undefined;
-    const failed = new Promise<void>((resolve) => {
-      resolveFailed = resolve;
-    });
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
-      onMetrics: (metric) => {
-        if (metric.status === "failed") resolveFailed();
-      },
-    });
-    await proxy.start();
-
-    await new Promise<void>((resolveAbort) => {
+    const result = await new Promise<{ body: string; status: number }>((resolveResponse, reject) => {
       const request = httpRequest({
         hostname: "127.0.0.1",
-        port: Number(proxy.address().split(":")[1]),
-        path: "/responses",
         method: "POST",
+        path: "/responses",
+        port: Number(proxy.address().split(":")[1]),
       }, (response) => {
-        response.once("data", () => {
-          response.destroy();
-          resolveAbort();
-        });
-        response.on("error", () => resolveAbort());
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolveResponse({
+          body: Buffer.concat(chunks).toString("utf8"),
+          status: response.statusCode ?? 0,
+        }));
+        response.on("error", reject);
       });
-      request.on("error", () => resolveAbort());
+      request.on("error", reject);
       request.end("{}");
     });
-    await failed;
-    await proxy.close();
 
-    const records = readDumpRecords(directory);
-    expect(bodyText(records, "response_body"))
-      .toBe(sse("response.output_text.delta", { delta: "partial" }));
-    expect(records.filter((record) => record.kind === "error").at(-1))
-      .toMatchObject({ scope: "client_disconnected" });
+    expect(result).toEqual({ body: "upstream-ok", status: 200 });
+    expect(errors).toHaveLength(1);
   });
 
-  it("records the WebSocket handshake and frames in both directions", async () => {
-    const upstreamServer = createServer();
-    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
-    let upstreamPath = "";
-    upstreamWebSocket.on("connection", (socket, request) => {
-      upstreamPath = request.url ?? "";
-      socket.on("message", () => {
-        socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "OK" }));
-        socket.send(JSON.stringify({
-          type: "response.completed",
-          response: { id: "ws-1" },
-        }));
-      });
+  it("disables dumping without throwing when storage initialization fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-failure-"));
+    temporaryDirectories.push(root);
+    const blocked = join(root, "not-a-directory");
+    writeFileSync(blocked, "blocked");
+    const errors: Error[] = [];
+    const dump = new ModelTrafficDump({
+      directory: blocked,
+      label: "openai",
+      onError: (error) => errors.push(error),
     });
-    await listen(upstreamServer);
-    const upstreamAddress = upstreamServer.address() as AddressInfo;
-    openServers.push({
-      close: async () => {
-        for (const client of upstreamWebSocket.clients) client.terminate();
-        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
-        await closeServer(upstreamServer).close();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+
+    expect(() => {
+      exchange.requestChunk(Buffer.from("{}"));
+      exchange.requestEnd();
+      exchange.responseHead(200, { "content-type": "application/json" });
+      exchange.responseChunk(Buffer.from("{}"));
+      exchange.responseEnd();
+    }).not.toThrow();
+    await dump.close();
+    expect(errors).toHaveLength(1);
+  });
+
+  it("stores one HTTP request and one terminal SSE response with payload references", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {
+        authorization: "Bearer secret",
+        "content-type": "application/json",
+        "x-codex-turn-metadata": JSON.stringify({
+          request_kind: "turn",
+          thread_id: "thread-1",
+          turn_id: "turn-1",
+        }),
       },
+      method: "POST",
+      path: "/responses",
+      startedAtMs: Date.now(),
     });
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, label: "openai" },
-    });
-    await proxy.start();
+    exchange.requestChunk(Buffer.from(JSON.stringify({ input: ["hello"], model: "gpt-6-astra" })));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "text/event-stream" });
+    exchange.responseChunk(Buffer.from("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"));
+    const terminal = {
+      type: "response.completed",
+      response: { model: "gpt-6-astra", output: [{ type: "message", content: "done" }] },
+    };
+    const encoded = `event: response.completed\ndata: ${JSON.stringify(terminal)}\n\n`;
+    exchange.responseChunk(Buffer.from(encoded.slice(0, 30)));
+    exchange.responseChunk(Buffer.from(encoded.slice(30)));
+    exchange.responseEnd();
+    await dump.close();
 
-    const client = new WebSocket(`ws://${proxy.address()}/responses`, {
-      headers: { authorization: "Bearer sk-secret" },
+    const sessions = listDumpFiles(directory);
+    expect(sessions).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(sessions[0]!, "manifest.json"), "utf8")))
+      .toMatchObject({ label: "openai", version: 2 });
+    const index = readIndex(sessions[0]!);
+    expect(index.map((record) => record.kind)).toEqual(["request", "response"]);
+    expect(index[0]).toMatchObject({
+      headers: { authorization: "Bearer <redacted>" },
+      id: 1,
+      requestKind: "turn",
+      requestModel: "gpt-6-astra",
+      threadId: "thread-1",
+      turnId: "turn-1",
     });
-    const completed = new Promise<void>((resolveCompleted, rejectCompleted) => {
-      client.on("open", () => {
-        client.send(JSON.stringify({ type: "response.create", model: "gpt-ws" }));
-      });
-      client.on("message", (data) => {
-        const message = JSON.parse(data.toString("utf8")) as { type?: string };
-        if (message.type === "response.completed") resolveCompleted();
-      });
-      client.on("error", rejectCompleted);
+    expect(index[1]).toMatchObject({
+      eventType: "response.completed",
+      responseModels: ["gpt-6-astra"],
+      state: "completed",
     });
-    await completed;
-    client.close();
-    await proxy.close();
+    expect(index[0]!.payload.parts[0]).toMatchObject({ file: "payload-1.bin", offset: 0 });
 
-    expect(upstreamPath).toBe("/responses");
-    const records = readDumpRecords(directory);
-    expect(records.find((record) => record.kind === "websocket_handshake"))
-      .toMatchObject({
-        url: `ws://127.0.0.1:${upstreamAddress.port}/responses`,
-        headers: { authorization: "Bearer <redacted>" },
-      });
-    expect(frameTexts(records, "client")).toEqual([
-      JSON.stringify({ type: "response.create", model: "gpt-ws" }),
+    const detail = await describeDumpExchange(sessions, 1);
+    expect(JSON.parse(detail.request.body)).toMatchObject({ model: "gpt-6-astra" });
+    expect(JSON.parse(detail.response.body)).toEqual(terminal);
+    expect(detail.trace.some((record: { kind: string }) => record.kind === "response_body")).toBe(true);
+  });
+
+  it("creates a separate logical interaction for every WebSocket response.create", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginWebSocketExchange({
+      headers: { authorization: "Bearer secret" },
+      startedAtMs: Date.now(),
+      url: "wss://example.test/responses",
+    });
+    exchange.webSocketFrame("client", textFrame({
+      type: "response.create",
+      model: "gpt-6-astra",
+      client_metadata: { thread_id: "thread-ws" },
+    }), false);
+    exchange.webSocketFrame("upstream", textFrame({
+      type: "response.completed",
+      response: { model: "gpt-6-astra", output: [] },
+    }), false);
+    exchange.webSocketFrame("client", textFrame({
+      type: "response.create",
+      model: "gpt-6-astra",
+      input: ["second"],
+    }), false);
+    exchange.webSocketFrame("upstream", textFrame({
+      type: "response.failed",
+      response: { model: "gpt-6-astra" },
+    }), false);
+    await dump.close();
+
+    const sessions = listDumpFiles(directory);
+    const list = await summarizeDumpFiles(sessions);
+    expect(list.exchanges).toMatchObject([
+      { id: 1, state: "completed", threadId: "thread-ws", transport: "websocket" },
+      { id: 2, state: "failed", transport: "websocket" },
     ]);
-    expect(frameTexts(records, "upstream").join("")).toContain("response.completed");
-    expect(readDumpContent(directory)).not.toContain("sk-secret");
+    expect((await describeDumpExchange(sessions, 1)).trace)
+      .toHaveLength(2);
   });
 
-  it("keeps only the newest input items and folds duplicated response fields", async () => {
-    const responseBody = sse("response.created", {
-      response: {
-        id: "r1",
-        instructions: "x".repeat(300),
-        tools: [{ name: "shell", type: "function" }],
-      },
-      type: "response.created",
-    })
-      + sse("response.output_text.delta", { delta: "O" })
-      + sse("response.output_text.delta", { delta: "K" })
-      + sse("response.output_text.done", { text: "OK" });
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.end(responseBody);
-      });
+  it("does not reuse a previous WebSocket response model after the next call closes", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginWebSocketExchange({
+      headers: {}, startedAtMs: Date.now(), url: "wss://example.test/responses",
     });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, inputItems: 2, label: "openai" },
-    });
-    await proxy.start();
+    exchange.webSocketFrame("client", textFrame({
+      type: "response.create", model: "request-one",
+    }), false);
+    exchange.webSocketFrame("upstream", textFrame({
+      type: "response.completed", response: { model: "response-one" },
+    }), false);
+    exchange.webSocketFrame("client", textFrame({
+      type: "response.create", model: "request-two",
+    }), false);
+    exchange.webSocketClose("upstream", 1006, Buffer.alloc(0));
+    await dump.close();
 
-    const items = ["a", "b", "c", "d", "e"].map((text, index) => ({
-      content: text.repeat(200),
-      role: index % 2 === 0 ? "user" : "assistant",
-      type: "message",
+    const detail = await describeDumpExchange(listDumpFiles(directory), 2);
+    expect(detail).toMatchObject({
+      requestModel: "request-two",
+      responseModels: [],
+      state: "incomplete",
+    });
+  });
+
+  it("records an explicit failed response when HTTP forwarding aborts", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {},
+      method: "POST",
+      path: "/responses",
+      startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from("{}"));
+    exchange.failure("upstream_request", new Error("offline"));
+    await dump.close();
+
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response).toMatchObject({
+      error: "offline",
+      errorScope: "upstream_request",
+      state: "failed",
+    });
+  });
+
+  it("keeps an observed completed SSE terminal when the transport closes afterward", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from("{}"));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "text/event-stream" });
+    exchange.responseChunk(Buffer.from(
+      'event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-6-astra"}}\n\n',
+    ));
+    exchange.failure("client_disconnected");
+    await dump.close();
+
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response).toMatchObject({ state: "completed" });
+  });
+
+  it("recognizes a terminal SSE response when Content-Type is omitted", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from("{}"));
+    exchange.requestEnd();
+    exchange.responseHead(200, {});
+    exchange.responseChunk(Buffer.from(
+      'event: response.completed\ndata: {"type":"response.completed","response":{"model":"gpt-6-astra"}}\n\n',
+    ));
+    exchange.responseEnd();
+    await dump.close();
+
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response).toMatchObject({
+      eventType: "response.completed",
+      state: "completed",
+    });
+    expect(JSON.parse(detail.response.body)).toMatchObject({
+      response: { model: "gpt-6-astra" },
+      type: "response.completed",
+    });
+    expect(detail.responseModels).toEqual(["gpt-6-astra"]);
+  });
+
+  it("stops collecting an oversized unterminated SSE event", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "text/event-stream" });
+    exchange.responseChunk(Buffer.from(`data: ${"x".repeat(1_048_577)}`));
+    const collector = exchange as unknown as {
+      sseTerminal: { disabled: boolean; pending: string };
+    };
+    expect(collector.sseTerminal.pending).toBe("");
+    expect(collector.sseTerminal.disabled).toBe(true);
+    exchange.responseEnd();
+    await dump.close();
+
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response).toMatchObject({ state: "incomplete" });
+    expect(detail.response.body).toBe("");
+  });
+
+  it("extracts the request model across raw payload chunks", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    const request = JSON.stringify({
+      input: "x".repeat(1_048_576),
+      model: "gpt-6-astra",
+    });
+    const encoded = Buffer.from(request);
+    exchange.requestChunk(encoded.subarray(0, 1_048_576));
+    exchange.requestChunk(encoded.subarray(1_048_576));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "application/json" });
+    exchange.responseChunk(Buffer.from("{}"));
+    exchange.responseEnd();
+    await dump.close();
+
+    const [summary] = (await summarizeDumpFiles(listDumpFiles(directory))).exchanges;
+    expect(summary.requestModel).toBe("gpt-6-astra");
+  });
+
+  it("preserves UTF-8 request text when a network chunk ends inside a character", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    const request = JSON.stringify({ input: "汉".repeat(400_000), model: "gpt-6-astra" });
+    const encoded = Buffer.from(request);
+    let split = 1_048_576;
+    while ((encoded[split]! & 0xc0) !== 0x80 || (encoded[split - 1]! & 0xe0) !== 0xe0) {
+      split += 1;
+    }
+    exchange.requestChunk(encoded.subarray(0, split));
+    exchange.requestChunk(encoded.subarray(split));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "application/json" });
+    exchange.responseChunk(Buffer.from("{}"));
+    exchange.responseEnd();
+    await dump.close();
+
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.request.body).toBe(request);
+  });
+
+  it("extracts the response model across raw JSON payload chunks", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from("{}"));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "application/json" });
+    const response = Buffer.from(JSON.stringify({
+      output: "x".repeat(1_048_576),
+      model: "gpt-response",
     }));
-    const tools = [{ name: "shell", type: "function" }];
-    const requestBody = JSON.stringify({
-      input: items,
-      instructions: "system prompt",
-      model: "gpt-compact",
-      tools,
-    });
-    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
-    await proxy.close();
+    exchange.responseChunk(response.subarray(0, 1_048_576));
+    exchange.responseChunk(response.subarray(1_048_576));
+    exchange.responseEnd();
+    await dump.close();
 
-    const records = readDumpRecords(directory);
-    const request = JSON.parse(bodyText(records, "request_body")) as {
-      input: Array<Record<string, unknown>>;
-      instructions: string;
-      tools: unknown;
-    };
-    expect(request.input).toHaveLength(3);
-    expect(request.input[0]).toEqual({
-      omitted_bytes: Buffer.byteLength(JSON.stringify(items.slice(0, 3))),
-      omitted_items: 3,
-      type: "omitted",
-    });
-    expect(request.input.slice(1)).toEqual(items.slice(-2));
-    expect(request.instructions).toBe("system prompt");
-    expect(request.tools).toEqual(tools);
-
-    const events = sseData(bodyText(records, "response_body"));
-    expect(events[0]?.["response"]).toEqual({
-      id: "r1",
-      instructions: `<omitted ${Buffer.byteLength("x".repeat(300))} 字节>`,
-      tools: `<omitted ${Buffer.byteLength(JSON.stringify(tools))} 字节>`,
-    });
-    expect(events[1]).toEqual({ text: "OK" });
-    expect(events).toHaveLength(2);
-    expect(bodyText(records, "response_body")).not.toContain("response.output_text.delta");
+    const [summary] = (await summarizeDumpFiles(listDumpFiles(directory))).exchanges;
+    expect(summary.responseModels).toEqual(["gpt-response"]);
   });
 
-  it("caps oversized entries when only the per-entry limit is set", async () => {
-    const echoed = {
-      instructions: "keep the complete instructions",
-      tools: [{ name: "shell", type: "function" }],
+  it("closes a rotated payload stream before shutdown", async () => {
+    const { dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from("{}"));
+    exchange.requestEnd();
+    const internals = dump as unknown as {
+      payloadWrittenBytes: number;
+      streams: Set<unknown>;
+      writeQueue: Promise<void>;
     };
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ response: echoed, type: "response.created" }));
-      });
-    });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, itemMaxBytes: 512, label: "openai" },
-    });
-    await proxy.start();
+    internals.payloadWrittenBytes = 64 * 1_048_576;
+    exchange.responseHead(200, { "content-type": "application/json" });
+    exchange.responseChunk(Buffer.from("{}"));
+    exchange.responseEnd();
+    await internals.writeQueue;
 
-    const big = { content: "x".repeat(2_000), type: "function_call_output" };
-    const small = { content: "ok", type: "message" };
-    const requestBody = JSON.stringify({
-      input: [big, small],
-      instructions: "s".repeat(5_000),
-      model: "gpt-capped",
-    });
-    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
-    await proxy.close();
+    expect(internals.streams.size).toBe(2);
+    await dump.close();
+  });
 
-    const records = readDumpRecords(directory);
-    const request = JSON.parse(bodyText(records, "request_body")) as {
-      input: Array<Record<string, unknown>>;
-    };
-    // 只设置单条上限时 input 不折叠，只把超限条目换成头尾摘要。
+  it("keeps compacted payload parts bounded and private", async () => {
+    const { directory, dump } = fixture({ inputItems: 1, itemMaxBytes: 64 });
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestChunk(Buffer.from(JSON.stringify({
+      input: [{ text: "old" }, { text: "x".repeat(500) }],
+      model: "gpt-6-astra",
+    })));
+    exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "application/json" });
+    exchange.responseChunk(Buffer.from(JSON.stringify({ model: "gpt-6-astra", output: [] })));
+    exchange.responseEnd();
+    await dump.close();
+
+    const session = listDumpFiles(directory)[0]!;
+    const detail = await describeDumpExchange([session], 1);
+    const request = JSON.parse(detail.request.body) as { input: unknown[] };
     expect(request.input).toHaveLength(2);
-    expect(request.input[1]).toEqual(small);
-    const capped = request.input[0]!;
-    expect(capped["type"]).toBe("truncated");
-    expect(capped["bytes"]).toBe(Buffer.byteLength(JSON.stringify(big)));
-    expect(Buffer.byteLength(String(capped["head"]))).toBe(256);
-    expect(Buffer.byteLength(String(capped["tail"]))).toBe(256);
-    expect(String(capped["head"]).startsWith('{"content":"xxx')).toBe(true);
-    expect(String(capped["tail"]).endsWith('"type":"function_call_output"}')).toBe(true);
-    // 超长字符串字段同样只保留头尾。
-    const instructions = (request as unknown as { instructions: Record<string, unknown> }).instructions;
-    expect(instructions["type"]).toBe("truncated");
-    expect(instructions["bytes"]).toBe(5_000);
-    expect(String(instructions["head"])).toBe("s".repeat(256));
-    expect(String(instructions["tail"])).toBe("s".repeat(256));
-    const response = JSON.parse(bodyText(records, "response_body")) as {
-      response: typeof echoed;
-    };
-    expect(response.response).toEqual(echoed);
+    expect(request.input[0]).toMatchObject({ omitted_items: 1, type: "omitted" });
+    expect(request.input[1]).toMatchObject({ type: "truncated" });
+    for (const name of readdirSync(session)) {
+      expect(statSync(join(session, name)).mode & 0o077).toBe(0);
+    }
   });
 
-  it("folds multi-megabyte bodies that span several record parts", async () => {
-    const upstream = createServer((request, response) => {
-      request.resume();
-      request.on("end", () => {
-        response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ ok: true }));
-      });
+  it("removes only complete old sessions after retained history exceeds the size budget", async () => {
+    const { directory, dump } = fixture();
+    const oldest = oldSession(directory, "oldest", 1);
+    const newer = oldSession(directory, "newer", 2);
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
     });
-    await listen(upstream);
-    const upstreamAddress = upstream.address() as AddressInfo;
-    openServers.push(closeServer(upstream));
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, inputItems: 3, itemMaxBytes: 65_536, label: "openai" },
-    });
-    await proxy.start();
+    exchange.requestEnd();
+    await dump.close();
 
-    const items = Array.from({ length: 250 }, (_, index) => ({
-      content: "x".repeat(20_000),
-      index,
-      type: "function_call_output",
-    }));
-    const requestBody = JSON.stringify({ input: items, model: "gpt-multi-part" });
-    expect(requestBody.length).toBeGreaterThan(4 * 1_048_576);
-    expect(await postResponses(proxy.address(), requestBody)).toBe(200);
-    await proxy.close();
-
-    const records = readDumpRecords(directory);
-    // 开启精简时先整段缓冲再折叠，5 MB 正文折叠后不足一条记录上限。
-    expect(records.filter((record) => record.kind === "request_body")).toHaveLength(1);
-    const text = bodyText(records, "request_body");
-    // 折叠发生在整段正文上：分片只影响记录条数，不会因为半截 JSON 而跳过折叠。
-    const stored = JSON.parse(text) as { input: Array<Record<string, unknown>> };
-    expect(stored.input).toHaveLength(4);
-    expect(stored.input[0]).toMatchObject({
-      omitted_items: items.length - 3,
-      type: "omitted",
-    });
-    expect(Buffer.byteLength(text)).toBeLessThan(300_000);
-  });
-
-  it("compacts websocket client frames and echoed upstream fields", async () => {
-    const upstreamServer = createServer();
-    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
-    upstreamWebSocket.on("connection", (socket) => {
-      socket.on("message", () => {
-        socket.send(JSON.stringify({
-          response: {
-            instructions: "y".repeat(120),
-            tools: [{ name: "shell" }],
-          },
-          type: "response.created",
-        }));
-        socket.send(JSON.stringify({ delta: "O", type: "response.output_text.delta" }));
-        socket.send(JSON.stringify({ text: "OK", type: "response.output_text.done" }));
-        socket.send(JSON.stringify({ type: "response.completed" }));
-      });
-    });
-    await listen(upstreamServer);
-    const upstreamAddress = upstreamServer.address() as AddressInfo;
-    openServers.push({
-      close: async () => {
-        for (const client of upstreamWebSocket.clients) client.terminate();
-        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
-        await closeServer(upstreamServer).close();
-      },
-    });
-    const directory = trafficDumpDirectory();
-    const proxy = new ProviderProxy("127.0.0.1:0", {
-      upstreamHost: "127.0.0.1",
-      upstreamPort: upstreamAddress.port,
-      upstreamProtocol: "http",
-      trafficDump: { directory, inputItems: 1, label: "openai" },
-    });
-    await proxy.start();
-
-    const items = ["a", "b", "c"].map((text) => ({ content: text.repeat(120), type: "message" }));
-    const client = new WebSocket(`ws://${proxy.address()}/responses`);
-    const completed = new Promise<void>((resolveCompleted, rejectCompleted) => {
-      client.on("open", () => {
-        client.send(JSON.stringify({
-          input: items,
-          instructions: "frame prompt",
-          model: "gpt-ws",
-          type: "response.create",
-        }));
-      });
-      client.on("message", (data) => {
-        const message = JSON.parse(data.toString("utf8")) as { type?: string };
-        if (message.type === "response.completed") resolveCompleted();
-      });
-      client.on("error", rejectCompleted);
-    });
-    await completed;
-    client.close();
-    await proxy.close();
-
-    const records = readDumpRecords(directory);
-    const frame = JSON.parse(frameTexts(records, "client")[0]!) as {
-      input: Array<Record<string, unknown>>;
-      instructions: string;
-    };
-    expect(frame.input).toEqual([
-      {
-        omitted_bytes: Buffer.byteLength(JSON.stringify(items.slice(0, 2))),
-        omitted_items: 2,
-        type: "omitted",
-      },
-      items[2],
-    ]);
-    expect(frame.instructions).toBe("frame prompt");
-
-    const upstreamEvents = frameTexts(records, "upstream").map(
-      (text) => JSON.parse(text) as Record<string, unknown>,
-    );
-    expect(upstreamEvents[0]?.["response"]).toEqual({
-      instructions: `<omitted ${Buffer.byteLength("y".repeat(120))} 字节>`,
-      tools: `<omitted ${Buffer.byteLength(JSON.stringify([{ name: "shell" }]))} 字节>`,
-    });
-    expect(upstreamEvents.slice(1)).toEqual([
-      { text: "OK", type: "response.output_text.done" },
-      { type: "response.completed" },
-    ]);
+    expect(existsSync(oldest)).toBe(false);
+    expect(existsSync(newer)).toBe(true);
   });
 });
 
-function trafficDumpDirectory(): string {
-  const parent = mkdtempSync(join(tmpdir(), "codex-traffic-dump-"));
-  temporaryDirectories.push(parent);
-  return join(parent, "traffic");
-}
-
-async function waitForDumpContent(
-  directory: string,
-  expected: string,
-  timeoutMs = 1_000,
-): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (existsSync(directory)) {
-      const content = readDumpContent(directory);
-      if (content.includes(expected)) return content;
-    }
-    await new Promise((resolveTick) => setTimeout(resolveTick, 10));
-  }
-  throw new Error(`等待转储内容超时：${expected}`);
-}
-
-function closeServer(server: ReturnType<typeof createServer>): ProviderProxyTestServer {
-  return {
-    close: () => new Promise<void>((resolveClose) => {
-      server.close(() => resolveClose());
-    }),
-  };
-}
-
-function listen(server: ReturnType<typeof createServer>): Promise<void> {
-  return new Promise<void>((resolveListen) => {
-    server.listen(0, "127.0.0.1", resolveListen);
+function fixture(options: { inputItems?: number; itemMaxBytes?: number } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-"));
+  temporaryDirectories.push(directory);
+  const errors: Error[] = [];
+  const dump = new ModelTrafficDump({
+    directory,
+    label: "openai",
+    onError: (error) => errors.push(error),
+    ...options,
   });
+  expect(errors).toEqual([]);
+  return { directory, dump };
 }
 
-function postResponses(address: string, body: string): Promise<number> {
-  const port = Number(address.split(":")[1]);
-  return new Promise<number>((resolveStatus, rejectStatus) => {
-    const request = httpRequest({
-      hostname: "127.0.0.1",
-      port,
-      path: "/responses",
-      method: "POST",
-      headers: {
-        "authorization": "Bearer sk-secret",
-        "content-type": "application/json",
-      },
-    }, (response) => {
-      response.resume();
-      response.on("end", () => resolveStatus(response.statusCode ?? 0));
-      response.on("error", rejectStatus);
+function textFrame(value: unknown): Buffer {
+  return Buffer.from(JSON.stringify(value), "utf8");
+}
+
+function readIndex(session: string): Array<Record<string, unknown> & {
+  payload: { parts: Array<Record<string, unknown>> };
+}> {
+  return readFileSync(join(session, "interactions.jsonl"), "utf8")
+    .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown> & {
+      payload: { parts: Array<Record<string, unknown>> };
     });
-    request.on("error", rejectStatus);
-    request.end(body);
-  });
 }
 
-function dumpFiles(directory: string): string[] {
-  return readdirSync(directory)
-    .filter((name) => name.endsWith(".jsonl"))
-    .sort();
-}
-
-function dumpFile(directory: string): string {
-  const files = dumpFiles(directory);
-  expect(files).toHaveLength(1);
-  return join(directory, files[0]!);
-}
-
-function readDumpContent(directory: string): string {
-  return dumpFiles(directory)
-    .map((name) => readFileSync(join(directory, name), "utf8"))
-    .join("");
-}
-
-function readDumpRecords(directory: string): Array<Record<string, unknown>> {
-  return readDumpContent(directory)
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-function bodyText(
-  records: Array<Record<string, unknown>>,
-  kind: "request_body" | "response_body",
-): string {
-  return records
-    .filter((record) => record.kind === kind)
-    .map((record) => String(record.text))
-    .join("");
-}
-
-function frameTexts(
-  records: Array<Record<string, unknown>>,
-  direction: "client" | "upstream",
-): string[] {
-  return records
-    .filter((record) => record.kind === "websocket_frame" && record.direction === direction)
-    .map((record) => String(record.text));
-}
-
-function sseData(text: string): Array<Record<string, unknown>> {
-  return text
-    .split("\n")
-    .filter((line) => line.startsWith("data: "))
-    .map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
+function oldSession(directory: string, session: string, createdAtMs: number): string {
+  const path = join(directory, `openai-${session}`);
+  mkdirSync(path, { mode: 0o700 });
+  writeFileSync(
+    join(path, "manifest.json"),
+    JSON.stringify({ createdAtMs, label: "openai", session, version: 2 }),
+  );
+  const payload = join(path, "payload-1.bin");
+  writeFileSync(payload, "");
+  truncateSync(payload, 200 * 1_048_576);
+  return path;
 }

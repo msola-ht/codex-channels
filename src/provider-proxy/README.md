@@ -68,14 +68,14 @@
   Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
   不安全、无认证或已被活动进程占用的端点，并只清理自己创建的端点；指标按换行完成单帧并在归约后
   确认，不依赖 Windows named pipe 不具备的半关闭时序。
-- `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储。把统计代理
-  收到的请求头与请求体、上游返回的响应头与响应块、WebSocket 握手和双向帧按 JSON Lines 写入数据
-  目录下的私有文件；只复制、不改变转发、背压和指标采集，也不阻塞模型响应。正文按单条记录上限
-  切分，单文件达到上限后轮转，目录只保留最近若干文件；Authorization、Cookie 等凭据字段只保留
-  认证方案。`[debug].model_traffic_input_items` 大于 `0` 时启用精简模式：`input` 只保留末尾若干
-  条，逐条 `.delta` 流式增量不再写入（完整文本仍在 `*.done` 与 `response.completed` 中），响应
-  回显的 `instructions` 与 `tools` 折叠为长度占位，发送的请求字段与保留的响应事件保持完整。
-  写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
+- `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储。V2 为每个 writer
+  session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
+  offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
+  `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
+  一次调用。写队列先落正文再落索引，不改变转发、背压和指标采集。历史完整 session 按 Provider
+  约保留 320 MiB，当前写入中的 session 不会被拆除；Authorization、Cookie 等凭据字段只保留认证
+  方案。精简模式继续裁剪 `input` 与过大条目，并从 trace 丢弃 `.delta`；逻辑响应始终只保存
+  `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；

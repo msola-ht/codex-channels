@@ -6,7 +6,7 @@ export const trafficPageSizeOptions = [25, 50, 100, 200]
 const defaultLimit = 50
 
 export interface TrafficQuery {
-  frameOffset: number
+  traceOffset: number
   label?: string
   session?: string
   id: number | null
@@ -22,13 +22,13 @@ export function useTrafficQuery() {
     const rawId = search.get("id")
     const rawLabel = search.get("label")
     const rawSession = search.get("session")
-    const frameOffset = Number(search.get("frameOffset") ?? 0)
+    const traceOffset = Number(search.get("traceOffset") ?? 0)
     const offset = Number(search.get("offset") ?? 0)
     const limit = Number(search.get("limit") ?? defaultLimit)
     return {
       ...(rawLabel === null ? {} : { label: rawLabel }),
       ...(rawSession === null ? {} : { session: rawSession }),
-      frameOffset: Number.isInteger(frameOffset) && frameOffset >= 0 ? frameOffset : 0,
+      traceOffset: Number.isInteger(traceOffset) && traceOffset >= 0 ? traceOffset : 0,
       id: rawId !== null && /^[0-9]+$/u.test(rawId) ? Number(rawId) : null,
       limit: trafficPageSizeOptions.includes(limit) ? limit : defaultLimit,
       offset: Number.isInteger(offset) && offset >= 0 ? offset : 0,
@@ -39,7 +39,7 @@ export function useTrafficQuery() {
     changes: {
       label?: string | null
       session?: string | null
-      frameOffset?: number | null
+      traceOffset?: number | null
       id?: number | null
       limit?: number
       offset?: number

@@ -1,408 +1,192 @@
 #!/usr/bin/env node
 
-import {
-  closeSync,
-  fstatSync,
-  openSync,
-  readSync,
-  statSync,
-} from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
 import {
-  findRecord,
-  forEachDumpExchange,
+  describeDumpExchange,
+  dumpCatalog,
   formatTime,
-  frameText,
-  joinBodies,
   labelOf,
   listDumpFiles,
-  parseSseEvents,
-  parseTurnMetadata,
-  readDumpExchange,
-  requestMetadata,
-  requestModelOf,
-  responseModelsOf,
   selectFilesOfLabel,
   shortId,
   summarizeDumpFiles,
-  websocketFrames,
-  writerSessionOf,
 } from "./traffic-dump-reader.mjs";
 
 const followIntervalMs = 1_000;
-
 const options = parseTrafficCommandArgs(process.argv.slice(2));
 const directory = options.directory ?? defaultTrafficDirectory();
+
+try {
+  if (options.follow) await followTraffic();
+  else await renderSessions(selectedSessions());
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}
 
 function defaultTrafficDirectory() {
   const located = locateOptionalUserConfig(process.env);
   return join(located?.dataDir ?? userDataDir(process.env), "traffic");
 }
 
-if (options.follow) {
-  await followTraffic();
-} else {
-  await renderFiles(selectedFiles(), options);
-}
-
-function selectedFiles() {
+function selectedSessions() {
   if (options.files.length > 0) return options.files;
-  return newestDumpFiles(directory);
-}
-
-function newestDumpFiles(target) {
-  const files = listDumpFiles(target);
-  const newest = files.at(-1);
+  const sessions = listDumpFiles(directory);
+  const newest = sessions.at(-1);
   if (newest === undefined) return [];
-  const label = labelOf(newest);
-  return selectFilesOfLabel(files, label);
+  return selectFilesOfLabel(sessions, labelOf(newest));
 }
 
 async function followTraffic() {
-  const initialFiles = selectedFiles();
-  if (options.files.length > 0) await renderFiles(initialFiles, options);
-  else if (initialFiles.length > 0) {
-    console.log(`从现有文件末尾开始跟随：${initialFiles.join("、")}`);
+  if (options.files.length > 1) throw new Error("一次只能跟随一个 V2 session 目录");
+  const initial = selectedSessions();
+  let session = initial[0];
+  let displayed = new Set();
+  if (session !== undefined && options.files.length === 0) {
+    const page = await summarizeDumpFiles(initial);
+    displayed = new Set(page.exchanges
+      .filter((summary) => summary.state !== "pending")
+      .map((summary) => summary.id));
   }
-  console.log(`跟随 ${directory} 中的新内容，按 Ctrl-C 停止`);
-  const tails = new Map();
-  for (const path of listDumpFiles(directory)) {
-    tails.set(path, { offset: fileSize(path), remainder: "" });
-  }
-  const sseBuffers = new Map();
-  const frameBuffers = new Map();
   let stopped = false;
-  const stop = () => {
-    stopped = true;
-  };
+  const stop = () => { stopped = true; };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+  console.log(`跟随 ${directory} 中的新模型调用，按 Ctrl-C 停止`);
   while (!stopped) {
-    await sleep(followIntervalMs);
-    const files = listDumpFiles(directory);
-    pruneFollowState(files, tails, sseBuffers, frameBuffers);
-    for (const path of files) {
-      const tail = tails.get(path) ?? { offset: 0, remainder: "" };
-      tails.set(path, tail);
-      const content = readFrom(path, tail.offset);
-      if (content.length === 0) continue;
-      tail.offset += Buffer.byteLength(content);
-      const lines = `${tail.remainder}${content}`.split("\n");
-      tail.remainder = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.length === 0) continue;
-        let record;
-        try {
-          record = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        renderFollowRecord(record, followScope(path), sseBuffers, frameBuffers);
+    const selected = selectedSessions();
+    const current = selected[0];
+    if (current !== undefined) {
+      if (current !== session) {
+        session = current;
+        displayed = new Set();
+      }
+      const page = await summarizeDumpFiles(selected);
+      for (const summary of page.exchanges) {
+        if (summary.state === "pending" || displayed.has(summary.id)) continue;
+        displayed.add(summary.id);
+        const rendered = await renderExchange(selected, summary);
+        if (rendered !== undefined) console.log(rendered);
       }
     }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, followIntervalMs));
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function fileSize(path) {
-  try {
-    return statSync(path).size;
-  } catch {
-    return 0;
-  }
-}
-
-function readFrom(path, offset) {
-  let descriptor;
-  try {
-    descriptor = openSync(path, "r");
-  } catch {
-    return "";
-  }
-  try {
-    const { size } = fstatSync(descriptor);
-    if (size <= offset) return "";
-    const length = size - offset;
-    const buffer = Buffer.allocUnsafe(length);
-    let read = 0;
-    while (read < length) {
-      const chunk = readSync(descriptor, buffer, read, length - read, offset + read);
-      if (chunk === 0) break;
-      read += chunk;
-    }
-    return buffer.subarray(0, read).toString("utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function renderFollowRecord(record, scope, sseBuffers, frameBuffers) {
-  if (options.exchange !== undefined && record.exchange !== options.exchange) return;
-  const exchangeKey = `${scope}\0${record.exchange}`;
-  const prefix = `[${formatTime(record.ts ?? record.startedAtMs)}] #${record.exchange}`;
-  const emit = (text) => {
-    if (options.grep !== undefined && !text.includes(options.grep)) return;
-    const [first, ...rest] = text.split("\n");
-    console.log(`${prefix} ${first}`);
-    for (const line of rest) console.log(`          ${line}`);
-  };
-  switch (record.kind) {
-    case "request_head": {
-      const metadata = parseTurnMetadata(record.headers?.["x-codex-turn-metadata"]);
-      emit(`${record.method} ${record.path}  线程=${shortId(metadata.threadId)}  `
-        + `轮次=${shortId(metadata.turnId)}  类型=${metadata.requestKind ?? "-"}`);
-      break;
-    }
-    case "request_body":
-      emit("请求体：\n" + jsonOrText(String(record.text ?? ""), options.maxBytes));
-      break;
-    case "response_head":
-      emit(`响应状态 ${record.status}`);
-      break;
-    case "response_body": {
-      const pending = `${sseBuffers.get(exchangeKey) ?? ""}${record.text ?? ""}`;
-      const blocks = pending.split(/\r?\n\r?\n/u);
-      sseBuffers.set(exchangeKey, blocks.pop() ?? "");
-      for (const block of blocks) {
-        for (const event of parseSseEvents(`${block}\n\n`)) {
-          emit(`[${event.type}]\n${renderEventPayload(event, options.maxBytes)}`);
-        }
-      }
-      break;
-    }
-    case "response_end":
-    case "websocket_close":
-    case "error": {
-      flushSseBuffer(exchangeKey, sseBuffers, emit);
-      flushFrameBuffers(exchangeKey, frameBuffers, emit);
-      if (record.kind === "response_end") {
-        emit(`响应结束 ${record.bytes ?? 0} 字节，用时 ${record.durationMs ?? "-"} ms`);
-      } else if (record.kind === "websocket_close") {
-        emit(`连接关闭 ${record.peer} code=${record.code}`
-          + (record.reason === undefined ? "" : ` 原因=${record.reason}`));
-      } else {
-        emit(`中断 ${record.scope}${record.message === undefined ? "" : ` ${record.message}`}`);
-      }
-      break;
-    }
-    case "websocket_handshake":
-      emit(`WebSocket ${record.url}`);
-      break;
-    case "websocket_frame": {
-      const key = `${exchangeKey}\0${record.direction}`;
-      const text = `${frameBuffers.get(key) ?? ""}${frameText(record)}`;
-      if (record.part < record.parts) {
-        frameBuffers.set(key, text);
-        break;
-      }
-      frameBuffers.delete(key);
-      emit(`${record.direction === "client" ? "发出" : "返回"}：\n`
-        + jsonOrText(text, options.maxBytes));
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-function flushSseBuffer(exchangeKey, sseBuffers, emit) {
-  const pending = sseBuffers.get(exchangeKey);
-  sseBuffers.delete(exchangeKey);
-  if (pending === undefined || pending.trim().length === 0) return;
-  for (const event of parseSseEvents(`${pending}\n\n`)) {
-    emit(`[${event.type}]\n${renderEventPayload(event, options.maxBytes)}`);
-  }
-}
-
-function flushFrameBuffers(exchangeKey, frameBuffers, emit) {
-  const prefix = `${exchangeKey}\0`;
-  for (const [key, text] of [...frameBuffers]) {
-    if (!key.startsWith(prefix)) continue;
-    frameBuffers.delete(key);
-    const direction = key.slice(prefix.length);
-    emit(`${direction === "client" ? "发出" : "返回"}：\n`
-      + jsonOrText(text, options.maxBytes));
-  }
-}
-
-function followScope(path) {
-  const writerSession = writerSessionOf(path);
-  return writerSession === undefined ? path : `${labelOf(path)}:${writerSession}`;
-}
-
-function pruneFollowState(files, tails, sseBuffers, frameBuffers) {
-  const paths = new Set(files);
-  for (const path of tails.keys()) {
-    if (!paths.has(path)) tails.delete(path);
-  }
-  const scopes = new Set(files.map(followScope));
-  for (const key of sseBuffers.keys()) {
-    if (![...scopes].some((scope) => key.startsWith(`${scope}\0`))) sseBuffers.delete(key);
-  }
-  for (const key of frameBuffers.keys()) {
-    if (![...scopes].some((scope) => key.startsWith(`${scope}\0`))) frameBuffers.delete(key);
-  }
-}
-
-async function renderFiles(paths, options) {
+async function renderSessions(paths) {
   if (paths.length === 0) {
-    console.error(`没有找到转储文件：${options.directory ?? directory}`);
+    const catalog = dumpCatalog(directory);
+    console.error(catalog.legacyFiles.length > 0
+      ? "只找到旧版逐帧 JSONL；请重启 App Server 生成 V2 转储，旧文件不会自动迁移"
+      : `没有找到转储 session：${directory}`);
     process.exitCode = 1;
     return;
   }
-  const unreadable = paths.filter((path) => {
-    const stats = statSync(path, { throwIfNoEntry: false });
-    return stats === undefined || !stats.isFile();
-  });
-  if (unreadable.length > 0) {
-    console.error(
-      `转储文件不存在：${unreadable.join("、")}\n`
-      + "列出 exchange 摘要请使用 --list，查看全部选项请使用 -h。",
-    );
+  if (paths.length > 1) {
+    console.error("一次只能读取一个 V2 session 目录");
     process.exitCode = 1;
     return;
   }
-  const { exchanges } = await summarizeDumpFiles(paths);
-  if (options.exchange !== undefined && !exchanges.some(({ id }) => id === options.exchange)) {
-    const ids = exchanges.map(({ id }) => id);
-    console.error(
-      `没有找到 exchange #${options.exchange}：${paths.join("、")} `
-      + (ids.length === 0
-        ? "没有 exchange 记录。"
-        : `编号范围是 #${Math.min(...ids)}–#${Math.max(...ids)}。`),
-    );
+  const invalid = paths.filter((path) => !statSync(path, { throwIfNoEntry: false })?.isDirectory());
+  if (invalid.length > 0) {
+    console.error(`V2 转储参数必须是 session 目录：${invalid.join("、")}`);
     process.exitCode = 1;
     return;
   }
-  console.log(`\n### ${paths.join("\n### ")}（${exchanges.length} 个 exchange）`);
-  const detail = !options.list && (options.all || options.exchange !== undefined);
-  if (!detail) {
-    for (const summary of exchanges) {
-      if (options.exchange !== undefined && summary.id !== options.exchange) continue;
-      const line = summaryLine(summary);
-      if (options.grep !== undefined && !line.includes(options.grep)) continue;
-      console.log(line);
-    }
+  const page = await summarizeDumpFiles(paths);
+  if (options.exchange !== undefined
+    && !page.exchanges.some((entry) => entry.id === options.exchange)) {
+    console.error(`没有找到模型调用 #${options.exchange}`);
+    process.exitCode = 1;
     return;
   }
-  const emitExchange = (exchange) => {
-    const text = renderExchange(exchange, options);
-    if (options.grep !== undefined && !text.includes(options.grep)) return;
-    console.log(text);
-  };
-  if (options.exchange !== undefined) {
-    const exchange = await readDumpExchange(paths, options.exchange);
-    if (exchange !== null) emitExchange(exchange);
-    return;
+  console.log(`\n### ${paths.join("\n### ")}（${page.total} 次模型调用）`);
+  const details = !options.list && (options.all || options.exchange !== undefined);
+  for (const summary of page.exchanges) {
+    const rendered = await renderExchange(paths, summary, details);
+    if (rendered !== undefined) console.log(rendered);
   }
-  await forEachDumpExchange(paths, emitExchange);
+}
+
+async function renderExchange(
+  paths,
+  summary,
+  details = !options.list && (options.all || options.exchange !== undefined),
+) {
+  if (options.exchange !== undefined && summary.id !== options.exchange) return undefined;
+  let rendered = summaryLine(summary);
+  if (details) {
+    const detail = await describeDumpExchange(paths, summary.id, {
+      maxSectionBytes: options.maxBytes ?? Number.MAX_SAFE_INTEGER,
+    });
+    if (detail === null) return undefined;
+    rendered = renderDetail(detail);
+  }
+  return options.grep === undefined || rendered.includes(options.grep)
+    ? rendered
+    : undefined;
 }
 
 function summaryLine(summary) {
   const target = summary.transport === "websocket"
     ? `WebSocket ${summary.url ?? ""}`
     : `${summary.method ?? "HTTP"} ${summary.path ?? ""}`.trim();
-  const parts = [
+  return [
     `#${summary.id}`,
     formatTime(summary.startedAtMs),
     target,
     `线程=${shortId(summary.threadId)}`,
     `轮次=${shortId(summary.turnId)}`,
-    `类型=${summary.requestKind ?? "-"}`,
-  ];
-  if (summary.status !== undefined) parts.push(`状态=${summary.status}`);
-  if (summary.hasError) parts.push("有中断记录");
-  return parts.join("  ");
+    `模型=${summary.requestModel ?? "-"}→${summary.responseModels.join("、") || "-"}`,
+    `结果=${stateLabel(summary.state)}`,
+  ].join("  ");
 }
 
-function renderExchange(exchange, options) {
-  const head = findRecord(exchange, "request_head");
-  const handshake = findRecord(exchange, "websocket_handshake");
-  const metadata = requestMetadata(exchange);
+function renderDetail(detail) {
+  const requestTarget = detail.transport === "websocket"
+    ? `WebSocket ${detail.request.url ?? detail.url ?? ""}`
+    : `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim();
   const lines = [
     "",
-    `#${exchange.id} ${formatTime(exchange.startedAtMs)} `
-      + (head !== undefined ? `${head.method} ${head.path}` : `WebSocket ${handshake?.url ?? ""}`),
+    `#${detail.id} ${formatTime(detail.startedAtMs)} ${requestTarget}`,
+    `线程：${detail.threadId ?? "未提供"}  轮次：${detail.turnId ?? "未提供"}  类型：${detail.requestKind ?? "未提供"}`,
+    `模型：${detail.requestModel ?? "未提供"} → ${detail.responseModels.join("、") || "未提供"}`,
   ];
-  if (exchange.account !== undefined) lines.push(`账户：${exchange.account}`);
-  lines.push(
-    `线程：${metadata.threadId ?? "未提供"}  轮次：${metadata.turnId ?? "未提供"}  `
-    + `类型：${metadata.requestKind ?? "未提供"}`,
-  );
-  const requestModel = requestModelOf(exchange);
-  const responseModels = responseModelsOf(exchange);
-  lines.push(
-    `模型：请求 ${requestModel ?? "未提供"}  响应 `
-    + (responseModels.length > 0 ? responseModels.join("、") : "未提供"),
-  );
-  if (head !== undefined) {
-    lines.push("", "请求头：", ...headerLines(head.headers));
-  } else if (handshake !== undefined) {
-    lines.push("", "握手请求头：", ...headerLines(handshake.headers));
-  }
-  const requestBody = joinBodies(exchange, "request_body");
-  if (requestBody.length > 0) {
-    lines.push("", "请求体：", indent(jsonOrText(requestBody, options.maxBytes)));
-  }
-  const responseHead = findRecord(exchange, "response_head");
-  if (responseHead !== undefined) {
-    lines.push("", `响应状态：${responseHead.status}`, ...headerLines(responseHead.headers));
-  }
-  const responseBody = joinBodies(exchange, "response_body");
-  if (responseBody.length > 0) {
-    lines.push("", "响应体：", ...renderResponseBody(responseBody, options.maxBytes));
-  }
-  for (const frame of websocketFrames(exchange)) {
-    const arrow = frame.direction === "client" ? "→ App Server 发出" : "← 上游返回";
-    lines.push("", `${arrow}：`, indent(jsonOrText(String(frame.text ?? ""), options.maxBytes)));
-  }
-  for (const record of exchange.records) {
-    if (record.kind === "websocket_close") {
-      lines.push("", `连接关闭：${record.peer} code=${record.code}`
-        + (record.reason === undefined ? "" : ` 原因=${record.reason}`));
-    } else if (record.kind === "error") {
-      lines.push("", `中断：${record.scope}`
-        + (record.message === undefined ? "" : ` ${record.message}`));
+  if (detail.account !== undefined) lines.push(`账户：${detail.account}`);
+  lines.push("", "请求头：", ...headerLines(detail.request.headers));
+  lines.push("", "请求：", indent(pretty(detail.request.body)));
+  if (detail.response === null) {
+    lines.push("", "响应：等待终态");
+  } else {
+    lines.push("", `响应：${stateLabel(detail.response.state)}`
+      + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`)
+      + (detail.response.durationMs === undefined ? "" : ` ${detail.response.durationMs} ms`));
+    lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
+    if (detail.response.errorScope !== undefined) {
+      lines.push(`错误：${detail.response.errorScope}`
+        + (detail.response.error === undefined ? "" : ` ${detail.response.error}`));
     }
   }
   return lines.join("\n");
 }
 
-function renderResponseBody(body, maxBytes) {
-  const events = parseSseEvents(body);
-  if (events.length === 0) return [indent(jsonOrText(body, maxBytes))];
-  return events.flatMap((event) => [
-    `  [${event.type}]`,
-    ...indent(renderEventPayload(event, maxBytes)).split("\n"),
-  ]);
+function stateLabel(state) {
+  if (state === "completed") return "完成";
+  if (state === "failed") return "失败";
+  if (state === "incomplete") return "不完整";
+  return "进行中";
 }
 
-function renderEventPayload(event, maxBytes) {
-  return event.parsed === undefined
-    ? bounded(event.raw, maxBytes)
-    : bounded(JSON.stringify(event.parsed, null, 2), maxBytes);
-}
-
-function jsonOrText(text, maxBytes) {
+function pretty(text) {
   try {
-    return bounded(JSON.stringify(JSON.parse(text), null, 2), maxBytes);
+    return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
-    return bounded(text, maxBytes);
+    return text;
   }
-}
-
-function bounded(text, maxBytes) {
-  if (maxBytes === undefined || !Number.isFinite(maxBytes)) return text;
-  const bytes = Buffer.byteLength(text);
-  if (bytes <= maxBytes) return text;
-  const head = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
-  return `${head}\n…（本段共 ${bytes} 字节，已按 --max-bytes 截断 ${bytes - maxBytes} 字节）`;
 }
 
 function indent(text) {

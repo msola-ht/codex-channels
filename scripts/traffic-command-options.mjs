@@ -1,24 +1,24 @@
 import { isAbsolute, resolve } from "node:path";
 
-export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [转储文件...]
+export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目录]
 
-把 [debug].model_traffic_dump 生成的 JSON Lines 转储渲染成人可读文本：解转义并展开请求头与
-请求体，把 SSE 响应和 WebSocket 双向帧按事件逐条解码。
+把 [debug].model_traffic_dump 生成的 V2 转储渲染成人可读文本：每次逻辑模型调用只展示一条请求
+和一个终态响应，原始 SSE 事件与 WebSocket 帧保留在独立 trace 中。
 
-默认列出 exchange 摘要；展开正文需要 --exchange 或 --all。
+默认列出模型调用摘要；展开正文需要 --exchange 或 --all。
 
 选项：
-  --list               只列出 exchange 摘要（默认行为）
-  --all                展开所有 exchange 的完整正文
-  --exchange <编号>    只显示指定 exchange（正整数）
-  --grep <文本>        只显示包含该文本的 exchange
+  --list               只列出模型调用摘要（默认行为）
+  --all                展开所有模型调用的请求与终态响应
+  --exchange <编号>    只显示指定模型调用（正整数）
+  --grep <文本>        只显示包含该文本的模型调用
   --max-bytes <字节>   每段正文最多显示多少字节，默认不截断
   --follow             持续输出新写入的转储内容，按 Ctrl-C 停止
   --dir <目录>         指定转储目录，默认当前用户数据目录下的 traffic
   -h, --help           显示本帮助
 
-不传文件时读取 --dir 下最新标签、最新 writer session 的全部保留文件，以还原跨多次轮转的 exchange。
---follow 从现有文件的末尾开始，显式传入文件时先完整输出再跟随。`;
+不传路径时读取 --dir 下最新标签、最新 writer session。位置参数只接受一个 V2 session 目录；旧版逐帧
+JSONL 不自动迁移或混读。--follow 从当前末尾开始，显式传入 session 时从已有调用开始输出。`;
 
 export function parseTrafficCommandArgs(args) {
   const options = {
@@ -69,7 +69,7 @@ export function parseTrafficCommandArgs(args) {
     if (argument.startsWith("-")) {
       throw new Error(`未知参数：${argument}`);
     }
-    const file = requiredValue(argument, "转储文件");
+    const file = requiredValue(argument, "V2 session 目录");
     options.files.push(isAbsolute(file) ? file : resolve(file));
   }
   if (options.all && options.list) {

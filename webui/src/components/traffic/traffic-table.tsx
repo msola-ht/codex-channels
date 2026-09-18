@@ -46,7 +46,7 @@ export function TrafficTable({
                   variant="link"
                   size="sm"
                   className="h-auto px-0 font-mono"
-                  aria-label={`查看 exchange #${exchange.id} 明细`}
+                  aria-label={`查看模型调用 #${exchange.id} 明细`}
                   onClick={(event) => {
                     event.stopPropagation()
                     onOpen(exchange.id)
@@ -70,8 +70,10 @@ export function TrafficTable({
                 {exchange.requestModel ?? "—"} → {exchange.responseModels.join("、") || "—"}
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
-                {exchange.status ?? "—"}
-                {exchange.hasError ? <Badge className="ml-2" variant="destructive">中断</Badge> : null}
+                {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
+                {stateLabel(exchange.state)}
+                {exchange.durationMs === undefined ? "" : ` · ${exchange.durationMs} ms`}
+                {exchange.hasError ? <Badge className="ml-2" variant="destructive">异常</Badge> : null}
               </TableCell>
             </TableRow>
           ))}
@@ -86,6 +88,13 @@ export function TrafficTable({
       </Table>
     </div>
   )
+}
+
+function stateLabel(state: TrafficExchangeSummary["state"]): string {
+  if (state === "completed") return "完成"
+  if (state === "failed") return "失败"
+  if (state === "incomplete") return "不完整"
+  return "进行中"
 }
 
 function requestLabel(exchange: TrafficExchangeSummary): string {

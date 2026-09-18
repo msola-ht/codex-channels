@@ -37,7 +37,7 @@ export function TrafficPage() {
     query.id === null
       ? null
       : {
-          frameOffset: query.frameOffset,
+          traceOffset: query.traceOffset,
           id: query.id,
           ...(query.label === undefined ? {} : { label: query.label }),
           ...(query.session === undefined ? {} : { session: query.session }),
@@ -61,14 +61,14 @@ export function TrafficPage() {
           <div className="shrink-0">
             <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
             <p className="text-sm text-muted-foreground">
-              转储包含完整 prompt、代码与工具输出，请勿分享；正文与 WebSocket 帧页最多展示 4 MiB
+              一次模型调用对应一条请求和一个终态响应；原始传输轨迹默认收起，单页最多展示 4 MiB
             </p>
           </div>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => update({ frameOffset: null, id: null })}
+            onClick={() => update({ traceOffset: null, id: null })}
           >返回列表</Button>
         </div>
         <ErrorBanner error={detail.error} />
@@ -77,7 +77,7 @@ export function TrafficPage() {
           : (
               <TrafficDetail
                 detail={detailData.exchange}
-                onFramePageChange={(frameOffset) => update({ frameOffset })}
+                onTracePageChange={(traceOffset) => update({ traceOffset })}
               />
             )}
       </div>
@@ -109,7 +109,7 @@ export function TrafficPage() {
                   <SelectGroup>
                     {listData.labels.map((entry) => (
                       <SelectItem key={entry.label} value={entry.label}>
-                        {entry.label}（{entry.files} 文件）
+                        {entry.label}（{entry.sessions} 个会话）
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -153,16 +153,16 @@ export function TrafficPage() {
       {list.error !== null ? null : list.loading || listData === null ? <PageSkeleton rows={8} /> : (
         <Card>
           <CardHeader>
-            <CardTitle>Exchange（{listData.total}）</CardTitle>
+            <CardTitle>模型调用（{listData.total}）</CardTitle>
             <CardDescription className="break-all">
-              {listData.label} · {listData.files.join("、")}
+              {listData.label} · session {listData.session}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <TrafficTable
               exchanges={listData.exchanges}
               onOpen={(id) => update({
-                frameOffset: null,
+                traceOffset: null,
                 id,
                 label: listData.label,
                 session: listData.session,

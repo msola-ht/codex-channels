@@ -1,8 +1,8 @@
 /**
- * WebUI 的模型转储只读接口：列出转储 exchange 摘要与单条完整字段。
+ * WebUI 的模型转储只读接口：列出逻辑模型调用摘要与单条请求/终态响应。
  *
  * 转储包含原始 prompt、代码与工具输出，因此这里只接受回环连接，且只按标签读取
- * 数据目录下 `traffic/` 的 JSON Lines 文件，不接受任意路径。
+ * 数据目录下 `traffic/` 的 V2 session，不接受任意路径。
  */
 import { join } from "node:path";
 
@@ -24,8 +24,8 @@ const defaultPageSize = 100;
 const maximumPageSize = 500;
 /** 单段正文回传上限；浏览器可承受该体量，超出时响应里带截断标记。 */
 const maximumSectionBytes = 4 * 1_048_576;
-/** WebSocket 帧页同时受正文总量和帧数约束，避免大量空帧绕过字节上限。 */
-const maximumFramePageSize = 100;
+/** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
+const maximumTracePageSize = 100;
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
   if (apiPath !== "/traffic" && apiPath !== "/traffic/exchange") return false;
@@ -34,9 +34,25 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   }
   const located = locateOptionalUserConfig(environment);
   const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
-  const catalog = dumpCatalog(directory);
+  let catalog;
+  try {
+    catalog = dumpCatalog(directory);
+  } catch (error) {
+    throw new ApiError(
+      503,
+      "traffic_unsupported_version",
+      error instanceof Error ? error.message : "模型流量转储版本无效",
+    );
+  }
   const labels = catalog.labels;
   if (labels.length === 0) {
+    if (catalog.legacyFiles.length > 0) {
+      throw new ApiError(
+        503,
+        "traffic_legacy_format",
+        "现有转储是旧版逐帧格式；请重启 App Server 生成 V2 转储，旧文件不会自动迁移",
+      );
+    }
     throw new ApiError(
       503,
       "traffic_unavailable",
@@ -55,7 +71,6 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     sendJson(response, 200, {
       directory,
       enabled,
-      files,
       generatedAt: new Date().toISOString(),
       label,
       labels,
@@ -64,33 +79,32 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     });
     return true;
   }
-  assertParameters(url, ["frameOffset", "id", "label", "session"]);
+  assertParameters(url, ["id", "label", "session", "traceOffset"]);
   const label = readLabel(url, labels);
   const id = readInteger(url, "id", undefined, 1, Number.MAX_SAFE_INTEGER);
-  const frameOffset = readInteger(
+  const traceOffset = readInteger(
     url,
-    "frameOffset",
+    "traceOffset",
     0,
     0,
     Number.MAX_SAFE_INTEGER,
   );
   const { files, session } = readSessionFiles(url, catalog.files, label);
   const exchange = await describeDumpExchange(files, id, {
-    frameOffset,
-    maxFramePageSize: maximumFramePageSize,
+    traceOffset,
+    maxTracePageSize: maximumTracePageSize,
     maxSectionBytes: maximumSectionBytes,
   });
   if (exchange === null) {
-    throw new ApiError(404, "traffic_exchange_not_found", `没有找到 exchange #${id}`);
+    throw new ApiError(404, "traffic_exchange_not_found", `没有找到模型调用 #${id}`);
   }
-  if (frameOffset > 0 && frameOffset >= exchange.framePage.total) {
-    throw new ApiError(400, "invalid_parameter", "frameOffset 超出允许范围");
+  if (traceOffset > 0 && traceOffset >= exchange.tracePage.total) {
+    throw new ApiError(400, "invalid_parameter", "traceOffset 超出允许范围");
   }
   sendJson(response, 200, {
     directory,
     enabled,
     exchange,
-    files,
     generatedAt: new Date().toISOString(),
     label,
     session,

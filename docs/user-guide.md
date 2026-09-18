@@ -348,39 +348,41 @@ model_traffic_dump = true
 codexc service restart app-server
 ```
 
-App Server 发给统计代理的每个模型请求、上游返回的响应头和响应块，以及 WebSocket 握手和双向帧，
-都会按 JSON Lines 写入 `~/.codex-connect/traffic/` 下的 `0600` 文件；HTTP 请求头
+App Server 发给统计代理的模型调用会写入 `~/.codex-connect/traffic/` 下的 V2 私有 session 目录；
+HTTP 的一次请求对应一条逻辑调用，同一 WebSocket 连接中的每个 `response.create` 也分别对应一条。
+每条逻辑调用只保存一条请求索引和一个完成、失败或不完整终态响应，原始 HTTP/SSE 块、WebSocket
+握手和双向帧另存为默认不展示的 trace。HTTP 请求头
 `x-codex-turn-metadata`、WebSocket 首帧 `client_metadata` 里的 `thread_id` 与 `turn_id`
 可以对齐到具体会话和轮次。转储是统计代理的旁路复制，不改变转发路径、指标采集和流式背压，
 也不是抓包代理。Authorization、Cookie 等凭据字段只保留认证方案，替换为 `<redacted>`。
 
-单条记录正文超过 1 MiB 时按 `part` 切分，单文件达到 64 MiB 后轮转，目录只保留最近 5 个文件；
-转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储文件包含完整 prompt、工具
-输出、代码和 SSE 事件，排查完成后关闭开关并删除文件，不要分享原始转储。
+每个 session 的 `manifest.json` 声明精确版本，`interactions.jsonl` 保存小型索引，正文通过
+offset/bytes 引用轮转的 `payload-*.bin`，原始传输轨迹位于 `trace-*.jsonl`。正文和 trace 文件达到
+64 MiB 后轮转；同一 Provider 的历史完整 session 约保留 320 MiB，当前写入 session 不在中途删除。
+转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储包含 prompt、工具输出和代码，
+排查完成后关闭开关并删除 session，不要分享原始转储。
 
-转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时
-（例如重启 App Server 或中断 Turn），转储会先写出已经收到的部分响应体，再写一条
-`"kind": "error"` 记录，`scope` 常见取值是 `client_disconnected` 或 `websocket_closed`。这类记录
-表示流没有正常收尾，不代表上游一定失败。
+转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时，
+该逻辑调用会得到 `failed` 或 `incomplete` 终态及明确的 `errorScope`；已收到的传输块仍在 trace 中。
 
-转储是 JSON Lines，字段被转义且正文可能分片，直接读不方便；用 `codexc traffic` 渲染成人可读文本：
+正文与索引分开存储，直接读不方便；用 `codexc traffic` 渲染成人可读文本：
 
 ```bash
-codexc traffic                                 # 列出最新转储文件中每个 exchange 的摘要
-codexc traffic --exchange 12                   # 展开某一次的请求头、请求体、响应头、SSE 事件或 WebSocket 帧
-codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的 exchange 并展开正文
+codexc traffic                                 # 列出最新 session 中的逻辑模型调用
+codexc traffic --exchange 12                   # 展开某次调用的一条请求和一个终态响应
+codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的逻辑调用并展开正文
 codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
 codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
 ```
 
-摘要行包含 exchange 编号、时间、请求路径或 WebSocket URL、线程、轮次、请求类型和响应状态；
-正文按请求与响应分别标注 `模型`，便于核对请求模型和响应模型是否一致。不传文件时读取用户数据
-目录下 `traffic/` 中最新的标签，并自动合并最新一次 writer session 保留的全部轮转文件；也可以用
-`--dir` 指定目录，或直接传入转储文件路径。`codexc traffic -h` 列出全部选项。
+摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”
+与“响应”。不传路径时读取 `traffic/` 中最新标签的最新 writer session；也可以用 `--dir` 指定根
+目录，或传入一个 V2 session 目录。旧版逐帧 JSONL 原样保留但不自动迁移或混读，重启 App Server
+后会生成 V2 session；回滚旧版本时旧文件仍可继续使用。`codexc traffic -h` 列出全部选项。
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
-点开某条即进入该条的请求与响应字段，页面地址保留标签、writer session、exchange 编号与分页位置，
-返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号 exchange。
+点开某条即进入该条的一条请求与终态响应，原始传输 trace 默认收起；页面地址保留标签、writer session、调用编号与分页位置，
+返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号调用。
 该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。
 
 ### 转储体积控制

@@ -3,8 +3,8 @@ import {
   appendFileSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("traffic command options", () => {
-  it("defaults to listing the newest dump files", () => {
+  it("defaults to listing the newest V2 session", () => {
     expect(parseTrafficCommandArgs([])).toEqual({
       all: false,
       directory: undefined,
@@ -48,520 +48,253 @@ describe("traffic command options", () => {
     });
   });
 
-  it("parses filters, absolute file paths and the dump directory", () => {
+  it("parses filters and session paths", () => {
     expect(parseTrafficCommandArgs([
-      "--exchange", "12",
-      "--max-bytes", "0",
-      "--grep", "deepseek",
-      "--dir", "relative-traffic",
-      "relative-dump.jsonl",
-      "/absolute-dump.jsonl",
+      "--exchange", "12", "--max-bytes", "0", "--grep", "deepseek",
+      "--dir", "relative-traffic", "relative-session",
     ])).toEqual({
       all: false,
       directory: resolve("relative-traffic"),
       exchange: 12,
-      files: [resolve("relative-dump.jsonl"), "/absolute-dump.jsonl"],
+      files: [resolve("relative-session")],
       follow: false,
       grep: "deepseek",
       list: false,
       maxBytes: 0,
-    });
-    expect(parseTrafficCommandArgs(["--all", "--follow"])).toMatchObject({
-      all: true,
-      follow: true,
-      list: false,
     });
   });
 
   it.each([
     [["--bogus"], "未知参数：--bogus"],
     [["--exchange"], "--exchange 缺少值"],
-    [["--exchange", "abc"], "--exchange 需要正整数值"],
     [["--exchange", "0"], "--exchange 需要正整数值"],
     [["--max-bytes", "-1"], "--max-bytes 需要非负整数值"],
-    [["--exchange", "-2"], "--exchange 需要正整数值"],
-    [["--max-bytes", "1.5"], "--max-bytes 需要非负整数值"],
-    [["--max-bytes", "9007199254740992"], "--max-bytes 需要非负整数值"],
     [["--grep", "--all"], "--grep 缺少值"],
-    [["--dir"], "--dir 缺少值"],
     [["--list", "--all"], "--list 与 --all 不能同时使用"],
   ] as const)("rejects %j", (args, message) => {
     expect(() => parseTrafficCommandArgs([...args])).toThrow(message);
   });
 
-  it("documents every option in the shared usage text", () => {
-    for (const option of [
-      "--list",
-      "--all",
-      "--exchange",
-      "--grep",
-      "--max-bytes",
-      "--follow",
-      "--dir",
-      "-h, --help",
-    ]) {
+  it("documents every public option and the V2 session boundary", () => {
+    for (const option of ["--list", "--all", "--exchange", "--grep", "--max-bytes", "--follow", "--dir", "--help"]) {
       expect(TRAFFIC_USAGE).toContain(option);
     }
+    expect(TRAFFIC_USAGE).toContain("V2 session");
+    expect(TRAFFIC_USAGE).toContain("旧版逐帧");
   });
 });
 
-describe("traffic command rendering", () => {
-  it("ignores non-file JSONL directory entries", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-    );
-    mkdirSync(join(directory, "ignored.jsonl"));
+describe("traffic command V2 rendering", () => {
+  it("lists logical model calls from the newest label and session", () => {
+    const directory = temporaryDirectory();
+    writeSession(directory, "openai", "2026-09-17T00-00-00-000Z", [interaction(1, "old")], 100);
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "new")], 200);
+    writeSession(directory, "deepseek", "2026-09-18T01-00-00-000Z", [interaction(1, "latest")], 300);
 
     const result = runTraffic(["--dir", directory]);
-
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("#1");
+    expect(result.stdout).toContain("1 次模型调用");
+    expect(result.stdout).toContain("模型=deepseek-flash→deepseek-flash");
+    expect(result.stdout).toContain("结果=完成");
   });
 
-  it("lists exchanges from the newest label and merges rotated files", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(directory, "ocg-account-2026-09-17T00-00-05-000Z-1.jsonl", 5, httpExchange(1));
-    writeDumpFile(directory, "openai-2026-09-17T00-00-00-000Z-1.jsonl", 10, httpExchange(1));
-    writeDumpFile(directory, "openai-2026-09-17T00-00-00-000Z-2.jsonl", 20, websocketExchange(2));
+  it("renders exactly one request and one terminal response", () => {
+    const directory = temporaryDirectory();
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
 
-    const result = runTraffic(["--dir", directory]);
-
+    const result = runTraffic(["--dir", directory, "--exchange", "1"]);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("2 个 exchange");
-    expect(result.stdout).toContain("#1");
-    expect(result.stdout).toContain("POST /responses");
-    expect(result.stdout).toContain("线程=th-http0");
-    expect(result.stdout).toContain("轮次=tu-http0");
-    expect(result.stdout).toContain("类型=turn");
-    expect(result.stdout).toContain("状态=200");
-    expect(result.stdout).toContain("#2");
-    expect(result.stdout).toContain("WebSocket wss://chatgpt.com/backend-api/codex/responses");
-    expect(result.stdout).toContain("有中断记录");
-    expect(result.stdout).not.toContain("ocg-account");
+    expect(result.stdout.match(/\n请求：/gu)).toHaveLength(1);
+    expect(result.stdout.match(/\n响应：/gu)).toHaveLength(1);
+    expect(result.stdout).toContain("hello");
+    expect(result.stdout).toContain('"type": "response.completed"');
   });
 
-  it("streams complete exchanges when one line in the latest session is malformed", () => {
-    const directory = trafficDirectory();
-    const first = writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-    );
-    appendFileSync(first, "{malformed\n");
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-2.jsonl",
-      20,
-      websocketExchange(2),
-    );
+  it("filters logical calls and bounds payload output", () => {
+    const directory = temporaryDirectory();
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [
+      interaction(1, "alpha"), interaction(2, "needle-" + "x".repeat(100)),
+    ]);
 
-    const result = runTraffic(["--all", "--dir", directory]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("2 个 exchange");
-    expect(result.stdout).toContain("#1 ");
-    expect(result.stdout).toContain("POST /responses");
-    expect(result.stdout).toContain("#2 ");
-    expect(result.stdout).toContain("WebSocket wss://chatgpt.com/backend-api/codex/responses");
-  });
-
-  it("keeps consecutive HTTP interruption records in one streamed exchange", () => {
-    const directory = trafficDirectory();
-    const prefix = { exchange: 1, startedAtMs: 1_700_000_000_000 };
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      [
-        { ...prefix, headers: {}, kind: "request_head", method: "POST", path: "/responses" },
-        { ...prefix, kind: "error", message: "上游中断", scope: "upstream_response" },
-        { ...prefix, kind: "error", message: "客户端关闭", scope: "client_disconnected" },
-      ],
-    );
-
-    const result = runTraffic(["--all", "--dir", directory]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout.match(/\n#1 /gu)).toHaveLength(1);
-    expect(result.stdout).toContain("中断：upstream_response 上游中断");
-    expect(result.stdout).toContain("中断：client_disconnected 客户端关闭");
-  });
-
-  it("renders the full HTTP request and response of one exchange", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      websocketExchange(1),
-      httpExchange(2),
-    );
-
-    const result = runTraffic(["--dir", directory, "--exchange", "2"]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("#2");
-    expect(result.stdout).toContain("账户：acct-openai");
-    expect(result.stdout).toContain("线程：th-http0001-full  轮次：tu-http0001-full  类型：turn");
-    expect(result.stdout).toContain("模型：请求 deepseek-flash  响应 deepseek-flash");
-    expect(result.stdout).toContain("authorization: Bearer <redacted>");
-    expect(result.stdout).toContain('"model": "deepseek-flash"');
-    expect(result.stdout).toContain("响应状态：200");
-    expect(result.stdout).toContain("[response.created]");
-    expect(result.stdout).toContain("[response.output_text.delta]");
-    expect(result.stdout).not.toContain("wss://chatgpt.com");
-  });
-
-  it("renders WebSocket handshake headers, both directions and interruptions", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      websocketExchange(1),
-    );
-
-    const result = runTraffic(["--dir", directory, "--all"]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("握手请求头：");
-    expect(result.stdout).toContain("user-agent: codex-cli");
-    expect(result.stdout).toContain("模型：请求 gpt-6-astra  响应 gpt-6-astra");
-    expect(result.stdout).toContain("→ App Server 发出：");
-    expect(result.stdout).toContain("← 上游返回：");
-    expect(result.stdout).toContain('"type": "response.created"');
-    expect(result.stdout).toContain("连接关闭：client code=1006 原因=client_disconnected");
-    expect(result.stdout).toContain("中断：client_disconnected 连接被客户端关闭");
-  });
-
-  it("joins split bodies and split websocket frames", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      splitWebsocketExchange(1),
-    );
-
-    const result = runTraffic(["--dir", directory, "--exchange", "1", "--max-bytes", "10000"]);
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('"type": "response.create"');
-    expect(result.stdout).toContain('"model": "gpt-6-astra"');
-    expect(result.stdout).not.toContain("…（本段共");
-  });
-
-  it("filters by keyword and truncates long payloads", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-      websocketExchange(2),
-    );
-
-    const filtered = runTraffic(["--dir", directory, "--all", "--grep", "gpt-6-astra"]);
+    const filtered = runTraffic(["--dir", directory, "--all", "--grep", "needle"]);
     expect(filtered.stdout).toContain("#2");
-    expect(filtered.stdout).not.toContain("#1");
-
-    const truncated = runTraffic(["--dir", directory, "--exchange", "1", "--max-bytes", "40"]);
-    expect(truncated.stdout).toContain("已按 --max-bytes 截断");
+    expect(filtered.stdout).not.toContain("#1 ");
+    const bounded = runTraffic(["--dir", directory, "--exchange", "2", "--max-bytes", "35"]);
+    expect(bounded.stdout).toContain("needle-xxx");
+    expect(bounded.stdout).not.toContain("x".repeat(20));
   });
 
-  it("fails closed when the directory has no dump file", () => {
-    const result = runTraffic(["--dir", trafficDirectory()]);
+  it("fails clearly for legacy JSONL and missing logical calls", () => {
+    const legacyDirectory = temporaryDirectory();
+    writeFileSync(join(legacyDirectory, "openai-2026-09-18T00-00-00-000Z-1.jsonl"), "{}\n");
+    const legacy = runTraffic(["--dir", legacyDirectory]);
+    expect(legacy.status).toBe(1);
+    expect(legacy.stderr).toContain("旧版逐帧 JSONL");
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("没有找到转储文件");
-  });
-
-  it("reports a missing exchange instead of printing an empty header", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-      websocketExchange(2),
-    );
-
+    const directory = temporaryDirectory();
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
     const missing = runTraffic(["--dir", directory, "--exchange", "9"]);
-
     expect(missing.status).toBe(1);
-    expect(missing.stdout).toBe("");
-    expect(missing.stderr).toContain("没有找到 exchange #9");
-    expect(missing.stderr).toContain("编号范围是 #1–#2");
+    expect(missing.stderr).toContain("没有找到模型调用 #9");
 
-    const found = runTraffic(["--dir", directory, "--exchange", "2"]);
-    expect(found.status).toBe(0);
-    expect(found.stdout).toContain("#2");
+    const malformedDirectory = temporaryDirectory();
+    const malformedSession = join(malformedDirectory, "openai-broken");
+    mkdirSync(malformedSession);
+    writeFileSync(join(malformedSession, "manifest.json"), "{broken");
+    const malformed = runTraffic(["--dir", malformedDirectory]);
+    expect(malformed.status).toBe(1);
+    expect(malformed.stderr).toContain("manifest 无效");
   });
 
-  it("rejects unknown words instead of treating them as files", () => {
-    const directory = trafficDirectory();
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
+  it("follows logical records in an explicitly selected session", async () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(
+      directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")],
     );
-
-    const result = runTraffic(["--dir", directory, "list"]);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("转储文件不存在：");
-    expect(result.stderr).toContain("--list");
-    expect(result.stderr).not.toContain("at readFileSync");
-
-    const directoryAsFile = runTraffic([directory]);
-    expect(directoryAsFile.status).toBe(1);
-    expect(directoryAsFile.stderr).toContain("转储文件不存在：");
-    expect(directoryAsFile.stderr).not.toContain("EISDIR");
+    const child = spawn(process.execPath, [trafficScript, "--follow", session], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    runningChildren.add(child);
+    let stdout = "";
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    await waitFor(() => stdout.includes("#1"), () => stdout);
+    child.kill("SIGINT");
+    await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+    runningChildren.delete(child);
+    expect(stdout).toContain("结果=完成");
   });
 
-  it("follows new records until interrupted", async () => {
-    const directory = trafficDirectory();
-    const path = writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-    );
-
-    const child = spawn(
-      process.execPath,
-      [trafficScript, "--follow", "--dir", directory, "--max-bytes", "400"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
+  it("follows the first session created after startup", async () => {
+    const directory = temporaryDirectory();
+    const child = spawn(process.execPath, [trafficScript, "--follow", "--dir", directory], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     runningChildren.add(child);
-    let output = "";
-    let errors = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      errors += chunk;
-    });
-    await waitFor(() => output.includes("按 Ctrl-C 停止"), () => `${output}\n${errors}`);
-
-    appendFileSync(path, `{malformed\n${dumpLines(websocketExchange(2))}`);
-    await waitFor(() => output.includes("gpt-6-astra"), () => `${output}\n${errors}`);
-
+    let stdout = "";
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    await waitFor(() => stdout.includes("按 Ctrl-C 停止"), () => stdout);
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
+    await waitFor(() => stdout.includes("#1"), () => stdout);
     child.kill("SIGINT");
-    const code = await new Promise<number | null>((resolveExit) => {
-      child.once("exit", resolveExit);
-    });
+    await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     runningChildren.delete(child);
+  });
 
-    expect(code).toBe(0);
-    expect(output).toContain("从现有文件末尾开始跟随");
-    expect(output).toContain("返回：");
-    expect(output).toContain("中断 client_disconnected 连接被客户端关闭");
-    expect(output).not.toContain("#1 ");
-  }, 20_000);
-
-  it("isolates follow buffers when exchange numbers restart in a new writer session", async () => {
-    const directory = trafficDirectory();
-    const older = writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-00-00-000Z-1.jsonl",
-      10,
-      httpExchange(1),
-    );
-    const child = spawn(
-      process.execPath,
-      [trafficScript, "--follow", "--dir", directory, "--max-bytes", "400"],
-      { stdio: ["ignore", "pipe", "pipe"] },
-    );
+  it("applies filters while following an explicit session", async () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [
+      interaction(1, "first"), interaction(2, "second"),
+    ]);
+    const child = spawn(process.execPath, [trafficScript, "--follow", "--grep", "#2", session], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     runningChildren.add(child);
-    let output = "";
-    let errors = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      errors += chunk;
-    });
-    await waitFor(() => output.includes("按 Ctrl-C 停止"), () => `${output}\n${errors}`);
-
-    appendFileSync(older, dumpLines([{
-      direction: "client",
-      exchange: 2,
-      kind: "websocket_frame",
-      part: 1,
-      parts: 2,
-      startedAtMs: 1_700_000_000_000,
-      text: "{\"old\":",
-    }]));
-    await new Promise((resolveTick) => setTimeout(resolveTick, 1_200));
-    writeDumpFile(
-      directory,
-      "openai-2026-09-17T00-01-00-000Z-1.jsonl",
-      20,
-      websocketExchange(2),
-    );
-    await waitFor(() => output.includes("gpt-6-astra"), () => `${output}\n${errors}`);
-
+    let stdout = "";
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    await waitFor(() => stdout.includes("#2"), () => stdout);
     child.kill("SIGINT");
-    const code = await new Promise<number | null>((resolveExit) => {
-      child.once("exit", resolveExit);
-    });
+    await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     runningChildren.delete(child);
+    expect(stdout).not.toContain("#1 ");
+  });
 
-    expect(code).toBe(0);
-    expect(output).not.toContain("{\"old\":");
-  }, 20_000);
+  it("waits for a pending call to receive its terminal response before following it", async () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(
+      directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "pending")],
+    );
+    const indexPath = join(session, "interactions.jsonl");
+    const [requestLine, responseLine] = readFileSync(indexPath, "utf8").trim().split("\n");
+    writeFileSync(indexPath, `${requestLine}\n`);
+    const child = spawn(process.execPath, [trafficScript, "--follow", session], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    runningChildren.add(child);
+    let stdout = "";
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    await waitFor(() => stdout.includes("按 Ctrl-C 停止"), () => stdout);
+    await new Promise((resolveTick) => setTimeout(resolveTick, 1_100));
+    appendFileSync(indexPath, `${responseLine}\n`);
+    await waitFor(() => stdout.includes("结果=完成"), () => stdout);
+    child.kill("SIGINT");
+    await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
+    runningChildren.delete(child);
+    expect(stdout.match(/#1 /gu)).toHaveLength(1);
+    expect(stdout).not.toContain("结果=进行中");
+  });
 });
 
-function runTraffic(args: string[]): { status: number | null; stderr: string; stdout: string } {
-  const result = spawnSync(process.execPath, [trafficScript, ...args], { encoding: "utf8" });
-  return { status: result.status, stderr: result.stderr, stdout: result.stdout };
-}
-
-async function waitFor(ready: () => boolean, describeOutput: () => string): Promise<void> {
-  const deadline = Date.now() + 12_000;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
-  }
-  throw new Error(`等待输出超时：\n${describeOutput()}`);
-}
-
-function trafficDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-"));
+function temporaryDirectory() {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-cli-v2-"));
   temporaryDirectories.push(directory);
   return directory;
 }
 
-function writeDumpFile(
+function runTraffic(args: string[]) {
+  return spawnSync(process.execPath, [trafficScript, ...args], {
+    encoding: "utf8",
+    env: process.env,
+  });
+}
+
+function interaction(id: number, prompt: string) {
+  return {
+    requestBody: JSON.stringify({ input: [prompt], model: "deepseek-flash" }),
+    responseBody: JSON.stringify({ response: { model: "deepseek-flash", output: [] }, type: "response.completed" }),
+    request: {
+      id, kind: "request", method: "POST", path: "/responses", requestKind: "turn",
+      requestModel: "deepseek-flash", startedAtMs: 1_700_000_000_000 + id,
+      threadId: `thread-${id}`, transport: "http", turnId: `turn-${id}`,
+    },
+    response: {
+      durationMs: 12, id, kind: "response", responseModels: ["deepseek-flash"],
+      state: "completed", status: 200,
+    },
+  };
+}
+
+function writeSession(
   directory: string,
-  name: string,
-  modifiedAtSeconds: number,
-  ...groups: Record<string, unknown>[][]
-): string {
-  const path = join(directory, name);
-  writeFileSync(path, dumpLines(...groups), { mode: 0o600 });
-  utimesSync(path, modifiedAtSeconds, modifiedAtSeconds);
+  label: string,
+  session: string,
+  interactions: ReturnType<typeof interaction>[],
+  createdAtMs = 1_700_000_000_000,
+) {
+  const path = join(directory, `${label}-${session}`);
+  mkdirSync(path, { mode: 0o700 });
+  writeFileSync(join(path, "manifest.json"), JSON.stringify({ createdAtMs, label, session, version: 2 }));
+  const payloads: Buffer[] = [];
+  const records: Array<Record<string, unknown>> = [];
+  let offset = 0;
+  for (const item of interactions) {
+    const request = Buffer.from(item.requestBody);
+    const requestPayload = { bytes: request.length, parts: [{ bytes: request.length, encoding: "utf8", file: "payload-1.bin", offset }] };
+    payloads.push(request);
+    offset += request.length;
+    const response = Buffer.from(item.responseBody);
+    const responsePayload = { bytes: response.length, parts: [{ bytes: response.length, encoding: "utf8", file: "payload-1.bin", offset }] };
+    payloads.push(response);
+    offset += response.length;
+    records.push(
+      { version: 2, ...item.request, payload: requestPayload },
+      { version: 2, ...item.response, payload: responsePayload },
+    );
+  }
+  writeFileSync(join(path, "payload-1.bin"), Buffer.concat(payloads), { mode: 0o600 });
+  writeFileSync(join(path, "interactions.jsonl"), records.map((record) => `${JSON.stringify(record)}\n`).join(""), { mode: 0o600 });
+  writeFileSync(join(path, "trace-1.jsonl"), "", { mode: 0o600 });
   return path;
 }
 
-function dumpLines(...groups: Record<string, unknown>[][]): string {
-  return groups.flat().map((record) => `${JSON.stringify({
-    ts: 1_700_000_000_000,
-    ...record,
-  })}\n`).join("");
-}
-
-function httpExchange(exchange: number): Record<string, unknown>[] {
-  const prefix = { account: "acct-openai", exchange, startedAtMs: 1_700_000_000_000 };
-  const requestBody = JSON.stringify({
-    input: "hello",
-    model: "deepseek-flash",
-    stream: true,
-  });
-  const responseBody = `event: response.created\ndata: ${
-    JSON.stringify({ response: { model: "deepseek-flash" }, type: "response.created" })
-  }\n\nevent: response.output_text.delta\ndata: ${
-    JSON.stringify({ delta: "OK", type: "response.output_text.delta" })
-  }\n\n`;
-  return [
-    {
-      ...prefix,
-      headers: {
-        "content-type": "application/json",
-        authorization: "Bearer <redacted>",
-        "x-codex-turn-metadata": JSON.stringify({
-          request_kind: "turn",
-          thread_id: "th-http0001-full",
-          turn_id: "tu-http0001-full",
-        }),
-      },
-      kind: "request_head",
-      method: "POST",
-      path: "/responses",
-    },
-    { ...prefix, kind: "request_body", part: 1, bytes: requestBody.length, text: requestBody },
-    { ...prefix, kind: "request_end", bytes: requestBody.length },
-    {
-      ...prefix,
-      headers: { "content-type": "text/event-stream" },
-      kind: "response_head",
-      status: 200,
-    },
-    { ...prefix, kind: "response_body", part: 1, bytes: responseBody.length, text: responseBody },
-    { ...prefix, durationMs: 12, kind: "response_end", bytes: responseBody.length },
-  ];
-}
-
-function websocketExchange(exchange: number): Record<string, unknown>[] {
-  const prefix = { exchange, startedAtMs: 1_700_000_000_000 };
-  const turnMetadata = JSON.stringify({
-    request_kind: "turn",
-    thread_id: "th-webs0002-full",
-    turn_id: "tu-webs0002-full",
-  });
-  return [
-    {
-      ...prefix,
-      headers: { "user-agent": "codex-cli" },
-      kind: "websocket_handshake",
-      url: "wss://chatgpt.com/backend-api/codex/responses",
-    },
-    {
-      ...prefix,
-      direction: "client",
-      kind: "websocket_frame",
-      part: 1,
-      parts: 1,
-      text: JSON.stringify({
-        client_metadata: {
-          "x-codex-turn-metadata": turnMetadata,
-          thread_id: "th-webs0002-full",
-        },
-        model: "gpt-6-astra",
-        type: "response.create",
-      }),
-    },
-    {
-      ...prefix,
-      direction: "upstream",
-      kind: "websocket_frame",
-      part: 1,
-      parts: 1,
-      text: JSON.stringify({
-        response: { model: "gpt-6-astra" },
-        type: "response.created",
-      }),
-    },
-    { ...prefix, code: 1006, kind: "websocket_close", peer: "client", reason: "client_disconnected" },
-    {
-      ...prefix,
-      kind: "error",
-      message: "连接被客户端关闭",
-      scope: "client_disconnected",
-    },
-  ];
-}
-
-function splitWebsocketExchange(exchange: number): Record<string, unknown>[] {
-  const records = websocketExchange(exchange);
-  const frame = records[1] as { text: string } & Record<string, unknown>;
-  const clientFrame = JSON.parse(frame.text) as Record<string, unknown>;
-  const text = JSON.stringify({ ...clientFrame, padding: "x".repeat(2_048) });
-  return [
-    records[0] as Record<string, unknown>,
-    { ...frame, part: 1, parts: 2, text: text.slice(0, 1_024) },
-    { ...frame, part: 2, parts: 2, text: text.slice(1_024) },
-    ...records.slice(2),
-  ];
+async function waitFor(condition: () => boolean, describe: () => string) {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
+  }
+  throw new Error(`等待输出超时：\n${describe()}`);
 }

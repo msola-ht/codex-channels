@@ -778,7 +778,7 @@ export interface OfficialAccountSnapshotsResponse {
 
 export interface TrafficLabel {
   label: string
-  files: number
+  sessions: number
   latestAtMs: number
 }
 
@@ -795,6 +795,8 @@ export interface TrafficExchangeSummary {
   turnId?: string
   requestKind?: string
   status?: number
+  state: "completed" | "failed" | "incomplete" | "pending"
+  durationMs?: number
   hasError: boolean
   requestModel?: string
   responseModels: string[]
@@ -806,7 +808,6 @@ export interface TrafficListResponse {
   label: string
   labels: TrafficLabel[]
   session: string
-  files: string[]
   generatedAt: string
   exchanges: TrafficExchangeSummary[]
   total: number
@@ -819,41 +820,42 @@ export interface TrafficExchangeDetail {
   id: number
   startedAtMs: number
   account?: string
-  /** 记录不足时省略：转储里可能只剩中断记录，没有能判断传输类型的证据。 */
-  transport?: "http" | "websocket"
+  transport: "http" | "websocket"
   threadId?: string
   turnId?: string
   requestKind?: string
   requestModel?: string
   responseModels: string[]
+  state: "completed" | "failed" | "incomplete" | "pending"
   url?: string
-  websocketHeaders: Record<string, TrafficHeaderValue> | null
   request: {
-    method: string
-    path: string
+    method?: string
+    path?: string
+    url?: string
     headers: Record<string, TrafficHeaderValue>
     body: string
     bodyTruncated: boolean
     bytes?: number
-  } | null
+  }
   response: {
+    state: "completed" | "failed" | "incomplete"
     status: number | null
     headers: Record<string, TrafficHeaderValue>
     body: string
     bodyTruncated: boolean
     bytes?: number
     durationMs?: number
+    eventType?: string
+    errorScope?: string
+    error?: string
   } | null
-  events: Array<{ type: string; payload: string }>
-  framePage: {
+  tracePage: {
     offset: number
     total: number
     previousOffset: number | null
     nextOffset: number | null
   }
-  frames: Array<{ direction: "client" | "upstream"; text: string; truncated: boolean }>
-  closes: Array<{ peer: string; code: number; reason?: string }>
-  errors: Array<{ scope: string; message?: string }>
+  trace: Array<{ atMs: number; kind: string; text: string; truncated: boolean }>
 }
 
 export interface TrafficDetailResponse {
@@ -861,7 +863,6 @@ export interface TrafficDetailResponse {
   enabled: boolean
   label: string
   session: string
-  files: string[]
   generatedAt: string
   exchange: TrafficExchangeDetail
 }
