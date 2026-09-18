@@ -1,150 +1,55 @@
-import {
-  closeSync,
-  createWriteStream,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-  type WriteStream,
-} from "node:fs";
+import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
-import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import type { RawData } from "ws";
 
 import {
-  securePrivateDirectorySync,
-  securePrivateFileSync,
-} from "../../runtime/private-file.mjs";
+  BodyAccumulator,
+  SseTerminalCollector,
+  bodyBufferLimit,
+  compactText,
+  createTopLevelStringFieldScanner,
+  decodeUtf8,
+  errorText,
+  eventTypeOf,
+  headerValue,
+  isStreamDelta,
+  isTerminalResponseType,
+  parseJsonValue,
+  payloadOf,
+  rawDataBuffer,
+  requestFieldsOf,
+  responseModelsOf,
+  responseStateOf,
+  sanitizedHeaders,
+  scanTopLevelStringField,
+  splitBuffer,
+  splitText,
+} from "./traffic-dump-content.js";
+import {
+  TrafficDumpStorage,
+  type TrafficDumpSession,
+  type TrafficPayloadPart,
+} from "./traffic-dump-storage.js";
 
-/** 单条记录的正文上限；超出后按记录切分，转储内存占用保持有界。 */
-const recordPayloadLimitBytes = 1_048_576;
-/**
- * 开启精简时先整段缓冲正文再折叠：分片只能是完整正文的一半，无法折叠半截 JSON。
- * 超过该上限时按原样分片写出，避免为超大正文无限占用内存。
- */
-const compactionBufferLimitBytes = 32 * 1_048_576;
-/** 单个正文或 trace 文件上限，达到后写入下一个文件。 */
-const fileSizeLimitBytes = 64 * 1_048_576;
-/** 同一 Provider 的历史完整 session 约保留 320 MiB；当前 session 不在写入中途删除。 */
-const retainedBytesPerLabel = 5 * fileSizeLimitBytes;
-const millisecondsPerDay = 24 * 60 * 60 * 1_000;
-/** 长驻 App Server 按天切分 session，使时间保留可以持续清理完整历史批次。 */
-const sessionRotationIntervalMs = millisecondsPerDay;
-/** 待写缓冲达到该大小后立即落盘，不等待请求结束。 */
-const flushThresholdBytes = 262_144;
-/** 低流量时的最长落盘等待，兼顾实时查看与小记录合并。 */
-const flushIntervalMs = 100;
-/** 单个 SSE 事件的解析上限；超过后停止解析终态，但不影响报文转发与原始 trace。 */
-const sseEventLimitCharacters = 1_048_576;
-/** 摘要字段只接受短字符串，避免扫描器为异常字段持续累积内存。 */
-const maximumJsonFieldCharacters = 4_096;
-
-/** 只保留认证方案，凭据本身不写盘。 */
-const credentialHeaderNames = new Set([
-  "authorization",
-  "proxy-authorization",
-  "cookie",
-  "set-cookie",
-  "x-api-key",
-  "api-key",
-  "openai-api-key",
-  "x-goog-api-key",
-]);
+export {
+  pruneModelTrafficDumpSessions,
+  type PruneModelTrafficDumpOptions,
+} from "./traffic-dump-retention.js";
 
 export interface ModelTrafficDumpOptions {
   /** 转储目录，通常为 Gateway 数据目录下的 traffic 目录。 */
   directory: string;
-  /**
-   * 精简模式下 `input` 保留的末尾条目数；`0` 表示按原样转储完整报文。
-   * 大于 `0` 时同时折叠响应回显的 `instructions` 与 `tools`。
-   */
+  /** 精简模式下 `input` 保留的末尾条目数；`0` 表示按原样转储完整报文。 */
   inputItems?: number;
-  /**
-   * 单个数组条目的正文上限（字节）；超过时只保留头尾并写入截断标记。
-   * `0` 或不设置表示按原样转储。
-   */
+  /** 单个数组条目的正文上限（字节）；`0` 或不设置表示按原样转储。 */
   itemMaxBytes?: number;
   /** 历史 session 的最长保留天数；`0` 或不设置时关闭按时间清理。 */
   retentionDays?: number;
   /** 文件名前缀，用于区分主 Provider 与隔离 Provider。 */
   label: string;
   onError: (error: Error) => void;
-}
-
-export interface PruneModelTrafficDumpOptions {
-  /** 转储根目录。 */
-  directory: string;
-  /** 只清理指定 Provider；省略时清理目录中的全部 V2 Provider。 */
-  label?: string;
-  /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
-  retentionDays: number;
-  /** 当前写入目录；清理时始终保留。 */
-  currentSessionDirectory?: string;
-  /** 仍有调用或文件流归属的目录；清理时始终保留。 */
-  protectedSessionDirectories?: readonly string[];
-}
-
-/** 清理可识别的 V2 历史 session；未知目录与旧版文件保持不变。 */
-export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOptions): void {
-  if (!existsSync(options.directory)) return;
-  const protectedDirectories = new Set(options.protectedSessionDirectories ?? []);
-  if (options.currentSessionDirectory !== undefined) {
-    protectedDirectories.add(options.currentSessionDirectory);
-  }
-  const byLabel = new Map<string, Array<{
-    createdAtMs: number;
-    lastActivityAtMs: number;
-    path: string;
-    size: number;
-  }>>();
-  for (const entry of readdirSync(options.directory, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const path = join(options.directory, entry.name);
-    const manifest = readManifest(path);
-    if (manifest?.version !== 2 || (options.label !== undefined && manifest.label !== options.label)) {
-      continue;
-    }
-    const sessions = byLabel.get(manifest.label) ?? [];
-    const stats = directoryStats(path);
-    sessions.push({
-      createdAtMs: manifest.createdAtMs,
-      lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs),
-      path,
-      size: stats.size,
-    });
-    byLabel.set(manifest.label, sessions);
-  }
-  const oldestRetainedAtMs = options.retentionDays === 0
-    ? null
-    : Date.now() - options.retentionDays * millisecondsPerDay;
-  for (const sessions of byLabel.values()) {
-    sessions.sort((left, right) => right.lastActivityAtMs - left.lastActivityAtMs
-      || right.createdAtMs - left.createdAtMs);
-    let retained = 0;
-    for (const session of sessions) {
-      const protectedSession = protectedDirectories.has(session.path);
-      if (
-        !protectedSession
-        && oldestRetainedAtMs !== null
-        && session.lastActivityAtMs < oldestRetainedAtMs
-      ) {
-        rmSync(session.path, { force: true, recursive: true });
-        continue;
-      }
-      retained += session.size;
-      if (
-        protectedSession
-        || retained <= retainedBytesPerLabel
-      ) continue;
-      rmSync(session.path, { force: true, recursive: true });
-    }
-  }
 }
 
 export interface ModelTrafficHttpExchangeInput {
@@ -162,67 +67,39 @@ export interface ModelTrafficWebSocketExchangeInput {
   url: string;
 }
 
-interface TrafficPayloadPart {
-  bytes: number;
-  encoding: "base64" | "utf8";
-  file: string;
-  offset: number;
-}
-
-interface TrafficPayload {
-  bytes: number;
-  parts: TrafficPayloadPart[];
-}
-
-interface TrafficDumpSession {
-  activeInteractions: number;
-  closing: boolean;
-  flushTimer: NodeJS.Timeout | undefined;
-  interactionCount: number;
-  interactionStream: WriteStream | undefined;
-  payloadFileIndex: number;
-  payloadStream: WriteStream | undefined;
-  payloadWrittenBytes: number;
-  pending: string[];
-  pendingBytes: number;
-  sessionDirectory: string | undefined;
-  startedAtMs: number;
-  traceFileIndex: number;
-  traceStream: WriteStream | undefined;
-  traceWrittenBytes: number;
-  writerSession: string;
-}
-
 /**
- * 模型请求转储：把统计代理两侧的完整报文按 JSON Lines 写入私有文件。
- * 只做旁路复制，不改变转发、背压和指标采集行为；写入失败时停止转储并由 onError 上报。
+ * 模型请求转储入口：建立 HTTP/WS 交换，并把 V2 文件生命周期委派给独立存储组件。
+ * 只做旁路复制；写入失败由存储组件停止转储并经 onError 上报。
  */
 export class ModelTrafficDump {
-  private readonly directory: string;
   private readonly inputItems: number;
   private readonly itemMaxBytes: number;
-  private readonly label: string;
-  private readonly onError: (error: Error) => void;
-  private readonly retentionDays: number;
-  private readonly streams = new Set<WriteStream>();
   private readonly sessions = new Set<TrafficDumpSession>();
-  private currentSession: TrafficDumpSession | undefined;
-  private connectionCount = 0;
+  private readonly storage: TrafficDumpStorage;
+  private readonly streams = new Set<WriteStream>();
   private writeQueue = Promise.resolve();
-  private closed = false;
-  private failed = false;
+  private connectionCount = 0;
 
   constructor(options: ModelTrafficDumpOptions) {
-    this.directory = options.directory;
     this.inputItems = options.inputItems ?? 0;
     this.itemMaxBytes = options.itemMaxBytes ?? 0;
-    this.label = options.label.replace(/[^A-Za-z0-9._-]+/gu, "_");
-    this.onError = options.onError;
-    this.retentionDays = options.retentionDays ?? 0;
+    this.storage = new TrafficDumpStorage({
+      directory: options.directory,
+      label: options.label,
+      onError: options.onError,
+      retentionDays: options.retentionDays ?? 0,
+    }, {
+      getWriteQueue: () => this.writeQueue,
+      sessions: this.sessions,
+      setWriteQueue: (queue) => {
+        this.writeQueue = queue;
+      },
+      streams: this.streams,
+    });
   }
 
   beginHttpExchange(input: ModelTrafficHttpExchangeInput): ModelTrafficExchange {
-    const session = this.beginLogicalInteraction(input.startedAtMs);
+    const session = this.storage.beginLogicalInteraction(input.startedAtMs);
     const exchange = this.createExchange(input, "http", session);
     exchange.write({
       kind: "request_head",
@@ -236,7 +113,7 @@ export class ModelTrafficDump {
   beginWebSocketExchange(
     input: ModelTrafficWebSocketExchangeInput,
   ): ModelTrafficExchange {
-    const session = this.ensureCurrentSession(input.startedAtMs, false);
+    const session = this.storage.sessionForConnection(input.startedAtMs);
     const exchange = this.createExchange(input, "websocket", session);
     exchange.write({
       kind: "websocket_handshake",
@@ -246,27 +123,19 @@ export class ModelTrafficDump {
     return exchange;
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
-    this.closed = true;
-    this.currentSession = undefined;
-    for (const session of [...this.sessions]) this.retireSession(session, true);
-    await this.writeQueue;
-    await Promise.all([...this.streams].map((stream) => {
-      if (stream.closed) return Promise.resolve();
-      return new Promise<void>((resolveClose) => {
-        stream.once("close", resolveClose);
-        if (!stream.destroyed) stream.end();
-      });
-    }));
+  close(): Promise<void> {
+    return this.storage.close();
   }
 
-  private createExchange(input: {
-    accountId?: string;
-    startedAtMs: number;
-  }, transport: "http" | "websocket", session: TrafficDumpSession): ModelTrafficExchange {
+  private createExchange(
+    input: { accountId?: string; startedAtMs: number },
+    transport: "http" | "websocket",
+    session: TrafficDumpSession,
+  ): ModelTrafficExchange {
     this.connectionCount += 1;
-    const interactionId = transport === "http" ? this.nextInteractionId(session) : undefined;
+    const interactionId = transport === "http"
+      ? this.storage.nextInteractionId(session)
+      : undefined;
     return new ModelTrafficExchange(
       {
         connection: this.connectionCount,
@@ -276,300 +145,16 @@ export class ModelTrafficDump {
       transport,
       interactionId,
       session,
-      () => this.currentSession ?? session,
-      (target, record) => this.writeTrace(target, record),
-      (target, record) => this.writeInteraction(target, record),
-      (target, content, encoding) => this.writePayload(target, content, encoding),
-      (target) => this.nextInteractionId(target),
-      (startedAtMs) => this.beginLogicalInteraction(startedAtMs),
-      (target) => this.completeLogicalInteraction(target),
+      () => this.storage.currentSessionOr(session),
+      (target, record) => this.storage.writeTrace(target, record),
+      (target, record) => this.storage.writeInteraction(target, record),
+      (target, content, encoding) => this.storage.writePayload(target, content, encoding),
+      (target) => this.storage.nextInteractionId(target),
+      (startedAtMs) => this.storage.beginLogicalInteraction(startedAtMs),
+      (target) => this.storage.completeLogicalInteraction(target),
       this.inputItems,
       this.itemMaxBytes,
     );
-  }
-
-  private beginLogicalInteraction(startedAtMs: number): TrafficDumpSession {
-    const session = this.ensureCurrentSession(startedAtMs, true);
-    session.activeInteractions += 1;
-    return session;
-  }
-
-  private completeLogicalInteraction(session: TrafficDumpSession): void {
-    if (session.activeInteractions > 0) session.activeInteractions -= 1;
-    if (session !== this.currentSession) this.retireSession(session);
-  }
-
-  private ensureCurrentSession(startedAtMs: number, rotate: boolean): TrafficDumpSession {
-    const current = this.currentSession;
-    if (
-      current !== undefined
-      && (!rotate || startedAtMs - current.startedAtMs < sessionRotationIntervalMs)
-    ) return current;
-    const session = this.createSession(startedAtMs);
-    this.currentSession = session;
-    if (current !== undefined) this.retireSession(current);
-    return session;
-  }
-
-  private createSession(startedAtMs: number): TrafficDumpSession {
-    const session: TrafficDumpSession = {
-      activeInteractions: 0,
-      closing: false,
-      flushTimer: undefined,
-      interactionCount: 0,
-      interactionStream: undefined,
-      payloadFileIndex: 1,
-      payloadStream: undefined,
-      payloadWrittenBytes: 0,
-      pending: [],
-      pendingBytes: 0,
-      sessionDirectory: undefined,
-      startedAtMs,
-      traceFileIndex: 1,
-      traceStream: undefined,
-      traceWrittenBytes: 0,
-      writerSession: new Date(startedAtMs).toISOString().replace(/[:.]/gu, "-"),
-    };
-    this.sessions.add(session);
-    return session;
-  }
-
-  private nextInteractionId(session: TrafficDumpSession): number {
-    session.interactionCount += 1;
-    return session.interactionCount;
-  }
-
-  private writeTrace(session: TrafficDumpSession, record: Record<string, unknown>): void {
-    if (this.closed || this.failed) return;
-    const line = `${JSON.stringify({ ts: Date.now(), ...record })}\n`;
-    session.pending.push(line);
-    session.pendingBytes += Buffer.byteLength(line);
-    if (session.pendingBytes >= flushThresholdBytes) {
-      this.flush(session);
-      return;
-    }
-    this.scheduleFlush(session);
-  }
-
-  private flush(session: TrafficDumpSession): void {
-    if (session.flushTimer) {
-      clearTimeout(session.flushTimer);
-      session.flushTimer = undefined;
-    }
-    if (this.failed || session.pending.length === 0) return;
-    const content = session.pending.join("");
-    const contentBytes = Buffer.byteLength(content);
-    session.pending = [];
-    session.pendingBytes = 0;
-    try {
-      if (session.traceStream
-        && session.traceWrittenBytes + contentBytes > fileSizeLimitBytes) {
-        this.rotateTrace(session);
-      }
-      session.traceWrittenBytes += contentBytes;
-      const stream = this.ensureTraceStream(session);
-      this.enqueueWrite(stream, content);
-    } catch (error) {
-      this.fail(error);
-    }
-  }
-
-  private scheduleFlush(session: TrafficDumpSession): void {
-    if (session.flushTimer) return;
-    session.flushTimer = setTimeout(() => {
-      session.flushTimer = undefined;
-      this.flush(session);
-    }, flushIntervalMs);
-    session.flushTimer.unref();
-  }
-
-  private rotateTrace(session: TrafficDumpSession): void {
-    const stream = session.traceStream;
-    session.traceStream = undefined;
-    session.traceWrittenBytes = 0;
-    session.traceFileIndex += 1;
-    if (stream) this.enqueueClose(stream);
-  }
-
-  private writeInteraction(session: TrafficDumpSession, record: Record<string, unknown>): void {
-    if (this.closed || this.failed) return;
-    try {
-      const line = `${JSON.stringify({ version: 2, ts: Date.now(), ...record })}\n`;
-      this.enqueueWrite(this.ensureInteractionStream(session), line);
-    } catch (error) {
-      this.fail(error);
-    }
-  }
-
-  private writePayload(
-    session: TrafficDumpSession,
-    content: Buffer,
-    encoding: "base64" | "utf8",
-  ): TrafficPayloadPart | undefined {
-    if (this.closed || this.failed) return undefined;
-    try {
-      if (session.payloadStream && session.payloadWrittenBytes > 0
-        && session.payloadWrittenBytes + content.length > fileSizeLimitBytes) {
-        const stream = session.payloadStream;
-        session.payloadStream = undefined;
-        session.payloadWrittenBytes = 0;
-        session.payloadFileIndex += 1;
-        this.enqueueClose(stream);
-      }
-      const stream = this.ensurePayloadStream(session);
-      const part = {
-        bytes: content.length,
-        encoding,
-        file: `payload-${session.payloadFileIndex}.bin`,
-        offset: session.payloadWrittenBytes,
-      } satisfies TrafficPayloadPart;
-      session.payloadWrittenBytes += content.length;
-      this.enqueueWrite(stream, content);
-      return part;
-    } catch (error) {
-      this.fail(error);
-      return undefined;
-    }
-  }
-
-  private ensureTraceStream(session: TrafficDumpSession): WriteStream {
-    if (session.traceStream) return session.traceStream;
-    session.traceStream = this.createSessionStream(
-      session,
-      `trace-${session.traceFileIndex}.jsonl`,
-    );
-    return session.traceStream;
-  }
-
-  private ensureInteractionStream(session: TrafficDumpSession): WriteStream {
-    if (session.interactionStream) return session.interactionStream;
-    session.interactionStream = this.createSessionStream(session, "interactions.jsonl");
-    return session.interactionStream;
-  }
-
-  private ensurePayloadStream(session: TrafficDumpSession): WriteStream {
-    if (session.payloadStream) return session.payloadStream;
-    session.payloadStream = this.createSessionStream(
-      session,
-      `payload-${session.payloadFileIndex}.bin`,
-    );
-    return session.payloadStream;
-  }
-
-  private createSessionStream(session: TrafficDumpSession, name: string): WriteStream {
-    const path = join(this.ensureSessionDirectory(session), name);
-    if (!existsSync(path)) closeSync(openSync(path, "wx", 0o600));
-    securePrivateFileSync(path);
-    const stream = createWriteStream(path, { flags: "a" });
-    stream.on("error", (error: unknown) => this.fail(error));
-    stream.on("close", () => this.streams.delete(stream));
-    this.streams.add(stream);
-    return stream;
-  }
-
-  private ensureSessionDirectory(sessionState: TrafficDumpSession): string {
-    if (sessionState.sessionDirectory) return sessionState.sessionDirectory;
-    mkdirSync(this.directory, { recursive: true, mode: 0o700 });
-    securePrivateDirectorySync(this.directory);
-    let suffix = 1;
-    let session: string;
-    for (;;) {
-      session = `${sessionState.writerSession}${suffix === 1 ? "" : `-${suffix}`}`;
-      const name = `${this.label}-${session}`;
-      const path = join(this.directory, name);
-      try {
-        mkdirSync(path, { mode: 0o700 });
-        sessionState.sessionDirectory = path;
-        break;
-      } catch (error) {
-        if (!isFileExistsError(error)) throw error;
-        suffix += 1;
-      }
-    }
-    securePrivateDirectorySync(sessionState.sessionDirectory);
-    const manifestPath = join(sessionState.sessionDirectory, "manifest.json");
-    writeFileSync(manifestPath, `${JSON.stringify({
-      createdAtMs: sessionState.startedAtMs,
-      label: this.label,
-      session,
-      version: 2,
-    }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    securePrivateFileSync(manifestPath);
-    this.pruneSessions();
-    return sessionState.sessionDirectory;
-  }
-
-  private pruneSessions(): void {
-    const protectedSessionDirectories = [...this.sessions]
-      .flatMap((session) => session.sessionDirectory === undefined
-        ? []
-        : [session.sessionDirectory]);
-    pruneModelTrafficDumpSessions({
-      directory: this.directory,
-      label: this.label,
-      retentionDays: this.retentionDays,
-      protectedSessionDirectories,
-    });
-  }
-
-  private enqueueWrite(stream: WriteStream, content: string | Buffer): void {
-    this.writeQueue = this.writeQueue.then(() => {
-      if (this.failed) return;
-      return new Promise<void>((resolveWrite, rejectWrite) => {
-        stream.write(content, (error) => error === null || error === undefined
-          ? resolveWrite()
-          : rejectWrite(error));
-      });
-    }).catch((error: unknown) => this.fail(error));
-  }
-
-  private enqueueClose(stream: WriteStream): void {
-    this.writeQueue = this.writeQueue.then(() => {
-      if (stream.closed || stream.destroyed) return;
-      return new Promise<void>((resolveClose) => {
-        stream.once("close", resolveClose);
-        stream.end();
-      });
-    }).catch((error: unknown) => this.fail(error));
-  }
-
-  private retireSession(session: TrafficDumpSession, force = false): void {
-    if (session.closing || (!force && session.activeInteractions > 0)) return;
-    session.closing = true;
-    this.flush(session);
-    const streams = [session.traceStream, session.interactionStream, session.payloadStream]
-      .filter((stream): stream is WriteStream => stream !== undefined);
-    session.traceStream = undefined;
-    session.interactionStream = undefined;
-    session.payloadStream = undefined;
-    for (const stream of streams) this.enqueueClose(stream);
-    this.writeQueue = this.writeQueue.then(() => {
-      this.sessions.delete(session);
-      if (!this.failed) this.pruneSessions();
-    }).catch((error: unknown) => this.fail(error));
-  }
-
-  private fail(error: unknown): void {
-    if (this.failed) return;
-    this.failed = true;
-    const streams = [...this.streams];
-    for (const session of this.sessions) {
-      session.traceStream = undefined;
-      session.interactionStream = undefined;
-      session.payloadStream = undefined;
-      session.pending = [];
-      session.pendingBytes = 0;
-      if (session.flushTimer) {
-        clearTimeout(session.flushTimer);
-        session.flushTimer = undefined;
-      }
-    }
-    for (const stream of streams) stream.destroy();
-    try {
-      this.onError(error instanceof Error ? error : new Error(String(error)));
-    } catch {
-      // 转储与错误回调都属于旁路，不能影响模型请求转发。
-    }
   }
 }
 
@@ -643,9 +228,7 @@ export class ModelTrafficExchange {
     private readonly inputItems: number,
     private readonly itemMaxBytes: number,
   ) {
-    const limitBytes = inputItems > 0 || itemMaxBytes > 0
-      ? compactionBufferLimitBytes
-      : recordPayloadLimitBytes;
+    const limitBytes = bodyBufferLimit(inputItems, itemMaxBytes);
     this.requestBody = new BodyAccumulator(
       (chunk) => this.writeBody("request_body", chunk, this.requestPayloadParts),
       limitBytes,
@@ -676,7 +259,6 @@ export class ModelTrafficExchange {
     this.writeTrace(record);
   }
 
-  /** 精简模式丢弃流式增量：逐条增量只重复框架字段，完整文本由 `*.done` 事件承载。 */
   private dropsStreamDelta(text: string): boolean {
     return this.inputItems > 0 && isStreamDelta(parseJsonValue(text));
   }
@@ -699,11 +281,7 @@ export class ModelTrafficExchange {
     this.responseHeadRecord = { status, headers: sanitized };
     this.responseIsSse = headerValue(headers, "content-type")
       ?.toLowerCase().includes("text/event-stream") ?? false;
-    this.write({
-      kind: "response_head",
-      status,
-      headers: sanitized,
-    });
+    this.write({ kind: "response_head", status, headers: sanitized });
   }
 
   responseChunk(chunk: Buffer): void {
@@ -761,7 +339,7 @@ export class ModelTrafficExchange {
       }
       if (this.dropsStreamDelta(text)) return;
       const parts = splitText(compactText(text, this.inputItems, this.itemMaxBytes));
-      parts.forEach((text, index) => {
+      parts.forEach((part, index) => {
         this.writeTrace({
           kind: "websocket_frame",
           ...(interaction === undefined ? {} : { interaction }),
@@ -771,7 +349,7 @@ export class ModelTrafficExchange {
           parts: parts.length,
           bytes: buffer.length,
           encoding: "utf8",
-          text,
+          text: part,
         });
       });
       if (direction === "upstream" && isTerminalResponseType(eventTypeOf(parsed))) {
@@ -831,7 +409,6 @@ export class ModelTrafficExchange {
     }
   }
 
-  /** 正文先折叠再按记录上限分片：一条记录可能来自压缩后的多段，编号仍按写入顺序递增。 */
   private writeBody(
     kind: string,
     chunk: Buffer,
@@ -1005,655 +582,4 @@ export class ModelTrafficExchange {
         return stored === undefined ? [] : [stored];
       });
   }
-}
-
-class BodyAccumulator {
-  private readonly chunks: Buffer[] = [];
-  private bytes = 0;
-
-  constructor(
-    private readonly emit: (chunk: Buffer) => void,
-    private readonly limitBytes: number,
-  ) {}
-
-  append(chunk: Buffer): void {
-    this.chunks.push(chunk);
-    this.bytes += chunk.length;
-    if (this.bytes >= this.limitBytes) this.drain();
-  }
-
-  drain(final = false): void {
-    if (this.chunks.length === 0) return;
-    const buffer = Buffer.concat(this.chunks, this.bytes);
-    const heldBytes = final ? 0 : incompleteUtf8SuffixBytes(buffer);
-    const emittedBytes = buffer.length - heldBytes;
-    if (emittedBytes > 0) this.emit(buffer.subarray(0, emittedBytes));
-    this.chunks.length = 0;
-    if (heldBytes > 0) this.chunks.push(Buffer.from(buffer.subarray(emittedBytes)));
-    this.bytes = heldBytes;
-  }
-}
-
-/** 非最终分片保留末尾未收齐的 UTF-8 字符，避免把合法正文误判为二进制。 */
-function incompleteUtf8SuffixBytes(buffer: Buffer): number {
-  let start = buffer.length - 1;
-  while (start >= 0 && isUtf8ContinuationByte(buffer[start]!)) start -= 1;
-  if (start < 0 || buffer.length - start > 4) return 0;
-  const lead = buffer[start]!;
-  const expected = lead >= 0xc2 && lead <= 0xdf
-    ? 2
-    : lead >= 0xe0 && lead <= 0xef
-      ? 3
-      : lead >= 0xf0 && lead <= 0xf4 ? 4 : 1;
-  const available = buffer.length - start;
-  return expected > available ? available : 0;
-}
-
-class SseTerminalCollector {
-  private readonly decoder = new StringDecoder("utf8");
-  private pending = "";
-  private disabled = false;
-  sawResponseEvent = false;
-  terminal: { text: string; type: string } | undefined;
-
-  append(chunk: Buffer): void {
-    if (this.disabled) {
-      this.decoder.write(chunk);
-      return;
-    }
-    this.pending += this.decoder.write(chunk);
-    this.consume(false);
-  }
-
-  end(): void {
-    if (this.disabled) {
-      this.decoder.end();
-      return;
-    }
-    this.pending += this.decoder.end();
-    this.consume(true);
-  }
-
-  private consume(final: boolean): void {
-    const blocks = this.pending.split(/\r?\n\r?\n/u);
-    const tail = blocks.pop() ?? "";
-    this.pending = final ? "" : tail;
-    for (const block of blocks) {
-      if (!this.inspectBounded(block)) return;
-    }
-    if (tail.length > sseEventLimitCharacters) {
-      this.disable();
-      return;
-    }
-    if (final && tail.length > 0) this.inspect(tail);
-  }
-
-  private inspectBounded(block: string): boolean {
-    if (block.length > sseEventLimitCharacters) {
-      this.disable();
-      return false;
-    }
-    this.inspect(block);
-    return true;
-  }
-
-  private disable(): void {
-    this.disabled = true;
-    this.pending = "";
-  }
-
-  private inspect(block: string): void {
-    const data = block.split(/\r?\n/u)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice("data:".length).trimStart())
-      .join("\n");
-    if (data.length === 0 || data === "[DONE]") return;
-    const parsed = parseJsonValue(data);
-    const eventLine = block.split(/\r?\n/u).find((line) => line.startsWith("event:"));
-    const type = eventTypeOf(parsed) ?? eventNameOf(eventLine);
-    if (type === "error" || type?.startsWith("response.") === true) {
-      this.sawResponseEvent = true;
-    }
-    if (isTerminalResponseType(type)) this.terminal = { text: data, type };
-  }
-}
-
-type JsonFieldScanPhase =
-  | "afterValue"
-  | "colon"
-  | "done"
-  | "key"
-  | "skipNested"
-  | "skipPrimitive"
-  | "start"
-  | "value";
-type JsonStringPurpose = "key" | "nested" | "skipValue" | "target";
-
-interface TopLevelStringFieldScanner {
-  capture: string;
-  captureOverflow: boolean;
-  field: string;
-  nestedDepth: number;
-  pendingKey: string | undefined;
-  phase: JsonFieldScanPhase;
-  stringEscaped: boolean;
-  stringPurpose: JsonStringPurpose | undefined;
-  value: string | undefined;
-}
-
-/** 只保留键名和目标字符串，可以跨 HTTP 正文分片持续扫描。 */
-function createTopLevelStringFieldScanner(field: string): TopLevelStringFieldScanner {
-  return {
-    capture: "",
-    captureOverflow: false,
-    field,
-    nestedDepth: 0,
-    pendingKey: undefined,
-    phase: "start",
-    stringEscaped: false,
-    stringPurpose: undefined,
-    value: undefined,
-  };
-}
-
-function scanTopLevelStringField(scanner: TopLevelStringFieldScanner, text: string): void {
-  if (scanner.phase === "done") return;
-  for (const character of text) {
-    if (scanner.stringPurpose !== undefined) {
-      scanJsonStringCharacter(scanner, character);
-      continue;
-    }
-    if (scanner.phase === "skipNested") {
-      if (character === '"') beginJsonString(scanner, "nested");
-      else if (character === "{" || character === "[") scanner.nestedDepth += 1;
-      else if (character === "}" || character === "]") {
-        scanner.nestedDepth -= 1;
-        if (scanner.nestedDepth === 0) scanner.phase = "afterValue";
-      }
-      continue;
-    }
-    if (scanner.phase === "skipPrimitive") {
-      if (character === ",") scanner.phase = "key";
-      else if (character === "}") scanner.phase = "done";
-      continue;
-    }
-    if (/\s/u.test(character)) continue;
-    switch (scanner.phase) {
-      case "start":
-        scanner.phase = character === "{" ? "key" : "done";
-        break;
-      case "key":
-        if (character === '"') beginJsonString(scanner, "key");
-        else scanner.phase = "done";
-        break;
-      case "colon":
-        scanner.phase = character === ":" ? "value" : "done";
-        break;
-      case "value":
-        if (scanner.pendingKey === scanner.field) {
-          if (character === '"') beginJsonString(scanner, "target");
-          else scanner.phase = "done";
-        } else {
-          beginSkippedJsonValue(scanner, character);
-        }
-        break;
-      case "afterValue":
-        if (character === ",") scanner.phase = "key";
-        else scanner.phase = "done";
-        break;
-      default:
-        scanner.phase = "done";
-        break;
-    }
-  }
-}
-
-function beginSkippedJsonValue(
-  scanner: TopLevelStringFieldScanner,
-  character: string,
-): void {
-  if (character === '"') {
-    beginJsonString(scanner, "skipValue");
-  } else if (character === "{" || character === "[") {
-    scanner.nestedDepth = 1;
-    scanner.phase = "skipNested";
-  } else {
-    scanner.phase = "skipPrimitive";
-  }
-}
-
-function beginJsonString(
-  scanner: TopLevelStringFieldScanner,
-  purpose: JsonStringPurpose,
-): void {
-  scanner.capture = purpose === "key" || purpose === "target" ? '"' : "";
-  scanner.captureOverflow = false;
-  scanner.stringEscaped = false;
-  scanner.stringPurpose = purpose;
-}
-
-function scanJsonStringCharacter(
-  scanner: TopLevelStringFieldScanner,
-  character: string,
-): void {
-  const purpose = scanner.stringPurpose;
-  if ((purpose === "key" || purpose === "target") && !scanner.captureOverflow) {
-    scanner.capture += character;
-    if (scanner.capture.length > maximumJsonFieldCharacters) {
-      scanner.capture = "";
-      scanner.captureOverflow = true;
-    }
-  }
-  if (scanner.stringEscaped) {
-    scanner.stringEscaped = false;
-    return;
-  }
-  if (character === "\\") {
-    scanner.stringEscaped = true;
-    return;
-  }
-  if (character !== '"') return;
-  scanner.stringPurpose = undefined;
-  if (purpose === "nested") return;
-  if (purpose === "skipValue") {
-    scanner.phase = "afterValue";
-    return;
-  }
-  let value: unknown;
-  if (!scanner.captureOverflow) {
-    try {
-      value = JSON.parse(scanner.capture);
-    } catch {
-      scanner.phase = "done";
-      return;
-    }
-  }
-  scanner.capture = "";
-  if (purpose === "key") {
-    scanner.pendingKey = typeof value === "string" ? value : undefined;
-    scanner.phase = "colon";
-    return;
-  }
-  if (typeof value === "string") scanner.value = value;
-  scanner.phase = "done";
-}
-
-function payloadOf(parts: TrafficPayloadPart[]): TrafficPayload {
-  return {
-    bytes: parts.reduce((total, part) => total + part.bytes, 0),
-    parts: [...parts],
-  };
-}
-
-function eventTypeOf(parsed: unknown): string | undefined {
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  const type = (parsed as { type?: unknown }).type;
-  return typeof type === "string" ? type : undefined;
-}
-
-function isTerminalResponseType(type: string | undefined): type is string {
-  return type === "response.completed"
-    || type === "response.failed"
-    || type === "response.incomplete"
-    || type === "error";
-}
-
-function responseStateOf(
-  type: string | undefined,
-): "completed" | "failed" | "incomplete" {
-  if (type === "response.completed") return "completed";
-  if (type === "response.incomplete") return "incomplete";
-  return type === "response.failed" || type === "error" ? "failed" : "incomplete";
-}
-
-function headerValue(headers: IncomingHttpHeaders, name: string): string | undefined {
-  const value = headers[name];
-  return Array.isArray(value) ? value.join(", ") : value;
-}
-
-function requestFieldsOf(
-  parsed: unknown,
-  headers?: Record<string, string | string[]>,
-  knownModel?: string,
-): {
-  requestKind?: string;
-  requestModel?: string;
-  threadId?: string;
-  turnId?: string;
-} {
-  const object = typeof parsed === "object" && parsed !== null
-    ? parsed as Record<string, unknown>
-    : {};
-  const clientMetadata = typeof object.client_metadata === "object"
-    && object.client_metadata !== null
-    ? object.client_metadata as Record<string, unknown>
-    : {};
-  // WebSocket 握手属于连接，不能代表复用连接上的下一次调用。
-  const rawTurnMetadata = parsed === undefined
-    ? headers?.["x-codex-turn-metadata"]
-    : clientMetadata["x-codex-turn-metadata"];
-  const turnMetadataValue: unknown = Array.isArray(rawTurnMetadata)
-    ? (rawTurnMetadata as unknown[])[0]
-    : rawTurnMetadata;
-  const turnMetadata: unknown = typeof turnMetadataValue === "string"
-    ? parseJsonValue(turnMetadataValue)
-    : turnMetadataValue;
-  const metadata = typeof turnMetadata === "object" && turnMetadata !== null
-    ? turnMetadata as Record<string, unknown>
-    : {};
-  const model = typeof object.model === "string" ? object.model : knownModel;
-  const threadId = typeof metadata.thread_id === "string"
-    ? metadata.thread_id
-    : typeof clientMetadata.thread_id === "string" ? clientMetadata.thread_id : undefined;
-  const turnId = typeof metadata.turn_id === "string"
-    ? metadata.turn_id
-    : typeof clientMetadata.turn_id === "string" ? clientMetadata.turn_id : undefined;
-  return {
-    ...(typeof metadata.request_kind === "string"
-      ? { requestKind: metadata.request_kind }
-      : {}),
-    ...(model === undefined ? {} : { requestModel: model }),
-    ...(threadId === undefined ? {} : { threadId }),
-    ...(turnId !== undefined && turnId.length > 0
-      ? { turnId }
-      : {}),
-  };
-}
-
-function responseModelsOf(parsed: unknown): string[] {
-  if (typeof parsed !== "object" || parsed === null) return [];
-  const object = parsed as Record<string, unknown>;
-  const response = typeof object.response === "object" && object.response !== null
-    ? object.response as Record<string, unknown>
-    : undefined;
-  const model = response?.model ?? object.model;
-  return typeof model === "string" ? [model] : [];
-}
-
-function splitBuffer(buffer: Buffer): Buffer[] {
-  if (buffer.length <= recordPayloadLimitBytes) return [buffer];
-  const parts: Buffer[] = [];
-  for (let offset = 0; offset < buffer.length; offset += recordPayloadLimitBytes) {
-    parts.push(buffer.subarray(offset, offset + recordPayloadLimitBytes));
-  }
-  return parts;
-}
-
-function splitText(text: string): string[] {
-  const buffer = Buffer.from(text, "utf8");
-  if (buffer.length <= recordPayloadLimitBytes) return [text];
-  const parts: string[] = [];
-  for (let offset = 0; offset < buffer.length;) {
-    let end = Math.min(offset + recordPayloadLimitBytes, buffer.length);
-    if (end < buffer.length) {
-      while (end > offset && isUtf8ContinuationByte(buffer[end]!)) end -= 1;
-    }
-    parts.push(buffer.subarray(offset, end).toString("utf8"));
-    offset = end;
-  }
-  return parts;
-}
-
-function isUtf8ContinuationByte(byte: number): boolean {
-  return (byte & 0xc0) === 0x80;
-}
-
-function decodeUtf8(chunk: Buffer): string | null {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(chunk);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 精简模式：丢弃流式增量事件，`input` 只保留末尾若干条，并折叠响应回显的 `instructions`
- * 与 `tools`。完整 JSON 直接折叠；SSE 正文按事件折叠，但不改变保留事件的分帧。
- */
-function compactText(text: string, inputItems: number, itemMaxBytes: number): string {
-  if (inputItems <= 0 && itemMaxBytes <= 0) return text;
-  const whole = compactJson(text, inputItems, itemMaxBytes);
-  if (whole !== undefined) return whole;
-  return compactSseText(text, inputItems, itemMaxBytes);
-}
-
-/** 末尾不完整的 SSE 分块原样保留：它可能只是跨分片事件的半截，无法判断类型。 */
-function compactSseText(text: string, inputItems: number, itemMaxBytes: number): string {
-  const blocks = text.split(/\r?\n\r?\n/u);
-  const tail = blocks.pop() ?? "";
-  const kept: string[] = [];
-  for (const block of blocks) {
-    const lines = block.split(/\r?\n/u);
-    const index = lines.findIndex((line) => line.startsWith("data: "));
-    const eventLine = lines.find((line) => line.startsWith("event: "));
-    if (index === -1) {
-      kept.push(block);
-      continue;
-    }
-    const data = lines[index]!.slice("data: ".length);
-    const parsed = parseJsonValue(data);
-    if (isStreamDelta(parsed) || isStreamDeltaType(eventNameOf(eventLine))) continue;
-    const compacted = compactJsonValue(parsed, inputItems, itemMaxBytes);
-    if (compacted !== undefined) lines[index] = `data: ${compacted}`;
-    kept.push(lines.join("\n"));
-  }
-  return [...kept, tail].join("\n\n");
-}
-
-function compactJson(
-  text: string,
-  inputItems: number,
-  itemMaxBytes: number,
-): string | undefined {
-  return compactJsonValue(parseJsonValue(text), inputItems, itemMaxBytes);
-}
-
-function compactJsonValue(
-  parsed: unknown,
-  inputItems: number,
-  itemMaxBytes: number,
-): string | undefined {
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  return JSON.stringify(compactValue(parsed, inputItems, false, itemMaxBytes));
-}
-
-function parseJsonValue(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
-/** 流式增量事件：逐条只重复框架字段，完整文本由同一条目的 `*.done` 事件承载。 */
-function isStreamDelta(parsed: unknown): boolean {
-  if (typeof parsed !== "object" || parsed === null) return false;
-  return isStreamDeltaType((parsed as { type?: unknown }).type);
-}
-
-/** SSE 类型既可能写在 `event:` 行，也可能写在 data 的 `type` 字段，两者都要识别。 */
-function isStreamDeltaType(type: unknown): boolean {
-  return typeof type === "string" && type.endsWith(".delta");
-}
-
-function eventNameOf(eventLine: string | undefined): string | undefined {
-  return eventLine === undefined ? undefined : eventLine.slice("event: ".length).trim();
-}
-
-function compactValue(
-  value: unknown,
-  inputItems: number,
-  inResponse: boolean,
-  itemMaxBytes: number,
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      capEntry(compactValue(item, inputItems, inResponse, itemMaxBytes), itemMaxBytes));
-  }
-  if (typeof value !== "object" || value === null) return value;
-  const compacted: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (key === "input" && Array.isArray(item)) {
-      compacted[key] = compactInput(item, inputItems).map((entry) =>
-        capEntry(entry, itemMaxBytes));
-    } else if (inputItems > 0 && inResponse && foldableEcho(key, item)) {
-      compacted[key] = omittedMarker(byteLengthOf(item));
-    } else {
-      compacted[key] = capValue(
-        compactValue(item, inputItems, inResponse || key === "response", itemMaxBytes),
-        itemMaxBytes,
-      );
-    }
-  }
-  return compacted;
-}
-
-/**
- * 单个条目或超长字符串字段超过上限时只保留头尾：完整正文通常没有再读的价值，头尾足以定位问题。
- * 数组与对象本身不在这里截断，它们的元素和字段由递归处理。
- * 上限按 UTF-8 字节计算，截断处可能落在多字节字符上，此时以替换字符收尾。
- */
-function capEntry(value: unknown, itemMaxBytes: number): unknown {
-  if (itemMaxBytes <= 0) return value;
-  const bytes = byteLengthOf(value);
-  if (bytes <= itemMaxBytes) return value;
-  return truncatedMarker(value, itemMaxBytes, bytes);
-}
-
-function capValue(value: unknown, itemMaxBytes: number): unknown {
-  if (itemMaxBytes <= 0 || typeof value !== "string") return value;
-  return capEntry(value, itemMaxBytes);
-}
-
-function truncatedMarker(
-  value: unknown,
-  itemMaxBytes: number,
-  bytes: number,
-): Record<string, unknown> {
-  const half = Math.floor(itemMaxBytes / 2);
-  return {
-    type: "truncated",
-    bytes,
-    head: excerpt(value, half, false),
-    tail: excerpt(value, half, true),
-  };
-}
-
-function excerpt(value: unknown, maxBytes: number, fromEnd: boolean): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
-  const buffer = Buffer.from(text, "utf8");
-  const start = fromEnd ? Math.max(0, buffer.length - maxBytes) : 0;
-  return buffer.subarray(start, start + maxBytes).toString("utf8");
-}
-
-/** 只折叠有内容的响应回显字段，空字符串与空数组原样保留。 */
-function foldableEcho(key: string, value: unknown): boolean {
-  if (key === "instructions") return typeof value === "string" && value.length > 0;
-  if (key === "tools") return Array.isArray(value) && value.length > 0;
-  return false;
-}
-
-function compactInput(items: unknown[], inputItems: number): unknown[] {
-  if (inputItems <= 0 || items.length <= inputItems) return items;
-  const omitted = items.slice(0, items.length - inputItems);
-  return [
-    {
-      omitted_bytes: byteLengthOf(omitted),
-      omitted_items: omitted.length,
-      type: "omitted",
-    },
-    ...items.slice(items.length - inputItems),
-  ];
-}
-
-function omittedMarker(bytes: number): string {
-  return `<omitted ${bytes} 字节>`;
-}
-
-function byteLengthOf(value: unknown): number {
-  return typeof value === "string"
-    ? Buffer.byteLength(value)
-    : Buffer.byteLength(JSON.stringify(value) ?? "");
-}
-
-function rawDataBuffer(data: RawData): Buffer {
-  if (typeof data === "string") return Buffer.from(data, "utf8");
-  if (data instanceof ArrayBuffer) return Buffer.from(data);
-  if (Array.isArray(data)) return Buffer.concat(data);
-  return data;
-}
-
-function sanitizedHeaders(
-  headers: IncomingHttpHeaders,
-): Record<string, string | string[]> {
-  const output: Record<string, string | string[]> = {};
-  for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined) continue;
-    output[name] = credentialHeaderNames.has(name.toLowerCase())
-      ? redactHeaderValue(value)
-      : value;
-  }
-  return output;
-}
-
-function redactHeaderValue(value: string | string[]): string | string[] {
-  return Array.isArray(value)
-    ? value.map(redactedValue)
-    : redactedValue(value);
-}
-
-function redactedValue(value: string): string {
-  const scheme = /^(Bearer|Basic|Digest)\s/iu.exec(value);
-  return scheme ? `${scheme[1]} <redacted>` : "<redacted>";
-}
-
-function isFileExistsError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EEXIST";
-}
-
-function readManifest(directory: string): {
-  createdAtMs: number;
-  label: string;
-  session: string;
-  version: number;
-} | undefined {
-  try {
-    const value = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8")) as {
-      createdAtMs?: unknown;
-      label?: unknown;
-      session?: unknown;
-      version?: unknown;
-    };
-    return typeof value.createdAtMs === "number"
-      && typeof value.label === "string"
-      && typeof value.session === "string"
-      && typeof value.version === "number"
-      ? value as { createdAtMs: number; label: string; session: string; version: number }
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function directoryStats(directory: string): { lastModifiedAtMs: number; size: number } {
-  let lastModifiedAtMs = statSync(directory).mtimeMs;
-  let size = 0;
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      const child = directoryStats(path);
-      lastModifiedAtMs = Math.max(lastModifiedAtMs, child.lastModifiedAtMs);
-      size += child.size;
-      continue;
-    }
-    const status = statSync(path);
-    lastModifiedAtMs = Math.max(lastModifiedAtMs, status.mtimeMs);
-    size += status.size;
-  }
-  return { lastModifiedAtMs, size };
-}
-
-function errorText(error: unknown): string {
-  if (typeof error === "string") return error;
-  return error instanceof Error ? error.message : "未知错误";
 }

@@ -73,7 +73,9 @@
   Turn 完成事件不会抢先清理请求统计状态；Gateway 不在线时指标直接丢弃并继续模型响应。接收端拒绝
   不安全、无认证或已被活动进程占用的端点，并只清理自己创建的端点；指标按换行完成单帧并在归约后
   确认，不依赖 Windows named pipe 不具备的半关闭时序。
-- `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储。V2 为每个 writer
+- `traffic-dump.ts`：仅在 `[debug].model_traffic_dump` 开启时使用的模型报文旁路转储入口与 HTTP/WebSocket
+  逻辑调用归约；`traffic-dump-storage.ts` 管理 V2 session、顺序写入和文件轮转，
+  `traffic-dump-retention.ts` 管理历史批次保留，`traffic-dump-content.ts` 负责正文分片、终态解析、裁剪与凭据头脱敏。V2 为每个 writer
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
