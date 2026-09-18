@@ -344,6 +344,7 @@ codexc service logs -n 100
 ```toml
 [debug]
 model_traffic_dump = true
+model_traffic_retention_days = 30
 ```
 
 ```bash
@@ -364,6 +365,11 @@ offset/bytes 引用轮转的 `payload-*.bin`，原始传输轨迹位于 `trace-*
 转储写入失败时只停止转储并在日志中报错，模型请求继续正常转发。转储包含 prompt、工具输出和代码，
 排查完成后关闭开关并删除 session，不要分享原始转储。
 
+`model_traffic_retention_days` 默认 `30`。App Server 服务每次启动时会删除超过该天数的可识别 V2
+历史批次，即使当前已关闭转储也会执行；设为 `0` 可关闭按时间自动清理。旧版逐帧 JSONL、未知文件
+和未知目录不会自动删除。升级后首次启动会按同一规则处理已有 V2 历史批次；需要回滚到不识别该键的
+旧版时，先从 `[debug]` 删除 `model_traffic_retention_days`。
+
 转储默认按下一节的体积控制规则裁剪，不会把每次请求重发的完整会话历史原样落盘。流被提前终止时，
 该逻辑调用会得到 `failed` 或 `incomplete` 终态及明确的 `errorScope`；已收到的传输块仍在 trace 中。
 
@@ -375,6 +381,8 @@ codexc traffic --exchange 12                   # 展开某次调用的一条请�
 codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的逻辑调用并展开正文
 codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
 codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
+codexc traffic cleanup                         # 预览全部可清理转储，不删除
+codexc traffic cleanup --confirm               # 停止全部 App Server 后永久删除预览范围
 ```
 
 摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”
@@ -382,12 +390,17 @@ codexc traffic --follow                        # 从现有文件末尾开始持�
 不传路径时读取 `traffic/` 中最新标签的最新 writer session；也可以用 `--dir` 指定根
 目录，或传入一个 V2 session 目录。旧版逐帧 JSONL 原样保留但不自动迁移或混读，重启 App Server
 后会生成 V2 session；回滚旧版本时旧文件仍可继续使用。`codexc traffic -h` 列出全部选项。
+`cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session 和旧版逐帧 JSONL，
+未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
+`codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
+`codexc service start app-server`。
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
 点开某条即进入该条的请求参数、实际输出与用量摘要。终态未携带输出时，从已存 trace 的完成条目
 提取；原始正文、逐条用量归因与传输 trace 默认收起，数据不会回写。页面地址保留标签、writer session、调用编号与分页位置，
 返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号调用。
-该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。
+该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。页面
+同时显示自动保留天数，并提供“清空转储”的预览确认入口；实际删除前必须先停止全部 App Server。
 
 ### 转储体积控制
 
@@ -399,6 +412,7 @@ codexc traffic --follow                        # 从现有文件末尾开始持�
 model_traffic_dump = true
 model_traffic_input_items = 3
 model_traffic_item_max_bytes = 65536
+model_traffic_retention_days = 30
 ```
 
 - `model_traffic_input_items`（默认 `3`）：只保留请求 `input` 数组末尾这么多条完整条目，更早的
@@ -408,6 +422,8 @@ model_traffic_item_max_bytes = 65536
   响应 `output` 条目、其中嵌套的数组元素）和超长字符串字段超过该字节数时只保留头尾各一半，替换为
   `{"type": "truncated", "bytes": …, "head": …, "tail": …}` 标记；`0` 表示不限制。它独立于
   `model_traffic_input_items` 生效，只设上限不会折叠 `input`。
+- `model_traffic_retention_days`（默认 `30`）：App Server 启动时清理超过天数的 V2 历史批次；`0`
+  关闭按时间清理。按 Provider 约 320 MiB 的体积上限继续生效。
 
 精简开启时还会折叠响应里重复回显的 `response.instructions` 与 `response.tools`
 （`<omitted N 字节>` 占位），并丢弃逐条流式增量事件
@@ -415,7 +431,7 @@ model_traffic_item_max_bytes = 65536
 `response.function_call_arguments.delta` 等以 `.delta` 结尾的事件）不再写入转储，它们的完整文本
 由同一条目的 `*.done` 事件和 `response.completed.response.output` 承载。请求头、请求体其它字段、
 `model`、保留的响应事件和事件顺序保持完整。需要逐个字段核对原文时，把两项参数都设为 `0` 按原样
-转储。两项参数都在 App Server 启动时读取，改完需要重启服务；使用 `codexc traffic` 查看时不需要
+转储。这些参数都在 App Server 启动时读取，改完需要重启服务；使用 `codexc traffic` 查看时不需要
 额外参数，折叠、截断与丢弃结果会直接显示在对应位置。
 
 开启精简时正文先整段缓冲再折叠，然后按 1 MiB 分片写入；单个正文超过 32 MiB 时退化为按原样分片，

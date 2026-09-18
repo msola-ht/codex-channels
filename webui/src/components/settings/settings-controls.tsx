@@ -28,6 +28,7 @@ export function ManagementConfirmationDialog({
   onCancel,
   confirmLabel = "确认写入",
   confirmVariant = "default",
+  confirmDisabled = false,
   children,
 }: {
   open: boolean
@@ -38,6 +39,7 @@ export function ManagementConfirmationDialog({
   onCancel: () => void
   confirmLabel?: string
   confirmVariant?: ComponentProps<typeof Button>["variant"]
+  confirmDisabled?: boolean
   children: ReactNode
 }) {
   return (
@@ -52,7 +54,7 @@ export function ManagementConfirmationDialog({
           <AlertDialogCancel disabled={saving}>取消</AlertDialogCancel>
           <AlertDialogAction
             variant={confirmVariant}
-            disabled={saving}
+            disabled={saving || confirmDisabled}
             onClick={(event) => {
               event.preventDefault()
               onConfirm()

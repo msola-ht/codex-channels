@@ -31,25 +31,34 @@ export class WebuiManagementTaskRunner {
       ? `codexc service ${normalized.action}${normalized.target ? ` ${normalized.target}` : ""}`
       : normalized.operation === "update"
         ? "codexc update"
-        : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
+        : normalized.operation === "traffic"
+          ? "codexc traffic cleanup --confirm"
+          : `codexc metrics ${normalized.action}${normalized.target === undefined ? "" : ` ${normalized.target}`}`;
     const metrics = normalized.operation === "metrics";
     const service = normalized.operation === "service";
+    const traffic = normalized.operation === "traffic";
     return {
       operation: normalized.operation,
       action: normalized.action,
       target: normalized.target ?? null,
-      effects: [service ? `执行 ${command}` : metrics ? `执行 ${command}` : "执行 codexc update（独立更新子进程）"],
-      preconditions: metrics && metricsRequireStoppedGateway.has(normalized.action)
-        ? ["Gateway 必须已停止，且指标 Socket 不可用"]
-        : [],
-      recovery: metrics
+      effects: [service || metrics || traffic ? `执行 ${command}` : "执行 codexc update（独立更新子进程）"],
+      preconditions: traffic
+        ? ["全部 App Server 必须已停止"]
+        : metrics && metricsRequireStoppedGateway.has(normalized.action)
+          ? ["Gateway 必须已停止，且指标 Socket 不可用"]
+          : [],
+      recovery: traffic
+        ? "永久删除全部可识别转储，无法恢复；未知文件与目录不处理"
+        : metrics
         ? normalized.action === "prune"
           ? "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态"
           : "操作前保留指标数据库备份；失败时保留备份并重试"
         : service
           ? "服务管理器失败时任务标记失败，不自动扩大操作范围"
           : "更新子进程负责备份、版本切换和服务恢复；失败时保留恢复信息",
-      activation: metrics && normalized.action === "prune"
+      activation: traffic
+        ? "不会自动启动已停止的 App Server"
+        : metrics && normalized.action === "prune"
         ? "按操作前状态恢复 Gateway"
         : metrics
           ? "不会自动启动已停止的 Gateway"
@@ -134,7 +143,9 @@ export class WebuiManagementTaskRunner {
       ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])]
       : normalized.operation === "update"
         ? ["update"]
-        : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
+        : normalized.operation === "traffic"
+          ? ["traffic", "cleanup", "--confirm"]
+          : ["metrics", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])];
     const invocation = resolveExecutableInvocation("codexc", args, environment);
     await new Promise((resolve) => {
       const child = spawn(invocation.file, invocation.args, {
@@ -228,6 +239,11 @@ export function normalizeTaskInput(input) {
     }
     if (input.target !== undefined) throw new Error("该指标维护动作不接受提供商目标");
     return { operation: "metrics", action: input.action };
+  }
+  if (input.operation === "traffic") {
+    if (input.action !== "cleanup") throw new Error("转储维护动作无效");
+    if (input.target !== undefined) throw new Error("转储清理不接受目标");
+    return { operation: "traffic", action: "cleanup", target: undefined };
   }
   if (input.operation === "update" && (input.action === undefined || input.action === "source")) {
     return { operation: "update", action: "source", target: undefined };

@@ -4,6 +4,7 @@ import { useEffect, useId } from "react"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { TrafficDetail } from "@/components/traffic/traffic-detail"
+import { TrafficCleanupControls } from "@/components/traffic/traffic-cleanup-controls"
 import { TrafficTable } from "@/components/traffic/traffic-table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
+import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
 import { formatTime } from "@/lib/format"
 
@@ -34,6 +36,7 @@ export function TrafficPage() {
   const sessionSelectId = useId()
   const pageSizeSelectId = useId()
   const { query, update } = useTrafficQuery()
+  const tasks = useManagementTasks()
   const list = useTrafficExchanges(query.id === null ? query : null)
   const detail = useTrafficExchange(
     query.id === null
@@ -161,6 +164,7 @@ export function TrafficPage() {
             {list.loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
             {list.loading ? "刷新中" : "刷新"}
           </Button>
+          <TrafficCleanupControls tasks={tasks} onCompleted={list.refetch} />
         </div>
       </div>
 
@@ -182,6 +186,12 @@ export function TrafficPage() {
             关闭时不会再写入新记录，这里显示的是已存在的历史转储文件。
           </AlertDescription>
         </Alert>
+      ) : null}
+      {listData !== null ? (
+        <p className="text-xs text-muted-foreground">
+          自动保留：{listData.retentionDays === 0 ? "已关闭" : `${listData.retentionDays} 天`}；
+          App Server 启动时清理过期历史批次。
+        </p>
       ) : null}
 
       {list.error !== null ? null : list.loading || listData === null ? <PageSkeleton rows={8} /> : (

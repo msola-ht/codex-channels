@@ -56,6 +56,7 @@ describe("webui server settings and task management", () => {
         webui: { tokenConfigured: boolean };
         network: { configuredFields: string[] };
         metrics: { storage: { retentionDays: number; maxRows: number } };
+        system: { modelTrafficDumpEnabled: boolean; modelTrafficRetentionDays: number };
       };
       services: { available: boolean; entries: Array<{ target: string }> };
       cli: Array<{ command: string }>;
@@ -65,6 +66,7 @@ describe("webui server settings and task management", () => {
       webui: { tokenConfigured: true },
       network: { configuredFields: ["https_proxy"] },
       metrics: { storage: { retentionDays: 365, maxRows: 1_000_000 } },
+      system: { modelTrafficDumpEnabled: false, modelTrafficRetentionDays: 30 },
     });
     expect(body.services.entries).toBeInstanceOf(Array);
     expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
@@ -131,6 +133,37 @@ describe("webui server settings and task management", () => {
     expect(replay.status).toBe(409);
   });
 
+  it("previews traffic cleanup with recognized dump counts", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(
+      fixture.environment,
+      undefined,
+      { token: "webui-token", managementOrigin },
+    );
+    const response = await fetch(`${origin}/api/v1/management/tasks/preview`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer webui-token",
+        origin: managementOrigin,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ operation: "traffic", action: "cleanup" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      preview: {
+        operation: "traffic",
+        action: "cleanup",
+        resource: {
+          dumps: { bytes: 0, labels: 0, legacyFiles: 0, v2Sessions: 0 },
+        },
+      },
+      confirmationToken: expect.any(String),
+    });
+  });
+
   it("requires a one-time confirmation for secret-bearing Gateway settings", async () => {
     const fixture = createFixture();
     const managementOrigin = "http://127.0.0.1:0";
@@ -168,6 +201,32 @@ describe("webui server settings and task management", () => {
     });
     expect(update.status).toBe(200);
     expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+  });
+
+  it("updates traffic retention through WebUI settings management", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const current = await (await fetch(`${origin}/api/v1/management/settings`)).json() as {
+      revision: string;
+      system: { modelTrafficDumpEnabled: boolean; modelTrafficRetentionDays: number };
+    };
+    expect(current.system).toMatchObject({
+      modelTrafficDumpEnabled: false,
+      modelTrafficRetentionDays: 30,
+    });
+
+    const update = await fetch(`${origin}/api/v1/management/settings`, {
+      method: "PATCH",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({
+        revision: current.revision,
+        setting: { kind: "system.model-traffic-retention-days", value: 14 },
+      }),
+    });
+
+    expect(update.status).toBe(200);
+    expect(loadGatewaySettings(fixture.environment).system.modelTrafficRetentionDays).toBe(14);
   });
 
   it("protects low-risk management writes with the same WebUI token", async () => {

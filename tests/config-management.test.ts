@@ -67,6 +67,7 @@ describe("Gateway Config management", () => {
         sandbox: "workspace-write",
         defaultWorkspace: expect.any(String),
         modelTrafficDumpEnabled: false,
+        modelTrafficRetentionDays: 30,
       },
       automation: { scheduledTasksEnabled: false },
       advanced: { loggingLevel: "info", pluginApiEnabled: false },
@@ -142,6 +143,7 @@ describe("Gateway Config management", () => {
       model_traffic_dump: false,
       model_traffic_input_items: 5,
       model_traffic_item_max_bytes: 32_768,
+      model_traffic_retention_days: 14,
     };
     writeGatewayConfig(fixture.configPath, document);
     const settings = loadGatewaySettings(fixture.environment);
@@ -167,6 +169,35 @@ describe("Gateway Config management", () => {
       model_traffic_dump: true,
       model_traffic_input_items: 5,
       model_traffic_item_max_bytes: 32_768,
+      model_traffic_retention_days: 14,
+    });
+  });
+
+  it("updates model traffic retention without replacing other dump controls", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.debug = {
+      model_traffic_dump: true,
+      model_traffic_input_items: 4,
+      model_traffic_item_max_bytes: 16_384,
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "system.model-traffic-retention-days",
+      value: 0,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result).toMatchObject({ value: 0, activation: "restart-app-server" });
+    expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({
+      model_traffic_dump: true,
+      model_traffic_input_items: 4,
+      model_traffic_item_max_bytes: 16_384,
+      model_traffic_retention_days: 0,
     });
   });
 

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ManagementConfirmationDialog } from "@/components/settings/settings-controls"
+import { formatBytes } from "@/lib/format"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
@@ -75,8 +76,41 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
     pending.preview.recovery ? `失败处理：${pending.preview.recovery}` : null,
   ].filter((item): item is string => item !== null)
   const destructive = (pending.input.operation === "metrics" && pending.input.action !== "upgrade")
+    || pending.input.operation === "traffic"
     || (pending.input.operation === "service" && (pending.input.action === "uninstall" || pending.input.action === "stop"))
-  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  const traffic = pending.input.operation === "traffic"
+    ? trafficCleanupResource(pending.preview.resource)
+    : null
+  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
+    {traffic === null ? null : <p className="mt-2 text-muted-foreground">
+      将删除 {traffic.v2Sessions} 个 V2 批次、{traffic.legacyFiles} 个旧版文件，合计 {formatBytes(traffic.bytes)}；
+      受管 App Server 当前{traffic.appServerRunning ? "仍在运行" : "未运行"}。
+    </p>}
   </ManagementConfirmationDialog>
+}
+
+function trafficCleanupResource(value: unknown): {
+  appServerRunning: boolean
+  bytes: number
+  legacyFiles: number
+  v2Sessions: number
+} | null {
+  if (value === null || typeof value !== "object" || !("dumps" in value)) return null
+  const dumps = value.dumps
+  if (dumps === null || typeof dumps !== "object") return null
+  const bytes = "bytes" in dumps ? dumps.bytes : undefined
+  const legacyFiles = "legacyFiles" in dumps ? dumps.legacyFiles : undefined
+  const v2Sessions = "v2Sessions" in dumps ? dumps.v2Sessions : undefined
+  if (typeof bytes !== "number" || typeof legacyFiles !== "number" || typeof v2Sessions !== "number") return null
+  const appServer = "appServer" in value ? value.appServer : null
+  return {
+    appServerRunning: appServer !== null
+      && typeof appServer === "object"
+      && "running" in appServer
+      && appServer.running === true,
+    bytes,
+    legacyFiles,
+    v2Sessions,
+  }
 }

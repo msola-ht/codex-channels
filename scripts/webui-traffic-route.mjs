@@ -59,7 +59,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
       "还没有转储文件：在 config.toml 的 [debug] 开启 model_traffic_dump 后重启 App Server 服务",
     );
   }
-  const enabled = dumpEnabled(environment);
+  const dump = dumpSettings(environment);
   if (apiPath === "/traffic") {
     assertParameters(url, ["label", "limit", "offset", "session"]);
     const label = readLabel(url, labels);
@@ -71,7 +71,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     });
     sendJson(response, 200, {
       directory,
-      enabled,
+      enabled: dump.enabled,
+      retentionDays: dump.retentionDays,
       generatedAt: new Date().toISOString(),
       label,
       labels,
@@ -110,7 +111,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   }
   sendJson(response, 200, {
     directory,
-    enabled,
+    enabled: dump.enabled,
+    retentionDays: dump.retentionDays,
     exchange,
     generatedAt: new Date().toISOString(),
     label,
@@ -119,16 +121,19 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   return true;
 }
 
-function dumpEnabled(environment) {
+function dumpSettings(environment) {
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const configPath = explicitConfigFile
     ? explicitConfigFile
     : join(userDataDir(environment), "config.toml");
   try {
-    return validateDebugConfigDocument(readGatewayConfig(configPath).debug ?? {})
-      .model_traffic_dump;
+    const debug = validateDebugConfigDocument(readGatewayConfig(configPath).debug ?? {});
+    return {
+      enabled: debug.model_traffic_dump,
+      retentionDays: debug.model_traffic_retention_days,
+    };
   } catch {
-    return false;
+    return { enabled: false, retentionDays: 30 };
   }
 }
 

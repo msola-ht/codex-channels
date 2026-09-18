@@ -464,9 +464,52 @@ describe("ModelTrafficDump V2", () => {
     expect(existsSync(oldest)).toBe(false);
     expect(existsSync(newer)).toBe(true);
   });
+
+  it("removes expired historical sessions when the writer starts", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-retention-"));
+    temporaryDirectories.push(directory);
+    const expired = oldSession(directory, "expired", Date.now() - 31 * 24 * 60 * 60 * 1_000, 0);
+    const retained = oldSession(directory, "retained", Date.now() - 29 * 24 * 60 * 60 * 1_000, 0);
+    const errors: Error[] = [];
+
+    const dump = new ModelTrafficDump({
+      directory,
+      label: "openai",
+      retentionDays: 30,
+      onError: (error) => errors.push(error),
+    });
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestEnd();
+
+    expect(errors).toEqual([]);
+    expect(existsSync(expired)).toBe(false);
+    expect(existsSync(retained)).toBe(true);
+    await dump.close();
+  });
+
+  it("keeps expired sessions when time retention is disabled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-retention-off-"));
+    temporaryDirectories.push(directory);
+    const expired = oldSession(directory, "expired", 1, 0);
+    const dump = new ModelTrafficDump({
+      directory,
+      label: "openai",
+      retentionDays: 0,
+      onError: () => undefined,
+    });
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(),
+    });
+    exchange.requestEnd();
+
+    expect(existsSync(expired)).toBe(true);
+    await dump.close();
+  });
 });
 
-function fixture(options: { inputItems?: number; itemMaxBytes?: number } = {}) {
+function fixture(options: { inputItems?: number; itemMaxBytes?: number; retentionDays?: number } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-"));
   temporaryDirectories.push(directory);
   const errors: Error[] = [];
@@ -493,7 +536,7 @@ function readIndex(session: string): Array<Record<string, unknown> & {
     });
 }
 
-function oldSession(directory: string, session: string, createdAtMs: number): string {
+function oldSession(directory: string, session: string, createdAtMs: number, sizeMiB = 200): string {
   const path = join(directory, `openai-${session}`);
   mkdirSync(path, { mode: 0o700 });
   writeFileSync(
@@ -502,6 +545,6 @@ function oldSession(directory: string, session: string, createdAtMs: number): st
   );
   const payload = join(path, "payload-1.bin");
   writeFileSync(payload, "");
-  truncateSync(payload, 200 * 1_048_576);
+  truncateSync(payload, sizeMiB * 1_048_576);
   return path;
 }

@@ -517,20 +517,24 @@ cwd = "/tmp/workspace"
         model_traffic_dump: true,
         model_traffic_input_items: 3,
         model_traffic_item_max_bytes: 65_536,
+        model_traffic_retention_days: 30,
       });
     expect(validateDebugConfigDocument({})).toEqual({
       model_traffic_dump: false,
       model_traffic_input_items: 3,
       model_traffic_item_max_bytes: 65_536,
+      model_traffic_retention_days: 30,
     });
     expect(validateDebugConfigDocument({
       model_traffic_dump: true,
       model_traffic_input_items: 3,
       model_traffic_item_max_bytes: 65_536,
+      model_traffic_retention_days: 30,
     })).toEqual({
       model_traffic_dump: true,
       model_traffic_input_items: 3,
       model_traffic_item_max_bytes: 65_536,
+      model_traffic_retention_days: 30,
     });
     expect(capturedError(() => validateDebugConfigDocument({
       model_traffic_dump: "yes",
@@ -546,6 +550,9 @@ cwd = "/tmp/workspace"
     }))).toContain("[debug]");
     expect(capturedError(() => validateDebugConfigDocument({
       model_traffic_item_max_bytes: -1,
+    }))).toContain("[debug]");
+    expect(capturedError(() => validateDebugConfigDocument({
+      model_traffic_retention_days: -1,
     }))).toContain("[debug]");
     expect(capturedError(() => validateDebugConfigDocument({
       model_traffic_item_max_bytes: 1.5,

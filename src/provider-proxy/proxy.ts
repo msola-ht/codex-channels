@@ -91,6 +91,8 @@ export interface ProviderProxyOptions {
     inputItems?: number;
     /** 单个数组条目的正文上限（字节）；缺省或 `0` 时按原样转储。 */
     itemMaxBytes?: number;
+    /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
+    retentionDays?: number;
     label: string;
   };
   resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
@@ -173,6 +175,7 @@ export class ProviderProxy {
     }
     this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
+    this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
       ? undefined
       : new ModelTrafficDump({
@@ -184,6 +187,9 @@ export class ProviderProxy {
           ...(options.trafficDump.itemMaxBytes === undefined
             ? {}
             : { itemMaxBytes: options.trafficDump.itemMaxBytes }),
+          ...(options.trafficDump.retentionDays === undefined
+            ? {}
+            : { retentionDays: options.trafficDump.retentionDays }),
           onError: (error) => {
             this.onError?.(error);
           },
@@ -191,7 +197,6 @@ export class ProviderProxy {
     this.quotaWindowsProvider = options.quotaWindowsProvider;
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
-    this.onError = options.onError;
     this.server = createServer((request, response) => {
       this.handleHttpRequest(request, response);
     });

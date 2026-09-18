@@ -32,6 +32,8 @@ function currentValue(settings: ManagementSettingsResponse, setting: ManagementS
   if (setting.kind === "system.sandbox") return settings.system.sandbox
   if (setting.kind === "system.approval-timeout") return settings.system.approvalTimeoutSeconds
   if (setting.kind === "system.idle-release-minutes") return settings.system.idleReleaseMinutes
+  if (setting.kind === "system.model-traffic-dump") return settings.system.modelTrafficDumpEnabled
+  if (setting.kind === "system.model-traffic-retention-days") return settings.system.modelTrafficRetentionDays
   if (setting.kind === "automation.scheduled-tasks") return settings.automation.scheduledTasksEnabled
   if (setting.kind === "advanced.logging-level") return settings.advanced.loggingLevel
   if (setting.kind === "metrics.storage") return { storage: settings.metrics.storage }

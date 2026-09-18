@@ -430,6 +430,37 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("codexc service restart app-server");
   });
 
+  it("updates model traffic retention through the system settings", async () => {
+    const fixture = createFixture();
+    const output: string[] = [];
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn()
+        .mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("model_traffic_retention"),
+      text: vi.fn().mockResolvedValueOnce("7"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts,
+    });
+
+    expect(result).toEqual({
+      modelTrafficRetentionDays: 7,
+      configPath: fixture.configPath,
+      activation: "restart-app-server",
+      activationResult: configActivationResult("restart-app-server"),
+    });
+    expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({
+      model_traffic_retention_days: 7,
+    });
+    expect(output.join("")).toContain("保留 7 天");
+  });
+
   it("toggles the operation detail display mode through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];

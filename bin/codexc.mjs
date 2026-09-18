@@ -49,7 +49,9 @@ import {
 } from "../scripts/codex-remote-options.mjs";
 import { parseChannelSendImageArgs } from "../scripts/channel-send-image-options.mjs";
 import {
+  parseTrafficCleanupArgs,
   parseTrafficCommandArgs,
+  TRAFFIC_CLEANUP_USAGE,
   TRAFFIC_USAGE,
 } from "../scripts/traffic-command-options.mjs";
 import {
@@ -252,6 +254,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   traffic: TRAFFIC_USAGE,
+  "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -465,8 +468,13 @@ try {
       await metrics(args);
       break;
     case "traffic":
-      if (showRequestedHelp(args, "traffic")) break;
+      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup")) break;
       if (args.some(isHelpArgument)) throw new Error(TRAFFIC_USAGE);
+      if (args[0] === "cleanup") {
+        parseTrafficCleanupArgs(args.slice(1));
+        runStandaloneScript("scripts/traffic-cleanup.mjs", args.slice(1));
+        break;
+      }
       parseTrafficCommandArgs(args);
       runStandaloneScript("scripts/traffic-command.mjs", args);
       break;

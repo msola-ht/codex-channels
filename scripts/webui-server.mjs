@@ -740,6 +740,8 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
         sandbox: gateway.system.sandbox,
         defaultWorkspace: gateway.system.defaultWorkspace,
         defaultModel: gateway.system.defaultModel,
+        modelTrafficDumpEnabled: gateway.system.modelTrafficDumpEnabled,
+        modelTrafficRetentionDays: gateway.system.modelTrafficRetentionDays,
       },
       automation: {
         scheduledTasksEnabled: gateway.automation.scheduledTasksEnabled,

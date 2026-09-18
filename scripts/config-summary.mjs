@@ -13,6 +13,7 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
     `- 模型请求转储：${enabledLabel(summary.modelTrafficDump)}`,
+    `- 转储自动保留：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `${summary.modelTrafficRetentionDays} 天`}`,
     `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
     `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
@@ -58,6 +59,7 @@ export function gatewayConfigSummary(document, configPath) {
     idleReleaseMinutes: numberValue(conversation.idle_release_minutes) ?? 15,
     scheduledTasks: scheduledTasks.enabled === true,
     modelTrafficDump: debug.model_traffic_dump === true,
+    modelTrafficRetentionDays: numberValue(debug.model_traffic_retention_days) ?? 30,
     pluginApi: experimental.plugin_api === true,
     logLevel: stringValue(logging.level) || "info",
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]

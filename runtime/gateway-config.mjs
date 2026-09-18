@@ -177,6 +177,7 @@ const debugSchema = z.strictObject({
   model_traffic_dump: z.boolean().default(false),
   model_traffic_input_items: z.number().int().min(0).default(3),
   model_traffic_item_max_bytes: z.number().int().min(0).default(65_536),
+  model_traffic_retention_days: z.number().int().min(0).max(36_500).default(30),
 });
 
 const gatewayDocumentSchema = z.strictObject({

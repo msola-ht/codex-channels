@@ -199,6 +199,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["channel", "-h"], "用法：codexc channel"],
       [["channel", "send-image", "--help"], "用法：codexc channel send-image"],
       [["traffic", "-h"], "用法：codexc traffic"],
+      [["traffic", "cleanup", "--help"], "用法：codexc traffic cleanup"],
       [["webui", "-h"], "用法：codexc webui"],
       [["version", "-h"], "用法：codexc version"],
     ] as const;
@@ -2856,6 +2857,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["traffic", "--list", "--all"], "--list 与 --all 不能同时使用"],
       [["traffic", "--exchange", "abc"], "--exchange 需要正整数值"],
       [["traffic", "--dir"], "--dir 缺少值"],
+      [["traffic", "cleanup", "--all"], "未知清理参数：--all"],
     ] as const;
     await forEachWithConcurrency(cases, 8, async ([args, expected]) => {
       const result = await runCliProcess(args, {

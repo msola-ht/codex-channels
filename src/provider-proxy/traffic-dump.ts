@@ -33,6 +33,7 @@ const compactionBufferLimitBytes = 32 * 1_048_576;
 const fileSizeLimitBytes = 64 * 1_048_576;
 /** 同一 Provider 的历史完整 session 约保留 320 MiB；当前 session 不在写入中途删除。 */
 const retainedBytesPerLabel = 5 * fileSizeLimitBytes;
+const millisecondsPerDay = 24 * 60 * 60 * 1_000;
 /** 待写缓冲达到该大小后立即落盘，不等待请求结束。 */
 const flushThresholdBytes = 262_144;
 /** 低流量时的最长落盘等待，兼顾实时查看与小记录合并。 */
@@ -67,9 +68,66 @@ export interface ModelTrafficDumpOptions {
    * `0` 或不设置表示按原样转储。
    */
   itemMaxBytes?: number;
+  /** 历史 session 的最长保留天数；`0` 或不设置时关闭按时间清理。 */
+  retentionDays?: number;
   /** 文件名前缀，用于区分主 Provider 与隔离 Provider。 */
   label: string;
   onError: (error: Error) => void;
+}
+
+export interface PruneModelTrafficDumpOptions {
+  /** 转储根目录。 */
+  directory: string;
+  /** 只清理指定 Provider；省略时清理目录中的全部 V2 Provider。 */
+  label?: string;
+  /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
+  retentionDays: number;
+  /** 当前写入目录；清理时始终保留。 */
+  currentSessionDirectory?: string;
+}
+
+/** 清理可识别的 V2 历史 session；未知目录与旧版文件保持不变。 */
+export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOptions): void {
+  if (!existsSync(options.directory)) return;
+  const byLabel = new Map<string, Array<{
+    createdAtMs: number;
+    path: string;
+    size: number;
+  }>>();
+  for (const entry of readdirSync(options.directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const path = join(options.directory, entry.name);
+    const manifest = readManifest(path);
+    if (manifest?.version !== 2 || (options.label !== undefined && manifest.label !== options.label)) {
+      continue;
+    }
+    const sessions = byLabel.get(manifest.label) ?? [];
+    sessions.push({ createdAtMs: manifest.createdAtMs, path, size: directorySize(path) });
+    byLabel.set(manifest.label, sessions);
+  }
+  const oldestRetainedAtMs = options.retentionDays === 0
+    ? null
+    : Date.now() - options.retentionDays * millisecondsPerDay;
+  for (const sessions of byLabel.values()) {
+    sessions.sort((left, right) => right.createdAtMs - left.createdAtMs);
+    let retained = 0;
+    for (const session of sessions) {
+      if (
+        session.path !== options.currentSessionDirectory
+        && oldestRetainedAtMs !== null
+        && session.createdAtMs < oldestRetainedAtMs
+      ) {
+        rmSync(session.path, { force: true, recursive: true });
+        continue;
+      }
+      retained += session.size;
+      if (
+        session.path === options.currentSessionDirectory
+        || retained <= retainedBytesPerLabel
+      ) continue;
+      rmSync(session.path, { force: true, recursive: true });
+    }
+  }
 }
 
 export interface ModelTrafficHttpExchangeInput {
@@ -109,6 +167,7 @@ export class ModelTrafficDump {
   private readonly itemMaxBytes: number;
   private readonly label: string;
   private readonly onError: (error: Error) => void;
+  private readonly retentionDays: number;
   private readonly writerSession = new Date().toISOString().replace(/[:.]/gu, "-");
   private readonly streams = new Set<WriteStream>();
   private sessionDirectory: string | undefined;
@@ -134,6 +193,7 @@ export class ModelTrafficDump {
     this.itemMaxBytes = options.itemMaxBytes ?? 0;
     this.label = options.label.replace(/[^A-Za-z0-9._-]+/gu, "_");
     this.onError = options.onError;
+    this.retentionDays = options.retentionDays ?? 0;
   }
 
   beginHttpExchange(input: ModelTrafficHttpExchangeInput): ModelTrafficExchange {
@@ -350,27 +410,13 @@ export class ModelTrafficDump {
       version: 2,
     }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     securePrivateFileSync(manifestPath);
-    this.retainNewestSessions();
+    pruneModelTrafficDumpSessions({
+      currentSessionDirectory: this.sessionDirectory,
+      directory: this.directory,
+      label: this.label,
+      retentionDays: this.retentionDays,
+    });
     return this.sessionDirectory;
-  }
-
-  private retainNewestSessions(): void {
-    const sessions = readdirSync(this.directory, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .flatMap((entry) => {
-        const path = join(this.directory, entry.name);
-        const manifest = readManifest(path);
-        return manifest?.version === 2 && manifest.label === this.label
-          ? [{ createdAtMs: manifest.createdAtMs, path, size: directorySize(path) }]
-          : [];
-      })
-      .sort((left, right) => right.createdAtMs - left.createdAtMs);
-    let retained = 0;
-    for (const session of sessions) {
-      retained += session.size;
-      if (session.path === this.sessionDirectory || retained <= retainedBytesPerLabel) continue;
-      rmSync(session.path, { force: true, recursive: true });
-    }
   }
 
   private enqueueWrite(stream: WriteStream, content: string | Buffer): void {

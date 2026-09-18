@@ -277,6 +277,8 @@ export interface SettingsSummaryResponse {
       sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
+      modelTrafficDumpEnabled: boolean
+      modelTrafficRetentionDays: number
     }
     automation: { scheduledTasksEnabled: boolean }
     network: { configuredFields: string[] }
@@ -368,7 +370,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -444,7 +446,7 @@ export interface CodexUserSettingInput { kind: string; [key: string]: unknown }
 
 export interface ManagementTask {
   id: string
-  operation: "service" | "metrics" | "update"
+  operation: "service" | "metrics" | "traffic" | "update"
   action: string
   target: string | null
   state: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "failed"
@@ -462,6 +464,7 @@ export type ManagementTaskInput =
   | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
   | { operation: "metrics"; action: "upgrade" | "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
+  | { operation: "traffic"; action: "cleanup" }
 
 export interface ManagementTaskPreview {
   operation: ManagementTaskInput["operation"]
@@ -824,6 +827,7 @@ export interface TrafficExchangeSummary {
 export interface TrafficListResponse {
   directory: string
   enabled: boolean
+  retentionDays: number
   label: string
   labels: TrafficLabel[]
   session: string | null
@@ -925,6 +929,7 @@ export interface TrafficExchangeDetail {
 export interface TrafficDetailResponse {
   directory: string
   enabled: boolean
+  retentionDays: number
   label: string
   session: string
   generatedAt: string

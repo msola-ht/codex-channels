@@ -142,6 +142,8 @@ try {
     "scripts/telegram-setup-session.mjs",
     "scripts/telegram-setup.mjs",
     "scripts/terminal-prompter.mjs",
+    "scripts/traffic-cleanup.d.mts",
+    "scripts/traffic-cleanup.mjs",
     "scripts/traffic-command-options.d.mts",
     "scripts/traffic-command-options.mjs",
     "scripts/traffic-command.mjs",

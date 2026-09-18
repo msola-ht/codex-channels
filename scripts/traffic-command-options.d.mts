@@ -1,4 +1,10 @@
 export const TRAFFIC_USAGE: string;
+export const TRAFFIC_CLEANUP_USAGE: string;
+
+export interface TrafficCleanupOptions {
+  confirm: boolean;
+  directory: string | undefined;
+}
 
 export interface TrafficCommandOptions {
   all: boolean;
@@ -14,3 +20,7 @@ export interface TrafficCommandOptions {
 export function parseTrafficCommandArgs(
   args: readonly string[],
 ): TrafficCommandOptions;
+
+export function parseTrafficCleanupArgs(
+  args: readonly string[],
+): TrafficCleanupOptions;

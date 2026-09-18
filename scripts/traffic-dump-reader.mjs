@@ -16,6 +16,7 @@ import { createOutputCollector, parameterComparison, requestContent, requestMeta
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
+const legacyDumpFilePattern = /^[A-Za-z0-9._-]+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[1-9]\d*\.jsonl$/u;
 
 export function listDumpFiles(directory) {
   return dumpCatalog(directory).files;
@@ -27,7 +28,7 @@ export function dumpCatalog(directory) {
   const legacyFiles = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    if (entry.isFile() && legacyDumpFilePattern.test(entry.name)) {
       legacyFiles.push(path);
       continue;
     }

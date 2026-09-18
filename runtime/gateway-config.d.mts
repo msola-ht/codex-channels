@@ -60,6 +60,7 @@ export interface GatewayConfigDocument {
     model_traffic_dump: boolean;
     model_traffic_input_items: number;
     model_traffic_item_max_bytes: number;
+    model_traffic_retention_days: number;
   };
   scheduled_tasks: { enabled: boolean };
   storage: { database_path: string };
@@ -105,6 +106,7 @@ export function validateDebugConfigDocument(
   model_traffic_dump: boolean;
   model_traffic_input_items: number;
   model_traffic_item_max_bytes: number;
+  model_traffic_retention_days: number;
 };
 export function readGatewayConfig(configPath: string): TomlTable;
 export function materializeGatewayConfigDefaults(

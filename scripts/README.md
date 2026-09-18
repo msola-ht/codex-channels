@@ -128,7 +128,7 @@
   路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
-- `webui-traffic-route.mjs`：WebUI 的模型转储只读路由，列出 V2 逻辑调用摘要并提供单条请求与终态
+- `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
   响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
@@ -295,10 +295,10 @@
   开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
+- `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份与模型上游终端标识；快捷开关只在 `info` / `debug`
   间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
-  `[debug].model_traffic_dump` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
+  `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
   编辑，留空即删除配置。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
@@ -495,8 +495,11 @@
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
-  转储目录、逻辑调用编号、正文长度、关键字与跟随参数，使顶层 CLI 在读取配置前拒绝非法输入，
+  转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
+- `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc traffic cleanup`；默认只预览
+  已识别的 V2 session 与旧版逐帧 JSONL，确认全部 App Server 已停止后才按 `--confirm` 永久删除，
+  未识别文件与目录保持不变。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与

@@ -37,6 +37,11 @@ export async function runSystemSettings({
         label: "模型请求转储",
         hint: "记录完整模型报文；仅排查时临时开启",
       },
+      {
+        value: "model_traffic_retention",
+        label: "模型请求转储保留天数",
+        hint: "默认 30 天；0 关闭按时间自动清理",
+      },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
       {
         value: "idle_release",
@@ -71,6 +76,9 @@ export async function runSystemSettings({
   if (section === "debug") return debugSetup({ environment, input, output, prompts });
   if (section === "model_traffic_dump") {
     return runModelTrafficDump({ environment, output, prompts, writeConfig });
+  }
+  if (section === "model_traffic_retention") {
+    return runModelTrafficRetention({ environment, output, prompts, writeConfig });
   }
   if (section === "approval_timeout") {
     return runApprovalTimeout({ environment, output, prompts, writeConfig });
@@ -121,6 +129,39 @@ async function runModelTrafficDump({ environment, output, prompts, writeConfig }
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
     modelTrafficDumpEnabled: enabled,
+    configPath: result.configPath,
+    activation: result.activation,
+    activationResult: result.activationResult,
+  };
+}
+
+async function runModelTrafficRetention({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const value = await prompts.text({
+    message: "模型请求转储保留天数（0 表示关闭按时间自动清理）",
+    initialValue: String(settings.system.modelTrafficRetentionDays),
+    validate: (input) => {
+      const parsed = Number(input);
+      return Number.isInteger(parsed) && parsed >= 0 && parsed <= 36_500
+        ? undefined
+        : "请输入 0–36500 之间的整数";
+    },
+  });
+  if (prompts.isCancel(value)) return { action: "back" };
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
+    throw new Error("模型请求转储保留天数必须为 0–36500 之间的整数");
+  }
+  const result = updateGatewaySetting({
+    kind: "system.model-traffic-retention-days",
+    value: parsed,
+  }, { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(parsed === 0
+    ? `模型请求转储按时间自动清理已关闭：${result.configPath}\n`
+    : `模型请求转储已设为保留 ${parsed} 天：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return {
+    modelTrafficRetentionDays: parsed,
     configPath: result.configPath,
     activation: result.activation,
     activationResult: result.activationResult,

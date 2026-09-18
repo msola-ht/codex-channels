@@ -94,6 +94,7 @@ describe("webui traffic V2 API", () => {
 
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=1`);
     expect(list.status).toBe(200);
+    expect(list.body.retentionDays).toBe(30);
     expect(list.body).toMatchObject({ enabled: true, label: "ocg", total: 2, nextOffset: 1 });
     expect(list.body.exchanges[0]).toMatchObject({
       id: 2,
@@ -535,6 +536,7 @@ function writeSession(
 
 interface TrafficListBody {
   enabled: boolean;
+  retentionDays: number;
   exchanges: Array<Record<string, unknown>>;
   label: string;
   labels: Array<{ label: string; sessions: number }>;

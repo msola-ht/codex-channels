@@ -11,12 +11,14 @@ describe("WebUI management tasks", () => {
     expect(normalizeTaskInput({ operation: "service", action: "reload" })).toEqual({ operation: "service", action: "reload", target: undefined });
     expect(normalizeTaskInput({ operation: "metrics", action: "cleanup" })).toEqual({ operation: "metrics", action: "cleanup" });
     expect(normalizeTaskInput({ operation: "metrics", action: "prune", target: "deepseek" })).toEqual({ operation: "metrics", action: "prune", target: "deepseek" });
+    expect(normalizeTaskInput({ operation: "traffic", action: "cleanup" })).toEqual({ operation: "traffic", action: "cleanup", target: undefined });
     expect(normalizeTaskInput({ operation: "update" })).toEqual({ operation: "update", action: "source", target: undefined });
     expect(() => normalizeTaskInput({ operation: "service", action: "exec", target: "gateway" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "service", action: "reload", target: "gateway" })).toThrow("服务重载不接受服务目标");
     expect(() => normalizeTaskInput({ operation: "metrics", action: "shell" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "prune" })).toThrow();
     expect(() => normalizeTaskInput({ operation: "metrics", action: "cleanup", target: "deepseek" })).toThrow();
+    expect(() => normalizeTaskInput({ operation: "traffic", action: "cleanup", target: "openai" })).toThrow();
   });
 
   it("returns an explicit confirmation preview", () => {
@@ -38,6 +40,11 @@ describe("WebUI management tasks", () => {
     expect(runner.preview({ operation: "metrics", action: "cleanup" })).toMatchObject({
       preconditions: ["Gateway 必须已停止，且指标 Socket 不可用"],
       recovery: expect.stringContaining("指标数据库备份"),
+    });
+    expect(runner.preview({ operation: "traffic", action: "cleanup" })).toMatchObject({
+      effects: ["执行 codexc traffic cleanup --confirm"],
+      preconditions: ["全部 App Server 必须已停止"],
+      recovery: expect.stringContaining("无法恢复"),
     });
   });
 

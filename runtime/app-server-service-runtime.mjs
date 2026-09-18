@@ -58,9 +58,7 @@ import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
   const validatedDebug = validateDebugConfigDocument(runtime.document.debug ?? {});
-  const trafficDumpDirectory = validatedDebug.model_traffic_dump
-    ? join(runtime.dataDir, "traffic")
-    : undefined;
+  const trafficDumpDirectory = join(runtime.dataDir, "traffic");
   if (Object.hasOwn(runtime.document, "ds_proxy")) {
     throw new Error("ds_proxy 已移除，模型统计代理现在由 App Server 服务自动管理");
   }
@@ -118,6 +116,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   const upstreamAgents = new Set();
@@ -144,13 +143,14 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       ...(validatedCodex.upstream_user_agent
         ? { upstreamUserAgent: validatedCodex.upstream_user_agent }
         : {}),
-      ...(trafficDumpDirectory === undefined
+      ...(!validatedDebug.model_traffic_dump
         ? {}
         : {
             trafficDump: {
               directory: trafficDumpDirectory,
               inputItems: validatedDebug.model_traffic_input_items,
               itemMaxBytes: validatedDebug.model_traffic_item_max_bytes,
+              retentionDays: validatedDebug.model_traffic_retention_days,
               label: provider,
             },
           }),
@@ -665,6 +665,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       },
     );
     await supervisorOwner.start();
+    try {
+      pruneModelTrafficDumpSessions({
+        directory: trafficDumpDirectory,
+        retentionDays: validatedDebug.model_traffic_retention_days,
+      });
+    } catch (error) {
+      console.error(
+        "模型请求转储自动清理失败："
+        + (error instanceof Error ? error.message : String(error)),
+      );
+    }
     await ensureInstance(primaryProvider, { waitForReady: false });
     supervisorOwner.markRunning(primaryProvider);
     if (validatedCodex.desktop_app?.enabled === true && process.platform === "win32") {

@@ -74,8 +74,10 @@
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
-  一次调用。写队列先落正文再落索引，不改变转发、背压和指标采集。历史完整 session 按 Provider
-  约保留 320 MiB，当前写入中的 session 不会被拆除；Authorization、Cookie 等凭据字段只保留认证
+  一次调用。写队列先落正文再落索引，不改变转发、背压和指标采集。App Server 启动时按
+  `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理；历史完整 session
+  仍按 Provider 约保留 320 MiB。当前写入中的 session 不会被拆除，未知目录和旧版文件不会被自动删除；
+  Authorization、Cookie 等凭据字段只保留认证
   方案。精简模式继续裁剪 `input` 与过大条目，并从 trace 丢弃 `.delta`；逻辑响应始终只保存
   `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。

@@ -13,9 +13,16 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  parseTrafficCleanupArgs,
   parseTrafficCommandArgs,
+  TRAFFIC_CLEANUP_USAGE,
   TRAFFIC_USAGE,
 } from "../scripts/traffic-command-options.mjs";
+import {
+  assertConfiguredAppServersStopped,
+  runTrafficCleanup,
+  trafficCleanupPreview,
+} from "../scripts/traffic-cleanup.mjs";
 
 const trafficScript = resolve("scripts/traffic-command.mjs");
 const temporaryDirectories: string[] = [];
@@ -81,6 +88,87 @@ describe("traffic command options", () => {
     }
     expect(TRAFFIC_USAGE).toContain("V2 session");
     expect(TRAFFIC_USAGE).toContain("旧版逐帧");
+  });
+
+  it("parses cleanup preview and confirmation options", () => {
+    expect(parseTrafficCleanupArgs([])).toEqual({ confirm: false, directory: undefined });
+    expect(parseTrafficCleanupArgs(["--dir", "relative-traffic", "--confirm"])).toEqual({
+      confirm: true,
+      directory: resolve("relative-traffic"),
+    });
+    expect(() => parseTrafficCleanupArgs(["--all"])).toThrow("未知清理参数：--all");
+    expect(TRAFFIC_CLEANUP_USAGE).toContain("--confirm");
+  });
+});
+
+describe("traffic cleanup", () => {
+  it("previews recognized dumps without deleting them", async () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
+    const legacy = join(directory, "openai-2026-09-17T00-00-00-000Z-1.jsonl");
+    const unknown = join(directory, "notes.jsonl");
+    writeFileSync(legacy, "{}\n");
+    writeFileSync(unknown, "keep\n");
+    const lines: string[] = [];
+
+    const preview = await runTrafficCleanup(["--dir", directory], {
+      assertAppServersStopped: async () => { throw new Error("不应检查服务"); },
+      output: { log: (line) => { lines.push(line); } },
+    });
+
+    expect(preview).toMatchObject({ v2Sessions: 1, legacyFiles: 1, labels: 1 });
+    expect(lines.join("\n")).toContain("未删除");
+    expect(trafficCleanupPreview(directory).targets).toEqual([session, legacy]);
+    expect(readFileSync(unknown, "utf8")).toBe("keep\n");
+  });
+
+  it("requires stopped App Servers before confirmed deletion", async () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
+    await expect(runTrafficCleanup(["--dir", directory, "--confirm"], {
+      assertAppServersStopped: async () => { throw new Error("App Server 仍在运行"); },
+      output: { log: () => undefined },
+    })).rejects.toThrow("App Server 仍在运行");
+    expect(trafficCleanupPreview(directory).targets).toEqual([session]);
+  });
+
+  it("deletes recognized dumps after explicit confirmation and leaves unknown files", async () => {
+    const directory = temporaryDirectory();
+    writeSession(directory, "deepseek", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
+    writeFileSync(join(directory, "deepseek-2026-09-17T00-00-00-000Z-1.jsonl"), "{}\n");
+    const unknown = join(directory, "keep.jsonl");
+    writeFileSync(unknown, "keep\n");
+    let checked = 0;
+
+    const result = await runTrafficCleanup(["--dir", directory, "--confirm"], {
+      assertAppServersStopped: async () => { checked += 1; },
+      output: { log: () => undefined },
+    });
+
+    expect(checked).toBe(1);
+    expect(result).toMatchObject({ v2Sessions: 1, legacyFiles: 1 });
+    expect(trafficCleanupPreview(directory).targets).toEqual([]);
+    expect(readFileSync(unknown, "utf8")).toBe("keep\n");
+  });
+
+  it("rejects confirmed cleanup outside the current configured traffic directory", async () => {
+    const home = temporaryDirectory();
+    const other = temporaryDirectory();
+    writeFileSync(join(home, "config.toml"), "version = 1\n");
+
+    await expect(assertConfiguredAppServersStopped(
+      { CODEX_CONNECT_HOME: home },
+      other,
+    )).rejects.toThrow(`确认清理只允许当前配置的转储目录：${join(home, "traffic")}`);
+  });
+
+  it("rejects confirmed cleanup when no Gateway configuration can be verified", async () => {
+    const home = temporaryDirectory();
+
+    await expect(assertConfiguredAppServersStopped(
+      { CODEX_CONNECT_HOME: home },
+      join(home, "traffic"),
+    )).rejects.toThrow("必须先初始化并使用对应的 Gateway 配置");
   });
 });
 

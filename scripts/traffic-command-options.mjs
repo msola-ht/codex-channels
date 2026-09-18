@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 
 export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目录]
+      codexc traffic cleanup [--dir 目录] [--confirm]
 
 把 [debug].model_traffic_dump 生成的 V2 转储渲染成人可读文本：每次逻辑模型调用只展示一条请求
 和一个终态响应，原始 SSE 事件与 WebSocket 帧保留在独立 trace 中。
@@ -18,7 +19,20 @@ export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目�
   -h, --help           显示本帮助
 
 不传路径时读取 --dir 下最新标签、最新 writer session。位置参数只接受一个 V2 session 目录；旧版逐帧
-JSONL 不自动迁移或混读。--follow 从当前末尾开始，显式传入 session 时从已有调用开始输出。`;
+JSONL 不自动迁移或混读。--follow 从当前末尾开始，显式传入 session 时从已有调用开始输出。
+
+cleanup 默认只预览可识别的全部 V2 session 和旧版逐帧 JSONL；加 --confirm 才会删除。删除前必须
+停止全部 App Server，无法恢复。`;
+
+export const TRAFFIC_CLEANUP_USAGE = `用法：codexc traffic cleanup [--dir 目录] [--confirm]
+
+预览或清空转储目录中可识别的全部 V2 session 和旧版逐帧 JSONL。默认只预览；加 --confirm 才会
+删除，删除前必须停止全部 App Server。未知文件和目录不会删除。
+
+选项：
+  --dir <目录>         指定预览目录；确认删除只允许当前配置的数据目录下的 traffic
+  --confirm            确认永久删除预览范围内的全部转储
+  -h, --help           显示本帮助`;
 
 export function parseTrafficCommandArgs(args) {
   const options = {
@@ -74,6 +88,24 @@ export function parseTrafficCommandArgs(args) {
   }
   if (options.all && options.list) {
     throw new Error("--list 与 --all 不能同时使用");
+  }
+  return options;
+}
+
+export function parseTrafficCleanupArgs(args) {
+  const options = { confirm: false, directory: undefined };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--confirm") {
+      options.confirm = true;
+      continue;
+    }
+    if (argument === "--dir") {
+      options.directory = resolve(requiredValue(args[index + 1], "--dir"));
+      index += 1;
+      continue;
+    }
+    throw new Error(`未知清理参数：${argument}`);
   }
   return options;
 }
