@@ -118,6 +118,9 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 共用的中文短文本，不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
+`conversation-model-account-command-format.ts` 在 OpenAI `/limits` 中展示重置券可用数量，并按相同
+到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
+未返回明细的剩余张数。
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。

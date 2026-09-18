@@ -146,6 +146,15 @@ export function toAccountRateLimits(
           "rate limit reset credits availableCount",
         )
       : null,
+    resetCreditExpiresAt: response.rateLimitResetCredits
+      ? response.rateLimitResetCredits.credits === null
+        ? null
+        : response.rateLimitResetCredits.credits.map((credit, index) =>
+            optionalNumber(
+              credit.expiresAt,
+              `rate limit reset credit ${index + 1} expiresAt`,
+            ))
+      : null,
     accountId: optionalBoundedString(response.accountId, "rate limit accountId"),
     ordinaryUsageAllowed: optionalBoolean(
       response.ordinaryUsageAllowed,
