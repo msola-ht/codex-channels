@@ -59,6 +59,7 @@ export function loadGatewaySettings(environment = process.env) {
   const conversation = table(document.conversation);
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
+  const debug = table(document.debug);
   const experimental = table(document.experimental);
   const network = table(document.network);
   const telegram = table(document.telegram);
@@ -83,6 +84,7 @@ export function loadGatewaySettings(environment = process.env) {
       sandbox: codex.sandbox === "read-only" ? "read-only" : "workspace-write",
       defaultWorkspace: stringValue(document.default_workspace) || null,
       defaultModel: stringValue(codex.default_model) || null,
+      modelTrafficDumpEnabled: debug.model_traffic_dump === true,
       officialTuiIdentity: {
         clientIdentity: {
           name: stringValue(clientIdentity.name) || null,
@@ -279,6 +281,11 @@ function applySetting(document, input) {
       else codex.default_model = value;
       document.codex = codex;
       return changed(value, "restart-gateway");
+    }
+    case "system.model-traffic-dump": {
+      const value = booleanValue(input.value, "value", "模型请求转储");
+      document.debug = { ...table(document.debug), model_traffic_dump: value };
+      return changed(value, "restart-app-server");
     }
     case "system.official-tui-identity": {
       const identity = table(input.value?.clientIdentity);

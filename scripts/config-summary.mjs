@@ -12,6 +12,7 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 思考状态：${enabledLabel(summary.reasoning)}`,
     `- 计划任务：${enabledLabel(summary.scheduledTasks)}`,
     `- 会话空闲自动解除：${summary.idleReleaseMinutes === 0 ? "关闭" : `${summary.idleReleaseMinutes} 分钟`}`,
+    `- 模型请求转储：${enabledLabel(summary.modelTrafficDump)}`,
     `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
     `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
@@ -27,6 +28,7 @@ export function gatewayConfigSummary(document, configPath) {
   const codex = table(document.codex);
   const display = table(document.display);
   const conversation = table(document.conversation);
+  const debug = table(document.debug);
   const experimental = table(document.experimental);
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
@@ -55,6 +57,7 @@ export function gatewayConfigSummary(document, configPath) {
     reasoning: display.reasoning !== false,
     idleReleaseMinutes: numberValue(conversation.idle_release_minutes) ?? 15,
     scheduledTasks: scheduledTasks.enabled === true,
+    modelTrafficDump: debug.model_traffic_dump === true,
     pluginApi: experimental.plugin_api === true,
     logLevel: stringValue(logging.level) || "info",
     networkFields: ["http_proxy", "https_proxy", "all_proxy", "no_proxy"]

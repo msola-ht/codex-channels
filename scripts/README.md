@@ -271,7 +271,7 @@
   hermes 运行时的 `.skill-lock.json`。
 - `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
   配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
-  （调试快捷开关、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
+  （调试快捷开关、模型请求转储、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
   配置文件路径；`--json` 不进入菜单或读取配置正文，只输出路径与文件存在状态。
@@ -293,10 +293,11 @@
   开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
-- `config-system-menu.mjs`：独立管理调试快捷开关、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
+- `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份与模型上游终端标识；快捷开关只在 `info` / `debug`
-  间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；终端标识预填运行该
-  命令的终端探测结果并允许编辑，留空即删除配置。
+  间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
+  `[debug].model_traffic_dump` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
+  编辑，留空即删除配置。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；

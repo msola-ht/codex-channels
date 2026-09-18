@@ -18,6 +18,7 @@ import { configActivationResult } from "../scripts/config-activation-result.mjs"
 import {
   GatewayConfigConflictError,
   readGatewayConfig,
+  writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
@@ -65,6 +66,7 @@ describe("Gateway Config management", () => {
         idleReleaseMinutes: 15,
         sandbox: "workspace-write",
         defaultWorkspace: expect.any(String),
+        modelTrafficDumpEnabled: false,
       },
       automation: { scheduledTasksEnabled: false },
       advanced: { loggingLevel: "info", pluginApiEnabled: false },
@@ -130,6 +132,41 @@ describe("Gateway Config management", () => {
     });
     expect(readGatewayConfig(fixture.configPath).conversation).toMatchObject({
       idle_release_minutes: 20,
+    });
+  });
+
+  it("updates the model traffic dump switch without replacing its size controls", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.debug = {
+      model_traffic_dump: false,
+      model_traffic_input_items: 5,
+      model_traffic_item_max_bytes: 32_768,
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const settings = loadGatewaySettings(fixture.environment);
+
+    const result = updateGatewaySetting({
+      kind: "system.model-traffic-dump",
+      value: true,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    expect(result).toMatchObject({
+      value: true,
+      activation: "restart-app-server",
+      activationResult: {
+        status: "restart",
+        target: "app-server",
+        commands: ["codexc service restart app-server"],
+      },
+    });
+    expect(readGatewayConfig(fixture.configPath).debug).toEqual({
+      model_traffic_dump: true,
+      model_traffic_input_items: 5,
+      model_traffic_item_max_bytes: 32_768,
     });
   });
 

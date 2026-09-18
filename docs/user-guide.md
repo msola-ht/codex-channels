@@ -336,7 +336,8 @@ codexc service logs -n 100
 
 ### 模型请求转储
 
-需要查看模型请求和响应的完整字段时，在 Gateway 配置中临时开启转储并重启服务：
+需要查看模型请求和响应的完整字段时，运行 `codexc config`，选择“系统设置 → 模型请求转储 → 开启”，
+再按提示重启 App Server。也可以手工设置：
 
 ```toml
 [debug]
@@ -344,7 +345,7 @@ model_traffic_dump = true
 ```
 
 ```bash
-codexc service restart all
+codexc service restart app-server
 ```
 
 App Server 发给统计代理的每个模型请求、上游返回的响应头和响应块，以及 WebSocket 握手和双向帧，
