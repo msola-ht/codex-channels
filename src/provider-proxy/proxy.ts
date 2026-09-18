@@ -275,7 +275,16 @@ export class ProviderProxy {
       rejectUnsupportedPath(response);
       return;
     }
-    const upstreamTarget = this.upstreamFor(request.headers);
+    let upstreamTarget: ProviderProxyUpstream;
+    try {
+      upstreamTarget = this.upstreamFor(request.headers);
+    } catch (error) {
+      request.resume();
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { type: "provider_proxy_route_error" } }));
+      this.onError?.(asError(error));
+      return;
+    }
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
@@ -435,11 +444,20 @@ export class ProviderProxy {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
     }
+    let target: ProviderProxyUpstream;
+    try {
+      target = this.upstreamFor(request.headers);
+    } catch (error) {
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      this.onError?.(asError(error));
+      return;
+    }
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
       this.proxyWebSocket(
         request,
         client,
         route,
+        target,
         recordsResponseMetrics,
       );
     });
@@ -449,9 +467,9 @@ export class ProviderProxy {
     request: IncomingMessage,
     client: WebSocket,
     route: ResolvedProxyRoute,
+    target: ProviderProxyUpstream,
     recordsResponseMetrics = true,
   ): void {
-    const target = this.upstreamFor(request.headers);
     const scheme = target.protocol === "https" ? "wss" : "ws";
     const port = target.port === undefined ? "" : `:${target.port}`;
     const url = `${scheme}://${target.host}${port}${upstreamWebSocketPath(

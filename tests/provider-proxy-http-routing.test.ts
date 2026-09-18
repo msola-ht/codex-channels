@@ -25,6 +25,42 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP routing", () => {
+  it("isolates HTTP and WebSocket route failures and can serve after route recovery", async () => {
+    const failure = new Error("invalid proxy route");
+    const errors: Error[] = [];
+    let failing = true;
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: () => {
+        if (failing) throw failure;
+        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port,
+          protocol: "http", basePath: "" };
+      },
+      onError: (error) => errors.push(error),
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const port = Number(proxy.address().split(":")[1]);
+    await expect(requestProxy(port, "/responses", "POST")).rejects.toThrow("502");
+    await new Promise<void>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}/responses`);
+      client.on("error", (error) => {
+        if (error.message.includes("502")) resolve();
+        else reject(error);
+      });
+      client.on("open", () => { client.close(); reject(new Error("unexpected upgrade")); });
+    });
+    expect(errors).toEqual([failure, failure]);
+    failing = false;
+    await expect(requestProxy(port, "/responses", "POST")).resolves.toEqual({ status: 200 });
+  });
+
 it("uses the configured upstream agent", async () => {
     let agentUsed = false;
     const agent = new Agent();

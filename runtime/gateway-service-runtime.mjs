@@ -24,7 +24,7 @@ export async function runGatewayService(
     gatewayEntryPath,
   ], {
     stdio: "inherit",
-    env: runtime.environment,
+    env: runtime.unresolvedProxyEnvironment,
     cwd: runtime.dataDir,
   });
   const forwardSignal = (signal) => signalChildProcesses([child], signal);

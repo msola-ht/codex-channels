@@ -71,7 +71,9 @@ export interface StartupRuntimeInfo {
   debugEnabled?: boolean;
   openAiConnectivity?:
     | "reachable"
-    | "partial"
+    | "route-warning"
+    | "invalid-base-url"
+    | "indeterminate"
     | "unreachable"
     | "not-applicable";
 }
@@ -115,12 +117,7 @@ export function createStartupPresentation(
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}`,
       },
-      ...(runtime.openAiConnectivity === "unreachable"
-        ? [{
-            label: "OpenAI 网络",
-            value: "连接失败；请检查代理设置",
-          }]
-        : []),
+      ...openAiConnectivityFields(runtime.openAiConnectivity),
     ],
     sections: [
       ...(runtime.debugEnabled === true
@@ -190,6 +187,25 @@ export function createStartupPresentation(
         : []),
     ],
   };
+}
+
+function openAiConnectivityFields(
+  status: StartupRuntimeInfo["openAiConnectivity"],
+): LifecyclePresentationLeafField[] {
+  switch (status) {
+    case "unreachable":
+      return [{ label: "OpenAI 网络", value: "连接失败；请检查代理设置" }];
+    case "invalid-base-url":
+      return [{ label: "OpenAI 网络", value: "Base URL 路径无效；请检查配置" }];
+    case "route-warning":
+      return [{ label: "OpenAI 网络", value: "线路响应异常；请检查 Gateway 日志与 OpenAI Base URL" }];
+    case "indeterminate":
+      return [{ label: "OpenAI 网络", value: "检测失败；请检查 App Server 连接与 Gateway 日志" }];
+    case "reachable":
+    case "not-applicable":
+    case undefined:
+      return [];
+  }
 }
 
 export function createTurnStartedPresentation(

@@ -186,6 +186,11 @@ export class FakeTransport extends BaseTransport {
     accountId: null,
     rateLimitUpsell: null,
   };
+  accountResult: Record<string, unknown> = {
+    account: null,
+    requiresOpenaiAuth: true,
+  };
+  ignoreAccountRead = false;
   skillsResult: Record<string, unknown> = { data: [] };
   pluginInstalledResult: Record<string, unknown> = {
     marketplaces: [],
@@ -371,6 +376,16 @@ export class FakeTransport extends BaseTransport {
                 },
               ],
             },
+          }),
+        ),
+      );
+    } else if (decoded.method === "account/read") {
+      if (this.ignoreAccountRead) return;
+      queueMicrotask(() =>
+        this.emitMessage(
+          JSON.stringify({
+            id: decoded.id,
+            result: this.accountResult,
           }),
         ),
       );

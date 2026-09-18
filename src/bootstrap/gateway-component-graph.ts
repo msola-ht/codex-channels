@@ -179,6 +179,7 @@ export abstract class GatewayComponentGraph {
   private readonly queueLifecycleTasks = new Set<Promise<void>>();
   private codexUpstreamUserAgent: string | undefined;
   private openAiConnectivity: OpenAiConnectivityStatus = "not-applicable";
+  protected openAiConnectivityAbort: AbortController | undefined;
   protected stopping = false;
 
   protected abstract requestStop(): Promise<void>;
@@ -1107,22 +1108,26 @@ export abstract class GatewayComponentGraph {
       this.requireRunning();
       this.codexUpstreamUserAgent = initialized.userAgent;
       if (this.primaryProvider === "openai" && this.customPrimaryProviderId === undefined) {
+        const connectivityAbort = new AbortController();
+        this.openAiConnectivityAbort = connectivityAbort;
         const [connectivity] = await Promise.all([
-          this.primaryProvider === undefined
-            ? Promise.resolve<OpenAiConnectivityStatus>("not-applicable")
-            : this.probeOpenAiConnectivity(),
+          this.probeOpenAiConnectivity(connectivityAbort.signal),
           this.refreshRateLimits(),
-        ]);
+        ]).finally(() => {
+          if (this.openAiConnectivityAbort === connectivityAbort) {
+            this.openAiConnectivityAbort = undefined;
+          }
+        });
         this.openAiConnectivity = connectivity;
         if (connectivity === "unreachable") {
           this.logger.warn(
             { connectivity },
             "OpenAI 启动连通探测失败，渠道启动通知将显示提醒",
           );
-        } else if (connectivity === "partial") {
-          this.logger.info(
+        } else if (connectivity !== "reachable" && connectivity !== "not-applicable") {
+          this.logger.warn(
             { connectivity },
-            "OpenAI 启动连通探测部分通过，不影响渠道启动通知",
+            "OpenAI 启动线路探测返回警告，渠道启动通知将显示提醒",
           );
         }
       }
@@ -1171,6 +1176,8 @@ export abstract class GatewayComponentGraph {
   }
 
   private async shutdownComponentsOnce(): Promise<void> {
+    this.openAiConnectivityAbort?.abort();
+    this.openAiConnectivityAbort = undefined;
     this.removeRpcNotification?.();
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
@@ -1455,12 +1462,52 @@ export abstract class GatewayComponentGraph {
     }
   }
 
-  private async probeOpenAiConnectivity(): Promise<OpenAiConnectivityStatus> {
+  private async probeOpenAiConnectivity(
+    signal?: AbortSignal,
+  ): Promise<OpenAiConnectivityStatus> {
     const openAiBaseUrl = loadOpenAiBaseUrl();
-    return await checkOpenAiConnectivity({
-      proxy: this.config.networkProxy,
-      ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
-    });
+    const deadlineMs = 12_000;
+    const deadlineAt = Date.now() + deadlineMs;
+    const deadlineController = new AbortController();
+    const abortForShutdown = () => deadlineController.abort(
+      signal?.reason ?? new Error("Gateway 正在停止"),
+    );
+    signal?.addEventListener("abort", abortForShutdown, { once: true });
+    if (signal?.aborted) abortForShutdown();
+    const deadline = setTimeout(
+      () => deadlineController.abort(new Error("OpenAI 启动连通探测超时")),
+      deadlineMs,
+    );
+    deadline.unref();
+    try {
+      const accountRoute = openAiBaseUrl === undefined
+        ? await this.codex.openAiAccountRoute(deadlineController.signal)
+        : "api";
+      if (accountRoute === "not-required") {
+        return "not-applicable";
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) return "unreachable";
+      return await checkOpenAiConnectivity({
+        proxy: this.config.networkProxy,
+        route: accountRoute,
+        ...(openAiBaseUrl === undefined ? {} : { baseUrl: openAiBaseUrl }),
+        deadlineMs: remainingMs,
+        signal: deadlineController.signal,
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        throw signal.reason ?? error;
+      }
+      if (deadlineController.signal.aborted) {
+        return "unreachable";
+      }
+      this.logger.warn({ err: error }, "读取 OpenAI 当前认证线路失败，无法执行启动连通探测");
+      return "indeterminate";
+    } finally {
+      clearTimeout(deadline);
+      signal?.removeEventListener("abort", abortForShutdown);
+    }
   }
 
   private isBindingRestoring(threadId: string): boolean {

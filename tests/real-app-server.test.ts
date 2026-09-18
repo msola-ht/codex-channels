@@ -19,6 +19,7 @@ import { appendDiagnostic, appServerFailure, signalTestProcessTree, stopDetached
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
+const contractTest = runContract ? it : it.skip;
 const deepseekCatalogContractTest = runContract ? it : it.skip;
 
 describe("real App Server test process cleanup", () => {
@@ -97,6 +98,69 @@ describe("real App Server test process cleanup", () => {
     },
   );
 });
+
+contractTest(
+  "reads the no-login OpenAI account route without refreshing credentials",
+  async () => {
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "account-route-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const socketPath = join(testRuntime, "app-server.sock");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), "", { mode: 0o600 });
+    let processHandle: ChildProcess | undefined;
+    let appServerStderr = "";
+    let client: CodexAppServerClient | undefined;
+    try {
+      const environment: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome };
+      delete environment.OPENAI_API_KEY;
+      processHandle = spawn(
+        process.env.CODEX_BINARY ?? "codex",
+        ["app-server", "--listen", `unix://${socketPath}`],
+        {
+          cwd: process.cwd(),
+          env: environment,
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      processHandle.stderr?.setEncoding("utf8");
+      processHandle.stderr?.on("data", (chunk: string) => {
+        appServerStderr = appendDiagnostic(appServerStderr, chunk);
+      });
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle?.exitCode === null
+          ? undefined
+          : new Error(appServerFailure(
+            "账户线路合同 App Server 启动失败",
+            appServerStderr,
+          )),
+      );
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+
+      await expect(client.openAiAccountRoute()).resolves.toBe("chatgpt");
+    } finally {
+      await client?.close().catch(() => undefined);
+      if (processHandle?.exitCode === null) {
+        processHandle.kill("SIGTERM");
+        await new Promise((resolveExit) => processHandle?.once("exit", resolveExit));
+      }
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  },
+  15_000,
+);
 
 deepseekCatalogContractTest(
   "cold-resumes a third-party thread with its provider model catalog",

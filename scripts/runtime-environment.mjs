@@ -17,13 +17,17 @@ export function configuredEnvironment(sourceEnvironment = process.env) {
   const network = table(document.network);
   const codex = table(document.codex);
   const proxyEnvironment = resolveProxyEnvironment(network, environment);
+  const unresolvedProxyEnvironment = {
+    ...environment,
+    CODEX_BINARY: stringValue(codex.binary) || "codex",
+  };
   return {
     configPath,
     dataDir,
     document,
+    unresolvedProxyEnvironment,
     environment: {
-      ...environment,
-      CODEX_BINARY: stringValue(codex.binary) || "codex",
+      ...unresolvedProxyEnvironment,
       ...proxyEnvironment,
     },
   };

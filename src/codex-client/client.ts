@@ -43,6 +43,8 @@ import type {
   ConfigReadParams,
   ConfigReadResponse,
   CollaborationModeListResponse,
+  GetAccountParams,
+  GetAccountResponse,
   GetAccountTokenUsageParams,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
@@ -114,6 +116,8 @@ import {
 } from "./turn-adapter.js";
 import { toModelOption } from "./model-adapter.js";
 import {
+  type OpenAiAccountRoute,
+  toOpenAiAccountRoute,
   toAccountRateLimits,
   toAccountThreadUsage,
   toAccountUsage,
@@ -902,6 +906,16 @@ export class CodexAppServerClient implements
       params: undefined,
     }, { retryOverload: true });
     return toAccountUsage(response);
+  }
+
+  async openAiAccountRoute(signal?: AbortSignal): Promise<OpenAiAccountRoute> {
+    const response = await this.rpc.request<GetAccountResponse>({
+      method: "account/read",
+      params: { refreshToken: false } satisfies GetAccountParams,
+    }, signal === undefined
+      ? { retryOverload: true }
+      : { retryOverload: true, signal });
+    return toOpenAiAccountRoute(response);
   }
 
   async accountThreadUsage(threadId: string): Promise<AccountThreadUsage> {

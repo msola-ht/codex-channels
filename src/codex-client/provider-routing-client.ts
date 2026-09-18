@@ -54,6 +54,7 @@ type ProviderClientMethod =
   | "listPlugins"
   | "resolvePlugin"
   | "accountUsage"
+  | "openAiAccountRoute"
   | "accountThreadUsage"
   | "accountRateLimits"
   | "listPermissionProfiles"
@@ -638,6 +639,12 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["accountUsage"]>
   ): ReturnType<ProviderClientInstance["accountUsage"]> {
     return this.withPrimaryActivity((client) => client.accountUsage(...args));
+  }
+
+  openAiAccountRoute(
+    ...args: Parameters<ProviderClientInstance["openAiAccountRoute"]>
+  ): ReturnType<ProviderClientInstance["openAiAccountRoute"]> {
+    return this.withPrimaryActivity((client) => client.openAiAccountRoute(...args));
   }
 
   accountThreadUsage(

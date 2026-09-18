@@ -1,4 +1,5 @@
 import type {
+  GetAccountResponse,
   GetAccountRateLimitsResponse,
   GetAccountTokenUsageResponse,
   RateLimitSnapshot,
@@ -14,6 +15,32 @@ import type {
   AccountRateLimits,
   AccountUsage,
 } from "../application/index.js";
+
+export type OpenAiAccountRoute = "api" | "chatgpt" | "not-required";
+
+export function toOpenAiAccountRoute(
+  response: GetAccountResponse,
+): OpenAiAccountRoute {
+  if (typeof response.requiresOpenaiAuth !== "boolean") {
+    throw new Error("Codex 响应缺少有效 requiresOpenaiAuth");
+  }
+  if (!response.requiresOpenaiAuth) {
+    return "not-required";
+  }
+  if (response.account === null) {
+    return "chatgpt";
+  }
+  if (!response.account || typeof response.account !== "object") {
+    throw new Error("Codex 响应缺少有效 account");
+  }
+  if (response.account.type === "chatgpt") {
+    return "chatgpt";
+  }
+  if (response.account.type === "apiKey" || response.account.type === "amazonBedrock") {
+    return "api";
+  }
+  throw new Error("Codex 响应包含未知 account 类型");
+}
 
 const maximumThreadMetric = 9_223_372_036_854_775_807n;
 

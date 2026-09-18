@@ -100,4 +100,5 @@ Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配�
 不把 Provider 指标 Socket 当作进程锁；裸实例与重复 Gateway 均失败关闭。
 OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官方认证请求 Header 选择 ChatGPT
 或 API 上游。主代理启动失败时 App Server 服务失败关闭；按需 Provider 代理启动失败时本次选择
-明确失败。两者都不会绕过统计代理静默直连上游。
+明确失败。两者都不会绕过统计代理静默直连上游。运行中动态上游路由解析失败时，HTTP 请求及
+WebSocket 升级返回 502 并报告内部错误，不退出监管进程；后续请求可以重新解析已修正的代理。

@@ -753,7 +753,7 @@ async function runForegroundScript(
       stdio: process.platform === "win32"
         ? ["inherit", "inherit", "inherit", "ipc"]
         : "inherit",
-      env: { ...runtime.environment, ...additionalEnvironment },
+      env: { ...runtime.unresolvedProxyEnvironment, ...additionalEnvironment },
       cwd: workingDirectory ?? runtime.dataDir,
       detached: process.platform !== "win32",
     },

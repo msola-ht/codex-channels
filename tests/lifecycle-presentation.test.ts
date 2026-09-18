@@ -84,7 +84,7 @@ describe("shared Surface lifecycle presentation", () => {
     )).toBe("思考完成\n\n耗时：500毫秒");
   });
 
-  it("does not warn when at least one official OpenAI route is reachable", () => {
+  it("shows an actionable warning when the active OpenAI route responds abnormally", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],
       {
@@ -106,7 +106,7 @@ describe("shared Surface lifecycle presentation", () => {
         nodeVersion: "v24.0.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
-        openAiConnectivity: "partial",
+        openAiConnectivity: "route-warning",
       },
     );
 
@@ -117,7 +117,40 @@ describe("shared Surface lifecycle presentation", () => {
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
       },
+      { label: "OpenAI 网络", value: "线路响应异常；请检查 Gateway 日志与 OpenAI Base URL" },
     ]);
+  });
+
+  it.each([
+    ["invalid-base-url", "Base URL 路径无效；请检查配置"],
+    ["indeterminate", "检测失败；请检查 App Server 连接与 Gateway 日志"],
+  ] as const)("renders the %s startup connectivity result", (openAiConnectivity, value) => {
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: null,
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      },
+      {
+        platform: "linux",
+        architecture: "x64",
+        gatewayVersion: "0.147.0",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+        openAiConnectivity,
+      },
+    );
+
+    expect(presentation.fields).toContainEqual({ label: "OpenAI 网络", value });
   });
 
   it("renders a compact subagent start notice without internal IDs", () => {

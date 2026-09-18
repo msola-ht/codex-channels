@@ -43,7 +43,25 @@ export function selectHttpProxyUrl(
   explicitProxy?: string,
 ): string | undefined;
 
+export function createRefreshableHttpProxySelector(
+  configured?: ProxySettings,
+  environment?: NodeJS.ProcessEnv,
+  options?: {
+    platform?: NodeJS.Platform;
+    readSystemProxy?: (platform: NodeJS.Platform) => ProxySettings;
+  },
+): {
+  validate(target: string | URL, explicitProxy?: string): void;
+  select(target: string | URL, explicitProxy?: string): string | undefined;
+  invalidate(): void;
+};
+
 export function readMacSystemProxy(output?: string): ProxySettings;
+
+export function readSystemProxyAsync(
+  platform?: NodeJS.Platform,
+  signal?: AbortSignal,
+): Promise<ProxySettings>;
 
 export function readGnomeSystemProxy(
   readSetting?: (schema: string, key: string) => string,

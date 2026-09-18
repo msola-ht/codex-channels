@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   createApplication: vi.fn(),
   createAccountRefresh: vi.fn(),
   createProviderSettingsWatcher: vi.fn(),
+  createNetworkProxyWatcher: vi.fn(),
+  readGatewayConfig: vi.fn(),
   restartAppServerService: vi.fn(),
   logger: {
     info: vi.fn(),
@@ -40,6 +42,10 @@ const mocks = vi.hoisted(() => ({
     close: vi.fn(),
   },
   providerSettingsWatcher: {
+    start: vi.fn(),
+    stop: vi.fn(),
+  },
+  networkProxyWatcher: {
     start: vi.fn(),
     stop: vi.fn(),
   },
@@ -72,6 +78,9 @@ vi.mock("../runtime/gateway-owner.mjs", () => ({
     }
   },
 }));
+vi.mock("../runtime/gateway-config.mjs", () => ({
+  readGatewayConfig: mocks.readGatewayConfig,
+}));
 vi.mock("../src/config/index.js", () => ({
   loadRuntimeConfig: mocks.loadRuntimeConfig,
 }));
@@ -93,6 +102,13 @@ vi.mock("../src/bootstrap/provider-settings-watcher.js", () => ({
     }
   },
 }));
+vi.mock("../src/bootstrap/network-proxy-watcher.js", () => ({
+  NetworkProxyWatcher: class {
+    constructor(...args: unknown[]) {
+      return mocks.createNetworkProxyWatcher(...args);
+    }
+  },
+}));
 vi.mock("../src/bootstrap/service-restart-runner.js", () => ({
   restartAppServerService: mocks.restartAppServerService,
 }));
@@ -103,6 +119,7 @@ const runtime = {
   configPath: "/tmp/codex-connect/config.toml",
   config: {
     workspaces: [{ id: "main", name: "Main", cwd: "/workspace" }],
+    networkProxy: {},
   },
 };
 
@@ -124,6 +141,8 @@ beforeEach(() => {
   mocks.createApplication.mockReturnValue(mocks.application);
   mocks.createAccountRefresh.mockReturnValue(mocks.accountRefresh);
   mocks.createProviderSettingsWatcher.mockReturnValue(mocks.providerSettingsWatcher);
+  mocks.createNetworkProxyWatcher.mockReturnValue(mocks.networkProxyWatcher);
+  mocks.readGatewayConfig.mockReturnValue({ network: {} });
   mocks.owner.start.mockResolvedValue(undefined);
   mocks.owner.close.mockResolvedValue(undefined);
   mocks.application.start.mockResolvedValue(undefined);
@@ -169,6 +188,7 @@ describe("runGatewayProcess", () => {
     expect(mocks.accountRefresh.start).toHaveBeenCalledOnce();
     expect(mocks.owner.markReady).toHaveBeenCalledOnce();
     expect(mocks.providerSettingsWatcher.start).toHaveBeenCalledOnce();
+    expect(mocks.networkProxyWatcher.start).toHaveBeenCalledOnce();
     expect(watchedPaths).toEqual([
       runtime.configPath,
       "/tmp/config-events.jsonl",
@@ -232,6 +252,7 @@ describe("runGatewayProcess", () => {
     expect(mocks.owner.close).toHaveBeenCalledOnce();
     expect(mocks.owner.markReady).not.toHaveBeenCalled();
     expect(mocks.providerSettingsWatcher.start).not.toHaveBeenCalled();
+    expect(mocks.networkProxyWatcher.start).not.toHaveBeenCalled();
   });
 
   it("closes ownership when application construction fails", async () => {
@@ -264,6 +285,7 @@ describe("runGatewayProcess", () => {
 
     expect(mocks.owner.markNotReady).toHaveBeenCalledOnce();
     expect(mocks.providerSettingsWatcher.stop).toHaveBeenCalledOnce();
+    expect(mocks.networkProxyWatcher.stop).toHaveBeenCalledOnce();
     expect(mocks.accountRefresh.close).toHaveBeenCalledOnce();
     expect(mocks.application.stop).toHaveBeenCalledOnce();
     expect(mocks.owner.close).toHaveBeenCalledOnce();
