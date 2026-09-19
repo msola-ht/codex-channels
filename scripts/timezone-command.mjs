@@ -9,13 +9,27 @@ import { writeGatewayConfigActivationNotice } from "./config-activation-notice.m
 import { loadGatewaySettings, updateGatewaySetting } from "./config-management.mjs";
 
 const zoneinfoRoot = "/usr/share/zoneinfo";
+/** 交互选择里“恢复系统时区”的哨兵值：不是合法 IANA 名称，不会与列表项冲突。 */
+export const systemTimezoneValue = "__system__";
+/** 交互选择里“手动输入”的哨兵值。 */
+export const customTimezoneValue = "__custom__";
+/** 交互入口只列常见时区，其余名称走「其他」手动输入，避免几百条列表。 */
+export const commonTimezones = [
+  { value: "Asia/Shanghai", hint: "中国标准时间 UTC+8，无夏令时" },
+  { value: "Asia/Tokyo", hint: "日本标准时间 UTC+9" },
+  { value: "Europe/London", hint: "英国时间 UTC+0 / 夏令时 UTC+1" },
+  { value: "America/New_York", hint: "美国东部 UTC-5 / 夏令时 UTC-4" },
+  { value: "America/Los_Angeles", hint: "美国西部 UTC-8 / 夏令时 UTC-7" },
+  { value: "UTC", hint: "协调世界时" },
+];
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]
 
 设置 App Server 与 WebUI 服务进程时区，决定模型请求 environment context 里的时区与当前日期，
 WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿用运行环境的系统时区。
 
-  codexc timezone                    交互设置（预填当前值，留空即恢复系统时区）
+  codexc timezone                    交互选择常见时区，或选“其他”手动输入 IANA 名称；
+                                     选中“恢复系统时区”即删除该配置
   codexc timezone Asia/Shanghai      直接写入 [codex].timezone
   codexc timezone --system           删除该配置，恢复系统时区
   codexc timezone --json             只读输出当前配置；
@@ -75,6 +89,20 @@ export function isKnownTimezone(
   return exists(join(root, timezone));
 }
 
+/** 交互选择的可选项：恢复系统时区、常见时区、当前值（不在常见列表时）与手动输入。 */
+export function timezoneChoices(current) {
+  const common = commonTimezones.map(({ value, hint }) => ({ value, label: value, hint }));
+  const configured = current !== null && !commonTimezones.some(({ value }) => value === current)
+    ? [{ value: current, label: current, hint: "当前配置" }]
+    : [];
+  return [
+    { value: systemTimezoneValue, label: "恢复系统时区", hint: "删除 codex.timezone，沿用系统时区" },
+    ...configured,
+    ...common,
+    { value: customTimezoneValue, label: "其他（手动输入 IANA 名称）", hint: "如 Etc/GMT+8、Asia/Kolkata" },
+  ];
+}
+
 export function normalizeTimezoneInput(value, { exists = existsSync, root = zoneinfoRoot } = {}) {
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (trimmed === "") return null;
@@ -110,17 +138,33 @@ export async function runTimezoneCommand(args = [], {
   }
   let next = parsed.action === "clear" ? null : parsed.timezone;
   if (parsed.action === "prompt") {
-    const value = await prompts.text({
-      message: "模型可见时区（IANA 名称，如 America/Los_Angeles）；留空恢复系统时区",
-      initialValue: current ?? "",
-      validate: normalize,
+    const choices = timezoneChoices(current);
+    const value = await prompts.select({
+      message: "模型可见时区",
+      showInstructions: false,
+      initialValue: current !== null && choices.some((choice) => choice.value === current)
+        ? current
+        : systemTimezoneValue,
+      options: choices,
     });
     if (prompts.isCancel(value)) {
       output.write("已取消时区设置\n");
       return { action: "cancelled" };
     }
-    const normalized = value.trim();
-    next = normalized === "" ? null : normalized;
+    if (value === customTimezoneValue) {
+      const typed = await prompts.text({
+        message: "IANA 时区名称（如 Asia/Kolkata、Etc/GMT+8）；留空恢复系统时区",
+        initialValue: "",
+        validate: normalize,
+      });
+      if (prompts.isCancel(typed)) {
+        output.write("已取消时区设置\n");
+        return { action: "cancelled" };
+      }
+      next = typed.trim() === "" ? null : typed.trim();
+    } else {
+      next = value === systemTimezoneValue ? null : value;
+    }
   }
   const result = updateGatewaySetting({
     kind: "system.app-server-timezone",

@@ -157,9 +157,9 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 本次调用展示转发前准备、转发至首字、首字至结束与总耗时；缺少首字或中断前未走到的阶段不补值。HTTP 请求接收与转发可重叠，响应头至结束也包含背压暂停，均不解释为纯生成耗时。WS 另列进入转发时连接是否就绪、至提交发送的等待及提交至首字；每次调用独立记录，不复用连接握手耗时，提交发送不表示上游已收到。
 结束优先复用首次模型终态的总耗时；无终态时为上游结束或观察失败的时间，不包含其后客户端收到全部内容的耗时。历史调用没有 `callTiming` 时保留原墙钟耗时并明确未记录新阶段；无效或倒序节点不计算对应差值，不混用墙钟与单调时钟。V2 记录仅增加可选字段，原记录无需改写，回滚程序可忽略该字段。总耗时独立经指标 IPC 保存到 Schema v18，其余分段只保存在调用记录；需加载新版本 App Server 采集端才能产生节点。
 上游首 Token、最大排队、轮次累计生成、logical turn 和客户端工具暂停保持独立分组，不能与本次调用阶段相加或相减来估算网络延迟。
-连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 由本地代理在握手时显式
-请求 timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会
-移除该内部请求头。
+上游 timing 事件只在请求带 `x-responsesapi-include-timing-metrics` 时下发；该头由 App Server 按自身
+`runtime_metrics` 特性生成，代理不注入也不删除，出站握手头因此与原生客户端一致。HTTP/SSE 请求不带
+该头，不会产生上游 timing 数据，相关项显示“未提供”。
 上游数据从本次调用的 `responsesapi.websocket_timing.timing_metrics` 读取，仅接受
 `timing_scope=logical_turn` 且 `response_id` 与终态一致的事件，不受 trace 页码影响；缺失项显示
 “未提供”。各项口径可能重叠，不能相加，不代表完整对话轮次，差值也不作为网络延迟。

@@ -55,7 +55,23 @@ import {
 import { createProxyFetch } from "./proxy-fetch.mjs";
 import { ProviderProxyRuntimeRegistry } from "./provider-proxy-runtime-registry.mjs";
 
-const openAiTimingMetricsHosts = new Set(["api.openai.com", "chatgpt.com"]);
+/**
+ * 上游 timing 事件只在该请求带 `x-responsesapi-include-timing-metrics` 时下发，而原生客户端
+ * 只在 `runtime_metrics` 特性开启时才带这个头。由 App Server 自己打开该特性，代理侧就无需注入，
+ * 出站握手头与原生客户端完全一致。
+ */
+const appServerFeatureArguments = ["--enable", "runtime_metrics"];
+
+/** App Server 启动参数：通用参数之后打开客户端特性，再以 unix socket 监听。 */
+export function appServerArguments(baseArguments, socketPath) {
+  return [
+    ...baseArguments,
+    "app-server",
+    ...appServerFeatureArguments,
+    "--listen",
+    `unix://${socketPath}`,
+  ];
+}
 
 export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const validatedCodex = validateCodexConfigDocument(runtime.document.codex ?? {});
@@ -328,7 +344,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         }
         if (await appServerSocketAcceptsWebSocket(socketPath)) return;
         await prepareAppServerSocketPaths([socketPath]);
-        const primaryAppServerArguments = [
+        const primaryAppServerArguments = appServerArguments([
           ...primaryArguments,
           ...(desktopAppAttachment
             ? [
@@ -336,10 +352,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
                 `${macDesktopAppPluginEnabledConfigKey}=${desktopAppAttachment.toolsEnabled}`,
               ]
             : []),
-          "app-server",
-          "--listen",
-          `unix://${socketPath}`,
-        ];
+        ], socketPath);
         const primarySpawnOptions = {
           stdio: "inherit",
           env: primaryChildEnvironment,
@@ -427,19 +440,19 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           provider,
           providerBaseUrl,
         );
-        child = spawnCodexProcess(runtime.environment.CODEX_BINARY, [
-          ...argumentsList,
-          "app-server",
-          "--listen",
-          `unix://${managed.socketPath}`,
-        ], {
-          stdio: "inherit",
-          env: {
-            ...withoutManagedProviderApiKeys(runtime.environment),
-            ...managed.runtime.childEnvironment,
+        child = spawnCodexProcess(
+          runtime.environment.CODEX_BINARY,
+          appServerArguments(argumentsList, managed.socketPath),
+          {
+            stdio: "inherit",
+            env: {
+              ...withoutManagedProviderApiKeys(runtime.environment),
+              ...managed.runtime.childEnvironment,
+            },
+            cwd: defaultWorkspace.cwd,
           },
-          cwd: defaultWorkspace.cwd,
-        }, runtime.environment);
+          runtime.environment,
+        );
         children.push(child);
         childrenByProvider.set(provider, child);
         await waitForAppServer(
@@ -627,8 +640,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy("openai", {
         ...openAiProxyOptions,
         allowOpenAiApiPaths: true,
-        requestOpenAiTimingMetrics: configuredOpenAiUrl === undefined
-          || openAiTimingMetricsHosts.has(configuredOpenAiUrl.hostname),
       });
       primaryArguments = withOpenAiBaseUrl(primaryArguments, localBaseUrl);
     } else {

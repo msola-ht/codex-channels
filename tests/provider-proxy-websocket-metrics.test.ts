@@ -87,7 +87,6 @@ describe("ProviderProxy WebSocket metrics", () => {
       upstreamProtocol: "http",
       upstreamBasePath: "/backend-api/codex",
       allowOpenAiApiPaths: true,
-      requestOpenAiTimingMetrics: true,
       onMetrics: (metric) => {
         metrics.push(metric);
       },
@@ -248,8 +247,54 @@ describe("ProviderProxy WebSocket metrics", () => {
         }),
       },
     });
-    expect(upstreamTimingHeader).toBeUndefined();
+    expect(upstreamTimingHeader).toBe("true");
     expect(metrics).toEqual([]);
+  });
+
+  it("forwards a WebSocket handshake without inventing a timing metrics request", async () => {
+    const upstreamServer = createServer();
+    const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });
+    let upstreamTimingHeader: string | undefined;
+    upstreamWebSocket.on("connection", (socket, request) => {
+      const timingHeader = request.headers["x-responsesapi-include-timing-metrics"];
+      upstreamTimingHeader = Array.isArray(timingHeader) ? timingHeader[0] : timingHeader;
+      socket.send(JSON.stringify({ type: "response.created", response: { id: "r1" } }));
+    });
+    await new Promise<void>((resolveListen) => {
+      upstreamServer.listen(0, "127.0.0.1", resolveListen);
+    });
+    const upstreamAddress = upstreamServer.address() as AddressInfo;
+    openServers.push({
+      close: async () => {
+        for (const client of upstreamWebSocket.clients) client.terminate();
+        await new Promise<void>((resolveClose) => upstreamWebSocket.close(() => resolveClose()));
+        await new Promise<void>((resolveClose) => upstreamServer.close(() => resolveClose()));
+      },
+    });
+
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: upstreamAddress.port,
+      upstreamProtocol: "http",
+      allowOpenAiApiPaths: true,
+    });
+    await proxy.start();
+    openServers.push(proxy);
+
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => {
+        client.send(JSON.stringify({ type: "response.create", generate: false }));
+      });
+      client.on("message", (data) => {
+        const message = JSON.parse(data.toString("utf8")) as { type?: string };
+        if (message.type === "response.created") resolve();
+      });
+      client.on("error", reject);
+    });
+    client.close();
+
+    expect(upstreamTimingHeader).toBeUndefined();
   });
 
   it("records a failed WebSocket handshake without turn metadata", async () => {

@@ -82,8 +82,9 @@
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
-  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；只为确认的官方
-  OpenAI 上游请求 Responses timing 事件。Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
+  实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；启动 App Server 时
+  用 `--enable runtime_metrics` 打开客户端特性，使上游 timing 事件由 App Server 自己请求、代理原样
+  透传。Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
   上游连接失败会使系统代理发现结果失效，下一次请求可采用代理软件启动后才写入的系统代理，无需重启
   模型代理。App Server 自身发出的账户额度请求不经过 Provider Proxy；Gateway 的系统代理观察器仅
   提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。TOML 和标准代理环境

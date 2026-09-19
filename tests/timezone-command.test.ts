@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { parseTimezoneCommandArgs, runTimezoneCommand } from "../scripts/timezone-command.mjs";
+import { parseTimezoneCommandArgs, runTimezoneCommand, timezoneChoices } from "../scripts/timezone-command.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
@@ -28,11 +28,11 @@ function createFixture() {
   return { environment, configPath: initialized.configPath };
 }
 
-function captureOutput() {
+function captureOutput(isTTY = false) {
   const chunks: string[] = [];
   return {
     stream: {
-      isTTY: false,
+      isTTY,
       write: (text: string) => {
         chunks.push(text);
         return true;
@@ -43,6 +43,101 @@ function captureOutput() {
 }
 
 describe("codexc timezone", () => {
+  it("offers common timezones, the current value and manual input", () => {
+    expect(timezoneChoices(null).map(({ value }: { value: string }) => value)).toEqual([
+      "__system__",
+      "Asia/Shanghai",
+      "Asia/Tokyo",
+      "Europe/London",
+      "America/New_York",
+      "America/Los_Angeles",
+      "UTC",
+      "__custom__",
+    ]);
+    expect(timezoneChoices("Asia/Kolkata").map(({ value }: { value: string }) => value)).toEqual([
+      "__system__",
+      "Asia/Kolkata",
+      "Asia/Shanghai",
+      "Asia/Tokyo",
+      "Europe/London",
+      "America/New_York",
+      "America/Los_Angeles",
+      "UTC",
+      "__custom__",
+    ]);
+    expect(timezoneChoices("UTC").filter(({ hint }: { hint?: string }) => hint === "当前配置"))
+      .toEqual([]);
+  });
+
+  it("writes the timezone picked from the interactive list", async () => {
+    const fixture = createFixture();
+    const select = vi.fn().mockResolvedValue("Asia/Tokyo");
+
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment,
+      output: captureOutput(true).stream,
+      prompts: { select, isCancel: () => false },
+    })).resolves.toMatchObject({ action: "saved", timezone: "Asia/Tokyo" });
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBe("Asia/Tokyo");
+
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment,
+      output: captureOutput(true).stream,
+      prompts: { select: vi.fn().mockResolvedValue("__system__"), isCancel: () => false },
+    })).resolves.toMatchObject({ action: "saved", timezone: null });
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBeNull();
+  });
+
+  it("asks for an IANA name when the manual option is selected", async () => {
+    const fixture = createFixture();
+    const text = vi.fn().mockResolvedValue("Europe/Berlin");
+
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment,
+      output: captureOutput(true).stream,
+      prompts: {
+        select: vi.fn().mockResolvedValue("__custom__"),
+        text,
+        isCancel: () => false,
+      },
+    })).resolves.toMatchObject({ action: "saved", timezone: "Europe/Berlin" });
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBe("Europe/Berlin");
+  });
+
+  it("keeps the configuration when the interactive selection is cancelled", async () => {
+    const fixture = createFixture();
+    const output = captureOutput(true);
+
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment,
+      output: output.stream,
+      prompts: {
+        select: vi.fn().mockResolvedValue(Symbol("cancel")),
+        isCancel: (value: unknown) => typeof value === "symbol",
+      },
+    })).resolves.toEqual({ action: "cancelled" });
+    expect(output.text()).toContain("已取消时区设置");
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBeNull();
+  });
+
+  it("cancels the manual input without writing configuration", async () => {
+    const fixture = createFixture();
+    const output = captureOutput(true);
+
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment,
+      output: output.stream,
+      prompts: {
+        select: vi.fn().mockResolvedValue("__custom__"),
+        text: vi.fn().mockResolvedValue(Symbol("cancel")),
+        isCancel: (value: unknown) => typeof value === "symbol",
+      },
+    })).resolves.toEqual({ action: "cancelled" });
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBeNull();
+  });
+
   it("rejects non-IANA names, unknown zones and conflicting arguments", () => {
     expect(() => parseTimezoneCommandArgs(["Los Angeles"])).toThrow(/时区名称无效/u);
     expect(() => parseTimezoneCommandArgs(["--system", "Asia/Shanghai"]))

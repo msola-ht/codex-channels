@@ -33,11 +33,15 @@ Responses 请求 `input` 的一部分发给模型：
 ## 命令
 
 ```bash
-codexc timezone                    # 交互设置，预填当前值，留空即恢复系统时区
-codexc timezone America/Los_Angeles
+codexc timezone                    # 交互选择常见时区，或用「其他」手动输入 IANA 名称
+codexc timezone America/Los_Angeles # 直接写入，不进入交互
 codexc timezone --system           # 删除配置，恢复系统时区
 codexc timezone --json             # 只读输出当前配置
 ```
+
+交互列表只有常见时区（含上海、东京、伦敦、纽约、洛杉矶和 UTC）加两个动作项：「恢复系统时区」
+删除 `codex.timezone`，「其他」要求手动输入 IANA 名称。已配置的值默认高亮，因此直接回车不会
+改变配置；不在常见列表里的当前值会单独列在「当前配置」下。
 
 同一入口也位于 `codexc config` → 系统设置 → 模型可见时区。
 

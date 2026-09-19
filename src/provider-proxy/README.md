@@ -72,9 +72,8 @@
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
   `[codex].upstream_user_agent` 时覆盖出站 `User-Agent`，缺省则原样透传 App Server 生成的 UA；
-  确认连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 还会显式请求上游
-  timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会移除
-  该内部请求头；
+  `x-responsesapi-include-timing-metrics` 由 App Server 按自身 `runtime_metrics` 特性生成并原样透传，
+  代理不注入、也不删除，出站握手头因此与原生客户端一致；
   不影响私有元数据；该请求实际发往上游的 UA 由响应指标观察器写入指标记录，供 WebUI 请求明细读取。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的
