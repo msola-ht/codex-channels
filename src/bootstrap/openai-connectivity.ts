@@ -93,7 +93,9 @@ async function probeOpenAiRoute(
   timeout.unref();
   try {
     const inference = await requestAndDiscard(fetchImpl, plan.inferenceUrl, "HEAD", controller.signal);
-    if (inference.status >= 500) {
+    if (inference.status === 404) return "invalid-base-url";
+    if (!((inference.status >= 200 && inference.status < 300)
+      || inference.status === 401 || inference.status === 403 || inference.status === 405)) {
       return "route-warning";
     }
     if (plan.routeProbeUrl === undefined) {

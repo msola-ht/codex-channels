@@ -288,17 +288,35 @@ export class ProviderProxy {
     let upstreamTarget: ProviderProxyUpstream;
     const onPendingError = () => response.destroy();
     request.on("error", onPendingError);
+    request.once("close", () => request.removeListener("error", onPendingError));
     try {
       upstreamTarget = await this.upstreamFor(request.headers);
     } catch (error) {
+      if (this.stopped || response.destroyed) return;
       request.resume();
+      const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
+      const metrics = createMetricsState(metadata, startedAtMs, "http",
+        responseOperation(route, metadata.operation),
+        effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs);
+      metrics.httpStatus = 502;
+      if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+      markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
+      const exchange = this.trafficDump?.beginHttpExchange({
+        ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+        headers: request.headers, method: request.method ?? "GET",
+        path: request.url ?? "", startedAtMs,
+      });
+      exchange?.responseHead(502, {});
+      exchange?.failure("upstream_route");
+      if (route.kind === "response" || route.kind === "compact") {
+        await this.deliverMetrics(metrics, route.accountId);
+      }
       response.writeHead(502, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { type: "provider_proxy_route_error" } }));
       this.onError?.(asError(error));
       return;
-    } finally {
-      request.removeListener("error", onPendingError);
     }
+    request.removeListener("error", onPendingError);
     if (this.stopped || response.destroyed) return;
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
@@ -457,6 +475,8 @@ export class ProviderProxy {
     socket: Duplex,
     head: Buffer,
   ): Promise<void> {
+    const startedAtMs = Date.now();
+    const startedAtMonotonicMs = performance.now();
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -476,18 +496,36 @@ export class ProviderProxy {
     let target: ProviderProxyUpstream;
     const onPendingError = () => socket.destroy();
     socket.on("error", onPendingError);
+    socket.once("close", () => socket.removeListener("error", onPendingError));
     this.pendingUpgrades.add(socket);
     try {
       target = await this.upstreamFor(request.headers);
     } catch (error) {
+      if (this.stopped || socket.destroyed) return;
+      const exchange = this.trafficDump?.beginWebSocketExchange({
+        ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+        headers: request.headers, startedAtMs, url: request.url ?? "",
+      });
+      exchange?.failure("upstream_route");
+      if (recordsResponseMetrics) {
+        const metrics = createMetricsState(
+          { threadId: null, turnId: null, operation: "response" }, startedAtMs,
+          "websocket", "response",
+          effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs,
+        );
+        metrics.httpStatus = 502;
+        if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+        markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
+        await this.deliverMetrics(metrics, route.accountId);
+      }
       socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       this.onError?.(asError(error));
       return;
     } finally {
       this.pendingUpgrades.delete(socket);
-      socket.removeListener("error", onPendingError);
     }
     if (this.stopped || socket.destroyed) return;
+    socket.removeListener("error", onPendingError);
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
       this.proxyWebSocket(
         request,

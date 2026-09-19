@@ -25,6 +25,31 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP routing", () => {
+  it("preserves account and compaction metadata on route failure without counting model listings", async () => {
+    const samples: Array<{ sample: ProviderProxyMetrics; account: string | undefined }> = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", accountIds: ["test"],
+      resolveUpstream: async () => { throw new Error("route unavailable"); },
+      onMetrics: (sample, account) => { samples.push({ sample, account }); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const response = await fetch(`http://${proxy.address()}/go/test/responses/compact`, {
+      method: "POST", body: "{}",
+      headers: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread-test", turn_id: "turn-test" }) },
+    });
+    await response.text();
+    expect(response.status).toBe(502);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({ account: "test", sample: {
+      threadId: "thread-test", turnId: "turn-test", operation: "compact",
+      status: "failed", errorType: "provider_proxy_route_error", httpStatus: 502,
+    } });
+    const listing = await fetch(`http://${proxy.address()}/go/test/models`);
+    await listing.text();
+    expect(listing.status).toBe(502);
+    expect(samples).toHaveLength(1);
+  });
   it("waits for an asynchronous route without losing HTTP bodies or WebSocket messages", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -68,14 +93,17 @@ describe("ProviderProxy HTTP routing", () => {
   });
 
   it.each([
-    ["http", "shutdown"], ["websocket", "shutdown"],
-    ["http", "disconnect"], ["websocket", "disconnect"],
-  ])("does not forward pending %s routing after %s", async (transport, action) => {
+    ["http", "shutdown", false], ["websocket", "shutdown", false],
+    ["http", "disconnect", false], ["websocket", "disconnect", false],
+    ["http", "shutdown", true], ["websocket", "shutdown", true],
+    ["http", "disconnect", true], ["websocket", "disconnect", true],
+  ] as const)("does not forward pending %s routing after %s (reject=%s)", async (transport, action, rejectRoute) => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let ready!: () => void;
     const routeReady = new Promise<void>((resolve) => { ready = resolve; });
     let upstreamRequests = 0;
+    const samples: ProviderProxyMetrics[] = [];
     const upstream = createServer((_request, response) => { upstreamRequests += 1; response.end(); });
     upstream.on("upgrade", (_request, socket) => { upstreamRequests += 1; socket.destroy(); });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -85,8 +113,10 @@ describe("ProviderProxy HTTP routing", () => {
       resolveUpstream: async () => {
         ready();
         await gate;
+        if (rejectRoute) throw new Error("route failed after cancellation");
         return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port, protocol: "http" };
       },
+      onMetrics: (sample) => { samples.push(sample); },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -113,11 +143,18 @@ describe("ProviderProxy HTTP routing", () => {
     release();
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(upstreamRequests).toBe(0);
+    if (action === "shutdown") expect(samples).toHaveLength(0);
+    else {
+      // 客户端 close 不代表服务端已处理断连；竞态中可观测到一次失败，但不能重复投递。
+      expect(samples.length).toBeLessThanOrEqual(1);
+      for (const sample of samples) expect(sample.status).toBe("failed");
+    }
   });
 
   it.each([false, true])("isolates route failures and recovers (async=%s)", async (asynchronous) => {
     const failure = new Error("invalid proxy route");
     const errors: Error[] = [];
+    const metrics: ProviderProxyMetrics[] = [];
     let failing = true;
     const upstream = createServer((request, response) => {
       request.resume();
@@ -137,6 +174,7 @@ describe("ProviderProxy HTTP routing", () => {
         return asynchronous ? Promise.resolve(target) : target;
       },
       onError: (error) => errors.push(error),
+      onMetrics: (sample) => { metrics.push(sample); },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -151,6 +189,13 @@ describe("ProviderProxy HTTP routing", () => {
       client.on("open", () => { client.close(); reject(new Error("unexpected upgrade")); });
     });
     expect(errors).toEqual([failure, failure]);
+    expect(metrics).toHaveLength(2);
+    expect(metrics.map((sample) => sample.transport)).toEqual(["http", "websocket"]);
+    for (const sample of metrics) {
+      expect(sample).toMatchObject({ status: "failed", httpStatus: 502,
+        errorType: "provider_proxy_route_error", model: null, inputTokens: null });
+      expect(sample.firstContentMs).toBeUndefined();
+    }
     failing = false;
     await expect(requestProxy(port, "/responses", "POST")).resolves.toEqual({ status: 200 });
   });

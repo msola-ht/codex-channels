@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { checkOpenAiConnectivity } from "../src/bootstrap/openai-connectivity.js";
 
 describe("OpenAI startup connectivity", () => {
+  it.each(["api", "chatgpt"] as const)("rejects missing and unexpected inference routes for %s", async (route) => {
+    for (const status of [302, 404, 429, 500]) {
+      const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
+        new Response(null, { status: init?.method === "HEAD" ? status : 200 }));
+      await expect(checkOpenAiConnectivity({ proxy: {}, route, fetchImpl }))
+        .resolves.toBe(status === 404 ? "invalid-base-url" : "route-warning");
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    }
+  });
   it.each(["chatgpt", "api"] as const)("reports a failing inference endpoint on the %s route", async (route) => {
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
       new Response(null, { status: init?.method === "HEAD" ? 503 : 200 }));

@@ -106,5 +106,8 @@ OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官�
 或 API 上游。主代理启动失败时 App Server 服务失败关闭；按需 Provider 代理启动失败时本次选择
 明确失败。两者都不会绕过统计代理静默直连上游。运行中动态上游路由解析失败时，HTTP 请求及
 WebSocket 升级返回 502 并报告内部错误，不退出监管进程；后续请求可以重新解析已修正的代理。
+Responses/压缩路由解析失败也记录 `provider_proxy_route_error` 指标：HTTP 保留请求头中的 Thread/Turn 与账户归属，
+WebSocket 升级失败按握手失败记录，不推断尚未收到的模型调用元数据。转储记录 `upstream_route` 错误；
+HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `response.create`。`/models` 和其他非 Responses 端点不计模型请求。
 `resolveUpstream` 支持异步解析；等待期间保留 HTTP 请求体，关闭代理会清理待升级连接，
 客户端已断开或代理已关闭时不再建立上游连接。

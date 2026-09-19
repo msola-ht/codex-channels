@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import WebSocket from "ws";
 
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
@@ -42,6 +43,45 @@ afterEach(async () => {
 });
 
 describe("ModelTrafficDump V2", () => {
+  it.each(["http", "websocket"])("records %s route failures without copying internal error details into the dump", async (transport) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-route-failure-"));
+    temporaryDirectories.push(directory);
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      trafficDump: { directory, label: "openai" },
+      resolveUpstream: async () => { throw new Error("private-route-detail"); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    if (transport === "http") {
+      const response = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: "{}" });
+      await response.text();
+      expect(response.status).toBe(502);
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        const client = new WebSocket(`ws://${proxy.address()}/responses`);
+        client.on("error", (error) => {
+          if (error.message.includes("502")) resolve();
+          else reject(error);
+        });
+        client.on("open", () => { client.close(); reject(new Error("unexpected upgrade")); });
+      });
+    }
+    await proxy.close();
+    const session = join(directory, readdirSync(directory)[0]!);
+    if (transport === "http") {
+      const index = readIndex(session);
+      expect(index).toHaveLength(2);
+      expect(index[1]).toMatchObject({ state: "failed", errorScope: "upstream_route" });
+      expect(JSON.stringify(index)).not.toContain("private-route-detail");
+    } else {
+      const trace = readdirSync(session).filter((name) => name.startsWith("trace-"))
+        .map((name) => readFileSync(join(session, name), "utf8")).join("");
+      expect(trace).toContain('"kind":"websocket_handshake"');
+      expect(trace).toContain('"scope":"upstream_route"');
+      expect(trace).not.toContain("private-route-detail");
+    }
+  });
   it("keeps HTTP forwarding available when dump storage initialization fails", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-traffic-v2-proxy-failure-"));
     temporaryDirectories.push(root);
