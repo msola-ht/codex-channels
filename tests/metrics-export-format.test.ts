@@ -38,7 +38,7 @@ describe("metrics export display helpers", () => {
       expect(values[headings.indexOf(field)]).toBe(value);
     }
     const markdown = render("markdown");
-    expect(markdown).toContain("首内容（代理）");
+    expect(markdown).toContain("首字耗时");
     expect(markdown).toContain("12.5 ms | 672 ms | requested | echoed");
   });
   it("keeps local time output stable", () => {

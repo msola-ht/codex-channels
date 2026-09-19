@@ -14,8 +14,9 @@
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时，在首个非空思考、正文或工具参数增量前解析对应事件以记录单请求
-  单调时钟首内容延迟，此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
+  HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
+  此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
@@ -58,8 +59,10 @@
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
-  `firstContentMs` 从 HTTP 请求或 WebSocket 请求帧的代理回调入口计到首个有效内容增量的接收回调入口，
-  包含 HTTP 上游路由等待；入口采集单调时间，解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
+  `firstContentMs` 从 HTTP 路由解析成功、WS 请求帧转储与解析完成后进入转发流程开始，计到首个符合条件事件的接收回调入口；
+  不含 HTTP 路由等待，包含 WS 等待连接就绪。响应解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
+  HTTP 排除 created/in_progress/failed，其余合法 response.* 语义事件计入；WS 计入 response.*.delta、output_text.done 与 function_call_arguments.done。
+  纯错误、旁路额度/timing/metadata 与畸形报文不计入；完整展示口径见[WebUI 文档](../../docs/webui.md)。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。

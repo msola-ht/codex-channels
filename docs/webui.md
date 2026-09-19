@@ -111,11 +111,18 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 并区分发送值与响应回报值；回报值不证明模型内部执行行为，缺失或 null 不填默认值。
 HTTP 请求从当前调用的本地 trace 提取“代理收齐请求体”“收齐请求体至响应头”“响应头至结束”三个阶段，
 不受 trace 页码影响，缺失或倒序时不计算；这些时间不作为首 Token 延迟、纯生成耗时或网络延迟。
-“请求明细”页的“首内容（代理）”读取 Schema v16 的 `first_content_ms`，导出字段为 `firstContentMs`。
+“请求明细”页的“首字耗时”读取 Schema v16 的 `first_content_ms`，导出字段为 `firstContentMs`。
 耗时展示复用[全局自适应单位](display.md#完成汇报)，API 和机器可读导出保留毫秒原值。
-它使用单调时钟，从代理请求回调入口计到首个非空思考、正文或工具参数增量的接收回调入口，包含 HTTP 上游路由等待。
-起止时间均在转储与解析前采集；生命周期事件、空增量和仅有终态不计入。
-这是单请求的代理观测延迟，不是首个网络字节、纯推理耗时或客户端显示时间；无有效增量时显示 `—`。
+它参考 sub2api 的 HTTP semantic 与 WebSocket token-event 口径，使用单调时钟逐请求独立计时。
+HTTP 从上游路由解析成功、进入转发流程开始（不含路由等待）；WS 从请求帧转储及解析完成、进入转发流程开始，包含等待上游连接就绪的时间。
+终点使用接收回调入口的时间，不把响应解析、转储或指标投递耗时算进去。
+HTTP/SSE 跳过 `response.created` / `response.in_progress`，首个其他合法 `response.*` 语义事件计入，
+包括空 item/part、空 delta、仅含 usage 的 completed 和 incomplete，不要求已经返回可见文本。
+WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.function_call_arguments.done`，同样不要求文本非空。
+与 sub2api 部分错误分支不同，本项目不把纯错误（`error` / `response.failed`）、额度、timing、metadata、
+畸形 JSON 或无有效事件类型的数据计入；响应头、SSE 注释、空 data 与 `[DONE]` 也不计入。没有先前命中事件的 WS 终态不补算首字。
+非流式 JSON 不按流式首字计算；历史记录不补算，旧版已采集的非空增量耗时保持原值。
+这是单请求的代理观测延迟，不是首个网络字节、纯推理耗时或客户端显示时间；无符合条件的事件时显示 `—`。
 原 `upstreamTtftMs` 仍逐条保存上游 logical-turn 原值，在提示与导出中独立保留，不参与求和或均值汇总。
 模型对照分别保留 `requestModel` 与 `responseModel`，两者均已提供且名称不同时显示箭头；名称回显不证明实际模型身份，缺失不推断。
 采集不依赖转储开关；开启转储时，同一次观测值同时进入转储响应索引与指标库，精简模式也保留它。

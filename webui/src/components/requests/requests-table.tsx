@@ -38,7 +38,7 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   output: "输出 Token",
   reasoningOutput: "推理输出",
-  firstContent: "首内容（代理）",
+  firstContent: "首字耗时",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -119,9 +119,9 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: "首内容（代理）",
+      header: "首字耗时",
       cell: ({ row }) => (
-        <span className="tabular-nums" title={`单请求开始至代理收到首个非空思考、正文或工具参数增量；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}>
+        <span className="tabular-nums" title={`上游转发开始至首个符合条件的事件：HTTP 为跳过 created/in_progress 的首个 Responses 语义事件；WS 为 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误或旁路元数据；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}>
           {row.original.firstContentMs == null ? "—"
             : formatElapsedDuration(row.original.firstContentMs)}
         </span>

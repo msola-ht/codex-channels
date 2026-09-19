@@ -44,7 +44,7 @@ export interface ProviderProxyMetrics {
   totalTokens: number | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
-  /** 代理收到本次请求至首个非空文本、思考或工具参数增量；不是客户端显示时间。 */
+  /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
   firstContentMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
@@ -191,8 +191,7 @@ export function observeResponseEvent(
   receivedAtMs: number,
   receivedAtMonotonicMs: number,
 ): boolean {
-  if (contentDeltaTypes.has(type) && metrics.firstContentMs === undefined
-    && typeof event?.delta === "string" && event.delta.length > 0) {
+  if (metrics.firstContentMs === undefined && startsFirstToken(metrics.transport, type, event)) {
     const started = requestClocks.get(metrics);
     if (started !== undefined) metrics.firstContentMs = receivedAtMonotonicMs - started;
   }
@@ -488,9 +487,9 @@ export function inspectResponseEvent(
 ): { type: string; event: Record<string, unknown> | undefined } {
   const scannedType = responseEventType(payload);
   const candidateType = fallbackType || scannedType;
-  if (collectFirstContent && contentDeltaTypes.has(candidateType)) {
+  if (collectFirstContent) {
     const event = parseJsonPayload(payload);
-    return { type: boundedString(event?.type) ?? candidateType, event };
+    return { type: boundedString(event?.type) ?? fallbackType, event };
   }
   if (
     !requiresResponseEventBody(candidateType)
@@ -506,11 +505,19 @@ export function inspectResponseEvent(
   };
 }
 
-const contentDeltaTypes = new Set([
-  "response.output_text.delta", "response.reasoning_text.delta",
-  "response.reasoning_summary_text.delta", "response.function_call_arguments.delta",
-  "response.custom_tool_call_input.delta",
-]);
+function startsFirstToken(
+  transport: ProviderProxyMetrics["transport"],
+  type: string,
+  event: Record<string, unknown> | undefined,
+): boolean {
+  // 参考 sub2api 的 HTTP semantic / WS token-event 口径；不把旁路元数据或纯错误计为首字。
+  if (!event || !type.startsWith("response.")) return false;
+  if (transport === "websocket") {
+    return type.endsWith(".delta") || type === "response.output_text.done"
+      || type === "response.function_call_arguments.done";
+  }
+  return type !== "response.created" && type !== "response.in_progress" && type !== "response.failed";
+}
 
 const responseEventBodyTypeNames = [
   "response.created",

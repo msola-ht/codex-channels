@@ -318,6 +318,7 @@ export class ProviderProxy {
     }
     request.removeListener("error", onPendingError);
     if (this.stopped || response.destroyed) return;
+    const forwardingStartedAtMonotonicMs = performance.now();
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
@@ -327,7 +328,7 @@ export class ProviderProxy {
       "http",
       responseOperation(route, turnMetadata.operation),
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
-      startedAtMonotonicMs,
+      forwardingStartedAtMonotonicMs,
     );
     const exchange = this.trafficDump?.beginHttpExchange({
       ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
@@ -587,11 +588,11 @@ export class ProviderProxy {
     };
 
     client.on("message", (data, isBinary) => {
-      const startedAtMonotonicMs = performance.now();
       exchange?.webSocketFrame("client", data, isBinary);
       const sanitized = recordsResponseMetrics
         ? sanitizeClientWebSocketMessage(data, isBinary)
         : { data };
+      const startedAtMonotonicMs = performance.now();
       if (sanitized.metadata) {
         activeMetrics = sanitized.recordsMetrics === false
           ? undefined

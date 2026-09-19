@@ -171,7 +171,7 @@ function renderDetail(detail) {
     lines.push("", `响应：${stateLabel(detail.response.state)}`
       + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`)
       + (detail.response.durationMs === undefined ? "" : ` ${formatElapsedDuration(detail.response.durationMs)}`));
-    lines.push(`单请求首内容（代理）：${detail.response.firstContentMs === undefined ? "未采集" : formatElapsedDuration(detail.response.firstContentMs)}`);
+    lines.push(`单请求首字耗时：${detail.response.firstContentMs === undefined ? "未采集" : formatElapsedDuration(detail.response.firstContentMs)}`);
     lines.push(`上游轮次首 Token：${detail.response.timing?.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.timing.firstTokenMs)}`);
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
     if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");

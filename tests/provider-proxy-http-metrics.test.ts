@@ -92,7 +92,7 @@ it("does not mark an unobservable HTTP 200 response as completed", async () => {
     })]);
   });
 
-it("attaches quota snapshots and measures request entry through content arrival before parsing", async () => {
+it("attaches quota snapshots and measures forwarding through event arrival excluding route wait and parsing", async () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(100);
     const observeChunk = HttpResponseMetricsObserver.prototype.observeChunk;
     vi.spyOn(HttpResponseMetricsObserver.prototype, "observeChunk").mockImplementation(function (this: HttpResponseMetricsObserver, ...args) {
@@ -181,7 +181,7 @@ it("attaches quota snapshots and measures request entry through content arrival 
       responseModel: "deepseek-v4-flash",
       quotaWindows,
     });
-    expect(metrics[0]?.firstContentMs).toBe(250);
+    expect(metrics[0]?.firstContentMs).toBe(50);
   });
 
 it("recognizes SSE metadata when the upstream omits Content-Type", async () => {
