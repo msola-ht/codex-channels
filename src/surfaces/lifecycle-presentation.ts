@@ -301,7 +301,7 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  fields.push({ label: "Token/s", value: formatTokensPerSecond(event.tokensPerSecond) });
+  fields.push({ label: "Token/s", value: formatCompletionTokenRate(event.tokensPerSecond) });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -579,7 +579,7 @@ export function createTurnCompletedPresentation(
     runFields.push({
       title: "性能",
       fields: [
-        { label: "Token/s", value: formatTokensPerSecond(event.timing?.tokensPerSecond) },
+        { label: "Token/s", value: formatCompletionTokenRate(event.timing?.tokensPerSecond) },
         ...(event.durationMs === undefined ? [] : [{
           label: "总耗时",
           value: formatElapsedDuration(event.durationMs),
@@ -631,7 +631,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    taskFields.push({ label: "Token/s", value: formatTokensPerSecond(task.tokensPerSecond) });
+    taskFields.push({ label: "Token/s", value: formatCompletionTokenRate(task.tokensPerSecond) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -648,13 +648,14 @@ export function createTurnCompletedPresentation(
     });
     sessionFields.push({
       title: "Token",
-      value: `${formatTokenCount(session.inputTokens + session.outputTokens)} · Token/s：${formatTokensPerSecond(session.tokensPerSecond)}`,
-      fields: session.cachedInputTokens === null
-        ? []
-        : [{
+      value: formatTokenCount(session.inputTokens + session.outputTokens),
+      fields: [
+        ...(session.cachedInputTokens === null ? [] : [{
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
-          }],
+          }]),
+        { label: "Token/s", value: formatCompletionTokenRate(session.tokensPerSecond) },
+      ],
     });
   }
   const sections = [
@@ -670,6 +671,10 @@ export function createTurnCompletedPresentation(
     fields: runFields,
     ...(sections.length > 0 ? { sections } : {}),
   };
+}
+
+function formatCompletionTokenRate(value: number | null | undefined): string {
+  return value == null ? formatTokensPerSecond(value) : `${Number(formatTokensPerSecond(value))}/s`;
 }
 
 export function renderPlainLifecyclePresentation(

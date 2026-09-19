@@ -23,13 +23,13 @@ describe("shared Surface lifecycle presentation", () => {
       sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
         outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300 },
     }));
-    expect(rendered).toContain("Token/s：200.00");
-    expect(rendered).toContain("Token/s：300.00");
+    expect(rendered).toContain("Token/s：200/s");
+    expect(rendered).toContain("Token/s：300/s");
     expect(rendered).not.toContain("本次运行：");
     expect(rendered).not.toContain("200.00 Token/s");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K · Token/s：300.00");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K\n  Token/s：300/s");
     expect(rendered).not.toContain("会话统计（含子代理）");
-    expect(rendered).not.toContain("\nToken/s：300.00");
+    expect(rendered).not.toContain("\nToken/s：300/s");
     expect(rendered).not.toContain("上游轮次首 Token");
   });
   it.each([0, 569, 720.25])("omits OpenAI TTFT %s from completion cards", (ttftMs) => {
@@ -721,6 +721,7 @@ describe("shared Surface lifecycle presentation", () => {
           cachedInputTokens: 60_000,
           outputTokens: 2_000,
           reasoningOutputTokens: 500,
+          tokensPerSecond: 20.125,
         },
       }),
     );
@@ -729,6 +730,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：9 次");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
+    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%\n  Token/s：20.13/s");
   });
 
   it("separates completed, interrupted and unobservable model attempts", () => {
