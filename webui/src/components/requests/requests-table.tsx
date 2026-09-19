@@ -11,12 +11,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Checkbox } from "@/components/ui/checkbox"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import {
   DataTable,
   SortableHeader,
+  TableHint,
   type DataTableColumn,
 } from "@/components/metrics/data-table"
 import { useLanguage } from "@/hooks/language-context"
@@ -51,6 +51,8 @@ const COLUMN_LABELS: Record<string, string> = {
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
+  ua: false,
+  error: false,
   operation: false,
   http: false,
   reasoningOutput: false,
@@ -91,28 +93,6 @@ export function RequestsTable({
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
     {
-      id: "select",
-      header: ({ table }) => (
-        <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
-          }
-          onCheckedChange={() => table.toggleAllPageRowsSelected()}
-          aria-label="选择全部行"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={() => row.toggleSelected()}
-          aria-label="选择行"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    },
-    {
       id: "time",
       accessorFn: (record) => record.recordedAtMs,
       header: ({ column }) => (
@@ -123,30 +103,6 @@ export function RequestsTable({
           {formatTime(getValue<number>())}
         </span>
       ),
-    },
-    {
-      id: "firstContent",
-      accessorFn: (record) => record.firstContentMs,
-      enableSorting: false,
-      header: "首字耗时",
-      cell: ({ row }) => (
-        <span className="tabular-nums" title={`上游转发开始至首个符合条件的事件：HTTP 为跳过 created/in_progress 的首个 Responses 语义事件；WS 为 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误或旁路元数据；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}>
-          {row.original.firstContentMs == null ? "—"
-            : formatElapsedDuration(row.original.firstContentMs)}
-        </span>
-      ),
-    },
-    {
-      id: "totalDuration",
-      accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column}>总耗时</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="代理收到本次请求至模型终态；无终态则到结束或失败。使用单调时钟，不含终态后的指标投递或客户端显示时间。">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
-    },
-    {
-      id: "tokensPerSecond",
-      accessorFn: (record) => record.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="输出 Token ÷ 本次请求总耗时，不扣除首字等待；不是纯生成速度。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "provider",
@@ -163,7 +119,7 @@ export function RequestsTable({
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <div className="flex max-w-64 items-center gap-2 whitespace-nowrap" title={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}>
+        <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
           <span className="min-w-0 truncate">
           {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
             ? `${row.original.requestModel} → ${row.original.responseModel}`
@@ -171,41 +127,8 @@ export function RequestsTable({
           </span>
           {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
             ? <Badge variant="outline">名称不一致</Badge> : null}
-        </div>
+        </span></TableHint>
       ),
-    },
-    {
-      id: "ua",
-      accessorFn: (record) => record.userAgent ?? "",
-      enableSorting: false,
-      header: () => (
-        <span className="-ml-2 inline-flex h-7 items-center px-1.5 text-muted-foreground">
-          User-Agent
-        </span>
-      ),
-      cell: ({ row }) => {
-        const userAgent = row.original.userAgent
-        if (!userAgent) return <span className="text-muted-foreground">—</span>
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="block max-w-40 truncate font-mono text-xs">{userAgent}</span>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-md">
-              <p className="break-all text-xs">{userAgent}</p>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
-    },
-    {
-      id: "operation",
-      accessorFn: (record) => (record.operation === "compact" ? "压缩" : "响应"),
-      header: ({ column }) => (
-        <SortableHeader column={column}>操作</SortableHeader>
-      ),
-      cell: ({ row }) =>
-        row.original.operation === "compact" ? "压缩" : "响应",
     },
     {
       id: "status",
@@ -213,60 +136,16 @@ export function RequestsTable({
       header: ({ column }) => (
         <SortableHeader column={column}>状态</SortableHeader>
       ),
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
-    },
-    {
-      id: "http",
-      accessorFn: (record) => record.httpStatus ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>HTTP</SortableHeader>
-      ),
-      cell: ({ row }) => (
-        <span className="tabular-nums">{row.original.httpStatus ?? "—"}</span>
-      ),
-    },
-    {
-      id: "traffic",
-      header: "调用详情",
-      enableSorting: false,
-      cell: ({ row }) => row.original.traffic === null ? (
-        <span className="text-muted-foreground" title="没有采集到调用记录关联；可能是历史记录、未开启调用记录，或失败发生在模型请求创建之前。">未关联</span>
-      ) : (
-        <Button variant="link" size="sm" asChild>
-          <Link to={trafficDetailPath(row.original.traffic)}>查看调用详情</Link>
-        </Button>
-      ),
-    },
-    {
-      id: "error",
-      accessorFn: (record) => record.errorType ?? record.errorCode ?? "",
-      header: ({ column }) => (
-        <SortableHeader column={column}>错误</SortableHeader>
-      ),
       cell: ({ row }) => {
-        const label = formatErrorType(
-          row.original.errorType ?? row.original.errorCode ?? null,
-          language,
-        )
-        const message = row.original.errorMessage
-        if (!message) {
-          return <span className="max-w-40 truncate">{label}</span>
-        }
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="max-w-40 truncate">{label}</span>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-md">
-              <p className="break-words text-xs">{formatErrorMessage(message, language)}</p>
-              {row.original.errorCode ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  错误码：{row.original.errorCode}
-                </p>
-              ) : null}
-            </TooltipContent>
-          </Tooltip>
-        )
+        const record = row.original
+        const badge = <StatusBadge status={record.status} />
+        if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
+        const details = [
+          formatErrorType(record.errorType ?? record.errorCode ?? null, language),
+          ...(record.errorMessage ? [formatErrorMessage(record.errorMessage, language)] : []),
+          ...(record.errorCode ? [`错误码：${record.errorCode}`] : []),
+        ].join(" · ")
+        return <TableHint hint={details}>{badge}</TableHint>
       },
     },
     {
@@ -284,7 +163,7 @@ export function RequestsTable({
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
                 {formatTokens(record.inputTokens)}
               </span>
             </TooltipTrigger>
@@ -323,7 +202,7 @@ export function RequestsTable({
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
                 {formatTokens(record.outputTokens)}
               </span>
             </TooltipTrigger>
@@ -336,6 +215,117 @@ export function RequestsTable({
                   非推理输出：{nonReasoning === null ? "—" : formatTokens(nonReasoning)}
                 </li>
               </ul>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+    },
+    {
+      id: "firstContent",
+      accessorFn: (record) => record.firstContentMs,
+      enableSorting: false,
+      header: "首字耗时",
+      cell: ({ row }) => (
+        <TableHint hint={`上游转发开始至首个符合条件的事件：HTTP 为跳过 created/in_progress 的首个 Responses 语义事件；WS 为 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误或旁路元数据；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
+          {row.original.firstContentMs == null ? "—"
+            : formatElapsedDuration(row.original.firstContentMs)}
+        </span></TableHint>
+      ),
+    },
+    {
+      id: "totalDuration",
+      accessorFn: (record) => record.totalDurationMs,
+      header: ({ column }) => <SortableHeader column={column}>总耗时</SortableHeader>,
+      cell: ({ row }) => <TableHint hint="代理收到本次请求至模型终态；无终态则到结束或失败。使用单调时钟，不含终态后的指标投递或客户端显示时间。"><span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span></TableHint>,
+    },
+    {
+      id: "tokensPerSecond",
+      accessorFn: (record) => record.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>Token/s</SortableHeader>,
+      cell: ({ row }) => <TableHint hint="输出 Token ÷ 本次请求总耗时，不扣除首字等待；不是纯生成速度。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
+    },
+    {
+      id: "traffic",
+      header: "调用详情",
+      enableSorting: false,
+      cell: ({ row }) => row.original.traffic === null ? (
+        <TableHint hint="没有采集到调用记录关联；可能是历史记录、未开启调用记录，或失败发生在模型请求创建之前。"><span className="text-muted-foreground">未关联</span></TableHint>
+      ) : (
+        <Button variant="link" size="sm" asChild>
+          <Link to={trafficDetailPath(row.original.traffic)}>查看调用详情</Link>
+        </Button>
+      ),
+    },
+    {
+      id: "ua",
+      accessorFn: (record) => record.userAgent ?? "",
+      enableSorting: false,
+      header: () => (
+        <span className="-ml-2 inline-flex h-7 items-center px-1.5 text-muted-foreground">
+          User-Agent
+        </span>
+      ),
+      cell: ({ row }) => {
+        const userAgent = row.original.userAgent
+        if (!userAgent) return <span className="text-muted-foreground">—</span>
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 block max-w-40 truncate font-mono text-xs">{userAgent}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-md">
+              <p className="break-all text-xs">{userAgent}</p>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+    },
+    {
+      id: "operation",
+      accessorFn: (record) => (record.operation === "compact" ? "压缩" : "响应"),
+      header: ({ column }) => (
+        <SortableHeader column={column}>操作</SortableHeader>
+      ),
+      cell: ({ row }) =>
+        row.original.operation === "compact" ? "压缩" : "响应",
+    },
+    {
+      id: "http",
+      accessorFn: (record) => record.httpStatus ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>HTTP</SortableHeader>
+      ),
+      cell: ({ row }) => (
+        <span className="tabular-nums">{row.original.httpStatus ?? "—"}</span>
+      ),
+    },
+    {
+      id: "error",
+      accessorFn: (record) => record.errorType ?? record.errorCode ?? "",
+      header: ({ column }) => (
+        <SortableHeader column={column}>错误</SortableHeader>
+      ),
+      cell: ({ row }) => {
+        const label = formatErrorType(
+          row.original.errorType ?? row.original.errorCode ?? null,
+          language,
+        )
+        const message = row.original.errorMessage
+        if (!message) {
+          return <span className="block max-w-40 truncate">{label}</span>
+        }
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 max-w-40 truncate">{label}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="max-w-md">
+              <p className="break-words text-xs">{formatErrorMessage(message, language)}</p>
+              {row.original.errorCode ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  错误码：{row.original.errorCode}
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         )

@@ -6,7 +6,6 @@ import {
   createSortedRowModel,
   filterFn_includesString,
   globalFilteringFeature,
-  rowSelectionFeature,
   rowSortingFeature,
   sortFn_alphanumeric,
   sortFn_basic,
@@ -63,12 +62,25 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+
+export function TableHint({ hint, children }: { hint: string; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-md"><p>{hint}</p></TooltipContent>
+    </Tooltip>
+  )
+}
 
 const dataTableFeatures = tableFeatures({
   columnFilteringFeature,
   columnVisibilityFeature,
   globalFilteringFeature,
-  rowSelectionFeature,
   rowSortingFeature,
   filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
@@ -213,7 +225,6 @@ export function DataTable<TData extends RowData>({
     )
   const [globalFilter, setGlobalFilter] =
     usePersistentTableState<string>(storageKey, "filters", "")
-  const [rowSelection, setRowSelection] = React.useState({})
   // 排序只在本次会话内有效，刷新后回到默认（最新时间倒序）；
   // 持久化只保留列展示（columns）与筛选。
   const [clientSorting, setClientSorting] = React.useState<SortingState>(
@@ -243,7 +254,6 @@ export function DataTable<TData extends RowData>({
       sorting,
       columnVisibility,
       globalFilter,
-      rowSelection,
     },
     ...(server
       ? {
@@ -266,7 +276,6 @@ export function DataTable<TData extends RowData>({
         }),
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setGlobalFilter,
-    onRowSelectionChange: setRowSelection,
   })
 
   const queryValue =
@@ -383,7 +392,14 @@ export function DataTable<TData extends RowData>({
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      aria-sort={header.column.getCanSort()
+                        ? header.column.getIsSorted() === "asc" ? "ascending"
+                          : header.column.getIsSorted() === "desc" ? "descending" : "none"
+                        : undefined}
+                    >
                       {header.isPlaceholder ? null : (
                         <table.FlexRender header={header} />
                       )}
@@ -397,7 +413,6 @@ export function DataTable<TData extends RowData>({
                 pageRows.map((row) => (
                   <TableRow
                     key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id}>
@@ -422,8 +437,7 @@ export function DataTable<TData extends RowData>({
 
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">
-            已选 {table.getFilteredSelectedRowModel().rows.length} 条 · 匹配{" "}
-            {matched} 条
+            匹配 {matched} 条
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">

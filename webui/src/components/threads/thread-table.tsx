@@ -5,6 +5,7 @@ import { Link } from "react-router"
 import {
   DataTable,
   SortableHeader,
+  TableHint,
   type DataTableColumn,
   type DataTableProps,
 } from "@/components/metrics/data-table"
@@ -44,12 +45,6 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
   const subagentCount = threads.length - mainCount
 
   const columns = React.useMemo<DataTableColumn<ThreadListItem>[]>(() => [
-    {
-      id: "tokensPerSecond",
-      accessorFn: (thread) => thread.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="当前筛选范围内，各有效请求 Token/s 的算术平均；仅统计该会话自身。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
-    },
     {
       id: "time",
       accessorFn: (thread) => thread.firstRequestStartedAtMs,
@@ -93,7 +88,7 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="max-w-40 truncate">{row.original.model ?? "—"}</span>
+        <TableHint hint={row.original.model ?? "未提供模型名称"}><span className="block max-w-40 truncate">{row.original.model ?? "—"}</span></TableHint>
       ),
     },
     {
@@ -113,24 +108,6 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
           >
             <span className="truncate">子代理 · {row.original.agentPath}</span>
           </Badge>
-        ),
-    },
-    {
-      id: "parent",
-      enableSorting: false,
-      accessorFn: (thread) => thread.parentThreadId ?? "",
-      header: "父会话",
-      cell: ({ row }) =>
-        row.original.parentThreadId === null ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          <Link
-            to={metricsLink(`/threads/${encodeURIComponent(row.original.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}
-            className="underline-offset-4 hover:underline"
-            title={row.original.parentThreadId}
-          >
-            {shortThreadId(row.original.parentThreadId)}
-          </Link>
         ),
     },
     {
@@ -178,15 +155,10 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
       ),
     },
     {
-      id: "compact",
-      accessorFn: (thread) => thread.compact?.requestCount ?? Number.NEGATIVE_INFINITY,
-      header: ({ column }) => (
-        <SortableHeader column={column}>压缩</SortableHeader>
-      ),
-      cell: ({ row }) =>
-        row.original.compact === null
-          ? "—"
-          : `${row.original.compact.requestCount} 次`,
+      id: "tokensPerSecond",
+      accessorFn: (thread) => thread.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <TableHint hint="当前筛选范围内，各有效请求 Token/s 的算术平均；仅统计该会话自身。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
     },
     {
       id: "last",
@@ -200,6 +172,35 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
         </span>
       ),
     },
+    {
+      id: "parent",
+      enableSorting: false,
+      accessorFn: (thread) => thread.parentThreadId ?? "",
+      header: "父会话",
+      cell: ({ row }) =>
+        row.original.parentThreadId === null ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <Link
+            to={metricsLink(`/threads/${encodeURIComponent(row.original.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}
+            className="underline-offset-4 hover:underline"
+            title={row.original.parentThreadId}
+          >
+            {shortThreadId(row.original.parentThreadId)}
+          </Link>
+        ),
+    },
+    {
+      id: "compact",
+      accessorFn: (thread) => thread.compact?.requestCount ?? Number.NEGATIVE_INFINITY,
+      header: ({ column }) => (
+        <SortableHeader column={column}>压缩</SortableHeader>
+      ),
+      cell: ({ row }) =>
+        row.original.compact === null
+          ? "—"
+          : `${row.original.compact.requestCount} 次`,
+    },
   ], [query])
 
   return (
@@ -212,6 +213,7 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
       data={threads}
       storageKey={TABLE_STATE_KEY}
       columnLabels={COLUMN_LABELS}
+      defaultColumnVisibility={{ parent: false, compact: false }}
       emptyText="暂无会话记录"
       noMatchText="无匹配会话"
       pagination={{ ...pagination, pageSizeOptions: PAGE_SIZE_OPTIONS }}

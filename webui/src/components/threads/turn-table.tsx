@@ -1,7 +1,6 @@
 import * as React from "react"
 import { Link } from "react-router"
 
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Tooltip,
   TooltipContent,
@@ -11,6 +10,7 @@ import { ProviderBadge } from "@/components/metrics/provider-badge"
 import {
   DataTable,
   SortableHeader,
+  TableHint,
   type DataTableColumn,
   type DataTableProps,
 } from "@/components/metrics/data-table"
@@ -42,40 +42,6 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"] }) {
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
     {
-      id: "tokensPerSecond",
-      accessorFn: (turn) => turn.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="该轮有效请求速率的算术平均，不含工具等待时间。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
-    },
-    {
-      id: "turn",
-      accessorFn: (turn) => turn.turnId,
-      header: ({ column }) => <SortableHeader column={column}>Turn</SortableHeader>,
-      cell: ({ row }) => <Link className="block max-w-48 truncate underline-offset-4 hover:underline" title={row.original.turnId} to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link>,
-    },
-    {
-      id: "select",
-      header: ({ table }) => (
-        <Checkbox
-          checked={
-            table.getIsAllPageRowsSelected() ||
-            (table.getIsSomePageRowsSelected() && "indeterminate")
-          }
-          onCheckedChange={() => table.toggleAllPageRowsSelected()}
-          aria-label="选择全部行"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={() => row.toggleSelected()}
-          aria-label="选择行"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-    },
-    {
       id: "time",
       accessorFn: (turn) => turn.recordedAtMs ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
@@ -86,6 +52,12 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
           {formatTime(row.original.recordedAtMs ?? null)}
         </span>
       ),
+    },
+    {
+      id: "turn",
+      accessorFn: (turn) => turn.turnId,
+      header: ({ column }) => <SortableHeader column={column}>Turn</SortableHeader>,
+      cell: ({ row }) => <Link className="block max-w-48 truncate underline-offset-4 hover:underline" title={row.original.turnId} to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link>,
     },
     {
       id: "provider",
@@ -102,7 +74,7 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="max-w-48 truncate">{row.original.model ?? "—"}</span>
+        <TableHint hint={row.original.model ?? "未提供模型名称"}><span className="block max-w-48 truncate">{row.original.model ?? "—"}</span></TableHint>
       ),
     },
     {
@@ -146,7 +118,7 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
                 {formatTokens(turn.inputTokens)}
               </span>
             </TooltipTrigger>
@@ -183,7 +155,7 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
                 {formatTokens(turn.outputTokens)}
               </span>
             </TooltipTrigger>
@@ -200,6 +172,12 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
           </Tooltip>
         )
       },
+    },
+    {
+      id: "tokensPerSecond",
+      accessorFn: (turn) => turn.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <TableHint hint="该轮有效请求速率的算术平均，不含工具等待时间。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
     },
     {
       id: "compact",
@@ -227,6 +205,7 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
       data={turns}
       storageKey={TABLE_STATE_KEY}
       columnLabels={COLUMN_LABELS}
+      defaultColumnVisibility={{ compact: false }}
       filterPlaceholder="筛选 Provider / 模型 / 压缩"
       emptyText="暂无明细"
       noMatchText="无匹配记录"
