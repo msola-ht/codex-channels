@@ -52,3 +52,5 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
   （`react/only-export-components`）。
 
 详细行为见 `docs/webui.md`。
+
+调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。

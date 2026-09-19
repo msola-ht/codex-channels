@@ -28,7 +28,6 @@ export function TrafficTable({
       <Table className="min-w-[960px]">
         <TableHeader>
           <TableRow>
-            <TableHead className="w-16">#</TableHead>
             <TableHead>时间</TableHead>
             <TableHead>Provider</TableHead>
             <TableHead>模型</TableHead>
@@ -42,7 +41,7 @@ export function TrafficTable({
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 10 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => (
@@ -51,21 +50,18 @@ export function TrafficTable({
               className="cursor-pointer"
               onClick={() => onOpen(exchange)}
             >
-              <TableCell className="tabular-nums">
+              <TableCell className="whitespace-nowrap tabular-nums">
                 <Button
                   type="button"
                   variant="link"
                   size="sm"
-                  className="h-auto px-0 font-mono"
-                  aria-label={`查看批次 ${exchange.session} 的模型调用 #${exchange.id} 明细`}
+                  className="h-auto px-0"
+                  aria-label={`查看 ${exchange.label} ${formatTime(exchange.startedAtMs)} 的调用明细`}
                   onClick={(event) => {
                     event.stopPropagation()
                     onOpen(exchange)
                   }}
-                >#{exchange.id}</Button>
-              </TableCell>
-              <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
-                {formatTime(exchange.startedAtMs)}
+                >{formatTime(exchange.startedAtMs)}</Button>
               </TableCell>
               <TableCell><Badge variant="outline">{exchange.label}</Badge></TableCell>
               <TableCell>
@@ -88,7 +84,7 @@ export function TrafficTable({
           ))}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
                 没有调用记录
               </TableCell>
             </TableRow>

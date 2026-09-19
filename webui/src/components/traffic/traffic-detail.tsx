@@ -1,6 +1,8 @@
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
+import { useState } from "react"
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
 import { TrafficModel } from "@/components/traffic/traffic-model"
+import { TrafficContent, TrafficDisclosure } from "@/components/traffic/traffic-content"
 import { TableHint } from "@/components/metrics/data-table"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -19,21 +21,43 @@ import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
 export function TrafficDetail({
   detail,
+  provider,
+  session,
   onTracePageChange,
   traceLoading = false,
   traceError = false,
+  onRetry,
 }: {
   detail: TrafficExchangeDetail
+  provider: string
+  session: string
   onTracePageChange: (offset: number) => void
   traceLoading?: boolean
   traceError?: boolean
+  onRetry: () => void
 }) {
+  const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
+  const copyReference = async () => {
+    setCopyState("pending")
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({ label: provider, session, id: detail.id }, null, 2))
+      setCopyState("copied")
+    } catch {
+      setCopyState("failed")
+    }
+  }
   return (
     <div className="flex min-w-0 shrink-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <span className="break-all">提供商 {provider} · 批次 {session}</span>
+        <TableHint hint="批次内编号，新批次重新计数；与提供商、批次一起定位唯一调用。"><span className="whitespace-nowrap">调用编号 #{detail.id}</span></TableHint>
+        <Button type="button" variant="outline" size="sm" disabled={copyState === "pending"} onClick={() => void copyReference()}><CopyIcon data-icon="inline-start" />复制定位信息</Button>
+        <span role="status">{copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败，请手动复制上方定位信息。" : ""}</span>
+      </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
         <TableHint hint="上游转发开始至首个符合条件的语义事件，不是响应头到达或客户端显示时间；与上游 logical_turn 统计分开。"><span className="whitespace-nowrap tabular-nums">单请求首字：{detail.response?.firstContentMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstContentMs)}</span></TableHint>
+        <span className="whitespace-nowrap tabular-nums">总耗时：{detail.response?.callTiming?.totalMs === undefined ? "未提供" : formatElapsedDuration(detail.response.callTiming.totalMs)}</span>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
@@ -43,28 +67,12 @@ export function TrafficDetail({
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
         </span>
       </div>
-
-      <Card className="min-w-0 shrink-0">
-        <CardHeader>
-          <CardTitle>模型声明与来源</CardTitle>
-          <CardDescription>仅比较请求与响应回显名称，不验证模型身份。以下声明只来自本次调用保留的记录；缺失不代表上游未发送。</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 text-sm">
-          <p className="break-all">请求模型（请求 model）：{detail.requestModel ?? "未提供"}</p>
-          <p className="break-all">响应回显（响应索引）：{detail.responseModels.join("、") || "未提供"}</p>
-          <div className="flex flex-col gap-1">
-            <p>服务端模型声明（不覆盖响应回显）：</p>
-            {detail.modelEvidence.serverModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
-              : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
-          </div>
-          <div className="flex flex-col gap-1">
-            <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
-            {detail.modelEvidence.safetyModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
-              : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
-          </div>
-          {detail.modelEvidence.truncated ? <p className="text-muted-foreground">声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
-        </CardContent>
-      </Card>
+      {traceLoading ? <p role="status" className="text-sm text-muted-foreground">正在刷新调用记录，当前摘要为上次成功读取的内容。</p> : null}
+      {detail.response === null ? null : <UsageSummary usage={detail.response.usage} />}
+      {detail.response?.failureStage === undefined ? null : (
+        <Alert variant="destructive"><AlertTitle>失败阶段：{detail.response.failureStage}</AlertTitle><AlertDescription>根据本次调用记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription></Alert>
+      )}
+      {detail.response?.failure === undefined ? null : <TrafficContent title="终态错误 / 不完整原因" text={detail.response.failure} json />}
 
       <Card className="min-w-0 shrink-0">
         <CardHeader>
@@ -86,14 +94,12 @@ export function TrafficDetail({
             <p className="break-all font-mono text-xs text-muted-foreground">接续响应：{detail.request.parameters.previousResponseId}</p>
           )}
           <TrafficRequestContent content={detail.request.content} />
-          <TrafficParameterComparison rows={detail.parameterComparison} />
-          <details>
-            <summary className="cursor-pointer text-sm">请求头与原始正文{detail.request.bodyTruncated ? "（展示已截断）" : ""}</summary>
+          <TrafficDisclosure title={`请求头与原始正文${detail.request.bodyTruncated ? "（展示已截断）" : ""}`}>
             <div className="flex flex-col gap-3 pt-3">
               <HeaderTable title="请求头" headers={detail.request.headers} />
-              <PayloadBlock title="请求正文" text={prettyJson(detail.request.body)} />
+              <TrafficContent title="请求正文" text={detail.request.body} json truncated={detail.request.bodyTruncated} />
             </div>
-          </details>
+          </TrafficDisclosure>
         </CardContent>
       </Card>
 
@@ -119,19 +125,11 @@ export function TrafficDetail({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm">实际服务层级：{detail.response.serviceTier ?? "未提供"}</p>
-            {detail.response.failureStage === undefined ? null : (
-              <Alert variant="destructive">
-                <AlertTitle>失败阶段：{detail.response.failureStage}</AlertTitle>
-                <AlertDescription>根据本次调用记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription>
-              </Alert>
-            )}
             {detail.response.responseId === undefined ? null : (
               <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
             )}
-            <UsageSummary usage={detail.response.usage} />
-            <TimingSummary response={detail.response} />
             {detail.response.output.map((item, index) => (
-              <PayloadBlock key={index} title={outputLabel(item)} text={item.text || "（没有可展示的文本）"} />
+              <TrafficContent key={index} title={outputLabel(item)} text={item.text} />
             ))}
             {detail.response.output.length === 0 ? (
               <p className="text-sm text-muted-foreground">{detail.category === "prewarm" ? "连接预热，不生成回答。"
@@ -141,14 +139,12 @@ export function TrafficDetail({
             {detail.response.outputTruncated ? (
               <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始调用记录未被修改。</AlertDescription></Alert>
             ) : null}
-            {detail.response.failure === undefined ? null : <PayloadBlock title="终态错误 / 不完整原因" text={prettyJson(detail.response.failure)} />}
-            <details>
-              <summary className="cursor-pointer text-sm">响应头与原始终态（含逐条用量归因）{detail.response.bodyTruncated ? " · 展示已截断" : ""}</summary>
+            <TrafficDisclosure title={`响应头与原始终态（含逐条用量归因）${detail.response.bodyTruncated ? " · 展示已截断" : ""}`}>
               <div className="flex flex-col gap-3 pt-3">
                 <HeaderTable title="响应头" headers={detail.response.headers} />
-                <PayloadBlock title="原始终态" text={prettyJson(detail.response.body)} />
+                <TrafficContent title="原始终态" text={detail.response.body} json truncated={detail.response.bodyTruncated} />
               </div>
-            </details>
+            </TrafficDisclosure>
             {detail.response.errorScope === undefined ? null : (
               <p className="break-all font-mono text-xs text-destructive">
                 {detail.response.errorScope}
@@ -159,22 +155,22 @@ export function TrafficDetail({
         </Card>
       )}
 
+      <TrafficDisclosure title="诊断信息：详细耗时、模型声明与参数对照">
+        {detail.response === null ? null : <TimingSummary response={detail.response} />}
+        <ModelEvidence detail={detail} />
+        <TrafficParameterComparison rows={detail.parameterComparison} />
+      </TrafficDisclosure>
       {detail.tracePage.total === 0 ? null : (
-        <details className="min-w-0 shrink-0 rounded-lg border bg-card text-card-foreground shadow-sm">
-          <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
-            原始事件（{detail.tracePage.total} 条，默认收起）
-          </summary>
+        <TrafficDisclosure title={`原始事件（${detail.tracePage.total} 条）`}>
           <div className="flex flex-col gap-3 border-t px-6 py-4" aria-busy={traceLoading}>
-            {traceLoading ? <><p role="status">正在加载原始事件…</p><Skeleton className="h-32 w-full" /></> : traceError ? <p>原始事件加载失败，请重试。</p> : detail.trace.map((item, index) => (
+            {traceLoading ? <><p role="status">正在加载原始事件…</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>原始事件加载失败，请重试。</p><Button type="button" variant="outline" onClick={onRetry}>重试原始事件</Button></> : <><p className="text-xs text-muted-foreground">当前 {detail.tracePage.offset + 1}–{detail.tracePage.offset + detail.trace.length} / {detail.tracePage.total} 条</p>{detail.trace.map((item, index) => (
               <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                 <p className="font-mono text-xs text-muted-foreground">
                   {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-                  {prettyJson(item.text)}
-                </pre>
+                <TrafficContent title="事件正文" text={item.text} json truncated={item.truncated} />
               </section>
-            ))}
+            ))}</>}
             {detail.tracePage.previousOffset === null && detail.tracePage.nextOffset === null ? null : (
               <div className="flex justify-end gap-2">
                 <Button
@@ -202,7 +198,7 @@ export function TrafficDetail({
               </div>
             )}
           </div>
-        </details>
+        </TrafficDisclosure>
       )}
     </div>
   )
@@ -309,22 +305,17 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
   )
 }
 
-function PayloadBlock({ title, text }: { title: string; text: string }) {
-  return (
-    <section className="flex min-w-0 flex-col gap-1">
-      <p className="break-all text-xs font-medium">{title}</p>
-      <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
-        {text || "（空）"}
-      </pre>
-    </section>
-  )
-}
-
-function prettyJson(text: string): string {
-  if (text.length === 0) return ""
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
+function ModelEvidence({ detail }: { detail: TrafficExchangeDetail }) {
+  return <Card className="min-w-0 shrink-0">
+    <CardHeader><CardTitle>模型声明与来源</CardTitle><CardDescription>仅比较请求与响应回显名称，不验证模型身份。缺失不代表上游未发送。</CardDescription></CardHeader>
+    <CardContent className="flex flex-col gap-3 text-sm">
+      <p className="break-all">请求模型：{detail.requestModel ?? "未提供"}</p>
+      <p className="break-all">响应回显：{detail.responseModels.join("、") || "未提供"}</p>
+      <p>服务端模型声明（不覆盖响应回显）：</p>
+      {detail.modelEvidence.serverModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+      <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
+      {detail.modelEvidence.safetyModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+      {detail.modelEvidence.truncated ? <p>声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
+    </CardContent>
+  </Card>
 }

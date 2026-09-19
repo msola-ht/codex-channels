@@ -13,6 +13,7 @@ describe("WebUI metrics table presentation", () => {
       import { MemoryRouter } from "react-router";
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
+          if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
@@ -57,8 +58,7 @@ describe("WebUI metrics table presentation", () => {
           traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
-          traceLoading: render(TrafficDetail, { detail, onTracePageChange: noop, traceLoading: true }),
-          traceFailure: render(TrafficDetail, { detail, onTracePageChange: noop, traceError: true }),
+          traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
@@ -68,6 +68,16 @@ describe("WebUI metrics table presentation", () => {
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
         };
+        globalThis.fixtureDisclosureOpen = true;
+        result.traceLoading = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceLoading: true });
+        result.traceFailure = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceError: true });
+        const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
+        result.truncatedContent = render(TrafficContent, { title: "片段", text: '{"partial":', json: true, truncated: true });
+        globalThis.fixtureDisclosureOpen = false;
+        result.incompleteOutput = render(TrafficDetail, { detail: { ...detail, response: {
+          state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
+          output: [{ type: "message", text: "complete visible message" }],
+        } }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         result.preferences = render(RequestsTable, requestProps);
         globalThis.fixtureQuery = { range: "30d", offset: 0, limit: 50 };
@@ -240,24 +250,39 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["#", "时间", "Provider", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
+    expect(markup.traffic).not.toContain("#7");
+    expect(markup.traffic).toContain("的调用明细");
     expect(markup.traffic).not.toContain("名称一致");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");
     expect(headers(markup.trafficLoading!)).toEqual(headers(markup.traffic!));
     expect(markup.trafficLoading).toContain('data-slot="skeleton"');
     expect(markup.trafficLoading).not.toContain("model-test");
-    expect(markup.trafficLoading).not.toContain("查看批次");
+    expect(markup.trafficLoading).not.toContain("的调用明细");
   });
 
   it("keeps call content but hides stale trace pages during loading or failure", () => {
+    expect(markup.incompleteOutput).toContain("输出展示不完整");
+    expect(markup.incompleteOutput).toContain("complete visible message");
+    expect(markup.incompleteOutput).not.toContain("内容已截断，展示和复制均仅包含已保留片段。");
+    expect(markup.traceClosed).not.toContain("request-body");
+    expect(markup.traceClosed).not.toContain("old-trace-body");
+    expect(markup.traceClosed).toContain("诊断信息");
+    expect(markup.truncatedContent).toContain("已截断");
+    expect(markup.truncatedContent).toContain("复制原文");
+    expect(markup.truncatedContent).not.toContain("格式化</button>");
     for (const html of [markup.traceLoading, markup.traceFailure]) {
       expect(html).toContain("request-body");
+      expect(html).toContain("提供商 openai · 批次 batch-1");
+      expect(html).toContain("调用编号 #7");
+      expect(html).toContain("复制定位信息");
       expect(html).not.toContain("old-trace-body");
       expect(html).toMatch(/<button\b[^>]*disabled=""/);
     }
     expect(markup.traceLoading).toContain("正在加载原始事件");
     expect(markup.traceFailure).toContain("原始事件加载失败");
+    expect(markup.traceFailure).toContain("重试原始事件");
   });
 
   it("offers an explicit retry and prevents repeating it while pending", () => {

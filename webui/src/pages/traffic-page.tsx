@@ -52,7 +52,6 @@ export function TrafficPage() {
         },
   )
   const listData = list.data
-  const detailData = detail.data
   const detailView = detail.displayData
   const pageNumber = Math.floor(query.offset / query.limit) + 1
   const paginationLimited = listData !== null
@@ -65,9 +64,9 @@ export function TrafficPage() {
       <div className="flex min-w-0 shrink-0 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold">明细 #{query.id}</h1>
+            <h1 className="text-xl font-semibold">调用明细</h1>
             <p className="text-sm text-muted-foreground">
-              批次 {detailData?.session ?? query.exchangeSession ?? query.session} · 原始正文和传输轨迹可展开，每段最多展示 4 MiB
+              原始正文和传输轨迹可展开，每段最多展示 4 MiB
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -87,8 +86,11 @@ export function TrafficPage() {
               <TrafficDetail
                 key={`${detailView.label}:${detailView.session}:${detailView.exchange.id}`}
                 detail={detailView.exchange}
+                provider={detailView.label}
+                session={detailView.session}
                 traceLoading={detail.loading}
                 traceError={detail.error !== null}
+                onRetry={detail.refetch}
                 onTracePageChange={(traceOffset) => update({ traceOffset, exchangeLabel: detailView.label, exchangeSession: detailView.session })}
               />
             )}
