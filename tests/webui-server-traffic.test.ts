@@ -213,7 +213,7 @@ describe("webui traffic V2 API", () => {
     expect(list.body.retentionDays).toBe(30);
     expect(list.body).toMatchObject({
       enabled: true,
-      label: "ocg",
+      label: null,
       maximumOffset: 50_000,
       total: 2,
       nextOffset: 1,
@@ -447,13 +447,28 @@ describe("webui traffic V2 API", () => {
     writeSession(fixture.trafficDir, "openai", "2026-09-18T00-00-00-000Z", [
       httpInteraction(1, "newer"),
     ], 200);
-    writeSession(fixture.trafficDir, "deepseek", "2026-09-18T01-00-00-000Z", [
+    writeSession(fixture.trafficDir, "deepseek", "2026-09-18T00-00-00-000Z", [
       httpInteraction(1, "other"),
     ], 300);
     const server = await startServer(fixture.environment);
 
     const latest = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
-    expect(latest.body.label).toBe("deepseek");
+    expect(latest.body.label).toBeNull();
+    expect(latest.body.total).toBe(3);
+    expect(latest.body.exchanges.map((entry) => entry.label).sort()).toEqual(["deepseek", "openai", "openai"]);
+    const selected = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=deepseek`);
+    expect(selected.body).toMatchObject({ label: "deepseek", total: 1 });
+    for (const entry of latest.body.exchanges) {
+      const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?label=${entry.label}&session=${entry.session}&id=${entry.id}`);
+      expect(detail.body.exchange.request.body).toBe(entry.label === "deepseek" ? "other"
+        : entry.session === "2026-09-17T00-00-00-000Z" ? "older" : "newer");
+    }
+    const firstPage = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=2`);
+    const lastPage = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=2&offset=2`);
+    expect(firstPage.body).toMatchObject({ label: null, total: 3, nextOffset: 2 });
+    expect(lastPage.body).toMatchObject({ label: null, total: 3, nextOffset: null });
+    expect(new Set([...firstPage.body.exchanges, ...lastPage.body.exchanges]
+      .map((entry) => `${entry.label}:${entry.session}:${entry.id}`)).size).toBe(3);
     expect(latest.body.labels.map((entry) => entry.label)).toEqual(["deepseek", "openai"]);
     const older = await getJson<TrafficDetailBody>(
       `${server.origin}/api/v1/traffic/exchange?id=1&label=openai&session=2026-09-17T00-00-00-000Z`,
@@ -665,7 +680,7 @@ interface TrafficListBody {
   enabled: boolean;
   retentionDays: number;
   exchanges: Array<Record<string, unknown>>;
-  label: string;
+  label: string | null;
   labels: Array<{ label: string; sessions: number }>;
   maximumOffset: number;
   nextOffset: number | null;

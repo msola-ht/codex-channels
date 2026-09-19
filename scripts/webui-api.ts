@@ -816,6 +816,7 @@ export interface TrafficLabel {
 
 export interface TrafficExchangeSummary {
   id: number
+  label: string
   session: string
   startedAtMs: number
   account?: string
@@ -840,7 +841,7 @@ export interface TrafficListResponse {
   directory: string
   enabled: boolean
   retentionDays: number
-  label: string
+  label: string | null
   labels: TrafficLabel[]
   session: string | null
   sessions: Array<{ session: string; createdAtMs: number }>

@@ -10,6 +10,7 @@ export interface TrafficQuery {
   label?: string
   session?: string
   exchangeSession?: string
+  exchangeLabel?: string
   id: number | null
   limit: number
   offset: number
@@ -24,6 +25,7 @@ export function useTrafficQuery() {
     const rawLabel = search.get("label")
     const rawSession = search.get("session")
     const rawExchangeSession = search.get("exchangeSession")
+    const rawExchangeLabel = search.get("exchangeLabel")
     const traceOffset = Number(search.get("traceOffset") ?? 0)
     const offset = Number(search.get("offset") ?? 0)
     const limit = Number(search.get("limit") ?? defaultLimit)
@@ -31,6 +33,7 @@ export function useTrafficQuery() {
       ...(rawLabel === null ? {} : { label: rawLabel }),
       ...(rawSession === null ? {} : { session: rawSession }),
       ...(rawExchangeSession === null ? {} : { exchangeSession: rawExchangeSession }),
+      ...(rawExchangeLabel === null ? {} : { exchangeLabel: rawExchangeLabel }),
       traceOffset: Number.isInteger(traceOffset) && traceOffset >= 0 ? traceOffset : 0,
       id: rawId !== null && /^[0-9]+$/u.test(rawId) ? Number(rawId) : null,
       limit: trafficPageSizeOptions.includes(limit) ? limit : defaultLimit,
@@ -43,6 +46,7 @@ export function useTrafficQuery() {
       label?: string | null
       session?: string | null
       exchangeSession?: string | null
+      exchangeLabel?: string | null
       traceOffset?: number | null
       id?: number | null
       limit?: number

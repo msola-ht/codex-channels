@@ -46,7 +46,7 @@ export function TrafficPage() {
       : {
           traceOffset: query.traceOffset,
           id: query.id,
-          ...(query.label === undefined ? {} : { label: query.label }),
+          ...((query.exchangeLabel ?? query.label) === undefined ? {} : { label: query.exchangeLabel ?? query.label }),
           ...((query.exchangeSession ?? query.session) === undefined
             ? {} : { session: query.exchangeSession ?? query.session }),
         },
@@ -78,7 +78,7 @@ export function TrafficPage() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => update({ traceOffset: null, id: null, exchangeSession: null })}
+            onClick={() => update({ traceOffset: null, id: null, exchangeSession: null, exchangeLabel: null })}
           >返回列表</Button>
           </div>
         </div>
@@ -89,7 +89,7 @@ export function TrafficPage() {
                 detail={detailView.exchange}
                 traceLoading={detail.loading}
                 traceError={detail.error !== null}
-                onTracePageChange={(traceOffset) => update({ traceOffset, label: detailView.label, exchangeSession: detailView.session })}
+                onTracePageChange={(traceOffset) => update({ traceOffset, exchangeLabel: detailView.label, exchangeSession: detailView.session })}
               />
             )}
       </div>
@@ -103,7 +103,7 @@ export function TrafficPage() {
           <h1 className="text-xl font-semibold">调用详情</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            记录的模型请求与响应字段；默认汇总所选提供商全部保留批次，按请求时间倒序展示
+            记录的模型请求与响应字段；默认汇总全部提供商、全部保留批次，按请求时间倒序展示
           </p>
         </div>
         <div className="flex w-full flex-wrap items-end gap-3">
@@ -112,16 +112,17 @@ export function TrafficPage() {
               <Field className="w-48">
                 <FieldLabel htmlFor={labelSelectId}>提供商</FieldLabel>
                 <Select
-                  value={query.label ?? listData.label}
-                  onValueChange={(value) => update({ label: value, session: null, exchangeSession: null, id: null }, true)}
+                  value={query.label === undefined ? "all" : `label:${query.label}`}
+                  onValueChange={(value) => update({ label: value === "all" ? null : value.slice(6), session: null, exchangeSession: null, id: null }, true)}
                 >
                   <SelectTrigger id={labelSelectId} size="sm" className="w-40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
+                      <SelectItem value="all">全部提供商</SelectItem>
                       {listData.labels.map((entry) => (
-                        <SelectItem key={entry.label} value={entry.label}>
+                        <SelectItem key={entry.label} value={`label:${entry.label}`}>
                           {entry.label}（{entry.sessions} 个批次）
                         </SelectItem>
                       ))}
@@ -130,7 +131,7 @@ export function TrafficPage() {
                 </Select>
               </Field>
             ) : null}
-            {listData !== null ? (
+            {listData !== null && listData.label !== null ? (
               <Field className="w-64">
                 <FieldLabel htmlFor={sessionSelectId}>记录批次</FieldLabel>
                 <Select
@@ -178,7 +179,7 @@ export function TrafficPage() {
           size="sm"
           className="self-start"
           onClick={() => update({ id: null, label: null, session: null, exchangeSession: null }, true)}
-        >改看最新提供商的全部批次</Button>
+        >查看全部提供商和批次</Button>
       ) : null}
       {listData !== null && !listData.enabled ? (
         <Alert>
@@ -210,7 +211,7 @@ export function TrafficPage() {
           <CardHeader>
             <CardTitle>{list.loading ? "正在刷新请求记录…" : `请求记录（${listData.total}）`}</CardTitle>
             <CardDescription className="break-all">
-              {listData.label} · {listData.session === null
+              {listData.label ?? "全部提供商"} · {listData.session === null
                 ? `全部 ${listData.sessions.length} 个保留批次` : `批次 ${listData.session}`}
             </CardDescription>
           </CardHeader>
@@ -221,7 +222,7 @@ export function TrafficPage() {
               onOpen={(exchange) => update({
                 traceOffset: null,
                 id: exchange.id,
-                label: listData.label,
+                exchangeLabel: exchange.label,
                 exchangeSession: exchange.session,
               })}
             />

@@ -14,8 +14,8 @@ describe("WebUI metrics table presentation", () => {
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
-          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; }";
-          if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "export function QueryFilters() { return null; }";
+          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
       try {
@@ -45,7 +45,7 @@ describe("WebUI metrics table presentation", () => {
         const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
           h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null, h(component, props)))));
         const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
-        const exchange = { id: 7, session: "batch-1", startedAtMs: 1000, category: "model",
+        const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model",
           state: "completed", durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
@@ -77,6 +77,9 @@ describe("WebUI metrics table presentation", () => {
         result.errors = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
+        const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
+        result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
+        result.activeFilters = render(QueryFilters, { query: { range: "7d", provider: ["openai"], model: "test" }, onChange: noop });
         const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
@@ -113,6 +116,19 @@ describe("WebUI metrics table presentation", () => {
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
 
+  it("renders a single-row filter toolbar with flexible search and collapsed secondary fields", () => {
+    expect(markup.filters).toContain("flex-row flex-nowrap items-center gap-2");
+    expect(markup.filters).toContain("min-w-0 flex-1");
+    expect(markup.filters).toContain("hidden @lg/filters:inline-flex");
+    expect(markup.filters).toContain('placeholder="搜索关键词"');
+    expect(markup.filters).toContain("查询</button>");
+    expect(markup.filters).toContain("重置</button>");
+    expect(markup.filters).not.toContain("Thread ID");
+    expect(markup.filters).not.toContain("Turn ID");
+    expect(markup.activeFilters).toContain("筛选 · 3");
+    expect(markup.filters).not.toContain("筛选 ·");
+  });
+
   it("retains every error row and summary footprint while hiding stale loading values", () => {
     expect(headers(markup.errorsLoading!)).toEqual(headers(markup.errors!));
     expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(51);
@@ -121,6 +137,19 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('role="status">正在加载错误记录…');
     expect(markup.errors).not.toContain('data-slot="skeleton"');
+  });
+
+  it("places compact console-style error statistics before filters without thread inputs", () => {
+    const html = markup.errors!;
+    const filters = html.indexOf('data-query-filters="true"');
+    expect(filters).toBeGreaterThan(0);
+    expect(html).toContain('data-thread-filters="false"');
+    const cards = html.slice(0, filters);
+    expect(cards).toContain("grid gap-4 sm:grid-cols-2 xl:grid-cols-4");
+    expect(cards).toContain("请求总数 · 失败 60 次");
+    expect(cards).toContain("成功率 · 当前显示 50 / 60 条失败记录");
+    expect(cards).not.toContain('data-slot="card-header"');
+    expect([...cards.matchAll(/data-slot="card-content"/g)]).toHaveLength(2);
   });
 
   it("groups request identity, usage, performance and detail columns", () => {
@@ -211,7 +240,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["#", "时间", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
+    expect(headers(markup.traffic!)).toEqual(["#", "时间", "Provider", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
     expect(markup.traffic).not.toContain("名称一致");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");

@@ -66,7 +66,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   const dump = dumpSettings(environment);
   if (apiPath === "/traffic") {
     assertParameters(url, ["label", "limit", "offset", "session"]);
-    const label = readLabel(url, labels);
+    const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
     const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
       newestFirst: true,
@@ -82,7 +82,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
       labels,
       maximumOffset: maximumPageOffset,
       session,
-      sessions: catalog.sessions.filter((entry) => entry.label === label)
+      sessions: catalog.sessions.filter((entry) => label === null || entry.label === label)
         .map(({ session, createdAtMs }) => ({ session, createdAtMs })).reverse(),
       ...page,
       nextOffset: page.nextOffset !== null && page.nextOffset <= maximumPageOffset
@@ -173,7 +173,9 @@ function readSessionFiles(url, catalogFiles, label) {
     throw new ApiError(400, "unsupported_parameter", "session 只能出现一次");
   }
   const requested = values[0];
-  const files = selectFilesOfLabel(catalogFiles, label, requested);
+  const files = label === null
+    ? catalogFiles.filter((file) => requested === undefined || writerSessionOf(file) === requested)
+    : selectFilesOfLabel(catalogFiles, label, requested);
   if (files.length === 0) {
     throw new ApiError(
       404,

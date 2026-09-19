@@ -30,6 +30,7 @@ export function TrafficTable({
           <TableRow>
             <TableHead className="w-16">#</TableHead>
             <TableHead>时间</TableHead>
+            <TableHead>Provider</TableHead>
             <TableHead>模型</TableHead>
             <TableHead>状态</TableHead>
             <TableHead className="text-right">总耗时</TableHead>
@@ -41,12 +42,12 @@ export function TrafficTable({
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 10 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => (
             <TableRow
-              key={`${exchange.session}:${exchange.id}`}
+              key={`${exchange.label}:${exchange.session}:${exchange.id}`}
               className="cursor-pointer"
               onClick={() => onOpen(exchange)}
             >
@@ -66,6 +67,7 @@ export function TrafficTable({
               <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                 {formatTime(exchange.startedAtMs)}
               </TableCell>
+              <TableCell><Badge variant="outline">{exchange.label}</Badge></TableCell>
               <TableCell>
                 <TrafficModel request={exchange.requestModel} responses={exchange.responseModels} />
               </TableCell>
@@ -86,7 +88,7 @@ export function TrafficTable({
           ))}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
                 没有调用记录
               </TableCell>
             </TableRow>

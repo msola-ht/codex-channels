@@ -346,6 +346,7 @@ function summaryOf(interaction, body) {
   const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   return {
     id: request.id,
+    label: labelOf(interaction.directory),
     session: interaction.session,
     startedAtMs: request.startedAtMs,
     ...(request.account === undefined ? {} : { account: request.account }),

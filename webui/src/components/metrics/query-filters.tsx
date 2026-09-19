@@ -1,9 +1,11 @@
 import { useId, useState } from "react"
-import { ChevronDownIcon } from "lucide-react"
+import { ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetTrigger } from "@/components/ui/sheet"
+import { metricsRangeLabels } from "@/lib/metrics-query"
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuCheckboxItem } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { MetricsQuery, RangeName } from "@/lib/types"
@@ -24,6 +26,8 @@ export function QueryFilters(props: { query: MetricsQuery; onChange: (query: Par
 function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true, providers, providersLoading, providersError }: { query: MetricsQuery; onChange: (query: Partial<MetricsQuery>) => void; threadId?: string; showThreadFilters?: boolean; providers: string[]; providersLoading: boolean; providersError: string | null }) {
   const id = useId()
   const [draft, setDraft] = useState(query)
+  const [open, setOpen] = useState(false)
+  const [dateError, setDateError] = useState<string | null>(null)
   const [range, setRange] = useState<RangeName | "custom">(query.from !== undefined || query.to !== undefined ? "custom" : query.range ?? "all")
   const set = (key: keyof MetricsQuery, value: string) => setDraft((previous) => ({ ...previous, [key]: value }))
   const selectedProviders = draft.provider ?? []
@@ -31,11 +35,15 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
   const textFields = [
     ...(showThreadFilters && !threadId ? [["threadId", "Thread ID"]] : []),
     ...(showThreadFilters ? [["turnId", "Turn ID"]] : []),
-    ["model", "模型"], ["filter", "关键词"],
-  ] as Array<["threadId" | "turnId" | "model" | "filter", string]>
-  return (
-    <form className="shrink-0" onSubmit={(event) => {
-      event.preventDefault()
+    ["model", "模型"],
+  ] as Array<["threadId" | "turnId" | "model", string]>
+  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length
+  const apply = () => {
+      if (range === "custom" && (!draft.from || !draft.to || draft.from > draft.to)) {
+        setDateError("请填写完整日期，结束日期不能早于开始日期。")
+        setOpen(true)
+        return
+      }
       const changes: Partial<MetricsQuery> = {
         range: range === "custom" ? undefined : range as MetricsQuery["range"],
         from: range === "custom" ? draft.from : undefined,
@@ -43,11 +51,42 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         operation: draft.operation || undefined,
         status: draft.status || undefined,
         provider: selectedProviders.length === 0 ? undefined : selectedProviders,
+        filter: draft.filter?.trim() || undefined,
       }
       for (const [key] of textFields) changes[key] = draft[key]?.trim() || undefined
       onChange(changes)
-    }}>
-      <FieldGroup className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4 xl:grid-cols-6">
+      setDateError(null)
+      setOpen(false)
+  }
+  const reset = () => {
+    const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined }
+    setDraft(cleared)
+    setRange("all")
+    setDateError(null)
+    setOpen(false)
+    onChange(cleared)
+  }
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <form className="@container/filters min-w-0 shrink-0" onSubmit={(event) => { event.preventDefault(); apply() }}>
+        <FieldGroup className="flex-row flex-nowrap items-center gap-2">
+          <Button type="button" variant="outline" className="hidden @lg/filters:inline-flex" aria-label={`时间范围：${metricsRangeLabels[range]}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+            {metricsRangeLabels[range]}<ChevronDownIcon data-icon="inline-end" />
+          </Button>
+          <Field className="min-w-0 flex-1">
+            <FieldLabel className="sr-only" htmlFor={`${id}-filter`}>关键词</FieldLabel>
+            <Input id={`${id}-filter`} value={draft.filter ?? ""} maxLength={128} placeholder="搜索关键词" onChange={(event) => set("filter", event.target.value)} />
+          </Field>
+          <SheetTrigger asChild><Button type="button" variant="outline"><SlidersHorizontalIcon data-icon="inline-start" />筛选{filterCount > 0 ? ` · ${filterCount}` : ""}</Button></SheetTrigger>
+          <Button type="submit">查询</Button>
+          <Button type="button" variant="outline" onClick={reset}>重置</Button>
+        </FieldGroup>
+      </form>
+      <SheetContent>
+        <SheetHeader><SheetTitle>筛选条件</SheetTitle><SheetDescription>调整条件后点击查询生效，关闭面板保留未应用的条件。</SheetDescription></SheetHeader>
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => { event.preventDefault(); apply() }}>
+      <FieldGroup className="min-h-0 flex-1 gap-4 overflow-y-auto px-4 pb-4">
+        <ErrorBanner error={dateError} />
         <RangeSelector value={range} onChange={setRange} from={draft.from} to={draft.to} onDateChange={set} />
         <Field>
           <FieldLabel htmlFor={`${id}-provider`}>Provider</FieldLabel>
@@ -71,7 +110,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
           </DropdownMenu>
         </Field>
         {textFields.map(([key, label]) => (
-          <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder={key === "filter" ? "会话 / 模型 / 错误" : "全部"} onChange={(event) => set(key, event.target.value)} /></Field>
+          <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder="全部" onChange={(event) => set(key, event.target.value)} /></Field>
         ))}
         {([
           ["operation", "操作", [["response", "响应"], ["compact", "压缩"]]],
@@ -84,16 +123,13 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
             </Select>
           </Field>
         ))}
-        <div className="flex gap-2">
-          <Button type="submit">查询</Button>
-          <Button type="button" variant="outline" onClick={() => {
-            const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined }
-            setDraft(cleared)
-            setRange("all")
-            onChange(cleared)
-          }}>重置</Button>
-        </div>
       </FieldGroup>
-    </form>
+        <SheetFooter className="shrink-0 flex-row">
+          <Button type="submit">查询</Button>
+          <Button type="button" variant="outline" onClick={reset}>重置</Button>
+        </SheetFooter>
+        </form>
+      </SheetContent>
+    </Sheet>
   )
 }
