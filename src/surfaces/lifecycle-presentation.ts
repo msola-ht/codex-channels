@@ -32,6 +32,7 @@ import {
   formatCacheHitRate,
   formatRequestCount,
   formatTokenCount,
+  formatTokensPerSecond,
 } from "./token-format.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
 
@@ -300,6 +301,7 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
+  fields.push({ label: "Token/s", value: formatTokensPerSecond(event.tokensPerSecond) });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -573,6 +575,18 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
+  if (event.durationMs !== undefined || event.timing?.modelRequestCount !== undefined) {
+    runFields.push({
+      title: "性能",
+      fields: [
+        { label: "Token/s", value: formatTokensPerSecond(event.timing?.tokensPerSecond) },
+        ...(event.durationMs === undefined ? [] : [{
+          label: "总耗时",
+          value: formatElapsedDuration(event.durationMs),
+        }]),
+      ],
+    });
+  }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [
@@ -617,18 +631,8 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
+    taskFields.push({ label: "Token/s", value: formatTokensPerSecond(task.tokensPerSecond) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
-  }
-  if (event.durationMs !== undefined) {
-    runFields.push({
-      title: "性能",
-      fields: [
-        {
-          label: "总耗时",
-          value: formatElapsedDuration(event.durationMs),
-        },
-      ],
-    });
   }
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
@@ -644,7 +648,7 @@ export function createTurnCompletedPresentation(
     });
     sessionFields.push({
       title: "Token",
-      value: formatTokenCount(session.inputTokens + session.outputTokens),
+      value: `${formatTokenCount(session.inputTokens + session.outputTokens)} · Token/s：${formatTokensPerSecond(session.tokensPerSecond)}`,
       fields: session.cachedInputTokens === null
         ? []
         : [{
@@ -654,11 +658,8 @@ export function createTurnCompletedPresentation(
     });
   }
   const sections = [
-    ...(runFields.length > 0
-      ? [{ title: "本次运行", fields: runFields }]
-      : []),
     ...(sessionFields.length > 0
-      ? [{ title: "当前 Session 累计", fields: sessionFields }]
+      ? [{ title: "当前会话", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
       ? [{ title: "账户状态", fields: accountFields }]
@@ -666,8 +667,8 @@ export function createTurnCompletedPresentation(
   ];
   return {
     title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
-    fields: sections.length === 1 ? sections[0]!.fields : [],
-    ...(sections.length > 1 ? { sections } : {}),
+    fields: runFields,
+    ...(sections.length > 0 ? { sections } : {}),
   };
 }
 

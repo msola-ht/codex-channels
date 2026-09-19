@@ -109,6 +109,7 @@ export interface StoredQuotaPeriod {
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
+  tokensPerSecond?: number | null;
   id: number;
   recordedAtMs: number;
   uncachedInputTokens: number | null;
@@ -126,6 +127,8 @@ export interface StoredCompactRequestMetricsSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
+  /** 有效请求输出速率的算术平均，不是会话墙钟吞吐量。 */
+  tokensPerSecond?: number | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
   upstreamTtftMs?: number | null;
   provider: string | null;
@@ -142,6 +145,7 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  tokensPerSecond?: number | null;
   provider: string | null;
   turnCount: number;
   requestCount: number;
@@ -164,6 +168,7 @@ export interface StoredThreadTurnSummary extends StoredTurnRequestMetricsSummary
 }
 
 export interface StoredThreadListItem {
+  tokensPerSecond?: number | null;
   threadId: string;
   provider: string | null;
   model: string | null;
@@ -215,6 +220,7 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 }
 
 export interface StoredModelRequestMetricsAggregate {
+  tokensPerSecond?: number | null;
   requestCount: number;
   unsuccessfulRequestCount: number;
   inputTokens: number;
@@ -261,6 +267,7 @@ export interface ModelRequestMetricsPageQuery extends ModelRequestMetricsScope {
 }
 
 export type ModelRequestMetricsSortKey =
+  | "tokensPerSecond"
   | "totalDurationMs"
   | "recordedAtMs"
   | "provider"
@@ -283,6 +290,7 @@ export interface StoredModelRequestMetricsPage {
 }
 
 export type ModelRequestMetricsThreadSortKey =
+  | "tokensPerSecond"
   | "time" | "last" | "thread" | "turn" | "provider" | "model"
   | "turns" | "requests" | "failures" | "input" | "output" | "compact";
 

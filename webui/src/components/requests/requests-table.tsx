@@ -26,6 +26,7 @@ import {
   formatErrorType,
   formatTime,
   formatTokens,
+  formatTokensPerSecond,
 } from "@/lib/format"
 import type { RequestRecord } from "@/lib/types"
 
@@ -45,6 +46,7 @@ const COLUMN_LABELS: Record<string, string> = {
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
   totalDuration: "总耗时",
+  tokensPerSecond: "Token/s",
   traffic: "调用详情",
 }
 
@@ -139,6 +141,12 @@ export function RequestsTable({
       accessorFn: (record) => record.totalDurationMs,
       header: ({ column }) => <SortableHeader column={column}>总耗时</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="代理收到本次请求至模型终态；无终态则到结束或失败。使用单调时钟，不含终态后的指标投递或客户端显示时间。">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
+    },
+    {
+      id: "tokensPerSecond",
+      accessorFn: (record) => record.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="输出 Token ÷ 本次请求总耗时，不扣除首字等待；不是纯生成速度。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "provider",

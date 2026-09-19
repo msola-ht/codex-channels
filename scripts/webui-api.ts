@@ -53,6 +53,7 @@ export interface CompactSummary {
 }
 
 export interface Aggregate {
+  tokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -147,6 +148,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  tokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -170,6 +172,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface TurnSummary {
+  tokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -202,6 +205,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  tokensPerSecond?: number | null
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
@@ -234,6 +238,8 @@ export interface RequestRecord {
 }
 
 export type RequestSortKey =
+  | "tokensPerSecond"
+  | "totalDuration"
   | "time"
   | "provider"
   | "model"

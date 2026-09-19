@@ -12,6 +12,7 @@ const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
   "",
+  "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
 ].join("\n");
@@ -561,10 +562,9 @@ describe("TelegramOutbox", () => {
       [
         "<b>本次运行 · 失败</b>",
         "",
-        "<b>本次运行</b>",
         "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
         "",
-        "<b>当前 Session 累计</b>",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
       ].join("\n"),
@@ -1339,12 +1339,11 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
-        "<b>本次运行</b>",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>提供商：</b>OpenAI 官方",
         "• <b>最近请求缓存命中率：</b>2.07%",
         "",
-        "<b>当前 Session 累计</b>",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
@@ -1378,6 +1377,7 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",

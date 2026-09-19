@@ -17,6 +17,7 @@ import {
 import {
   formatTime,
   formatTokens,
+  formatTokensPerSecond,
 } from "@/lib/format"
 import type { MetricsQuery, TurnSummary } from "@/lib/types"
 import { metricsLink } from "@/lib/metrics-query"
@@ -32,6 +33,7 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
+  tokensPerSecond: "平均 Token/s",
   compact: "压缩",
 }
 
@@ -39,6 +41,12 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"] }) {
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
+    {
+      id: "tokensPerSecond",
+      accessorFn: (turn) => turn.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="该轮有效请求速率的算术平均，不含工具等待时间。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
+    },
     {
       id: "turn",
       accessorFn: (turn) => turn.turnId,

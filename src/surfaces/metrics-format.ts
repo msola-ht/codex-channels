@@ -13,6 +13,7 @@ import {
   formatCacheHitRate,
   formatRequestCount,
   formatTokenCount,
+  formatTokensPerSecond,
 } from "./token-format.js";
 export function formatConversationMetrics(
   result: Extract<ConversationCommandResult, { kind: "metrics" }>,
@@ -36,6 +37,7 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 最近运行聚合",
+      `平均 Token/s：${formatTokensPerSecond(turn.tokensPerSecond)}`,
       ...(turn.upstreamTtftMs == null ? [] : [`上游轮次首 Token：${formatElapsedDuration(turn.upstreamTtftMs)}（不是单请求首内容）`]),
       `模型请求：${formatRequestCount(turn.requestCount)} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(turn.unsuccessfulRequestCount)} 次）` : ""}`,
       `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
@@ -62,6 +64,7 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 当前会话指标累计",
+      `平均 Token/s：${formatTokensPerSecond(aggregate.tokensPerSecond)}`,
       `Turn：${aggregate.turnCount} 次`,
       `模型请求：${formatRequestCount(aggregate.requestCount)} 次${aggregate.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(aggregate.unsuccessfulRequestCount)} 次）` : ""}`,
       `- **Token**：${formatTokenCount(aggregate.inputTokens + aggregate.outputTokens)}`,

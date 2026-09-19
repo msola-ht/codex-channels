@@ -54,7 +54,7 @@ describe("webui server data API", () => {
     const traffic = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 4 };
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
-      firstContentMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
+      firstContentMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -65,15 +65,26 @@ describe("webui server data API", () => {
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
         firstContentMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
+        tokensPerSecond: 1_000_000 / 1234.5,
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
         firstContentMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
+        tokensPerSecond: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
     }
     const sorted = await fetch(`${origin}/api/v1/requests?range=all&sort=totalDuration&direction=desc`);
     expect(sorted.status).toBe(200);
     expect(((await sorted.json()) as { records: Array<{ totalDurationMs: number | null }> }).records[0]?.totalDurationMs).toBe(1234.5);
+    const speeds = await fetch(`${origin}/api/v1/requests?range=all&sort=tokensPerSecond&direction=desc`);
+    expect(speeds.status).toBe(200);
+    expect(((await speeds.json()) as { records: Array<{ tokensPerSecond: number | null }> }).records[0]?.tokensPerSecond).toBe(1_000_000 / 1234.5);
+    for (const [path, key] of [["threads", "threads"], ["threads/thread-1/turns", "turns"]]) {
+      const response = await fetch(`${origin}/api/v1/${path}?range=all&sort=tokensPerSecond&direction=desc`);
+      expect(response.status).toBe(200);
+      const body = await response.json() as Record<string, Array<{ tokensPerSecond: number | null }>>;
+      expect(body[key!]![0]?.tokensPerSecond).toBe(1_000_000 / 1234.5);
+    }
   });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };

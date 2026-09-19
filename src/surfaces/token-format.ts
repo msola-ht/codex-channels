@@ -16,6 +16,10 @@ export function formatTokenCount(value: number): string {
   return value.toLocaleString("zh-CN");
 }
 
+export function formatTokensPerSecond(value: number | null | undefined): string {
+  return value == null ? "未提供" : value.toFixed(2);
+}
+
 export function formatRequestCount(value: number): string {
   if (Math.abs(value) >= 1_000) return formatCompactNumber(value, 2);
   return value.toLocaleString("zh-CN");

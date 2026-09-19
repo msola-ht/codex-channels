@@ -22,8 +22,8 @@ const target = {
   accountId,
   conversationId: actorId,
 } as const;
-const turnCompletedText = "**本次运行 · 已完成**\n\n- Session：测试会话\n- Session ID：thread";
-const turnStoppedText = "**本次运行 · 已停止**\n\n- Session：测试会话\n- Session ID：thread";
+const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
+const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
   it("keeps reply contexts private to one account and Conversation", () => {
@@ -310,9 +310,8 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       turnStoppedText,
       "**本次运行 · 失败**\n\n"
-        + "**本次运行**\n"
         + "- 错误：受控错误\n\n"
-        + "**当前 Session 累计**\n"
+        + "**当前会话**\n"
         + "- Session：测试会话\n"
         + "- Session ID：thread",
     ]);

@@ -25,6 +25,30 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("derives request speed and averages only eligible raw requests across scopes", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    const base = { ...sample(), recordedAtMs: 2_000 };
+    store.recordBatch([
+      { ...base, outputTokens: 100, totalDurationMs: 1_000 },
+      { ...base, outputTokens: 900, totalDurationMs: 3_000 },
+      { ...base, outputTokens: 99_999 },
+      { ...base, outputTokens: 100, totalDurationMs: 0 },
+      { ...base, outputTokens: 0, totalDurationMs: 1_000 },
+      { ...base, outputTokens: null, totalDurationMs: 1_000 },
+      { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000 },
+    ]);
+    expect(store.recent(7).map((row) => row.tokensPerSecond)).toEqual([900, null, null, null, null, 300, 100]);
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(200);
+    const scope = { startAtMs: 1_000, endAtMs: 3_000, limit: 1, sortKey: "tokensPerSecond" as const, sortDirection: "desc" as const };
+    expect(store.threadList(scope).threads[0]).toMatchObject({ threadId: "other", tokensPerSecond: 900 });
+    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(200);
+    expect(store.page(scope).records[0]?.tokensPerSecond).toBe(900);
+    store.recordSubagentThread({ agentThreadId: "other", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBeCloseTo(1300 / 3);
+    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(200);
+    store.close();
+  });
   it("persists TTFT and restores the first eligible sample for the exact Turn", () => {
     const path = join(temporaryDirectory(), "metrics.sqlite3");
     const store = new SqliteModelRequestMetricsStore(path, 5_000);

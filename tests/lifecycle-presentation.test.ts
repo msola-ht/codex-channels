@@ -15,6 +15,23 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
+  it("shows distinct run and session request speeds without restoring TTFT", () => {
+    const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
+      threadId: "thread-1", turnId: "turn-1", status: "completed", durationMs: 999_000,
+      timing: { modelRequestCount: 2, tokensPerSecond: 200 },
+      sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
+        outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300 },
+    }));
+    expect(rendered).toContain("Token/s：200.00");
+    expect(rendered).toContain("Token/s：300.00");
+    expect(rendered).not.toContain("本次运行：");
+    expect(rendered).not.toContain("200.00 Token/s");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K · Token/s：300.00");
+    expect(rendered).not.toContain("会话统计（含子代理）");
+    expect(rendered).not.toContain("\nToken/s：300.00");
+    expect(rendered).not.toContain("上游轮次首 Token");
+  });
   it.each([0, 569, 720.25])("omits OpenAI TTFT %s from completion cards", (ttftMs) => {
     const event = {
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
@@ -519,15 +536,15 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toBe([
       "本次运行 · 失败",
       "",
-      "本次运行：",
       "错误：失败：[已隐藏]",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
       "性能",
+      "  Token/s：未提供",
       "  总耗时：1 min 5 s",
       "",
-      "当前 Session 累计：",
+      "当前会话：",
       "当前工作区：Main (main)",
       "Session：统一生命周期",
       "Session ID：thread-1",
@@ -708,7 +725,7 @@ describe("shared Surface lifecycle presentation", () => {
       }),
     );
 
-    expect(rendered).toContain("当前 Session 累计：");
+    expect(rendered).toContain("当前会话：");
     expect(rendered).toContain("模型请求：9 次");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");

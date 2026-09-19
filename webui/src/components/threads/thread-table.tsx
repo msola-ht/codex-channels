@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import {
   formatTime,
   formatTokens,
+  formatTokensPerSecond,
   shortThreadId,
 } from "@/lib/format"
 import type { MetricsQuery, ThreadListItem } from "@/lib/types"
@@ -31,6 +32,7 @@ const COLUMN_LABELS: Record<string, string> = {
   requests: "请求",
   input: "输入 Token",
   output: "输出 Token",
+  tokensPerSecond: "平均 Token/s",
   compact: "压缩",
   last: "最后记录",
 }
@@ -42,6 +44,12 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
   const subagentCount = threads.length - mainCount
 
   const columns = React.useMemo<DataTableColumn<ThreadListItem>[]>(() => [
+    {
+      id: "tokensPerSecond",
+      accessorFn: (thread) => thread.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="当前筛选范围内，各有效请求 Token/s 的算术平均；仅统计该会话自身。">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
+    },
     {
       id: "time",
       accessorFn: (thread) => thread.firstRequestStartedAtMs,
