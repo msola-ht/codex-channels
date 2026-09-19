@@ -236,6 +236,8 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableString(record.threadId)
     || !nullableString(record.turnId)
     || !nullableString(record.model)
+    || (record.requestModel !== undefined && !nullableString(record.requestModel))
+    || (record.responseModel !== undefined && !nullableString(record.responseModel))
     || !nullableString(record.serviceTier)
     || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
     || !nullableHttpStatus(record.httpStatus)
@@ -251,6 +253,9 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableTokenCount(record.totalTokens)
     || !finiteNumber(record.requestStartedAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
+    || (record.firstContentMs !== undefined
+      && (typeof record.firstContentMs !== "number"
+        || !Number.isFinite(record.firstContentMs) || record.firstContentMs < 0))
     || (record.upstreamTtftMs !== undefined
       && (typeof record.upstreamTtftMs !== "number"
         || !Number.isFinite(record.upstreamTtftMs) || record.upstreamTtftMs < 0))

@@ -177,3 +177,4 @@ export function formatFailureRate(requestCount: number, unsuccessful: number): s
 export function shortThreadId(threadId: string): string {
   return threadId.length <= 14 ? threadId : `${threadId.slice(0, 8)}…${threadId.slice(-4)}`
 }
+export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js"

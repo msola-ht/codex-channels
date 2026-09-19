@@ -114,8 +114,8 @@ OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”�
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
-`elapsed-duration.ts` 只把已确认的 Turn、操作、推理状态等毫秒值或账户用量秒数格式化为三个 Surface
-共用的中文短文本，不负责计时、状态或持久化。
+`elapsed-duration.ts` 把已确认的 Turn、操作、推理状态和请求耗时格式化为自适应 `ms` / `s` / `min` / `h`，
+三个 Surface、CLI 与 WebUI 共用该纯函数；账户用量秒数仍使用独立的中文周期格式。不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
 `conversation-model-account-command-format.ts` 在 OpenAI `/limits` 中展示重置券可用数量，并按相同

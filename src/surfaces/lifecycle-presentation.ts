@@ -302,8 +302,8 @@ export function createSubagentCompletedPresentation(
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
   if (event.modelProvider === "openai" && event.upstreamTtftMs !== undefined) {
     fields.push({
-      label: "首字耗时",
-      value: `${event.upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
+      label: "上游轮次首 Token",
+      value: formatElapsedDuration(event.upstreamTtftMs),
     });
   }
   const cachedInputTokens = event.cachedInputTokens;
@@ -632,8 +632,8 @@ export function createTurnCompletedPresentation(
       title: "性能",
       fields: [
         ...(upstreamTtftMs === undefined ? [] : [{
-          label: "首字耗时",
-          value: `${upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
+          label: "上游轮次首 Token",
+          value: formatElapsedDuration(upstreamTtftMs),
         }]),
         ...(event.durationMs === undefined ? [] : [{
           label: "总耗时",

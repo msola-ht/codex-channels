@@ -219,7 +219,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       .all() as Array<{ name: string }>;
     inspection.close();
     expect(columns.map((column) => column.name).filter((name) =>
-      name !== "error_message"
+      name !== "error_message" && name !== "first_content_ms"
       && /body|content|prompt|message|image|authorization/iu.test(name)
     )).toEqual([]);
   });

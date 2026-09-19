@@ -164,7 +164,7 @@ describe("Feishu outbox operation summaries", () => {
     expect(markdownCards).toEqual([
       "**运行命令 · 已完成** · exit 0 · `git status --short`\n\n"
       + "---\n"
-      + "**耗时：** 125毫秒",
+      + "**耗时：** 125 ms",
     ]);
   });
 
@@ -208,7 +208,7 @@ describe("Feishu outbox operation summaries", () => {
 
     expect(markdownCards).toEqual([
       "**等待子代理 · 失败**\n\n---\n"
-      + "**耗时：** 125毫秒",
+      + "**耗时：** 125 ms",
     ]);
   });
 
@@ -256,7 +256,7 @@ describe("Feishu outbox operation summaries", () => {
       + "- MCP 工具：3 次\n"
       + "  - `codex_apps.github.fetch_pr · 读写属性未知`：2 次\n"
       + "  - `codex_apps.github.update_pull_request · 读写属性未知`：1 次\n\n"
-      + "---\n**耗时：** 375毫秒",
+      + "---\n**耗时：** 375 ms",
       turnCompletedMarkdown,
     ]);
   });

@@ -191,7 +191,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         INSERT INTO model_request_metrics (
           ${metricStorageColumnsSql}
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -292,6 +292,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         : JSON.stringify(sample.quotaWindows),
       sample.userAgent ?? null,
       sample.upstreamTtftMs ?? null,
+      sample.firstContentMs ?? null,
+      sample.requestModel ?? null,
+      sample.responseModel ?? null,
     );
     return recordedAtMs;
   }

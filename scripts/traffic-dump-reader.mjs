@@ -168,6 +168,7 @@ export async function describeDumpExchange(
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
       durationMs: interaction.response.durationMs,
+      firstContentMs: interaction.response.firstContentMs,
       httpTiming: interaction.request.transport !== "http" ? null : {
         receiveRequestMs: elapsedMs(interaction.request.startedAtMs, trace.milestones.request_end),
         waitResponseHeadMs: elapsedMs(trace.milestones.request_end, trace.milestones.response_head),

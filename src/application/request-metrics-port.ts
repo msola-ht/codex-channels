@@ -14,6 +14,8 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
+  /** 上游轮次首 Token，不是单请求首内容延迟。 */
+  upstreamTtftMs?: number | null;
   turnId: string;
   requestCount: number;
   unsuccessfulRequestCount: number;

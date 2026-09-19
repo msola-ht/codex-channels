@@ -28,6 +28,9 @@ export interface ModelRequestMetricSample {
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   upstreamTtftMs?: number | null;
+  firstContentMs?: number | null;
+  requestModel?: string | null;
+  responseModel?: string | null;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
   weeklyQuota: {

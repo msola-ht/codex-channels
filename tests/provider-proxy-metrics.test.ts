@@ -38,6 +38,14 @@ describe("Provider proxy metrics channel", () => {
         await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: value } as ProviderProxyMetrics);
       }
       expect(received.map((value) => value.upstreamTtftMs)).toEqual([0, 569.25]);
+      received.length = 0;
+      for (const value of [0, 12.5, -1, "123", null]) {
+        await sendProviderProxyMetrics(socketPath, {
+          ...metrics(), firstContentMs: value, requestModel: "requested", responseModel: "echoed",
+        } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.firstContentMs)).toEqual([0, 12.5]);
+      expect(received[0]).toMatchObject({ requestModel: "requested", responseModel: "echoed" });
     } finally { await server.close(); }
   });
   const unixIt = process.platform === "win32" ? it.skip : it;

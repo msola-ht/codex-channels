@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatTime } from "@/lib/format"
+import { formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeSummary } from "@/lib/types"
 
 export function TrafficTable({
@@ -73,7 +73,7 @@ export function TrafficTable({
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
                 {stateLabel(exchange.state)}
-                {exchange.durationMs === undefined ? "" : ` · ${exchange.durationMs} ms`}
+                {exchange.durationMs === undefined ? "" : ` · ${formatElapsedDuration(exchange.durationMs)}`}
                 {exchange.hasError ? <Badge className="ml-2" variant="destructive">异常</Badge> : null}
               </TableCell>
             </TableRow>

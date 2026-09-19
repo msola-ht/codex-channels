@@ -155,6 +155,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       totalTokens: 150,
     });
     expect(metrics[0]).not.toHaveProperty("firstTokenAtMs");
+    expect(metrics[0]?.firstContentMs).toBeGreaterThanOrEqual(0);
   });
 
   it("does not record WebSocket startup prewarm as a model request", async () => {

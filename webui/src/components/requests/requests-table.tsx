@@ -17,6 +17,7 @@ import {
 import { useLanguage } from "@/hooks/language-context"
 import {
   formatErrorMessage,
+  formatElapsedDuration,
   formatErrorType,
   formatTime,
   formatTokens,
@@ -37,7 +38,7 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   output: "输出 Token",
   reasoningOutput: "推理输出",
-  upstreamTtft: "首字耗时",
+  firstContent: "首内容（代理）",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -115,14 +116,14 @@ export function RequestsTable({
       ),
     },
     {
-      id: "upstreamTtft",
-      accessorFn: (record) => record.upstreamTtftMs,
+      id: "firstContent",
+      accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: "首字耗时",
+      header: "首内容（代理）",
       cell: ({ row }) => (
-        <span className="tabular-nums" title="OpenAI 上游 logical_turn 首 Token 统计，不是客户端首字延迟；每条请求保留上游原值。">
-          {row.original.upstreamTtftMs == null ? "—"
-            : `${row.original.upstreamTtftMs.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}
+        <span className="tabular-nums" title={`单请求开始至代理收到首个非空思考、正文或工具参数增量；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}>
+          {row.original.firstContentMs == null ? "—"
+            : formatElapsedDuration(row.original.firstContentMs)}
         </span>
       ),
     },
@@ -141,7 +142,11 @@ export function RequestsTable({
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="max-w-40 truncate">{row.original.model ?? "—"}</span>
+        <span className="max-w-64 truncate" title={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}>
+          {row.original.requestModel && row.original.responseModel && row.original.requestModel !== row.original.responseModel
+            ? `${row.original.requestModel} → ${row.original.responseModel}`
+            : row.original.model ?? "—"}
+        </span>
       ),
     },
     {

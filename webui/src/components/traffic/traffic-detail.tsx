@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { formatBytes, formatTime } from "@/lib/format"
+import { formatBytes, formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
 export function TrafficDetail({
@@ -30,9 +30,9 @@ export function TrafficDetail({
           className="tabular-nums"
           title="来源：responsesapi.websocket_timing.timing_metrics.first_sampled_message_ttft_ms；仅使用与响应 ID 匹配的 logical_turn 统计，不代表客户端看到首字的时间。"
         >
-          首字耗时：{detail.response?.timing?.firstTokenMs === undefined
+          上游轮次首 Token：{detail.response?.timing?.firstTokenMs === undefined
             ? "未提供"
-            : `${detail.response.timing.firstTokenMs.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}
+            : formatElapsedDuration(detail.response.timing.firstTokenMs)}
         </span>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
@@ -206,6 +206,7 @@ function UsageSummary({ usage }: { usage: NonNullable<TrafficExchangeDetail["res
 function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
   const timing = response.timing
   const metrics = [
+    ["单请求首内容（代理）", response.firstContentMs],
     ["本地请求耗时", response.durationMs],
     ...(response.httpTiming === null ? [] : [
       ["代理收齐请求体", response.httpTiming.receiveRequestMs],
@@ -214,7 +215,7 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
     ] as const),
     ...(timing === null ? [] : [
     ["上游最大排队", timing?.queueMaxMs],
-    ["上游生成阶段", timing?.samplingMs],
+    ["上游轮次累计生成", timing?.samplingMs],
     ["上游 logical turn", timing?.totalMs],
     ["客户端工具暂停", timing?.toolPauseMs],
     ] as const),
@@ -225,7 +226,7 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
         {metrics.map(([label, value]) => (
           <div key={label}>
             <dt className="text-muted-foreground">{label}</dt>
-            <dd>{value === undefined ? "未提供" : `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}</dd>
+            <dd>{value === undefined ? "未提供" : formatElapsedDuration(value)}</dd>
           </div>
         ))}
       </dl>
@@ -234,7 +235,7 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
       )}
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
-        顶部首字耗时取自上游 first_sampled_message_ttft_ms（首 Token），不代表客户端看到首字的时间。
+        顶部轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首内容是代理收到首个非空思考、正文或工具参数增量的延迟，均不代表客户端显示时间。旧转储未采集首内容时不从 trace 反推。
         各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
       </p>
     </section>

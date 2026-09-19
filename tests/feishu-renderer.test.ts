@@ -44,7 +44,7 @@ describe("Feishu output renderer", () => {
       turnId: "turn-1",
       summary: "",
       elapsedMs: 15_000,
-    })).toBe("**思考中…**\n\n---\n**耗时：** 15秒");
+    })).toBe("**思考中…**\n\n---\n**耗时：** 15 s");
   });
 
   it("distinguishes a batch image limit from a single-image limit", () => {
@@ -473,7 +473,7 @@ describe("Feishu output renderer", () => {
       "- 提供商：OpenAI 官方",
       "- 最近请求缓存命中率：50.00%",
       "- **性能**",
-      "  - 总耗时：1分5秒",
+      "  - 总耗时：1 min 5 s",
       "",
       "### 当前 Session 累计",
       "- 当前工作区：Main (main)",

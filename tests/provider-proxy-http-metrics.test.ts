@@ -4,7 +4,8 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { HttpResponseMetricsObserver } from "../src/provider-proxy/response-metrics-observer.js";
 
 import {
   ProviderProxy,
@@ -19,6 +20,7 @@ import {
 const openServers: ProviderProxyTestServer[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanupProviderProxyTestServers(openServers);
 });
 
@@ -90,11 +92,21 @@ it("does not mark an unobservable HTTP 200 response as completed", async () => {
     })]);
   });
 
-it("attaches quota window snapshots from the injected provider", async () => {
+it("attaches quota snapshots and measures request entry through content arrival before parsing", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(100);
+    const observeChunk = HttpResponseMetricsObserver.prototype.observeChunk;
+    vi.spyOn(HttpResponseMetricsObserver.prototype, "observeChunk").mockImplementation(function (this: HttpResponseMetricsObserver, ...args) {
+      clock.mockReturnValue(900);
+      return observeChunk.apply(this, args);
+    });
     const upstream = createServer((request, response) => {
       request.resume();
       request.on("end", () => {
         response.writeHead(200, { "content-type": "text/event-stream" });
+        clock.mockReturnValue(350);
+        response.write(sse("response.output_text.delta", {
+          type: "response.output_text.delta", delta: "content",
+        }));
         response.end(sse("response.completed", {
           type: "response.completed",
           response: {
@@ -131,6 +143,11 @@ it("attaches quota window snapshots from the injected provider", async () => {
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
       quotaWindowsProvider: async () => quotaWindows,
+      resolveUpstream: async () => {
+        await Promise.resolve();
+        clock.mockReturnValue(300);
+        return { host: "127.0.0.1", port: upstreamAddress.port, protocol: "http" };
+      },
       onMetrics: (metric) => {
         metrics.push(metric);
       },
@@ -151,7 +168,8 @@ it("attaches quota window snapshots from the injected provider", async () => {
         response.on("error", rejectResponse);
       });
       request.on("error", rejectResponse);
-      request.end("{}");
+      request.write('{"model":"requested');
+      request.end('-model"}');
     });
 
     expect(metrics).toHaveLength(1);
@@ -159,8 +177,11 @@ it("attaches quota window snapshots from the injected provider", async () => {
       status: "completed",
       httpStatus: 200,
       model: "deepseek-v4-flash",
+      requestModel: "requested-model",
+      responseModel: "deepseek-v4-flash",
       quotaWindows,
     });
+    expect(metrics[0]?.firstContentMs).toBe(250);
   });
 
 it("recognizes SSE metadata when the upstream omits Content-Type", async () => {

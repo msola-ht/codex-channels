@@ -160,6 +160,12 @@ export class ModelTrafficDump {
 
 /** 单次 HTTP 交换或 WebSocket 连接；V2 索引按逻辑模型调用记录请求与终态响应。 */
 export class ModelTrafficExchange {
+  private requestMetrics: { firstContentMs?: number } | undefined;
+
+  /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首内容时间。 */
+  observeRequestMetrics(metrics: { firstContentMs?: number }): void {
+    this.requestMetrics = metrics;
+  }
   private readonly requestBody: BodyAccumulator;
   private readonly responseBody: BodyAccumulator;
   private readonly partNumbers = new Map<string, number>();
@@ -317,6 +323,7 @@ export class ModelTrafficExchange {
       let interaction = this.activeWebSocket?.id;
       if (direction === "client" && eventTypeOf(parsed) === "response.create") {
         this.completeActiveWebSocket("incomplete", "superseded_by_next_request");
+        this.requestMetrics = undefined;
         this.responseModels = [];
         const startedAtMs = Date.now();
         const session = this.beginLogicalInteraction(startedAtMs);
@@ -528,6 +535,7 @@ export class ModelTrafficExchange {
       bytes: this.responseBytes,
       durationMs: Date.now() - this.prefix.startedAtMs,
       ...(terminal === undefined ? {} : { eventType: terminal.type }),
+      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
@@ -557,6 +565,7 @@ export class ModelTrafficExchange {
       transport: "websocket",
       state,
       durationMs: Date.now() - active.startedAtMs,
+      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload: payloadOf(compacted === undefined

@@ -253,8 +253,8 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual(["<b>思考中…</b>"]);
     expect(api.edits).toEqual([
-      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
-      "<b>思考完成</b>\n\n<b>耗时：</b>15秒",
+      "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
+      "<b>思考完成</b>\n\n<b>耗时：</b>15 s",
     ]);
   });
 
@@ -290,7 +290,7 @@ describe("TelegramOutbox", () => {
     await settle();
     expect(api.sent).toEqual([
       "<b>思考中…</b>",
-      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
+      "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
     ]);
     expect(api.edits).toEqual([
       "<b>思考完成</b>",
@@ -967,7 +967,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.edits.at(-1)).toContain(
-      "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0",
+      "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0",
     );
     expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
@@ -1583,7 +1583,7 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "<b>操作过程</b>\n\n"
-      + "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0"
+      + "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0"
       + " · <code>git status --short second line</code>",
     ]);
   });

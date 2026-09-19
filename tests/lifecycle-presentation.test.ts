@@ -22,12 +22,12 @@ describe("shared Surface lifecycle presentation", () => {
       timing: { upstreamTtftMs: ttftMs },
     } as const;
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
-    expect(rendered).toContain(`首字耗时：${ttftMs}毫秒`);
+    expect(rendered).toContain(`上游轮次首 Token：${ttftMs} ms`);
     expect(rendered).not.toContain("总耗时");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
-      modelProvider: "deepseek" }))).not.toContain("首字耗时");
+      modelProvider: "deepseek" }))).not.toContain("上游轮次首 Token");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
-      timing: {} }))).not.toContain("首字耗时");
+      timing: {} }))).not.toContain("上游轮次首 Token");
   });
   beforeEach(() => {
     setConfiguredCustomPrimaryProviderId(undefined);
@@ -75,13 +75,13 @@ describe("shared Surface lifecycle presentation", () => {
       createTurnReasoningPresentation("thread-1234567890", 15_000),
     );
     expect(rendered).toContain("思考中…");
-    expect(rendered).toContain("耗时：15秒");
+    expect(rendered).toContain("耗时：15 s");
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500),
     )).toBe("思考中…");
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500, true),
-    )).toBe("思考完成\n\n耗时：500毫秒");
+    )).toBe("思考完成\n\n耗时：500 ms");
   });
 
   it("shows an actionable warning when the active OpenAI route responds abnormally", () => {
@@ -517,7 +517,7 @@ describe("shared Surface lifecycle presentation", () => {
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
       "性能",
-      "  总耗时：1分5秒",
+      "  总耗时：1 min 5 s",
       "",
       "当前 Session 累计：",
       "当前工作区：Main (main)",

@@ -17,7 +17,7 @@ describe("formatWeixinOperation", () => {
     for (const control of ["`", "*", "_", "~", "#", ">", "[", "]"]) {
       expect(text).not.toContain(control);
     }
-    expect(text).toContain("耗时：125毫秒");
+    expect(text).toContain("耗时：125 ms");
   });
 
   it("bounds compact detail and keeps it on one line", () => {
@@ -32,7 +32,7 @@ describe("formatWeixinOperation", () => {
     expect(text.split("\n")).toHaveLength(1);
     expect(text).toContain("运行命令 · 已完成 · exit 0");
     expect(text).toContain("first line ");
-    expect(text).toContain("… · 耗时：125毫秒");
+    expect(text).toContain("… · 耗时：125 ms");
   });
 
   it("shows the MCP read-only hint", () => {

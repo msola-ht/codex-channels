@@ -1,5 +1,6 @@
 import {
   csvCell,
+  formatElapsedDuration,
   formatLocalTime,
   formatLocalTimeZone,
   formatRequestCount,
@@ -217,8 +218,8 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首内容（代理） | 上游轮次首 Token | 请求模型 | 响应回显 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
         [
@@ -231,6 +232,10 @@ export function printMetricsExport(result, format) {
           markdownCell(formatTokenCount(record.inputTokens ?? 0)),
           markdownCell(formatTokenCount(record.cachedInputTokens ?? 0)),
           markdownCell(formatTokenCount(record.outputTokens ?? 0)),
+          markdownCell(record.firstContentMs == null ? "—" : formatElapsedDuration(record.firstContentMs)),
+          markdownCell(record.upstreamTtftMs == null ? "—" : formatElapsedDuration(record.upstreamTtftMs)),
+          markdownCell(record.requestModel ?? "未知"),
+          markdownCell(record.responseModel ?? "未回显"),
         ].join(" | "),
       );
     }
@@ -550,6 +555,10 @@ function printTurnSummary(summary) {
 
 function csvColumns() {
   return [
+    ["firstContentMs", (record) => record.firstContentMs],
+    ["upstreamTtftMs", (record) => record.upstreamTtftMs],
+    ["requestModel", (record) => record.requestModel],
+    ["responseModel", (record) => record.responseModel],
     ["id", (record) => record.id],
     ["recordedAt", (record) => record.recordedAtMs === undefined
       ? ""

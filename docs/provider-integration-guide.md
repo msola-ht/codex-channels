@@ -90,7 +90,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v15，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
+  Schema v16，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
   读取时对 5 小时滚动窗口按当前时间范围和请求开始时间判定，对 7 天/月度固定窗口优先按快照
   归属；快照缺失或请求开始时已经过期才回退到请求时间。账户窗口只展示官方已用百分比、重置时间
   和本地 Token，不展示总额或费用。

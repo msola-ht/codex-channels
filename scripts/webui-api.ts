@@ -202,6 +202,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  firstContentMs: number | null
+  requestModel: string | null
+  responseModel: string | null
   upstreamTtftMs: number | null
   id: number
   provider: string | null
@@ -918,6 +921,7 @@ export interface TrafficExchangeDetail {
       samplingMs?: number
       toolPauseMs?: number
     } | null
+    firstContentMs?: number
   } | null
   tracePage: {
     offset: number

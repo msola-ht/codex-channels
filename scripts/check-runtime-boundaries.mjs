@@ -22,6 +22,7 @@ const allowedDistEntries = new Map([
     "dist/storage/index.js",
     "dist/surfaces/feishu/index.js",
     "dist/surfaces/token-format.js",
+    "dist/surfaces/elapsed-duration.js",
     "dist/surfaces/weixin/index.js",
   ])],
   ["bin", new Set()],

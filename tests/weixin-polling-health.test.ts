@@ -58,7 +58,7 @@ describe("WeixinPollingHealth", () => {
       "- 微信链路：Token 失效暂停",
       "- 连续失败：0 次",
       "- 上次后台轮询：尚无",
-      "- 预计恢复：1小时后",
+      "- 预计恢复：1 h后",
       "- 处理建议：重新运行 codexc setup",
     ].join("\n"));
   });

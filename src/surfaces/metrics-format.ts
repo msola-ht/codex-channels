@@ -7,6 +7,7 @@ import {
   formatPercent,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
+import { formatElapsedDuration } from "./elapsed-duration.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
 import {
   formatCacheHitRate,
@@ -35,6 +36,7 @@ export function formatConversationMetrics(
     lines.push(
       "",
       "### 最近运行聚合",
+      ...(turn.upstreamTtftMs == null ? [] : [`上游轮次首 Token：${formatElapsedDuration(turn.upstreamTtftMs)}（不是单请求首内容）`]),
       `模型请求：${formatRequestCount(turn.requestCount)} 次${turn.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(turn.unsuccessfulRequestCount)} 次）` : ""}`,
       `- **Token**：${formatTokenCount(turn.inputTokens + turn.outputTokens)}`,
       ...(turn.cachedInputTokens === null

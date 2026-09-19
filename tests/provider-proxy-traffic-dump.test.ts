@@ -134,6 +134,9 @@ describe("ModelTrafficDump V2", () => {
     });
     exchange.requestChunk(Buffer.from(JSON.stringify({ input: ["hello"], model: "gpt-6-astra" })));
     exchange.requestEnd();
+    const observedMetrics: { firstContentMs?: number } = {};
+    exchange.observeRequestMetrics(observedMetrics);
+    observedMetrics.firstContentMs = 12.5;
     exchange.responseHead(200, { "content-type": "text/event-stream" });
     exchange.responseChunk(Buffer.from("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"));
     const terminal = {
@@ -170,6 +173,7 @@ describe("ModelTrafficDump V2", () => {
     const detail = await describeDumpExchange(sessions, 1);
     expect(JSON.parse(detail.request.body)).toMatchObject({ model: "gpt-6-astra" });
     expect(JSON.parse(detail.response.body)).toEqual(terminal);
+    expect(detail.response.firstContentMs).toBe(12.5);
     expect(detail.trace.some((record: { kind: string }) => record.kind === "response_body")).toBe(true);
   });
 
@@ -185,6 +189,7 @@ describe("ModelTrafficDump V2", () => {
       model: "gpt-6-astra",
       client_metadata: { thread_id: "thread-ws" },
     }), false);
+    exchange.observeRequestMetrics({ firstContentMs: 23.5 });
     exchange.webSocketFrame("upstream", textFrame({
       type: "response.completed",
       response: { model: "gpt-6-astra", output: [] },
@@ -208,6 +213,8 @@ describe("ModelTrafficDump V2", () => {
     ]);
     expect((await describeDumpExchange(sessions, 1)).trace)
       .toHaveLength(2);
+    expect((await describeDumpExchange(sessions, 1)).response.firstContentMs).toBe(23.5);
+    expect((await describeDumpExchange(sessions, 2)).response.firstContentMs).toBeUndefined();
   });
 
   it("uses per-call WebSocket metadata instead of the prewarm handshake", async () => {

@@ -14,8 +14,8 @@
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时，普通增量只扫描事件类型并立即透传，不解析事件 JSON、记录首尾
-  时间或等待指标处理；只对创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  转发 SSE 或 WebSocket 响应时，在首个非空思考、正文或工具参数增量前解析对应事件以记录单请求
+  单调时钟首内容延迟，此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
@@ -57,8 +57,11 @@
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
-  同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录、不估算本地首字。
-  普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
+  同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
+  `firstContentMs` 从 HTTP 请求或 WebSocket 请求帧的代理回调入口计到首个有效内容增量的接收回调入口，
+  包含 HTTP 上游路由等待；入口采集单调时间，解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
+  HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
+  首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
@@ -79,7 +82,8 @@
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
-  一次调用。每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
+  一次调用。响应索引复用代理同一份 `firstContentMs` 观测，精简模式也保留，不从 trace 反推。
+  每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
   已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。写队列先落正文再落索引，不改变
   转发、背压和指标采集；App Server 启动及新 session 建立时按 session
   最后活动时间与 `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理。

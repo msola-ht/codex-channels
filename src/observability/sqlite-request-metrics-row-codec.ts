@@ -39,6 +39,9 @@ export interface MetricRow {
   quota_windows: string | null;
   user_agent: string | null;
   upstream_ttft_ms: number | null;
+  first_content_ms: number | null;
+  request_model: string | null;
+  response_model: string | null;
 }
 
 export interface CompactSummaryRow {
@@ -111,6 +114,9 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     turnId: row.turn_id,
     userAgent: row.user_agent,
     upstreamTtftMs: row.upstream_ttft_ms,
+    firstContentMs: row.first_content_ms,
+    requestModel: row.request_model,
+    responseModel: row.response_model,
     model: row.model,
     serviceTier: row.service_tier,
     reasoningEffort: row.reasoning_effort,

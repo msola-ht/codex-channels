@@ -9,6 +9,7 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 
 import WebSocket, {
   WebSocketServer,
@@ -48,6 +49,7 @@ import {
   type ProviderQuotaWindowSnapshot,
 } from "./response-metrics-observer.js";
 import { ModelTrafficDump } from "./traffic-dump.js";
+import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./traffic-dump-content.js";
 
 export type {
   ProviderProxyMetrics,
@@ -266,6 +268,8 @@ export class ProviderProxy {
   }
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const startedAtMonotonicMs = performance.now();
+    const startedAtMs = Date.now();
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -299,13 +303,13 @@ export class ProviderProxy {
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
-    const startedAtMs = Date.now();
     const metrics = createMetricsState(
       turnMetadata,
       startedAtMs,
       "http",
       responseOperation(route, turnMetadata.operation),
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+      startedAtMonotonicMs,
     );
     const exchange = this.trafficDump?.beginHttpExchange({
       ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
@@ -314,6 +318,9 @@ export class ProviderProxy {
       path: request.url ?? "",
       startedAtMs,
     });
+    exchange?.observeRequestMetrics(metrics);
+    const requestModelScanner = createTopLevelStringFieldScanner("model");
+    const requestModelDecoder = new StringDecoder("utf8");
     if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
     }
@@ -352,8 +359,10 @@ export class ProviderProxy {
       const metricsObserver = new HttpResponseMetricsObserver(metrics);
       let forwarding = Promise.resolve();
       upstreamResponse.on("data", (chunk: Buffer) => {
+        const receivedAtMonotonicMs = performance.now();
+        const receivedAtMs = Date.now();
         exchange?.responseChunk(chunk);
-        const completed = metricsObserver.observeChunk(chunk, Date.now());
+        const completed = metricsObserver.observeChunk(chunk, receivedAtMs, receivedAtMonotonicMs);
         if (!completed) {
           if (!response.write(chunk)) {
             upstreamResponse.pause();
@@ -373,8 +382,9 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("end", () => {
+        const endedAtMonotonicMs = performance.now();
         const endedAtMs = Date.now();
-        const completed = metricsObserver.finish(endedAtMs);
+        const completed = metricsObserver.finish(endedAtMs, endedAtMonotonicMs);
         exchange?.responseEnd();
         forwarding = forwarding.then(async () => {
           if (completed || recordsResponseMetrics) await emitMetrics();
@@ -429,8 +439,16 @@ export class ProviderProxy {
         upstream.destroy();
       }
     });
-    request.on("data", (chunk: Buffer) => exchange?.requestChunk(chunk));
-    request.on("end", () => exchange?.requestEnd());
+    request.on("data", (chunk: Buffer) => {
+      scanTopLevelStringField(requestModelScanner, requestModelDecoder.write(chunk));
+      metrics.requestModel = boundedString(requestModelScanner.value);
+      exchange?.requestChunk(chunk);
+    });
+    request.on("end", () => {
+      scanTopLevelStringField(requestModelScanner, requestModelDecoder.end());
+      metrics.requestModel = boundedString(requestModelScanner.value);
+      exchange?.requestEnd();
+    });
     request.pipe(upstream);
   }
 
@@ -531,6 +549,7 @@ export class ProviderProxy {
     };
 
     client.on("message", (data, isBinary) => {
+      const startedAtMonotonicMs = performance.now();
       exchange?.webSocketFrame("client", data, isBinary);
       const sanitized = recordsResponseMetrics
         ? sanitizeClientWebSocketMessage(data, isBinary)
@@ -544,9 +563,12 @@ export class ProviderProxy {
               "websocket",
               sanitized.metadata.operation,
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+              startedAtMonotonicMs,
             );
         if (activeMetrics) {
           activeMetrics.model = sanitized.model ?? null;
+          activeMetrics.requestModel = sanitized.model ?? null;
+          exchange?.observeRequestMetrics(activeMetrics);
           activeMetrics.serviceTier = sanitized.serviceTier ?? null;
           activeMetrics.reasoningEffort = sanitized.reasoningEffort
             ?? (route.externalRole
@@ -566,6 +588,7 @@ export class ProviderProxy {
       }
     });
     upstream.on("unexpected-response", (_request, response) => {
+      const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       const statusCode = response.statusCode ?? 502;
       exchange?.failure("upstream_handshake", `HTTP ${statusCode}`);
@@ -588,6 +611,7 @@ export class ProviderProxy {
           "websocket",
           "response",
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+          receivedAtMonotonicMs,
         );
         if (route.externalRole) {
           fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -602,22 +626,23 @@ export class ProviderProxy {
       upstream.terminate();
     });
     upstream.on("message", (data, isBinary) => {
-      exchange?.webSocketFrame("upstream", data, isBinary);
+      const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       let completedMetrics: MetricsState | undefined;
       if (!isBinary && activeMetrics) {
         const currentMetrics = activeMetrics;
         const text = rawDataText(data);
-        const observed = inspectResponseEvent(text);
+        const observed = inspectResponseEvent(text, "", currentMetrics.firstContentMs === undefined);
         const { type, event: parsed } = observed;
         if (type === "codex.rate_limits") {
           currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
         }
-        if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
+        if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs, receivedAtMonotonicMs)) {
           activeMetrics = undefined;
           completedMetrics = currentMetrics;
         }
       }
+      exchange?.webSocketFrame("upstream", data, isBinary);
       if (!completedMetrics && !forwarding) {
         forwardImmediately(data, isBinary);
         return;

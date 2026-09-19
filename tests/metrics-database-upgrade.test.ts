@@ -39,6 +39,25 @@ function fixture() {
 }
 
 describe("model request metrics database upgrades", () => {
+  it("preserves v15 upstream timing without fabricating per-request facts", () => {
+    const { environment, databasePath } = fixture();
+    const current = new SqliteModelRequestMetricsStore(databasePath);
+    current.record({ ...metricSample(), upstreamTtftMs: 672 });
+    current.close();
+    const old = new DatabaseSync(databasePath);
+    old.exec(`ALTER TABLE model_request_metrics DROP COLUMN first_content_ms;
+      ALTER TABLE model_request_metrics DROP COLUMN request_model;
+      ALTER TABLE model_request_metrics DROP COLUMN response_model;
+      UPDATE schema_metadata SET value = 15 WHERE name = 'schema_version';`);
+    old.close();
+    expect(validateMetricsDatabaseStructure(environment, { allowUpgradeable: true }).schemaVersion).toBe(15);
+    expect(upgradeMetricsDatabase(environment, { gatewayRunning: () => false }).schemaVersion).toBe(16);
+    const upgraded = new SqliteModelRequestMetricsStore(databasePath);
+    expect(upgraded.recent(1)[0]).toMatchObject({ upstreamTtftMs: 672, firstContentMs: null, requestModel: null, responseModel: null });
+    upgraded.record({ ...metricSample(), firstContentMs: 12.5, requestModel: "a", responseModel: "b" });
+    expect(upgraded.recent(1)[0]).toMatchObject({ firstContentMs: 12.5, requestModel: "a", responseModel: "b" });
+    upgraded.close();
+  });
   it("backs up v14 and preserves history with unknown TTFT on explicit upgrade", () => {
     const { environment, databasePath } = fixture();
     const current = new SqliteModelRequestMetricsStore(databasePath);
@@ -46,6 +65,9 @@ describe("model request metrics database upgrades", () => {
     current.close();
     const legacy = new DatabaseSync(databasePath);
     legacy.exec(`ALTER TABLE model_request_metrics DROP COLUMN upstream_ttft_ms;
+      ALTER TABLE model_request_metrics DROP COLUMN first_content_ms;
+      ALTER TABLE model_request_metrics DROP COLUMN request_model;
+      ALTER TABLE model_request_metrics DROP COLUMN response_model;
       UPDATE schema_metadata SET value = 14 WHERE name = 'schema_version';`);
     legacy.close();
     expect(() => new SqliteModelRequestMetricsStore(databasePath)).toThrow(/版本不兼容/u);
@@ -53,7 +75,7 @@ describe("model request metrics database upgrades", () => {
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false, now: () => new Date("2026-09-18T00:00:00.000Z"),
     });
-    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 14, schemaVersion: 15 });
+    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 14, schemaVersion: 16 });
     const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
     expect(backup.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(14);
     expect(backup.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(2);
@@ -578,7 +600,7 @@ describe("model request metrics database upgrades", () => {
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
       now: () => new Date("2026-09-14T13:45:00.000Z"),
-    })).toThrow(/Schema 15 结构不完整/u);
+    })).toThrow(/Schema 16 结构不完整/u);
 
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(13);
     expect(existsSync(
@@ -602,7 +624,7 @@ describe("model request metrics database upgrades", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13\/v14 升级到 v15/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13\/v14\/v15 升级到 v16/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 

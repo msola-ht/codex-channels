@@ -695,7 +695,7 @@ describe("WeixinConversationAdapter", () => {
       target,
       expect.stringContaining(
         "- 微信链路：退避中\n- 连续失败：3 次\n"
-        + "- 上次后台轮询：2026-07-28 03:15:42\n- 预计恢复：30秒后",
+        + "- 上次后台轮询：2026-07-28 03:15:42\n- 预计恢复：30 s后",
       ),
     );
   });
