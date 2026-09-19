@@ -14,6 +14,7 @@ import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   describeDumpExchange,
   describeDumpTrace,
+  describeDumpTurnStates,
   dumpCatalog,
   selectFilesOfLabel,
   summarizeDumpFiles,
@@ -30,7 +31,7 @@ const maximumSectionBytes = 4 * 1_048_576;
 const maximumTracePageSize = 100;
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
-  if (!["/traffic", "/traffic/exchange", "/traffic/trace"].includes(apiPath)) return false;
+  if (!["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
@@ -70,7 +71,6 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
     const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
-      includeTurnStateLengths: true,
       newestFirst: true,
       limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
       offset: readInteger(url, "offset", 0, 0, maximumPageOffset),
@@ -91,6 +91,26 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
         ? page.nextOffset
         : null,
     });
+    return true;
+  }
+  if (apiPath === "/traffic/turn-state") {
+    assertParameters(url, ["ids", "label", "session"]);
+    if (!url.searchParams.has("label") || !url.searchParams.has("session")) {
+      throw new ApiError(400, "missing_parameter", "读取字符数需指定 label 和 session");
+    }
+    const values = url.searchParams.getAll("ids");
+    const ids = values.length === 1 && /^[1-9][0-9]*(,[1-9][0-9]*)*$/u.test(values[0])
+      ? values[0].split(",").map(Number) : [];
+    if (ids.length === 0 || ids.length > maximumPageSize || ids.some((id) => !Number.isSafeInteger(id))
+      || new Set(ids).size !== ids.length) {
+      throw new ApiError(400, "invalid_parameter", "ids 必须是当前页不重复的有效调用编号");
+    }
+    const label = readLabel(url, labels);
+    const { files } = readSessionFiles(url, catalog.files, label);
+    if (files.length !== 1) throw new ApiError(400, "invalid_parameter", "字符数查询必须定位唯一批次");
+    const exchanges = await describeDumpTurnStates(files, ids);
+    if (exchanges === null) throw new ApiError(404, "traffic_exchange_not_found", "关联调用记录不可用；不会匹配其他请求");
+    sendJson(response, 200, { label, session: writerSessionOf(files[0]), exchanges });
     return true;
   }
   assertParameters(url, ["id", "label", "session", "traceOffset"]);

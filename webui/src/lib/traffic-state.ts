@@ -13,6 +13,16 @@ export function resolveTrafficDetailSnapshot<T extends { label: string; session:
 }
 
 /** 只使用采集端保存的精确定位符，不按时间、模型或 Thread/Turn 猜配。 */
+export function trafficCallKey(reference: { label: string; session: string; id: number }): string {
+  return JSON.stringify([reference.label, reference.session, reference.id])
+}
+
+/** 进行中的摘要必须重新读取，不能只合并新事件页。 */
+export function canReuseTrafficSummary(value: { state: string; response: object | null }): boolean {
+  return value.response !== null && ["completed", "failed", "incomplete"].includes(value.state)
+}
+
+/** 只使用采集端保存的精确定位符，不按时间、模型或 Thread/Turn 猜配。 */
 export function trafficDetailPath(reference: { label: string; session: string; interaction: number }): string {
   return `/traffic?${new URLSearchParams({
     label: reference.label, exchangeSession: reference.session, id: String(reference.interaction),

@@ -32,6 +32,7 @@ import type {
   ThreadTurnsResponse,
   TrafficDetailResponse,
   TrafficTraceResponse,
+  TrafficTurnStatesResponse,
   TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
@@ -320,6 +321,14 @@ export function fetchTrafficExchanges(
   if (query.session !== undefined) params.set("session", query.session)
   const suffix = params.size === 0 ? "" : `?${params.toString()}`
   return getJson<TrafficListResponse>(`${API_PREFIX}/traffic${suffix}`, signal)
+}
+
+export function fetchTrafficTurnStates(
+  query: { label: string; session: string; ids: number[] },
+  signal?: AbortSignal,
+): Promise<TrafficTurnStatesResponse> {
+  const params = new URLSearchParams({ label: query.label, session: query.session, ids: query.ids.join(",") })
+  return getJson<TrafficTurnStatesResponse>(`${API_PREFIX}/traffic/turn-state?${params.toString()}`, signal)
 }
 
 export function fetchTrafficExchange(

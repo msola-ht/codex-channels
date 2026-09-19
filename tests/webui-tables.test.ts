@@ -55,7 +55,12 @@ describe("WebUI metrics table presentation", () => {
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
         const result = {
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
-          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
+          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]) }),
+          trafficCountsLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
+          trafficCountsFailed: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), "fixture count failure"]]) }),
+          trafficCountsPartial: render(TrafficTable, { exchanges: [exchange, { ...exchange, id: 8 }], onOpen: noop,
+            turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]),
+            turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
@@ -252,6 +257,12 @@ describe("WebUI metrics table presentation", () => {
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
     expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
     expect(markup.traffic).toContain("1,234");
+    expect(markup.trafficCountsLoading).toContain("加载中…");
+    expect(markup.trafficCountsLoading).toContain("的调用明细");
+    expect(markup.trafficCountsFailed).toContain("加载失败");
+    expect(markup.trafficCountsFailed).toContain("的调用明细");
+    expect(markup.trafficCountsPartial).toContain("1,234");
+    expect(markup.trafficCountsPartial?.match(/加载失败/g)).toHaveLength(1);
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
     expect(markup.traffic).not.toContain("名称一致");

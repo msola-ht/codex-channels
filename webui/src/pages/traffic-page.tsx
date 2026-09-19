@@ -174,6 +174,7 @@ export function TrafficPage() {
       </div>
 
       <ErrorBanner error={list.error} onRetry={list.refetch} pending={list.loading} />
+      <ErrorBanner error={list.turnStatesError === null ? null : `Turn State 字符数加载失败：${list.turnStatesError}`} onRetry={list.refetchTurnStates} pending={list.turnStatesLoading} />
       {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
@@ -221,6 +222,8 @@ export function TrafficPage() {
             <TrafficTable
               loading={list.loading}
               exchanges={listData.exchanges}
+              turnStates={list.turnStates}
+              turnStateErrors={list.turnStateErrors}
               onOpen={(exchange) => update({
                 traceOffset: null,
                 id: exchange.id,

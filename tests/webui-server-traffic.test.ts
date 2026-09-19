@@ -74,7 +74,7 @@ describe("webui traffic V2 API", () => {
     });
     expect(detail.response.outputTruncated).toBe(false);
     const server = await startServer(fixture.environment);
-    const list = await getJson<{ exchanges: Array<{ turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic`);
+    const list = await getJson<{ exchanges: Array<{ turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic/turn-state?label=openai&session=models&ids=1`);
     expect(list.body.exchanges[0]?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
     expect(JSON.stringify(detail.modelEvidence)).not.toMatch(/must-not-project|catalog-only|other-call/u);
   });
@@ -120,9 +120,43 @@ describe("webui traffic V2 API", () => {
     ]);
     expect((await describeDumpExchange(paths, 2)).modelEvidence.turnStateLengths).toEqual([]);
     const server = await startServer(fixture.environment);
-    const list = await getJson<{ exchanges: Array<{ id: number; turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic`);
+    const list = await getJson<{ exchanges: Array<{ id: number; turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic/turn-state?label=openai&session=turn-state&ids=1,2`);
     expect(list.body.exchanges.find((entry) => entry.id === 1)?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
     expect(list.body.exchanges.find((entry) => entry.id === 2)?.turnStateLengths).toEqual([]);
+  });
+
+  it("loads the list without reading response payloads or traces for character counts", async () => {
+    const fixture = createFixture();
+    writeSession(fixture.trafficDir, "openai", "independent-counts", [httpInteraction(1)]);
+    writeFileSync(join(fixture.trafficDir, "openai-independent-counts", "payload-1.bin"), "");
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.status).toBe(200);
+    expect(list.body.exchanges).toHaveLength(1);
+    expect(list.body.exchanges[0]).not.toHaveProperty("turnStateLengths");
+  });
+
+  it("reads character counts by exact provider, session and ids without re-paging", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.response.headers = { "x-codex-turn-state": "abc" };
+    writeSession(fixture.trafficDir, "openai", "precise", [call, httpInteraction(2)]);
+    const other = httpInteraction(1);
+    other.response.headers = { "x-codex-turn-state": "different" };
+    writeSession(fixture.trafficDir, "deepseek", "precise", [other]);
+    writeSession(fixture.trafficDir, "openai", "other", [other]);
+    const server = await startServer(fixture.environment);
+    const target = `${server.origin}/api/v1/traffic/turn-state?label=openai&session=precise`;
+    const result = await getJson<{ exchanges: unknown[] }>(`${target}&ids=1`);
+    expect(result.status).toBe(200);
+    expect(result.body.exchanges).toEqual([
+      { id: 1, turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 3 }] },
+    ]);
+    expect((await getJson(`${target}&ids=3`)).status).toBe(404);
+    for (const invalid of ["", "0", "1,1", "1,-2", "9007199254740992", "1&ids=2"]) {
+      expect((await getJson(`${target}&ids=${invalid}`)).status).toBe(400);
+    }
+    expect((await getJson(`${server.origin}/api/v1/traffic/turn-state?ids=1`)).status).toBe(400);
   });
 
   it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
@@ -596,7 +630,7 @@ describe("webui traffic V2 API", () => {
     expect(result.body.error.code).toBe("traffic_unsupported_version");
   });
 
-  it.each(["/traffic", "/traffic/exchange", "/traffic/trace"])("rejects non-loopback callers before reading %s", async (apiPath) => {
+  it.each(["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"])("rejects non-loopback callers before reading %s", async (apiPath) => {
     const fixture = createFixture();
     await expect(routeTrafficApi({
       apiPath,

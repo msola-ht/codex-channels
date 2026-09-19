@@ -89,25 +89,39 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
-export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false, includeTurnStateLengths = false } = {}) {
+export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
   const page = limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst)
     : await readInteractionSummaryPage(paths, offset + limit, newestFirst);
   const boundedLimit = limit ?? page.entries.length;
   const entries = page.entries.slice(offset, offset + boundedLimit);
-  const lengths = includeTurnStateLengths ? await readPageTurnStateLengths(entries) : null;
   const exchanges = entries.map((entry) => {
     const body = entry.request.transport === "websocket"
       && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm")
       ? parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576).text)
       : undefined;
-    return { ...summaryOf(entry, body), ...(lengths === null ? {} : { turnStateLengths: lengths.get(entry).result().turnStateLengths }) };
+    return summaryOf(entry, body);
   });
   return {
     exchanges,
     total: page.total,
     nextOffset: offset + exchanges.length < page.total ? offset + exchanges.length : null,
   };
+}
+
+/** 按列表已返回的精确编号读取，不重新分页，避免新增调用挤动页码。 */
+export async function describeDumpTurnStates(paths, ids) {
+  const selected = new Set(ids);
+  const entries = new Map();
+  await forEachDumpRecord(paths, (record, directory) => {
+    if (!selected.has(record.id) || (record.kind !== "request" && record.kind !== "response")) return;
+    if (!entries.has(record.id)) entries.set(record.id, { directory });
+    entries.get(record.id)[record.kind] = record;
+  });
+  if (ids.some((id) => entries.get(id)?.request === undefined)) return null;
+  const ordered = ids.map((id) => entries.get(id));
+  const lengths = await readPageTurnStateLengths(ordered);
+  return ordered.map((entry) => ({ id: entry.request.id, turnStateLengths: lengths.get(entry).result().turnStateLengths }));
 }
 
 async function readPageTurnStateLengths(entries) {

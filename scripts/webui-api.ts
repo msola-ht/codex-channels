@@ -815,7 +815,6 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
-  turnStateLengths: Array<{ source: string; characters: number }>
   id: number
   label: string
   session: string
@@ -851,6 +850,12 @@ export interface TrafficListResponse {
   total: number
   maximumOffset: number
   nextOffset: number | null
+}
+
+export interface TrafficTurnStatesResponse {
+  label: string
+  session: string
+  exchanges: Array<{ id: number; turnStateLengths: Array<{ source: string; characters: number }> }>
 }
 
 export type TrafficHeaderValue = string | string[]

@@ -13,15 +13,20 @@ import {
 } from "@/components/ui/table"
 import { formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeSummary } from "@/lib/types"
+import { trafficCallKey } from "@/lib/traffic-state"
 
 export function TrafficTable({
   exchanges,
   onOpen,
   loading = false,
+  turnStates,
+  turnStateErrors,
 }: {
   exchanges: TrafficExchangeSummary[]
   onOpen: (exchange: TrafficExchangeSummary) => void
   loading?: boolean
+  turnStates?: Map<string, Array<{ source: string; characters: number }>>
+  turnStateErrors?: Map<string, string>
 }) {
   return (
     <div className="min-w-0">
@@ -45,7 +50,10 @@ export function TrafficTable({
             <TableRow key={index}>{Array.from({ length: 10 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
-          )) : exchanges.map((exchange) => (
+          )) : exchanges.map((exchange) => {
+            const lengths = turnStates?.get(trafficCallKey(exchange))
+            const turnStatesError = turnStateErrors?.get(trafficCallKey(exchange)) ?? null
+            return (
             <TableRow
               key={`${exchange.label}:${exchange.session}:${exchange.id}`}
               className="cursor-pointer"
@@ -77,8 +85,8 @@ export function TrafficTable({
                 <TableHint hint="调用索引记录的总耗时；详细阶段及计时来源见调用明细。">{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</TableHint>
               </TableCell>
               <TableCell className="text-right whitespace-nowrap tabular-nums">
-                <TableHint hint={exchange.turnStateLengths.length === 0 ? "未记录 X-Codex-Turn-State" : exchange.turnStateLengths.map((entry) => `${entry.characters.toLocaleString("zh-CN")} 字符 · ${entry.source}`).join("；")}>
-                  <span className="block max-w-40 truncate">{exchange.turnStateLengths.length === 0 ? "—" : [...new Set(exchange.turnStateLengths.map((entry) => entry.characters))].map((count) => count.toLocaleString("zh-CN")).join(" / ")}</span>
+                <TableHint hint={turnStatesError ?? (lengths === undefined ? "正在读取字符数，不影响查看调用" : lengths.length === 0 ? "未记录 X-Codex-Turn-State" : lengths.map((entry) => `${entry.characters.toLocaleString("zh-CN")} 字符 · ${entry.source}`).join("；"))}>
+                  <span className="block max-w-40 truncate">{turnStatesError !== null ? "加载失败" : lengths === undefined ? "加载中…" : lengths.length === 0 ? "—" : [...new Set(lengths.map((entry) => entry.characters))].map((count) => count.toLocaleString("zh-CN")).join(" / ")}</span>
                 </TableHint>
               </TableCell>
               <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
@@ -87,7 +95,7 @@ export function TrafficTable({
               <TableCell><TableHint hint={exchange.threadId ?? "未提供线程"}><span className="block max-w-40 truncate font-mono text-xs">{exchange.threadId ?? "—"}</span></TableHint></TableCell>
               <TableCell><TableHint hint={exchange.turnId ?? "未提供轮次"}><span className="block max-w-32 truncate font-mono text-xs">{exchange.turnId ?? "—"}</span></TableHint></TableCell>
             </TableRow>
-          ))}
+          )})}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
               <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
