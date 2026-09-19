@@ -200,6 +200,9 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout).toContain("服务端模型声明：未记录");
     expect(result.stdout).toContain("安全缓冲候选声明：未记录");
     expect(result.stdout).toContain("安全缓冲候选不表示已经切换");
+    expect(result.stdout).toContain("本次调用（单调时钟）");
+    expect(result.stdout).toContain("未记录阶段，不从历史记录补算");
+    expect(result.stdout).toContain("上游轮次统计（独立口径）");
   });
 
   it("filters logical calls and bounds payload output", () => {

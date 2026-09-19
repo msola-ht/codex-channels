@@ -14,6 +14,7 @@ export const metricStorageColumns = [
   "weekly_quota_plan_type", "quota_windows", "user_agent", "upstream_ttft_ms",
   "first_content_ms", "request_model", "response_model",
   "traffic_label", "traffic_session", "traffic_interaction",
+  "total_duration_ms",
 ] as const;
 
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
@@ -66,6 +67,7 @@ export const modelRequestMetricsTableSql = `
     traffic_label TEXT,
     traffic_session TEXT,
     traffic_interaction INTEGER,
+    total_duration_ms REAL CHECK (total_duration_ms IS NULL OR total_duration_ms >= 0),
     CHECK (
       (traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
       OR (traffic_label IS NOT NULL AND length(traffic_label) > 0

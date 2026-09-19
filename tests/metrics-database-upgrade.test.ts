@@ -40,13 +40,30 @@ function fixture() {
 }
 
 describe("model request metrics database upgrades", () => {
+  it("upgrades v17 preserving exact traffic links and leaving total duration unknown", () => {
+    const { environment, databasePath } = fixture();
+    const traffic = { label: "openai", session: "retained", interaction: 3 };
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record({ ...metricSample(), traffic, firstContentMs: 12.5 });
+    store.close();
+    const old = new DatabaseSync(databasePath);
+    old.exec("ALTER TABLE model_request_metrics DROP COLUMN total_duration_ms; UPDATE schema_metadata SET value = 17 WHERE name = 'schema_version';");
+    old.close();
+    const result = upgradeMetricsDatabase(environment, { gatewayRunning: () => false });
+    expect(result).toMatchObject({ previousSchemaVersion: 17, schemaVersion: 18 });
+    const upgraded = new SqliteModelRequestMetricsStore(databasePath);
+    expect(upgraded.recent(1)[0]).toMatchObject({ traffic, firstContentMs: 12.5, totalDurationMs: null });
+    upgraded.record({ ...metricSample(), totalDurationMs: 1234.5 });
+    expect(upgraded.recent(1)[0]?.totalDurationMs).toBe(1234.5);
+    upgraded.close();
+  });
   it("upgrades v16 without losing timing or models and never guesses historical traffic links", () => {
     const { environment, databasePath } = fixture();
     const current = new SqliteModelRequestMetricsStore(databasePath);
     current.record({ ...metricSample(), firstContentMs: 12.5, upstreamTtftMs: 672, requestModel: "sent", responseModel: "echoed" });
     current.close();
     const old = new DatabaseSync(databasePath);
-    const columns = ["id", ...metricStorageColumns.filter((column) => !column.startsWith("traffic_"))].join(", ");
+    const columns = ["id", ...metricStorageColumns.filter((column) => !column.startsWith("traffic_") && column !== "total_duration_ms")].join(", ");
     old.exec(`ALTER TABLE model_request_metrics RENAME TO previous_metrics;
       ${modelRequestMetricsTableSql.replace(/,\n {4}traffic_label TEXT,[\s\S]*?\n {2}\);/u, "\n  );")}
       INSERT INTO model_request_metrics (${columns}) SELECT ${columns} FROM previous_metrics;
@@ -54,7 +71,7 @@ describe("model request metrics database upgrades", () => {
       UPDATE schema_metadata SET value = 16 WHERE name = 'schema_version';`);
     old.close();
     const result = upgradeMetricsDatabase(environment, { gatewayRunning: () => false });
-    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 16, schemaVersion: 17 });
+    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 16, schemaVersion: 18 });
     const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
     expect(backup.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(16);
     backup.close();
@@ -77,7 +94,7 @@ describe("model request metrics database upgrades", () => {
       UPDATE schema_metadata SET value = 15 WHERE name = 'schema_version';`);
     old.close();
     expect(validateMetricsDatabaseStructure(environment, { allowUpgradeable: true }).schemaVersion).toBe(15);
-    expect(upgradeMetricsDatabase(environment, { gatewayRunning: () => false }).schemaVersion).toBe(17);
+    expect(upgradeMetricsDatabase(environment, { gatewayRunning: () => false }).schemaVersion).toBe(18);
     const upgraded = new SqliteModelRequestMetricsStore(databasePath);
     expect(upgraded.recent(1)[0]).toMatchObject({ upstreamTtftMs: 672, firstContentMs: null, requestModel: null, responseModel: null });
     upgraded.record({ ...metricSample(), firstContentMs: 12.5, requestModel: "a", responseModel: "b" });
@@ -101,7 +118,7 @@ describe("model request metrics database upgrades", () => {
     const result = upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false, now: () => new Date("2026-09-18T00:00:00.000Z"),
     });
-    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 14, schemaVersion: 17 });
+    expect(result).toMatchObject({ changed: true, previousSchemaVersion: 14, schemaVersion: 18 });
     const backup = new DatabaseSync(result.backupPath!, { readOnly: true });
     expect(backup.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(14);
     expect(backup.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(2);
@@ -626,7 +643,7 @@ describe("model request metrics database upgrades", () => {
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
       now: () => new Date("2026-09-14T13:45:00.000Z"),
-    })).toThrow(/Schema 17 结构不完整/u);
+    })).toThrow(/Schema 18 结构不完整/u);
 
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(13);
     expect(existsSync(
@@ -650,7 +667,7 @@ describe("model request metrics database upgrades", () => {
 
     expect(() => upgradeMetricsDatabase(environment, {
       gatewayRunning: () => false,
-    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13\/v14\/v15\/v16 升级到 v17/u);
+    })).toThrow(/仅支持 v3\/v4\/v5\/v6\/v7\/v8\/v9\/v10\/v11\/v12\/v13\/v14\/v15\/v16\/v17 升级到 v18/u);
     expect(inspectMetricsDatabase(environment).schemaVersion).toBe(2);
   });
 

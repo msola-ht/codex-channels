@@ -141,6 +141,35 @@ export function createModelEvidenceCollector() {
   };
 }
 
+/** 所有阶段只使用同一次调用的单调时钟偏移，不与旧墙钟或上游统计相减。 */
+export function callTiming(record) {
+  if (record?.clock !== "monotonic") return null;
+  const end = tokenCount(record.endMs);
+  if (end === undefined) return null;
+  const offset = (key) => {
+    const value = tokenCount(record[key]);
+    return value !== undefined && value <= end ? value : undefined;
+  };
+  const between = (start, finish) => start !== undefined && finish !== undefined && finish >= start ? finish - start : undefined;
+  const forwarding = offset("forwardingMs");
+  const first = offset("firstEventMs");
+  const submitted = offset("submittedMs");
+  const head = offset("responseHeadMs");
+  const body = offset("requestBodyEndMs");
+  return {
+    totalMs: end,
+    preForwardMs: forwarding,
+    firstEventWaitMs: between(forwarding, first),
+    afterFirstEventMs: between(first, end),
+    receiveRequestMs: body,
+    waitResponseHeadMs: between(body, head),
+    receiveResponseMs: between(head, end),
+    submitWaitMs: between(forwarding, submitted),
+    submittedToFirstEventMs: between(submitted, first),
+    connectionReady: typeof record.connectionReady === "boolean" ? record.connectionReady : undefined,
+  };
+}
+
 function tokenCount(value) {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }

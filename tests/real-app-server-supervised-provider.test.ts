@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+// @ts-expect-error JavaScript reader intentionally has no declaration file.
+import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 
 import {
   acquireAppServerProviderLease,
@@ -155,6 +157,7 @@ contractSuite("real supervised App Server provider", () => {
       ].join("\n"), { mode: 0o600 });
       writeGatewayConfig(configPath, {
         version: 1,
+        debug: { model_traffic_dump: true },
         default_workspace: "integration",
         telegram: {
           bot_token: "integration-token",
@@ -262,6 +265,17 @@ contractSuite("real supervised App Server provider", () => {
             10_000,
           );
           await waitFor(() => completed, 10_000);
+          await vi.waitFor(async () => {
+            const files = listDumpFiles(join(testRuntime, "traffic"));
+            const summary = (await summarizeDumpFiles(files)).exchanges.find((entry: { turnId?: string }) => entry.turnId === turn.turnId);
+            expect(summary).toBeDefined();
+            const detail = await describeDumpExchange(files, summary.id);
+            expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.callTiming.preForwardMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
+            expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.callTiming.receiveResponseMs).toBeGreaterThanOrEqual(0);
+          }, { timeout: 5000 });
 
           const policyTurn = await client.startTurn(
             threadId,

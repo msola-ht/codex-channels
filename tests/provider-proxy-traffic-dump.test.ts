@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 
 import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
@@ -43,6 +43,149 @@ afterEach(async () => {
 });
 
 describe("ModelTrafficDump V2", () => {
+  it.each(["http", "websocket"])("uses one failure timestamp for %s metrics and call details", async (transport) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-failure-timing-"));
+    temporaryDirectories.push(directory);
+    const metrics: ProviderProxyMetrics[] = [];
+    const server = createServer((request) => request.socket.destroy());
+    const sockets = new WebSocketServer({ server });
+    sockets.on("connection", (socket) => socket.on("message", () => socket.terminate()));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>((resolve) => sockets.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "openai" },
+      onMetrics: (metric) => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    if (transport === "http") {
+      await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: '{"model":"fixture"}' });
+    } else {
+      const client = new WebSocket(`ws://${proxy.address()}/responses`);
+      await new Promise<void>((resolve, reject) => {
+        client.once("open", () => client.send('{"type":"response.create","model":"fixture"}'));
+        client.once("close", () => resolve());
+        client.once("error", reject);
+      });
+    }
+    await vi.waitFor(() => expect(metrics).toHaveLength(1));
+    await proxy.close();
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response.callTiming.totalMs).toBe(metrics[0]?.totalDurationMs);
+  });
+
+  it("captures stages through a real reused WebSocket without changing forwarding", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-call-timing-ws-"));
+    temporaryDirectories.push(directory);
+    const server = createServer();
+    const sockets = new WebSocketServer({ server });
+    sockets.on("connection", (socket) => socket.on("message", () => {
+      socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "ok" }));
+      socket.send(JSON.stringify({ type: "response.completed", response: { status: "completed" } }));
+    }));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>((resolve) => sockets.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "openai" },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    try {
+      await new Promise<void>((resolve, reject) => { client.once("open", resolve); client.once("error", reject); });
+      for (let index = 0; index < 2; index += 1) {
+        await new Promise<void>((resolve, reject) => {
+          const receive = (data: WebSocket.RawData) => {
+            if (JSON.parse(data.toString()).type === "response.completed") {
+              client.off("message", receive);
+              client.off("error", reject);
+              resolve();
+            }
+          };
+          client.on("message", receive);
+          client.once("error", reject);
+          client.send(JSON.stringify({ type: "response.create", model: "fixture" }));
+        });
+      }
+    } finally { client.terminate(); }
+    await proxy.close();
+    const files = listDumpFiles(directory);
+    for (const id of [1, 2]) {
+      const detail = await describeDumpExchange(files, id);
+      expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
+      expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
+      expect(detail.response.callTiming.submittedToFirstEventMs).toBeGreaterThanOrEqual(0);
+    }
+    expect((await describeDumpExchange(files, 2)).response.callTiming.connectionReady).toBe(true);
+  });
+  it("records monotonic HTTP stages independently of wall-clock changes", async () => {
+    const { directory, dump } = fixture();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(10000);
+    const exchange = dump.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: 10000, startedAtMonotonicMs: 100 });
+    exchange.callTiming!.forwarding(110);
+    exchange.callTiming!.requestBodyEnd(120);
+    exchange.callTiming!.responseHead(130);
+    exchange.observeRequestMetrics({ firstContentMs: 25 });
+    exchange.requestEnd();
+    exchange.responseHead(200, {});
+    vi.setSystemTime(5000);
+    exchange.responseEnd(160);
+    await dump.close();
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.response.callTiming).toMatchObject({
+      totalMs: 60, preForwardMs: 10, firstEventWaitMs: 25, afterFirstEventMs: 25,
+      receiveRequestMs: 20, waitResponseHeadMs: 10, receiveResponseMs: 30,
+    });
+  });
+
+  it("keeps WebSocket connection waiting and first-event stages within each call", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginWebSocketExchange({ headers: {}, startedAtMs: Date.now(), url: "/responses" });
+    exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 100);
+    const first = exchange.callTiming!;
+    first.forwarding(110, false);
+    first.submitted(150);
+    exchange.observeRequestMetrics({ firstContentMs: 70 });
+    exchange.webSocketFrame("upstream", Buffer.from('{"type":"response.completed","response":{}}'), false, 250);
+    exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 300);
+    exchange.callTiming!.forwarding(310, true);
+    exchange.callTiming!.submitted(311);
+    exchange.observeRequestMetrics({ firstContentMs: 10 });
+    exchange.failure("upstream_error", undefined, 340);
+    await dump.close();
+    const paths = listDumpFiles(directory);
+    expect((await describeDumpExchange(paths, 1)).response.callTiming).toMatchObject({
+      totalMs: 150, preForwardMs: 10, firstEventWaitMs: 70, afterFirstEventMs: 70,
+      submitWaitMs: 40, submittedToFirstEventMs: 30, connectionReady: false,
+    });
+    expect((await describeDumpExchange(paths, 2)).response.callTiming).toMatchObject({
+      totalMs: 40, preForwardMs: 10, firstEventWaitMs: 10, afterFirstEventMs: 20,
+      submitWaitMs: 1, submittedToFirstEventMs: 9, connectionReady: true,
+    });
+  });
+
+  it("does not invent forwarding or first-event stages for a route failure", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(), startedAtMonotonicMs: 100 });
+    exchange.failure("upstream_route", undefined, 120);
+    await dump.close();
+    const timing = (await describeDumpExchange(listDumpFiles(directory), 1)).response.callTiming;
+    expect(timing.totalMs).toBe(20);
+    expect(timing.preForwardMs).toBeUndefined();
+    expect(timing.firstEventWaitMs).toBeUndefined();
+    expect(timing.afterFirstEventMs).toBeUndefined();
+  });
   it("binds HTTP metrics to actual collision-resolved sessions", async () => {
     const { directory, dump } = fixture();
     const second = new ModelTrafficDump({ directory, label: "openai", onError: () => undefined });

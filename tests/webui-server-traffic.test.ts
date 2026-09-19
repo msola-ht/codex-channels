@@ -23,6 +23,23 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("does not infer new stages from legacy wall-clock records or invalid offsets", async () => {
+    const fixture = createFixture();
+    const legacy = httpInteraction(1);
+    const invalid = httpInteraction(2);
+    Object.assign(invalid.response, { callTiming: {
+      clock: "monotonic", endMs: 100, forwardingMs: 10, firstEventMs: 120,
+      requestBodyEndMs: 80, responseHeadMs: 20,
+    } });
+    writeSession(fixture.trafficDir, "openai", "clock-stages", [legacy, invalid]);
+    const paths = [join(fixture.trafficDir, "openai-clock-stages")];
+    expect((await describeDumpExchange(paths, 1)).response.callTiming).toBeNull();
+    const timing = (await describeDumpExchange(paths, 2)).response.callTiming;
+    expect(timing).toMatchObject({ totalMs: 100, preForwardMs: 10, receiveResponseMs: 80 });
+    expect(timing.firstEventWaitMs).toBeUndefined();
+    expect(timing.afterFirstEventMs).toBeUndefined();
+    expect(timing.waitResponseHeadMs).toBeUndefined();
+  });
   it.each(["http", "websocket"])("separates %s model declarations across trace pages without changing terminal models", async (transport) => {
     const fixture = createFixture();
     const call = transport === "http" ? httpInteraction(1) : websocketInteraction(1);

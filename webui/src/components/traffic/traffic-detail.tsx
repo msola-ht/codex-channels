@@ -235,23 +235,32 @@ function UsageSummary({ usage }: { usage: NonNullable<TrafficExchangeDetail["res
 
 function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
   const timing = response.timing
+  const call = response.callTiming
   const metrics = [
     ["单请求首字耗时", response.firstContentMs],
-    ["本地请求耗时", response.durationMs],
-    ...(response.httpTiming === null ? [] : [
-      ["代理收齐请求体", response.httpTiming.receiveRequestMs],
-      ["收齐请求体至响应头", response.httpTiming.waitResponseHeadMs],
-      ["响应头至结束", response.httpTiming.receiveResponseMs],
+    ["本次调用总耗时", call?.totalMs],
+    ["转发前准备", call?.preForwardMs],
+    ["转发至首字事件", call?.firstEventWaitMs],
+    ["首字事件至结束", call?.afterFirstEventMs],
+    ...(response.httpTiming === null ? [
+      ["转发开始至提交发送", call?.submitWaitMs],
+      ["提交发送至首字事件", call?.submittedToFirstEventMs],
+    ] as const : [
+      ["入口至收齐请求体", call?.receiveRequestMs],
+      ["收齐请求体至响应头", call?.waitResponseHeadMs],
+      ["响应头至结束", call?.receiveResponseMs],
     ] as const),
-    ...(timing === null ? [] : [
+  ] as const
+  const upstreamMetrics = [
+    ["上游轮次首 Token", timing?.firstTokenMs],
     ["上游最大排队", timing?.queueMaxMs],
     ["上游轮次累计生成", timing?.samplingMs],
     ["上游 logical turn", timing?.totalMs],
     ["客户端工具暂停", timing?.toolPauseMs],
-    ] as const),
   ] as const
   return (
     <section className="flex flex-col gap-2" aria-label="耗时摘要">
+      <p className="text-sm font-medium">本次调用</p>
       <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-3">
         {metrics.map(([label, value]) => (
           <div key={label}>
@@ -260,9 +269,13 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
           </div>
         ))}
       </dl>
-      {response.httpTiming === null ? null : (
-        <p className="text-xs text-muted-foreground">HTTP 阶段基于代理本地时间戳，不是首 Token 延迟或纯生成耗时；缺失或时间倒序的阶段不计算。</p>
-      )}
+      {call === null ? <p className="text-xs text-muted-foreground">未记录单调时钟阶段，不从历史记录补算。原始记录耗时（墙钟）：{response.durationMs === undefined ? "未提供" : formatElapsedDuration(response.durationMs)}。</p> : null}
+      {call?.connectionReady === undefined ? null : <p className="text-xs text-muted-foreground">本次 WebSocket 请求进入转发时，连接{call.connectionReady ? "已就绪" : "尚未就绪"}；提交发送不表示上游已经收到。</p>}
+      <p className="text-xs text-muted-foreground">本次调用阶段使用同一单调时钟。首字后仍包含生成、传输和背压暂停，不是纯生成耗时；HTTP 请求接收与上游转发可重叠，其他阶段不能重复相加。失败记录中的结束表示本地观察到中断。</p>
+      <p className="text-sm font-medium">上游轮次统计（独立口径）</p>
+      <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-3">
+        {upstreamMetrics.map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd>{value === undefined ? "未提供" : formatElapsedDuration(value)}</dd></div>)}
+      </dl>
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
         顶部轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 取跳过 created/in_progress 的首个 Responses 语义事件，WS 取 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误、响应头或旁路元数据，均不代表客户端显示时间；历史值不从 trace 反推。

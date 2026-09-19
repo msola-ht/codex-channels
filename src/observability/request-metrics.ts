@@ -29,6 +29,7 @@ export interface ModelRequestMetricSample {
   responseCompletedAtMs: number;
   upstreamTtftMs?: number | null;
   firstContentMs?: number | null;
+  totalDurationMs?: number | null;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */
@@ -260,6 +261,7 @@ export interface ModelRequestMetricsPageQuery extends ModelRequestMetricsScope {
 }
 
 export type ModelRequestMetricsSortKey =
+  | "totalDurationMs"
   | "recordedAtMs"
   | "provider"
   | "model"

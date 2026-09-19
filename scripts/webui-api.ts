@@ -202,6 +202,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
   requestModel: string | null
@@ -896,6 +897,18 @@ export interface TrafficExchangeDetail {
     bodyTruncated: boolean
     bytes?: number
     durationMs?: number
+    callTiming: {
+      totalMs: number
+      preForwardMs?: number
+      firstEventWaitMs?: number
+      afterFirstEventMs?: number
+      receiveRequestMs?: number
+      waitResponseHeadMs?: number
+      receiveResponseMs?: number
+      submitWaitMs?: number
+      submittedToFirstEventMs?: number
+      connectionReady?: boolean
+    } | null
     httpTiming: {
       receiveRequestMs?: number
       waitResponseHeadMs?: number

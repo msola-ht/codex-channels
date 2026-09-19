@@ -61,11 +61,13 @@
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
   `firstContentMs` 从 HTTP 路由解析成功、WS 请求帧转储与解析完成后进入转发流程开始，计到首个符合条件事件的接收回调入口；
   不含 HTTP 路由等待，包含 WS 等待连接就绪。响应解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
+  `totalDurationMs` 使用独立的请求入口单调时钟，到首次模型终态或结束/失败时冻结，经 IPC 传递且不依赖调用记录开关；不包含终态后投递、客户端显示或其他重试，无逻辑请求的握手错误不伪造值。
   HTTP 排除 created/in_progress/failed，其余合法 response.* 语义事件计入；WS 计入 response.*.delta、output_text.done 与 function_call_arguments.done。
   纯错误、旁路额度/timing/metadata 与畸形报文不计入；完整展示口径见[WebUI 文档](../../docs/webui.md)。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
+- `traffic-call-timing.ts`：记录单次调用的单调时钟偏移，区分入口、转发、请求体收齐、响应头、WS 提交发送与结束；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了

@@ -80,6 +80,7 @@ const pageSortSql = {
   inputTokens: "input_tokens",
   outputTokens: "output_tokens",
   reasoningOutputTokens: "reasoning_output_tokens",
+  totalDurationMs: "total_duration_ms",
 } as const;
 const observableCompletionSql = `
   status = 'completed'
@@ -299,6 +300,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.traffic?.label ?? null,
       sample.traffic?.session ?? null,
       sample.traffic?.interaction ?? null,
+      sample.totalDurationMs ?? null,
     );
     return recordedAtMs;
   }

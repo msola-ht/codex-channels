@@ -46,6 +46,8 @@ export interface ProviderProxyMetrics {
   upstreamTtftMs?: number;
   /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
   firstContentMs?: number;
+  /** 代理收到请求至首个终态或结束/失败；单调时钟，不含终态后的投递。 */
+  totalDurationMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
   /** 精确定位本次调用的 V2 转储；未开启转储时不提供。 */
@@ -69,6 +71,7 @@ export interface MetricsState extends ProviderProxyMetrics {
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 const requestClocks = new WeakMap<MetricsState, number>();
+const totalRequestClocks = new WeakMap<MetricsState, number>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -77,6 +80,7 @@ export function createMetricsState(
   operation: ProviderProxyMetrics["operation"],
   userAgent: string | null,
   startedAtMonotonicMs: number,
+  totalStartedAtMonotonicMs?: number,
 ): MetricsState {
   const metrics: MetricsState = {
     ...metadata,
@@ -104,7 +108,13 @@ export function createMetricsState(
     quotaWindows: null,
   };
   requestClocks.set(metrics, startedAtMonotonicMs);
+  if (totalStartedAtMonotonicMs !== undefined) totalRequestClocks.set(metrics, totalStartedAtMonotonicMs);
   return metrics;
+}
+
+function observeTotalDuration(metrics: MetricsState, at: number): void {
+  const started = totalRequestClocks.get(metrics);
+  if (started !== undefined) metrics.totalDurationMs ??= at - started;
 }
 
 /** 实际发往上游的 UA：配置覆盖优先，否则用 App Server 发来的原始 UA。 */
@@ -223,13 +233,14 @@ export function observeResponseEvent(
     timingByMetrics.delete(metrics);
     observeResponseCompletion(metrics, type, event);
     metrics.responseCompletedAtMs = receivedAtMs;
+    observeTotalDuration(metrics, receivedAtMonotonicMs);
     return true;
   }
   if (type === "error") {
     const error = asRecord(event?.error);
     const errorType = boundedString(error?.type) ?? "upstream_error";
     metrics.httpStatus = finiteNonNegativeNumber(event?.status);
-    markMetricsFailed(metrics, errorType, receivedAtMs);
+    markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs);
     metrics.errorType = errorType;
     metrics.errorCode = boundedString(error?.code);
     metrics.errorMessage = boundedMessage(error?.message);
@@ -350,6 +361,7 @@ export class HttpResponseMetricsObserver {
           )
         : false;
     finalizeHttpStatus(this.metrics, receivedAtMs);
+    observeTotalDuration(this.metrics, receivedAtMonotonicMs);
     return completed;
   }
 
@@ -423,8 +435,10 @@ export function markMetricsFailed(
   errorType: string,
   receivedAtMs: number,
   error?: unknown,
+  receivedAtMonotonicMs = performance.now(),
 ): void {
   if (metrics.status === "completed") return;
+  observeTotalDuration(metrics, receivedAtMonotonicMs);
   metrics.status = "failed";
   metrics.errorType = errorType;
   metrics.errorCode = nodeErrorCode(error);

@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -174,6 +174,7 @@ export async function describeDumpExchange(
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
       durationMs: interaction.response.durationMs,
       firstContentMs: interaction.response.firstContentMs,
+      callTiming: callTiming(interaction.response.callTiming),
       httpTiming: interaction.request.transport !== "http" ? null : {
         receiveRequestMs: elapsedMs(interaction.request.startedAtMs, trace.milestones.request_end),
         waitResponseHeadMs: elapsedMs(trace.milestones.request_end, trace.milestones.response_head),

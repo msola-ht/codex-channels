@@ -182,6 +182,7 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
       quotaWindows,
     });
     expect(metrics[0]?.firstContentMs).toBe(50);
+    expect(metrics[0]?.totalDurationMs).toBeGreaterThanOrEqual(50);
   });
 
 it("recognizes SSE metadata when the upstream omits Content-Type", async () => {

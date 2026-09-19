@@ -44,6 +44,7 @@ const COLUMN_LABELS: Record<string, string> = {
   output: "输出 Token",
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
+  totalDuration: "总耗时",
   traffic: "调用详情",
 }
 
@@ -132,6 +133,12 @@ export function RequestsTable({
             : formatElapsedDuration(row.original.firstContentMs)}
         </span>
       ),
+    },
+    {
+      id: "totalDuration",
+      accessorFn: (record) => record.totalDurationMs,
+      header: ({ column }) => <SortableHeader column={column}>总耗时</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums" title="代理收到本次请求至模型终态；无终态则到结束或失败。使用单调时钟，不含终态后的指标投递或客户端显示时间。">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "provider",

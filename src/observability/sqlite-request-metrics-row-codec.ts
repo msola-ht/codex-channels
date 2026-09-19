@@ -40,6 +40,7 @@ export interface MetricRow {
   user_agent: string | null;
   upstream_ttft_ms: number | null;
   first_content_ms: number | null;
+  total_duration_ms: number | null;
   request_model: string | null;
   response_model: string | null;
   traffic_label: string | null;
@@ -118,6 +119,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     userAgent: row.user_agent,
     upstreamTtftMs: row.upstream_ttft_ms,
     firstContentMs: row.first_content_ms,
+    totalDurationMs: row.total_duration_ms,
     requestModel: row.request_model,
     responseModel: row.response_model,
     traffic: row.traffic_label === null ? null : {

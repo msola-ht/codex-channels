@@ -91,6 +91,7 @@ const requestSortKeys = {
   input: "inputTokens",
   output: "outputTokens",
   reasoningOutput: "reasoningOutputTokens",
+  totalDuration: "totalDurationMs",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;

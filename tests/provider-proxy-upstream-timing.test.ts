@@ -9,6 +9,16 @@ import {
 import { TurnTimingAccumulator } from "../src/conversation-core/turn-timing-accumulator.js";
 
 describe("OpenAI upstream TTFT", () => {
+  it("measures total duration from request entry and freezes it at the first terminal", () => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 120, 100);
+    metrics.responseFormat = "sse";
+    const observer = new HttpResponseMetricsObserver(metrics);
+    observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'), 500, 150);
+    observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"status":"completed"}}\n\n'), 400, 200);
+    observer.finish(300, 250);
+    expect(metrics.firstContentMs).toBe(30);
+    expect(metrics.totalDurationMs).toBe(100);
+  });
   it.each([
     { type: "response.output_text.done", text: "answer" },
     { type: "response.function_call_arguments.done", arguments: "{}" },
