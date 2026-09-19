@@ -218,8 +218,8 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首字耗时 | 上游轮次首 Token | 请求模型 | 响应回显 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首字耗时 | 上游轮次首 Token | 请求模型 | 响应回显 | 转储定位 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
         [
@@ -236,6 +236,8 @@ export function printMetricsExport(result, format) {
           markdownCell(record.upstreamTtftMs == null ? "—" : formatElapsedDuration(record.upstreamTtftMs)),
           markdownCell(record.requestModel ?? "未知"),
           markdownCell(record.responseModel ?? "未回显"),
+          markdownCell(record.traffic == null ? "未关联"
+            : `${record.traffic.label} / ${record.traffic.session} / #${record.traffic.interaction}`),
         ].join(" | "),
       );
     }
@@ -559,6 +561,9 @@ function csvColumns() {
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
     ["requestModel", (record) => record.requestModel],
     ["responseModel", (record) => record.responseModel],
+    ["trafficLabel", (record) => record.traffic?.label],
+    ["trafficSession", (record) => record.traffic?.session],
+    ["trafficInteraction", (record) => record.traffic?.interaction],
     ["id", (record) => record.id],
     ["recordedAt", (record) => record.recordedAtMs === undefined
       ? ""

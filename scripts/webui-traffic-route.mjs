@@ -46,6 +46,9 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     );
   }
   const labels = catalog.labels;
+  if (apiPath === "/traffic/exchange" && url.searchParams.has("session") && labels.length === 0) {
+    throw new ApiError(404, "traffic_session_not_found", "关联转储不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
+  }
   if (labels.length === 0) {
     if (catalog.legacyFiles.length > 0) {
       throw new ApiError(
@@ -109,7 +112,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     maxSectionBytes: maximumSectionBytes,
   });
   if (exchange === null) {
-    throw new ApiError(404, "traffic_exchange_not_found", `没有找到模型调用 #${id}`);
+    throw new ApiError(404, "traffic_exchange_not_found", `没有找到关联模型调用 #${id}：记录可能尚未写入、写入失败或已被清理；不会匹配其他请求`);
   }
   if (traceOffset > 0 && traceOffset >= exchange.tracePage.total) {
     throw new ApiError(400, "invalid_parameter", "traceOffset 超出允许范围");
@@ -159,7 +162,7 @@ function readLabel(url, labels) {
   if (values.length === 0) return labels[0].label;
   const label = values[0];
   if (!labels.some((entry) => entry.label === label)) {
-    throw new ApiError(404, "traffic_label_not_found", `没有该标签的转储文件：${label}`);
+    throw new ApiError(404, "traffic_label_not_found", `没有该标签的转储文件：${label}；关联记录可能尚未写入、写入失败或已被清理`);
   }
   return label;
 }
@@ -175,7 +178,7 @@ function readSessionFiles(url, catalogFiles, label) {
     throw new ApiError(
       404,
       "traffic_session_not_found",
-      `没有该标签的 writer session：${requested}`,
+      `没有该标签的 writer session：${requested}；关联记录可能尚未写入、写入失败或已被清理，不会匹配其他批次`,
     );
   }
   return { files, session: requested ?? null };

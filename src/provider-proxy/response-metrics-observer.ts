@@ -48,6 +48,8 @@ export interface ProviderProxyMetrics {
   firstContentMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
+  /** 精确定位本次调用的 V2 转储；未开启转储时不提供。 */
+  traffic?: { label: string; session: string; interaction: number };
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;

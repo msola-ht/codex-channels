@@ -42,6 +42,9 @@ export interface MetricRow {
   first_content_ms: number | null;
   request_model: string | null;
   response_model: string | null;
+  traffic_label: string | null;
+  traffic_session: string | null;
+  traffic_interaction: number | null;
 }
 
 export interface CompactSummaryRow {
@@ -117,6 +120,11 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     firstContentMs: row.first_content_ms,
     requestModel: row.request_model,
     responseModel: row.response_model,
+    traffic: row.traffic_label === null ? null : {
+      label: row.traffic_label,
+      session: row.traffic_session!,
+      interaction: row.traffic_interaction!,
+    },
     model: row.model,
     serviceTier: row.service_tier,
     reasoningEffort: row.reasoning_effort,

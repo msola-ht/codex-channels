@@ -307,6 +307,7 @@ export class ProviderProxy {
         path: request.url ?? "", startedAtMs,
       });
       exchange?.responseHead(502, {});
+      exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route");
       if (route.kind === "response" || route.kind === "compact") {
         await this.deliverMetrics(metrics, route.accountId);

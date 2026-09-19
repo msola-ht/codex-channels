@@ -78,6 +78,29 @@ export function responseFacts(body) {
   };
 }
 
+/** 只解释转储已经记录的失败位置，不由耗时或错误文本推断网络根因。 */
+export function failureStage(record, body) {
+  if (record?.state !== "failed" && record?.state !== "incomplete") return undefined;
+  const stages = {
+    upstream_route: "上游路由解析",
+    upstream_handshake: "上游 WebSocket 握手",
+    upstream_request: "上游请求（连接或发送）",
+    upstream_response: "上游响应接收",
+    client_request: "客户端请求接收",
+    client_disconnected: "客户端连接断开",
+    client_error: "客户端 WebSocket 传输",
+    upstream_error: "上游 WebSocket 传输",
+    websocket_client_closed: "客户端 WebSocket 关闭",
+    websocket_upstream_closed: "上游 WebSocket 关闭",
+    superseded_by_next_request: "上一请求未结束即收到下一请求",
+  };
+  if (record.errorScope !== undefined) return stages[record.errorScope] ?? "未识别的传输阶段";
+  const failureTypes = ["response.failed", "response.incomplete", "error"];
+  if (failureTypes.includes(record.eventType) || failureTypes.includes(body?.type)) return "上游返回失败或不完整终态";
+  if (record.status >= 400) return "上游 HTTP 响应";
+  return "未提供失败阶段";
+}
+
 function tokenCount(value) {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }

@@ -238,6 +238,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableString(record.model)
     || (record.requestModel !== undefined && !nullableString(record.requestModel))
     || (record.responseModel !== undefined && !nullableString(record.responseModel))
+    || (record.traffic !== undefined && !validTrafficReference(record.traffic))
     || !nullableString(record.serviceTier)
     || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
     || !nullableHttpStatus(record.httpStatus)
@@ -286,6 +287,15 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
       ? null
       : quotaWindows,
   } as unknown as ProviderProxyMetrics;
+}
+
+function validTrafficReference(value: unknown): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const reference = value as Record<string, unknown>;
+  return typeof reference.label === "string" && /^[A-Za-z0-9._-]{1,256}$/u.test(reference.label)
+    && typeof reference.session === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(reference.session)
+    && typeof reference.interaction === "number"
+    && Number.isSafeInteger(reference.interaction) && reference.interaction > 0;
 }
 
 function nullableQuotaWindows(value: unknown): boolean {

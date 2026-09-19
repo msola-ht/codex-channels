@@ -28,6 +28,7 @@ import {
 } from "./sqlite-request-metrics-row-codec.js";
 import {
   ensureCurrentModelRequestMetricsSchema,
+  metricStorageColumns,
   metricStorageColumnsSql,
   requireCurrentModelRequestMetricsSchema,
 } from "./sqlite-request-metrics-schema.js";
@@ -191,7 +192,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         INSERT INTO model_request_metrics (
           ${metricStorageColumnsSql}
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+          ${metricStorageColumns.map(() => "?").join(", ")}
         )
       `);
       this.insertSubagentThread = this.database.prepare(`
@@ -295,6 +296,9 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.firstContentMs ?? null,
       sample.requestModel ?? null,
       sample.responseModel ?? null,
+      sample.traffic?.label ?? null,
+      sample.traffic?.session ?? null,
+      sample.traffic?.interaction ?? null,
     );
     return recordedAtMs;
   }

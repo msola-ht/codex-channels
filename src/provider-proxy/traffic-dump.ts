@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { StringDecoder } from "node:string_decoder";
 
 import type { RawData } from "ws";
+import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
 
 import {
   BodyAccumulator,
@@ -152,6 +153,7 @@ export class ModelTrafficDump {
       (target) => this.storage.nextInteractionId(target),
       (startedAtMs) => this.storage.beginLogicalInteraction(startedAtMs),
       (target) => this.storage.completeLogicalInteraction(target),
+      (target, id) => this.storage.reference(target, id),
       this.inputItems,
       this.itemMaxBytes,
     );
@@ -163,8 +165,14 @@ export class ModelTrafficExchange {
   private requestMetrics: { firstContentMs?: number } | undefined;
 
   /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首内容时间。 */
-  observeRequestMetrics(metrics: { firstContentMs?: number }): void {
+  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic">): void {
     this.requestMetrics = metrics;
+    const interaction = this.transport === "http"
+      ? this.httpInteractionId : this.activeWebSocket?.id;
+    if (interaction !== undefined) {
+      const reference = this.trafficReference(this.activeWebSocket?.session ?? this.initialSession, interaction);
+      if (reference !== undefined) metrics.traffic = reference;
+    }
   }
   private readonly requestBody: BodyAccumulator;
   private readonly responseBody: BodyAccumulator;
@@ -231,6 +239,7 @@ export class ModelTrafficExchange {
     private readonly nextInteractionId: (session: TrafficDumpSession) => number,
     private readonly beginLogicalInteraction: (startedAtMs: number) => TrafficDumpSession,
     private readonly completeLogicalInteraction: (session: TrafficDumpSession) => void,
+    private readonly trafficReference: (session: TrafficDumpSession, id: number) => ProviderProxyMetrics["traffic"],
     private readonly inputItems: number,
     private readonly itemMaxBytes: number,
   ) {

@@ -86,6 +86,8 @@
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
   一次调用。响应索引复用代理同一份 `firstContentMs` 观测，精简模式也保留，不从 trace 反推。
+  指标中的 `traffic` 使用转储实际创建的标签、writer session（包含目录冲突时的编号后缀）与 interaction，
+  HTTP 和每次 WebSocket 调用分别绑定；未开启转储或 WS 握手失败、尚未创建逻辑调用时不提供关联。
   每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
   已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。写队列先落正文再落索引，不改变
   转发、背压和指标采集；App Server 启动及新 session 建立时按 session

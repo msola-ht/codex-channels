@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 
-import { ProviderProxy } from "../src/provider-proxy/index.js";
+import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
@@ -43,13 +43,37 @@ afterEach(async () => {
 });
 
 describe("ModelTrafficDump V2", () => {
+  it("binds HTTP metrics to actual collision-resolved sessions", async () => {
+    const { directory, dump } = fixture();
+    const second = new ModelTrafficDump({ directory, label: "openai", onError: () => undefined });
+    const observed: Array<Pick<ProviderProxyMetrics, "firstContentMs" | "traffic">> = [];
+    for (const writer of [dump, second]) {
+      const exchange = writer.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: 1_789_776_000_000 });
+      const metrics: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = {};
+      exchange.observeRequestMetrics(metrics);
+      observed.push(metrics);
+      exchange.requestEnd();
+      exchange.failure("upstream_request");
+      await writer.close();
+    }
+    expect(observed[0]?.traffic?.interaction).toBe(1);
+    expect(observed[1]?.traffic?.interaction).toBe(1);
+    expect(observed[1]?.traffic?.session).toBe(`${observed[0]?.traffic?.session}-2`);
+    for (const metrics of observed) {
+      const reference = metrics.traffic!;
+      const detail = await describeDumpExchange([join(directory, `${reference.label}-${reference.session}`)], reference.interaction);
+      expect(detail.response.failureStage).toBe("上游请求（连接或发送）");
+    }
+  });
   it.each(["http", "websocket"])("records %s route failures without copying internal error details into the dump", async (transport) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-route-failure-"));
     temporaryDirectories.push(directory);
+    const metrics: ProviderProxyMetrics[] = [];
     const proxy = new ProviderProxy("127.0.0.1:0", {
       upstreamHost: "127.0.0.1",
       trafficDump: { directory, label: "openai" },
       resolveUpstream: async () => { throw new Error("private-route-detail"); },
+      onMetrics: (metric) => { metrics.push(metric); },
     });
     await proxy.start();
     openServers.push(proxy);
@@ -73,8 +97,10 @@ describe("ModelTrafficDump V2", () => {
       const index = readIndex(session);
       expect(index).toHaveLength(2);
       expect(index[1]).toMatchObject({ state: "failed", errorScope: "upstream_route" });
+      expect(metrics[0]?.traffic).toMatchObject({ label: "openai", interaction: 1 });
       expect(JSON.stringify(index)).not.toContain("private-route-detail");
     } else {
+      expect(metrics[0]?.traffic).toBeUndefined();
       const trace = readdirSync(session).filter((name) => name.startsWith("trace-"))
         .map((name) => readFileSync(join(session, name), "utf8")).join("");
       expect(trace).toContain('"kind":"websocket_handshake"');
@@ -229,7 +255,8 @@ describe("ModelTrafficDump V2", () => {
       model: "gpt-6-astra",
       client_metadata: { thread_id: "thread-ws" },
     }), false);
-    exchange.observeRequestMetrics({ firstContentMs: 23.5 });
+    const first: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = { firstContentMs: 23.5 };
+    exchange.observeRequestMetrics(first);
     exchange.webSocketFrame("upstream", textFrame({
       type: "response.completed",
       response: { model: "gpt-6-astra", output: [] },
@@ -239,6 +266,11 @@ describe("ModelTrafficDump V2", () => {
       model: "gpt-6-astra",
       input: ["second"],
     }), false);
+    const second: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = {};
+    exchange.observeRequestMetrics(second);
+    expect(first.traffic?.interaction).toBe(1);
+    expect(second.traffic?.interaction).toBe(2);
+    expect(first.traffic?.session).toBe(second.traffic?.session);
     exchange.webSocketFrame("upstream", textFrame({
       type: "response.failed",
       response: { model: "gpt-6-astra" },
@@ -650,13 +682,17 @@ describe("ModelTrafficDump V2", () => {
     const socket = dump.beginWebSocketExchange({
       headers: {}, startedAtMs: Date.now(), url: "wss://example.test/responses",
     });
+    const first: Pick<ProviderProxyMetrics, "traffic"> = {};
+    const second: Pick<ProviderProxyMetrics, "traffic"> = {};
     socket.webSocketFrame("client", textFrame({ type: "response.create", model: "gpt-6-astra" }), false);
+    socket.observeRequestMetrics(first);
     socket.webSocketFrame("upstream", textFrame({
       type: "response.completed", response: { id: "resp-1", output: [] },
     }), false);
 
     vi.setSystemTime(new Date("2026-09-02T00:00:00.001Z"));
     socket.webSocketFrame("client", textFrame({ type: "response.create", model: "gpt-6-astra" }), false);
+    socket.observeRequestMetrics(second);
     socket.webSocketFrame("upstream", textFrame({
       type: "response.completed", response: { id: "resp-2", output: [] },
     }), false);
@@ -664,6 +700,14 @@ describe("ModelTrafficDump V2", () => {
 
     const sessions = listDumpFiles(directory);
     expect(sessions).toHaveLength(2);
+    expect(first.traffic?.interaction).toBe(1);
+    expect(second.traffic?.interaction).toBe(1);
+    expect(first.traffic?.session).not.toBe(second.traffic?.session);
+    for (const [metric, responseId] of [[first, "resp-1"], [second, "resp-2"]] as const) {
+      const reference = metric.traffic!;
+      const detail = await describeDumpExchange([join(directory, `${reference.label}-${reference.session}`)], reference.interaction);
+      expect(detail.response.responseId).toBe(responseId);
+    }
     await expect(Promise.all(sessions.map(async (session: string) =>
       (await summarizeDumpFiles([session])).total))).resolves.toEqual([1, 1]);
   });

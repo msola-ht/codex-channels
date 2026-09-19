@@ -25,7 +25,8 @@ describe("metrics export display helpers", () => {
     const result = {
       generatedAt: "2026-09-19T00:00:00Z", range: { name: "all" }, weeklyQuota: null,
       records: [{ recordedAtMs: 0, weeklyQuota: null, firstContentMs: 12.5, upstreamTtftMs: 672,
-        requestModel: "requested", responseModel: "echoed", operation: "response" }],
+        requestModel: "requested", responseModel: "echoed", operation: "response",
+        traffic: { label: "openai", session: "session-2", interaction: 23 } }],
     };
     const render = (format: string) => execFileSync(process.execPath, ["--input-type=module", "-e",
       `import { printMetricsExport } from './scripts/metrics-output-renderer.mjs';
@@ -34,12 +35,14 @@ describe("metrics export display helpers", () => {
     const [headingLine, valueLine] = render("csv").split("\n");
     const headings = headingLine!.split(",");
     const values = valueLine!.split(",");
-    for (const [field, value] of Object.entries({ firstContentMs: "12.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed" })) {
+    for (const [field, value] of Object.entries({ firstContentMs: "12.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
+      trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);
     }
     const markdown = render("markdown");
     expect(markdown).toContain("首字耗时");
     expect(markdown).toContain("12.5 ms | 672 ms | requested | echoed");
+    expect(markdown).toContain("openai / session-2 / #23");
   });
   it("keeps local time output stable", () => {
     const local = formatLocalTime(1_785_900_000_000);

@@ -31,6 +31,8 @@ export interface ModelRequestMetricSample {
   firstContentMs?: number | null;
   requestModel?: string | null;
   responseModel?: string | null;
+  /** 本地转储定位符；缺失不按时间或 Thread/Turn 推断。 */
+  traffic?: { label: string; session: string; interaction: number } | null;
   /** 记录入库时刻（毫秒）；缺省为写入时的 Date.now()，测试可显式指定以保证窗口确定性。 */
   recordedAtMs?: number;
   weeklyQuota: {

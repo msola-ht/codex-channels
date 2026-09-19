@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { resolveTrafficData } from "../webui/src/lib/traffic-state.js";
+import { resolveTrafficData, trafficDetailPath } from "../webui/src/lib/traffic-state.js";
 
 describe("traffic request ownership", () => {
+  it("links to the recorded label, session and interaction without using the current selection", () => {
+    expect(trafficDetailPath({ label: "ocg", session: "2026-09-19T00-00-00-000Z-2", interaction: 23 }))
+      .toBe("/traffic?label=ocg&exchangeSession=2026-09-19T00-00-00-000Z-2&id=23");
+  });
   it("does not expose the previous provider while a new label or latest session is loading", () => {
     const oldQuery = { label: "openai", session: "old", limit: 50, offset: 0 };
     const data = { key: JSON.stringify(oldQuery), value: { label: "openai", session: "old" } };

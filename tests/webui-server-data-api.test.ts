@@ -51,9 +51,10 @@ describe("webui server data API", () => {
   });
   it("returns persisted TTFT in request details and export with missing values left null", async () => {
     const fixture = createFixture();
+    const traffic = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 4 };
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
-      firstContentMs: 12.5, requestModel: "requested", responseModel: "echoed",
+      firstContentMs: 12.5, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -63,10 +64,10 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
-        firstContentMs: 12.5, requestModel: "requested", responseModel: "echoed",
+        firstContentMs: 12.5, requestModel: "requested", responseModel: "echoed", traffic,
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
-        firstContentMs: null, requestModel: null, responseModel: null,
+        firstContentMs: null, requestModel: null, responseModel: null, traffic: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
     }

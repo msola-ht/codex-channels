@@ -111,7 +111,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 并区分发送值与响应回报值；回报值不证明模型内部执行行为，缺失或 null 不填默认值。
 HTTP 请求从当前调用的本地 trace 提取“代理收齐请求体”“收齐请求体至响应头”“响应头至结束”三个阶段，
 不受 trace 页码影响，缺失或倒序时不计算；这些时间不作为首 Token 延迟、纯生成耗时或网络延迟。
-“请求明细”页的“首字耗时”读取 Schema v16 的 `first_content_ms`，导出字段为 `firstContentMs`。
+“请求明细”页的“首字耗时”读取 Schema v16 引入的 `first_content_ms`，导出字段为 `firstContentMs`。
 耗时展示复用[全局自适应单位](display.md#完成汇报)，API 和机器可读导出保留毫秒原值。
 它参考 sub2api 的 HTTP semantic 与 WebSocket token-event 口径，使用单调时钟逐请求独立计时。
 HTTP 从上游路由解析成功、进入转发流程开始（不含路由等待）；WS 从请求帧转储及解析完成、进入转发流程开始，包含等待上游连接就绪的时间。
@@ -127,7 +127,12 @@ WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.fu
 模型对照分别保留 `requestModel` 与 `responseModel`，两者均已提供且名称不同时显示箭头；名称回显不证明实际模型身份，缺失不推断。
 采集不依赖转储开关；开启转储时，同一次观测值同时进入转储响应索引与指标库，精简模式也保留它。
 v15 及更早的历史记录新增三字段为 NULL，不按历史转储补算；已有上游 TTFT 保留。
-部署 v16 前先停止 Gateway，运行 `codexc metrics upgrade`，命令会创建旧库私有备份并事务升级；
+Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可空 `traffic` 对象，CSV 为
+`trafficLabel`、`trafficSession`、`trafficInteraction`；请求明细的“查看转储”精确打开对应调用，失败请求同样可用。
+历史记录、未开启转储或逻辑调用创建前失败显示“未关联”，不按时间、Thread 或 Turn 猜配；关联批次尚未落盘、写入失败或已被清理时明确报错，不改为打开其他请求。
+转储失败详情与 `codexc traffic` 根据已记录的传输阶段、HTTP 状态或上游终态显示失败阶段；该分类不推断代理、账户或模型的根因。
+部署 v17 前先停止 Gateway 并关闭独立 WebUI 数据库读取进程，运行 `codexc metrics upgrade`，命令会创建旧库私有备份并事务升级；
+旧记录的转储关联保持 NULL，已有首内容、上游 TTFT 和请求/响应模型名称保留。
 升级后需加载新版本的 App Server 服务（采集端）与 Gateway（消费端）。不在普通启动时隐式迁移。
 回滚时停止 Gateway 并关闭独立 WebUI 数据库读取进程，先用 `codexc metrics reset` 归档新库，再将
 升级命令输出的备份复制回原数据库路径，恢复旧版程序后启动；升级后新增数据保留在归档中，不自动合并。
@@ -302,7 +307,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 支持服务端组合筛选、排序与分页，以及列显隐和行选择，表格在视口内内部滚动，输入、输出与
 缓存列悬浮显示明细；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
-悬浮查看完整值，Schema v13 起入库，当前 Schema v16 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
+悬浮查看完整值，Schema v13 起入库，当前 Schema v17 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“期间首次请求”表示匹配条件中首个请求的
 开始时间，不等同于 App Server 中 Thread 对象的创建时间；Threads 的“类型”列把已由
 Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，其余显示“主会话”，

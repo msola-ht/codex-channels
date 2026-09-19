@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { createOutputCollector, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -176,6 +176,7 @@ export async function describeDumpExchange(
       },
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
+      failureStage: failureStage(interaction.response, responseBody),
       error: interaction.response.error,
       storedBytes: interaction.response.payload?.bytes,
       ...facts,

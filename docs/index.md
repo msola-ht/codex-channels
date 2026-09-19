@@ -205,6 +205,7 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 `first_content_ms`、`request_model`、`response_model`，由 Provider Proxy 独立观测单请求首内容和请求/响应模型名称，
 贯通指标 IPC、明细、导出及转储，不新增 App Server RPC。单请求首字耗时参考 sub2api：HTTP/SSE 使用 semantic、
 WebSocket 使用 token-event 判定，具体口径及差异见[WebUI 请求明细](webui.md)；不替代上游轮次 TTFT。
+Schema v17 保存可空转储标签、实际 writer session 与 interaction，由 Provider Proxy 绑定并经 IPC、指标库、导出和 WebUI 精确定位调用；不根据历史时间猜配，也不新增 App Server RPC。
 旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，新增字段保持 NULL、已有 TTFT 保留，保留请求、
 子代理关系与账户快照，历史运行归属不按时间猜测；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 

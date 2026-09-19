@@ -100,6 +100,12 @@ export function TrafficDetail({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm">实际服务层级：{detail.response.serviceTier ?? "未提供"}</p>
+            {detail.response.failureStage === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>失败阶段：{detail.response.failureStage}</AlertTitle>
+                <AlertDescription>根据当前调用的转储记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription>
+              </Alert>
+            )}
             {detail.response.responseId === undefined ? null : (
               <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
             )}

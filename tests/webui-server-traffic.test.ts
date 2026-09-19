@@ -23,6 +23,49 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1);
+    call.response.state = "failed";
+    call.responseBody = JSON.stringify({ type: "response.failed", response: { error: { code: "upstream_error" } } });
+    writeSession(fixture.trafficDir, "openai", "ws-failed", [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, "openai-ws-failed")], 1);
+    expect(detail.response.failureStage).toBe("上游返回失败或不完整终态");
+  });
+
+  it.each([
+    [{ state: "failed", errorScope: "upstream_route" }, "上游路由解析"],
+    [{ state: "failed", errorScope: "upstream_response" }, "上游响应接收"],
+    [{ state: "incomplete", eventType: "response.incomplete" }, "上游返回失败或不完整终态"],
+    [{ state: "failed", status: 429 }, "上游 HTTP 响应"],
+    [{ state: "incomplete" }, "未提供失败阶段"],
+    [{ state: "completed" }, undefined],
+  ])("projects only recorded failure stages: %j", async (response, expected) => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    Object.assign(call.response, response);
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.failureStage).toBe(expected);
+  });
+
+  it("reports unavailable exact references without selecting another call", async () => {
+    const fixture = createFixture();
+    const server = await startServer(fixture.environment);
+    const detailUrl = `${server.origin}/api/v1/traffic/exchange?label=openai&session=missing&id=1`;
+    const empty = await getJson<TrafficErrorBody>(detailUrl);
+    expect(empty.status).toBe(404);
+    expect(empty.body.error.code).toBe("traffic_session_not_found");
+    writeSession(fixture.trafficDir, "openai", "retained", [httpInteraction(1)]);
+    const missingSession = await getJson<TrafficErrorBody>(detailUrl);
+    expect(missingSession.status).toBe(404);
+    expect(missingSession.body.error.code).toBe("traffic_session_not_found");
+    const missingCall = await getJson<TrafficErrorBody>(detailUrl.replace("session=missing&id=1", "session=retained&id=2"));
+    expect(missingCall.status).toBe(404);
+    expect(missingCall.body.error.code).toBe("traffic_exchange_not_found");
+  });
+
   it("projects retained inputs, declared tools and reported parameters without inventing missing content", async () => {
     const fixture = createFixture();
     const call = httpInteraction(1, JSON.stringify({

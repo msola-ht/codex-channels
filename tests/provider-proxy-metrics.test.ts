@@ -46,6 +46,14 @@ describe("Provider proxy metrics channel", () => {
       }
       expect(received.map((value) => value.firstContentMs)).toEqual([0, 12.5]);
       expect(received[0]).toMatchObject({ requestModel: "requested", responseModel: "echoed" });
+      received.length = 0;
+      const reference = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 23 };
+      for (const traffic of [reference, null, {}, { ...reference, interaction: 0 },
+        { ...reference, interaction: 1.5 }, { ...reference, session: "../other" },
+        { ...reference, label: "../other" }]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), traffic } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.traffic)).toEqual([reference]);
     } finally { await server.close(); }
   });
   const unixIt = process.platform === "win32" ? it.skip : it;

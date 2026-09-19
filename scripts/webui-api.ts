@@ -202,6 +202,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
   requestModel: string | null
   responseModel: string | null
@@ -909,6 +910,7 @@ export interface TrafficExchangeDetail {
       totalTokens?: number
     } | null
     failure?: string
+    failureStage?: string
     output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
     outputTruncated: boolean
     outputSource: "terminal" | "trace"

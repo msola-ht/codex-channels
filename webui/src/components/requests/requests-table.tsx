@@ -1,4 +1,7 @@
 import * as React from "react"
+import { Link } from "react-router"
+import { Button } from "@/components/ui/button"
+import { trafficDetailPath } from "@/lib/traffic-state"
 import type { SortingState } from "@tanstack/react-table"
 
 import {
@@ -39,6 +42,7 @@ const COLUMN_LABELS: Record<string, string> = {
   output: "输出 Token",
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
+  traffic: "转储",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -198,6 +202,18 @@ export function RequestsTable({
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.httpStatus ?? "—"}</span>
+      ),
+    },
+    {
+      id: "traffic",
+      header: "转储",
+      enableSorting: false,
+      cell: ({ row }) => row.original.traffic === null ? (
+        <span className="text-muted-foreground" title="没有采集到转储关联；可能是历史记录、未开启转储，或失败发生在模型请求创建之前。">未关联</span>
+      ) : (
+        <Button variant="link" size="sm" asChild>
+          <Link to={trafficDetailPath(row.original.traffic)}>查看转储</Link>
+        </Button>
       ),
     },
     {

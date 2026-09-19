@@ -8,6 +8,7 @@ import {
   type WriteStream,
 } from "node:fs";
 import { join } from "node:path";
+import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
 
 import {
   securePrivateDirectorySync,
@@ -124,6 +125,17 @@ export class TrafficDumpStorage {
   nextInteractionId(session: TrafficDumpSession): number {
     session.interactionCount += 1;
     return session.interactionCount;
+  }
+
+  reference(session: TrafficDumpSession, interaction: number): ProviderProxyMetrics["traffic"] {
+    if (this.closed || this.failed) return undefined;
+    try {
+      this.ensureSessionDirectory(session);
+      return { label: this.label, session: session.writerSession, interaction };
+    } catch (error) {
+      this.fail(error);
+      return undefined;
+    }
   }
 
   writeTrace(session: TrafficDumpSession, record: Record<string, unknown>): void {
@@ -331,6 +343,7 @@ export class TrafficDumpStorage {
       version: 2,
     }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
     securePrivateFileSync(manifestPath);
+    sessionState.writerSession = session;
     this.pruneSessions();
     return sessionState.sessionDirectory;
   }
