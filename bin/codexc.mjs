@@ -59,6 +59,10 @@ import {
   runDesktopAppCommand,
 } from "../scripts/desktop-app-command.mjs";
 import {
+  runTimezoneCommand,
+  timezoneCommandUsage,
+} from "../scripts/timezone-command.mjs";
+import {
   metricsCommandUsage,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
@@ -88,6 +92,7 @@ const helpText = {
   init                         初始化用户目录和配置
   setup [--json]               配置 Codex 新会话默认值、提供商、通讯渠道与项目技能（交互菜单）
   config                       打开日常设置菜单（交互菜单）
+  timezone                     设置模型可见的时区与当前日期（App Server 与 WebUI）
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
 
@@ -171,6 +176,7 @@ all 只包含 App Server 与 Gateway；WebUI 需单独指定。`,
 网络代理、高级设置（日志等级与开发中功能）、WebUI 设置、
 指标存储、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
+  timezone: timezoneCommandUsage,
   doctor: `用法：codexc doctor [--json]
 
 只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
@@ -420,6 +426,12 @@ try {
         process.cwd(),
         { failureReportedByChild: true },
       );
+      break;
+    case "timezone":
+      if (showRequestedHelp(args, "timezone")) {
+        break;
+      }
+      await runTimezoneCommand(args);
       break;
     case "doctor":
       if (showRequestedHelp(args, "doctor")) {

@@ -3,6 +3,7 @@ export type GatewaySettingActivation =
   | "restart-gateway"
   | "restart-webui"
   | "restart-app-server"
+  | "restart-app-server-webui"
   | "restart-all"
   | "reinstall-services";
 
@@ -46,6 +47,7 @@ export interface GatewaySettings {
         version: string;
       };
     };
+    appServerTimezone: string | null;
     workspaces: Array<{ id: string; name: string }>;
   };
   automation: {
@@ -106,6 +108,7 @@ export type GatewaySettingInput =
         terminalIdentity: string | null;
       };
     }
+  | { kind: "system.app-server-timezone"; value: string | null }
   | { kind: "automation.scheduled-tasks"; value: boolean }
   | { kind: "advanced.logging-level"; value: GatewaySettings["advanced"]["loggingLevel"] }
   | { kind: "advanced.plugin-api"; value: boolean }

@@ -73,6 +73,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   }
   runtime.environment.CODEX_CONNECT_SERVICE_ROLE = "app-server";
   applyAppServerTerminalIdentity(runtime.environment, validatedCodex.terminal_identity);
+  applyAppServerTimezone(runtime.environment, validatedCodex.timezone);
   const defaultWorkspace = resolveDefaultWorkspace();
   const appServerRuntime = resolveAppServerRuntime(
     runtime.document,
@@ -742,6 +743,15 @@ function applyAppServerTerminalIdentity(environment, terminalIdentity) {
   }
   environment.TERM_PROGRAM = terminalIdentity.slice(0, separator);
   environment.TERM_PROGRAM_VERSION = terminalIdentity.slice(separator + 1);
+}
+
+/**
+ * 只给 App Server 子进程设置时区：`[codex].timezone` 未配置时保持继承环境，不覆盖系统时区。
+ * 模型请求的 environment context 由 App Server 读进程时区生成，因此该值随 App Server 重启生效。
+ */
+export function applyAppServerTimezone(environment, timezone) {
+  if (timezone === undefined) return;
+  environment.TZ = timezone;
 }
 
 function withoutManagedProviderApiKeys(environment) {

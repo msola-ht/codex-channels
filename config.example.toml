@@ -46,6 +46,9 @@ sandbox = "workspace-write"
 # 取值由运行 `codexc config`、安装或更新服务的命令按其终端自动探测后写入，
 # 也可以直接填写「终端名」或「终端名/版本」；重启服务后生效：
 # terminal_identity = "iTerm.app/3.5.14"
+# 模型可见时区：App Server 请求里的 environment context 时区与当前日期，WebUI 页面时间同步跟随；
+# 缺省沿用系统时区，只写入这两个服务进程，不修改系统。用 codexc timezone 设置，重启后生效：
+# timezone = "America/Los_Angeles"
 
 [approval]
 timeout_seconds = 900

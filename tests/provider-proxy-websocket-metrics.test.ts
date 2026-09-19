@@ -127,6 +127,11 @@ describe("ProviderProxy WebSocket metrics", () => {
       type: "response.create",
       reasoning: { effort: "medium" },
       client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify({
+          request_kind: "compaction",
+          thread_id: "thread-ws",
+          turn_id: "turn-ws",
+        }),
         "x-codex-ws-stream-request-start-ms": String(requestStartedAtMs),
         stable: "kept",
       },
@@ -236,7 +241,12 @@ describe("ProviderProxy WebSocket metrics", () => {
     expect(upstreamMessage).toEqual({
       type: "response.create",
       generate: false,
-      client_metadata: {},
+      client_metadata: {
+        "x-codex-turn-metadata": JSON.stringify({
+          request_kind: "prewarm",
+          thread_id: "thread-warm",
+        }),
+      },
     });
     expect(upstreamTimingHeader).toBeUndefined();
     expect(metrics).toEqual([]);

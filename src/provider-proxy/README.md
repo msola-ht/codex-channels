@@ -13,7 +13,7 @@
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
-  `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
+  `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
   HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
   此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
@@ -33,7 +33,7 @@
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照
   与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.154.0 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
-  转发并移除私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
+  转发其私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
   Responses WebSocket 只从 `codex.rate_limits` 事件提取同一窗口；百分比转换为定点整数并随当前
   请求指标投递，不保存完整 Header、事件正文或其他额度桶。

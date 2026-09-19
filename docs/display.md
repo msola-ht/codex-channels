@@ -90,8 +90,9 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 `codexc metrics turns <Thread ID>` 仍列出指定 Thread 自身的 Turn 明细，不把子代理任务拆入公开
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
 范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
-CLI 与 WebUI 还支持 `today` / `yesterday`，分别按主机本地时区统计今天截至当前时刻、昨天完整自然日。
-WebUI 的每日分组和所有格式化时间统一跟随服务端系统时区，浏览器时区不改变日期归属；
+CLI 与 WebUI 还支持 `today` / `yesterday`，分别统计今天截至当前时刻、昨天完整自然日。
+WebUI 的每日分组和所有格式化时间统一跟随服务端进程时区，缺省为系统时区，可用
+[`codex.timezone`](model-timezone.md) 覆盖；浏览器时区不改变日期归属。
 CLI 人类可读的指标报告、导出与菜单使用执行主机本地时间，报告标明时区。JSON/CSV 中的时间戳和
 UTC ISO 时间以及原始上游转储保持原格式，不迁移历史记录；耗时不受时区影响。
 WebUI 菜单只展示今天、昨天、最近 7 天、最近 30 天、全部历史和自定义日期。

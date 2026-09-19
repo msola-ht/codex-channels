@@ -333,7 +333,7 @@ it("attributes configured reasoning effort only to the private external-role rou
     ]);
   });
 
-it("preserves upstream status and headers without forwarding local turn metadata", async () => {
+it("preserves upstream status, headers and local turn metadata", async () => {
     let forwardedMetadata: string | undefined;
     const upstream = createServer((request, response) => {
       forwardedMetadata = request.headers["x-codex-turn-metadata"] as string | undefined;
@@ -407,7 +407,10 @@ it("preserves upstream status and headers without forwarding local turn metadata
       retryAfter: "17",
       status: 429,
     });
-    expect(forwardedMetadata).toBeUndefined();
+    expect(JSON.parse(forwardedMetadata ?? "null")).toEqual({
+      thread_id: "thread-private",
+      turn_id: "turn-private",
+    });
     expect(metrics).toEqual([expect.objectContaining({
       status: "failed",
       httpStatus: 429,

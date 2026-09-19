@@ -913,6 +913,7 @@ function serveStatic(staticDir, pathname, response) {
 function main() {
   try {
     const settings = resolveWebuiSettings({ args: process.argv.slice(2) });
+    applyConfiguredTimezone(process.env, settings.configPath);
     const { host, server } = createWebuiServer({
       environment: process.env,
       host: settings.host,
@@ -948,6 +949,17 @@ function main() {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   }
+}
+
+/**
+ * WebUI 服务进程时区跟随 `[codex].timezone`：`/api/v1/time` 返回该值，页面时间展示与按天、
+ * 按小时的指标分组都按它计算。`TZ` 只在进程启动时生效，未配置时保持继承的系统时区，
+ * 因此改动后需要重启 WebUI 服务。
+ */
+export function applyConfiguredTimezone(environment, configPath) {
+  if (!existsSync(configPath)) return;
+  const timezone = loadGatewaySettings(environment).system.appServerTimezone;
+  if (timezone !== null) environment.TZ = timezone;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

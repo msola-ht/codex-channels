@@ -14,6 +14,7 @@ import {
   updateGatewaySetting,
 } from "./config-management.mjs";
 import { packageDir } from "./runtime-config.mjs";
+import { runTimezoneCommand } from "./timezone-command.mjs";
 
 export async function runSystemSettings({
   environment,
@@ -69,6 +70,11 @@ export async function runSystemSettings({
         label: "模型上游终端标识",
         hint: "codex.terminal_identity；预填运行本命令的终端，可编辑，留空则删除",
       },
+      {
+        value: "app_server_timezone",
+        label: "模型可见时区",
+        hint: "codex.timezone；缺省沿用系统时区，决定模型看到的时区与当前日期，WebUI 同步跟随",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -100,6 +106,9 @@ export async function runSystemSettings({
   }
   if (section === "official_tui_terminal") {
     return runOfficialTuiTerminal({ environment, output, prompts, writeConfig });
+  }
+  if (section === "app_server_timezone") {
+    return runAppServerTimezone({ environment, output, prompts, writeConfig });
   }
   throw new Error(`未知系统设置：${String(section)}`);
 }
@@ -405,4 +414,15 @@ async function runOfficialTuiTerminal({ environment, output, prompts, writeConfi
     activation: result.activation,
     activationResult: result.activationResult,
   };
+}
+
+/** 与 `codexc timezone` 共用同一实现，两处入口保持一致的校验与写入路径。 */
+async function runAppServerTimezone({ environment, output, prompts, writeConfig }) {
+  const result = await runTimezoneCommand([], {
+    environment,
+    output,
+    prompts,
+    writeConfig,
+  });
+  return result.action === "cancelled" ? { action: "back" } : result;
 }

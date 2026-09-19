@@ -39,6 +39,10 @@ function activationNotice(activation) {
   if (activation.target === "app-server") {
     return "配置已保存。请重启 App Server：codexc service restart app-server";
   }
+  if (activation.target === "app-server-webui") {
+    return "配置已保存。请重启 App Server 与 WebUI："
+      + "codexc service restart app-server；codexc service restart webui";
+  }
   if (activation.status === "reload" && activation.target === "gateway") {
     return "配置已保存。Gateway 将热加载新配置；如需手动触发，请执行 codexc service reload。";
   }

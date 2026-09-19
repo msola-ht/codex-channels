@@ -120,7 +120,8 @@
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
 - `webui-server.mjs` / `webui-api.ts`：`codexc webui` 的 HTTP 服务、共享 API 类型与管理路由组合入口；
   主服务托管静态前端和只读指标 API，并统一执行真实回环连接、精确 Origin、Bearer 鉴权、JSON 请求
-  约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由。
+  约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
+  `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
   `webui-management-provider-route.mjs` / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
@@ -297,10 +298,13 @@
 - `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
-  Gateway 新 Thread 模型覆盖、一键官方 TUI 身份与模型上游终端标识；快捷开关只在 `info` / `debug`
+  Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；快捷开关只在 `info` / `debug`
   间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
   `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
-  编辑，留空即删除配置。
+  编辑，留空即删除配置；模型可见时区与 `codexc timezone` 共用同一实现。
+- `timezone-command.mjs`：实现公开 `codexc timezone`，解析 IANA 时区名称与 `--system` / `--json`，
+  在边界校验格式与系统时区库后通过 Config 管理接口写入 `[codex].timezone`，并提示重启 App Server
+  与 WebUI；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的系统设置菜单复用同一实现。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；

@@ -157,7 +157,6 @@ export function forwardedRequestHeaders(
   userAgent?: string,
 ): IncomingHttpHeaders {
   const forwarded = endToEndHeaders(headers);
-  delete forwarded["x-codex-turn-metadata"];
   if (userAgent !== undefined) {
     forwarded["user-agent"] = userAgent;
   }
@@ -179,7 +178,6 @@ export function forwardedWebSocketHeaders(
     "sec-websocket-version",
     "sec-websocket-extensions",
     "sec-websocket-protocol",
-    "x-codex-turn-metadata",
     "x-responsesapi-include-timing-metrics",
   ]) delete forwarded[name];
   if (userAgent !== undefined) {

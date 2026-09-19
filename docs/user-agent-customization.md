@@ -42,7 +42,7 @@ codex-tui/0.154.0 (<系统与架构>) <终端标识> (codex-tui; 0.154.0)
 ```
 
 第一个 `0.154.0` 来自 App Server 的真实构建版本，不等于 `clientInfo.version`。Provider Proxy
-收到该原始 Header 后，移除 Hop-by-hop Header 和私有 Turn 元数据；配置了 `upstream_user_agent`
+收到该原始 Header 后，移除 Hop-by-hop Header；配置了 `upstream_user_agent`
 时在该层覆盖整条 `User-Agent`，缺省则原样转发到上游。HTTP/SSE 与 WebSocket 遵循相同规则。
 
 `<终端标识>` 由 App Server 进程按自身环境探测：`TERM_PROGRAM` 优先，其次各终端专有变量，最后

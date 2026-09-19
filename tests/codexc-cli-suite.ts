@@ -164,6 +164,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["service", "status", "--help"], "用法：codexc service status"],
       [["service", "logs", "--help"], "用法：codexc service logs"],
       [["config", "-h"], "用法：codexc config"],
+      [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
       [["rules", "-h"], "用法：codexc rules"],
       [["rules", "init", "-h"], "用法：codexc rules init"],
