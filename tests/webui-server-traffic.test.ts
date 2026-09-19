@@ -69,9 +69,13 @@ describe("webui traffic V2 API", () => {
     expect(detail.modelEvidence).toEqual({
       serverModels: [{ source: "http.headers.x-openai-model", model: "header-model" }, { source: "codex.response.metadata.headers.openai-model", model: "declared-model" }],
       safetyModels: [{ source: "codex.response.metadata.headers.x-codex-safety-buffering-faster-model", model: "candidate-model" }],
+      turnStateLengths: [{ source: "codex.response.metadata.headers.x-codex-turn-state", characters: 16 }],
       truncated: false,
     });
     expect(detail.response.outputTruncated).toBe(false);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<{ exchanges: Array<{ turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic/turn-state?label=openai&session=models&ids=1`);
+    expect(list.body.exchanges[0]?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
     expect(JSON.stringify(detail.modelEvidence)).not.toMatch(/must-not-project|catalog-only|other-call/u);
   });
 
@@ -94,6 +98,65 @@ describe("webui traffic V2 API", () => {
     expect(detail.modelEvidence.serverModels[0]).toEqual({ source: "response.completed.response.headers.x-openai-model", model: "nested-model" });
     expect(detail.modelEvidence.serverModels).toHaveLength(30);
     expect(detail.modelEvidence.truncated).toBe(true);
+  });
+
+  it("counts turn-state characters without projecting values or JSON escapes", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.response.headers = { "X-Codex-Turn-State": "a😀\n" };
+    call.responseBody = JSON.stringify({ type: "response.completed", response: { headers: { "x-codex-turn-state": "terminal" } } });
+    call.trace.push(...["abc", "abc", "", 123].map((value) => ({
+      interaction: 1, kind: "response_body", encoding: "utf8",
+      text: `data: ${JSON.stringify({ type: "codex.response.metadata", headers: { "x-codex-turn-state": value } })}\n\n`,
+    })));
+    writeSession(fixture.trafficDir, "openai", "turn-state", [call, httpInteraction(2)]);
+    const paths = [join(fixture.trafficDir, "openai-turn-state")];
+    const detail = await describeDumpExchange(paths, 1);
+    expect(detail.modelEvidence.turnStateLengths).toEqual([
+      { source: "http.headers.x-codex-turn-state", characters: 3 },
+      { source: "response.completed.response.headers.x-codex-turn-state", characters: 8 },
+      { source: "codex.response.metadata.headers.x-codex-turn-state", characters: 3 },
+      { source: "codex.response.metadata.headers.x-codex-turn-state", characters: 0 },
+    ]);
+    expect((await describeDumpExchange(paths, 2)).modelEvidence.turnStateLengths).toEqual([]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<{ exchanges: Array<{ id: number; turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic/turn-state?label=openai&session=turn-state&ids=1,2`);
+    expect(list.body.exchanges.find((entry) => entry.id === 1)?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
+    expect(list.body.exchanges.find((entry) => entry.id === 2)?.turnStateLengths).toEqual([]);
+  });
+
+  it("loads the list without reading response payloads or traces for character counts", async () => {
+    const fixture = createFixture();
+    writeSession(fixture.trafficDir, "openai", "independent-counts", [httpInteraction(1)]);
+    writeFileSync(join(fixture.trafficDir, "openai-independent-counts", "payload-1.bin"), "");
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.status).toBe(200);
+    expect(list.body.exchanges).toHaveLength(1);
+    expect(list.body.exchanges[0]).not.toHaveProperty("turnStateLengths");
+  });
+
+  it("reads character counts by exact provider, session and ids without re-paging", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.response.headers = { "x-codex-turn-state": "abc" };
+    writeSession(fixture.trafficDir, "openai", "precise", [call, httpInteraction(2)]);
+    const other = httpInteraction(1);
+    other.response.headers = { "x-codex-turn-state": "different" };
+    writeSession(fixture.trafficDir, "deepseek", "precise", [other]);
+    writeSession(fixture.trafficDir, "openai", "other", [other]);
+    const server = await startServer(fixture.environment);
+    const target = `${server.origin}/api/v1/traffic/turn-state?label=openai&session=precise`;
+    const result = await getJson<{ exchanges: unknown[] }>(`${target}&ids=1`);
+    expect(result.status).toBe(200);
+    expect(result.body.exchanges).toEqual([
+      { id: 1, turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 3 }] },
+    ]);
+    expect((await getJson(`${target}&ids=3`)).status).toBe(404);
+    for (const invalid of ["", "0", "1,1", "1,-2", "9007199254740992", "1&ids=2"]) {
+      expect((await getJson(`${target}&ids=${invalid}`)).status).toBe(400);
+    }
+    expect((await getJson(`${server.origin}/api/v1/traffic/turn-state?ids=1`)).status).toBe(400);
   });
 
   it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
@@ -213,7 +276,7 @@ describe("webui traffic V2 API", () => {
     expect(list.body.retentionDays).toBe(30);
     expect(list.body).toMatchObject({
       enabled: true,
-      label: "ocg",
+      label: null,
       maximumOffset: 50_000,
       total: 2,
       nextOffset: 1,
@@ -402,6 +465,25 @@ describe("webui traffic V2 API", () => {
     );
     expect(second.body.exchange.trace).toHaveLength(20);
     expect(second.body.exchange.tracePage.previousOffset).toBe(0);
+    // 正文文件不可读时，独立事件页仍可读取，且不返回完整明细。
+    writeFileSync(join(fixture.trafficDir, "openai-2026-09-17T00-00-00-000Z", "payload-1.bin"), "");
+    const trace = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/trace?label=openai&session=2026-09-17T00-00-00-000Z&id=1&traceOffset=100`,
+    );
+    expect(trace.status).toBe(200);
+    expect(trace.body.exchange).toEqual({
+      id: 1, trace: second.body.exchange.trace, tracePage: second.body.exchange.tracePage,
+    });
+    const outOfRange = await getJson<{ error: { code: string } }>(
+      `${server.origin}/api/v1/traffic/trace?id=1&traceOffset=120`,
+    );
+    expect(outOfRange.status).toBe(400);
+    expect(outOfRange.body.error.code).toBe("invalid_parameter");
+    const missing = await getJson<{ error: { code: string } }>(
+      `${server.origin}/api/v1/traffic/trace?id=2`,
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe("traffic_exchange_not_found");
   });
 
   it("does not skip trace records after the byte limit truncates a page", async () => {
@@ -447,13 +529,28 @@ describe("webui traffic V2 API", () => {
     writeSession(fixture.trafficDir, "openai", "2026-09-18T00-00-00-000Z", [
       httpInteraction(1, "newer"),
     ], 200);
-    writeSession(fixture.trafficDir, "deepseek", "2026-09-18T01-00-00-000Z", [
+    writeSession(fixture.trafficDir, "deepseek", "2026-09-18T00-00-00-000Z", [
       httpInteraction(1, "other"),
     ], 300);
     const server = await startServer(fixture.environment);
 
     const latest = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
-    expect(latest.body.label).toBe("deepseek");
+    expect(latest.body.label).toBeNull();
+    expect(latest.body.total).toBe(3);
+    expect(latest.body.exchanges.map((entry) => entry.label).sort()).toEqual(["deepseek", "openai", "openai"]);
+    const selected = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=deepseek`);
+    expect(selected.body).toMatchObject({ label: "deepseek", total: 1 });
+    for (const entry of latest.body.exchanges) {
+      const detail = await getJson<TrafficDetailBody>(`${server.origin}/api/v1/traffic/exchange?label=${entry.label}&session=${entry.session}&id=${entry.id}`);
+      expect(detail.body.exchange.request.body).toBe(entry.label === "deepseek" ? "other"
+        : entry.session === "2026-09-17T00-00-00-000Z" ? "older" : "newer");
+    }
+    const firstPage = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=2`);
+    const lastPage = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?limit=2&offset=2`);
+    expect(firstPage.body).toMatchObject({ label: null, total: 3, nextOffset: 2 });
+    expect(lastPage.body).toMatchObject({ label: null, total: 3, nextOffset: null });
+    expect(new Set([...firstPage.body.exchanges, ...lastPage.body.exchanges]
+      .map((entry) => `${entry.label}:${entry.session}:${entry.id}`)).size).toBe(3);
     expect(latest.body.labels.map((entry) => entry.label)).toEqual(["deepseek", "openai"]);
     const older = await getJson<TrafficDetailBody>(
       `${server.origin}/api/v1/traffic/exchange?id=1&label=openai&session=2026-09-17T00-00-00-000Z`,
@@ -533,10 +630,10 @@ describe("webui traffic V2 API", () => {
     expect(result.body.error.code).toBe("traffic_unsupported_version");
   });
 
-  it("rejects non-loopback callers before reading traffic", async () => {
+  it.each(["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"])("rejects non-loopback callers before reading %s", async (apiPath) => {
     const fixture = createFixture();
     await expect(routeTrafficApi({
-      apiPath: "/traffic",
+      apiPath,
       environment: fixture.environment,
       request: { socket: { remoteAddress: "192.0.2.1" } },
       response: {},
@@ -665,7 +762,7 @@ interface TrafficListBody {
   enabled: boolean;
   retentionDays: number;
   exchanges: Array<Record<string, unknown>>;
-  label: string;
+  label: string | null;
   labels: Array<{ label: string; sessions: number }>;
   maximumOffset: number;
   nextOffset: number | null;

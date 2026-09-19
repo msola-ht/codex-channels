@@ -13,9 +13,10 @@ describe("WebUI metrics table presentation", () => {
       import { MemoryRouter } from "react-router";
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
+          if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
-          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; }";
-          if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "export function QueryFilters() { return null; }";
+          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
+          if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
         } }],
       });
       try {
@@ -45,20 +46,24 @@ describe("WebUI metrics table presentation", () => {
         const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
           h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null, h(component, props)))));
         const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
-        const exchange = { id: 7, session: "batch-1", startedAtMs: 1000, category: "model",
+        const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
-        const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], truncated: false },
+        const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
         const result = {
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
-          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
+          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]) }),
+          trafficCountsLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
+          trafficCountsFailed: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), "fixture count failure"]]) }),
+          trafficCountsPartial: render(TrafficTable, { exchanges: [exchange, { ...exchange, id: 8 }], onOpen: noop,
+            turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]),
+            turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
-          traceLoading: render(TrafficDetail, { detail, onTracePageChange: noop, traceLoading: true }),
-          traceFailure: render(TrafficDetail, { detail, onTracePageChange: noop, traceError: true }),
+          traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
@@ -68,6 +73,16 @@ describe("WebUI metrics table presentation", () => {
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
         };
+        globalThis.fixtureDisclosureOpen = true;
+        result.traceLoading = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceLoading: true });
+        result.traceFailure = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceError: true });
+        const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
+        result.truncatedContent = render(TrafficContent, { title: "片段", text: '{"partial":', json: true, truncated: true });
+        globalThis.fixtureDisclosureOpen = false;
+        result.incompleteOutput = render(TrafficDetail, { detail: { ...detail, response: {
+          state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
+          output: [{ type: "message", text: "complete visible message" }],
+        } }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
         globalThis.localStorage = { getItem: key => key.endsWith(":columns") ? JSON.stringify({ ua: true, error: true }) : null };
         result.preferences = render(RequestsTable, requestProps);
         globalThis.fixtureQuery = { range: "30d", offset: 0, limit: 50 };
@@ -77,6 +92,9 @@ describe("WebUI metrics table presentation", () => {
         result.errors = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
+        const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
+        result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
+        result.activeFilters = render(QueryFilters, { query: { range: "7d", provider: ["openai"], model: "test" }, onChange: noop });
         const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
@@ -113,6 +131,19 @@ describe("WebUI metrics table presentation", () => {
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
 
+  it("renders a single-row filter toolbar with flexible search and collapsed secondary fields", () => {
+    expect(markup.filters).toContain("flex-row flex-nowrap items-center gap-2");
+    expect(markup.filters).toContain("min-w-0 flex-1");
+    expect(markup.filters).toContain("hidden @lg/filters:inline-flex");
+    expect(markup.filters).toContain('placeholder="搜索关键词"');
+    expect(markup.filters).toContain("查询</button>");
+    expect(markup.filters).toContain("重置</button>");
+    expect(markup.filters).not.toContain("Thread ID");
+    expect(markup.filters).not.toContain("Turn ID");
+    expect(markup.activeFilters).toContain("筛选 · 3");
+    expect(markup.filters).not.toContain("筛选 ·");
+  });
+
   it("retains every error row and summary footprint while hiding stale loading values", () => {
     expect(headers(markup.errorsLoading!)).toEqual(headers(markup.errors!));
     expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(51);
@@ -121,6 +152,19 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
     expect(markup.errorsLoading).toContain('role="status">正在加载错误记录…');
     expect(markup.errors).not.toContain('data-slot="skeleton"');
+  });
+
+  it("places compact console-style error statistics before filters without thread inputs", () => {
+    const html = markup.errors!;
+    const filters = html.indexOf('data-query-filters="true"');
+    expect(filters).toBeGreaterThan(0);
+    expect(html).toContain('data-thread-filters="false"');
+    const cards = html.slice(0, filters);
+    expect(cards).toContain("grid gap-4 sm:grid-cols-2 xl:grid-cols-4");
+    expect(cards).toContain("请求总数 · 失败 60 次");
+    expect(cards).toContain("成功率 · 当前显示 50 / 60 条失败记录");
+    expect(cards).not.toContain('data-slot="card-header"');
+    expect([...cards.matchAll(/data-slot="card-content"/g)]).toHaveLength(2);
   });
 
   it("groups request identity, usage, performance and detail columns", () => {
@@ -211,24 +255,48 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["#", "时间", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
+    expect(markup.traffic).toContain("1,234");
+    expect(markup.trafficCountsLoading).toContain("加载中…");
+    expect(markup.trafficCountsLoading).toContain("的调用明细");
+    expect(markup.trafficCountsFailed).toContain("加载失败");
+    expect(markup.trafficCountsFailed).toContain("的调用明细");
+    expect(markup.trafficCountsPartial).toContain("1,234");
+    expect(markup.trafficCountsPartial?.match(/加载失败/g)).toHaveLength(1);
+    expect(markup.traffic).not.toContain("#7");
+    expect(markup.traffic).toContain("的调用明细");
     expect(markup.traffic).not.toContain("名称一致");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");
     expect(headers(markup.trafficLoading!)).toEqual(headers(markup.traffic!));
     expect(markup.trafficLoading).toContain('data-slot="skeleton"');
     expect(markup.trafficLoading).not.toContain("model-test");
-    expect(markup.trafficLoading).not.toContain("查看批次");
+    expect(markup.trafficLoading).not.toContain("的调用明细");
   });
 
   it("keeps call content but hides stale trace pages during loading or failure", () => {
+    expect(markup.incompleteOutput).toContain("输出展示不完整");
+    expect(markup.incompleteOutput).toContain("complete visible message");
+    expect(markup.incompleteOutput).not.toContain("内容已截断，展示和复制均仅包含已保留片段。");
+    expect(markup.traceClosed).not.toContain("request-body");
+    expect(markup.traceClosed).not.toContain("old-trace-body");
+    expect(markup.traceClosed).toContain("诊断信息");
+    expect(markup.truncatedContent).toContain("已截断");
+    expect(markup.truncatedContent).toContain("复制原文");
+    expect(markup.truncatedContent).not.toContain("格式化</button>");
     for (const html of [markup.traceLoading, markup.traceFailure]) {
       expect(html).toContain("request-body");
+      expect(html).toContain("提供商 openai · 批次 batch-1");
+      expect(html).toContain("调用编号 #7");
+      expect(html).toContain("复制定位信息");
       expect(html).not.toContain("old-trace-body");
       expect(html).toMatch(/<button\b[^>]*disabled=""/);
     }
     expect(markup.traceLoading).toContain("正在加载原始事件");
+    expect(markup.traceLoading).toContain("X-Codex-Turn-State 字符数");
+    expect(markup.traceLoading).toContain("1,234");
     expect(markup.traceFailure).toContain("原始事件加载失败");
+    expect(markup.traceFailure).toContain("重试原始事件");
   });
 
   it("offers an explicit retry and prevents repeating it while pending", () => {

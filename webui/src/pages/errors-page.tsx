@@ -58,30 +58,30 @@ export function ErrorsPage() {
           <p className="text-sm text-muted-foreground">失败请求记录，按发生时间倒序</p>
         </div>
       </div>
-      <QueryFilters query={query} onChange={update} />
+      {error === null && data !== null ? (
+          <div className="relative" aria-busy={loading}>
+            <div className={cn("grid gap-4 sm:grid-cols-2 xl:grid-cols-4", loading && "invisible")} aria-hidden={loading || undefined}>
+              <StatCard
+                value={formatCount(data.errors.requestCount)}
+                description={`请求总数 · 失败 ${formatCount(data.errors.unsuccessfulRequestCount)} 次`}
+              />
+              <StatCard
+                value={formatSuccessRate(
+                  data.errors.requestCount,
+                  data.errors.unsuccessfulRequestCount,
+                )}
+                description={`成功率 · 当前显示 ${data.records.length} / ${data.total} 条失败记录`}
+              />
+            </div>
+            {loading ? <Skeleton className="absolute inset-0" /> : null}
+          </div>
+      ) : null}
+      <QueryFilters query={query} onChange={update} showThreadFilters={false} />
 
       <ErrorBanner error={error} onRetry={refetch} pending={loading} />
 
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <>
-          <div className="relative" aria-busy={loading}>
-            <div className={cn("grid gap-4 sm:grid-cols-2", loading && "invisible")} aria-hidden={loading || undefined}>
-              <StatCard
-                title="请求总数"
-                value={formatCount(data.errors.requestCount)}
-                description={`失败 ${formatCount(data.errors.unsuccessfulRequestCount)}`}
-              />
-              <StatCard
-                title="成功率"
-                value={formatSuccessRate(
-                  data.errors.requestCount,
-                  data.errors.unsuccessfulRequestCount,
-                )}
-                description={`当前显示 ${data.records.length} / ${data.total} 条失败记录`}
-              />
-            </div>
-            {loading ? <Skeleton className="absolute inset-0" /> : null}
-          </div>
           <Card className="min-w-0" aria-busy={loading}>
             <CardHeader>
               <CardTitle>错误记录</CardTitle>

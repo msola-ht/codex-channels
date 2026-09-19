@@ -13,6 +13,8 @@ import {
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   describeDumpExchange,
+  describeDumpTrace,
+  describeDumpTurnStates,
   dumpCatalog,
   selectFilesOfLabel,
   summarizeDumpFiles,
@@ -29,7 +31,7 @@ const maximumSectionBytes = 4 * 1_048_576;
 const maximumTracePageSize = 100;
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
-  if (apiPath !== "/traffic" && apiPath !== "/traffic/exchange") return false;
+  if (!["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
@@ -46,7 +48,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     );
   }
   const labels = catalog.labels;
-  if (apiPath === "/traffic/exchange" && url.searchParams.has("session") && labels.length === 0) {
+  if (apiPath !== "/traffic" && url.searchParams.has("session") && labels.length === 0) {
     throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
   }
   if (labels.length === 0) {
@@ -66,7 +68,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   const dump = dumpSettings(environment);
   if (apiPath === "/traffic") {
     assertParameters(url, ["label", "limit", "offset", "session"]);
-    const label = readLabel(url, labels);
+    const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
     const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
       newestFirst: true,
@@ -82,13 +84,33 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
       labels,
       maximumOffset: maximumPageOffset,
       session,
-      sessions: catalog.sessions.filter((entry) => entry.label === label)
+      sessions: catalog.sessions.filter((entry) => label === null || entry.label === label)
         .map(({ session, createdAtMs }) => ({ session, createdAtMs })).reverse(),
       ...page,
       nextOffset: page.nextOffset !== null && page.nextOffset <= maximumPageOffset
         ? page.nextOffset
         : null,
     });
+    return true;
+  }
+  if (apiPath === "/traffic/turn-state") {
+    assertParameters(url, ["ids", "label", "session"]);
+    if (!url.searchParams.has("label") || !url.searchParams.has("session")) {
+      throw new ApiError(400, "missing_parameter", "读取字符数需指定 label 和 session");
+    }
+    const values = url.searchParams.getAll("ids");
+    const ids = values.length === 1 && /^[1-9][0-9]*(,[1-9][0-9]*)*$/u.test(values[0])
+      ? values[0].split(",").map(Number) : [];
+    if (ids.length === 0 || ids.length > maximumPageSize || ids.some((id) => !Number.isSafeInteger(id))
+      || new Set(ids).size !== ids.length) {
+      throw new ApiError(400, "invalid_parameter", "ids 必须是当前页不重复的有效调用编号");
+    }
+    const label = readLabel(url, labels);
+    const { files } = readSessionFiles(url, catalog.files, label);
+    if (files.length !== 1) throw new ApiError(400, "invalid_parameter", "字符数查询必须定位唯一批次");
+    const exchanges = await describeDumpTurnStates(files, ids);
+    if (exchanges === null) throw new ApiError(404, "traffic_exchange_not_found", "关联调用记录不可用；不会匹配其他请求");
+    sendJson(response, 200, { label, session: writerSessionOf(files[0]), exchanges });
     return true;
   }
   assertParameters(url, ["id", "label", "session", "traceOffset"]);
@@ -106,7 +128,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(400, "missing_parameter", "查看模型调用明细需指定 session");
   }
   const session = writerSessionOf(files[0]);
-  const exchange = await describeDumpExchange(files, id, {
+  const describe = apiPath === "/traffic/trace" ? describeDumpTrace : describeDumpExchange;
+  const exchange = await describe(files, id, {
     traceOffset,
     maxTracePageSize: maximumTracePageSize,
     maxSectionBytes: maximumSectionBytes,
@@ -173,7 +196,9 @@ function readSessionFiles(url, catalogFiles, label) {
     throw new ApiError(400, "unsupported_parameter", "session 只能出现一次");
   }
   const requested = values[0];
-  const files = selectFilesOfLabel(catalogFiles, label, requested);
+  const files = label === null
+    ? catalogFiles.filter((file) => requested === undefined || writerSessionOf(file) === requested)
+    : selectFilesOfLabel(catalogFiles, label, requested);
   if (files.length === 0) {
     throw new ApiError(
       404,

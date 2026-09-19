@@ -31,6 +31,8 @@ import type {
   ThreadsResponse,
   ThreadTurnsResponse,
   TrafficDetailResponse,
+  TrafficTraceResponse,
+  TrafficTurnStatesResponse,
   TrafficListResponse,
 } from "@/lib/types"
 import { getToken } from "@/lib/token-storage"
@@ -321,6 +323,14 @@ export function fetchTrafficExchanges(
   return getJson<TrafficListResponse>(`${API_PREFIX}/traffic${suffix}`, signal)
 }
 
+export function fetchTrafficTurnStates(
+  query: { label: string; session: string; ids: number[] },
+  signal?: AbortSignal,
+): Promise<TrafficTurnStatesResponse> {
+  const params = new URLSearchParams({ label: query.label, session: query.session, ids: query.ids.join(",") })
+  return getJson<TrafficTurnStatesResponse>(`${API_PREFIX}/traffic/turn-state?${params.toString()}`, signal)
+}
+
 export function fetchTrafficExchange(
   query: { traceOffset?: number; id: number; label?: string; session?: string },
   signal?: AbortSignal,
@@ -333,6 +343,17 @@ export function fetchTrafficExchange(
     `${API_PREFIX}/traffic/exchange?${params.toString()}`,
     signal,
   )
+}
+
+export function fetchTrafficTrace(
+  query: { traceOffset?: number; id: number; label: string; session: string },
+  signal?: AbortSignal,
+): Promise<TrafficTraceResponse> {
+  const params = new URLSearchParams({
+    id: String(query.id), label: query.label, session: query.session,
+    traceOffset: String(query.traceOffset ?? 0),
+  })
+  return getJson<TrafficTraceResponse>(`${API_PREFIX}/traffic/trace?${params.toString()}`, signal)
 }
 
 export function refreshOfficialAccountSnapshot(

@@ -49,6 +49,16 @@ function pageTitle(pathname: string): string {
 }
 
 function BreadcrumbTrail({ pathname }: { pathname: string }) {
+  const { search } = useLocation()
+  const params = new URLSearchParams(search)
+  if (pathname === "/traffic" && params.has("id")) {
+    for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
+    return <>
+      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/traffic", search: params.toString() }}>调用详情</Link></BreadcrumbLink></BreadcrumbItem>
+      <BreadcrumbSeparator className="hidden md:block" />
+      <BreadcrumbItem><BreadcrumbPage>调用明细</BreadcrumbPage></BreadcrumbItem>
+    </>
+  }
   if (pathname.startsWith("/threads/")) {
     const threadId = decodeURIComponent(pathname.slice("/threads/".length))
     return (

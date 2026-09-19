@@ -55,6 +55,8 @@ export type {
   ThreadsResponse,
   ThreadTurnsResponse,
   TrafficDetailResponse,
+  TrafficTraceResponse,
+  TrafficTurnStatesResponse,
   TrafficExchangeDetail,
   TrafficExchangeSummary,
   TrafficHeaderValue,
