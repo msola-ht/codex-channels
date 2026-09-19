@@ -15,14 +15,20 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
-  it.each([0, 569, 720.25])("shows OpenAI TTFT %s without requiring Turn duration", (ttftMs) => {
+  it.each([0, 569, 720.25])("omits OpenAI TTFT %s from completion cards", (ttftMs) => {
     const event = {
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
       threadId: "thread-1", turnId: "turn-1", status: "completed", modelProvider: "openai",
       timing: { upstreamTtftMs: ttftMs },
     } as const;
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
-    expect(rendered).toContain(`上游轮次首 Token：${ttftMs} ms`);
+    expect(rendered).not.toContain("上游轮次首 Token");
+    expect(rendered).not.toContain("性能");
+    const withDuration = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      ...event, durationMs: 3156,
+    }));
+    expect(withDuration).toContain("总耗时：3.16 s");
+    expect(withDuration).not.toContain("上游轮次首 Token");
     expect(rendered).not.toContain("总耗时");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
       modelProvider: "deepseek" }))).not.toContain("上游轮次首 Token");
@@ -405,6 +411,7 @@ describe("shared Surface lifecycle presentation", () => {
         model: "gpt-test",
         modelProvider: "openai",
         reasoningEffort: null,
+        upstreamTtftMs: 3156,
         status: "completed",
         metricsStatus: "available",
         requestCount: 1,
@@ -417,6 +424,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).not.toContain("思考等级");
+    expect(rendered).not.toContain("上游轮次首 Token");
     expect(rendered).not.toContain("综合输出速度");
   });
 

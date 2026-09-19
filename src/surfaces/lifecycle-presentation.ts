@@ -300,12 +300,6 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  if (event.modelProvider === "openai" && event.upstreamTtftMs !== undefined) {
-    fields.push({
-      label: "上游轮次首 Token",
-      value: formatElapsedDuration(event.upstreamTtftMs),
-    });
-  }
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -625,20 +619,14 @@ export function createTurnCompletedPresentation(
     ];
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
-  const upstreamTtftMs = usesOpenAiAccount(event.modelProvider)
-    ? event.timing?.upstreamTtftMs : undefined;
-  if (event.durationMs !== undefined || upstreamTtftMs !== undefined) {
+  if (event.durationMs !== undefined) {
     runFields.push({
       title: "性能",
       fields: [
-        ...(upstreamTtftMs === undefined ? [] : [{
-          label: "上游轮次首 Token",
-          value: formatElapsedDuration(upstreamTtftMs),
-        }]),
-        ...(event.durationMs === undefined ? [] : [{
+        {
           label: "总耗时",
           value: formatElapsedDuration(event.durationMs),
-        }]),
+        },
       ],
     });
   }
