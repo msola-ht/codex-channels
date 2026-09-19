@@ -121,6 +121,13 @@
 把用户级 `service_tier` 保存为 `default`，同时保留下一 Turn 的显式 Standard 覆盖；保存失败不切换会话。
 第三方模型选择不修改 OpenAI 默认值；`model-selection-service.test.ts` 和
 `real-app-server-isolated-state.test.ts` 的模型切换与真实 App Server 重启合同覆盖该行为。
+OCG 账户快照明确为无有效订阅时，`gateway-component-graph.ts` 将该账户状态注入
+`model-selection-service.ts`，从渠道 `/model` 的浏览和选择中排除该账户；正常额度刷新后恢复。
+这是本地选择规则，不修改 `model/list` 协议、既有 Thread 或统计代理转发，验证见
+`model-selection-service.test.ts` 与 `provider-account-service.test.ts`。Telegram 模型按钮经
+`conversation-command-service.ts` 的结构化 `selectModel` 入口保留精确 Provider 与模型身份，
+等待期间失去订阅时拒绝选择，不重解析到其他账户同名模型；回调竞态由
+`telegram-command-interactions.test.ts` 覆盖。
 固定版的公开用户配置只接受 `approval_policy = "on-request" | "never"`；协议内部的 `untrusted`
 仍可作为 Workspace Thread 设置传给 App Server，但 `codexc remote` 不把它转换为固定版已退役的
 CLI 参数，未显式覆盖时失败关闭。

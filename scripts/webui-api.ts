@@ -762,8 +762,9 @@ export interface OpencodeGoQuotaWindow {
 }
 
 export interface OpencodeGoAccountUsage {
+  subscriptionRequired: boolean
   provider: string
-  account: string
+  account: string | null
   displayName: string
   default: boolean
   available: boolean

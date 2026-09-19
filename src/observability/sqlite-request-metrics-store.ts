@@ -552,9 +552,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         usage_json=excluded.usage_json, limits_json=excluded.limits_json
     `).run(snapshot.sourceId, snapshot.observedAtMs, snapshot.available ? 1 : 0,
       JSON.stringify(snapshot.usage), JSON.stringify(snapshot.limits));
-    this.database.prepare(`
-      DELETE FROM account_snapshots WHERE observed_at_ms < ?
-    `).run(Math.max(0, snapshot.observedAtMs - this.retentionMs));
+    this.cleanupAccountSnapshots(snapshot.observedAtMs);
   }
 
   latestAccountSnapshot(provider: string, accountId?: string) {
@@ -1325,6 +1323,18 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     }
   }
 
+  private cleanupAccountSnapshots(nowMs: number): void {
+    // 最新观测是账户状态，不随历史保留期限失效；只有后续观测可以替换它。
+    this.database.prepare(`
+      DELETE FROM account_snapshots
+      WHERE observed_at_ms < ? AND EXISTS (
+        SELECT 1 FROM account_snapshots newer
+        WHERE newer.source_id = account_snapshots.source_id
+          AND newer.observed_at_ms > account_snapshots.observed_at_ms
+      )
+    `).run(Math.max(0, nowMs - this.retentionMs));
+  }
+
   private cleanup(nowMs: number): void {
     this.requireOpen();
     this.database.exec("BEGIN IMMEDIATE");
@@ -1335,9 +1345,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       this.database.prepare(`
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
-      this.database.prepare(`
-        DELETE FROM account_snapshots WHERE observed_at_ms < ?
-      `).run(Math.max(0, nowMs - this.retentionMs));
+      this.cleanupAccountSnapshots(nowMs);
       this.database.prepare(`
         DELETE FROM model_request_metrics
         WHERE id <= COALESCE((

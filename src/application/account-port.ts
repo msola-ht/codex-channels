@@ -152,6 +152,7 @@ export interface ProviderQuotaWindow {
 }
 
 export type ProviderAccountUsage =
+  | { kind: "subscription-required"; provider: string }
   | {
       kind: "token-usage";
       provider: "openai";

@@ -123,6 +123,36 @@ describe("OpenCode Go account adapter", () => {
     });
   });
 
+  it("recognizes only the official missing subscription response", async () => {
+    const codexHome = await createCodexHome();
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => new Response(JSON.stringify({
+        type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
+      }), { status: 403 }),
+    });
+    await expect(adapter.accountUsage()).resolves.toMatchObject({
+      kind: "subscription-required",
+    });
+  });
+
+  it.each([
+    [401, { type: "error", error: { type: "AuthError", message: "Unauthorized" } }],
+    [403, { type: "error", error: { type: "EntitlementError", message: "sensitive forbidden detail" } }],
+    [403, { usage: { weekly: { percent: 10 } } }],
+    [403, "sensitive forbidden body"],
+    [500, { type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." } }],
+  ])("does not classify unrelated HTTP %s failures as a missing subscription", async (status, body) => {
+    const codexHome = await createCodexHome();
+    const adapter = createOpencodeGoAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => new Response(JSON.stringify(body), { status }),
+    });
+    await expect(adapter.accountUsage()).rejects.toMatchObject({
+      code: "provider.account.unavailable", message: "OpenCode Go 账户查询失败",
+    });
+  });
+
   it("falls back to the fixed-mode base config when no managed profile exists", async () => {
     const codexHome = await mkdtemp(join(tmpdir(), "codexc-opencode-go-fixed-account-"));
     temporaryDirectories.push(codexHome);

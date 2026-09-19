@@ -142,6 +142,34 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("retains each latest account fact through unrelated refresh and restart cleanup", () => {
+    const path = join(temporaryDirectory(), "request-metrics.sqlite3");
+    const start = 1_700_000_000_000;
+    const day = 86_400_000;
+    const store = new SqliteModelRequestMetricsStore(path, start, { retentionDays: 1 });
+    const missing = {
+      sourceId: "ocg-main:main", provider: "ocg-main", accountId: "main", displayName: "OCG",
+      enabled: true, observedAtMs: start, available: false,
+      usage: { kind: "subscription-required", provider: "ocg-main" },
+      limits: { kind: "unsupported", provider: "ocg-main" },
+    };
+    store.upsertAccountSnapshot(missing);
+    store.upsertAccountSnapshot({ ...missing, sourceId: "deepseek:default", provider: "deepseek",
+      accountId: null, observedAtMs: start + 2 * day,
+      usage: { kind: "balance", provider: "deepseek" } });
+    expect(store.latestAccountSnapshot("ocg-main")?.usage).toEqual(missing.usage);
+    store.close();
+    const restarted = new SqliteModelRequestMetricsStore(path, start + 4 * day, { retentionDays: 1 });
+    expect(restarted.latestAccountSnapshot("ocg-main")?.usage).toEqual(missing.usage);
+    restarted.upsertAccountSnapshot({ ...missing, observedAtMs: start + 4 * day,
+      available: true, usage: { kind: "quota-windows", provider: "ocg-main" } });
+    expect(restarted.latestAccountSnapshot("ocg-main")?.usage).toMatchObject({ kind: "quota-windows" });
+    restarted.close();
+    const database = new DatabaseSync(path, { readOnly: true });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM account_snapshots").get()).toEqual({ count: 2 });
+    database.close();
+  });
+
   it("cleans expired account snapshots when a source is refreshed", () => {
     const path = join(temporaryDirectory(), "request-metrics.sqlite3");
     const store = new SqliteModelRequestMetricsStore(path, Date.now(), { retentionDays: 1 });

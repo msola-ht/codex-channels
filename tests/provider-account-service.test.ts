@@ -5,9 +5,35 @@ import {
   createOpenAiAccountAdapter,
   type AccountQueryPort,
   type AccountRateLimits,
+  type OfficialAccountSnapshot,
+  type ProviderAccountUsage,
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
+  it("persists missing subscription across failures and restart, then replaces it on recovery", async () => {
+    const normal: ProviderAccountUsage = { kind: "quota-windows", provider: "ocg-main", available: true, windows: [] };
+    const missing: ProviderAccountUsage = { kind: "subscription-required", provider: "ocg-main" };
+    const usage = vi.fn<() => Promise<ProviderAccountUsage>>()
+      .mockResolvedValueOnce(normal).mockResolvedValueOnce(missing)
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(normal);
+    const written: OfficialAccountSnapshot[] = [];
+    const writer = { writeOfficialAccountSnapshot: (snapshot: OfficialAccountSnapshot) => { written.push(snapshot); } };
+    const adapters = [{ provider: "ocg-main", accountUsage: usage }];
+    const service = new ProviderAccountService(adapters, writer);
+    await service.accountUsage("ocg-main");
+    await service.refreshAccountSnapshot("ocg-main");
+    expect(written.at(-1)).toMatchObject({ available: false, usage: missing });
+    await expect(service.accountUsage("ocg-main")).rejects.toThrow("timeout");
+    const restarted = new ProviderAccountService(adapters, writer);
+    await restarted.refreshSnapshots();
+    await expect(restarted.accountLimits("ocg-main")).resolves.toEqual({ kind: "unsupported", provider: "ocg-main" });
+    expect(written).toHaveLength(2);
+    expect(written.at(-1)?.usage).toEqual(missing);
+    await restarted.refreshAccountSnapshot("ocg-main");
+    expect(written.at(-1)).toMatchObject({ available: true, usage: normal });
+  });
   it("routes OpenAI account queries and keeps unknown providers unsupported", async () => {
     const usage = { summary: {
       lifetimeTokens: 10,

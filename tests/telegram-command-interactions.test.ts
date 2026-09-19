@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ScheduledTaskUseCases } from "../src/application/index.js";
+import { ModelSelectionService, type ScheduledTaskUseCases } from "../src/application/index.js";
+import type { SessionRouter } from "../src/session-routing/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
-import { telegramModelSelectionToken } from "../src/surfaces/telegram/command-renderer.js";
+import { modelProviderSelectionKeyboard, modelSelectionKeyboard, telegramModelSelectionToken } from "../src/surfaces/telegram/command-renderer.js";
 import {
   conversationStatus,
 } from "./conversation-command-fixture.js";
@@ -25,6 +26,110 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it("does not select another account's same-name model when subscription changes during callback acknowledgement", async () => {
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const option = (model: string, provider: string) => ({
+      id: model, model, provider, displayName: provider,
+      supportedReasoningEfforts: [], defaultReasoningEffort: "high", serviceTiers: [],
+      defaultServiceTier: null, isDefault: true, inputModalities: ["text" as const],
+    });
+    const blocked = new Set<string>();
+    const newSession = vi.fn(async () => undefined);
+    const router = { modelSettings: () => undefined, workspace: () => ({ cwd: "/workspace" }), newSession } as unknown as SessionRouter;
+    const models = new ModelSelectionService({
+      listModels: async () => [option("gpt-main", "openai")],
+      readDefaultReasoningEffort: async () => null, readDefaultServiceTier: async () => null,
+      writeDefaultFastMode: async () => undefined,
+    }, router, "gpt-main", [option("shared", "ocg-a"), option("shared", "ocg-b")],
+    "openai", [], () => true, () => blocked);
+    const state = await models.browseProvider(target, "ocg-a");
+    const button = modelSelectionKeyboard({ kind: "models", view: "model", state })!.inline_keyboard[0]![0]!;
+    if (!("callback_data" in button)) throw new Error("Expected selection callback");
+    const selectModel = vi.fn(models.selectModel.bind(models));
+    const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn(), {
+      modelState: models.state.bind(models), selectModel,
+    });
+    surface.bot.api.config.use(async (previous, method, payload, signal) => {
+      if (method === "answerCallbackQuery") {
+        blocked.add("ocg-a");
+        await models.state(target);
+      }
+      return previous(method, payload, signal);
+    });
+    try {
+      await surface.bot.handleUpdate({
+        update_id: 14,
+        callback_query: {
+          id: "racing-model-menu", from: telegramUser(), chat_instance: "chat-instance", data: button.callback_data,
+          message: { message_id: 23, date: 1, chat: telegramChat(), text: "选择模型" },
+        },
+      });
+      expect(selectModel).toHaveBeenCalledWith(target, { provider: "ocg-a", model: "shared" });
+      expect(newSession).not.toHaveBeenCalled();
+      expect(models.turnOverrides(target)).toEqual({});
+      expect(sentTexts.join("\n")).toContain("/model");
+    } finally {
+      await surface.stop();
+      await output.close();
+    }
+  });
+
+  it.each(["provider", "model"])("rejects an old %s button after subscription filtering changes its index", async (view) => {
+    const models = ["openai", "ocg-a", "ocg-b"].map((provider) => ({
+      id: `${provider}-model`, model: `${provider}-model`, provider, displayName: provider,
+      supportedReasoningEfforts: [], defaultReasoningEffort: "high", serviceTiers: [],
+      defaultServiceTier: null, isDefault: true, inputModalities: ["text" as const],
+    }));
+    const current = {
+      models: [models[0]!, models[2]!], model: "openai-model", modelProvider: "openai",
+      effort: "high", serviceTier: null, pending: false, modelPending: false,
+      effortPending: false, serviceTierPending: false,
+    };
+    const before = view === "provider" ? { ...current, models }
+      : { ...current, models: [models[1]!], providerFilter: "ocg-a" };
+    const result = { kind: "models" as const, view: "model" as const, state: before };
+    const keyboard = view === "provider" ? modelProviderSelectionKeyboard(result) : modelSelectionKeyboard(result);
+    const button = keyboard!.inline_keyboard[view === "provider" ? 1 : 0]![0]!;
+    if (!("callback_data" in button)) throw new Error("Expected selection callback");
+    const selectModel = vi.fn().mockResolvedValue(current);
+    const browseProviderModels = vi.fn().mockResolvedValue(current);
+    const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn(), {
+      modelState: vi.fn().mockResolvedValue(current), selectModel, browseProviderModels,
+    });
+    try {
+      await surface.bot.handleUpdate({
+        update_id: 12,
+        callback_query: {
+          id: "expired-model-menu", from: telegramUser(), chat_instance: "chat-instance",
+          data: button.callback_data,
+          message: { message_id: 21, date: 1, chat: telegramChat(), text: "旧模型菜单" },
+        },
+      });
+      expect(selectModel).not.toHaveBeenCalled();
+      expect(browseProviderModels).not.toHaveBeenCalled();
+      expect(sentTexts.join("\n")).toContain("/model");
+      const freshResult = { ...result, state: current };
+      const freshKeyboard = view === "provider" ? modelProviderSelectionKeyboard(freshResult) : modelSelectionKeyboard(freshResult);
+      const freshButton = freshKeyboard!.inline_keyboard[view === "provider" ? 1 : 0]![0]!;
+      if (!("callback_data" in freshButton)) throw new Error("Expected selection callback");
+      await surface.bot.handleUpdate({
+        update_id: 13,
+        callback_query: {
+          id: "current-model-menu", from: telegramUser(), chat_instance: "chat-instance",
+          data: freshButton.callback_data,
+          message: { message_id: 22, date: 1, chat: telegramChat(), text: "新模型菜单" },
+        },
+      });
+      expect(view === "provider" ? browseProviderModels : selectModel).toHaveBeenCalledWith(
+        { surface: "telegram", accountId: "default", conversationId: "100" },
+        view === "provider" ? "ocg-b" : { provider: "openai", model: "openai-model" },
+      );
+    } finally {
+      await surface.stop();
+      await output.close();
+    }
+  });
+
   it("maps Telegram commands through the shared application command service", async () => {
     const submit = vi.fn();
     const download = vi.fn();
@@ -360,7 +465,7 @@ describe("Telegram command interactions", () => {
         id: "model-effort",
         from: telegramUser(),
         chat_instance: "chat-instance",
-        data: `me:2:${telegramModelSelectionToken("gpt-test", "openai")}`,
+        data: `me:2:${telegramModelSelectionToken(state)}`,
         message: {
           message_id: 20,
           date: 1,

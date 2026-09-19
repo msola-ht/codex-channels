@@ -6,6 +6,7 @@
 
 - `index.ts`：本模块的公开导出入口。
 - `conversation-command-service.ts`：执行平台无关的会话命令并返回结构化结果；只依赖命令实际使用的能力组合，Queue、Revert、MCP、Plugin 与计划任务分支由明确 handler 处理，不包含平台文案或消息布局。
+  按钮模型选择通过 `selectModel` 接受精确 Provider 与模型身份，不重新解释为文本选择器。
   会话恢复结果携带已绑定模型，新会话与 Workspace 切换结果携带下一条消息将使用的模型和 Provider；
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
@@ -34,6 +35,9 @@
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  模型选择入口按注入的共享账户状态过滤无有效订阅的 Provider，浏览和手动选择使用相同结果；
+  结构化选择不依赖当前浏览范围，异步读取默认设置后及保存待生效选择前再次核对订阅。
+  保留当前模型与完整目录用于已有会话的能力查询，不因订阅筛选自动切换或取消 Turn。
   可把主 App Server 的 Codex 官方模型目录以精确自定义 Provider ID 克隆为切换菜单项，不复制或
   持久化模型目录；模型声明的 Codex 多代理运行时作为只读能力提示保留，OpenAI 替代模型与退役时间
   不复制到第三方 Provider，且不参与模型可用性、自动切换或审批判断；
@@ -70,7 +74,8 @@
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
-  一次成功快照，不以 `unsupported` 覆盖有效余额或额度。
+  一次确认快照，不以 `unsupported` 覆盖有效余额或额度。官方明确的无有效订阅是结构化查询结果，
+  同样写入快照；普通查询失败不覆盖该状态，后续成功获取额度才恢复正常额度展示。
 - `request-metrics-port.ts`：定义 `/metrics` 使用的当前 Thread 最近 Turn 运行聚合、整个 Thread
   指标累计，以及自然日/周/月、24 小时至 365 天滚动窗口或全部保留历史的全局/提供商/模型聚合和异常请求
   只读摘要；聚合中的上下文压缩摘要单列实际请求模型、请求数与 Token；

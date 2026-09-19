@@ -6,6 +6,7 @@ import {
   modelProviderSelectionKeyboard,
   modelSelectionKeyboard,
   renderTelegramCommandResult,
+  telegramModelSelectionToken,
   threadQueueDeleteConfirmationKeyboard,
   threadQueueItemKeyboard,
   workspacePermissionFieldKeyboard,
@@ -578,6 +579,11 @@ describe("Telegram command renderer", () => {
       state: baseState,
     };
     const providerKeyboard = modelProviderSelectionKeyboard(providerResult);
+    const token = telegramModelSelectionToken(baseState);
+    expect(telegramModelSelectionToken(structuredClone(baseState))).toBe(token);
+    expect(telegramModelSelectionToken({ ...baseState, models: [...baseState.models].reverse() })).not.toBe(token);
+    expect(telegramModelSelectionToken({ ...baseState, providerFilter: "openai" })).not.toBe(token);
+    expect(telegramModelSelectionToken({ ...baseState, models: baseState.models.map((model) => ({ ...model, available: false })) })).not.toBe(token);
     expect(providerKeyboard?.inline_keyboard).toHaveLength(2);
     expect(
       (providerKeyboard?.inline_keyboard[0]?.[0] as { callback_data?: string })
@@ -604,5 +610,13 @@ describe("Telegram command renderer", () => {
       (modelKeyboard?.inline_keyboard[0]?.[0] as { callback_data?: string })
         ?.callback_data,
     ).toMatch(/^ms:1:/);
+    for (const button of [...providerKeyboard!.inline_keyboard.flat(), ...modelKeyboard!.inline_keyboard.flat()]) {
+      if (!("callback_data" in button)) throw new Error("Expected selection callback");
+      expect(Buffer.byteLength(button.callback_data)).toBeLessThanOrEqual(64);
+    }
+    for (let index = 0; index < 1_000; index++) {
+      telegramModelSelectionToken({ ...baseState, model: `menu-${index}` });
+    }
+    expect(telegramModelSelectionToken(baseState)).not.toBe(token);
   });
 });

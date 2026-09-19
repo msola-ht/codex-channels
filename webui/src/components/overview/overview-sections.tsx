@@ -1,5 +1,6 @@
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -23,6 +24,9 @@ import {
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
+import { AccountFreshnessBadge, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
+import { AccountSubscriptionNotice } from "./account-subscription-notice"
+import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useLanguage } from "@/hooks/language-context"
 import {
   formatCount,
@@ -177,22 +181,27 @@ export function DeepseekBalanceCard({
   available,
   observedAtMs,
   balances,
+  refreshControl,
 }: {
   available: boolean
   observedAtMs: number
   balances: DeepseekBalance[]
+  refreshControl: AccountRefreshControl | undefined
 }) {
   const primary = balances[0]
   return (
-    <Card>
+    <Card aria-busy={refreshControl?.refreshing}>
       <CardHeader>
-        <CardTitle>DS 账户余额</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2">DS 账户余额 <AccountFreshnessBadge observedAtMs={observedAtMs} /></CardTitle>
         <CardDescription>
-          {!available || primary === undefined
+          {observedAtMs <= 0
             ? "DeepSeek 账户余额暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
+        {refreshControl && !refreshControl.error && available && primary !== undefined
+          ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
+      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && primary !== undefined} /></CardContent> : null}
       {available && primary !== undefined ? (
         <CardContent className="flex flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-2">
@@ -214,16 +223,19 @@ export function DeepseekBalanceCard({
             </p>
           ) : null}
         </CardContent>
-      ) : null}
+      ) : !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
 }
 
 export function OpencodeGoUsageCard({
   accounts,
+  refreshControls,
+  onAccountsChanged,
 }: {
   accounts: Array<{
-    account: string
+    subscriptionRequired: boolean
+    account: string | null
     displayName: string
     default: boolean
     available: boolean
@@ -231,6 +243,8 @@ export function OpencodeGoUsageCard({
     provider: string
     observedAtMs: number
   }>
+  refreshControls: Record<string, AccountRefreshControl>
+  onAccountsChanged: (accountId: string, activation?: string) => void
 }) {
   if (accounts.length === 0) {
     return (
@@ -246,8 +260,10 @@ export function OpencodeGoUsageCard({
     <div className="flex flex-col gap-4">
       {accounts.map((account) => (
         <OpencodeGoAccountCard
-          key={account.account}
+          key={account.provider}
           {...account}
+          refreshControl={refreshControls[account.provider]}
+          onRemoved={onAccountsChanged}
         />
       ))}
     </div>
@@ -255,31 +271,44 @@ export function OpencodeGoUsageCard({
 }
 
 function OpencodeGoAccountCard({
+  account,
   displayName,
   default: isDefault,
   available,
   windows,
   observedAtMs,
+  refreshControl,
+  onRemoved,
+  subscriptionRequired,
 }: {
+  account: string | null
   provider: string
   displayName: string
   default: boolean
   available: boolean
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
+  refreshControl: AccountRefreshControl | undefined
+  onRemoved: (accountId: string, activation?: string) => void
+  subscriptionRequired: boolean
 }) {
   return (
-    <Card>
+    <Card aria-busy={refreshControl?.refreshing}>
       <CardHeader>
-        <CardTitle>{displayName}</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{displayName}</span>{subscriptionRequired ? <Badge variant="secondary">无有效订阅</Badge> : <AccountFreshnessBadge observedAtMs={observedAtMs} />}</CardTitle>
         <CardDescription>
           {isDefault ? "默认账户 · " : ""}
-          {!available || windows.length === 0
+          {observedAtMs <= 0
             ? "账户用量暂不可用"
-            : `账户配额 · 更新于 ${formatTime(observedAtMs)}`}
+            : `${subscriptionRequired ? "订阅状态 · 确认于" : "账户配额 · 更新于"} ${formatTime(observedAtMs)}`}
         </CardDescription>
+        {refreshControl && !refreshControl.error && available && windows.length > 0
+          ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
+      {subscriptionRequired
+        ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
+        : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
+      {!subscriptionRequired && available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
         {windows.map((window) => (
           <div key={window.windowId} className="flex flex-col gap-1">
             <div className="flex items-center justify-between text-sm">
@@ -301,7 +330,7 @@ function OpencodeGoAccountCard({
             ) : null}
           </div>
         ))}
-      </CardContent> : null}
+      </CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
 }

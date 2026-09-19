@@ -72,6 +72,12 @@ export function formatConversationModels(
     ].join("\n"));
   }
   const providers = listProviders(state.models);
+  if (providers.length === 0) {
+    return toStructuredMarkdownList([
+      formatModelStateLine(state),
+      "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
+    ].join("\n"));
+  }
   if (state.providerFilter === undefined && providers.length > 1) {
     const currentProvider = state.modelProvider ?? "openai";
     return toStructuredMarkdownList([
@@ -170,6 +176,9 @@ function formatModelStateLine(
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
+  if (result.result.kind === "subscription-required") {
+    return `${formatCodexProviderLabel(result.result.provider)} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
+  }
   if (result.result.kind === "unsupported") {
     return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数与 Token 可通过 /metrics 查看。`;
   }

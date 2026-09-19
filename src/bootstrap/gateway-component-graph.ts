@@ -471,6 +471,11 @@ export abstract class GatewayComponentGraph {
         defaultModel: provider.model,
       })),
       () => hasCodexAuthFile(process.env),
+      () => new Set(metricsStore.latestAccountSnapshots()
+        .filter((snapshot) => snapshot.provider.startsWith("ocg-")
+          && snapshot.usage !== null && typeof snapshot.usage === "object"
+          && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
+        .map((snapshot) => snapshot.provider)),
     );
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
