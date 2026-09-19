@@ -69,9 +69,13 @@ describe("webui traffic V2 API", () => {
     expect(detail.modelEvidence).toEqual({
       serverModels: [{ source: "http.headers.x-openai-model", model: "header-model" }, { source: "codex.response.metadata.headers.openai-model", model: "declared-model" }],
       safetyModels: [{ source: "codex.response.metadata.headers.x-codex-safety-buffering-faster-model", model: "candidate-model" }],
+      turnStateLengths: [{ source: "codex.response.metadata.headers.x-codex-turn-state", characters: 16 }],
       truncated: false,
     });
     expect(detail.response.outputTruncated).toBe(false);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<{ exchanges: Array<{ turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic`);
+    expect(list.body.exchanges[0]?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
     expect(JSON.stringify(detail.modelEvidence)).not.toMatch(/must-not-project|catalog-only|other-call/u);
   });
 
@@ -94,6 +98,31 @@ describe("webui traffic V2 API", () => {
     expect(detail.modelEvidence.serverModels[0]).toEqual({ source: "response.completed.response.headers.x-openai-model", model: "nested-model" });
     expect(detail.modelEvidence.serverModels).toHaveLength(30);
     expect(detail.modelEvidence.truncated).toBe(true);
+  });
+
+  it("counts turn-state characters without projecting values or JSON escapes", async () => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    call.response.headers = { "X-Codex-Turn-State": "a😀\n" };
+    call.responseBody = JSON.stringify({ type: "response.completed", response: { headers: { "x-codex-turn-state": "terminal" } } });
+    call.trace.push(...["abc", "abc", "", 123].map((value) => ({
+      interaction: 1, kind: "response_body", encoding: "utf8",
+      text: `data: ${JSON.stringify({ type: "codex.response.metadata", headers: { "x-codex-turn-state": value } })}\n\n`,
+    })));
+    writeSession(fixture.trafficDir, "openai", "turn-state", [call, httpInteraction(2)]);
+    const paths = [join(fixture.trafficDir, "openai-turn-state")];
+    const detail = await describeDumpExchange(paths, 1);
+    expect(detail.modelEvidence.turnStateLengths).toEqual([
+      { source: "http.headers.x-codex-turn-state", characters: 3 },
+      { source: "response.completed.response.headers.x-codex-turn-state", characters: 8 },
+      { source: "codex.response.metadata.headers.x-codex-turn-state", characters: 3 },
+      { source: "codex.response.metadata.headers.x-codex-turn-state", characters: 0 },
+    ]);
+    expect((await describeDumpExchange(paths, 2)).modelEvidence.turnStateLengths).toEqual([]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<{ exchanges: Array<{ id: number; turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic`);
+    expect(list.body.exchanges.find((entry) => entry.id === 1)?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
+    expect(list.body.exchanges.find((entry) => entry.id === 2)?.turnStateLengths).toEqual([]);
   });
 
   it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
@@ -402,6 +431,25 @@ describe("webui traffic V2 API", () => {
     );
     expect(second.body.exchange.trace).toHaveLength(20);
     expect(second.body.exchange.tracePage.previousOffset).toBe(0);
+    // 正文文件不可读时，独立事件页仍可读取，且不返回完整明细。
+    writeFileSync(join(fixture.trafficDir, "openai-2026-09-17T00-00-00-000Z", "payload-1.bin"), "");
+    const trace = await getJson<TrafficDetailBody>(
+      `${server.origin}/api/v1/traffic/trace?label=openai&session=2026-09-17T00-00-00-000Z&id=1&traceOffset=100`,
+    );
+    expect(trace.status).toBe(200);
+    expect(trace.body.exchange).toEqual({
+      id: 1, trace: second.body.exchange.trace, tracePage: second.body.exchange.tracePage,
+    });
+    const outOfRange = await getJson<{ error: { code: string } }>(
+      `${server.origin}/api/v1/traffic/trace?id=1&traceOffset=120`,
+    );
+    expect(outOfRange.status).toBe(400);
+    expect(outOfRange.body.error.code).toBe("invalid_parameter");
+    const missing = await getJson<{ error: { code: string } }>(
+      `${server.origin}/api/v1/traffic/trace?id=2`,
+    );
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe("traffic_exchange_not_found");
   });
 
   it("does not skip trace records after the byte limit truncates a page", async () => {
@@ -548,10 +596,10 @@ describe("webui traffic V2 API", () => {
     expect(result.body.error.code).toBe("traffic_unsupported_version");
   });
 
-  it("rejects non-loopback callers before reading traffic", async () => {
+  it.each(["/traffic", "/traffic/exchange", "/traffic/trace"])("rejects non-loopback callers before reading %s", async (apiPath) => {
     const fixture = createFixture();
     await expect(routeTrafficApi({
-      apiPath: "/traffic",
+      apiPath,
       environment: fixture.environment,
       request: { socket: { remoteAddress: "192.0.2.1" } },
       response: {},

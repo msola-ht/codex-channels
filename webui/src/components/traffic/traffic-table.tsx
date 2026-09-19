@@ -33,6 +33,7 @@ export function TrafficTable({
             <TableHead>模型</TableHead>
             <TableHead>状态</TableHead>
             <TableHead className="text-right">总耗时</TableHead>
+            <TableHead className="text-right whitespace-nowrap">Turn State 字符数</TableHead>
             <TableHead>类型</TableHead>
             <TableHead>请求</TableHead>
             <TableHead>线程</TableHead>
@@ -41,7 +42,7 @@ export function TrafficTable({
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 10 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => (
@@ -75,6 +76,11 @@ export function TrafficTable({
               <TableCell className="text-right tabular-nums">
                 <TableHint hint="调用索引记录的总耗时；详细阶段及计时来源见调用明细。">{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</TableHint>
               </TableCell>
+              <TableCell className="text-right whitespace-nowrap tabular-nums">
+                <TableHint hint={exchange.turnStateLengths.length === 0 ? "未记录 X-Codex-Turn-State" : exchange.turnStateLengths.map((entry) => `${entry.characters.toLocaleString("zh-CN")} 字符 · ${entry.source}`).join("；")}>
+                  <span className="block max-w-40 truncate">{exchange.turnStateLengths.length === 0 ? "—" : [...new Set(exchange.turnStateLengths.map((entry) => entry.characters))].map((count) => count.toLocaleString("zh-CN")).join(" / ")}</span>
+                </TableHint>
+              </TableCell>
               <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
                 : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
               <TableCell><TableHint hint={requestLabel(exchange)}><span className="block max-w-72 truncate font-mono text-xs">{requestLabel(exchange)}</span></TableHint></TableCell>
@@ -84,7 +90,7 @@ export function TrafficTable({
           ))}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
                 没有调用记录
               </TableCell>
             </TableRow>

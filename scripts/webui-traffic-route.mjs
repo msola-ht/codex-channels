@@ -13,6 +13,7 @@ import {
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
   describeDumpExchange,
+  describeDumpTrace,
   dumpCatalog,
   selectFilesOfLabel,
   summarizeDumpFiles,
@@ -29,7 +30,7 @@ const maximumSectionBytes = 4 * 1_048_576;
 const maximumTracePageSize = 100;
 
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
-  if (apiPath !== "/traffic" && apiPath !== "/traffic/exchange") return false;
+  if (!["/traffic", "/traffic/exchange", "/traffic/trace"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
@@ -46,7 +47,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     );
   }
   const labels = catalog.labels;
-  if (apiPath === "/traffic/exchange" && url.searchParams.has("session") && labels.length === 0) {
+  if (apiPath !== "/traffic" && url.searchParams.has("session") && labels.length === 0) {
     throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
   }
   if (labels.length === 0) {
@@ -69,6 +70,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
     const { files, session } = readSessionFiles(url, catalog.files, label);
     const page = await summarizeDumpFiles(files, {
+      includeTurnStateLengths: true,
       newestFirst: true,
       limit: readInteger(url, "limit", defaultPageSize, 1, maximumPageSize),
       offset: readInteger(url, "offset", 0, 0, maximumPageOffset),
@@ -106,7 +108,8 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(400, "missing_parameter", "查看模型调用明细需指定 session");
   }
   const session = writerSessionOf(files[0]);
-  const exchange = await describeDumpExchange(files, id, {
+  const describe = apiPath === "/traffic/trace" ? describeDumpTrace : describeDumpExchange;
+  const exchange = await describe(files, id, {
     traceOffset,
     maxTracePageSize: maximumTracePageSize,
     maxSectionBytes: maximumSectionBytes,

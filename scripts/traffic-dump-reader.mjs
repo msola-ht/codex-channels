@@ -89,23 +89,44 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
-export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
+export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false, includeTurnStateLengths = false } = {}) {
   const page = limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst)
     : await readInteractionSummaryPage(paths, offset + limit, newestFirst);
   const boundedLimit = limit ?? page.entries.length;
-  const exchanges = page.entries.slice(offset, offset + boundedLimit).map((entry) => {
+  const entries = page.entries.slice(offset, offset + boundedLimit);
+  const lengths = includeTurnStateLengths ? await readPageTurnStateLengths(entries) : null;
+  const exchanges = entries.map((entry) => {
     const body = entry.request.transport === "websocket"
       && (entry.request.requestKind === undefined || entry.request.requestKind === "prewarm")
       ? parseJson(readPayload(entry.directory, entry.request.payload, 4 * 1_048_576).text)
       : undefined;
-    return summaryOf(entry, body);
+    return { ...summaryOf(entry, body), ...(lengths === null ? {} : { turnStateLengths: lengths.get(entry).result().turnStateLengths }) };
   });
   return {
     exchanges,
     total: page.total,
     nextOffset: offset + exchanges.length < page.total ? offset + exchanges.length : null,
   };
+}
+
+async function readPageTurnStateLengths(entries) {
+  const collectors = new Map();
+  const batches = new Map();
+  for (const entry of entries) {
+    const evidence = createModelEvidenceCollector();
+    evidence.headers(entry.response?.headers, "http.headers");
+    evidence.event(parseJson(readPayload(entry.directory, entry.response?.payload, 4 * 1_048_576).text));
+    collectors.set(entry, evidence);
+    if (!batches.has(entry.directory)) batches.set(entry.directory, new Map());
+    batches.get(entry.directory).set(entry.request.id,
+      createOutputCollector(4 * 1_048_576, undefined, undefined, evidence.event, false));
+  }
+  for (const [directory, calls] of batches) {
+    for await (const record of traceRecords(directory)) calls.get(record?.interaction)?.consume(record);
+    for (const collector of calls.values()) collector.result();
+  }
+  return collectors;
 }
 
 export async function readDumpExchange(paths, id) {
@@ -191,6 +212,16 @@ export async function describeDumpExchange(
     trace: trace.items,
     tracePage: trace.page,
   };
+}
+
+/** 事件翻页不读取正文，也不重新构建输出与模型证据。 */
+export async function describeDumpTrace(paths, id, {
+  traceOffset = 0, maxTracePageSize = 100, maxSectionBytes = 4 * 1_048_576,
+} = {}) {
+  const interaction = await readDumpExchange(paths, id);
+  if (interaction?.request === undefined) return null;
+  const trace = await readTrace(interaction.directory, id, traceOffset, maxTracePageSize, maxSectionBytes);
+  return { id, trace: trace.items, tracePage: trace.page };
 }
 
 export function parseJson(text) {
@@ -421,33 +452,38 @@ function readFileSlice(path, offset, length) {
   }
 }
 
-async function readTrace(directory, id, offset, limit, maxBytes, output) {
-  const items = [];
-  const milestones = {};
-  let remaining = maxBytes;
-  let total = 0;
+async function* traceRecords(directory) {
   const paths = readdirSync(directory)
     .filter((name) => /^trace-[1-9][0-9]*\.jsonl$/u.test(name))
     .sort((left, right) => numericSuffix(left) - numericSuffix(right));
   for (const path of paths) {
     const lines = createInterface({ input: createReadStream(join(directory, path)), crlfDelay: Infinity });
     for await (const line of lines) {
-      const record = parseJson(line);
-      if (record?.interaction !== id) continue;
-      if (["request_end", "response_head", "response_end"].includes(record.kind)) {
-        milestones[record.kind] = record.ts;
-      }
-      output.consume(record);
-      if (total >= offset && items.length < limit && remaining > 0) {
-        const raw = JSON.stringify(record);
-        const buffer = Buffer.from(raw, "utf8");
-        const text = buffer.subarray(0, Math.max(0, remaining)).toString("utf8");
-        const truncated = buffer.length > remaining;
-        remaining -= Math.min(buffer.length, remaining);
-        items.push({ atMs: record.ts, kind: record.kind, text, truncated });
-      }
-      total += 1;
+      yield parseJson(line);
     }
+  }
+}
+
+async function readTrace(directory, id, offset, limit, maxBytes, output) {
+  const items = [];
+  const milestones = {};
+  let remaining = maxBytes;
+  let total = 0;
+  for await (const record of traceRecords(directory)) {
+    if (record?.interaction !== id) continue;
+    if (["request_end", "response_head", "response_end"].includes(record.kind)) {
+      milestones[record.kind] = record.ts;
+    }
+    output?.consume(record);
+    if (total >= offset && items.length < limit && remaining > 0) {
+      const raw = JSON.stringify(record);
+      const buffer = Buffer.from(raw, "utf8");
+      const text = buffer.subarray(0, Math.max(0, remaining)).toString("utf8");
+      const truncated = buffer.length > remaining;
+      remaining -= Math.min(buffer.length, remaining);
+      items.push({ atMs: record.ts, kind: record.kind, text, truncated });
+    }
+    total += 1;
   }
   return {
     items,

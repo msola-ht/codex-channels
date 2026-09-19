@@ -46,9 +46,9 @@ describe("WebUI metrics table presentation", () => {
         const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
           h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null, h(component, props)))));
         const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
-        const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model",
+        const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
-        const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], truncated: false },
+        const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
@@ -250,7 +250,8 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "类型", "请求", "线程", "轮次"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
+    expect(markup.traffic).toContain("1,234");
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
     expect(markup.traffic).not.toContain("名称一致");
@@ -281,6 +282,8 @@ describe("WebUI metrics table presentation", () => {
       expect(html).toMatch(/<button\b[^>]*disabled=""/);
     }
     expect(markup.traceLoading).toContain("正在加载原始事件");
+    expect(markup.traceLoading).toContain("X-Codex-Turn-State 字符数");
+    expect(markup.traceLoading).toContain("1,234");
     expect(markup.traceFailure).toContain("原始事件加载失败");
     expect(markup.traceFailure).toContain("重试原始事件");
   });

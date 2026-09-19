@@ -815,6 +815,7 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  turnStateLengths: Array<{ source: string; characters: number }>
   id: number
   label: string
   session: string
@@ -858,6 +859,7 @@ export interface TrafficExchangeDetail {
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
     safetyModels: Array<{ source: string; model: string }>
+    turnStateLengths: Array<{ source: string; characters: number }>
     truncated: boolean
   }
   parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
@@ -967,4 +969,8 @@ export interface TrafficDetailResponse {
   session: string
   generatedAt: string
   exchange: TrafficExchangeDetail
+}
+
+export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "exchange"> {
+  exchange: Pick<TrafficExchangeDetail, "id" | "trace" | "tracePage">
 }

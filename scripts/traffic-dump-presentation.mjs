@@ -105,6 +105,7 @@ export function failureStage(record, body) {
 export function createModelEvidenceCollector() {
   const serverModels = [];
   const safetyModels = [];
+  const turnStateLengths = [];
   let truncated = false;
   function add(target, source, model) {
     if (typeof model !== "string" || !model.trim()) return;
@@ -120,6 +121,14 @@ export function createModelEvidenceCollector() {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     for (const [name, model] of Object.entries(value)) {
       const key = name.toLowerCase();
+      if (key === "x-codex-turn-state" && typeof model === "string") {
+        const characters = Array.from(model).length;
+        const origin = `${source}.${key}`;
+        if (!turnStateLengths.some((entry) => entry.source === origin && entry.characters === characters)) {
+          if (turnStateLengths.length < 32) turnStateLengths.push({ source: origin, characters });
+          else truncated = true;
+        }
+      }
       if (key === "openai-model" || key === "x-openai-model") add(serverModels, `${source}.${key}`, model);
       if (key === "x-codex-safety-buffering-faster-model") add(safetyModels, `${source}.${key}`, model);
     }
@@ -137,7 +146,7 @@ export function createModelEvidenceCollector() {
         : type === "response.metadata" && value.metadata?.type === "safety_buffering" ? value.metadata : undefined;
       add(safetyModels, `${type}.${topLevel ? "safety_buffering" : "metadata"}.retry_model`, buffering?.retry_model);
     },
-    result: () => ({ serverModels, safetyModels, truncated }),
+    result: () => ({ serverModels, safetyModels, turnStateLengths, truncated }),
   };
 }
 
@@ -183,7 +192,7 @@ function parseObject(text) {
 }
 
 /** 完成条目独立于 trace 页收集；正文、重组缓冲与输出总量都受展示字节上限约束。 */
-export function createOutputCollector(maxBytes, terminalOutput, responseId, observeModelEvent) {
+export function createOutputCollector(maxBytes, terminalOutput, responseId, observeModelEvent, collectOutput = true) {
   const items = new Map();
   let bytes = 0;
   let truncated = false;
@@ -194,6 +203,7 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId, obse
   const hasTerminalOutput = Array.isArray(terminalOutput) && terminalOutput.length > 0;
 
   function add(index, item) {
+    if (!collectOutput) return;
     if (!item || typeof item !== "object") return;
     const size = Buffer.byteLength(JSON.stringify(item));
     const previous = items.get(index)?.size ?? 0;

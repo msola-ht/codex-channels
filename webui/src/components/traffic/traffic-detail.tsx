@@ -315,6 +315,8 @@ function ModelEvidence({ detail }: { detail: TrafficExchangeDetail }) {
       {detail.modelEvidence.serverModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
       <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
       {detail.modelEvidence.safetyModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+      <p>X-Codex-Turn-State 字符数：</p>
+      {detail.modelEvidence.turnStateLengths.length === 0 ? <p>未记录</p> : detail.modelEvidence.turnStateLengths.map((entry) => <p className="break-all" key={`${entry.source}:${entry.characters}`}>{entry.characters.toLocaleString("zh-CN")} 字符 · 来源：{entry.source}</p>)}
       {detail.modelEvidence.truncated ? <p>声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
     </CardContent>
   </Card>

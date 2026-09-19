@@ -164,6 +164,7 @@ function renderDetail(detail) {
     lines.push(`${label}：${entries.length === 0 ? "未记录" : entries.map((entry) => `${entry.model}（来源：${entry.source}）`).join("；")}`);
   }
   lines.push("安全缓冲候选不表示已经切换，也不表示由该模型执行安全检查；缺失仅表示保留转储中未记录。");
+  lines.push(`X-Codex-Turn-State 字符数：${detail.modelEvidence.turnStateLengths.length === 0 ? "未记录" : detail.modelEvidence.turnStateLengths.map((entry) => `${entry.characters} 字符（来源：${entry.source}）`).join("；")}`);
   if (detail.modelEvidence.truncated) lines.push("（模型声明展示不完整：超过条数或字段长度限制，或含无效字符）");
   if (detail.account !== undefined) lines.push(`账户：${detail.account}`);
   lines.push("", "请求头：", ...headerLines(detail.request.headers));
