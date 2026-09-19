@@ -80,7 +80,7 @@ flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非�
 按同一请求口径聚合指标库记录，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 不把请求累计输入误写成上下文占用；聚合中的上下文压缩摘要单列请求数与 Token，不显示模型请求
-聚合耗时、首段回复延迟、生成速度、本地价格或费用。信息类聊天指令（`/status`、`/usage`、
+聚合耗时、首段回复延迟、纯生成速度、本地价格或费用；运行与会话摘要以及完成卡片展示有效请求输出速率的算术平均 `Token/s`，复用查询结果，不用会话墙钟耗时重新计算。信息类聊天指令（`/status`、`/usage`、
 `/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/project-rules`、`/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
@@ -114,10 +114,13 @@ OpenAI 周限；配置的自定义主模型 Provider 追加“ · 自定义”�
 历史无 Turn 指标只在通用明细和时间范围聚合中按稳定 Provider ID 展示；各 Surface 只保留 HTML、
 CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Thread 的文本、审批和完成汇报均标注
 短 Thread ID，并继续进入原 Conversation 的有界顺序队列。
-`elapsed-duration.ts` 只把已确认的 Turn、操作、推理状态等毫秒值或账户用量秒数格式化为三个 Surface
-共用的中文短文本，不负责计时、状态或持久化。
+`elapsed-duration.ts` 把已确认的 Turn、操作、推理状态和请求耗时格式化为自适应 `ms` / `s` / `min` / `h`，
+三个 Surface、CLI 与 WebUI 共用该纯函数；账户用量秒数仍使用独立的中文周期格式。不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
+`conversation-model-account-command-format.ts` 在 OpenAI `/limits` 中展示重置券可用数量，并按相同
+到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
+未返回明细的剩余张数。
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。

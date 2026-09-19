@@ -7,6 +7,43 @@ import type { GetAccountTokenUsageResponse } from "../src/codex-protocol/index.j
 import { appServerRateLimit, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient account", () => {
+    it.each([
+      [{ account: null, requiresOpenaiAuth: true }, "chatgpt"],
+      [{ account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true }, "chatgpt"],
+      [{ account: { type: "apiKey" }, requiresOpenaiAuth: true }, "api"],
+      [{ account: null, requiresOpenaiAuth: false }, "not-required"],
+    ] as const)("reads the active OpenAI account route from account/read", async (response, route) => {
+      const transport = new FakeTransport();
+      transport.accountResult = response;
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+
+      await expect(client.openAiAccountRoute()).resolves.toBe(route);
+      expect(transport.sent.findLast((message) => message.method === "account/read"))
+        .toEqual(expect.objectContaining({
+          method: "account/read",
+          params: { refreshToken: false },
+        }));
+    });
+
+    it("cancels account/read at the caller deadline", async () => {
+      const transport = new FakeTransport();
+      transport.ignoreAccountRead = true;
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), {
+        sandbox: "workspace-write",
+      });
+      await client.connect();
+      const controller = new AbortController();
+      const request = client.openAiAccountRoute(controller.signal);
+
+      controller.abort(new Error("startup deadline"));
+
+      await expect(request).rejects.toThrow("startup deadline");
+      await client.close();
+    });
+
     it("reads account rate limits through the stable App Server method", async () => {
       const transport = new FakeTransport();
       transport.accountRateLimitsResult = {

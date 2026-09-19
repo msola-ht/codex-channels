@@ -110,6 +110,7 @@ export {
   resolveModel,
   resolveProvider,
   type ModelSelectionPreference,
+  type ModelSelectionIdentity,
   type ModelSelectionState,
   type OfficialModelCatalogProvider,
 } from "./model-selection-service.js";

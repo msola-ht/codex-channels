@@ -78,6 +78,98 @@ export function responseFacts(body) {
   };
 }
 
+/** 只解释转储已经记录的失败位置，不由耗时或错误文本推断网络根因。 */
+export function failureStage(record, body) {
+  if (record?.state !== "failed" && record?.state !== "incomplete") return undefined;
+  const stages = {
+    upstream_route: "上游路由解析",
+    upstream_handshake: "上游 WebSocket 握手",
+    upstream_request: "上游请求（连接或发送）",
+    upstream_response: "上游响应接收",
+    client_request: "客户端请求接收",
+    client_disconnected: "客户端连接断开",
+    client_error: "客户端 WebSocket 传输",
+    upstream_error: "上游 WebSocket 传输",
+    websocket_client_closed: "客户端 WebSocket 关闭",
+    websocket_upstream_closed: "上游 WebSocket 关闭",
+    superseded_by_next_request: "上一请求未结束即收到下一请求",
+  };
+  if (record.errorScope !== undefined) return stages[record.errorScope] ?? "未识别的传输阶段";
+  const failureTypes = ["response.failed", "response.incomplete", "error"];
+  if (failureTypes.includes(record.eventType) || failureTypes.includes(body?.type)) return "上游返回失败或不完整终态";
+  if (record.status >= 400) return "上游 HTTP 响应";
+  return "未提供失败阶段";
+}
+
+/** 只收集本次调用内明确记录的声明，不继承 WS 连接的其他调用。 */
+export function createModelEvidenceCollector() {
+  const serverModels = [];
+  const safetyModels = [];
+  let truncated = false;
+  function add(target, source, model) {
+    if (typeof model !== "string" || !model.trim()) return;
+    if (model.length > 256 || [...model].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+      truncated = true;
+      return;
+    }
+    if (target.some((entry) => entry.source === source && entry.model === model)) return;
+    if (serverModels.length + safetyModels.length >= 32) { truncated = true; return; }
+    target.push({ source, model });
+  }
+  function headers(value, source) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [name, model] of Object.entries(value)) {
+      const key = name.toLowerCase();
+      if (key === "openai-model" || key === "x-openai-model") add(serverModels, `${source}.${key}`, model);
+      if (key === "x-codex-safety-buffering-faster-model") add(safetyModels, `${source}.${key}`, model);
+    }
+  }
+  return {
+    headers,
+    event(value) {
+      const type = value?.type;
+      if (typeof type !== "string" || !(type.startsWith("response.") || type === "codex.response.metadata")) return;
+      headers(value.response?.headers, `${type}.response.headers`);
+      if (type === "response.metadata" || type === "codex.response.metadata") headers(value.headers, `${type}.headers`);
+      const topLevel = Object.hasOwn(value, "safety_buffering");
+      const buffering = topLevel
+        ? value.safety_buffering
+        : type === "response.metadata" && value.metadata?.type === "safety_buffering" ? value.metadata : undefined;
+      add(safetyModels, `${type}.${topLevel ? "safety_buffering" : "metadata"}.retry_model`, buffering?.retry_model);
+    },
+    result: () => ({ serverModels, safetyModels, truncated }),
+  };
+}
+
+/** 所有阶段只使用同一次调用的单调时钟偏移，不与旧墙钟或上游统计相减。 */
+export function callTiming(record) {
+  if (record?.clock !== "monotonic") return null;
+  const end = tokenCount(record.endMs);
+  if (end === undefined) return null;
+  const offset = (key) => {
+    const value = tokenCount(record[key]);
+    return value !== undefined && value <= end ? value : undefined;
+  };
+  const between = (start, finish) => start !== undefined && finish !== undefined && finish >= start ? finish - start : undefined;
+  const forwarding = offset("forwardingMs");
+  const first = offset("firstEventMs");
+  const submitted = offset("submittedMs");
+  const head = offset("responseHeadMs");
+  const body = offset("requestBodyEndMs");
+  return {
+    totalMs: end,
+    preForwardMs: forwarding,
+    firstEventWaitMs: between(forwarding, first),
+    afterFirstEventMs: between(first, end),
+    receiveRequestMs: body,
+    waitResponseHeadMs: between(body, head),
+    receiveResponseMs: between(head, end),
+    submitWaitMs: between(forwarding, submitted),
+    submittedToFirstEventMs: between(submitted, first),
+    connectionReady: typeof record.connectionReady === "boolean" ? record.connectionReady : undefined,
+  };
+}
+
 function tokenCount(value) {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
@@ -91,7 +183,7 @@ function parseObject(text) {
 }
 
 /** 完成条目独立于 trace 页收集；正文、重组缓冲与输出总量都受展示字节上限约束。 */
-export function createOutputCollector(maxBytes, terminalOutput, responseId) {
+export function createOutputCollector(maxBytes, terminalOutput, responseId, observeModelEvent) {
   const items = new Map();
   let bytes = 0;
   let truncated = false;
@@ -115,6 +207,7 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
 
   function event(text) {
     const value = parseObject(text);
+    observeModelEvent?.(value);
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
     const metrics = value?.timing_metrics;
     if (value?.type === "responsesapi.websocket_timing" && metrics?.timing_scope === "logical_turn"
@@ -149,10 +242,10 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
     for (const block of blocks) {
       if (droppingSse) droppingSse = false;
       else if (Buffer.byteLength(block) <= maxBytes) sseBlock(block);
-      else truncated = true;
+      else if (!hasTerminalOutput) truncated = true;
     }
     if (Buffer.byteLength(sse) > maxBytes) {
-      truncated = true;
+      if (!hasTerminalOutput) truncated = true;
       droppingSse = true;
       sse = sse.slice(-3);
     }
@@ -163,7 +256,7 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
     consume(record) {
       if (typeof record.text !== "string") return;
       if (record.kind === "response_body" && record.encoding === "utf8") {
-        if (!hasTerminalOutput) consumeSse(record.text);
+        consumeSse(record.text);
       } else if (record.kind === "websocket_frame" && record.direction === "upstream"
         && record.binary !== true) {
         if (record.parts > 1) {

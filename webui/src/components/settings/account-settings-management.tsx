@@ -106,7 +106,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   </Card>
 }
 
-function AccountSettingsConfirmationDialog({
+export function AccountSettingsConfirmationDialog({
   pending,
   saving,
   onConfirm,
@@ -121,7 +121,7 @@ function AccountSettingsConfirmationDialog({
   const account = preview.account
   const provider = preview.provider
   const lines = [`操作：${preview.operation}`]
-  if (account?.displayName !== undefined) lines.push(`账户：${account.displayName}（${account.id ?? "未知"}）`)
+  if (account?.id !== undefined) lines.push(`账户：${account.displayName ?? account.email ?? account.phone ?? account.id}（${account.id}）`)
   if (provider?.name !== undefined) lines.push(`Provider：${provider.name}（${provider.id ?? "未知"}）`)
   if (preview.mode !== undefined) lines.push(`模式：${preview.mode}`)
   if (preview.model !== undefined) lines.push(`模型：${preview.model}`)
@@ -133,7 +133,8 @@ function AccountSettingsConfirmationDialog({
   const destructive = pending.input.operation === "opencode.account.stop"
     || pending.input.operation === "opencode.account.remove"
     || pending.input.operation === "deepseek.restore"
-  return <ManagementConfirmationDialog open saving={saving} title="确认账户配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={destructive ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+  return <ManagementConfirmationDialog open saving={saving} title="确认账户配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={destructive ? "destructive" : "default"} confirmLabel={pending.input.operation === "opencode.account.remove" ? "确认删除" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
+    {pending.input.operation === "opencode.account.remove" ? <p>删除本地账户配置后，该账户历史 Thread 将不可恢复；此操作不会取消或续订官方订阅。</p> : null}
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     <p className="text-muted-foreground">生效目标：{preview.activation ?? "按操作结果"}</p>
   </ManagementConfirmationDialog>

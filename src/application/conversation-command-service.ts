@@ -32,7 +32,7 @@ import {
   parseScheduledTaskOperation,
 } from "./scheduled-task-command.js";
 import type { ScheduledTaskUseCases } from "./scheduled-task-service.js";
-import { resolveProvider } from "./model-selection-service.js";
+import { resolveProvider, type ModelSelectionIdentity, type ModelSelectionState } from "./model-selection-service.js";
 
 export {
   archivedSessionCommandUsageText,
@@ -316,7 +316,21 @@ export type ConversationCommandOutcome =
       run: Awaited<ReturnType<ScheduledTaskUseCases["run"]>>;
     };
 
+function modelSelectionResult(state: ModelSelectionState): ConversationCommandResult {
+  const selected = state.models.find((model) =>
+    model.model === state.model
+    && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
+  const shouldSelectEffort = (selected?.supportedReasoningEfforts.length ?? 0) > 1;
+  return {
+    kind: "models",
+    view: shouldSelectEffort ? "effort" : "model",
+    ...(shouldSelectEffort ? { nextSelection: "effort" as const } : {}),
+    state,
+  };
+}
+
 export interface ConversationCommandExecutor {
+  selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult>;
   execute(
     target: ConversationTarget,
     command: ConversationCommandName,
@@ -332,6 +346,11 @@ export class ConversationCommandService implements ConversationCommandExecutor {
     scheduledTasks?: ScheduledTaskUseCases,
   ) {
     this.scheduledTasks = scheduledTasks;
+  }
+
+  async selectModel(target: ConversationTarget, selection: ModelSelectionIdentity): Promise<ConversationCommandResult> {
+    this.conversations.touchActivity?.(target);
+    return modelSelectionResult(await this.conversations.selectModel(target, selection));
   }
 
   async execute(
@@ -572,16 +591,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           }
           throw error;
         }
-        const selected = state.models.find((model) =>
-          model.model === state.model
-          && (model.provider ?? "openai") === (state.modelProvider ?? "openai"));
-        const shouldSelectEffort = (selected?.supportedReasoningEfforts.length ?? 0) > 1;
-        return {
-          kind: "models",
-          view: shouldSelectEffort ? "effort" : "model",
-          ...(shouldSelectEffort ? { nextSelection: "effort" as const } : {}),
-          state,
-        };
+        return modelSelectionResult(state);
       }
       case "effort":
         return {

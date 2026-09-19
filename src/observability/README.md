@@ -13,8 +13,9 @@
 - `request-metrics.ts`：定义与 Provider 实现无关的单次模型请求指标、内部查询结果，以及写入、普通
   请求查询、Thread/Subagent 查询、Quota/Account Snapshot 四类窄存储端口；组合接口只供同一
   SQLite 实现声明完整能力，各消费方按实际用途依赖窄端口。
-  新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照、响应正文
-  或本地流式阶段时间；`upstreamTtftMs` 仅保留 OpenAI 提供的首 Token 统计。
+  新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
+  `firstContentMs` 保留代理单请求首内容延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
+  `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
 - `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
@@ -29,13 +30,16 @@
   旧锁继续失败关闭。
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v15 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v18 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 继续持有初始化事务，停机升级继续由指标脚本管理。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
-  逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳或流式阶段时间戳；
+  逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
   Schema v14 已删除对应旧计时列、价格与成本列及派生 View。数据库使用
   Schema v15 增加可空 `upstream_ttft_ms`，逐请求保留上游原值，Turn 汇总仅选择自身首个有效 OpenAI
-  普通响应样本，不合计或平均。数据库使用严格 Schema v15、Unix `0600` / Windows 当前 SID 私有文件权限，
+  普通响应样本，不合计或平均。Schema v16 增加可空 `first_content_ms`、`request_model`、`response_model`。
+  Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
+  Schema v18 增加可空 `total_duration_ms`，逐请求保存代理入口至首次模型终态或结束/失败的单调时钟总耗时，支持明细排序与导出，不聚合为 Turn 耗时；升级保留 v17 调用关联，历史总耗时为 NULL。
+  数据库使用严格 Schema v18、Unix `0600` / Windows 当前 SID 私有文件权限，
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
   10 ms；同一 Store 还提供不获取写锁、不初始化或清理 Schema 的显式只读模式。
@@ -45,7 +49,7 @@
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列；人类可读 CLI、
-  渠道卡片和 WebUI 页面不展示模型请求聚合耗时、本地首段回复延迟或生成速度，完成卡片的官方 Turn 总耗时
+  渠道卡片和 WebUI 页面展示派生 `tokensPerSecond`：单请求输出 Token 除以总耗时秒数，Turn/Thread 为范围内有效请求速率的算术平均，仅输出与耗时都大于零的记录参与，不新增存储列；不是纯生成速度或会话墙钟吞吐量。单请求首内容不合成为轮次指标，完成卡片的官方 Turn 总耗时
   不来自本指标库。内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合和指标库保留范围内的 Thread 会话累计分开返回，由
@@ -66,7 +70,7 @@
   WebSocket 上游握手失败、WS 内包装错误事件（如 429 usage_limit_reached）与 Gateway 层未发起
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
   失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。账户快照历史使用
-  相同的保留期限清理，避免按需刷新长期无界累积；OpenCode Go 账户窗口的本机 Token 汇总按精确
+  相同的保留期限清理，但每个账户源保留最新一条确认状态，避免把历史到期误作订阅恢复；OpenCode Go 账户窗口的本机 Token 汇总按精确
   Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。
   旧版 `/responses/compact` 与普通 `/responses` 上由受控元数据标记的 remote compaction v2
   都以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
@@ -94,9 +98,9 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。Schema v3 至 v14 可在停止 Gateway 后用
-`codexc update` 统一预检，并先创建 `0600` 备份再在单一事务中升级到 v15；请求、子代理关系和账户快照
-均保留，模型请求表只复制 v15 仍支持的字段，新增 TTFT 为 NULL，并删除价格、成本、旧计时列和派生 View。v8 升级
+HTTP API 复用相同查询，不向本模块写入状态。Schema v3 至 v17 可在停止 Gateway 后用
+`codexc update` 统一预检，并先创建 `0600` 备份再在单一事务中升级到 v18；请求、子代理关系和账户快照
+均保留，模型请求表只复制 v18 仍支持的字段，新增字段为 NULL、已有 TTFT、首内容与模型名称保留；历史转储关联不按时间猜配，并删除价格、成本、旧计时列和派生 View。v8 升级
 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为 `subagent_threads` 新增可空
 `parent_turn_id`，v10 升级 v11 新增运行级 `subagent_turns`，v11 升级 v12 新增账户源与账户快照表，
 v12 升级 v13 新增记录实际发往模型上游 `User-Agent` 的可空 `user_agent` 列。历史 NULL 和 v10 以前不存在的运行关系

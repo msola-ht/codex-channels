@@ -38,6 +38,27 @@ describe("Provider proxy metrics channel", () => {
         await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: value } as ProviderProxyMetrics);
       }
       expect(received.map((value) => value.upstreamTtftMs)).toEqual([0, 569.25]);
+      received.length = 0;
+      for (const value of [0, 12.5, -1, "123", null]) {
+        await sendProviderProxyMetrics(socketPath, {
+          ...metrics(), firstContentMs: value, requestModel: "requested", responseModel: "echoed",
+        } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.firstContentMs)).toEqual([0, 12.5]);
+      expect(received[0]).toMatchObject({ requestModel: "requested", responseModel: "echoed" });
+      received.length = 0;
+      for (const value of [0, 1234.5, -1, "123", null]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), totalDurationMs: value } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.totalDurationMs)).toEqual([0, 1234.5]);
+      received.length = 0;
+      const reference = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 23 };
+      for (const traffic of [reference, null, {}, { ...reference, interaction: 0 },
+        { ...reference, interaction: 1.5 }, { ...reference, session: "../other" },
+        { ...reference, label: "../other" }]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), traffic } as ProviderProxyMetrics);
+      }
+      expect(received.map((value) => value.traffic)).toEqual([reference]);
     } finally { await server.close(); }
   });
   const unixIt = process.platform === "win32" ? it.skip : it;

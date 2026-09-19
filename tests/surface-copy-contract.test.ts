@@ -682,6 +682,10 @@ describe("shared surface copy contract", () => {
       },
       {
         kind: "usage",
+        result: { kind: "subscription-required", provider: "ocg-main" },
+      },
+      {
+        kind: "usage",
         result: {
           kind: "token-usage",
           provider: "openai",

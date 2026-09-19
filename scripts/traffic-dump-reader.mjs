@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { createOutputCollector, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -143,10 +143,15 @@ export async function describeDumpExchange(
   const requestBody = parseJson(requestPayload.text);
   const responseBody = parseJson(responsePayload.text);
   const facts = responseFacts(responseBody);
-  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, facts.responseId);
+  const models = createModelEvidenceCollector();
+  models.headers(interaction.response?.headers, "http.headers");
+  models.event(responseBody);
+  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, facts.responseId, models.event);
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
+  const collected = output.result();
   return {
     ...summaryOf(interaction, requestBody),
+    modelEvidence: models.result(),
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
@@ -168,6 +173,8 @@ export async function describeDumpExchange(
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
       durationMs: interaction.response.durationMs,
+      firstContentMs: interaction.response.firstContentMs,
+      callTiming: callTiming(interaction.response.callTiming),
       httpTiming: interaction.request.transport !== "http" ? null : {
         receiveRequestMs: elapsedMs(interaction.request.startedAtMs, trace.milestones.request_end),
         waitResponseHeadMs: elapsedMs(trace.milestones.request_end, trace.milestones.response_head),
@@ -175,10 +182,11 @@ export async function describeDumpExchange(
       },
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
+      failureStage: failureStage(interaction.response, responseBody),
       error: interaction.response.error,
       storedBytes: interaction.response.payload?.bytes,
       ...facts,
-      ...output.result(),
+      ...collected,
     },
     trace: trace.items,
     tracePage: trace.page,

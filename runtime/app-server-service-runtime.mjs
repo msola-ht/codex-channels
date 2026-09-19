@@ -45,7 +45,7 @@ import {
   sharedProviderProxyKey,
 } from "./opencode-go-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
-import { selectHttpProxyUrl } from "./network-proxy.mjs";
+import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
   childProcessIsRunning,
   installProcessSignalHandlers,
@@ -122,18 +122,21 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
   const upstreamAgents = new Set();
+  const upstreamAgentsByProxyUrl = new Map();
+  const proxySelector = createRefreshableHttpProxySelector(
+    runtime.document.network ?? {},
+    process.env,
+  );
   let supervisorOwner;
   let desktopAppBridge;
-  const upstreamAgentFor = (upstreamUrl) => {
-    const proxyUrl = selectHttpProxyUrl({
-      http: runtime.environment.HTTP_PROXY,
-      https: runtime.environment.HTTPS_PROXY,
-      all: runtime.environment.ALL_PROXY,
-      no: runtime.environment.NO_PROXY,
-    }, upstreamUrl);
+  const upstreamAgentFor = async (upstreamUrl) => {
+    const proxyUrl = await proxySelector.select(upstreamUrl);
     if (!proxyUrl) return undefined;
+    const existing = upstreamAgentsByProxyUrl.get(proxyUrl);
+    if (existing) return existing;
     const agent = new HttpsProxyAgent(proxyUrl);
     upstreamAgents.add(agent);
+    upstreamAgentsByProxyUrl.set(proxyUrl, agent);
     return agent;
   };
   const providerProxyRuntimes = new ProviderProxyRuntimeRegistry(async (
@@ -188,10 +191,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               metrics,
             ),
           }),
-      onError: (error) => console.error(
-        `${opencodeGo ? "opencode-go" : provider} 模型统计代理失败：`
-        + (error instanceof Error ? error.message : String(error)),
-      ),
+      onError: (error) => {
+        proxySelector.invalidate();
+        console.error(
+          `${opencodeGo ? "opencode-go" : provider} 模型统计代理失败：`
+          + (error instanceof Error ? error.message : String(error)),
+        );
+      },
     });
     await modelProxy.start();
     const proxyRuntime = {
@@ -262,17 +268,27 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     }
   };
-  const proxyOptionsForUrl = (upstreamUrl) => {
-    const upstreamAgent = upstreamAgentFor(upstreamUrl);
+  const proxyOptionsForUrl = async (upstreamUrl) => {
+    await proxySelector.validate(upstreamUrl);
     return {
-      ...(upstreamAgent ? { upstreamAgent } : {}),
       upstreamHost: upstreamUrl.hostname,
       ...(upstreamUrl.port ? { upstreamPort: Number(upstreamUrl.port) } : {}),
       upstreamProtocol: upstreamUrl.protocol === "http:" ? "http" : "https",
       upstreamBasePath: upstreamUrl.pathname,
+      resolveUpstream: async () => {
+        const agent = await upstreamAgentFor(upstreamUrl);
+        return {
+          ...(agent ? { agent } : {}),
+          host: upstreamUrl.hostname,
+          ...(upstreamUrl.port ? { port: Number(upstreamUrl.port) } : {}),
+          protocol: upstreamUrl.protocol === "http:" ? "http" : "https",
+          basePath: upstreamUrl.pathname,
+        };
+      },
     };
   };
-  const goProxyOptions = proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
+  const goProxyOptions = () =>
+    proxyOptionsForUrl(new URL(opencodeGoProviderDefinition.baseUrl));
   let primaryArguments = [];
   let desktopAppAttachment;
   const managedByProvider = new Map(managedProviders.map((provider, index) => [
@@ -392,8 +408,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         const startedProxy = await startProviderProxy(
           proxyKey,
           withExternalRoleMetrics(provider, isGoProvider(provider)
-            ? goProxyOptions
-            : proxyOptionsForUrl(new URL(
+            ? await goProxyOptions()
+            : await proxyOptionsForUrl(new URL(
                 definition?.baseUrl ?? customDefinition.baseUrl,
               ))),
         );
@@ -565,7 +581,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         primaryProvider,
         withExternalRoleMetrics(
           customPrimaryProvider.id,
-          proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
+          await proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
         ),
       );
       primaryArguments = withProviderBaseUrl(
@@ -585,19 +601,19 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         : undefined;
       let openAiProxyOptions;
       if (configuredOpenAiUrl) {
-        openAiProxyOptions = proxyOptionsForUrl(configuredOpenAiUrl);
+        openAiProxyOptions = await proxyOptionsForUrl(configuredOpenAiUrl);
       } else {
         const chatgptUrl = new URL("https://chatgpt.com/backend-api/codex");
         const apiUrl = new URL("https://api.openai.com/v1");
-        const chatgptAgent = upstreamAgentFor(chatgptUrl);
-        const apiAgent = upstreamAgentFor(apiUrl);
+        await proxySelector.validate(chatgptUrl);
+        await proxySelector.validate(apiUrl);
         openAiProxyOptions = {
           upstreamHost: apiUrl.hostname,
           upstreamProtocol: "https",
           upstreamBasePath: apiUrl.pathname,
-          resolveUpstream: (headers) => {
+          resolveUpstream: async (headers) => {
             const target = headers["chatgpt-account-id"] === undefined ? apiUrl : chatgptUrl;
-            const agent = target === chatgptUrl ? chatgptAgent : apiAgent;
+            const agent = await upstreamAgentFor(target);
             return {
               ...(agent ? { agent } : {}),
               host: target.hostname,
@@ -621,8 +637,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
-          ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition.baseUrl))),
+          ? await goProxyOptions()
+          : await proxyOptionsForUrl(new URL(definition.baseUrl))),
       );
       const primaryBaseUrl = isGoProvider(definition.id)
         ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
@@ -646,12 +662,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)
-          ? goProxyOptions
-          : proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
+          ? await goProxyOptions()
+          : await proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
       );
       refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     const lifecycle = forwardChildrenLifecycle(children, async () => {
+      await proxySelector.close();
       await desktopAppBridge?.close();
       await supervisorOwner?.close();
       await Promise.all(
@@ -704,6 +721,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       );
     }
   } catch (error) {
+    await proxySelector.close();
     await desktopAppBridge?.close();
     await supervisorOwner?.close();
     await Promise.all(

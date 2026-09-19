@@ -173,7 +173,7 @@ export function upgradeMetricsDatabase(
     if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
       throw new Error(
         `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14 升级到 v${modelRequestMetricsSchemaVersion}`,
+        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17 升级到 v${modelRequestMetricsSchemaVersion}`,
       );
     }
     checkpoint(status.databasePath);
@@ -280,7 +280,11 @@ export function upgradeMetricsDatabase(
         ALTER TABLE model_request_metrics RENAME TO model_request_metrics_legacy;
         ${modelRequestMetricsTableSql}
         INSERT INTO model_request_metrics (id, ${metricStorageColumnsSql})
-          SELECT id, ${metricStorageColumns.map((column) => column === "upstream_ttft_ms" ? "NULL" : column).join(", ")}
+          SELECT id, ${metricStorageColumns.map((column) =>
+            column === "total_duration_ms"
+              || (previousSchemaVersion < 17 && ["traffic_label", "traffic_session", "traffic_interaction"].includes(column))
+              || (previousSchemaVersion < 16 && ["first_content_ms", "request_model", "response_model"].includes(column))
+              || (column === "upstream_ttft_ms" && previousSchemaVersion < 15) ? "NULL" : column).join(", ")}
           FROM model_request_metrics_legacy;
         DROP TABLE model_request_metrics_legacy;
         ${modelRequestMetricsIndexesSql}

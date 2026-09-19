@@ -39,6 +39,13 @@ export interface MetricRow {
   quota_windows: string | null;
   user_agent: string | null;
   upstream_ttft_ms: number | null;
+  first_content_ms: number | null;
+  total_duration_ms: number | null;
+  request_model: string | null;
+  response_model: string | null;
+  traffic_label: string | null;
+  traffic_session: string | null;
+  traffic_interaction: number | null;
 }
 
 export interface CompactSummaryRow {
@@ -54,6 +61,7 @@ export interface CompactSummaryRow {
 }
 
 export interface TurnSummaryRow extends CompactSummaryRow {
+  tokens_per_second: number | null;
   upstream_ttft_ms?: number | null;
   provider?: string | null;
   model?: string | null;
@@ -111,6 +119,17 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     turnId: row.turn_id,
     userAgent: row.user_agent,
     upstreamTtftMs: row.upstream_ttft_ms,
+    firstContentMs: row.first_content_ms,
+    totalDurationMs: row.total_duration_ms,
+    tokensPerSecond: row.total_duration_ms !== null && row.total_duration_ms > 0 && row.output_tokens !== null && row.output_tokens > 0
+      ? row.output_tokens * 1000 / row.total_duration_ms : null,
+    requestModel: row.request_model,
+    responseModel: row.response_model,
+    traffic: row.traffic_label === null ? null : {
+      label: row.traffic_label,
+      session: row.traffic_session!,
+      interaction: row.traffic_interaction!,
+    },
     model: row.model,
     serviceTier: row.service_tier,
     reasoningEffort: row.reasoning_effort,
@@ -156,6 +175,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
   return {
+    tokensPerSecond: row.tokens_per_second,
     ...(row.upstream_ttft_ms === undefined ? {} : { upstreamTtftMs: row.upstream_ttft_ms }),
     provider: row.provider ?? null,
     model: row.model ?? null,
@@ -183,6 +203,7 @@ export function toStoredThreadAggregate(
   });
   return {
     provider: summary.provider,
+    tokensPerSecond: row.tokens_per_second,
     turnCount: row.turn_count,
     requestCount: summary.requestCount,
     unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
@@ -204,6 +225,7 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   return {
+    tokensPerSecond: row.tokens_per_second,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,

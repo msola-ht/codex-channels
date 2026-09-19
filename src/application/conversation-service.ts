@@ -60,6 +60,7 @@ import {
 } from "../conversation-core/index.js";
 import type {
   ModelSelectionPreference,
+  ModelSelectionIdentity,
   ModelSelectionService,
   ModelSelectionState,
 } from "./model-selection-service.js";
@@ -262,7 +263,7 @@ export interface ConversationExtensionUseCases {
   clearModelBrowse(target: ConversationTarget): Promise<ModelSelectionState>;
   browseProviderModels(target: ConversationTarget, provider: string): Promise<ModelSelectionState>;
   clearModelSelection(target: ConversationTarget): Promise<ModelSelectionState>;
-  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
+  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState>;
   selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   selectFastMode(target: ConversationTarget, selector: string): Promise<ModelSelectionState>;
   listSkills(target: ConversationTarget): Promise<InstalledSkill[]>;
@@ -1423,7 +1424,7 @@ export class ConversationService implements
     return this.extensionQueries.clearModelSelection(target);
   }
 
-  selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+  selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
     return this.locked(target, async () => {
       this.requireIdle(target);
       await this.rejectQueueWhenPendingOverrideChanges(target);

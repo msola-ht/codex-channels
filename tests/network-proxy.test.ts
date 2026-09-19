@@ -1,14 +1,156 @@
+import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createRefreshableHttpProxySelector,
   readGnomeSystemProxy,
   readMacSystemProxy,
   resolveHttpProxyUrl,
   resolveProxyEnvironment,
   selectHttpProxyUrl,
 } from "../runtime/network-proxy.mjs";
+import { NetworkProxyWatcher } from "../src/bootstrap/network-proxy-watcher.js";
 
-describe("network proxy discovery", () => {
+describe("network proxy discovery", async () => {
+  it("keeps a single asynchronous discovery in flight and cancels it on stop", async () => {
+    let signal: AbortSignal | undefined;
+    let resolveRead!: (proxy: { https?: string }) => void;
+    const readSystemProxy = vi.fn((value: AbortSignal) => {
+      signal = value;
+      return new Promise<{ https?: string }>((resolve) => { resolveRead = resolve; });
+    });
+    const warn = vi.fn();
+    const watcher = new NetworkProxyWatcher({
+      environment: {}, logger: { warn } as unknown as Logger,
+      configured: {}, initialProxy: {}, readSystemProxy,
+    });
+    const first = watcher.checkNow();
+    const second = watcher.checkNow();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(readSystemProxy).toHaveBeenCalledOnce();
+    const stopped = watcher.stop();
+    expect(signal?.aborted).toBe(true);
+    resolveRead({ https: "http://127.0.0.1:7890" });
+    await Promise.all([first, second, stopped]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("observes system HTTPS changes when only NO_PROXY is configured", async () => {
+    let systemProxy: { https?: string } = {};
+    const warn = vi.fn();
+    const watcher = new NetworkProxyWatcher({
+      environment: {},
+      logger: { warn } as unknown as Logger,
+      configured: { no_proxy: "localhost,127.0.0.1" },
+      initialProxy: { no: "localhost,127.0.0.1" },
+      readSystemProxy: async () => systemProxy,
+    });
+    systemProxy = { https: "http://127.0.0.1:7890" };
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("retains the last route after a failed read and continues observing", async () => {
+    const warn = vi.fn();
+    const proxy = { https: "http://127.0.0.1:7890" };
+    const readSystemProxy = vi.fn()
+      .mockRejectedValueOnce(new Error("query timeout"))
+      .mockResolvedValueOnce(proxy)
+      .mockResolvedValueOnce({ https: "http://127.0.0.1:7891" });
+    const watcher = new NetworkProxyWatcher({
+      environment: {}, logger: { warn } as unknown as Logger,
+      configured: {}, initialProxy: proxy, readSystemProxy,
+    });
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("检查失败"));
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledOnce();
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledTimes(2);
+    await watcher.stop();
+  });
+
+  it("only warns once per changed route and stops observing on shutdown", async () => {
+    let systemProxy: { https?: string } = {};
+    const warn = vi.fn();
+    const watcher = new NetworkProxyWatcher({
+      environment: {},
+      logger: { warn } as unknown as Logger,
+      configured: {},
+      initialProxy: {},
+      readSystemProxy: async () => systemProxy,
+    });
+    systemProxy = { https: "http://127.0.0.1:7890" };
+    await watcher.checkNow();
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc service restart all"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("codexc start"));
+    await watcher.stop();
+    systemProxy = {};
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("notices a system proxy appearing during construction", async () => {
+    const warn = vi.fn();
+    const watcher = new NetworkProxyWatcher({
+      environment: {},
+      logger: { warn } as unknown as Logger,
+      configured: {},
+      initialProxy: {},
+      readSystemProxy: async () => ({ https: "http://127.0.0.1:7890" }),
+    });
+    await watcher.checkNow();
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it("does not warn for an explicitly configured proxy", async () => {
+    const warn = vi.fn();
+    const watcher = new NetworkProxyWatcher({
+      environment: {},
+      logger: { warn } as unknown as Logger,
+      configured: { https_proxy: "http://configured.example:8080" },
+      initialProxy: { https: "http://configured.example:8080" },
+      readSystemProxy: async () => ({ https: "http://127.0.0.1:7890" }),
+    });
+    await watcher.checkNow();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("refreshes system proxy selection only after the caller invalidates a failed route", async () => {
+    let systemProxy: { https_proxy?: string } = {};
+    const readSystemProxy = vi.fn(async () => systemProxy);
+    const selector = createRefreshableHttpProxySelector({}, {}, {
+      platform: "darwin",
+      readSystemProxy,
+    });
+
+    expect(await selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
+    systemProxy = { https_proxy: "http://127.0.0.1:7890" };
+    expect(await selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
+
+    selector.invalidate();
+    expect(await selector.select("https://api.openai.com/v1/responses"))
+      .toBe("http://127.0.0.1:7890/");
+    expect(readSystemProxy).toHaveBeenCalledTimes(2);
+  });
+
+  it("validates the initial route without keeping the discovery snapshot", async () => {
+    let systemProxy = { https_proxy: "not-a-url" };
+    const selector = createRefreshableHttpProxySelector({}, {}, {
+      platform: "darwin",
+      readSystemProxy: async () => systemProxy,
+    });
+
+    await expect(selector.validate("https://api.openai.com/v1/responses"))
+      .rejects.toThrow("HTTP(S) 代理不是有效 URL");
+
+    systemProxy = { https_proxy: "http://127.0.0.1:7890" };
+    expect(await selector.select("https://api.openai.com/v1/responses"))
+      .toBe("http://127.0.0.1:7890/");
+  });
+
   it("does not add undefined proxy keys when no source defines a proxy", () => {
     expect(resolveProxyEnvironment(
       {},

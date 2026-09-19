@@ -8,7 +8,8 @@
 - `index.ts`：Telegram Surface 的公开导出入口。
 - `constants.ts`：Telegram Surface 的稳定账号标识。
 - `bot.ts`：提供 Bootstrap 使用的单一选项工厂，注册 Telegram SDK 处理器，执行访问检查，
-  把标准命令或普通输入提交给 Application；
+  把标准命令或普通输入提交给 Application；模型按钮以精确 Provider 与模型身份提交，
+  不因回调等待期间的订阅变化重新选择其他账户的同名模型；
   同一 `media_group_id` 的图片按 Actor 合并为一次最多 4 张的 Application 输入；静态 GIF 无论作为文档还是
   `animation` 消息到达都进入相同内容校验，真正的动画 GIF 会被拒绝；共享输入批处理器在提交时
   将已校验的 PNG/JPEG/WebP/非动画 GIF 暂存文件读取为 Data URL，不把本地路径交给 App Server；
@@ -22,7 +23,9 @@
   强制覆盖；同时发送热加载、自动重启、重装要求和失败等配置
   生命周期通知，Workspace 新增通知带直接切换按钮；启动消息只使用组合根注入的 Gateway
   版本字符串和当前 Workspace Git 分支，不读取生成协议。
-- `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息。
+- `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息；模型按钮绑定当前模型、
+  浏览范围与有序选项的随机令牌，最多保留 1000 份菜单状态。列表变化或状态淘汰后旧按钮明确失效，
+  不按新列表重新解释旧序号。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
   普通 Turn 输入会在内存中绑定到精确消息 ID，“已开始处理。”、阶段性最终正文和最终正文均使用
   `reply_parameters` 原生回复该输入；回复目标保留到 Turn 结束、断线或关闭时清理；

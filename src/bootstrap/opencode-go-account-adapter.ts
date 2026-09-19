@@ -49,7 +49,7 @@ export function createOpencodeGoAccountAdapter(
           },
           signal: AbortSignal.timeout(requestTimeoutMs),
         });
-        if (!response.ok) {
+        if (!response.ok && response.status !== 403) {
           throw new Error(`OpenCode Go usage request failed with status ${response.status}`);
         }
         const body = await readBoundedFetchBody(response, maximumResponseBytes, {
@@ -57,8 +57,17 @@ export function createOpencodeGoAccountAdapter(
           tooLarge: () => new Error("OpenCode Go usage response is too large"),
           missingBody: () => new Error("OpenCode Go usage response is empty"),
         });
+        const parsed: unknown = JSON.parse(body.toString("utf8"));
+        if (response.status === 403) {
+          const error = record(record(parsed).error);
+          if (record(parsed).type === "error" && error.type === "EntitlementError"
+            && error.message === "OpenCode Go subscription required.") {
+            return { kind: "subscription-required", provider };
+          }
+          throw new Error("OpenCode Go usage request forbidden");
+        }
         const usage = parseUsageResponse(
-          JSON.parse(body.toString("utf8")) as unknown,
+          parsed,
           provider,
         );
         if (usage.kind !== "quota-windows") {

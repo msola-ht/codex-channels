@@ -2,9 +2,11 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
+import { formatElapsedDuration } from "./metrics-export-format.mjs";
 import {
   describeDumpExchange,
   dumpCatalog,
@@ -156,7 +158,13 @@ function renderDetail(detail) {
     `#${detail.id} ${formatTime(detail.startedAtMs)} ${requestTarget}`,
     `线程：${detail.threadId ?? "未提供"}  轮次：${detail.turnId ?? "未提供"}  类型：${detail.requestKind ?? "未提供"}`,
     `模型：${detail.requestModel ?? "未提供"} → ${detail.responseModels.join("、") || "未提供"}`,
+    `模型对照：${modelNameComparison(detail.requestModel, detail.responseModels.length === 1 ? detail.responseModels[0] : undefined)}（仅比较名称，不验证模型身份）`,
   ];
+  for (const [label, entries] of [["服务端模型声明", detail.modelEvidence.serverModels], ["安全缓冲候选声明", detail.modelEvidence.safetyModels]]) {
+    lines.push(`${label}：${entries.length === 0 ? "未记录" : entries.map((entry) => `${entry.model}（来源：${entry.source}）`).join("；")}`);
+  }
+  lines.push("安全缓冲候选不表示已经切换，也不表示由该模型执行安全检查；缺失仅表示保留转储中未记录。");
+  if (detail.modelEvidence.truncated) lines.push("（模型声明展示不完整：超过条数或字段长度限制，或含无效字符）");
   if (detail.account !== undefined) lines.push(`账户：${detail.account}`);
   lines.push("", "请求头：", ...headerLines(detail.request.headers));
   lines.push("", "请求：", indent(pretty(detail.request.body)));
@@ -169,7 +177,31 @@ function renderDetail(detail) {
   } else {
     lines.push("", `响应：${stateLabel(detail.response.state)}`
       + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`)
-      + (detail.response.durationMs === undefined ? "" : ` ${detail.response.durationMs} ms`));
+      + (detail.response.durationMs === undefined ? "" : ` 原始记录耗时（墙钟）=${formatElapsedDuration(detail.response.durationMs)}`));
+    lines.push(`单请求首字耗时：${detail.response.firstContentMs === undefined ? "未采集" : formatElapsedDuration(detail.response.firstContentMs)}`);
+    const call = detail.response.callTiming;
+    lines.push("本次调用（单调时钟）：");
+    if (call === null) lines.push("  未记录阶段，不从历史记录补算；上方为原始记录的墙钟耗时。");
+    else {
+      const stages = [
+        ["总耗时", call.totalMs], ["转发前准备", call.preForwardMs],
+        ["转发至首字事件", call.firstEventWaitMs], ["首字事件至结束", call.afterFirstEventMs],
+        ...(detail.response.httpTiming === null ? [
+          ["转发开始至提交发送", call.submitWaitMs], ["提交发送至首字事件", call.submittedToFirstEventMs],
+        ] : [
+          ["入口至收齐请求体", call.receiveRequestMs], ["收齐请求体至响应头", call.waitResponseHeadMs], ["响应头至结束", call.receiveResponseMs],
+        ]),
+      ];
+      for (const [label, value] of stages) lines.push(`  ${label}：${value === undefined ? "未记录" : formatElapsedDuration(value)}`);
+      if (call.connectionReady !== undefined) lines.push(`  进入转发时连接${call.connectionReady ? "已就绪" : "尚未就绪"}；提交发送不表示上游已经收到。`);
+    }
+    lines.push("首字后包含生成、传输和背压暂停；HTTP 阶段可重叠，不能重复相加。失败记录的结束表示本地观察到中断。", "上游轮次统计（独立口径）：");
+    lines.push(`上游轮次首 Token：${detail.response.timing?.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.timing.firstTokenMs)}`);
+    for (const [label, key] of [["最大排队", "queueMaxMs"], ["轮次累计生成", "samplingMs"], ["logical turn", "totalMs"], ["客户端工具暂停", "toolPauseMs"]]) {
+      const value = detail.response.timing?.[key];
+      lines.push(`  ${label}：${value === undefined ? "未提供" : formatElapsedDuration(value)}`);
+    }
+    if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${detail.response.failureStage}`);
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
     if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");
     const usage = detail.response.usage;

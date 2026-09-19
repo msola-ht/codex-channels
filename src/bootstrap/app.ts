@@ -35,6 +35,7 @@ export class GatewayApplication extends GatewayComponentGraph {
   stop(): Promise<void> {
     if (this.stopTask) return this.stopTask;
     this.stopping = true;
+    this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
     this.reconnectAbort?.abort();
     const startup = this.startTask;
     const reconnecting = this.reconnecting;

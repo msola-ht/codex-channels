@@ -93,6 +93,11 @@ export interface AccountRateLimits {
   limits: AccountRateLimit[];
   ordinaryUsageLimit: AccountRateLimit;
   resetCreditsAvailable: AccountMetric | null;
+  /**
+   * 每条服务端重置券明细的到期时间；`null` 元素表示该券没有到期时间。
+   * 整体为 `null` 表示服务端只返回数量，数组长度可能小于可用数量。
+   */
+  resetCreditExpiresAt?: Array<number | null> | null;
   accountId: string | null;
   ordinaryUsageAllowed: boolean | null;
   lunaReserve: {
@@ -147,6 +152,7 @@ export interface ProviderQuotaWindow {
 }
 
 export type ProviderAccountUsage =
+  | { kind: "subscription-required"; provider: string }
   | {
       kind: "token-usage";
       provider: "openai";

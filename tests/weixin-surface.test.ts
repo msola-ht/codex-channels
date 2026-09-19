@@ -120,7 +120,7 @@ describe("WeixinSurface", () => {
     );
     expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([
       "final reply",
-      "**本次运行 · 已完成**\n\n- Session：测试会话\n- Session ID：thread",
+      "**本次运行 · 已完成**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread",
     ]);
     expect(onFatal).not.toHaveBeenCalled();
   });

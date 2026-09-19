@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { toAccountRateLimits } from "../src/codex-client/account-adapter.js";
 
 vi.mock("../runtime/opencode-go-accounts.mjs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../runtime/opencode-go-accounts.mjs")>();
@@ -17,6 +18,45 @@ import {
 } from "../src/surfaces/conversation-command-format.js";
 
 describe("conversation model and account command formatting", () => {
+  it("groups reset credit expiry dates and preserves undisclosed and nonexpiring credits", () => {
+    const limits = toAccountRateLimits({
+      ordinaryUsageAllowed: true,
+      rateLimits: {
+        limitId: "codex", limitName: null, normalModelSlug: null,
+        primary: null, secondary: null, credits: null, individualLimit: null,
+        spendControlReached: null, planType: null, rateLimitReachedType: null,
+      },
+      rateLimitsByLimitId: null,
+      rateLimitResetCredits: {
+        availableCount: 5n,
+        credits: [2_000_000, null, 2_000_000].map((expiresAt, index) => ({
+          id: `credit-${index}`,
+          resetType: "codexRateLimits",
+          status: "available",
+          grantedAt: 1_000_000,
+          expiresAt,
+          title: null,
+          description: null,
+        })),
+      },
+      accountId: null,
+      rateLimitUpsell: null,
+    });
+    expect(limits.resetCreditExpiresAt).toEqual([2_000_000, null, 2_000_000]);
+    const render = () => formatConversationLimits({
+      kind: "limits",
+      result: { kind: "rate-limits", provider: "openai", limits },
+    });
+    expect(render()).toContain("可用额度重置券：5");
+    expect(render()).toContain("：2 张");
+    expect(render()).toContain("无到期时间：1 张");
+    expect(render()).toContain("其余 2 张：服务端未提供明细");
+    limits.resetCreditExpiresAt = null;
+    expect(render()).toContain("重置券到期时间：服务端未提供明细");
+    limits.resetCreditsAvailable = 0n;
+    expect(render()).not.toContain("重置券到期时间");
+  });
+
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
     const rendered = formatConversationModels({
       kind: "models",

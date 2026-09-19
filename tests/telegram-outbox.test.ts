@@ -12,6 +12,7 @@ const turnCompletedTitle = "<b>本次运行 · 已完成</b>";
 const turnCompletedPanel = [
   turnCompletedTitle,
   "",
+  "<b>当前会话</b>",
   "• <b>Session：</b>测试会话",
   "• <b>Session ID：</b>thread-1",
 ].join("\n");
@@ -253,8 +254,8 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual(["<b>思考中…</b>"]);
     expect(api.edits).toEqual([
-      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
-      "<b>思考完成</b>\n\n<b>耗时：</b>15秒",
+      "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
+      "<b>思考完成</b>\n\n<b>耗时：</b>15 s",
     ]);
   });
 
@@ -290,7 +291,7 @@ describe("TelegramOutbox", () => {
     await settle();
     expect(api.sent).toEqual([
       "<b>思考中…</b>",
-      "<b>思考中…</b>\n\n<b>耗时：</b>3秒",
+      "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
     ]);
     expect(api.edits).toEqual([
       "<b>思考完成</b>",
@@ -561,10 +562,9 @@ describe("TelegramOutbox", () => {
       [
         "<b>本次运行 · 失败</b>",
         "",
-        "<b>本次运行</b>",
         "• <b>错误：</b>命令执行失败，TOKEN=[已隐藏]",
         "",
-        "<b>当前 Session 累计</b>",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
       ].join("\n"),
@@ -967,7 +967,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     expect(api.edits.at(-1)).toContain(
-      "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0",
+      "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0",
     );
     expect(api.editOptions.at(-1)).toEqual({ parse_mode: "HTML" });
 
@@ -1339,12 +1339,11 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
-        "<b>本次运行</b>",
         "• <b>模型：</b>gpt-5.6-sol · medium · Fast 开启",
         "• <b>提供商：</b>OpenAI 官方",
         "• <b>最近请求缓存命中率：</b>2.07%",
         "",
-        "<b>当前 Session 累计</b>",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>上下文：</b>24.6 K / 258 K（9.5%）",
@@ -1378,6 +1377,7 @@ describe("TelegramOutbox", () => {
       [
         turnCompletedTitle,
         "",
+        "<b>当前会话</b>",
         "• <b>Session：</b>测试会话",
         "• <b>Session ID：</b>thread-1",
         "• <b>Git 分支：</b>feature/weixin-surface",
@@ -1583,7 +1583,7 @@ describe("TelegramOutbox", () => {
 
     expect(api.sent).toEqual([
       "<b>操作过程</b>\n\n"
-      + "💻 <b>运行命令 · 已完成</b> · 125毫秒 · exit 0"
+      + "💻 <b>运行命令 · 已完成</b> · 125 ms · exit 0"
       + " · <code>git status --short second line</code>",
     ]);
   });

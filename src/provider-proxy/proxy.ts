@@ -9,6 +9,7 @@ import {
 } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Duplex } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 
 import WebSocket, {
   WebSocketServer,
@@ -48,6 +49,8 @@ import {
   type ProviderQuotaWindowSnapshot,
 } from "./response-metrics-observer.js";
 import { ModelTrafficDump } from "./traffic-dump.js";
+import type { TrafficCallTiming } from "./traffic-call-timing.js";
+import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./traffic-dump-content.js";
 
 export type {
   ProviderProxyMetrics,
@@ -97,7 +100,7 @@ export interface ProviderProxyOptions {
     retentionDays?: number;
     label: string;
   };
-  resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream;
+  resolveUpstream?: (headers: IncomingHttpHeaders) => ProviderProxyUpstream | Promise<ProviderProxyUpstream>;
   timeoutMs?: number;
   quotaWindowsProvider?: (
     accountId?: string,
@@ -121,9 +124,8 @@ export class ProviderProxy {
   private readonly websocketServer = new WebSocketServer({ noServer: true });
   private readonly upstreamAgent: Agent | undefined;
   private readonly defaultUpstream: ProviderProxyUpstream;
-  private readonly resolveUpstream:
-    | ((headers: IncomingHttpHeaders) => ProviderProxyUpstream)
-    | undefined;
+  private readonly resolveUpstream: ProviderProxyOptions["resolveUpstream"];
+  private readonly pendingUpgrades = new Set<Duplex>();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
   private readonly externalRoleReasoningEffort: string | undefined;
@@ -202,10 +204,16 @@ export class ProviderProxy {
     this.timeoutMs = options.timeoutMs ?? 60_000;
     this.onMetrics = options.onMetrics;
     this.server = createServer((request, response) => {
-      this.handleHttpRequest(request, response);
+      void this.handleHttpRequest(request, response).catch((error: unknown) => {
+        response.destroy();
+        this.onError?.(asError(error));
+      });
     });
     this.server.on("upgrade", (request, socket, head) => {
-      this.handleWebSocketUpgrade(request, socket, head);
+      void this.handleWebSocketUpgrade(request, socket, head).catch((error: unknown) => {
+        socket.destroy();
+        this.onError?.(asError(error));
+      });
     });
   }
 
@@ -243,6 +251,7 @@ export class ProviderProxy {
   async close(): Promise<void> {
     if (!this.started || this.stopped) return;
     this.stopped = true;
+    for (const socket of this.pendingUpgrades) socket.destroy();
     const quotaRefreshes = [...this.quotaRefreshByAccount.values()];
     for (const refresh of quotaRefreshes) refresh.controller.abort();
     for (const client of this.websocketServer.clients) client.terminate();
@@ -259,7 +268,9 @@ export class ProviderProxy {
     await this.trafficDump?.close();
   }
 
-  private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
+  private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const startedAtMonotonicMs = performance.now();
+    const startedAtMs = Date.now();
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -275,17 +286,53 @@ export class ProviderProxy {
       rejectUnsupportedPath(response);
       return;
     }
-    const upstreamTarget = this.upstreamFor(request.headers);
+    let upstreamTarget: ProviderProxyUpstream;
+    const onPendingError = () => response.destroy();
+    request.on("error", onPendingError);
+    request.once("close", () => request.removeListener("error", onPendingError));
+    try {
+      upstreamTarget = await this.upstreamFor(request.headers);
+    } catch (error) {
+      const failedAtMonotonicMs = performance.now();
+      if (this.stopped || response.destroyed) return;
+      request.resume();
+      const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
+      const metrics = createMetricsState(metadata, startedAtMs, "http",
+        responseOperation(route, metadata.operation),
+        effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs, startedAtMonotonicMs);
+      metrics.httpStatus = 502;
+      if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+      markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
+      const exchange = this.trafficDump?.beginHttpExchange({
+        ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+        headers: request.headers, method: request.method ?? "GET",
+        path: request.url ?? "", startedAtMs, startedAtMonotonicMs,
+      });
+      exchange?.responseHead(502, {});
+      exchange?.observeRequestMetrics(metrics);
+      exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
+      if (route.kind === "response" || route.kind === "compact") {
+        await this.deliverMetrics(metrics, route.accountId);
+      }
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { type: "provider_proxy_route_error" } }));
+      this.onError?.(asError(error));
+      return;
+    }
+    request.removeListener("error", onPendingError);
+    if (this.stopped || response.destroyed) return;
+    const forwardingStartedAtMonotonicMs = performance.now();
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
-    const startedAtMs = Date.now();
     const metrics = createMetricsState(
       turnMetadata,
       startedAtMs,
       "http",
       responseOperation(route, turnMetadata.operation),
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+      forwardingStartedAtMonotonicMs,
+      startedAtMonotonicMs,
     );
     const exchange = this.trafficDump?.beginHttpExchange({
       ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
@@ -293,7 +340,12 @@ export class ProviderProxy {
       method: request.method ?? "GET",
       path: request.url ?? "",
       startedAtMs,
+      startedAtMonotonicMs,
     });
+    exchange?.callTiming?.forwarding(forwardingStartedAtMonotonicMs);
+    exchange?.observeRequestMetrics(metrics);
+    const requestModelScanner = createTopLevelStringFieldScanner("model");
+    const requestModelDecoder = new StringDecoder("utf8");
     if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
     }
@@ -321,6 +373,7 @@ export class ProviderProxy {
         this.upstreamUserAgent,
       ),
     }, (upstreamResponse) => {
+      exchange?.callTiming?.responseHead(performance.now());
       metrics.httpStatus = upstreamResponse.statusCode ?? null;
       metrics.responseFormat = httpResponseFormat(upstreamResponse.headers["content-type"]);
       metrics.weeklyQuota = weeklyQuotaFromHeaders(upstreamResponse.headers);
@@ -332,8 +385,10 @@ export class ProviderProxy {
       const metricsObserver = new HttpResponseMetricsObserver(metrics);
       let forwarding = Promise.resolve();
       upstreamResponse.on("data", (chunk: Buffer) => {
+        const receivedAtMonotonicMs = performance.now();
+        const receivedAtMs = Date.now();
         exchange?.responseChunk(chunk);
-        const completed = metricsObserver.observeChunk(chunk, Date.now());
+        const completed = metricsObserver.observeChunk(chunk, receivedAtMs, receivedAtMonotonicMs);
         if (!completed) {
           if (!response.write(chunk)) {
             upstreamResponse.pause();
@@ -353,9 +408,10 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("end", () => {
+        const endedAtMonotonicMs = performance.now();
         const endedAtMs = Date.now();
-        const completed = metricsObserver.finish(endedAtMs);
-        exchange?.responseEnd();
+        const completed = metricsObserver.finish(endedAtMs, endedAtMonotonicMs);
+        exchange?.responseEnd(endedAtMonotonicMs);
         forwarding = forwarding.then(async () => {
           if (completed || recordsResponseMetrics) await emitMetrics();
           response.end();
@@ -365,12 +421,13 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("error", (error) => {
+        const failedAtMonotonicMs = performance.now();
         if (metrics.status === "completed" && isExpectedStreamAbort(error)) {
           response.destroy();
           return;
         }
-        exchange?.failure("upstream_response", error);
-        markMetricsFailed(metrics, "upstream_response_error", Date.now(), error);
+        markMetricsFailed(metrics, "upstream_response_error", Date.now(), error, failedAtMonotonicMs);
+        exchange?.failure("upstream_response", error, failedAtMonotonicMs);
         void emitMetrics();
         response.destroy();
         this.onError?.(asError(error));
@@ -380,8 +437,9 @@ export class ProviderProxy {
       upstream.destroy(new Error(`模型上游响应超时：${this.timeoutMs}ms`));
     });
     upstream.on("error", (error) => {
-      exchange?.failure("upstream_request", error);
-      markMetricsFailed(metrics, "upstream_request_error", Date.now(), error);
+      const failedAtMonotonicMs = performance.now();
+      markMetricsFailed(metrics, "upstream_request_error", Date.now(), error, failedAtMonotonicMs);
+      exchange?.failure("upstream_request", error, failedAtMonotonicMs);
       void emitMetrics();
       if (!response.headersSent) {
         response.writeHead(502, { "content-type": "application/json" });
@@ -392,33 +450,48 @@ export class ProviderProxy {
       this.onError?.(asError(error));
     });
     request.on("error", (error) => {
-      exchange?.failure("client_request", error);
-      markMetricsFailed(metrics, "client_request_error", Date.now(), error);
+      const failedAtMonotonicMs = performance.now();
+      markMetricsFailed(metrics, "client_request_error", Date.now(), error, failedAtMonotonicMs);
+      exchange?.failure("client_request", error, failedAtMonotonicMs);
       void emitMetrics();
       upstream.destroy();
       this.onError?.(asError(error));
       response.destroy();
     });
     response.on("close", () => {
+      const closedAtMonotonicMs = performance.now();
       if (!response.writableEnded) {
-        exchange?.failure("client_disconnected");
         if (metrics.status !== "completed") {
-          markMetricsFailed(metrics, "client_disconnected", Date.now());
+          markMetricsFailed(metrics, "client_disconnected", Date.now(), undefined, closedAtMonotonicMs);
+          exchange?.failure("client_disconnected", undefined, closedAtMonotonicMs);
           void emitMetrics();
+        } else {
+          exchange?.failure("client_disconnected", undefined, closedAtMonotonicMs);
         }
         upstream.destroy();
       }
     });
-    request.on("data", (chunk: Buffer) => exchange?.requestChunk(chunk));
-    request.on("end", () => exchange?.requestEnd());
+    request.on("data", (chunk: Buffer) => {
+      scanTopLevelStringField(requestModelScanner, requestModelDecoder.write(chunk));
+      metrics.requestModel = boundedString(requestModelScanner.value);
+      exchange?.requestChunk(chunk);
+    });
+    request.on("end", () => {
+      exchange?.callTiming?.requestBodyEnd(performance.now());
+      scanTopLevelStringField(requestModelScanner, requestModelDecoder.end());
+      metrics.requestModel = boundedString(requestModelScanner.value);
+      exchange?.requestEnd();
+    });
     request.pipe(upstream);
   }
 
-  private handleWebSocketUpgrade(
+  private async handleWebSocketUpgrade(
     request: IncomingMessage,
     socket: Duplex,
     head: Buffer,
-  ): void {
+  ): Promise<void> {
+    const startedAtMs = Date.now();
+    const startedAtMonotonicMs = performance.now();
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -435,11 +508,45 @@ export class ProviderProxy {
       socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       return;
     }
+    let target: ProviderProxyUpstream;
+    const onPendingError = () => socket.destroy();
+    socket.on("error", onPendingError);
+    socket.once("close", () => socket.removeListener("error", onPendingError));
+    this.pendingUpgrades.add(socket);
+    try {
+      target = await this.upstreamFor(request.headers);
+    } catch (error) {
+      if (this.stopped || socket.destroyed) return;
+      const exchange = this.trafficDump?.beginWebSocketExchange({
+        ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
+        headers: request.headers, startedAtMs, url: request.url ?? "",
+      });
+      exchange?.failure("upstream_route");
+      if (recordsResponseMetrics) {
+        const metrics = createMetricsState(
+          { threadId: null, turnId: null, operation: "response" }, startedAtMs,
+          "websocket", "response",
+          effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs,
+        );
+        metrics.httpStatus = 502;
+        if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
+        markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
+        await this.deliverMetrics(metrics, route.accountId);
+      }
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      this.onError?.(asError(error));
+      return;
+    } finally {
+      this.pendingUpgrades.delete(socket);
+    }
+    if (this.stopped || socket.destroyed) return;
+    socket.removeListener("error", onPendingError);
     this.websocketServer.handleUpgrade(request, socket, head, (client) => {
       this.proxyWebSocket(
         request,
         client,
         route,
+        target,
         recordsResponseMetrics,
       );
     });
@@ -449,9 +556,9 @@ export class ProviderProxy {
     request: IncomingMessage,
     client: WebSocket,
     route: ResolvedProxyRoute,
+    target: ProviderProxyUpstream,
     recordsResponseMetrics = true,
   ): void {
-    const target = this.upstreamFor(request.headers);
     const scheme = target.protocol === "https" ? "wss" : "ws";
     const port = target.port === undefined ? "" : `:${target.port}`;
     const url = `${scheme}://${target.host}${port}${upstreamWebSocketPath(
@@ -479,7 +586,7 @@ export class ProviderProxy {
       ),
       handshakeTimeout: this.timeoutMs,
     });
-    const pending: Array<{ data: RawData | string; isBinary: boolean }> = [];
+    const pending: Array<{ data: RawData | string; isBinary: boolean; timing: TrafficCallTiming | undefined }> = [];
     let activeMetrics: MetricsState | undefined;
     let forwarding: Promise<void> | undefined;
     const failForwarding = (error: unknown): void => {
@@ -495,10 +602,14 @@ export class ProviderProxy {
     };
 
     client.on("message", (data, isBinary) => {
-      exchange?.webSocketFrame("client", data, isBinary);
+      const receivedAtMonotonicMs = performance.now();
+      exchange?.webSocketFrame("client", data, isBinary, receivedAtMonotonicMs);
       const sanitized = recordsResponseMetrics
         ? sanitizeClientWebSocketMessage(data, isBinary)
         : { data };
+      const startedAtMonotonicMs = performance.now();
+      const callTiming = sanitized.metadata ? exchange?.callTiming : undefined;
+      callTiming?.forwarding(startedAtMonotonicMs, upstream.readyState === WebSocket.OPEN);
       if (sanitized.metadata) {
         activeMetrics = sanitized.recordsMetrics === false
           ? undefined
@@ -508,9 +619,13 @@ export class ProviderProxy {
               "websocket",
               sanitized.metadata.operation,
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+              startedAtMonotonicMs,
+              receivedAtMonotonicMs,
             );
         if (activeMetrics) {
           activeMetrics.model = sanitized.model ?? null;
+          activeMetrics.requestModel = sanitized.model ?? null;
+          exchange?.observeRequestMetrics(activeMetrics);
           activeMetrics.serviceTier = sanitized.serviceTier ?? null;
           activeMetrics.reasoningEffort = sanitized.reasoningEffort
             ?? (route.externalRole
@@ -519,20 +634,23 @@ export class ProviderProxy {
         }
       }
       if (upstream.readyState === WebSocket.OPEN) {
+        callTiming?.submitted(performance.now());
         upstream.send(sanitized.data, { binary: isBinary });
       } else if (upstream.readyState === WebSocket.CONNECTING) {
-        pending.push({ data: sanitized.data, isBinary });
+        pending.push({ data: sanitized.data, isBinary, timing: callTiming });
       }
     });
     upstream.on("open", () => {
       for (const message of pending.splice(0)) {
+        message.timing?.submitted(performance.now());
         upstream.send(message.data, { binary: message.isBinary });
       }
     });
     upstream.on("unexpected-response", (_request, response) => {
+      const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       const statusCode = response.statusCode ?? 502;
-      exchange?.failure("upstream_handshake", `HTTP ${statusCode}`);
+      exchange?.failure("upstream_handshake", `HTTP ${statusCode}`, receivedAtMonotonicMs);
       if (!recordsResponseMetrics) {
         response.resume();
         client.terminate();
@@ -541,7 +659,7 @@ export class ProviderProxy {
       }
       if (activeMetrics) {
         activeMetrics.httpStatus = statusCode;
-        markMetricsFailed(activeMetrics, "upstream_handshake_error", Date.now());
+        markMetricsFailed(activeMetrics, "upstream_handshake_error", receivedAtMs, undefined, receivedAtMonotonicMs);
         activeMetrics.responseCompletedAtMs = receivedAtMs;
         void this.deliverMetrics(activeMetrics, route.accountId);
         activeMetrics = undefined;
@@ -552,6 +670,7 @@ export class ProviderProxy {
           "websocket",
           "response",
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
+          receivedAtMonotonicMs,
         );
         if (route.externalRole) {
           fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -566,22 +685,23 @@ export class ProviderProxy {
       upstream.terminate();
     });
     upstream.on("message", (data, isBinary) => {
-      exchange?.webSocketFrame("upstream", data, isBinary);
+      const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       let completedMetrics: MetricsState | undefined;
       if (!isBinary && activeMetrics) {
         const currentMetrics = activeMetrics;
         const text = rawDataText(data);
-        const observed = inspectResponseEvent(text);
+        const observed = inspectResponseEvent(text, "", currentMetrics.firstContentMs === undefined);
         const { type, event: parsed } = observed;
         if (type === "codex.rate_limits") {
           currentMetrics.weeklyQuota = weeklyQuotaFromEvent(parsed);
         }
-        if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs)) {
+        if (observeResponseEvent(currentMetrics, type, parsed, receivedAtMs, receivedAtMonotonicMs)) {
           activeMetrics = undefined;
           completedMetrics = currentMetrics;
         }
       }
+      exchange?.webSocketFrame("upstream", data, isBinary, receivedAtMonotonicMs);
       if (!completedMetrics && !forwarding) {
         forwardImmediately(data, isBinary);
         return;
@@ -607,24 +727,30 @@ export class ProviderProxy {
       else if (peer.readyState === WebSocket.CONNECTING) peer.terminate();
     };
     let failureType: "websocket_closed" | "client_disconnected" | undefined;
+    let failureAtMonotonicMs: number;
     const noteFailureType = (
       type: "websocket_closed" | "client_disconnected",
+      at: number,
     ): void => {
-      failureType ??= type;
+      if (failureType !== undefined) return;
+      failureType = type;
+      failureAtMonotonicMs = at;
     };
     client.on("close", (code, reason) => {
-      noteFailureType("client_disconnected");
-      exchange?.webSocketClose("client", code, reason);
+      const closedAtMonotonicMs = performance.now();
+      noteFailureType("client_disconnected", closedAtMonotonicMs);
+      exchange?.webSocketClose("client", code, reason, closedAtMonotonicMs);
       closePeer(upstream, code, reason);
     });
     upstream.on("close", (code, reason) => {
-      noteFailureType("websocket_closed");
-      exchange?.webSocketClose("upstream", code, reason);
+      const closedAtMonotonicMs = performance.now();
+      noteFailureType("websocket_closed", closedAtMonotonicMs);
+      exchange?.webSocketClose("upstream", code, reason, closedAtMonotonicMs);
       closePeer(client, code, reason);
       if (!activeMetrics) return;
       const reasonType = websocketCloseErrorType(reason);
       if (reasonType) {
-        markMetricsFailed(activeMetrics, "websocket_closed", Date.now());
+        markMetricsFailed(activeMetrics, "websocket_closed", Date.now(), undefined, failureAtMonotonicMs);
         activeMetrics.errorType = reasonType;
         activeMetrics.errorMessage = boundedMessage(reason.toString("utf8"));
       } else {
@@ -632,26 +758,30 @@ export class ProviderProxy {
           activeMetrics,
           failureType ?? "websocket_closed",
           Date.now(),
+          undefined,
+          failureAtMonotonicMs,
         );
       }
       void this.deliverMetrics(activeMetrics, route.accountId);
       activeMetrics = undefined;
     });
     client.on("error", (error) => {
-      noteFailureType("client_disconnected");
-      exchange?.failure("client_error", error);
+      const failedAtMonotonicMs = performance.now();
+      noteFailureType("client_disconnected", failedAtMonotonicMs);
+      exchange?.failure("client_error", error, failureAtMonotonicMs);
       this.onError?.(asError(error));
       upstream.terminate();
     });
     upstream.on("error", (error) => {
-      noteFailureType("websocket_closed");
-      exchange?.failure("upstream_error", error);
+      const failedAtMonotonicMs = performance.now();
+      noteFailureType("websocket_closed", failedAtMonotonicMs);
+      exchange?.failure("upstream_error", error, failureAtMonotonicMs);
       this.onError?.(asError(error));
       client.terminate();
     });
   }
 
-  private upstreamFor(headers: IncomingHttpHeaders): ProviderProxyUpstream {
+  private async upstreamFor(headers: IncomingHttpHeaders): Promise<ProviderProxyUpstream> {
     return this.resolveUpstream?.(headers) ?? this.defaultUpstream;
   }
 

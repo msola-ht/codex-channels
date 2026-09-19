@@ -71,6 +71,93 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("keeps an exact model selection bound to its provider after browsing is cleared", async () => {
+    let blocked = new Set<string>();
+    const newSession = vi.fn(async () => undefined);
+    const codex = {
+      listModels: async () => models, writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null, readDefaultServiceTier: async () => null,
+    };
+    const router = { modelSettings: () => undefined, workspace: () => ({ cwd: "/workspace" }), newSession } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, "gpt-main", [
+      { ...model("shared", ["high"], "high"), provider: "ocg-a" },
+      { ...model("shared", ["high"], "high"), provider: "ocg-b" },
+    ], "openai", [], () => true, () => blocked);
+    await service.browseProvider(target, "ocg-a");
+    blocked = new Set(["ocg-a"]);
+    await service.state(target);
+    await expect(service.selectModel(target, { provider: "ocg-a", model: "shared" }))
+      .rejects.toMatchObject({ code: "model.selection.expired" });
+    expect(newSession).not.toHaveBeenCalled();
+    expect(service.turnOverrides(target)).toEqual({});
+    await expect(service.selectModel(target, { provider: "ocg-b", model: "shared" }))
+      .resolves.toMatchObject({ modelProvider: "ocg-b", model: "shared" });
+  });
+
+  it("rechecks subscription after awaiting provider settings and before changing sessions", async () => {
+    const blocked = new Set<string>();
+    const newSession = vi.fn(async () => undefined);
+    const codex = {
+      listModels: async () => models, writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => { blocked.add("ocg-a"); return null; },
+      readDefaultServiceTier: async () => null,
+    };
+    const router = { modelSettings: () => undefined, workspace: () => ({ cwd: "/workspace" }), newSession } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, "gpt-main", [
+      { ...model("shared", ["high"], "high"), provider: "ocg-a" },
+    ], "openai", [], () => true, () => blocked);
+    await expect(service.selectModel(target, "shared")).rejects.toMatchObject({ code: "model.selection.expired" });
+    expect(newSession).not.toHaveBeenCalled();
+    expect(service.turnOverrides(target)).toEqual({});
+  });
+
+  it("hides unsubscribed accounts from browsing and selection without changing the current model", async () => {
+    const newSession = vi.fn(async () => undefined);
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = {
+      current: () => ({ threadId: "existing" }),
+      modelSettings: () => ({ model: "go-model", modelProvider: "ocg-old", effort: "high", serviceTier: null }),
+      newSession,
+      workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    let blocked = new Set<string>();
+    const service = new ModelSelectionService(codex, router, "gpt-main", [
+      { ...model("go-model", ["high"], "high"), id: "ocg-old/go-model", provider: "ocg-old" },
+      { ...model("go-model", ["high"], "high"), id: "ocg-other/go-model", provider: "ocg-other" },
+    ], "openai", [], () => true, () => blocked);
+    await service.browseProvider(target, "ocg-old");
+    blocked = new Set(["ocg-old"]);
+    const state = await service.state(target);
+    expect(state.providerFilter).toBeUndefined();
+    expect(state.modelProvider).toBe("ocg-old");
+    expect(state.models.some((item) => item.provider === "ocg-old")).toBe(false);
+    expect(state.models.some((item) => item.provider === "ocg-other")).toBe(true);
+    await expect(service.browseProvider(target, "ocg-old")).rejects.toMatchObject({ code: "model.provider.not-found" });
+    await expect(service.selectModel(target, "ocg-old/go-model")).rejects.toMatchObject({ code: "model.selector.not-found" });
+    await expect(service.requireInputModality(target, "text")).resolves.toBeUndefined();
+    expect(newSession).not.toHaveBeenCalled();
+    blocked = new Set();
+    expect((await service.state(target)).models.some((item) => item.provider === "ocg-old")).toBe(true);
+    await expect(service.selectModel(target, "ocg-old/go-model")).resolves.toMatchObject({ modelProvider: "ocg-old" });
+  });
+
+  it("returns an empty selection list when the fixed primary account has no subscription", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => "default",
+    } satisfies ModelSelectionPort;
+    const router = { current: () => undefined, modelSettings: () => undefined } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, "gpt-main", [], "ocg-only", [], () => false, () => new Set(["ocg-only"]));
+    expect(await service.state(target)).toMatchObject({ models: [], model: "gpt-main", modelProvider: "ocg-only" });
+    await expect(service.selectModel(target, "1")).rejects.toMatchObject({ code: "model.selector.not-found" });
+  });
   it("uses the configured primary Provider as the default before any selection", async () => {
     const codex = {
       listModels: async () => models,

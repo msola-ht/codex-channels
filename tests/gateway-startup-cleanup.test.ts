@@ -174,6 +174,27 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it("cancels connectivity before waiting for startup to settle", async () => {
+    const controller = new AbortController();
+    let settle!: () => void;
+    const startup = new Promise<void>((resolve) => { settle = resolve; });
+    const application = createGatewayApplicationFixture({
+      openAiConnectivityAbort: controller,
+      startTask: startup,
+      startupSettled: false,
+      bindingRestoreCoordinator: () => ({ close: () => undefined }),
+      codex: { close: async () => undefined },
+      shutdownComponents: async () => undefined,
+    });
+    const stopping = application.stop();
+    try {
+      expect(controller.signal.aborted).toBe(true);
+    } finally {
+      settle();
+      await stopping;
+    }
+  });
+
   it("skips idle release for a binding while its Provider is disconnected", () => {
     const application = createGatewayApplicationFixture({
       codex: { knownProvider: () => "deepseek" },

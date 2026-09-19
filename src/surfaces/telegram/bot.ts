@@ -426,10 +426,7 @@ export class TelegramSurface {
         const modelTarget = target(context);
         const state = await this.service.modelState(modelTarget);
         if (
-          telegramModelSelectionToken(
-            state.model,
-            state.modelProvider ?? "openai",
-          ) !== context.match[2]
+          telegramModelSelectionToken(state) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -465,10 +462,7 @@ export class TelegramSurface {
         const modelTarget = target(context);
         const state = await this.service.modelState(modelTarget);
         if (
-          telegramModelSelectionToken(
-            state.model,
-            state.modelProvider ?? "openai",
-          ) !== context.match[2]
+          telegramModelSelectionToken(state) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",
@@ -486,11 +480,10 @@ export class TelegramSurface {
         await context.editMessageReplyMarkup({
           reply_markup: { inline_keyboard: [] },
         });
-        const result = await this.commands.execute(
-          modelTarget,
-          "model",
-          selected.id,
-        );
+        const result = await this.commands.selectModel(modelTarget, {
+          provider: selected.provider ?? "openai",
+          model: selected.model,
+        });
         await renderTelegramCommandResult(
           context,
           result,
@@ -503,10 +496,7 @@ export class TelegramSurface {
         const modelTarget = target(context);
         const state = await this.service.modelState(modelTarget);
         if (
-          telegramModelSelectionToken(
-            state.model,
-            state.modelProvider ?? "openai",
-          ) !== context.match[2]
+          telegramModelSelectionToken(state) !== context.match[2]
         ) {
           throw new UserFacingError(
             "model.selection.expired",

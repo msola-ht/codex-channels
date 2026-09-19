@@ -288,12 +288,12 @@ function applySetting(document, input) {
       return changed(value, "restart-gateway");
     }
     case "system.model-traffic-dump": {
-      const value = booleanValue(input.value, "value", "模型请求转储");
+      const value = booleanValue(input.value, "value", "调用详情记录");
       document.debug = { ...table(document.debug), model_traffic_dump: value };
       return changed(value, "restart-app-server");
     }
     case "system.model-traffic-retention-days": {
-      const value = integerValue(input.value, 0, 36_500, "value", "模型请求转储保留天数");
+      const value = integerValue(input.value, 0, 36_500, "value", "调用记录保留天数");
       document.debug = { ...table(document.debug), model_traffic_retention_days: value };
       return changed(value, "restart-app-server");
     }

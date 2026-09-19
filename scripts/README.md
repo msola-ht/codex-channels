@@ -8,7 +8,8 @@
   独立项目命令提供不修改配置权限的必需/可选路径定位，可选定位只把文件不存在视为未初始化，
   但显式指定的配置文件缺失及其他文件系统错误仍失败；启动与写入流程显式收紧目录和配置文件权限。
 - `runtime-environment.mjs`：在已定位的用户配置上统一装配 Gateway、App Server 与管理脚本使用的
-  `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；需要在配置损坏时仍可运行的服务恢复
+  `CODEX_CONNECT_HOME`、配置路径、Codex 可执行文件和代理环境；同时保留未合并系统代理的环境，供
+  前台监管与 Gateway 服务子进程自行解析，避免自动发现结果变成固定环境覆盖。需要在配置损坏时仍可运行的服务恢复
   命令使用独立的最小控制环境。
 - `desktop-app-command.mjs` / `desktop-app-command.d.mts`：实现公开 `codexc desktop-app` 的严格
   参数、只读状态、macOS ChatGPT Bundle 与 Windows 当前用户 `OpenAI.Codex` 包兼容探测、配置
@@ -87,8 +88,8 @@
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v14
-  检查点回写、私有备份后，在单一事务中重建为 v15；模型请求记录只复制当前保留字段，新增上游 TTFT 为 NULL，删除旧价格、
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v17
+  检查点回写、私有备份后，在单一事务中重建为 v18；模型请求记录只复制当前保留字段，新增字段为 NULL，保留已有耗时与模型名称，转储关联不按历史时间猜配，删除旧价格、
   成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
   `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
@@ -113,7 +114,7 @@
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
-  以及 Markdown/CSV 转义；紧凑数字格式复用 Surface 导出。
+  以及 Markdown/CSV 转义；紧凑数字和自适应耗时格式复用 Surface 纯函数导出，JSON/CSV 的毫秒数值不转换。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
@@ -129,7 +130,7 @@
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
-  响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位。
+  响应；默认跨批次按请求时间倒序分页，支持单批次筛选，明细按批次与编号定位，指标关联目标缺失时明确报错，不替换目标。
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
@@ -506,8 +507,8 @@
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。正文和独立 trace
   均有界读取，旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
-- `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误；从终态或
-  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，不回写转储。
+- `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
+  独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
 
 ## 构建、打包与服务
 

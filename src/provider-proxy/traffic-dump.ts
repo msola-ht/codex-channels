@@ -1,8 +1,10 @@
 import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders } from "node:http";
+import { TrafficCallTiming } from "./traffic-call-timing.js";
 import { StringDecoder } from "node:string_decoder";
 
 import type { RawData } from "ws";
+import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
 
 import {
   BodyAccumulator,
@@ -53,6 +55,7 @@ export interface ModelTrafficDumpOptions {
 }
 
 export interface ModelTrafficHttpExchangeInput {
+  startedAtMonotonicMs?: number;
   accountId?: string;
   headers: IncomingHttpHeaders;
   method: string;
@@ -101,6 +104,7 @@ export class ModelTrafficDump {
   beginHttpExchange(input: ModelTrafficHttpExchangeInput): ModelTrafficExchange {
     const session = this.storage.beginLogicalInteraction(input.startedAtMs);
     const exchange = this.createExchange(input, "http", session);
+    if (input.startedAtMonotonicMs !== undefined) exchange.callTiming = new TrafficCallTiming(input.startedAtMonotonicMs);
     exchange.write({
       kind: "request_head",
       method: input.method,
@@ -152,6 +156,7 @@ export class ModelTrafficDump {
       (target) => this.storage.nextInteractionId(target),
       (startedAtMs) => this.storage.beginLogicalInteraction(startedAtMs),
       (target) => this.storage.completeLogicalInteraction(target),
+      (target, id) => this.storage.reference(target, id),
       this.inputItems,
       this.itemMaxBytes,
     );
@@ -160,6 +165,19 @@ export class ModelTrafficDump {
 
 /** 单次 HTTP 交换或 WebSocket 连接；V2 索引按逻辑模型调用记录请求与终态响应。 */
 export class ModelTrafficExchange {
+  callTiming: TrafficCallTiming | undefined;
+  private requestMetrics: { firstContentMs?: number; totalDurationMs?: number } | undefined;
+
+  /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首内容时间。 */
+  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstContentMs" | "totalDurationMs" | "traffic">): void {
+    this.requestMetrics = metrics;
+    const interaction = this.transport === "http"
+      ? this.httpInteractionId : this.activeWebSocket?.id;
+    if (interaction !== undefined) {
+      const reference = this.trafficReference(this.activeWebSocket?.session ?? this.initialSession, interaction);
+      if (reference !== undefined) metrics.traffic = reference;
+    }
+  }
   private readonly requestBody: BodyAccumulator;
   private readonly responseBody: BodyAccumulator;
   private readonly partNumbers = new Map<string, number>();
@@ -225,6 +243,7 @@ export class ModelTrafficExchange {
     private readonly nextInteractionId: (session: TrafficDumpSession) => number,
     private readonly beginLogicalInteraction: (startedAtMs: number) => TrafficDumpSession,
     private readonly completeLogicalInteraction: (session: TrafficDumpSession) => void,
+    private readonly trafficReference: (session: TrafficDumpSession, id: number) => ProviderProxyMetrics["traffic"],
     private readonly inputItems: number,
     private readonly itemMaxBytes: number,
   ) {
@@ -292,7 +311,7 @@ export class ModelTrafficExchange {
     this.responseBody.append(chunk);
   }
 
-  responseEnd(): void {
+  responseEnd(endedAtMonotonicMs = performance.now()): void {
     this.finishResponseModel();
     this.sseTerminal.end();
     if (this.sseTerminal.sawResponseEvent) this.responseIsSse = true;
@@ -302,13 +321,14 @@ export class ModelTrafficExchange {
       bytes: this.responseBytes,
       durationMs: Date.now() - this.prefix.startedAtMs,
     });
-    this.recordHttpResponse();
+    this.recordHttpResponse(undefined, undefined, undefined, endedAtMonotonicMs);
   }
 
   webSocketFrame(
     direction: "client" | "upstream",
     data: RawData,
     isBinary: boolean,
+    receivedAtMonotonicMs?: number,
   ): void {
     const buffer = rawDataBuffer(data);
     if (!isBinary) {
@@ -316,7 +336,9 @@ export class ModelTrafficExchange {
       const parsed = parseJsonValue(text);
       let interaction = this.activeWebSocket?.id;
       if (direction === "client" && eventTypeOf(parsed) === "response.create") {
-        this.completeActiveWebSocket("incomplete", "superseded_by_next_request");
+        this.completeActiveWebSocket("incomplete", "superseded_by_next_request", undefined, undefined, receivedAtMonotonicMs);
+        this.callTiming = receivedAtMonotonicMs === undefined ? undefined : new TrafficCallTiming(receivedAtMonotonicMs);
+        this.requestMetrics = undefined;
         this.responseModels = [];
         const startedAtMs = Date.now();
         const session = this.beginLogicalInteraction(startedAtMs);
@@ -354,7 +376,7 @@ export class ModelTrafficExchange {
       });
       if (direction === "upstream" && isTerminalResponseType(eventTypeOf(parsed))) {
         this.responseModels = responseModelsOf(parsed);
-        this.completeActiveWebSocket(responseStateOf(eventTypeOf(parsed)), undefined, text);
+        this.completeActiveWebSocket(responseStateOf(eventTypeOf(parsed)), undefined, text, undefined, receivedAtMonotonicMs);
       }
       return;
     }
@@ -378,6 +400,7 @@ export class ModelTrafficExchange {
     peer: "client" | "upstream",
     code: number,
     reason: Buffer,
+    endedAtMonotonicMs = performance.now(),
   ): void {
     const text = reason.toString("utf8");
     this.write({
@@ -386,10 +409,10 @@ export class ModelTrafficExchange {
       code,
       ...(text.length === 0 ? {} : { reason: text.slice(0, 512) }),
     });
-    this.completeActiveWebSocket("incomplete", `websocket_${peer}_closed`);
+    this.completeActiveWebSocket("incomplete", `websocket_${peer}_closed`, undefined, undefined, endedAtMonotonicMs);
   }
 
-  failure(scope: string, error?: unknown): void {
+  failure(scope: string, error?: unknown, endedAtMonotonicMs = performance.now()): void {
     if (this.failureRecorded) return;
     this.failureRecorded = true;
     this.finishRequestModel();
@@ -403,9 +426,9 @@ export class ModelTrafficExchange {
     });
     if (this.transport === "http") {
       this.recordHttpRequest();
-      this.recordHttpResponse("failed", scope, error);
+      this.recordHttpResponse("failed", scope, error, endedAtMonotonicMs);
     } else {
-      this.completeActiveWebSocket("failed", scope, undefined, error);
+      this.completeActiveWebSocket("failed", scope, undefined, error, endedAtMonotonicMs);
     }
   }
 
@@ -502,6 +525,7 @@ export class ModelTrafficExchange {
     forcedState?: "failed" | "incomplete",
     errorScope?: string,
     error?: unknown,
+    endedAtMonotonicMs = performance.now(),
   ): void {
     if (this.transport !== "http" || this.responseRecorded) return;
     this.responseRecorded = true;
@@ -527,7 +551,9 @@ export class ModelTrafficExchange {
       headers: this.responseHeadRecord?.headers ?? {},
       bytes: this.responseBytes,
       durationMs: Date.now() - this.prefix.startedAtMs,
+      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstContentMs, this.requestMetrics?.totalDurationMs) }),
       ...(terminal === undefined ? {} : { eventType: terminal.type }),
+      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
@@ -543,6 +569,7 @@ export class ModelTrafficExchange {
     errorScope?: string,
     text?: string,
     error?: unknown,
+    endedAtMonotonicMs = performance.now(),
   ): void {
     const active = this.activeWebSocket;
     if (active === undefined) return;
@@ -557,6 +584,8 @@ export class ModelTrafficExchange {
       transport: "websocket",
       state,
       durationMs: Date.now() - active.startedAtMs,
+      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstContentMs, this.requestMetrics?.totalDurationMs) }),
+      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload: payloadOf(compacted === undefined

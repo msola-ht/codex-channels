@@ -15,10 +15,12 @@ import { describe, expect, it } from "vitest";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, signalTestProcessTree, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
+const contractTest = runContract ? it : it.skip;
 const deepseekCatalogContractTest = runContract ? it : it.skip;
 
 describe("real App Server test process cleanup", () => {
@@ -98,6 +100,69 @@ describe("real App Server test process cleanup", () => {
   );
 });
 
+contractTest(
+  "reads the no-login OpenAI account route without refreshing credentials",
+  async () => {
+    const runtimeRoot = resolve(".runtime");
+    mkdirSync(runtimeRoot, { recursive: true });
+    const testRuntime = mkdtempSync(join(runtimeRoot, "account-route-contract-"));
+    const codexHome = join(testRuntime, "codex-home");
+    const socketPath = join(testRuntime, "app-server.sock");
+    mkdirSync(codexHome, { recursive: true, mode: 0o700 });
+    writeFileSync(join(codexHome, "config.toml"), "", { mode: 0o600 });
+    let processHandle: ChildProcess | undefined;
+    let appServerStderr = "";
+    let client: CodexAppServerClient | undefined;
+    try {
+      const environment: NodeJS.ProcessEnv = { ...process.env, CODEX_HOME: codexHome };
+      delete environment.OPENAI_API_KEY;
+      processHandle = spawn(
+        process.env.CODEX_BINARY ?? "codex",
+        ["app-server", "--listen", `unix://${socketPath}`],
+        {
+          cwd: process.cwd(),
+          env: environment,
+          stdio: ["ignore", "ignore", "pipe"],
+        },
+      );
+      processHandle.stderr?.setEncoding("utf8");
+      processHandle.stderr?.on("data", (chunk: string) => {
+        appServerStderr = appendDiagnostic(appServerStderr, chunk);
+      });
+      await waitFor(
+        () => existsSync(socketPath),
+        10_000,
+        () => processHandle?.exitCode === null
+          ? undefined
+          : new Error(appServerFailure(
+            "账户线路合同 App Server 启动失败",
+            appServerStderr,
+          )),
+      );
+      client = new CodexAppServerClient(
+        new JsonRpcClient(new UnixWebSocketTransport(socketPath)),
+        { sandbox: "read-only" },
+      );
+      await client.connect();
+
+      await expect(client.openAiAccountRoute()).resolves.toBe("chatgpt");
+    } finally {
+      await client?.close().catch(() => undefined);
+      if (processHandle?.exitCode === null) {
+        processHandle.kill("SIGTERM");
+        await new Promise((resolveExit) => processHandle?.once("exit", resolveExit));
+      }
+      rmSync(testRuntime, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+  },
+  15_000,
+);
+
 deepseekCatalogContractTest(
   "cold-resumes a third-party thread with its provider model catalog",
   async () => {
@@ -110,7 +175,9 @@ deepseekCatalogContractTest(
     const resolvedCatalogPath = deepseekCatalogPath
       ?? join(providerDirectory, "models.json");
     const socketPath = join(testRuntime, "app-server.sock");
+    let upstreamRequests = 0;
     const apiServer = createServer((_request, response) => {
+      upstreamRequests += 1;
       response.writeHead(400, { "content-type": "application/json" });
       response.end(JSON.stringify({
         error: { type: "invalid_request_error", message: "contract failure" },
@@ -124,6 +191,14 @@ deepseekCatalogContractTest(
     if (!apiAddress || typeof apiAddress === "string") {
       throw new Error("DeepSeek 冷恢复合同无法创建本机 API 夹具");
     }
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: async () => {
+        await new Promise<void>((resolveRoute) => setImmediate(resolveRoute));
+        return { host: "127.0.0.1", port: apiAddress.port, protocol: "http" };
+      },
+    });
+    await proxy.start();
     mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
     if (!deepseekCatalogPath) {
@@ -166,7 +241,7 @@ deepseekCatalogContractTest(
         "",
         "[model_providers.deepseek]",
         'name = "deepseek"',
-        `base_url = "http://127.0.0.1:${apiAddress.port}/"`,
+        `base_url = "http://${proxy.address()}/"`,
         'wire_api = "responses"',
         'experimental_bearer_token = "sk-contract-placeholder"',
         "",
@@ -248,6 +323,7 @@ deepseekCatalogContractTest(
         workdir,
       );
       await waitFor(() => turnCompleted, 10_000);
+      expect(upstreamRequests).toBeGreaterThan(0);
       removeNotification();
       await client.close();
       client = undefined;
@@ -269,6 +345,7 @@ deepseekCatalogContractTest(
     } finally {
       await client?.close().catch(() => undefined);
       await stopServer();
+      await proxy.close();
       await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
       rmSync(testRuntime, { recursive: true, force: true });
     }

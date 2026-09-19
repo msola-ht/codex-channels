@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 
 const PROXY_FIELDS = [
   ["http_proxy", "HTTP_PROXY"],
@@ -58,6 +58,81 @@ export function selectHttpProxyUrl(proxy, target, explicitProxy) {
     ? stringValue(proxy.http) || stringValue(proxy.all)
     : stringValue(proxy.https) || stringValue(proxy.http) || stringValue(proxy.all);
   return validateHttpProxyUrl(selected);
+}
+
+export function createRefreshableHttpProxySelector(
+  configured = {},
+  environment = process.env,
+  options = {},
+) {
+  let resolved;
+  let inFlight;
+  let generation = 0;
+  const controller = new AbortController();
+  const platform = options.platform ?? process.platform;
+  const readSystemProxy = options.readSystemProxy ?? optionalSystemProxyAsync;
+  const resolve = async () => {
+    controller.signal.throwIfAborted();
+    if (resolved) return resolved;
+    if (!inFlight) {
+      const currentGeneration = generation;
+      inFlight = (async () => {
+        let needsSystemProxy = false;
+        const explicit = resolveProxyEnvironment(configured, environment, {
+          readSystemProxy: () => { needsSystemProxy = true; return {}; },
+        });
+        const system = needsSystemProxy
+          ? await readSystemProxy(platform, controller.signal)
+          : undefined;
+        controller.signal.throwIfAborted();
+        const result = system === undefined ? explicit : resolveProxyEnvironment(
+          configured, environment, { readSystemProxy: () => system },
+        );
+        if (generation === currentGeneration) resolved = result;
+        return result;
+      })().finally(() => { inFlight = undefined; });
+    }
+    return await inFlight;
+  };
+  const select = async (target, explicitProxy) => {
+    const proxy = await resolve();
+    controller.signal.throwIfAborted();
+    return selectHttpProxyUrl({
+      http: proxy.HTTP_PROXY,
+      https: proxy.HTTPS_PROXY,
+      all: proxy.ALL_PROXY,
+      no: proxy.NO_PROXY,
+    }, target, explicitProxy);
+  };
+  const invalidate = () => {
+    generation += 1;
+    resolved = undefined;
+  };
+  return {
+    async validate(target, explicitProxy) {
+      try {
+        await select(target, explicitProxy);
+      } finally {
+        invalidate();
+      }
+    },
+    select,
+    invalidate,
+    async close() {
+      controller.abort();
+      await inFlight?.catch(() => undefined);
+    },
+  };
+}
+
+async function optionalSystemProxyAsync(platform, signal) {
+  try {
+    return await readSystemProxyAsync(platform, signal);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    // Match startup discovery: system settings are optional (e.g. headless Linux).
+    return {};
+  }
 }
 
 function validateHttpProxyUrl(value) {
@@ -180,6 +255,45 @@ function defaultSystemProxyReader(platform) {
     // System proxy discovery is optional; explicit config and environment remain authoritative.
   }
   return {};
+}
+
+export async function readSystemProxyAsync(platform = process.platform, signal) {
+  signal?.throwIfAborted();
+  const deadline = globalThis.AbortSignal.timeout(2_000);
+  const querySignal = signal ? globalThis.AbortSignal.any([signal, deadline]) : deadline;
+  const runQuery = (executable, args) => new Promise((resolve, reject) => {
+    execFile(executable, args, {
+      encoding: "utf8", signal: querySignal, timeout: 2_000,
+    }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
+  if (platform === "darwin") {
+    return readMacSystemProxy(await runQuery("/usr/sbin/scutil", ["--proxy"]));
+  }
+  if (platform !== "linux") return {};
+  const settings = new Map();
+  const readSetting = async (schema, key) => {
+    const value = await runQuery("gsettings", ["get", schema, key]);
+    settings.set(`${schema}:${key}`, value);
+    return value;
+  };
+  if (unquote(await readSetting("org.gnome.system.proxy", "mode")) !== "manual") return {};
+  try {
+    await readSetting("org.gnome.system.proxy", "use-same-proxy");
+  } catch (error) {
+    if (querySignal.aborted) throw error;
+    // This optional GNOME key is absent on some supported installations.
+    settings.set("org.gnome.system.proxy:use-same-proxy", "false");
+  }
+  const sameProxy = unquote(settings.get("org.gnome.system.proxy:use-same-proxy")) === "true";
+  for (const protocol of sameProxy ? ["http", "socks"] : ["http", "https", "socks"]) {
+    await readSetting(`org.gnome.system.proxy.${protocol}`, "host");
+    await readSetting(`org.gnome.system.proxy.${protocol}`, "port");
+  }
+  await readSetting("org.gnome.system.proxy", "ignore-hosts");
+  return readGnomeSystemProxy((schema, key) => settings.get(`${schema}:${key}`));
 }
 
 function parseKeyValueOutput(output) {

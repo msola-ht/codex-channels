@@ -12,6 +12,9 @@ export const metricStorageColumns = [
   "request_started_at_ms", "response_completed_at_ms", "recorded_at_ms",
   "weekly_quota_limit_id", "weekly_used_percent_millionths", "weekly_resets_at",
   "weekly_quota_plan_type", "quota_windows", "user_agent", "upstream_ttft_ms",
+  "first_content_ms", "request_model", "response_model",
+  "traffic_label", "traffic_session", "traffic_interaction",
+  "total_duration_ms",
 ] as const;
 
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
@@ -57,7 +60,20 @@ export const modelRequestMetricsTableSql = `
     weekly_quota_plan_type TEXT,
     quota_windows TEXT,
     user_agent TEXT,
-    upstream_ttft_ms REAL CHECK (upstream_ttft_ms IS NULL OR upstream_ttft_ms >= 0)
+    upstream_ttft_ms REAL CHECK (upstream_ttft_ms IS NULL OR upstream_ttft_ms >= 0),
+    first_content_ms REAL CHECK (first_content_ms IS NULL OR first_content_ms >= 0),
+    request_model TEXT,
+    response_model TEXT,
+    traffic_label TEXT,
+    traffic_session TEXT,
+    traffic_interaction INTEGER,
+    total_duration_ms REAL CHECK (total_duration_ms IS NULL OR total_duration_ms >= 0),
+    CHECK (
+      (traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
+      OR (traffic_label IS NOT NULL AND length(traffic_label) > 0
+        AND traffic_session IS NOT NULL AND length(traffic_session) > 0
+        AND traffic_interaction IS NOT NULL AND traffic_interaction > 0)
+    )
   );
 `;
 

@@ -11,11 +11,11 @@ import { useMetricsExport } from "@/hooks/use-metrics-export"
 export function RequestsPage() {
   const state = useMetricsQuery("30d")
   const { query, update, sorting, onSortingChange } = state
-  const { data, loading, error } = useRequests(query)
+  const { data, loading, error, refetch } = useRequests(query)
   const exporter = useMetricsExport(query)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-6">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">请求明细</h1>
         <Button variant="outline" disabled={exporter.pending || loading || error !== null} onClick={() => void exporter.download()}>
@@ -23,11 +23,13 @@ export function RequestsPage() {
         </Button>
       </div>
       <QueryFilters query={query} onChange={update} showThreadFilters={false} />
-      <ErrorBanner error={error ?? exporter.error} />
-      {error !== null ? null : loading || data === null ? <PageSkeleton rows={8} /> : (
+      <ErrorBanner error={error} onRetry={refetch} pending={loading} />
+      <ErrorBanner error={exporter.error} onRetry={() => void exporter.download()} pending={exporter.pending || loading || error !== null} />
+      {error !== null ? null : data === null ? <PageSkeleton rows={8} /> : (
         <>
-          <QuerySummary aggregate={data.aggregate} range={data.range} />
+          <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} />
           <RequestsTable
+            loading={loading}
             records={data.records}
             pageNumber={Math.floor(query.offset / query.limit) + 1}
             hasPrevious={query.offset > 0}

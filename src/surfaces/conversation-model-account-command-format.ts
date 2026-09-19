@@ -72,6 +72,12 @@ export function formatConversationModels(
     ].join("\n"));
   }
   const providers = listProviders(state.models);
+  if (providers.length === 0) {
+    return toStructuredMarkdownList([
+      formatModelStateLine(state),
+      "当前没有可选模型。请检查账户配置与订阅状态；续订后可在 WebUI 或当前账户的 /usage 刷新。",
+    ].join("\n"));
+  }
   if (state.providerFilter === undefined && providers.length > 1) {
     const currentProvider = state.modelProvider ?? "openai";
     return toStructuredMarkdownList([
@@ -170,6 +176,9 @@ function formatModelStateLine(
 export function formatConversationUsage(
   result: Extract<ConversationCommandResult, { kind: "usage" }>,
 ): string {
+  if (result.result.kind === "subscription-required") {
+    return `${formatCodexProviderLabel(result.result.provider)} 无有效订阅，可能已到期或尚未开通。请检查订阅状态；续订后可重新执行 /usage 查询。`;
+  }
   if (result.result.kind === "unsupported") {
     return `${formatCodexProviderLabel(result.result.provider)} 仅提供模型请求，不提供账户余额/额度查询。请求次数与 Token 可通过 /metrics 查看。`;
   }
@@ -355,9 +364,10 @@ export function formatConversationLimits(
         : [`消费控制：${limit.spendControlReached ? "已达到上限" : "正常"}`]),
       `限流状态：${formatRateLimitState(limit.rateLimitReachedType)}`,
     ]),
-    ...(result.result.limits.resetCreditsAvailable === null
-      ? []
-      : ["", `可用额度重置券：${result.result.limits.resetCreditsAvailable}`]),
+    ...formatResetCreditLines(
+      result.result.limits.resetCreditsAvailable,
+      result.result.limits.resetCreditExpiresAt,
+    ),
     ...(hasWeeklyWindow
       ? [
           "",
@@ -385,6 +395,49 @@ export function formatConversationLimits(
         ]
       : []),
   ].join("\n"));
+}
+
+function formatResetCreditLines(
+  available: AccountMetric | null,
+  expiresAt: Array<number | null> | null | undefined,
+): string[] {
+  if (available === null) {
+    return [];
+  }
+  const lines = ["", `可用额度重置券：${available}`];
+  if (available === 0 || available === 0n) {
+    return lines;
+  }
+  if (!expiresAt || expiresAt.length === 0) {
+    return [...lines, "重置券到期时间：服务端未提供明细"];
+  }
+
+  const counts = new Map<number | null, number>();
+  for (const timestamp of expiresAt) {
+    counts.set(timestamp, (counts.get(timestamp) ?? 0) + 1);
+  }
+  const entries = [...counts.entries()].sort(([left], [right]) => {
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return left - right;
+  });
+  const detailLines = entries.map(([timestamp, count]) =>
+    `  - ${timestamp === null ? "无到期时间" : formatResetTime(timestamp)}：${count} 张`);
+  const availableCount = accountMetricToBigInt(available);
+  const undisclosedCount = availableCount === null
+    ? 0n
+    : availableCount - BigInt(expiresAt.length);
+  if (undisclosedCount > 0n) {
+    detailLines.push(`  - 其余 ${undisclosedCount} 张：服务端未提供明细`);
+  }
+  return [...lines, "重置券到期时间：", ...detailLines];
+}
+
+function accountMetricToBigInt(value: AccountMetric): bigint | null {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
 }
 
 function formatAccountLimitWindow(

@@ -6,7 +6,6 @@ import {
   createSortedRowModel,
   filterFn_includesString,
   globalFilteringFeature,
-  rowSelectionFeature,
   rowSortingFeature,
   sortFn_alphanumeric,
   sortFn_basic,
@@ -63,12 +62,28 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+
+export function TableHint({ hint, children }: { hint: string; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="inline-flex min-w-0 max-w-full cursor-help focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2">
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="min-w-0 break-all whitespace-normal">{hint}</p></TooltipContent>
+    </Tooltip>
+  )
+}
 
 const dataTableFeatures = tableFeatures({
   columnFilteringFeature,
   columnVisibilityFeature,
   globalFilteringFeature,
-  rowSelectionFeature,
   rowSortingFeature,
   filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
@@ -175,6 +190,8 @@ type DataTablePagination =
     }
 
 export interface DataTableProps<TData extends RowData> {
+  loading?: boolean
+  numericColumnIds?: readonly string[]
   title: string
   description: (info: DataTableDescriptionInfo) => React.ReactNode
   columns: DataTableColumn<TData>[]
@@ -190,6 +207,8 @@ export interface DataTableProps<TData extends RowData> {
 }
 
 export function DataTable<TData extends RowData>({
+  loading = false,
+  numericColumnIds = [],
   title,
   description,
   columns,
@@ -213,7 +232,6 @@ export function DataTable<TData extends RowData>({
     )
   const [globalFilter, setGlobalFilter] =
     usePersistentTableState<string>(storageKey, "filters", "")
-  const [rowSelection, setRowSelection] = React.useState({})
   // 排序只在本次会话内有效，刷新后回到默认（最新时间倒序）；
   // 持久化只保留列展示（columns）与筛选。
   const [clientSorting, setClientSorting] = React.useState<SortingState>(
@@ -243,7 +261,6 @@ export function DataTable<TData extends RowData>({
       sorting,
       columnVisibility,
       globalFilter,
-      rowSelection,
     },
     ...(server
       ? {
@@ -266,7 +283,6 @@ export function DataTable<TData extends RowData>({
         }),
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setGlobalFilter,
-    onRowSelectionChange: setRowSelection,
   })
 
   const queryValue =
@@ -310,20 +326,21 @@ export function DataTable<TData extends RowData>({
   }
 
   return (
-    <Card className="flex min-h-0 flex-1 flex-col">
+    <Card className="flex min-h-min min-w-0 flex-1 flex-col" aria-busy={loading}>
       <CardHeader className="shrink-0">
         <CardTitle>{title}</CardTitle>
-        <CardDescription>
-          {description({
+        <CardDescription className="relative">
+          <span className={cn("block", loading && "invisible")} aria-hidden={loading || undefined}>{description({
             total,
             matched,
             pageSize,
             pageNumber: server ? pagination.pageNumber : currentPage + 1,
             serverTotal: server ? pagination.serverTotal : undefined,
-          })}
+          })}</span>
+          {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner />正在加载…</span> : null}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col gap-4">
+      <CardContent className="grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(10rem,1fr)_auto] gap-4" inert={loading}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
           {server && pagination.onFilterChange === undefined ? null : (
             <div className="flex items-center gap-2">
@@ -374,8 +391,9 @@ export function DataTable<TData extends RowData>({
           </DropdownMenu>
         </div>
 
+        {/* 行数不参与卡片固有高度；网格为表格保留最小视口，为工具栏和分页保留实际高度。 */}
         <div
-          className="min-h-40 min-w-0 flex-1 overflow-y-auto"
+          className="min-h-0 min-w-0 overflow-y-auto [contain:size]"
           style={{ scrollbarWidth: "thin" }}
         >
           <Table>
@@ -383,7 +401,15 @@ export function DataTable<TData extends RowData>({
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id} colSpan={header.colSpan}>
+                    <TableHead
+                      key={header.id}
+                      colSpan={header.colSpan}
+                      className={cn(numericColumnIds.includes(header.column.id) && "text-right [&_button]:ml-0 [&_button]:-mr-2")}
+                      aria-sort={header.column.getCanSort()
+                        ? header.column.getIsSorted() === "asc" ? "ascending"
+                          : header.column.getIsSorted() === "desc" ? "descending" : "none"
+                        : undefined}
+                    >
                       {header.isPlaceholder ? null : (
                         <table.FlexRender header={header} />
                       )}
@@ -393,14 +419,19 @@ export function DataTable<TData extends RowData>({
               ))}
             </TableHeader>
             <TableBody>
-              {pageRows.length > 0 ? (
+              {loading ? Array.from({ length: 5 }, (_, index) => (
+                <TableRow key={index}>
+                  {table.getVisibleLeafColumns().map((column) => (
+                    <TableCell key={column.id}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
+                  ))}
+                </TableRow>
+              )) : pageRows.length > 0 ? (
                 pageRows.map((row) => (
                   <TableRow
                     key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
+                      <TableCell key={cell.id} className={cn(numericColumnIds.includes(cell.column.id) && "text-right tabular-nums")}>
                         <table.FlexRender cell={cell} />
                       </TableCell>
                     ))}
@@ -409,7 +440,7 @@ export function DataTable<TData extends RowData>({
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={columns.length}
+                    colSpan={table.getVisibleLeafColumns().length}
                     className="h-16 text-center text-muted-foreground"
                   >
                     {data.length === 0 ? emptyText : noMatchText}
@@ -422,8 +453,7 @@ export function DataTable<TData extends RowData>({
 
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">
-            已选 {table.getFilteredSelectedRowModel().rows.length} 条 · 匹配{" "}
-            {matched} 条
+            {loading ? "正在加载…" : `匹配 ${matched} 条`}
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">

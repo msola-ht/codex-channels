@@ -1,8 +1,17 @@
 export function formatElapsedDuration(durationMs: number): string {
-  if (durationMs < 1_000) {
-    return `${durationMs}毫秒`;
-  }
-  return formatElapsedSeconds(Math.round(durationMs / 1_000));
+  const milliseconds = Math.round(durationMs * 100) / 100;
+  if (milliseconds < 1_000) return `${milliseconds} ms`;
+  const seconds = Math.round(durationMs / 10) / 100;
+  if (seconds < 60) return `${seconds} s`;
+  const wholeSeconds = Math.round(durationMs / 1_000);
+  const hours = Math.floor(wholeSeconds / 3_600);
+  const minutes = Math.floor(wholeSeconds % 3_600 / 60);
+  const remainingSeconds = wholeSeconds % 60;
+  return [
+    ...(hours > 0 ? [`${hours} h`] : []),
+    ...(minutes > 0 ? [`${minutes} min`] : []),
+    ...(remainingSeconds > 0 ? [`${remainingSeconds} s`] : []),
+  ].join(" ");
 }
 
 export function formatElapsedSeconds(

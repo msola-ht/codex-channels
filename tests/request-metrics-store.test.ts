@@ -25,6 +25,30 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("derives request speed and averages only eligible raw requests across scopes", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    const base = { ...sample(), recordedAtMs: 2_000 };
+    store.recordBatch([
+      { ...base, outputTokens: 100, totalDurationMs: 1_000 },
+      { ...base, outputTokens: 900, totalDurationMs: 3_000 },
+      { ...base, outputTokens: 99_999 },
+      { ...base, outputTokens: 100, totalDurationMs: 0 },
+      { ...base, outputTokens: 0, totalDurationMs: 1_000 },
+      { ...base, outputTokens: null, totalDurationMs: 1_000 },
+      { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000 },
+    ]);
+    expect(store.recent(7).map((row) => row.tokensPerSecond)).toEqual([900, null, null, null, null, 300, 100]);
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(200);
+    const scope = { startAtMs: 1_000, endAtMs: 3_000, limit: 1, sortKey: "tokensPerSecond" as const, sortDirection: "desc" as const };
+    expect(store.threadList(scope).threads[0]).toMatchObject({ threadId: "other", tokensPerSecond: 900 });
+    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(200);
+    expect(store.page(scope).records[0]?.tokensPerSecond).toBe(900);
+    store.recordSubagentThread({ agentThreadId: "other", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBeCloseTo(1300 / 3);
+    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(200);
+    store.close();
+  });
   it("persists TTFT and restores the first eligible sample for the exact Turn", () => {
     const path = join(temporaryDirectory(), "metrics.sqlite3");
     const store = new SqliteModelRequestMetricsStore(path, 5_000);
@@ -142,6 +166,34 @@ describe("SqliteModelRequestMetricsStore", () => {
     store.close();
   });
 
+  it("retains each latest account fact through unrelated refresh and restart cleanup", () => {
+    const path = join(temporaryDirectory(), "request-metrics.sqlite3");
+    const start = 1_700_000_000_000;
+    const day = 86_400_000;
+    const store = new SqliteModelRequestMetricsStore(path, start, { retentionDays: 1 });
+    const missing = {
+      sourceId: "ocg-main:main", provider: "ocg-main", accountId: "main", displayName: "OCG",
+      enabled: true, observedAtMs: start, available: false,
+      usage: { kind: "subscription-required", provider: "ocg-main" },
+      limits: { kind: "unsupported", provider: "ocg-main" },
+    };
+    store.upsertAccountSnapshot(missing);
+    store.upsertAccountSnapshot({ ...missing, sourceId: "deepseek:default", provider: "deepseek",
+      accountId: null, observedAtMs: start + 2 * day,
+      usage: { kind: "balance", provider: "deepseek" } });
+    expect(store.latestAccountSnapshot("ocg-main")?.usage).toEqual(missing.usage);
+    store.close();
+    const restarted = new SqliteModelRequestMetricsStore(path, start + 4 * day, { retentionDays: 1 });
+    expect(restarted.latestAccountSnapshot("ocg-main")?.usage).toEqual(missing.usage);
+    restarted.upsertAccountSnapshot({ ...missing, observedAtMs: start + 4 * day,
+      available: true, usage: { kind: "quota-windows", provider: "ocg-main" } });
+    expect(restarted.latestAccountSnapshot("ocg-main")?.usage).toMatchObject({ kind: "quota-windows" });
+    restarted.close();
+    const database = new DatabaseSync(path, { readOnly: true });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM account_snapshots").get()).toEqual({ count: 2 });
+    database.close();
+  });
+
   it("cleans expired account snapshots when a source is refreshed", () => {
     const path = join(temporaryDirectory(), "request-metrics.sqlite3");
     const store = new SqliteModelRequestMetricsStore(path, Date.now(), { retentionDays: 1 });
@@ -191,7 +243,7 @@ describe("SqliteModelRequestMetricsStore", () => {
       .all() as Array<{ name: string }>;
     inspection.close();
     expect(columns.map((column) => column.name).filter((name) =>
-      name !== "error_message"
+      name !== "error_message" && name !== "first_content_ms"
       && /body|content|prompt|message|image|authorization/iu.test(name)
     )).toEqual([]);
   });

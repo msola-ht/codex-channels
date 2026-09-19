@@ -88,6 +88,8 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnOutputTiming {
+  /** 本轮有效模型请求输出速率的算术平均，由已持久化请求派生。 */
+  tokensPerSecond?: number;
   /** 本轮首个有效 OpenAI 上游 TTFT 样本，不累计。 */
   upstreamTtftMs?: number;
   modelRequestCount?: number;
@@ -106,6 +108,7 @@ export interface TurnOutputTiming {
 }
 
 export interface TurnTaskMetricsSummary {
+  tokensPerSecond?: number | null;
   requestCount: number;
   unsuccessfulRequestCount: number;
   inputTokens: number;
@@ -241,7 +244,7 @@ export type OutputEvent =
   | { type: "plan.updated"; target: ConversationTarget; threadId: string; turnId: string; explanation: string | null; steps: TurnPlanStep[]; background?: boolean }
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
-  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number }
+  | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number; tokensPerSecond?: number }
   | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }

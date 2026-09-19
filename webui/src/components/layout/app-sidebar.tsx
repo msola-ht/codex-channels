@@ -16,9 +16,11 @@ import {
 import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
 import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
 import { navItems } from "@/lib/navigation"
+import { useSidebar } from "@/components/ui/sidebar-context"
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const { setOpenMobile } = useSidebar()
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
@@ -40,7 +42,7 @@ export function AppSidebar() {
                     }
                     tooltip={item.label}
                   >
-                    <NavLink to={item.to}>
+                    <NavLink to={item.to} onClick={() => setOpenMobile(false)}>
                       <item.icon />
                       <span>{item.label}</span>
                     </NavLink>

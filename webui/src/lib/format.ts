@@ -1,5 +1,9 @@
 export type DisplayLanguage = "zh" | "en"
 
+export function formatTokensPerSecond(value: number | null | undefined): string {
+  return value == null ? "—" : value.toFixed(2)
+}
+
 let serverTimeZone: string | undefined
 
 /** 页面加载前由服务端时间接口设置；禁止静默使用浏览器时区。 */
@@ -177,3 +181,4 @@ export function formatFailureRate(requestCount: number, unsuccessful: number): s
 export function shortThreadId(threadId: string): string {
   return threadId.length <= 14 ? threadId : `${threadId.slice(0, 8)}…${threadId.slice(-4)}`
 }
+export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js"

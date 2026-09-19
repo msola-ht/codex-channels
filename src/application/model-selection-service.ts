@@ -32,6 +32,11 @@ export interface ModelSelectionPreference {
   serviceTier: string | null;
 }
 
+export interface ModelSelectionIdentity {
+  provider: string;
+  model: string;
+}
+
 export interface OfficialModelCatalogProvider {
   provider: string;
   displayName: string;
@@ -52,21 +57,22 @@ export class ModelSelectionService {
     private readonly primaryProvider = "openai",
     private readonly officialCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
     private readonly openaiAuthenticated: () => boolean = () => true,
+    private readonly providersWithoutSubscription: () => ReadonlySet<string> = () => new Set(),
   ) {}
 
   async state(target: ConversationTarget): Promise<ModelSelectionState> {
     const models = await this.listModels();
-    const filter = this.providerFilterByConversation.get(this.key(target));
-    return this.resolveState(
-      target,
-      filter === undefined ? models : filterModelsByProvider(models, filter),
-      filter,
-    );
+    let filter = this.providerFilterByConversation.get(this.key(target));
+    if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
+      this.providerFilterByConversation.delete(this.key(target));
+      filter = undefined;
+    }
+    return this.selectionState(target, models, filter);
   }
 
   async browseProvider(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
     const models = await this.listModels();
-    const resolvedProvider = resolveProvider(models, provider);
+    const resolvedProvider = resolveProvider(this.selectableModels(models), provider);
     if (resolvedProvider === undefined) {
       throw new UserFacingError(
         "model.provider.not-found",
@@ -83,7 +89,7 @@ export class ModelSelectionService {
       );
     }
     this.providerFilterByConversation.set(this.key(target), resolvedProvider);
-    return this.resolveState(target, filtered, resolvedProvider);
+    return this.selectionState(target, models, resolvedProvider);
   }
 
   clearProviderBrowse(target: ConversationTarget): void {
@@ -94,7 +100,7 @@ export class ModelSelectionService {
     target: ConversationTarget,
     modality: ModelInputModality,
   ): Promise<void> {
-    const current = await this.state(target);
+    const current = this.resolveState(target, await this.listModels());
     const model = findModel(current.models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
@@ -127,13 +133,19 @@ export class ModelSelectionService {
     );
   }
 
-  async selectModel(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
+  async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
     const models = await this.listModels();
     const providerFilter = this.providerFilterByConversation.get(this.key(target));
+    const eligible = this.selectableModels(models);
     const selectableModels = providerFilter === undefined
-      ? models
-      : filterModelsByProvider(models, providerFilter);
-    const selected = resolveModel(selectableModels, selector);
+      ? eligible
+      : filterModelsByProvider(eligible, providerFilter);
+    const selected = typeof selector === "string"
+      ? resolveModel(selectableModels, selector)
+      : findModel(eligible, selector.model, selector.provider);
+    if (!selected) {
+      throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
+    }
     if (selected.available === false) {
       throw new UserFacingError(
         "model.unavailable",
@@ -162,6 +174,7 @@ export class ModelSelectionService {
           selectedProvider,
         )
       : undefined;
+    this.requireSubscribedProvider(selectedProvider);
     if (resetOfficialFast) {
       // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
       await this.codex.writeDefaultFastMode(false);
@@ -169,6 +182,7 @@ export class ModelSelectionService {
     if (providerChanged) {
       await this.router.newSession(target);
     }
+    this.requireSubscribedProvider(selectedProvider);
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
@@ -201,11 +215,7 @@ export class ModelSelectionService {
           : {}),
     });
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
-    return this.resolveState(
-      target,
-      filterModelsByProvider(models, selectedProvider),
-      selectedProvider,
-    );
+    return this.selectionState(target, models, selectedProvider);
   }
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
@@ -418,6 +428,25 @@ export class ModelSelectionService {
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
       providerPending: hasOverride(pending, "modelProvider"),
+    };
+  }
+
+  private requireSubscribedProvider(provider: string): void {
+    if (this.providersWithoutSubscription().has(provider)) {
+      throw new UserFacingError("model.selection.expired", "账户已无有效订阅，请重新发送 /model 选择");
+    }
+  }
+
+  private selectableModels(models: ModelOption[]): ModelOption[] {
+    const blocked = this.providersWithoutSubscription();
+    return models.filter((model) => !blocked.has(model.provider ?? "openai"));
+  }
+
+  private selectionState(target: ConversationTarget, models: ModelOption[], filter?: string): ModelSelectionState {
+    const selectable = this.selectableModels(models);
+    return {
+      ...this.resolveState(target, models, filter),
+      models: filter === undefined ? selectable : filterModelsByProvider(selectable, filter),
     };
   }
 

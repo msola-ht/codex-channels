@@ -30,6 +30,7 @@ function summary() {
       compact: null,
     },
     threadAggregate: {
+      tokensPerSecond: 125,
       provider: "deepseek",
       turnCount: 1,
       requestCount: 2,
@@ -264,6 +265,7 @@ describe("SubagentCompletionTracker", () => {
       modelProvider: "deepseek",
       status: "completed",
       metricsStatus: "available",
+      tokensPerSecond: 125,
       requestCount: 2,
       unsuccessfulRequestCount: 0,
       inputTokens: 1_000,

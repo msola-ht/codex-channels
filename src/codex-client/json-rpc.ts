@@ -31,6 +31,13 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
   method: string;
   startedAtMs: number;
+  removeAbortHandler?: () => void;
+}
+
+export interface RpcRequestOptions {
+  retryOverload: boolean;
+  attempts?: number;
+  signal?: AbortSignal;
 }
 
 export interface RpcNotification {
@@ -179,18 +186,20 @@ export class JsonRpcClient {
 
   async request<T>(
     request: RpcClientRequest,
-    options: { retryOverload: boolean; attempts?: number } = { retryOverload: false },
+    options: RpcRequestOptions = { retryOverload: false },
   ): Promise<T> {
     const attempts = options.retryOverload ? (options.attempts ?? 4) : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        return await this.requestOnce<T>(request);
+        return await this.requestOnce<T>(request, options.signal);
       } catch (error) {
         if (!(error instanceof JsonRpcError) || error.code !== -32001 || attempt === attempts) {
           throw error;
         }
         const base = Math.min(2_000, 100 * 2 ** (attempt - 1));
-        await delay(base + Math.floor(Math.random() * base));
+        await delay(base + Math.floor(Math.random() * base), undefined, {
+          signal: options.signal,
+        });
       }
     }
     throw new Error("无法完成 JSON-RPC 请求");
@@ -200,12 +209,18 @@ export class JsonRpcClient {
     await this.transport.send(JSON.stringify(notification));
   }
 
-  private async requestOnce<T>(request: RpcClientRequest): Promise<T> {
+  private async requestOnce<T>(
+    request: RpcClientRequest,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    signal?.throwIfAborted();
     const { method } = request;
     const id = this.nextId++;
     const startedAtMs = Date.now();
     const response = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
+        const pending = this.pending.get(id);
+        pending?.removeAbortHandler?.();
         this.pending.delete(id);
         this.logger?.debug?.(
           {
@@ -219,18 +234,40 @@ export class JsonRpcClient {
         reject(new Error(`Codex JSON-RPC 请求超时：${method}`));
       }, this.requestTimeoutMs);
       timer.unref();
-      this.pending.set(id, { resolve, reject, timer, method, startedAtMs });
+      const pending: PendingRequest = { resolve, reject, timer, method, startedAtMs };
+      let abortRequest: (() => void) | undefined;
+      if (signal) {
+        const abort = () => {
+          const active = this.pending.get(id);
+          if (active !== pending) return;
+          clearTimeout(timer);
+          this.pending.delete(id);
+          signal.removeEventListener("abort", abort);
+          reject(abortRequestError(signal, method));
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        pending.removeAbortHandler = () => signal.removeEventListener("abort", abort);
+        abortRequest = abort;
+      }
+      this.pending.set(id, pending);
+      if (signal?.aborted) abortRequest?.();
     });
 
-    try {
-      await this.transport.send(JSON.stringify({ ...request, id }));
-    } catch (error) {
+    const failSend = (error: unknown): void => {
       const pending = this.pending.get(id);
       if (pending) {
         clearTimeout(pending.timer);
+        pending.removeAbortHandler?.();
         this.pending.delete(id);
+        pending.reject(asError(error));
       }
-      throw error;
+    };
+    if (!signal?.aborted) {
+      try {
+        void this.transport.send(JSON.stringify({ ...request, id })).catch(failSend);
+      } catch (error) {
+        failSend(error);
+      }
     }
     return (await response) as T;
   }
@@ -257,6 +294,7 @@ export class JsonRpcClient {
         return;
       }
       clearTimeout(pending.timer);
+      pending.removeAbortHandler?.();
       this.pending.delete(message.id);
       this.logger?.debug?.(
         {
@@ -396,6 +434,7 @@ export class JsonRpcClient {
   private failPending(error: Error): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      pending.removeAbortHandler?.();
       pending.reject(error);
     }
     this.pending.clear();
@@ -404,4 +443,10 @@ export class JsonRpcClient {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function abortRequestError(signal: AbortSignal, method: string): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(`Codex JSON-RPC 请求已取消：${method}`);
 }

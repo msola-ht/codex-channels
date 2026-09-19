@@ -14,8 +14,9 @@
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时，普通增量只扫描事件类型并立即透传，不解析事件 JSON、记录首尾
-  时间或等待指标处理；只对创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
+  转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
+  HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
+  此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
   指标仍可归入请求模型；HTTP
@@ -57,9 +58,16 @@
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
-  同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录、不估算本地首字。
-  普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
+  同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
+  `firstContentMs` 从 HTTP 路由解析成功、WS 请求帧转储与解析完成后进入转发流程开始，计到首个符合条件事件的接收回调入口；
+  不含 HTTP 路由等待，包含 WS 等待连接就绪。响应解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
+  `totalDurationMs` 使用独立的请求入口单调时钟，到首次模型终态或结束/失败时冻结，经 IPC 传递且不依赖调用记录开关；不包含终态后投递、客户端显示或其他重试，无逻辑请求的握手错误不伪造值。
+  HTTP 排除 created/in_progress/failed/metadata，其余合法 response.* 语义事件计入；WS 计入 response.*.delta、output_text.done 与 function_call_arguments.done。
+  纯错误、旁路额度/timing/metadata 与畸形报文不计入；完整展示口径见[WebUI 文档](../../docs/webui.md)。
+  HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
+  首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
+- `traffic-call-timing.ts`：记录单次调用的单调时钟偏移，区分入口、转发、请求体收齐、响应头、WS 提交发送与结束；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
@@ -79,7 +87,10 @@
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
-  一次调用。每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
+  一次调用。响应索引复用代理同一份 `firstContentMs` 观测，精简模式也保留，不从 trace 反推。
+  指标中的 `traffic` 使用转储实际创建的标签、writer session（包含目录冲突时的编号后缀）与 interaction，
+  HTTP 和每次 WebSocket 调用分别绑定；未开启转储或 WS 握手失败、尚未创建逻辑调用时不提供关联。
+  每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，
   已在执行的并发调用继续在原 session 完成，因此请求与响应不会拆分。写队列先落正文再落索引，不改变
   转发、背压和指标采集；App Server 启动及新 session 建立时按 session
   最后活动时间与 `[debug].model_traffic_retention_days` 清理过期 V2 历史 session，`0` 关闭按时间清理。
@@ -100,4 +111,10 @@ Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配�
 不把 Provider 指标 Socket 当作进程锁；裸实例与重复 Gateway 均失败关闭。
 OpenAI 保留用户配置的 `openai_base_url`；没有显式上游时，按官方认证请求 Header 选择 ChatGPT
 或 API 上游。主代理启动失败时 App Server 服务失败关闭；按需 Provider 代理启动失败时本次选择
-明确失败。两者都不会绕过统计代理静默直连上游。
+明确失败。两者都不会绕过统计代理静默直连上游。运行中动态上游路由解析失败时，HTTP 请求及
+WebSocket 升级返回 502 并报告内部错误，不退出监管进程；后续请求可以重新解析已修正的代理。
+Responses/压缩路由解析失败也记录 `provider_proxy_route_error` 指标：HTTP 保留请求头中的 Thread/Turn 与账户归属，
+WebSocket 升级失败按握手失败记录，不推断尚未收到的模型调用元数据。转储记录 `upstream_route` 错误；
+HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `response.create`。`/models` 和其他非 Responses 端点不计模型请求。
+`resolveUpstream` 支持异步解析；等待期间保留 HTTP 请求体，关闭代理会清理待升级连接，
+客户端已断开或代理已关闭时不再建立上游连接。

@@ -44,6 +44,14 @@ export interface ProviderProxyMetrics {
   totalTokens: number | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
+  /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
+  firstContentMs?: number;
+  /** 代理收到请求至首个终态或结束/失败；单调时钟，不含终态后的投递。 */
+  totalDurationMs?: number;
+  requestModel?: string | null;
+  responseModel?: string | null;
+  /** 精确定位本次调用的 V2 转储；未开启转储时不提供。 */
+  traffic?: { label: string; session: string; interaction: number };
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   weeklyQuota: ProviderWeeklyQuotaSnapshot | null;
@@ -62,6 +70,8 @@ export interface MetricsState extends ProviderProxyMetrics {
 }
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
+const requestClocks = new WeakMap<MetricsState, number>();
+const totalRequestClocks = new WeakMap<MetricsState, number>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -69,8 +79,10 @@ export function createMetricsState(
   transport: ProviderProxyMetrics["transport"],
   operation: ProviderProxyMetrics["operation"],
   userAgent: string | null,
+  startedAtMonotonicMs: number,
+  totalStartedAtMonotonicMs?: number,
 ): MetricsState {
-  return {
+  const metrics: MetricsState = {
     ...metadata,
     transport,
     responseFormat: transport === "websocket" ? "websocket" : "unknown",
@@ -95,6 +107,14 @@ export function createMetricsState(
     weeklyQuota: null,
     quotaWindows: null,
   };
+  requestClocks.set(metrics, startedAtMonotonicMs);
+  if (totalStartedAtMonotonicMs !== undefined) totalRequestClocks.set(metrics, totalStartedAtMonotonicMs);
+  return metrics;
+}
+
+function observeTotalDuration(metrics: MetricsState, at: number): void {
+  const started = totalRequestClocks.get(metrics);
+  if (started !== undefined) metrics.totalDurationMs ??= at - started;
 }
 
 /** 实际发往上游的 UA：配置覆盖优先，否则用 App Server 发来的原始 UA。 */
@@ -181,7 +201,12 @@ export function observeResponseEvent(
   type: string,
   event: Record<string, unknown> | undefined,
   receivedAtMs: number,
+  receivedAtMonotonicMs: number,
 ): boolean {
+  if (metrics.firstContentMs === undefined && startsFirstToken(metrics.transport, type, event)) {
+    const started = requestClocks.get(metrics);
+    if (started !== undefined) metrics.firstContentMs = receivedAtMonotonicMs - started;
+  }
   if (metrics.transport === "websocket" && type === "response.created") {
     const responseId = boundedString(asRecord(event?.response)?.id);
     if (responseId !== null) timingByMetrics.set(metrics, { responseId });
@@ -208,13 +233,14 @@ export function observeResponseEvent(
     timingByMetrics.delete(metrics);
     observeResponseCompletion(metrics, type, event);
     metrics.responseCompletedAtMs = receivedAtMs;
+    observeTotalDuration(metrics, receivedAtMonotonicMs);
     return true;
   }
   if (type === "error") {
     const error = asRecord(event?.error);
     const errorType = boundedString(error?.type) ?? "upstream_error";
     metrics.httpStatus = finiteNonNegativeNumber(event?.status);
-    markMetricsFailed(metrics, errorType, receivedAtMs);
+    markMetricsFailed(metrics, errorType, receivedAtMs, undefined, receivedAtMonotonicMs);
     metrics.errorType = errorType;
     metrics.errorCode = boundedString(error?.code);
     metrics.errorMessage = boundedMessage(error?.message);
@@ -251,6 +277,7 @@ function observeResponseFields(
   event: Record<string, unknown> | undefined,
 ): void {
   metrics.model = boundedString(response?.model);
+  metrics.responseModel = metrics.model;
   metrics.serviceTier = boundedString(response?.service_tier);
   const usage = asRecord(response?.usage);
   const inputDetails = asRecord(usage?.input_tokens_details);
@@ -303,10 +330,10 @@ export class HttpResponseMetricsObserver {
 
   constructor(private readonly metrics: MetricsState) {}
 
-  observeChunk(chunk: Buffer, receivedAtMs: number): boolean {
+  observeChunk(chunk: Buffer, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
-      ? this.processText(this.decoder.write(chunk), receivedAtMs)
+      ? this.processText(this.decoder.write(chunk), receivedAtMs, receivedAtMonotonicMs)
       : false;
     if (this.metrics.responseFormat === "json" && !this.jsonOverflow) {
       this.jsonBytes += chunk.length;
@@ -319,12 +346,12 @@ export class HttpResponseMetricsObserver {
     return completed;
   }
 
-  finish(receivedAtMs: number): boolean {
+  finish(receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
     const completed = this.metrics.responseFormat === "sse"
       || this.metrics.responseFormat === "unknown"
-      ? this.processText(this.decoder.end(), receivedAtMs)
+      ? this.processText(this.decoder.end(), receivedAtMs, receivedAtMonotonicMs)
         || (this.pending
-          ? this.processLine(this.pending.trimEnd(), receivedAtMs)
+          ? this.processLine(this.pending.trimEnd(), receivedAtMs, receivedAtMonotonicMs)
           : false)
       : this.metrics.responseFormat === "json" && !this.jsonOverflow
         ? observeJsonResponse(
@@ -334,10 +361,11 @@ export class HttpResponseMetricsObserver {
           )
         : false;
     finalizeHttpStatus(this.metrics, receivedAtMs);
+    observeTotalDuration(this.metrics, receivedAtMonotonicMs);
     return completed;
   }
 
-  private processLine(line: string, receivedAtMs: number): boolean {
+  private processLine(line: string, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
     if (line === "") {
       this.currentEvent = "";
       return false;
@@ -349,7 +377,7 @@ export class HttpResponseMetricsObserver {
     if (!line.startsWith("data:")) return false;
     const payload = line.slice(5).trim();
     if (!payload || payload === "[DONE]") return false;
-    const observed = inspectResponseEvent(payload, this.currentEvent);
+    const observed = inspectResponseEvent(payload, this.currentEvent, this.metrics.firstContentMs === undefined);
     if (
       this.metrics.responseFormat === "unknown"
       && observed.type.startsWith("response.")
@@ -361,10 +389,11 @@ export class HttpResponseMetricsObserver {
       observed.type,
       observed.event,
       receivedAtMs,
+      receivedAtMonotonicMs,
     );
   }
 
-  private processText(text: string, receivedAtMs: number): boolean {
+  private processText(text: string, receivedAtMs: number, receivedAtMonotonicMs: number): boolean {
     if (this.sseMetadataOverflow) return false;
     this.pending += text;
     const lines = this.pending.split(/\r?\n/u);
@@ -378,7 +407,7 @@ export class HttpResponseMetricsObserver {
       this.currentEvent = "";
       return false;
     }
-    return lines.some((line) => this.processLine(line, receivedAtMs));
+    return lines.some((line) => this.processLine(line, receivedAtMs, receivedAtMonotonicMs));
   }
 }
 
@@ -406,8 +435,10 @@ export function markMetricsFailed(
   errorType: string,
   receivedAtMs: number,
   error?: unknown,
+  receivedAtMonotonicMs = performance.now(),
 ): void {
   if (metrics.status === "completed") return;
+  observeTotalDuration(metrics, receivedAtMonotonicMs);
   metrics.status = "failed";
   metrics.errorType = errorType;
   metrics.errorCode = nodeErrorCode(error);
@@ -468,9 +499,14 @@ function responseEventType(payload: string): string {
 export function inspectResponseEvent(
   payload: string,
   fallbackType = "",
+  collectFirstContent = false,
 ): { type: string; event: Record<string, unknown> | undefined } {
   const scannedType = responseEventType(payload);
   const candidateType = fallbackType || scannedType;
+  if (collectFirstContent) {
+    const event = parseJsonPayload(payload);
+    return { type: boundedString(event?.type) ?? fallbackType, event };
+  }
   if (
     !requiresResponseEventBody(candidateType)
     && !responseEventBodyTypeNames.some((type) => payload.includes(`"${type}"`))
@@ -483,6 +519,21 @@ export function inspectResponseEvent(
     type,
     event: requiresResponseEventBody(type) ? event : undefined,
   };
+}
+
+function startsFirstToken(
+  transport: ProviderProxyMetrics["transport"],
+  type: string,
+  event: Record<string, unknown> | undefined,
+): boolean {
+  // 参考 sub2api 的 HTTP semantic / WS token-event 口径；不把旁路元数据或纯错误计为首字。
+  if (!event || !type.startsWith("response.")) return false;
+  if (transport === "websocket") {
+    return type.endsWith(".delta") || type === "response.output_text.done"
+      || type === "response.function_call_arguments.done";
+  }
+  return type !== "response.created" && type !== "response.in_progress"
+    && type !== "response.failed" && type !== "response.metadata";
 }
 
 const responseEventBodyTypeNames = [

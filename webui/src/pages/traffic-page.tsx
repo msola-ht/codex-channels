@@ -1,5 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
-import { useEffect, useId } from "react"
+import { useId } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
@@ -37,7 +37,9 @@ export function TrafficPage() {
   const pageSizeSelectId = useId()
   const { query, update } = useTrafficQuery()
   const tasks = useManagementTasks()
-  const list = useTrafficExchanges(query.id === null ? query : null)
+  const list = useTrafficExchanges(query.id === null ? {
+    label: query.label, session: query.session, limit: query.limit, offset: query.offset,
+  } : null)
   const detail = useTrafficExchange(
     query.id === null
       ? null
@@ -51,22 +53,12 @@ export function TrafficPage() {
   )
   const listData = list.data
   const detailData = detail.data
+  const detailView = detail.displayData
   const pageNumber = Math.floor(query.offset / query.limit) + 1
   const paginationLimited = listData !== null
     && listData.nextOffset === null
     && query.offset + listData.exchanges.length < listData.total
     && query.offset + listData.exchanges.length >= listData.maximumOffset
-
-  useEffect(() => {
-    const loaded = query.id === null ? listData : detailData
-    if (loaded === null) return
-    if (query.id === null) {
-      if (query.label !== loaded.label) update({ label: loaded.label }, false, true)
-    } else if (detailData !== null
-      && (query.label !== detailData.label || query.exchangeSession !== detailData.session)) {
-      update({ label: detailData.label, exchangeSession: detailData.session }, false, true)
-    }
-  }, [detailData, listData, query.id, query.label, query.exchangeSession, update])
 
   if (query.id !== null) {
     return (
@@ -78,20 +70,26 @@ export function TrafficPage() {
               批次 {detailData?.session ?? query.exchangeSession ?? query.session} · 原始正文和传输轨迹可展开，每段最多展示 4 MiB
             </p>
           </div>
+          <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={detail.loading} onClick={detail.refetch}>
+            {detail.loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}刷新
+          </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => update({ traceOffset: null, id: null, exchangeSession: null })}
           >返回列表</Button>
+          </div>
         </div>
-        <ErrorBanner error={detail.error} />
-        {detail.error !== null ? null : detail.loading || detailData === null
-          ? <PageSkeleton rows={6} />
-          : (
+        <ErrorBanner error={detail.error} onRetry={detail.refetch} pending={detail.loading} />
+        {detailView === null ? detail.error !== null ? null : <PageSkeleton rows={6} /> : (
               <TrafficDetail
-                detail={detailData.exchange}
-                onTracePageChange={(traceOffset) => update({ traceOffset })}
+                key={`${detailView.label}:${detailView.session}:${detailView.exchange.id}`}
+                detail={detailView.exchange}
+                traceLoading={detail.loading}
+                traceError={detail.error !== null}
+                onTracePageChange={(traceOffset) => update({ traceOffset, label: detailView.label, exchangeSession: detailView.session })}
               />
             )}
       </div>
@@ -99,10 +97,10 @@ export function TrafficPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">转储</h1>
+          <h1 className="text-xl font-semibold">调用详情</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
             记录的模型请求与响应字段；默认汇总所选提供商全部保留批次，按请求时间倒序展示
@@ -172,7 +170,7 @@ export function TrafficPage() {
         </div>
       </div>
 
-      <ErrorBanner error={list.error} />
+      <ErrorBanner error={list.error} onRetry={list.refetch} pending={list.loading} />
       {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
@@ -184,16 +182,16 @@ export function TrafficPage() {
       ) : null}
       {listData !== null && !listData.enabled ? (
         <Alert>
-          <AlertTitle>当前未开启转储</AlertTitle>
+          <AlertTitle>当前未开启调用详情记录</AlertTitle>
           <AlertDescription>
             配置里 <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            关闭时不会再写入新记录，这里显示的是已存在的历史转储文件。
+            关闭时不会再写入新记录，这里显示的是已存在的历史调用记录文件。
           </AlertDescription>
         </Alert>
       ) : null}
       {paginationLimited ? (
         <Alert>
-          <AlertTitle>已达到转储分页上限</AlertTitle>
+          <AlertTitle>已达到调用记录分页上限</AlertTitle>
           <AlertDescription>
             当前最多翻到 offset {listData.maximumOffset.toLocaleString("zh-CN")}；仍有更早记录时，
             请选择单个记录批次缩小范围，或使用 <code className="rounded bg-muted px-1 text-xs">codexc traffic</code> 查看。
@@ -207,17 +205,18 @@ export function TrafficPage() {
         </p>
       ) : null}
 
-      {list.error !== null ? null : list.loading || listData === null ? <PageSkeleton rows={8} /> : (
-        <Card>
+      {list.error !== null ? null : listData === null ? <PageSkeleton rows={8} /> : (
+        <Card aria-busy={list.loading}>
           <CardHeader>
-            <CardTitle>请求记录（{listData.total}）</CardTitle>
+            <CardTitle>{list.loading ? "正在刷新请求记录…" : `请求记录（${listData.total}）`}</CardTitle>
             <CardDescription className="break-all">
               {listData.label} · {listData.session === null
                 ? `全部 ${listData.sessions.length} 个保留批次` : `批次 ${listData.session}`}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent inert={list.loading}>
             <TrafficTable
+              loading={list.loading}
               exchanges={listData.exchanges}
               onOpen={(exchange) => update({
                 traceOffset: null,

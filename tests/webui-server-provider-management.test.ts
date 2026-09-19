@@ -37,6 +37,33 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("returns persisted subscription facts from Gateway refresh and subsequent reads", async () => {
+    const fixture = createFixture();
+    writeOpencodeGoAccounts(fixture.environment, [{ id: "main", default: true }]);
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, {
+      managementOrigin,
+      refreshGatewayAccount: async () => {
+        const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+        store.upsertAccountSnapshot({
+          sourceId: "ocg-main:main", provider: "ocg-main", accountId: "main", displayName: "OCG",
+          enabled: true, observedAtMs: Date.now(), available: false,
+          usage: { kind: "subscription-required", provider: "ocg-main" },
+          limits: { kind: "unsupported", provider: "ocg-main" },
+        });
+        store.close();
+      },
+    });
+    const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "ocg-main" }),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.snapshots).toContainEqual(expect.objectContaining({ available: false, usage: { kind: "subscription-required", provider: "ocg-main" } }));
+    const reread = await fetch(`${origin}/api/v1/accounts`);
+    expect(await reread.json()).toEqual(body);
+  });
   it("returns the latest unified account snapshots without calling provider APIs", async () => {
     const fixture = createFixture();
     const store = new SqliteModelRequestMetricsStore(fixture.databasePath);

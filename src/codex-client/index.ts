@@ -46,6 +46,7 @@ export {
   sanitizeOperationText,
   toOperationUpdate,
 } from "./operation-adapter.js";
+export type { OpenAiAccountRoute } from "./account-adapter.js";
 export {
   codexCliVersion,
   supportedCodexCliVersion,

@@ -1,5 +1,8 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
+import { TrafficModel } from "@/components/traffic/traffic-model"
+import { TableHint } from "@/components/metrics/data-table"
+import { Skeleton } from "@/components/ui/skeleton"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -11,37 +14,31 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { formatBytes, formatTime } from "@/lib/format"
+import { formatBytes, formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
 
 export function TrafficDetail({
   detail,
   onTracePageChange,
+  traceLoading = false,
+  traceError = false,
 }: {
   detail: TrafficExchangeDetail
   onTracePageChange: (offset: number) => void
+  traceLoading?: boolean
+  traceError?: boolean
 }) {
   return (
     <div className="flex min-w-0 shrink-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
-        <span
-          className="tabular-nums"
-          title="来源：responsesapi.websocket_timing.timing_metrics.first_sampled_message_ttft_ms；仅使用与响应 ID 匹配的 logical_turn 统计，不代表客户端看到首字的时间。"
-        >
-          首字耗时：{detail.response?.timing?.firstTokenMs === undefined
-            ? "未提供"
-            : `${detail.response.timing.firstTokenMs.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}
-        </span>
+        <TableHint hint="上游转发开始至首个符合条件的语义事件，不是响应头到达或客户端显示时间；与上游 logical_turn 统计分开。"><span className="whitespace-nowrap tabular-nums">单请求首字：{detail.response?.firstContentMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstContentMs)}</span></TableHint>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
-        <span>
-          模型：<span className="font-mono">{detail.requestModel ?? "未提供"}</span> →{" "}
-          <span className="font-mono">{detail.responseModels.join("、") || "未提供"}</span>
-        </span>
-        <span className="text-muted-foreground">
+        <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+        <span className="min-w-0 break-all text-muted-foreground">
           线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
         </span>
@@ -49,8 +46,30 @@ export function TrafficDetail({
 
       <Card className="min-w-0 shrink-0">
         <CardHeader>
+          <CardTitle>模型声明与来源</CardTitle>
+          <CardDescription>仅比较请求与响应回显名称，不验证模型身份。以下声明只来自本次调用保留的记录；缺失不代表上游未发送。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 text-sm">
+          <p className="break-all">请求模型（请求 model）：{detail.requestModel ?? "未提供"}</p>
+          <p className="break-all">响应回显（响应索引）：{detail.responseModels.join("、") || "未提供"}</p>
+          <div className="flex flex-col gap-1">
+            <p>服务端模型声明（不覆盖响应回显）：</p>
+            {detail.modelEvidence.serverModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
+              : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+          </div>
+          <div className="flex flex-col gap-1">
+            <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
+            {detail.modelEvidence.safetyModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
+              : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+          </div>
+          {detail.modelEvidence.truncated ? <p className="text-muted-foreground">声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
+        </CardContent>
+      </Card>
+
+      <Card className="min-w-0 shrink-0">
+        <CardHeader>
           <CardTitle>请求</CardTitle>
-          <CardDescription>
+          <CardDescription className="break-all">
             {requestLabel(detail)}
             {detail.transport !== "http" || detail.request.bytes === undefined ? "" : ` · 原始 ${formatBytes(detail.request.bytes)}`}
             {detail.request.storedBytes === undefined ? "" : ` · 正文存储 ${formatBytes(detail.request.storedBytes)}`}
@@ -100,6 +119,12 @@ export function TrafficDetail({
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm">实际服务层级：{detail.response.serviceTier ?? "未提供"}</p>
+            {detail.response.failureStage === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>失败阶段：{detail.response.failureStage}</AlertTitle>
+                <AlertDescription>根据本次调用记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription>
+              </Alert>
+            )}
             {detail.response.responseId === undefined ? null : (
               <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
             )}
@@ -114,7 +139,7 @@ export function TrafficDetail({
                   : "未提取到完成的输出条目，可展开原始正文与传输轨迹查看。"}</p>
             ) : null}
             {detail.response.outputTruncated ? (
-              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始转储未被修改。</AlertDescription></Alert>
+              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始调用记录未被修改。</AlertDescription></Alert>
             ) : null}
             {detail.response.failure === undefined ? null : <PayloadBlock title="终态错误 / 不完整原因" text={prettyJson(detail.response.failure)} />}
             <details>
@@ -125,7 +150,7 @@ export function TrafficDetail({
               </div>
             </details>
             {detail.response.errorScope === undefined ? null : (
-              <p className="font-mono text-xs text-destructive">
+              <p className="break-all font-mono text-xs text-destructive">
                 {detail.response.errorScope}
                 {detail.response.error === undefined ? "" : `：${detail.response.error}`}
               </p>
@@ -137,15 +162,15 @@ export function TrafficDetail({
       {detail.tracePage.total === 0 ? null : (
         <details className="min-w-0 shrink-0 rounded-lg border bg-card text-card-foreground shadow-sm">
           <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
-            原始传输轨迹（{detail.tracePage.total} 条，默认收起）
+            原始事件（{detail.tracePage.total} 条，默认收起）
           </summary>
-          <div className="flex flex-col gap-3 border-t px-6 py-4">
-            {detail.trace.map((item, index) => (
+          <div className="flex flex-col gap-3 border-t px-6 py-4" aria-busy={traceLoading}>
+            {traceLoading ? <><p role="status">正在加载原始事件…</p><Skeleton className="h-32 w-full" /></> : traceError ? <p>原始事件加载失败，请重试。</p> : detail.trace.map((item, index) => (
               <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                 <p className="font-mono text-xs text-muted-foreground">
                   {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
                   {prettyJson(item.text)}
                 </pre>
               </section>
@@ -156,7 +181,7 @@ export function TrafficDetail({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={detail.tracePage.previousOffset === null}
+                  disabled={traceLoading || traceError || detail.tracePage.previousOffset === null}
                   onClick={() => detail.tracePage.previousOffset === null
                     ? undefined
                     : onTracePageChange(detail.tracePage.previousOffset)}
@@ -167,7 +192,7 @@ export function TrafficDetail({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={detail.tracePage.nextOffset === null}
+                  disabled={traceLoading || traceError || detail.tracePage.nextOffset === null}
                   onClick={() => detail.tracePage.nextOffset === null
                     ? undefined
                     : onTracePageChange(detail.tracePage.nextOffset)}
@@ -205,36 +230,50 @@ function UsageSummary({ usage }: { usage: NonNullable<TrafficExchangeDetail["res
 
 function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
   const timing = response.timing
+  const call = response.callTiming
   const metrics = [
-    ["本地请求耗时", response.durationMs],
-    ...(response.httpTiming === null ? [] : [
-      ["代理收齐请求体", response.httpTiming.receiveRequestMs],
-      ["收齐请求体至响应头", response.httpTiming.waitResponseHeadMs],
-      ["响应头至结束", response.httpTiming.receiveResponseMs],
+    ["单请求首字耗时", response.firstContentMs],
+    ["本次调用总耗时", call?.totalMs],
+    ["转发前准备", call?.preForwardMs],
+    ["转发至首字事件", call?.firstEventWaitMs],
+    ["首字事件至结束", call?.afterFirstEventMs],
+    ...(response.httpTiming === null ? [
+      ["转发开始至提交发送", call?.submitWaitMs],
+      ["提交发送至首字事件", call?.submittedToFirstEventMs],
+    ] as const : [
+      ["入口至收齐请求体", call?.receiveRequestMs],
+      ["收齐请求体至响应头", call?.waitResponseHeadMs],
+      ["响应头至结束", call?.receiveResponseMs],
     ] as const),
-    ...(timing === null ? [] : [
+  ] as const
+  const upstreamMetrics = [
+    ["上游轮次首 Token", timing?.firstTokenMs],
     ["上游最大排队", timing?.queueMaxMs],
-    ["上游生成阶段", timing?.samplingMs],
+    ["上游轮次累计生成", timing?.samplingMs],
     ["上游 logical turn", timing?.totalMs],
     ["客户端工具暂停", timing?.toolPauseMs],
-    ] as const),
   ] as const
   return (
     <section className="flex flex-col gap-2" aria-label="耗时摘要">
+      <p className="text-sm font-medium">本次调用</p>
       <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-3">
         {metrics.map(([label, value]) => (
           <div key={label}>
             <dt className="text-muted-foreground">{label}</dt>
-            <dd>{value === undefined ? "未提供" : `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })} ms`}</dd>
+            <dd>{value === undefined ? "未提供" : formatElapsedDuration(value)}</dd>
           </div>
         ))}
       </dl>
-      {response.httpTiming === null ? null : (
-        <p className="text-xs text-muted-foreground">HTTP 阶段基于代理本地时间戳，不是首 Token 延迟或纯生成耗时；缺失或时间倒序的阶段不计算。</p>
-      )}
+      {call === null ? <p className="text-xs text-muted-foreground">未记录单调时钟阶段，不从历史记录补算。原始记录耗时（墙钟）：{response.durationMs === undefined ? "未提供" : formatElapsedDuration(response.durationMs)}。</p> : null}
+      {call?.connectionReady === undefined ? null : <p className="text-xs text-muted-foreground">本次 WebSocket 请求进入转发时，连接{call.connectionReady ? "已就绪" : "尚未就绪"}；提交发送不表示上游已经收到。</p>}
+      <p className="text-xs text-muted-foreground">本次调用阶段使用同一单调时钟。首字后仍包含生成、传输和背压暂停，不是纯生成耗时；HTTP 请求接收与上游转发可重叠，其他阶段不能重复相加。失败记录中的结束表示本地观察到中断。</p>
+      <p className="text-sm font-medium">上游轮次统计（独立口径）</p>
+      <dl className="grid grid-cols-2 gap-3 text-sm tabular-nums sm:grid-cols-3">
+        {upstreamMetrics.map(([label, value]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd>{value === undefined ? "未提供" : formatElapsedDuration(value)}</dd></div>)}
+      </dl>
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
-        顶部首字耗时取自上游 first_sampled_message_ttft_ms（首 Token），不代表客户端看到首字的时间。
+        上游轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 取跳过 created/in_progress 的首个 Responses 语义事件，WS 取 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误、响应头或旁路元数据，均不代表客户端显示时间；历史值不从 trace 反推。
         各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
       </p>
     </section>
@@ -274,7 +313,7 @@ function PayloadBlock({ title, text }: { title: string; text: string }) {
   return (
     <section className="flex min-w-0 flex-col gap-1">
       <p className="break-all text-xs font-medium">{title}</p>
-      <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+      <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
         {text || "（空）"}
       </pre>
     </section>

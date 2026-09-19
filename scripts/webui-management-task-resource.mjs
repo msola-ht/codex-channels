@@ -81,7 +81,7 @@ export async function managementTaskResourceState(normalized, environment, servi
         },
       }
     } catch {
-      throw createError(503, "task_resource_unavailable", "转储状态暂不可用，请稍后重试")
+      throw createError(503, "task_resource_unavailable", "调用记录状态暂不可用，请稍后重试")
     }
   }
   return {

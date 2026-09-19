@@ -15,19 +15,42 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
-  it.each([0, 569, 720.25])("shows OpenAI TTFT %s without requiring Turn duration", (ttftMs) => {
+  it("shows distinct run and session request speeds without restoring TTFT", () => {
+    const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
+      threadId: "thread-1", turnId: "turn-1", status: "completed", durationMs: 999_000,
+      timing: { modelRequestCount: 2, tokensPerSecond: 200 },
+      sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
+        outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300 },
+    }));
+    expect(rendered).toContain("Token/s：200/s");
+    expect(rendered).toContain("Token/s：300/s");
+    expect(rendered).not.toContain("本次运行：");
+    expect(rendered).not.toContain("200.00 Token/s");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K\n  Token/s：300/s");
+    expect(rendered).not.toContain("会话统计（含子代理）");
+    expect(rendered).not.toContain("\nToken/s：300/s");
+    expect(rendered).not.toContain("上游轮次首 Token");
+  });
+  it.each([0, 569, 720.25])("omits OpenAI TTFT %s from completion cards", (ttftMs) => {
     const event = {
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
       threadId: "thread-1", turnId: "turn-1", status: "completed", modelProvider: "openai",
       timing: { upstreamTtftMs: ttftMs },
     } as const;
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation(event));
-    expect(rendered).toContain(`首字耗时：${ttftMs}毫秒`);
+    expect(rendered).not.toContain("上游轮次首 Token");
+    expect(rendered).not.toContain("性能");
+    const withDuration = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
+      ...event, durationMs: 3156,
+    }));
+    expect(withDuration).toContain("总耗时：3.16 s");
+    expect(withDuration).not.toContain("上游轮次首 Token");
     expect(rendered).not.toContain("总耗时");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
-      modelProvider: "deepseek" }))).not.toContain("首字耗时");
+      modelProvider: "deepseek" }))).not.toContain("上游轮次首 Token");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
-      timing: {} }))).not.toContain("首字耗时");
+      timing: {} }))).not.toContain("上游轮次首 Token");
   });
   beforeEach(() => {
     setConfiguredCustomPrimaryProviderId(undefined);
@@ -75,16 +98,16 @@ describe("shared Surface lifecycle presentation", () => {
       createTurnReasoningPresentation("thread-1234567890", 15_000),
     );
     expect(rendered).toContain("思考中…");
-    expect(rendered).toContain("耗时：15秒");
+    expect(rendered).toContain("耗时：15 s");
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500),
     )).toBe("思考中…");
     expect(renderPlainLifecyclePresentation(
       createTurnReasoningPresentation(undefined, 500, true),
-    )).toBe("思考完成\n\n耗时：500毫秒");
+    )).toBe("思考完成\n\n耗时：500 ms");
   });
 
-  it("does not warn when at least one official OpenAI route is reachable", () => {
+  it("shows an actionable warning when the active OpenAI route responds abnormally", () => {
     const presentation = createStartupPresentation(
       [{ id: "main", name: "Main", cwd: "/workspace/main" }],
       {
@@ -106,7 +129,7 @@ describe("shared Surface lifecycle presentation", () => {
         nodeVersion: "v24.0.0",
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
-        openAiConnectivity: "partial",
+        openAiConnectivity: "route-warning",
       },
     );
 
@@ -117,7 +140,40 @@ describe("shared Surface lifecycle presentation", () => {
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
       },
+      { label: "OpenAI 网络", value: "线路响应异常；请检查 Gateway 日志与 OpenAI Base URL" },
     ]);
+  });
+
+  it.each([
+    ["invalid-base-url", "Base URL 路径无效；请检查配置"],
+    ["indeterminate", "检测失败；请检查 App Server 连接与 Gateway 日志"],
+  ] as const)("renders the %s startup connectivity result", (openAiConnectivity, value) => {
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      {
+        workspaceId: "main",
+        model: "gpt-test",
+        modelProvider: "openai",
+        effort: null,
+        serviceTier: null,
+        modelPending: false,
+        effortPending: false,
+        fastModePending: false,
+        collaborationMode: "default",
+        collaborationModePending: false,
+      },
+      {
+        platform: "linux",
+        architecture: "x64",
+        gatewayVersion: "0.147.0",
+        nodeVersion: "v24.0.0",
+        transport: "Unix WebSocket",
+        codexUpstreamUserAgent: null,
+        openAiConnectivity,
+      },
+    );
+
+    expect(presentation.fields).toContainEqual({ label: "OpenAI 网络", value });
   });
 
   it("renders a compact subagent start notice without internal IDs", () => {
@@ -372,6 +428,7 @@ describe("shared Surface lifecycle presentation", () => {
         model: "gpt-test",
         modelProvider: "openai",
         reasoningEffort: null,
+        upstreamTtftMs: 3156,
         status: "completed",
         metricsStatus: "available",
         requestCount: 1,
@@ -384,6 +441,7 @@ describe("shared Surface lifecycle presentation", () => {
     );
 
     expect(rendered).not.toContain("思考等级");
+    expect(rendered).not.toContain("上游轮次首 Token");
     expect(rendered).not.toContain("综合输出速度");
   });
 
@@ -478,15 +536,15 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toBe([
       "本次运行 · 失败",
       "",
-      "本次运行：",
       "错误：失败：[已隐藏]",
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
       "性能",
-      "  总耗时：1分5秒",
+      "  Token/s：未提供",
+      "  总耗时：1 min 5 s",
       "",
-      "当前 Session 累计：",
+      "当前会话：",
       "当前工作区：Main (main)",
       "Session：统一生命周期",
       "Session ID：thread-1",
@@ -663,14 +721,16 @@ describe("shared Surface lifecycle presentation", () => {
           cachedInputTokens: 60_000,
           outputTokens: 2_000,
           reasoningOutputTokens: 500,
+          tokensPerSecond: 20.125,
         },
       }),
     );
 
-    expect(rendered).toContain("当前 Session 累计：");
+    expect(rendered).toContain("当前会话：");
     expect(rendered).toContain("模型请求：9 次");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
+    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%\n  Token/s：20.13/s");
   });
 
   it("separates completed, interrupted and unobservable model attempts", () => {

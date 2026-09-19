@@ -92,6 +92,19 @@ describe("restartAppServerService", () => {
 
     await rejection;
   });
+
+  it("terminates the restart command when its owner cancels", async () => {
+    const child = fakeChild();
+    mocks.spawn.mockReturnValueOnce(child);
+    mocks.terminateChildProcess.mockResolvedValueOnce(undefined);
+    const controller = new AbortController();
+    const result = restartAppServerService({ signal: controller.signal });
+
+    controller.abort(new Error("Gateway stopping"));
+
+    await expect(result).rejects.toThrow("Gateway stopping");
+    expect(mocks.terminateChildProcess).toHaveBeenCalledWith(child);
+  });
 });
 
 function fakeChild(): EventEmitter & {

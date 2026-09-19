@@ -1,6 +1,6 @@
 import { useApi } from "@/hooks/use-api"
 import { fetchTrafficExchange, fetchTrafficExchanges } from "@/lib/api"
-import { resolveTrafficData } from "@/lib/traffic-state"
+import { resolveTrafficData, resolveTrafficDetailSnapshot } from "@/lib/traffic-state"
 
 export function useTrafficExchanges(
   query: { label?: string; limit?: number; offset?: number; session?: string } | null,
@@ -22,5 +22,9 @@ export function useTrafficExchange(
     async (signal) => ({ key, value: query === null ? null : await fetchTrafficExchange(query, signal) }),
     [key],
   )
-  return { ...result, data: resolveTrafficData(key, result.data) }
+  const data = resolveTrafficData(key, result.data)
+  return { ...result, data,
+    displayData: data ?? resolveTrafficDetailSnapshot(query, result.data?.value ?? null),
+    loading: result.loading || (query !== null && result.error === null && data === null),
+  }
 }

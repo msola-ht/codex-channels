@@ -21,7 +21,7 @@ describe("Feishu operation log formatter", () => {
       "```",
       "",
       "---",
-      "**耗时：** 125毫秒",
+      "**耗时：** 125 ms",
     ].join("\n"));
   });
 
@@ -36,7 +36,7 @@ describe("Feishu operation log formatter", () => {
       "**调用 MCP 工具 · 已完成** · 读写属性未知\n"
       + "具体内容：`codex_apps.list_mcp_resources`\n\n"
       + "---\n"
-      + "**耗时：** 3秒",
+      + "**耗时：** 2.62 s",
     );
   });
 
@@ -61,7 +61,7 @@ describe("Feishu operation log formatter", () => {
     }, "compact")).toBe(
       "**运行命令 · 已完成** · exit 0 · `git status --short second line`\n\n"
       + "---\n"
-      + "**耗时：** 125毫秒",
+      + "**耗时：** 125 ms",
     );
   });
 

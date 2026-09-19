@@ -48,7 +48,7 @@ export class WebuiManagementTaskRunner {
           ? ["Gateway 必须已停止，且指标 Socket 不可用"]
           : [],
       recovery: traffic
-        ? "永久删除全部可识别转储，无法恢复；未知文件与目录不处理"
+        ? "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理"
         : metrics
         ? normalized.action === "prune"
           ? "操作前备份本地指标库；失败时保留备份并尝试恢复原服务状态"
@@ -241,8 +241,8 @@ export function normalizeTaskInput(input) {
     return { operation: "metrics", action: input.action };
   }
   if (input.operation === "traffic") {
-    if (input.action !== "cleanup") throw new Error("转储维护动作无效");
-    if (input.target !== undefined) throw new Error("转储清理不接受目标");
+    if (input.action !== "cleanup") throw new Error("调用记录维护动作无效");
+    if (input.target !== undefined) throw new Error("调用记录清理不接受目标");
     return { operation: "traffic", action: "cleanup", target: undefined };
   }
   if (input.operation === "update" && (input.action === undefined || input.action === "source")) {

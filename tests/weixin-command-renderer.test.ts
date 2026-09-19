@@ -389,7 +389,7 @@ describe("Weixin command renderer", () => {
     expect(rendered).toContain("模型：gpt-test · medium · Fast 开启");
     expect(rendered).toContain("上下文压缩：2 次");
     expect(rendered).toContain("Git 分支：feature/weixin-surface");
-    expect(rendered).toContain("总耗时：1分5秒");
+    expect(rendered).toContain("总耗时：1 min 5 s");
     expect(rendered).not.toContain("延迟");
     expect(rendered).not.toContain("速度");
   });

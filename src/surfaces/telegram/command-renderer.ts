@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import type { Context } from "grammy";
 import type { InlineKeyboardMarkup } from "grammy/types";
 
 import type {
   ConversationCommandResult,
+  ModelSelectionState,
 } from "../../application/index.js";
 import {
   fastServiceTierId,
@@ -271,10 +272,7 @@ export function modelEffortKeyboard(
   if (!model || model.supportedReasoningEfforts.length <= 1) {
     return undefined;
   }
-  const token = telegramModelSelectionToken(
-    result.state.model,
-    result.state.modelProvider ?? "openai",
-  );
+  const token = telegramModelSelectionToken(result.state);
   return {
     inline_keyboard: model.supportedReasoningEfforts.map((option, index) => [{
       text: `${option.effort === result.state.effort ? "✓ " : ""}${option.effort}`,
@@ -319,10 +317,7 @@ export function modelProviderSelectionKeyboard(
   }
   const providers = listProviders(result.state.models);
   const current = result.state.modelProvider ?? "openai";
-  const token = telegramModelSelectionToken(
-    result.state.model,
-    result.state.modelProvider ?? "openai",
-  );
+  const token = telegramModelSelectionToken(result.state);
   return {
     inline_keyboard: providers.map((provider, index) => [{
       text: boundedButtonLabel(
@@ -344,10 +339,7 @@ export function modelSelectionKeyboard(
   if (result.view !== "model" || models.length === 0) {
     return undefined;
   }
-  const token = telegramModelSelectionToken(
-    result.state.model,
-    result.state.modelProvider ?? "openai",
-  );
+  const token = telegramModelSelectionToken(result.state);
   return {
     inline_keyboard: models.map((model, index) => [{
       text: boundedButtonLabel(
@@ -358,8 +350,25 @@ export function modelSelectionKeyboard(
   };
 }
 
-export function telegramModelSelectionToken(model: string, provider: string): string {
-  return createHash("sha256").update(`${provider}\0${model}`).digest("base64url");
+const maximumModelSelectionSnapshots = 1_000;
+const modelSelectionTokens = new Map<string, string>();
+
+export function telegramModelSelectionToken(state: ModelSelectionState): string {
+  const key = JSON.stringify([
+    state.model, state.modelProvider ?? "openai", state.providerFilter ?? null,
+    state.models.map((model) => [
+      model.id, model.model, model.provider ?? "openai", model.available !== false,
+      model.supportedReasoningEfforts.map((option) => option.effort),
+    ]),
+  ]);
+  const existing = modelSelectionTokens.get(key);
+  if (existing !== undefined) return existing;
+  const token = randomBytes(32).toString("base64url");
+  modelSelectionTokens.set(key, token);
+  if (modelSelectionTokens.size > maximumModelSelectionSnapshots) {
+    modelSelectionTokens.delete(modelSelectionTokens.keys().next().value!);
+  }
+  return token;
 }
 
 function scopedModelDisplayName(displayName: string, provider: string | undefined): string {

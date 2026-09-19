@@ -32,6 +32,7 @@ import {
   formatCacheHitRate,
   formatRequestCount,
   formatTokenCount,
+  formatTokensPerSecond,
 } from "./token-format.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
 
@@ -71,7 +72,9 @@ export interface StartupRuntimeInfo {
   debugEnabled?: boolean;
   openAiConnectivity?:
     | "reachable"
-    | "partial"
+    | "route-warning"
+    | "invalid-base-url"
+    | "indeterminate"
     | "unreachable"
     | "not-applicable";
 }
@@ -115,12 +118,7 @@ export function createStartupPresentation(
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}`,
       },
-      ...(runtime.openAiConnectivity === "unreachable"
-        ? [{
-            label: "OpenAI 网络",
-            value: "连接失败；请检查代理设置",
-          }]
-        : []),
+      ...openAiConnectivityFields(runtime.openAiConnectivity),
     ],
     sections: [
       ...(runtime.debugEnabled === true
@@ -190,6 +188,25 @@ export function createStartupPresentation(
         : []),
     ],
   };
+}
+
+function openAiConnectivityFields(
+  status: StartupRuntimeInfo["openAiConnectivity"],
+): LifecyclePresentationLeafField[] {
+  switch (status) {
+    case "unreachable":
+      return [{ label: "OpenAI 网络", value: "连接失败；请检查代理设置" }];
+    case "invalid-base-url":
+      return [{ label: "OpenAI 网络", value: "Base URL 路径无效；请检查配置" }];
+    case "route-warning":
+      return [{ label: "OpenAI 网络", value: "线路响应异常；请检查 Gateway 日志与 OpenAI Base URL" }];
+    case "indeterminate":
+      return [{ label: "OpenAI 网络", value: "检测失败；请检查 App Server 连接与 Gateway 日志" }];
+    case "reachable":
+    case "not-applicable":
+    case undefined:
+      return [];
+  }
 }
 
 export function createTurnStartedPresentation(
@@ -284,12 +301,7 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  if (event.modelProvider === "openai" && event.upstreamTtftMs !== undefined) {
-    fields.push({
-      label: "首字耗时",
-      value: `${event.upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
-    });
-  }
+  fields.push({ label: "Token/s", value: formatCompletionTokenRate(event.tokensPerSecond) });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -563,6 +575,18 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
+  if (event.durationMs !== undefined || event.timing?.modelRequestCount !== undefined) {
+    runFields.push({
+      title: "性能",
+      fields: [
+        { label: "Token/s", value: formatCompletionTokenRate(event.timing?.tokensPerSecond) },
+        ...(event.durationMs === undefined ? [] : [{
+          label: "总耗时",
+          value: formatElapsedDuration(event.durationMs),
+        }]),
+      ],
+    });
+  }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
     const taskFields: LifecyclePresentationField[] = [
@@ -607,24 +631,8 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
+    taskFields.push({ label: "Token/s", value: formatCompletionTokenRate(task.tokensPerSecond) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
-  }
-  const upstreamTtftMs = usesOpenAiAccount(event.modelProvider)
-    ? event.timing?.upstreamTtftMs : undefined;
-  if (event.durationMs !== undefined || upstreamTtftMs !== undefined) {
-    runFields.push({
-      title: "性能",
-      fields: [
-        ...(upstreamTtftMs === undefined ? [] : [{
-          label: "首字耗时",
-          value: `${upstreamTtftMs.toLocaleString("zh-CN", { maximumFractionDigits: 2 })}毫秒`,
-        }]),
-        ...(event.durationMs === undefined ? [] : [{
-          label: "总耗时",
-          value: formatElapsedDuration(event.durationMs),
-        }]),
-      ],
-    });
   }
   if (Object.hasOwn(event, "gitBranch")) {
     sessionFields.push({
@@ -641,20 +649,18 @@ export function createTurnCompletedPresentation(
     sessionFields.push({
       title: "Token",
       value: formatTokenCount(session.inputTokens + session.outputTokens),
-      fields: session.cachedInputTokens === null
-        ? []
-        : [{
+      fields: [
+        ...(session.cachedInputTokens === null ? [] : [{
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
-          }],
+          }]),
+        { label: "Token/s", value: formatCompletionTokenRate(session.tokensPerSecond) },
+      ],
     });
   }
   const sections = [
-    ...(runFields.length > 0
-      ? [{ title: "本次运行", fields: runFields }]
-      : []),
     ...(sessionFields.length > 0
-      ? [{ title: "当前 Session 累计", fields: sessionFields }]
+      ? [{ title: "当前会话", fields: sessionFields }]
       : []),
     ...(accountFields.length > 0
       ? [{ title: "账户状态", fields: accountFields }]
@@ -662,9 +668,13 @@ export function createTurnCompletedPresentation(
   ];
   return {
     title: `${event.background ? "后台任务" : "本次运行"} · ${event.missingFinalResponse ? "无最终回复" : turnStatusLabel(event.status)}`,
-    fields: sections.length === 1 ? sections[0]!.fields : [],
-    ...(sections.length > 1 ? { sections } : {}),
+    fields: runFields,
+    ...(sections.length > 0 ? { sections } : {}),
   };
+}
+
+function formatCompletionTokenRate(value: number | null | undefined): string {
+  return value == null ? formatTokensPerSecond(value) : `${Number(formatTokensPerSecond(value))}/s`;
 }
 
 export function renderPlainLifecyclePresentation(

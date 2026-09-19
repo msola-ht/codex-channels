@@ -53,6 +53,7 @@ export interface CompactSummary {
 }
 
 export interface Aggregate {
+  tokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -147,6 +148,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  tokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -170,6 +172,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface TurnSummary {
+  tokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -202,6 +205,12 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  tokensPerSecond?: number | null
+  totalDurationMs: number | null
+  traffic: { label: string; session: string; interaction: number } | null
+  firstContentMs: number | null
+  requestModel: string | null
+  responseModel: string | null
   upstreamTtftMs: number | null
   id: number
   provider: string | null
@@ -229,6 +238,8 @@ export interface RequestRecord {
 }
 
 export type RequestSortKey =
+  | "tokensPerSecond"
+  | "totalDuration"
   | "time"
   | "provider"
   | "model"
@@ -762,8 +773,9 @@ export interface OpencodeGoQuotaWindow {
 }
 
 export interface OpencodeGoAccountUsage {
+  subscriptionRequired: boolean
   provider: string
-  account: string
+  account: string | null
   displayName: string
   default: boolean
   available: boolean
@@ -842,6 +854,11 @@ export interface TrafficListResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  modelEvidence: {
+    serverModels: Array<{ source: string; model: string }>
+    safetyModels: Array<{ source: string; model: string }>
+    truncated: boolean
+  }
   parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
   id: number
   startedAtMs: number
@@ -886,6 +903,18 @@ export interface TrafficExchangeDetail {
     bodyTruncated: boolean
     bytes?: number
     durationMs?: number
+    callTiming: {
+      totalMs: number
+      preForwardMs?: number
+      firstEventWaitMs?: number
+      afterFirstEventMs?: number
+      receiveRequestMs?: number
+      waitResponseHeadMs?: number
+      receiveResponseMs?: number
+      submitWaitMs?: number
+      submittedToFirstEventMs?: number
+      connectionReady?: boolean
+    } | null
     httpTiming: {
       receiveRequestMs?: number
       waitResponseHeadMs?: number
@@ -905,6 +934,7 @@ export interface TrafficExchangeDetail {
       totalTokens?: number
     } | null
     failure?: string
+    failureStage?: string
     output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
     outputTruncated: boolean
     outputSource: "terminal" | "trace"
@@ -917,6 +947,7 @@ export interface TrafficExchangeDetail {
       samplingMs?: number
       toolPauseMs?: number
     } | null
+    firstContentMs?: number
   } | null
   tracePage: {
     offset: number

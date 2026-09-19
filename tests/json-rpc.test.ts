@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
@@ -6,6 +6,28 @@ import { appServerGoal, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 
 describe("JsonRpcClient", () => {
+  it("cancels while transport sending is still pending and handles a late send failure", async () => {
+    const transport = new FakeTransport();
+    const client = new JsonRpcClient(transport);
+    await client.connect();
+    let rejectSend!: (error: Error) => void;
+    vi.spyOn(transport, "send").mockImplementation(() => new Promise<void>((_resolve, reject) => {
+      rejectSend = reject;
+    }));
+    const controller = new AbortController();
+    const request = client.request({ method: "account/read", params: { refreshToken: false } }, {
+      retryOverload: false, signal: controller.signal,
+    });
+    const rejected = expect(request).rejects.toThrow("shutdown");
+    controller.abort(new Error("shutdown"));
+    try {
+      await rejected;
+    } finally {
+      rejectSend(new Error("late send failure"));
+      await client.close();
+    }
+  });
+
   it("retries overload only when the caller marks a request safe", async () => {
     const transport = new FakeTransport();
     transport.simulateAccountUsageOverload = true;

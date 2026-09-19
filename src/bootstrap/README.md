@@ -47,8 +47,8 @@
   View 都不读取请求正文、设置文件或价格目录。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token 与压缩统计；
-  首字耗时使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、有效请求平均 Token/s 与压缩统计；
+  上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
 - `subagent-completion-tracker.ts`：登记 Core 发布的子代理线程，以 App Server 发给发起父 Turn 的
@@ -77,9 +77,14 @@
   读取凭据，不把 Token 放入运行配置。
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
   Dispatcher 复用由 `runtime/proxy-fetch.mjs` 实现。
-- `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做一次有界、无凭据的 HTTP
-  传输探测；官方双目标全部不可达时生成脱敏状态供渠道上线通知使用，单目标失败只记录日志，
-  均不阻断 Gateway；自定义 `openai_base_url` 只探测该地址。
+- `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做有界、无凭据的 HTTP
+  连通探测；组合根先通过稳定 `account/read` 判断当前使用 API Key 还是 ChatGPT 路由，再按官方
+  Doctor 的端点规则只探测活动线路。API 与自定义 `openai_base_url` 使用 `/responses` 传输探测和
+  `/models` 路径校验，ChatGPT 使用 `/backend-api/codex/responses`；`account/read` 与 HTTP 探测共同受
+  总计 12 秒的启动窗口约束，传输失败在剩余时间内有限退避重试，以覆盖已解析代理地址的监听稍晚于
+  App Server/Gateway 就绪的情况。推理端点 HEAD 返回 5xx 时报告线路异常，不被 `/models` 成功掩盖。
+  失败和路径异常形成脱敏状态
+  供渠道上线通知使用，但不阻断 Gateway；停止过程会取消仍在进行的探测。
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文
@@ -89,7 +94,8 @@
   重置时间）；参数化工厂按 `modelProvider` 区分 `ocg-<账户>`，指标库按账户过滤，并汇总本机
   指标库的模型本地 Token 用量；三个额度窗口共用一次精确 Provider 流式读取，不执行通用文本筛选、
   重复计数或偏移分页；Key、响应正文
-  和解析异常同样不进入日志或业务事件。
+  和解析异常同样不进入日志或业务事件；仅将官方明确的缺少订阅权益响应转换为可持久化的无有效订阅结果，
+  不把普通鉴权或网络失败解释为订阅到期。
 - `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
   Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
   新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的
@@ -116,6 +122,10 @@
   校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
   等待修复，重启失败按冷却时间重试；等待、重启中、生效和失败状态通过共享配置变更通知投递给
   所有渠道，停止 Gateway 时一并关闭。
+- `network-proxy-watcher.ts`：按字段保留 TOML 与标准环境代理优先级，监听系统发现参与解析后的
+  有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
+  后台服务与前台入口，不自动重启共享进程。系统查询异步执行且不重叠，失败保留上次结果并告警；
+  停止 Gateway 时取消后续检查及在途查询，并等待查询结束。
 - `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为

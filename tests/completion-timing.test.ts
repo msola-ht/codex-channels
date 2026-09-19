@@ -4,6 +4,10 @@ import { mergeCompletionTiming } from "../src/bootstrap/completion-timing.js";
 import type { StoredTurnRequestMetricsSummary } from "../src/observability/index.js";
 
 describe("mergeCompletionTiming", () => {
+  it("restores persisted mean request speed without retaining a stale unknown value", () => {
+    expect(mergeCompletionTiming(turnSummary({ tokensPerSecond: 200 }), "turn-1", undefined)?.tokensPerSecond).toBe(200);
+    expect(mergeCompletionTiming(turnSummary({ tokensPerSecond: null }), "turn-1", { tokensPerSecond: 100 })).not.toHaveProperty("tokensPerSecond");
+  });
   it("restores persisted TTFT instead of a later live sample after restart", () => {
     expect(mergeCompletionTiming(turnSummary({ upstreamTtftMs: 569 }), "turn-1",
       { upstreamTtftMs: 720 })?.upstreamTtftMs).toBe(569);

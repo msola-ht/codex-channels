@@ -11,10 +11,13 @@ import {
   type WorkspaceAddedConfigEvent,
 } from "../../runtime/config-event-queue.mjs";
 import { GatewayAccountRefreshServer } from "../../runtime/gateway-account-refresh.mjs";
+import { readGatewayConfig } from "../../runtime/gateway-config.mjs";
+import type { ProxySettings } from "../../runtime/network-proxy.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
 import { GatewayApplication } from "./app.js";
+import { NetworkProxyWatcher } from "./network-proxy-watcher.js";
 import {
   ProviderSettingsWatcher,
   type ProviderSettingsStateKind,
@@ -74,9 +77,18 @@ export async function runGatewayProcess(): Promise<void> {
       ),
     environment: process.env,
   });
+  const configuredNetwork = proxySettings(
+    readGatewayConfig(runtime.configPath).network,
+  );
+  const networkProxyWatcher = new NetworkProxyWatcher({
+    logger,
+    configured: configuredNetwork,
+    initialProxy: config.networkProxy,
+  });
 
-  const stopWatching = (): void => {
+  const stopWatching = (): Promise<void> => {
     providerSettingsWatcher.stop();
+    const networkStopped = networkProxyWatcher.stop();
     if (reloadTimer) {
       clearTimeout(reloadTimer);
       reloadTimer = undefined;
@@ -86,6 +98,7 @@ export async function runGatewayProcess(): Promise<void> {
     }
     process.removeListener("SIGHUP", scheduleReload);
     process.removeListener("message", controlFromParent);
+    return networkStopped;
   };
   const stop = (exitCode = 0): void => {
     if (stopping) {
@@ -93,13 +106,14 @@ export async function runGatewayProcess(): Promise<void> {
     }
     stopping = true;
     gatewayOwner.markNotReady();
-    stopWatching();
+    const watchersStopped = stopWatching();
     void accountRefresh
       .close()
       .catch((error) => logger.error({ err: error }, "Gateway 账户刷新 IPC 关闭失败"))
       .then(() => application.stop())
       .catch((error) => logger.error({ err: error }, "Gateway 停止失败"))
       .finally(async () => {
+        await watchersStopped;
         try {
           await gatewayOwner.close();
         } catch (error) {
@@ -212,7 +226,7 @@ export async function runGatewayProcess(): Promise<void> {
     await application.start();
     await accountRefresh.start();
   } catch (error) {
-    stopWatching();
+    await stopWatching();
     await accountRefresh.close().catch(() => undefined);
     await application.stop().catch(() => undefined);
     await gatewayOwner.close();
@@ -224,6 +238,7 @@ export async function runGatewayProcess(): Promise<void> {
   gatewayOwner.markReady();
   started = true;
   providerSettingsWatcher.start();
+  networkProxyWatcher.start();
   if (watchedPaths.length > 0) {
     for (const path of watchedPaths) {
       watchFile(path, { interval: 500, persistent: false }, (current, previous) => {
@@ -239,6 +254,17 @@ export async function runGatewayProcess(): Promise<void> {
     reloadPending = false;
     await reload();
   }
+}
+
+function proxySettings(value: unknown): ProxySettings {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  const table = value as Record<string, unknown>;
+  return {
+    ...(typeof table.http_proxy === "string" ? { http_proxy: table.http_proxy } : {}),
+    ...(typeof table.https_proxy === "string" ? { https_proxy: table.https_proxy } : {}),
+    ...(typeof table.all_proxy === "string" ? { all_proxy: table.all_proxy } : {}),
+    ...(typeof table.no_proxy === "string" ? { no_proxy: table.no_proxy } : {}),
+  };
 }
 
 function readPendingConfigEvents(

@@ -55,9 +55,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
 
   async accountLimits(modelProvider: string): Promise<ProviderAccountLimits> {
     const adapter = this.adapters.get(modelProvider);
-    const result: ProviderAccountLimits = adapter?.accountLimits
-      ? await adapter.accountLimits()
-      : { kind: "unsupported", provider: modelProvider };
+    // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
+    if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
+    const result = await adapter.accountLimits();
     this.persist(
       this.snapshotUsage.get(modelProvider)
         ?? { kind: "unsupported", provider: modelProvider },

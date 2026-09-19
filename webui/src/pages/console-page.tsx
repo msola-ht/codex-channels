@@ -18,7 +18,7 @@ import {
 } from "@/components/overview/overview-sections"
 import { UsageCharts } from "@/components/overview/usage-charts"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
-import type { AccountSnapshotFreshness } from "@/hooks/use-official-account-sources"
+import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useDashboard } from "@/hooks/use-dashboard"
 import { cn } from "@/lib/utils"
 import type {
@@ -65,11 +65,16 @@ export function ConsolePage({ range, onRangeChange }: {
         error={dashboard.error}
       />
       <AccountStatusCards
+        onAccountRemoved={officialAccounts.accountRemoved}
+        removalNotice={officialAccounts.removalNotice}
         overview={dashboard.data}
         balance={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
-        freshness={officialAccounts.data?.freshness ?? { deepseek: "missing", opencodeGo: "missing" }}
-        accountError={officialAccounts.refreshError ?? officialAccounts.error ?? officialAccounts.data?.warning ?? null}
+        refreshControls={officialAccounts.refreshControls}
+        accountError={officialAccounts.refreshError ?? officialAccounts.error}
+        accountWarning={officialAccounts.data?.warning ?? null}
+        refreshing={officialAccounts.refreshing}
+        onRefresh={() => void refreshAccounts()}
       />
     </div>
   )
@@ -132,17 +137,27 @@ function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery;
 }
 
 function AccountStatusCards({
+  onAccountRemoved,
+  removalNotice,
   overview,
   balance,
   opencodeGoUsage,
-  freshness,
+  refreshControls,
   accountError,
+  accountWarning,
+  refreshing,
+  onRefresh,
 }: {
+  onAccountRemoved: (accountId: string, activation?: string) => void
+  removalNotice: string | null
   overview: OverviewResponse | null
   balance: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
-  freshness: { deepseek: AccountSnapshotFreshness; opencodeGo: AccountSnapshotFreshness }
+  refreshControls: Record<string, AccountRefreshControl>
   accountError: string | null
+  accountWarning: string | null
+  refreshing: boolean
+  onRefresh: () => void
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -150,49 +165,38 @@ function AccountStatusCards({
         <h2 className="text-lg font-semibold">本地账户与额度</h2>
         <p className="text-sm text-muted-foreground">数据来自本机 Gateway 的账户快照。</p>
       </div>
+      {accountError ? <Alert variant="destructive">
+        <AlertTitle>账户数据暂未更新</AlertTitle>
+        <AlertDescription>
+          <p>{accountError}</p>
+          <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
+            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {refreshing ? "刷新中" : "重试"}
+          </Button>
+        </AlertDescription>
+      </Alert> : null}
+      {removalNotice ? <Alert><AlertTitle>本地账户已删除</AlertTitle><AlertDescription>{removalNotice}</AlertDescription></Alert> : null}
       <div className="grid gap-6 lg:grid-cols-2">
         <WeeklyQuotaCard
           usedPercent={overview?.weeklyQuota?.usedPercent ?? null}
           resetsAt={overview?.weeklyQuota?.resetsAt ?? null}
           planType={overview?.weeklyQuota?.planType ?? null}
         />
+        <DeepseekBalanceCard
+          available={balance?.available ?? false}
+          observedAtMs={balance?.observedAtMs ?? 0}
+          balances={balance?.balances ?? []}
+          refreshControl={refreshControls.deepseek}
+        />
         <div className="flex flex-col gap-2">
-          <FreshnessNotice provider="DS" status={freshness.deepseek} />
-          <DeepseekBalanceCard
-            available={balance?.available ?? false}
-            observedAtMs={balance?.observedAtMs ?? 0}
-            balances={balance?.balances ?? []}
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          {opencodeGoUsage !== null && opencodeGoUsage.accounts.length > 0
-            ? <FreshnessNotice provider="OCG" status={freshness.opencodeGo} />
-            : null}
+          {accountWarning ? <Alert><AlertTitle>OCG 账户信息暂不可用</AlertTitle><AlertDescription>{accountWarning}</AlertDescription></Alert> : null}
           <OpencodeGoUsageCard
             accounts={opencodeGoUsage?.accounts ?? []}
+            refreshControls={refreshControls}
+            onAccountsChanged={onAccountRemoved}
           />
         </div>
       </div>
-      <ErrorBanner error={accountError} />
     </div>
-  )
-}
-
-function FreshnessNotice({
-  provider,
-  status,
-}: {
-  provider: "DS" | "OCG"
-  status: AccountSnapshotFreshness
-}) {
-  if (status === "fresh") return null
-  return (
-    <Alert>
-      <AlertTitle>{provider} 账户快照需要刷新</AlertTitle>
-      <AlertDescription>
-        {status === "missing" ? "尚未获取到账户快照。" : "本地快照已超过 15 分钟。"}
-        可使用汇总范围旁的刷新按钮实时查询。
-      </AlertDescription>
-    </Alert>
   )
 }

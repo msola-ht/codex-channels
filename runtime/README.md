@@ -2,6 +2,8 @@
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+- `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
+
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
@@ -14,7 +16,11 @@
 - `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。系统自动发现只覆盖 macOS 和 GNOME；Windows 明确不读取 WinINET/WinHTTP，使用 TOML
-  或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。
+  或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。App Server 服务持有的刷新选择器
+  会在启动时先校验当前目标的代理 URL，再缓存一次选择；Provider 上游连接失败后使缓存失效，让
+  下一次请求异步重新读取系统代理，并发请求共享在途查询；服务停止时取消查询，关闭后不再选择路由。
+  请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
+  观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
@@ -77,7 +83,11 @@
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
 - `app-server-service-runtime.mjs`：持有内部 App Server 服务入口的 Provider 统计代理、主实例与隔离
   实例子进程、按需启动/释放、Supervisor、可选 Desktop App 桥和退出清理生命周期；只为确认的官方
-  OpenAI 上游请求 Responses timing 事件。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
+  OpenAI 上游请求 Responses timing 事件。Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
+  上游连接失败会使系统代理发现结果失效，下一次请求可采用代理软件启动后才写入的系统代理，无需重启
+  模型代理。App Server 自身发出的账户额度请求不经过 Provider Proxy；Gateway 的系统代理观察器仅
+  提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。TOML 和标准代理环境
+  变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider

@@ -23,6 +23,122 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("does not infer new stages from legacy wall-clock records or invalid offsets", async () => {
+    const fixture = createFixture();
+    const legacy = httpInteraction(1);
+    const invalid = httpInteraction(2);
+    Object.assign(invalid.response, { callTiming: {
+      clock: "monotonic", endMs: 100, forwardingMs: 10, firstEventMs: 120,
+      requestBodyEndMs: 80, responseHeadMs: 20,
+    } });
+    writeSession(fixture.trafficDir, "openai", "clock-stages", [legacy, invalid]);
+    const paths = [join(fixture.trafficDir, "openai-clock-stages")];
+    expect((await describeDumpExchange(paths, 1)).response.callTiming).toBeNull();
+    const timing = (await describeDumpExchange(paths, 2)).response.callTiming;
+    expect(timing).toMatchObject({ totalMs: 100, preForwardMs: 10, receiveResponseMs: 80 });
+    expect(timing.firstEventWaitMs).toBeUndefined();
+    expect(timing.afterFirstEventMs).toBeUndefined();
+    expect(timing.waitResponseHeadMs).toBeUndefined();
+  });
+  it.each(["http", "websocket"])("separates %s model declarations across trace pages without changing terminal models", async (transport) => {
+    const fixture = createFixture();
+    const call = transport === "http" ? httpInteraction(1) : websocketInteraction(1);
+    call.response.headers = { "X-OpenAI-Model": "header-model" };
+    const value = JSON.stringify({ type: "codex.response.metadata", headers: {
+      "openai-model": "declared-model", "x-codex-safety-buffering-faster-model": "candidate-model",
+      "x-codex-turn-state": "must-not-project", "x-models-etag": "catalog-only",
+    } });
+    call.responseBody = JSON.stringify({ type: "response.completed", response: {
+      model: "terminal-model", output: [{ type: "message", content: [{ type: "output_text", text: "answer" }] }],
+    } });
+    call.response.responseModels = ["terminal-model"];
+    call.trace = Array.from({ length: 3 }, () => ({ interaction: 1, kind: "other" }));
+    if (transport === "websocket") {
+      call.trace.push(...[value.slice(0, 40), value.slice(40)].map((text, index) => ({
+        interaction: 1, kind: "websocket_frame", direction: "upstream", text, part: index + 1, parts: 2,
+      })));
+      call.trace.push({ interaction: 2, kind: "websocket_frame", direction: "upstream", text: value.replace("candidate-model", "other-call") });
+    } else {
+      const sse = `data: ${value}\n\n`;
+      call.trace.push(...[sse.slice(0, 30), sse.slice(30)].map((text) => ({ interaction: 1, kind: "response_body", encoding: "utf8", text })));
+    }
+    writeSession(fixture.trafficDir, "openai", "models", [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, "openai-models")], 1, { maxTracePageSize: 1 });
+    expect(detail.trace).toHaveLength(1);
+    expect(detail.responseModels).toEqual(["terminal-model"]);
+    expect(detail.modelEvidence).toEqual({
+      serverModels: [{ source: "http.headers.x-openai-model", model: "header-model" }, { source: "codex.response.metadata.headers.openai-model", model: "declared-model" }],
+      safetyModels: [{ source: "codex.response.metadata.headers.x-codex-safety-buffering-faster-model", model: "candidate-model" }],
+      truncated: false,
+    });
+    expect(detail.response.outputTruncated).toBe(false);
+    expect(JSON.stringify(detail.modelEvidence)).not.toMatch(/must-not-project|catalog-only|other-call/u);
+  });
+
+  it("bounds declarations and preserves explicit safety metadata sources", async () => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1);
+    call.trace = [
+      { type: "response.metadata", metadata: { type: "safety_buffering", retry_model: "retry-model" } },
+      { type: "response.metadata", safety_buffering: null, metadata: { type: "safety_buffering", retry_model: "ignored" } },
+      { type: "response.metadata", headers: { "openai-model": "x".repeat(257) } },
+      { type: "response.completed", response: { headers: { "X-OpenAI-Model": "nested-model" } }, safety_buffering: { retry_model: "explicit-retry" } },
+      ...Array.from({ length: 40 }, (_, index) => ({ type: "codex.response.metadata", headers: { "openai-model": `model-${index}` } })),
+    ].map((event) => ({ interaction: 1, kind: "websocket_frame", direction: "upstream", text: JSON.stringify(event) }));
+    writeSession(fixture.trafficDir, "openai", "bounded-models", [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, "openai-bounded-models")], 1);
+    expect(detail.modelEvidence.safetyModels).toEqual([
+      { source: "response.metadata.metadata.retry_model", model: "retry-model" },
+      { source: "response.completed.safety_buffering.retry_model", model: "explicit-retry" },
+    ]);
+    expect(detail.modelEvidence.serverModels[0]).toEqual({ source: "response.completed.response.headers.x-openai-model", model: "nested-model" });
+    expect(detail.modelEvidence.serverModels).toHaveLength(30);
+    expect(detail.modelEvidence.truncated).toBe(true);
+  });
+
+  it("identifies WebSocket failure terminals without an HTTP eventType index", async () => {
+    const fixture = createFixture();
+    const call = websocketInteraction(1);
+    call.response.state = "failed";
+    call.responseBody = JSON.stringify({ type: "response.failed", response: { error: { code: "upstream_error" } } });
+    writeSession(fixture.trafficDir, "openai", "ws-failed", [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, "openai-ws-failed")], 1);
+    expect(detail.response.failureStage).toBe("上游返回失败或不完整终态");
+  });
+
+  it.each([
+    [{ state: "failed", errorScope: "upstream_route" }, "上游路由解析"],
+    [{ state: "failed", errorScope: "upstream_response" }, "上游响应接收"],
+    [{ state: "incomplete", eventType: "response.incomplete" }, "上游返回失败或不完整终态"],
+    [{ state: "failed", status: 429 }, "上游 HTTP 响应"],
+    [{ state: "incomplete" }, "未提供失败阶段"],
+    [{ state: "completed" }, undefined],
+  ])("projects only recorded failure stages: %j", async (response, expected) => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    Object.assign(call.response, response);
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.failureStage).toBe(expected);
+  });
+
+  it("reports unavailable exact references without selecting another call", async () => {
+    const fixture = createFixture();
+    const server = await startServer(fixture.environment);
+    const detailUrl = `${server.origin}/api/v1/traffic/exchange?label=openai&session=missing&id=1`;
+    const empty = await getJson<TrafficErrorBody>(detailUrl);
+    expect(empty.status).toBe(404);
+    expect(empty.body.error.code).toBe("traffic_session_not_found");
+    writeSession(fixture.trafficDir, "openai", "retained", [httpInteraction(1)]);
+    const missingSession = await getJson<TrafficErrorBody>(detailUrl);
+    expect(missingSession.status).toBe(404);
+    expect(missingSession.body.error.code).toBe("traffic_session_not_found");
+    const missingCall = await getJson<TrafficErrorBody>(detailUrl.replace("session=missing&id=1", "session=retained&id=2"));
+    expect(missingCall.status).toBe(404);
+    expect(missingCall.body.error.code).toBe("traffic_exchange_not_found");
+  });
+
   it("projects retained inputs, declared tools and reported parameters without inventing missing content", async () => {
     const fixture = createFixture();
     const call = httpInteraction(1, JSON.stringify({
@@ -425,7 +541,7 @@ describe("webui traffic V2 API", () => {
       request: { socket: { remoteAddress: "192.0.2.1" } },
       response: {},
       url: new URL("http://127.0.0.1/api/v1/traffic"),
-    })).rejects.toMatchObject({ message: "转储查看只允许回环访问", status: 503 });
+    })).rejects.toMatchObject({ message: "调用记录查看只允许回环访问", status: 503 });
   });
 });
 

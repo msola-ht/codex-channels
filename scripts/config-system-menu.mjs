@@ -34,12 +34,12 @@ export async function runSystemSettings({
       },
       {
         value: "model_traffic_dump",
-        label: "模型请求转储",
+        label: "调用详情记录",
         hint: "记录完整模型报文；仅排查时临时开启",
       },
       {
         value: "model_traffic_retention",
-        label: "模型请求转储保留天数",
+        label: "调用记录保留天数",
         hint: "默认 30 天；0 关闭按时间自动清理",
       },
       { value: "approval_timeout", label: "审批超时", hint: "approval.timeout_seconds（30–3600 秒）" },
@@ -107,25 +107,25 @@ export async function runSystemSettings({
 async function runModelTrafficDump({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
-    message: "模型请求转储（包含完整 prompt、工具输出和代码，仅排查时开启）",
+    message: "调用详情记录（包含完整 prompt、工具输出和代码，仅排查时开启）",
     showInstructions: false,
     initialValue: settings.system.modelTrafficDumpEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "写入用户数据目录下的 traffic/" },
-      { value: "disabled", label: "关闭", hint: "停止写入新的转储文件" },
+      { value: "disabled", label: "关闭", hint: "停止写入新的调用记录文件" },
       { value: "back", label: "返回上一级" },
     ],
   });
   if (prompts.isCancel(selected) || selected === "back") return { action: "back" };
   if (selected !== "enabled" && selected !== "disabled") {
-    throw new Error(`未知模型请求转储设置：${String(selected)}`);
+    throw new Error(`未知调用详情记录设置：${String(selected)}`);
   }
   const enabled = selected === "enabled";
   const result = updateGatewaySetting({
     kind: "system.model-traffic-dump",
     value: enabled,
   }, { environment, expectedRevision: settings.revision, writeConfig });
-  output.write(`模型请求转储已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
+  output.write(`调用详情记录已${enabled ? "开启" : "关闭"}：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
     modelTrafficDumpEnabled: enabled,
@@ -138,7 +138,7 @@ async function runModelTrafficDump({ environment, output, prompts, writeConfig }
 async function runModelTrafficRetention({ environment, output, prompts, writeConfig }) {
   const settings = loadGatewaySettings(environment);
   const value = await prompts.text({
-    message: "模型请求转储保留天数（0 表示关闭按时间自动清理）",
+    message: "调用记录保留天数（0 表示关闭按时间自动清理）",
     initialValue: String(settings.system.modelTrafficRetentionDays),
     validate: (input) => {
       const parsed = Number(input);
@@ -150,15 +150,15 @@ async function runModelTrafficRetention({ environment, output, prompts, writeCon
   if (prompts.isCancel(value)) return { action: "back" };
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 36_500) {
-    throw new Error("模型请求转储保留天数必须为 0–36500 之间的整数");
+    throw new Error("调用记录保留天数必须为 0–36500 之间的整数");
   }
   const result = updateGatewaySetting({
     kind: "system.model-traffic-retention-days",
     value: parsed,
   }, { environment, expectedRevision: settings.revision, writeConfig });
   output.write(parsed === 0
-    ? `模型请求转储按时间自动清理已关闭：${result.configPath}\n`
-    : `模型请求转储已设为保留 ${parsed} 天：${result.configPath}\n`);
+    ? `调用详情记录按时间自动清理已关闭：${result.configPath}\n`
+    : `调用详情记录已设为保留 ${parsed} 天：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return {
     modelTrafficRetentionDays: parsed,

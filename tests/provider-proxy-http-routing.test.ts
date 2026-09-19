@@ -25,6 +25,181 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP routing", () => {
+  it("preserves account and compaction metadata on route failure without counting model listings", async () => {
+    const samples: Array<{ sample: ProviderProxyMetrics; account: string | undefined }> = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", accountIds: ["test"],
+      resolveUpstream: async () => { throw new Error("route unavailable"); },
+      onMetrics: (sample, account) => { samples.push({ sample, account }); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const response = await fetch(`http://${proxy.address()}/go/test/responses/compact`, {
+      method: "POST", body: "{}",
+      headers: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread-test", turn_id: "turn-test" }) },
+    });
+    await response.text();
+    expect(response.status).toBe(502);
+    expect(samples).toHaveLength(1);
+    expect(samples[0]).toMatchObject({ account: "test", sample: {
+      threadId: "thread-test", turnId: "turn-test", operation: "compact",
+      status: "failed", errorType: "provider_proxy_route_error", httpStatus: 502,
+    } });
+    const listing = await fetch(`http://${proxy.address()}/go/test/models`);
+    await listing.text();
+    expect(listing.status).toBe(502);
+    expect(samples).toHaveLength(1);
+  });
+  it("waits for an asynchronous route without losing HTTP bodies or WebSocket messages", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let ready!: () => void;
+    const routesReady = new Promise<void>((resolve) => { ready = resolve; });
+    let routeCalls = 0;
+    let body = "";
+    const upstream = createServer((request, response) => {
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      request.on("end", () => response.end("ok"));
+    });
+    const websocket = new WebSocketServer({ server: upstream });
+    websocket.on("connection", (client) => client.on("message", (data) => client.send(data)));
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    openServers.push({ close: () => new Promise<void>((resolve) => websocket.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: async () => {
+        if (++routeCalls === 2) ready();
+        await gate;
+        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port, protocol: "http" };
+      },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const httpResponse = requestProxy(Number(proxy.address().split(":")[1]), "/responses", "POST");
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const message = new Promise<string>((resolve, reject) => {
+      client.on("error", reject);
+      client.on("open", () => client.send("hello"));
+      client.on("message", (data) => { resolve(data.toString()); client.close(); });
+    });
+    await routesReady;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(body).toBe("");
+    release();
+    await expect(httpResponse).resolves.toEqual({ status: 200 });
+    await expect(message).resolves.toBe("hello");
+    expect(body).toBe("{}");
+  });
+
+  it.each([
+    ["http", "shutdown", false], ["websocket", "shutdown", false],
+    ["http", "disconnect", false], ["websocket", "disconnect", false],
+    ["http", "shutdown", true], ["websocket", "shutdown", true],
+    ["http", "disconnect", true], ["websocket", "disconnect", true],
+  ] as const)("does not forward pending %s routing after %s (reject=%s)", async (transport, action, rejectRoute) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let ready!: () => void;
+    const routeReady = new Promise<void>((resolve) => { ready = resolve; });
+    let upstreamRequests = 0;
+    const samples: ProviderProxyMetrics[] = [];
+    const upstream = createServer((_request, response) => { upstreamRequests += 1; response.end(); });
+    upstream.on("upgrade", (_request, socket) => { upstreamRequests += 1; socket.destroy(); });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: async () => {
+        ready();
+        await gate;
+        if (rejectRoute) throw new Error("route failed after cancellation");
+        return { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port, protocol: "http" };
+      },
+      onMetrics: (sample) => { samples.push(sample); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    let disconnect!: () => void;
+    const closed = new Promise<void>((resolve) => {
+      if (transport === "http") {
+        const client = httpRequest(`http://${proxy.address()}/responses`, { method: "POST" });
+        client.on("error", () => undefined);
+        client.on("close", () => resolve());
+        client.end("{}");
+        disconnect = () => client.destroy();
+      } else {
+        const client = new WebSocket(`ws://${proxy.address()}/responses`);
+        client.on("error", () => undefined);
+        client.on("close", () => resolve());
+        disconnect = () => client.terminate();
+      }
+    });
+    await routeReady;
+    if (action === "shutdown") await proxy.close();
+    else disconnect();
+    await closed;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(upstreamRequests).toBe(0);
+    if (action === "shutdown") expect(samples).toHaveLength(0);
+    else {
+      // 客户端 close 不代表服务端已处理断连；竞态中可观测到一次失败，但不能重复投递。
+      expect(samples.length).toBeLessThanOrEqual(1);
+      for (const sample of samples) expect(sample.status).toBe("failed");
+    }
+  });
+
+  it.each([false, true])("isolates route failures and recovers (async=%s)", async (asynchronous) => {
+    const failure = new Error("invalid proxy route");
+    const errors: Error[] = [];
+    const metrics: ProviderProxyMetrics[] = [];
+    let failing = true;
+    const upstream = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => response.end("ok"));
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1",
+      resolveUpstream: () => {
+        if (failing) {
+          if (asynchronous) return Promise.reject(failure);
+          throw failure;
+        }
+        const target = { host: "127.0.0.1", port: (upstream.address() as AddressInfo).port,
+          protocol: "http" as const, basePath: "" };
+        return asynchronous ? Promise.resolve(target) : target;
+      },
+      onError: (error) => errors.push(error),
+      onMetrics: (sample) => { metrics.push(sample); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const port = Number(proxy.address().split(":")[1]);
+    await expect(requestProxy(port, "/responses", "POST")).rejects.toThrow("502");
+    await new Promise<void>((resolve, reject) => {
+      const client = new WebSocket(`ws://127.0.0.1:${port}/responses`);
+      client.on("error", (error) => {
+        if (error.message.includes("502")) resolve();
+        else reject(error);
+      });
+      client.on("open", () => { client.close(); reject(new Error("unexpected upgrade")); });
+    });
+    expect(errors).toEqual([failure, failure]);
+    expect(metrics).toHaveLength(2);
+    expect(metrics.map((sample) => sample.transport)).toEqual(["http", "websocket"]);
+    for (const sample of metrics) {
+      expect(sample).toMatchObject({ status: "failed", httpStatus: 502,
+        errorType: "provider_proxy_route_error", model: null, inputTokens: null });
+      expect(sample.firstContentMs).toBeUndefined();
+    }
+    failing = false;
+    await expect(requestProxy(port, "/responses", "POST")).resolves.toEqual({ status: 200 });
+  });
+
 it("uses the configured upstream agent", async () => {
     let agentUsed = false;
     const agent = new Agent();

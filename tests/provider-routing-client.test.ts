@@ -1093,6 +1093,7 @@ function client() {
     listPlugins: vi.fn(),
     resolvePlugin: vi.fn(),
     accountUsage: vi.fn(),
+    openAiAccountRoute: vi.fn(),
     accountThreadUsage: vi.fn(),
     accountRateLimits: vi.fn(),
     listPermissionProfiles: vi.fn(),

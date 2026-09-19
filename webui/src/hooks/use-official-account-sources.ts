@@ -6,61 +6,82 @@ import {
   fetchOfficialAccountSnapshots,
   refreshOfficialAccountSnapshot,
 } from "@/lib/api"
-import type { DeepseekBalance, OpencodeGoAccountUsage, OpencodeGoQuotaWindow } from "@/lib/types"
-
-const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
-
-export type AccountSnapshotFreshness = "fresh" | "stale" | "missing"
+import type { DeepseekBalance } from "@/lib/types"
+import {
+  accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh, accountSnapshotsWithoutRemoved, opencodeAccountFromSnapshot, refreshableAccounts,
+  type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
+} from "@/lib/account-refresh-state"
 
 export function useOfficialAccountSources() {
-  const snapshots = useApi(async (signal) => {
-    const result = await fetchOfficialAccountSnapshots(signal)
-    return accountSources(result)
-  }, [])
+  const snapshots = useApi(fetchOfficialAccountSnapshots, [])
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [providers, setProviders] = useState<RefreshableAccount[]>([])
+  const [providerErrors, setProviderErrors] = useState<Record<string, AccountRefreshError | null>>({})
+  const [refreshingProviders, setRefreshingProviders] = useState<string[]>([])
+  const [removedAccountIds, setRemovedAccountIds] = useState<string[]>([])
+  const [removalNotice, setRemovalNotice] = useState<string | null>(null)
   const initialRefreshStarted = useRef(false)
   const refreshOperation = useRef<Promise<void> | null>(null)
   const refreshController = useRef<AbortController | null>(null)
   const replaceData = snapshots.replaceData
-  const refresh = useCallback(() => {
+  const refresh = useCallback((provider?: string, snapshotsOnly = false) => {
     if (refreshOperation.current !== null) return refreshOperation.current
+    initialRefreshStarted.current = true
     const controller = new AbortController()
     refreshController.current = controller
     const operation = (async () => {
       setRefreshing(true)
       setRefreshError(null)
       try {
-        const providers = await fetchManagementProviders(controller.signal)
-        const refreshableProviders = providers.providers
-          .filter((provider) =>
-            provider.kind === "managed" && isRefreshableAccountProvider(provider.id))
-          .map((provider) => provider.id)
+        const accounts = refreshableAccounts(await fetchManagementProviders(controller.signal))
+        if (controller.signal.aborted) return
+        setProviders(accounts)
+        const refreshableProviders = (snapshotsOnly ? [] : accounts)
+          .filter((account) => provider === undefined || account.id === provider)
+          .map((account) => account.id)
+        if (provider !== undefined && refreshableProviders.length === 0) {
+          throw new Error("账户来源不存在或不支持刷新")
+        }
+        setRefreshingProviders(refreshableProviders)
         const results = await Promise.allSettled(
           refreshableProviders.map((provider) =>
             refreshOfficialAccountSnapshot(provider, controller.signal)),
         )
+        if (controller.signal.aborted) return
+        setProviderErrors((previous) => ({ ...previous, ...accountRefreshErrors(refreshableProviders, results) }))
+        const refreshed = accountSnapshotsAfterRefresh(snapshots.data, refreshableProviders, results)
+        if (refreshed !== null) replaceData(refreshed)
         const result = await fetchOfficialAccountSnapshots(controller.signal)
-        replaceData(accountSources(result))
-        const failed = results.find((item) => item.status === "rejected")
-        if (failed?.status === "rejected") {
-          setRefreshError(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))
-        }
+        if (controller.signal.aborted) return
+        replaceData(result)
+        setRemovedAccountIds((removed) => removed.filter((id) => result.snapshots.some((snapshot) => snapshot.accountId === id)))
       } catch (error) {
         if (!controller.signal.aborted) {
-          setRefreshError(error instanceof Error ? error.message : String(error))
+          const message = error instanceof Error ? error.message : String(error)
+          setRefreshError(snapshotsOnly ? `账户已删除，列表同步失败：${message}` : message)
         }
       } finally {
         if (refreshController.current === controller) {
           refreshController.current = null
           refreshOperation.current = null
           setRefreshing(false)
+          setRefreshingProviders([])
         }
       }
     })()
     refreshOperation.current = operation
     return operation
-  }, [replaceData])
+  }, [replaceData, snapshots.data])
+
+  const accountRemoved = useCallback((accountId: string, activation?: string) => {
+    refreshController.current?.abort()
+    refreshOperation.current = null
+    setRemovedAccountIds((previous) => [...previous, accountId])
+    setProviderErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([provider]) => provider !== `ocg-${accountId}`)))
+    setRemovalNotice(`本地账户 ${accountId} 已删除。${activation === "restart-all" ? "请运行 codexc service restart all，使运行中的服务应用配置。" : ""}此操作不会取消官方订阅。`)
+    void refresh(undefined, true)
+  }, [refresh])
 
   useEffect(() => {
     if (snapshots.data === null || initialRefreshStarted.current) return
@@ -70,11 +91,18 @@ export function useOfficialAccountSources() {
 
   useEffect(() => () => refreshController.current?.abort(), [])
 
-  return { ...snapshots, refreshing, refreshError, refresh }
-}
-
-function isRefreshableAccountProvider(provider: string): boolean {
-  return provider === "deepseek" || provider === "ocg" || provider.startsWith("ocg-")
+  const refreshControls: Record<string, AccountRefreshControl> = Object.fromEntries(providers.map((provider) => [provider.id, {
+    refreshing: refreshingProviders.includes(provider.id),
+    disabled: refreshing,
+    error: providerErrors[provider.id] ?? null,
+    onRefresh: () => { void refresh(provider.id) },
+  }]))
+  return {
+    ...snapshots,
+    data: snapshots.data === null ? null
+      : accountSources(accountSnapshotsWithoutRemoved(accountSnapshotsWithMissingProviders(snapshots.data, providers), removedAccountIds)),
+    refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice,
+  }
 }
 
 function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSnapshots>>) {
@@ -88,60 +116,15 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
       }
     : null
   const opencodeGo = opencodeSnapshots.length > 0
-    ? { accounts: opencodeSnapshots.flatMap((snapshot) => toOpencodeAccounts(snapshot)) }
+    ? { accounts: opencodeSnapshots.map(opencodeAccountFromSnapshot) }
     : null
-  const now = Date.now()
-  const freshness = (observedAtMs: number | null): AccountSnapshotFreshness =>
-    observedAtMs === null || observedAtMs <= 0
-      ? "missing"
-      : now - observedAtMs > ACCOUNT_SNAPSHOT_MAX_AGE_MS
-        ? "stale"
-        : "fresh"
-  const opencodeFreshness = opencodeSnapshots.map((snapshot) =>
-    freshness(snapshot.observedAtMs))
-  const opencodeGoFreshness: AccountSnapshotFreshness = opencodeFreshness.includes("missing")
-    ? "missing"
-    : opencodeFreshness.includes("stale")
-      ? "stale"
-      : opencodeFreshness.length === 0 ? "missing" : "fresh"
   return {
     deepseek,
     opencodeGo,
-    freshness: {
-      deepseek: freshness(deepseekSnapshot?.observedAtMs ?? null),
-      opencodeGo: opencodeGoFreshness,
-    },
     warning: result.warnings[0]?.message ?? null,
   }
 }
 
 function isDeepseekUsage(value: unknown): value is { balances: DeepseekBalance[] } {
   return !!value && typeof value === "object" && Array.isArray((value as { balances?: unknown }).balances)
-}
-
-function toOpencodeAccounts(snapshot: {
-  provider: string
-  accountId: string | null
-  displayName: string
-  default: boolean
-  observedAtMs: number
-  available: boolean
-  usage: unknown
-}): OpencodeGoAccountUsage[] {
-  const usage = snapshot.usage as { windows?: OpencodeGoQuotaWindow[] }
-  return [{
-    provider: snapshot.provider,
-    account: snapshot.accountId ?? "default",
-    displayName: snapshot.displayName,
-    default: snapshot.default,
-    observedAtMs: snapshot.observedAtMs,
-    available: snapshot.available,
-    windows: Array.isArray(usage.windows)
-      ? usage.windows.map((window) => ({
-        ...window,
-        // 快照库保存官方接口的秒级时间；WebUI 展示统一使用毫秒 Unix 时间戳。
-        resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
-      }))
-      : [],
-  }]
 }

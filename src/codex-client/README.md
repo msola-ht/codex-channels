@@ -44,7 +44,8 @@
 - `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
-- `account-adapter.ts`：把账户 Token 用量、单桶或多桶额度、重置券数量、账户 ID、普通用量权限及
+- `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
+  启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application
   稳定摘要；接受当前 0.154.0 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
@@ -83,7 +84,8 @@
   `item/tool/call` 属于 Gateway 宿主动态工具边界，不在本审批适配器中执行。
 - `protocol-info.ts`：集中公开 App Server 客户端标识、受支持的 Codex CLI 版本和 Gateway 显示版本，
   供 Client 请求复用，并由组合根校验版本、向 Surface 注入纯字符串。
-- `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、账户与 Thread 用量及用户级配置
+- `client.ts`：Thread 搜索/归档/固定、原生 Queue 六请求、分页历史与 Revert、Turn、模型、权限、Skill、
+  `account/read` 当前认证路由、账户与 Thread 用量及用户级配置
   读取等 App Server 方法的类型化封装；按 Workspace 读取有效思考等级与服务层级，模型、思考等级、服务层级默认值和受控 agents 设置统一通过
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
