@@ -11,7 +11,7 @@ export function TrafficRequestContent({ content }: { content: TrafficExchangeDet
         </details>
       )}
       <section className="flex min-w-0 flex-col gap-2" aria-label="请求输入">
-        <p className="text-sm font-medium">请求输入（转储保留内容）</p>
+        <p className="text-sm font-medium">请求输入（调用记录保留内容）</p>
         {content.input === null ? <p className="text-sm text-muted-foreground">未提取到输入，见原始正文。</p>
           : content.input.length === 0 ? <p className="text-sm text-muted-foreground">输入为空。</p>
             : content.input.map((item, index) => (

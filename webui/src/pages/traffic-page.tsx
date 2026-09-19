@@ -102,7 +102,7 @@ export function TrafficPage() {
     <div className="flex flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">转储</h1>
+          <h1 className="text-xl font-semibold">调用详情</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
             记录的模型请求与响应字段；默认汇总所选提供商全部保留批次，按请求时间倒序展示
@@ -184,16 +184,16 @@ export function TrafficPage() {
       ) : null}
       {listData !== null && !listData.enabled ? (
         <Alert>
-          <AlertTitle>当前未开启转储</AlertTitle>
+          <AlertTitle>当前未开启调用详情记录</AlertTitle>
           <AlertDescription>
             配置里 <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            关闭时不会再写入新记录，这里显示的是已存在的历史转储文件。
+            关闭时不会再写入新记录，这里显示的是已存在的历史调用记录文件。
           </AlertDescription>
         </Alert>
       ) : null}
       {paginationLimited ? (
         <Alert>
-          <AlertTitle>已达到转储分页上限</AlertTitle>
+          <AlertTitle>已达到调用记录分页上限</AlertTitle>
           <AlertDescription>
             当前最多翻到 offset {listData.maximumOffset.toLocaleString("zh-CN")}；仍有更早记录时，
             请选择单个记录批次缩小范围，或使用 <code className="rounded bg-muted px-1 text-xs">codexc traffic</code> 查看。

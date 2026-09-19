@@ -2,8 +2,8 @@
 
 `codexc webui` 启动本地指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）中的全局统计、
 会话、请求明细与错误聚合；设置页还可修改结构化配置，并通过白名单异步任务执行受保护的服务与维护动作。回环监听未配置令牌时复用真实回环连接与 Origin 约束；配置令牌或绑定非回环地址时使用同一令牌鉴权。WebUI 不读取业务会话库，不接受任意命令。
-“转储”页另有一份受限视图，按逻辑模型调用展示 `[debug].model_traffic_dump` 落盘的一条请求与一个
-终态响应；原始传输轨迹默认收起，只对回环连接开放，并可在预览确认后清空全部已识别转储。
+“调用详情”页另有一份受限视图，按逻辑模型调用展示 `[debug].model_traffic_dump` 落盘的一条请求与一个
+终态响应；原始事件默认收起，只对回环连接开放，并可在预览确认后清空全部已识别转储。
 
 ## 命令
 
@@ -86,7 +86,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | Thread 详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
-| 转储 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
+| 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider、托管 Provider 默认值和共享子代理设置读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
@@ -97,7 +97,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 统一按服务端时区格式化，页头标明时区及 UTC 偏移；夏令时按该时区在各时间点的规则计算。
 设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 
-转储页读取用户数据目录 `traffic/` 下 `[debug].model_traffic_dump` 生成的 V2 session，默认展示最新
+调用详情页读取用户数据目录 `traffic/` 下 `[debug].model_traffic_dump` 生成的 V2 session，默认展示最新
 提供商的全部保留批次，按请求开始时间倒序分页；“记录批次”可筛选单个 writer session，
 重启产生新批次不会隐藏仍保留的旧记录。提供商、批次筛选、选中的逻辑调用、页码与每页条数
 （25/50/100/200）都保留在页面地址中；列表筛选使用 `session`，明细定位使用 `exchangeSession` 和编号，
@@ -124,11 +124,14 @@ WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.fu
 非流式 JSON 不按流式首字计算；历史记录不补算，旧版已采集的非空增量耗时保持原值。
 这是单请求的代理观测延迟，不是首个网络字节、纯推理耗时或客户端显示时间；无符合条件的事件时显示 `—`。
 原 `upstreamTtftMs` 仍逐条保存上游 logical-turn 原值，在提示与导出中独立保留，不参与求和或均值汇总。
-模型对照分别保留 `requestModel` 与 `responseModel`，两者均已提供且名称不同时显示箭头；名称回显不证明实际模型身份，缺失不推断。
+模型对照分别保留 `requestModel` 与 `responseModel`，请求明细、调用详情与 CLI 共用“名称一致 / 名称不一致 / 信息不足”口径；去除首尾空白后精确比较，不折叠大小写或推断别名，缺少任一名称时为信息不足。名称回显不证明实际模型身份。
+调用详情和 `codexc traffic --exchange` 另列本次调用的服务端模型声明（`openai-model` / `x-openai-model`）与安全缓冲候选（`x-codex-safety-buffering-faster-model` / `retry_model`），逐项标明响应头或事件来源，不覆盖响应回显、不参与名称对照。安全缓冲候选不表示已经切换，也不表示该模型执行安全检查。
+声明只从保留的本次调用转储中有界提取，支持 WebSocket 分片与 SSE 跨块，不继承连接中其他调用的声明，也不受详情 trace 页码影响；未记录不等于上游未发送。该展示不新增数据库字段。
+请求明细的模型列保持单行，只在名称不一致时显示行内标签；一致或信息不足不显示标签，长名称截断，悬浮查看完整请求与响应名称。
 采集不依赖转储开关；开启转储时，同一次观测值同时进入转储响应索引与指标库，精简模式也保留它。
 v15 及更早的历史记录新增三字段为 NULL，不按历史转储补算；已有上游 TTFT 保留。
 Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可空 `traffic` 对象，CSV 为
-`trafficLabel`、`trafficSession`、`trafficInteraction`；请求明细的“查看转储”精确打开对应调用，失败请求同样可用。
+`trafficLabel`、`trafficSession`、`trafficInteraction`；请求明细的“查看调用详情”精确打开对应调用，失败请求同样可用。
 历史记录、未开启转储或逻辑调用创建前失败显示“未关联”，不按时间、Thread 或 Turn 猜配；关联批次尚未落盘、写入失败或已被清理时明确报错，不改为打开其他请求。
 转储失败详情与 `codexc traffic` 根据已记录的传输阶段、HTTP 状态或上游终态显示失败阶段；该分类不推断代理、账户或模型的根因。
 部署 v17 前先停止 Gateway 并关闭独立 WebUI 数据库读取进程，运行 `codexc metrics upgrade`，命令会创建旧库私有备份并事务升级；
@@ -136,7 +139,7 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 升级后需加载新版本的 App Server 服务（采集端）与 Gateway（消费端）。不在普通启动时隐式迁移。
 回滚时停止 Gateway 并关闭独立 WebUI 数据库读取进程，先用 `codexc metrics reset` 归档新库，再将
 升级命令输出的备份复制回原数据库路径，恢复旧版程序后启动；升级后新增数据保留在归档中，不自动合并。
-转储明细顶部显示“上游轮次首 Token”，取自 `first_sampled_message_ttft_ms`，原始单位为毫秒，展示时自适应转换；
+调用详情顶部显示“上游轮次首 Token”，取自 `first_sampled_message_ttft_ms`，原始单位为毫秒，展示时自适应转换；
 这是上游首 Token 统计，不代表客户端看到首字的时间，缺失时显示“未提供”，不使用本地时间估算。
 响应耗时摘要区分单请求首内容、本地请求耗时与上游最大排队、轮次累计生成、logical turn 和客户端工具暂停。
 连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 由本地代理在握手时显式
@@ -149,7 +152,7 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 与逐条用量归因保留在折叠区，展开后正文和 trace 共用页面纵向滚动，不再嵌套独立的正文滚动框。
 派生输出不改写原始记录。已有 V2 WebSocket 请求按正文中的每次调用
 元数据修正展示归属，正文超出读取上限无法解析时保留索引信息。逐块 SSE 与
-WebSocket 帧位于默认收起的“原始传输轨迹”，不再与逻辑响应混排。正文按原样显示；转储按
+WebSocket 帧位于默认收起的“原始事件”，不再与逻辑响应混排。正文按原样显示；转储按
 [`转储体积控制`](user-guide.md#转储体积控制) 裁剪过的条目会直接显示
 `{"type": "truncated", …}` / `{"type": "omitted", …}` 标记。请求体、终态响应或 trace 页超过
 4 MiB 时只返回前 4 MiB；trace 每页最多 100 条，并通过 `tracePage` 返回总数与前后页 offset。
@@ -281,7 +284,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 边界约束：
 
 - WebUI 不读取、不解析业务会话库；App Server 用户设置通过后端结构化 RPC 适配器访问，不把协议或凭据暴露给前端；
-- 转储页只接受真实回环连接，且只按已知标签读取用户数据目录下 `traffic/` 的 V2 session，不接受任意
+- 调用详情页只接受真实回环连接，且只按已知标签读取用户数据目录下 `traffic/` 的 V2 session，不接受任意
   路径；该页展示的是未脱敏的原始 prompt、代码与工具输出，不要分享截图或展开内容；
 - 指标 API 不提供写接口；设置管理仅允许计划内字段，并修改对应结构化入口；敏感 Provider 凭据只写入私有凭据目录；
 - 指标 API 只接受 GET，设置管理只接受明确的 JSON POST/PATCH/DELETE；未知 API 与非 `/api/v1` 前缀统一返回 JSON 404；
@@ -295,8 +298,8 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 webui/src/
   lib/         API 客户端、共享类型转出与格式化（Token/时间）
   hooks/       资源数据 hook（统一 loading/error/refetch）
-  components/  Sidebar 布局、指标区块、共享数据表格组件与转储摘要/明细区块
-  pages/       概览、Threads、Thread 详情、请求、错误、转储、设置
+  components/  Sidebar 布局、指标区块、共享数据表格组件与调用摘要/明细区块
+  pages/       概览、Threads、Thread 详情、请求、错误、调用详情、设置
 ```
 
 设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、上下文管理、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。

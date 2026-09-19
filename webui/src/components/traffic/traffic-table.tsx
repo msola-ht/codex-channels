@@ -81,7 +81,7 @@ export function TrafficTable({
           {exchanges.length === 0 ? (
             <TableRow>
               <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
-                没有转储记录
+                没有调用记录
               </TableCell>
             </TableRow>
           ) : null}

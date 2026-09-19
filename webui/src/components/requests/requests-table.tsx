@@ -1,6 +1,8 @@
 import * as React from "react"
 import { Link } from "react-router"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { SortingState } from "@tanstack/react-table"
 
@@ -42,7 +44,7 @@ const COLUMN_LABELS: Record<string, string> = {
   output: "输出 Token",
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
-  traffic: "转储",
+  traffic: "调用详情",
 }
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
@@ -146,11 +148,15 @@ export function RequestsTable({
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <span className="max-w-64 truncate" title={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}>
-          {row.original.requestModel && row.original.responseModel && row.original.requestModel !== row.original.responseModel
+        <div className="flex max-w-64 items-center gap-2 whitespace-nowrap" title={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}>
+          <span className="min-w-0 truncate">
+          {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
             ? `${row.original.requestModel} → ${row.original.responseModel}`
-            : row.original.model ?? "—"}
-        </span>
+            : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
+          </span>
+          {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
+            ? <Badge variant="outline">名称不一致</Badge> : null}
+        </div>
       ),
     },
     {
@@ -206,13 +212,13 @@ export function RequestsTable({
     },
     {
       id: "traffic",
-      header: "转储",
+      header: "调用详情",
       enableSorting: false,
       cell: ({ row }) => row.original.traffic === null ? (
-        <span className="text-muted-foreground" title="没有采集到转储关联；可能是历史记录、未开启转储，或失败发生在模型请求创建之前。">未关联</span>
+        <span className="text-muted-foreground" title="没有采集到调用记录关联；可能是历史记录、未开启调用记录，或失败发生在模型请求创建之前。">未关联</span>
       ) : (
         <Button variant="link" size="sm" asChild>
-          <Link to={trafficDetailPath(row.original.traffic)}>查看转储</Link>
+          <Link to={trafficDetailPath(row.original.traffic)}>查看调用详情</Link>
         </Button>
       ),
     },

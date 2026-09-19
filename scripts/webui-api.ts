@@ -847,6 +847,11 @@ export interface TrafficListResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  modelEvidence: {
+    serverModels: Array<{ source: string; model: string }>
+    safetyModels: Array<{ source: string; model: string }>
+    truncated: boolean
+  }
   parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
   id: number
   startedAtMs: number

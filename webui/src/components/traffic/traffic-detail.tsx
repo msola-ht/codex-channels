@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card"
 import { formatBytes, formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
+import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
 
 export function TrafficDetail({
   detail,
@@ -41,11 +42,34 @@ export function TrafficDetail({
           模型：<span className="font-mono">{detail.requestModel ?? "未提供"}</span> →{" "}
           <span className="font-mono">{detail.responseModels.join("、") || "未提供"}</span>
         </span>
+        <Badge variant="outline">{modelNameComparison(detail.requestModel, detail.responseModels.length === 1 ? detail.responseModels[0] : undefined)}</Badge>
         <span className="text-muted-foreground">
           线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
         </span>
       </div>
+
+      <Card className="min-w-0 shrink-0">
+        <CardHeader>
+          <CardTitle>模型声明与来源</CardTitle>
+          <CardDescription>仅比较请求与响应回显名称，不验证模型身份。以下声明只来自本次调用保留的记录；缺失不代表上游未发送。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 text-sm">
+          <p className="break-all">请求模型（请求 model）：{detail.requestModel ?? "未提供"}</p>
+          <p className="break-all">响应回显（响应索引）：{detail.responseModels.join("、") || "未提供"}</p>
+          <div className="flex flex-col gap-1">
+            <p>服务端模型声明（不覆盖响应回显）：</p>
+            {detail.modelEvidence.serverModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
+              : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+          </div>
+          <div className="flex flex-col gap-1">
+            <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
+            {detail.modelEvidence.safetyModels.length === 0 ? <p className="text-muted-foreground">未记录</p>
+              : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
+          </div>
+          {detail.modelEvidence.truncated ? <p className="text-muted-foreground">声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
+        </CardContent>
+      </Card>
 
       <Card className="min-w-0 shrink-0">
         <CardHeader>
@@ -103,7 +127,7 @@ export function TrafficDetail({
             {detail.response.failureStage === undefined ? null : (
               <Alert variant="destructive">
                 <AlertTitle>失败阶段：{detail.response.failureStage}</AlertTitle>
-                <AlertDescription>根据当前调用的转储记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription>
+                <AlertDescription>根据本次调用记录定位；不据此推断账户过期、代理故障或具体网络根因。</AlertDescription>
               </Alert>
             )}
             {detail.response.responseId === undefined ? null : (
@@ -120,7 +144,7 @@ export function TrafficDetail({
                   : "未提取到完成的输出条目，可展开原始正文与传输轨迹查看。"}</p>
             ) : null}
             {detail.response.outputTruncated ? (
-              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始转储未被修改。</AlertDescription></Alert>
+              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始调用记录未被修改。</AlertDescription></Alert>
             ) : null}
             {detail.response.failure === undefined ? null : <PayloadBlock title="终态错误 / 不完整原因" text={prettyJson(detail.response.failure)} />}
             <details>
@@ -143,7 +167,7 @@ export function TrafficDetail({
       {detail.tracePage.total === 0 ? null : (
         <details className="min-w-0 shrink-0 rounded-lg border bg-card text-card-foreground shadow-sm">
           <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
-            原始传输轨迹（{detail.tracePage.total} 条，默认收起）
+            原始事件（{detail.tracePage.total} 条，默认收起）
           </summary>
           <div className="flex flex-col gap-3 border-t px-6 py-4">
             {detail.trace.map((item, index) => (

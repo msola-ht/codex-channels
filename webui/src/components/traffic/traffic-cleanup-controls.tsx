@@ -36,7 +36,7 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
         onClick={() => void tasks.run({ operation: "traffic", action: "cleanup" })}
       >
         {tasks.saving ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
-        清空转储
+        清空调用记录
       </Button>
     </div>
     {error === null ? null : <Alert variant="destructive">

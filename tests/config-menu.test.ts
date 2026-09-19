@@ -119,7 +119,7 @@ describe("Codex Connect config menu", () => {
     expect(rendered).toContain("Gateway 配置总览");
     expect(rendered).toContain("通讯渠道：Telegram");
     expect(rendered).toContain("计划任务：开启");
-    expect(rendered).toContain("模型请求转储：关闭");
+    expect(rendered).toContain("调用详情记录：关闭");
     expect(rendered).toContain("显式网络代理：https_proxy");
     expect(rendered).toContain("Codex 官方与第三方 Provider 配置由 codexc setup 管理");
     expect(rendered).not.toContain("telegram-secret");
@@ -426,7 +426,7 @@ describe("Codex Connect config menu", () => {
     expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({
       model_traffic_dump: true,
     });
-    expect(output.join("")).toContain("模型请求转储已开启");
+    expect(output.join("")).toContain("调用详情记录已开启");
     expect(output.join("")).toContain("codexc service restart app-server");
   });
 

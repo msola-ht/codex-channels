@@ -2,6 +2,7 @@
 
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
@@ -157,7 +158,13 @@ function renderDetail(detail) {
     `#${detail.id} ${formatTime(detail.startedAtMs)} ${requestTarget}`,
     `线程：${detail.threadId ?? "未提供"}  轮次：${detail.turnId ?? "未提供"}  类型：${detail.requestKind ?? "未提供"}`,
     `模型：${detail.requestModel ?? "未提供"} → ${detail.responseModels.join("、") || "未提供"}`,
+    `模型对照：${modelNameComparison(detail.requestModel, detail.responseModels.length === 1 ? detail.responseModels[0] : undefined)}（仅比较名称，不验证模型身份）`,
   ];
+  for (const [label, entries] of [["服务端模型声明", detail.modelEvidence.serverModels], ["安全缓冲候选声明", detail.modelEvidence.safetyModels]]) {
+    lines.push(`${label}：${entries.length === 0 ? "未记录" : entries.map((entry) => `${entry.model}（来源：${entry.source}）`).join("；")}`);
+  }
+  lines.push("安全缓冲候选不表示已经切换，也不表示由该模型执行安全检查；缺失仅表示保留转储中未记录。");
+  if (detail.modelEvidence.truncated) lines.push("（模型声明展示不完整：超过条数或字段长度限制，或含无效字符）");
   if (detail.account !== undefined) lines.push(`账户：${detail.account}`);
   lines.push("", "请求头：", ...headerLines(detail.request.headers));
   lines.push("", "请求：", indent(pretty(detail.request.body)));

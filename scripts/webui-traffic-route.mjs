@@ -1,7 +1,7 @@
 /**
- * WebUI 的模型转储只读接口：列出逻辑模型调用摘要与单条请求/终态响应。
+ * WebUI 的模型调用记录只读接口：列出逻辑模型调用摘要与单条请求/终态响应。
  *
- * 转储包含原始 prompt、代码与工具输出，因此这里只接受回环连接，且只按标签读取
+ * 调用记录包含原始 prompt、代码与工具输出，因此这里只接受回环连接，且只按标签读取
  * 数据目录下 `traffic/` 的 V2 session，不接受任意路径。
  */
 import { join } from "node:path";
@@ -31,7 +31,7 @@ const maximumTracePageSize = 100;
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
   if (apiPath !== "/traffic" && apiPath !== "/traffic/exchange") return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
-    throw new ApiError(503, "traffic_unavailable", "转储查看只允许回环访问");
+    throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
   const located = locateOptionalUserConfig(environment);
   const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
@@ -42,25 +42,25 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(
       503,
       "traffic_unsupported_version",
-      error instanceof Error ? error.message : "模型流量转储版本无效",
+      error instanceof Error ? error.message : "模型调用记录版本无效",
     );
   }
   const labels = catalog.labels;
   if (apiPath === "/traffic/exchange" && url.searchParams.has("session") && labels.length === 0) {
-    throw new ApiError(404, "traffic_session_not_found", "关联转储不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
+    throw new ApiError(404, "traffic_session_not_found", "关联调用记录不可用：批次尚未写入、写入失败或已被清理；不会匹配其他请求");
   }
   if (labels.length === 0) {
     if (catalog.legacyFiles.length > 0) {
       throw new ApiError(
         503,
         "traffic_legacy_format",
-        "现有转储是旧版逐帧格式；请重启 App Server 生成 V2 转储，旧文件不会自动迁移",
+        "现有调用记录是旧版逐帧格式；请重启 App Server 生成 V2 调用记录，旧文件不会自动迁移",
       );
     }
     throw new ApiError(
       503,
       "traffic_unavailable",
-      "还没有转储文件：在 config.toml 的 [debug] 开启 model_traffic_dump 后重启 App Server 服务",
+      "还没有调用记录文件：在 config.toml 的 [debug] 开启 model_traffic_dump 后重启 App Server 服务",
     );
   }
   const dump = dumpSettings(environment);
@@ -162,7 +162,7 @@ function readLabel(url, labels) {
   if (values.length === 0) return labels[0].label;
   const label = values[0];
   if (!labels.some((entry) => entry.label === label)) {
-    throw new ApiError(404, "traffic_label_not_found", `没有该标签的转储文件：${label}；关联记录可能尚未写入、写入失败或已被清理`);
+    throw new ApiError(404, "traffic_label_not_found", `没有该标签的调用记录文件：${label}；关联记录可能尚未写入、写入失败或已被清理`);
   }
   return label;
 }

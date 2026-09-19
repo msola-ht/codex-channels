@@ -42,7 +42,7 @@ function pageTitle(pathname: string): string {
   if (pathname.startsWith("/threads/")) return "Thread 详情"
   if (pathname === "/threads") return "Threads"
   if (pathname === "/requests") return "请求"
-  if (pathname === "/traffic") return "转储"
+  if (pathname === "/traffic") return "调用详情"
   if (pathname === "/errors") return "错误"
   if (pathname === "/settings") return "设置"
   return "控制台"

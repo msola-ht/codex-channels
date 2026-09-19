@@ -2,6 +2,8 @@
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+- `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
+
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一

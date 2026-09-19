@@ -196,6 +196,10 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout.match(/\n响应：/gu)).toHaveLength(1);
     expect(result.stdout).toContain("hello");
     expect(result.stdout).toContain('"type": "response.completed"');
+    expect(result.stdout).toContain("模型对照：名称一致");
+    expect(result.stdout).toContain("服务端模型声明：未记录");
+    expect(result.stdout).toContain("安全缓冲候选声明：未记录");
+    expect(result.stdout).toContain("安全缓冲候选不表示已经切换");
   });
 
   it("filters logical calls and bounds payload output", () => {

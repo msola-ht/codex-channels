@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { resolveTrafficData, trafficDetailPath } from "../webui/src/lib/traffic-state.js";
+import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 describe("traffic request ownership", () => {
+  it.each([
+    ["model-a", "model-a", "名称一致"],
+    [" model-a ", "model-a", "名称一致"],
+    ["model-a", "model-b", "名称不一致"],
+    ["model-a", "MODEL-A", "名称不一致"],
+    ["model-a", "model-a-latest", "名称不一致"],
+    ["model-a", null, "信息不足"],
+    [undefined, "model-a", "信息不足"],
+    ["", "model-a", "信息不足"],
+  ])("compares only provided names: %s / %s", (request, response, expected) => {
+    expect(modelNameComparison(request, response)).toBe(expected);
+  });
   it("links to the recorded label, session and interaction without using the current selection", () => {
     expect(trafficDetailPath({ label: "ocg", session: "2026-09-19T00-00-00-000Z-2", interaction: 23 }))
       .toBe("/traffic?label=ocg&exchangeSession=2026-09-19T00-00-00-000Z-2&id=23");

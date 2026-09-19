@@ -101,6 +101,46 @@ export function failureStage(record, body) {
   return "未提供失败阶段";
 }
 
+/** 只收集本次调用内明确记录的声明，不继承 WS 连接的其他调用。 */
+export function createModelEvidenceCollector() {
+  const serverModels = [];
+  const safetyModels = [];
+  let truncated = false;
+  function add(target, source, model) {
+    if (typeof model !== "string" || !model.trim()) return;
+    if (model.length > 256 || [...model].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+      truncated = true;
+      return;
+    }
+    if (target.some((entry) => entry.source === source && entry.model === model)) return;
+    if (serverModels.length + safetyModels.length >= 32) { truncated = true; return; }
+    target.push({ source, model });
+  }
+  function headers(value, source) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [name, model] of Object.entries(value)) {
+      const key = name.toLowerCase();
+      if (key === "openai-model" || key === "x-openai-model") add(serverModels, `${source}.${key}`, model);
+      if (key === "x-codex-safety-buffering-faster-model") add(safetyModels, `${source}.${key}`, model);
+    }
+  }
+  return {
+    headers,
+    event(value) {
+      const type = value?.type;
+      if (typeof type !== "string" || !(type.startsWith("response.") || type === "codex.response.metadata")) return;
+      headers(value.response?.headers, `${type}.response.headers`);
+      if (type === "response.metadata" || type === "codex.response.metadata") headers(value.headers, `${type}.headers`);
+      const topLevel = Object.hasOwn(value, "safety_buffering");
+      const buffering = topLevel
+        ? value.safety_buffering
+        : type === "response.metadata" && value.metadata?.type === "safety_buffering" ? value.metadata : undefined;
+      add(safetyModels, `${type}.${topLevel ? "safety_buffering" : "metadata"}.retry_model`, buffering?.retry_model);
+    },
+    result: () => ({ serverModels, safetyModels, truncated }),
+  };
+}
+
 function tokenCount(value) {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
@@ -114,7 +154,7 @@ function parseObject(text) {
 }
 
 /** 完成条目独立于 trace 页收集；正文、重组缓冲与输出总量都受展示字节上限约束。 */
-export function createOutputCollector(maxBytes, terminalOutput, responseId) {
+export function createOutputCollector(maxBytes, terminalOutput, responseId, observeModelEvent) {
   const items = new Map();
   let bytes = 0;
   let truncated = false;
@@ -138,6 +178,7 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
 
   function event(text) {
     const value = parseObject(text);
+    observeModelEvent?.(value);
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
     const metrics = value?.timing_metrics;
     if (value?.type === "responsesapi.websocket_timing" && metrics?.timing_scope === "logical_turn"
@@ -172,10 +213,10 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
     for (const block of blocks) {
       if (droppingSse) droppingSse = false;
       else if (Buffer.byteLength(block) <= maxBytes) sseBlock(block);
-      else truncated = true;
+      else if (!hasTerminalOutput) truncated = true;
     }
     if (Buffer.byteLength(sse) > maxBytes) {
-      truncated = true;
+      if (!hasTerminalOutput) truncated = true;
       droppingSse = true;
       sse = sse.slice(-3);
     }
@@ -186,7 +227,7 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId) {
     consume(record) {
       if (typeof record.text !== "string") return;
       if (record.kind === "response_body" && record.encoding === "utf8") {
-        if (!hasTerminalOutput) consumeSse(record.text);
+        consumeSse(record.text);
       } else if (record.kind === "websocket_frame" && record.direction === "upstream"
         && record.binary !== true) {
         if (record.parts > 1) {
