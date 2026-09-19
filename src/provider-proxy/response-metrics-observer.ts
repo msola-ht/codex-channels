@@ -532,7 +532,8 @@ function startsFirstToken(
     return type.endsWith(".delta") || type === "response.output_text.done"
       || type === "response.function_call_arguments.done";
   }
-  return type !== "response.created" && type !== "response.in_progress" && type !== "response.failed";
+  return type !== "response.created" && type !== "response.in_progress"
+    && type !== "response.failed" && type !== "response.metadata";
 }
 
 const responseEventBodyTypeNames = [

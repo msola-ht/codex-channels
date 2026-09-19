@@ -50,6 +50,7 @@ describe("OpenAI upstream TTFT", () => {
     { type: "response.in_progress" },
     { type: "codex.rate_limits" },
     { type: "codex.response.metadata" },
+    { type: "response.metadata", metadata: { type: "safety_buffering", retry_model: "model-b" } },
     { type: "responsesapi.websocket_timing" },
   ])("excludes preamble, errors and out-of-band metadata: $type", (event) => {
     for (const transport of ["http", "websocket"] as const) {
@@ -58,6 +59,22 @@ describe("OpenAI upstream TTFT", () => {
       observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
       expect(metrics.firstContentMs).toBeUndefined();
     }
+  });
+
+  it.each([
+    'data: {"type":"response.metadata","metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
+    'event: response.metadata\ndata: {"metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
+  ])("waits for content after HTTP metadata: %s", (metadata) => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100, 100);
+    metrics.responseFormat = "sse";
+    const observer = new HttpResponseMetricsObserver(metrics);
+    observer.observeChunk(Buffer.from(metadata), 1010, 110);
+    expect(metrics.firstContentMs).toBeUndefined();
+    observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"hello"}\n\n'), 1500, 600);
+    expect(metrics.firstContentMs).toBe(500);
+    observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"status":"completed"}}\n\n'), 1600, 700);
+    expect(metrics.firstContentMs).toBe(500);
+    expect(metrics.totalDurationMs).toBe(600);
   });
 
   it.each([

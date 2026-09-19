@@ -119,7 +119,7 @@ HTTP 从上游路由解析成功、进入转发流程开始（不含路由等待
 HTTP/SSE 跳过 `response.created` / `response.in_progress`，首个其他合法 `response.*` 语义事件计入，
 包括空 item/part、空 delta、仅含 usage 的 completed 和 incomplete，不要求已经返回可见文本。
 WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.function_call_arguments.done`，同样不要求文本非空。
-与 sub2api 部分错误分支不同，本项目不把纯错误（`error` / `response.failed`）、额度、timing、metadata、
+与 sub2api 部分错误分支不同，本项目不把纯错误（`error` / `response.failed`）、额度、timing、metadata（`response.metadata` / `codex.response.metadata`）、
 畸形 JSON 或无有效事件类型的数据计入；响应头、SSE 注释、空 data 与 `[DONE]` 也不计入。没有先前命中事件的 WS 终态不补算首字。
 非流式 JSON 不按流式首字计算；历史记录不补算，旧版已采集的非空增量耗时保持原值。
 这是单请求的代理观测延迟，不是首个网络字节、纯推理耗时或客户端显示时间；无符合条件的事件时显示 `—`。
