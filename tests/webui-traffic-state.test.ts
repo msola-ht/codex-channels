@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { resolveTrafficData, trafficDetailPath } from "../webui/src/lib/traffic-state.js";
+import { resolveTrafficData, resolveTrafficDetailSnapshot, trafficDetailPath } from "../webui/src/lib/traffic-state.js";
 import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 describe("traffic request ownership", () => {
+  it("retains only an explicitly identified call while its trace page changes", () => {
+    const value = { label: "openai", session: "batch-1", exchange: { id: 7 } };
+    const query = { label: "openai", session: "batch-1", id: 7 };
+    expect(resolveTrafficDetailSnapshot(query, value)).toBe(value);
+    for (const other of [null, { id: 7 }, { ...query, label: "deepseek" }, { ...query, session: "batch-2" }, { ...query, id: 8 }]) {
+      expect(resolveTrafficDetailSnapshot(other, value)).toBeNull();
+    }
+    expect(resolveTrafficDetailSnapshot(query, null)).toBeNull();
+  });
   it.each([
     ["model-a", "model-a", "名称一致"],
     [" model-a ", "model-a", "名称一致"],

@@ -76,5 +76,5 @@ function inputLabel(item: NonNullable<TrafficExchangeDetail["request"]["content"
 }
 
 function ContentText({ text }: { text: string }) {
-  return <pre className="mt-2 max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">{text || "（空）"}</pre>
+  return <pre className="mt-2 max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">{text || "（空）"}</pre>
 }

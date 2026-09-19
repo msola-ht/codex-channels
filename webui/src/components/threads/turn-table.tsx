@@ -39,7 +39,7 @@ const COLUMN_LABELS: Record<string, string> = {
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
-export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"] }) {
+export function TurnTable({ turns, threadId, query, pagination, loading = false }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"]; loading?: boolean }) {
   const columns = React.useMemo<DataTableColumn<TurnSummary>[]>(() => [
     {
       id: "time",
@@ -197,6 +197,8 @@ export function TurnTable({ turns, threadId, query, pagination }: { turns: TurnS
 
   return (
     <DataTable
+      numericColumnIds={["requests", "failures", "input", "output", "tokensPerSecond", "compact"]}
+      loading={loading}
       title="每轮明细"
       description={({ total, matched, pageSize }) =>
         `共 ${total} 轮 · 匹配 ${matched} 轮 · 每页 ${pageSize} 条`

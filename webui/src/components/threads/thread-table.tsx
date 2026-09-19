@@ -40,7 +40,7 @@ const COLUMN_LABELS: Record<string, string> = {
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200]
 
-export function ThreadTable({ threads, query, pagination }: { threads: ThreadListItem[]; query: MetricsQuery; pagination: DataTableProps<ThreadListItem>["pagination"] }) {
+export function ThreadTable({ threads, query, pagination, loading = false }: { threads: ThreadListItem[]; query: MetricsQuery; pagination: DataTableProps<ThreadListItem>["pagination"]; loading?: boolean }) {
   const mainCount = threads.filter((thread) => thread.agentPath === null).length
   const subagentCount = threads.length - mainCount
 
@@ -205,6 +205,8 @@ export function ThreadTable({ threads, query, pagination }: { threads: ThreadLis
 
   return (
     <DataTable
+      numericColumnIds={["turns", "requests", "input", "output", "tokensPerSecond", "compact"]}
+      loading={loading}
       title="会话列表"
       description={({ total }) =>
         `共 ${total} 个匹配会话 · 本页主会话 ${mainCount} / 子代理 ${subagentCount} · 各会话只统计自身请求`

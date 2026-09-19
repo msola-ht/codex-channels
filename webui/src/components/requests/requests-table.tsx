@@ -61,6 +61,7 @@ const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200, 500]
 
 export function RequestsTable({
+  loading = false,
   records,
   pageNumber,
   hasPrevious,
@@ -75,6 +76,7 @@ export function RequestsTable({
   filter,
   total,
 }: {
+  loading?: boolean
   records: RequestRecord[]
   pageNumber: number
   hasPrevious: boolean
@@ -317,12 +319,12 @@ export function RequestsTable({
         return (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 max-w-40 truncate">{label}</span>
+              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 block max-w-40 truncate">{label}</span>
             </TooltipTrigger>
             <TooltipContent side="right" className="max-w-md">
-              <p className="break-words text-xs">{formatErrorMessage(message, language)}</p>
+              <p className="break-all whitespace-normal text-xs">{formatErrorMessage(message, language)}</p>
               {row.original.errorCode ? (
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 break-all whitespace-normal text-xs text-muted-foreground">
                   错误码：{row.original.errorCode}
                 </p>
               ) : null}
@@ -348,6 +350,8 @@ export function RequestsTable({
 
   return (
     <DataTable
+      numericColumnIds={["input", "output", "firstContent", "totalDuration", "tokensPerSecond", "http", "reasoningOutput"]}
+      loading={loading}
       title="记录"
       description={({ pageNumber: currentPage }) =>
         `共 ${total} 条匹配 · 当前页 ${records.length} 条 · 第 ${currentPage} 页`

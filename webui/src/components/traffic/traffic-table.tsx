@@ -1,5 +1,8 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { TableHint } from "@/components/metrics/data-table"
+import { TrafficModel } from "@/components/traffic/traffic-model"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
   TableBody,
@@ -14,27 +17,34 @@ import type { TrafficExchangeSummary } from "@/lib/types"
 export function TrafficTable({
   exchanges,
   onOpen,
+  loading = false,
 }: {
   exchanges: TrafficExchangeSummary[]
   onOpen: (exchange: TrafficExchangeSummary) => void
+  loading?: boolean
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="min-w-0">
       <Table className="min-w-[960px]">
         <TableHeader>
           <TableRow>
             <TableHead className="w-16">#</TableHead>
             <TableHead>时间</TableHead>
+            <TableHead>模型</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead className="text-right">总耗时</TableHead>
+            <TableHead>类型</TableHead>
             <TableHead>请求</TableHead>
             <TableHead>线程</TableHead>
             <TableHead>轮次</TableHead>
-            <TableHead>类型</TableHead>
-            <TableHead>模型</TableHead>
-            <TableHead>状态</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {exchanges.map((exchange) => (
+          {loading ? Array.from({ length: 5 }, (_, index) => (
+            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
+              <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
+            ))}</TableRow>
+          )) : exchanges.map((exchange) => (
             <TableRow
               key={`${exchange.session}:${exchange.id}`}
               className="cursor-pointer"
@@ -56,31 +66,27 @@ export function TrafficTable({
               <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
                 {formatTime(exchange.startedAtMs)}
               </TableCell>
-              <TableCell className="max-w-72 truncate font-mono text-xs">
-                {requestLabel(exchange)}
-              </TableCell>
-              <TableCell className="max-w-40 truncate font-mono text-xs" title={exchange.threadId}>
-                {exchange.threadId ?? "—"}
-              </TableCell>
-              <TableCell className="max-w-32 truncate font-mono text-xs" title={exchange.turnId}>
-                {exchange.turnId ?? "—"}
-              </TableCell>
-              <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
-                : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
-              <TableCell className="max-w-56 truncate text-xs">
-                {exchange.requestModel ?? "—"} → {exchange.responseModels.join("、") || "—"}
+              <TableCell>
+                <TrafficModel request={exchange.requestModel} responses={exchange.responseModels} />
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
                 {stateLabel(exchange.state)}
-                {exchange.durationMs === undefined ? "" : ` · ${formatElapsedDuration(exchange.durationMs)}`}
                 {exchange.hasError ? <Badge className="ml-2" variant="destructive">异常</Badge> : null}
               </TableCell>
+              <TableCell className="text-right tabular-nums">
+                <TableHint hint="调用索引记录的总耗时；详细阶段及计时来源见调用明细。">{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</TableHint>
+              </TableCell>
+              <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
+                : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
+              <TableCell><TableHint hint={requestLabel(exchange)}><span className="block max-w-72 truncate font-mono text-xs">{requestLabel(exchange)}</span></TableHint></TableCell>
+              <TableCell><TableHint hint={exchange.threadId ?? "未提供线程"}><span className="block max-w-40 truncate font-mono text-xs">{exchange.threadId ?? "—"}</span></TableHint></TableCell>
+              <TableCell><TableHint hint={exchange.turnId ?? "未提供轮次"}><span className="block max-w-32 truncate font-mono text-xs">{exchange.turnId ?? "—"}</span></TableHint></TableCell>
             </TableRow>
           ))}
-          {exchanges.length === 0 ? (
+          {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
                 没有调用记录
               </TableCell>
             </TableRow>

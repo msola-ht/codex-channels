@@ -1,5 +1,8 @@
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { TrafficParameterComparison, TrafficRequestContent } from "@/components/traffic/traffic-request-content"
+import { TrafficModel } from "@/components/traffic/traffic-model"
+import { TableHint } from "@/components/metrics/data-table"
+import { Skeleton } from "@/components/ui/skeleton"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -13,37 +16,29 @@ import {
 } from "@/components/ui/card"
 import { formatBytes, formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
-import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
 
 export function TrafficDetail({
   detail,
   onTracePageChange,
+  traceLoading = false,
+  traceError = false,
 }: {
   detail: TrafficExchangeDetail
   onTracePageChange: (offset: number) => void
+  traceLoading?: boolean
+  traceError?: boolean
 }) {
   return (
     <div className="flex min-w-0 shrink-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="font-semibold">#{detail.id}</span>
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
-        <span
-          className="tabular-nums"
-          title="来源：responsesapi.websocket_timing.timing_metrics.first_sampled_message_ttft_ms；仅使用与响应 ID 匹配的 logical_turn 统计，不代表客户端看到首字的时间。"
-        >
-          上游轮次首 Token：{detail.response?.timing?.firstTokenMs === undefined
-            ? "未提供"
-            : formatElapsedDuration(detail.response.timing.firstTokenMs)}
-        </span>
+        <TableHint hint="上游转发开始至首个符合条件的语义事件，不是响应头到达或客户端显示时间；与上游 logical_turn 统计分开。"><span className="whitespace-nowrap tabular-nums">单请求首字：{detail.response?.firstContentMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstContentMs)}</span></TableHint>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
-        <span>
-          模型：<span className="font-mono">{detail.requestModel ?? "未提供"}</span> →{" "}
-          <span className="font-mono">{detail.responseModels.join("、") || "未提供"}</span>
-        </span>
-        <Badge variant="outline">{modelNameComparison(detail.requestModel, detail.responseModels.length === 1 ? detail.responseModels[0] : undefined)}</Badge>
-        <span className="text-muted-foreground">
+        <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+        <span className="min-w-0 break-all text-muted-foreground">
           线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
         </span>
@@ -74,7 +69,7 @@ export function TrafficDetail({
       <Card className="min-w-0 shrink-0">
         <CardHeader>
           <CardTitle>请求</CardTitle>
-          <CardDescription>
+          <CardDescription className="break-all">
             {requestLabel(detail)}
             {detail.transport !== "http" || detail.request.bytes === undefined ? "" : ` · 原始 ${formatBytes(detail.request.bytes)}`}
             {detail.request.storedBytes === undefined ? "" : ` · 正文存储 ${formatBytes(detail.request.storedBytes)}`}
@@ -155,7 +150,7 @@ export function TrafficDetail({
               </div>
             </details>
             {detail.response.errorScope === undefined ? null : (
-              <p className="font-mono text-xs text-destructive">
+              <p className="break-all font-mono text-xs text-destructive">
                 {detail.response.errorScope}
                 {detail.response.error === undefined ? "" : `：${detail.response.error}`}
               </p>
@@ -169,13 +164,13 @@ export function TrafficDetail({
           <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
             原始事件（{detail.tracePage.total} 条，默认收起）
           </summary>
-          <div className="flex flex-col gap-3 border-t px-6 py-4">
-            {detail.trace.map((item, index) => (
+          <div className="flex flex-col gap-3 border-t px-6 py-4" aria-busy={traceLoading}>
+            {traceLoading ? <><p role="status">正在加载原始事件…</p><Skeleton className="h-32 w-full" /></> : traceError ? <p>原始事件加载失败，请重试。</p> : detail.trace.map((item, index) => (
               <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                 <p className="font-mono text-xs text-muted-foreground">
                   {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
                 </p>
-                <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+                <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
                   {prettyJson(item.text)}
                 </pre>
               </section>
@@ -186,7 +181,7 @@ export function TrafficDetail({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={detail.tracePage.previousOffset === null}
+                  disabled={traceLoading || traceError || detail.tracePage.previousOffset === null}
                   onClick={() => detail.tracePage.previousOffset === null
                     ? undefined
                     : onTracePageChange(detail.tracePage.previousOffset)}
@@ -197,7 +192,7 @@ export function TrafficDetail({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={detail.tracePage.nextOffset === null}
+                  disabled={traceLoading || traceError || detail.tracePage.nextOffset === null}
                   onClick={() => detail.tracePage.nextOffset === null
                     ? undefined
                     : onTracePageChange(detail.tracePage.nextOffset)}
@@ -278,7 +273,7 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
       </dl>
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
-        顶部轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 取跳过 created/in_progress 的首个 Responses 语义事件，WS 取 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误、响应头或旁路元数据，均不代表客户端显示时间；历史值不从 trace 反推。
+        上游轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 取跳过 created/in_progress 的首个 Responses 语义事件，WS 取 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误、响应头或旁路元数据，均不代表客户端显示时间；历史值不从 trace 反推。
         各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
       </p>
     </section>
@@ -318,7 +313,7 @@ function PayloadBlock({ title, text }: { title: string; text: string }) {
   return (
     <section className="flex min-w-0 flex-col gap-1">
       <p className="break-all text-xs font-medium">{title}</p>
-      <pre className="max-w-full rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
+      <pre className="max-h-96 max-w-full overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs whitespace-pre-wrap break-all">
         {text || "（空）"}
       </pre>
     </section>

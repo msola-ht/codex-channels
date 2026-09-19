@@ -10,8 +10,8 @@ export function useThreadRun(threadId: string) {
 }
 
 export function useThreadTurns(threadId: string, query: MetricsQuery) {
-  return useApi(
-    (signal) => fetchThreadTurns(threadId, query, signal),
-    [threadId, JSON.stringify(query)],
-  )
+  const queryKey = JSON.stringify([threadId, query])
+  const state = useApi(async (signal) => ({ queryKey, data: await fetchThreadTurns(threadId, query, signal) }), [queryKey])
+  return { data: state.data?.data ?? null, error: state.error, refetch: state.refetch,
+    loading: state.loading || (state.error === null && state.data?.queryKey !== queryKey) }
 }
