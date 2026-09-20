@@ -1,6 +1,10 @@
 # Config
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
+其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
+`gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
+保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启
+Gateway，以刷新进程时区或渠道启动卡配置。
 
 ## 文件
 

@@ -599,12 +599,13 @@ cwd = "/tmp/workspace"
     expect(runtime.config.telegramBotToken).toBe("secret");
   });
 
-  it("accepts explicit model, sandbox, timeout and log settings", () => {
+  it("accepts explicit model, timezone, sandbox, timeout and log settings", () => {
     const fixture = createFixture({
       codex: {
         binary: "codex",
         socket_path: "runtime/app-server.sock",
         default_model: "gpt-test",
+        timezone: "Asia/Shanghai",
         sandbox: "read-only",
       },
       approval: { timeout_seconds: 45 },
@@ -614,9 +615,33 @@ cwd = "/tmp/workspace"
     const config = loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath }).config;
 
     expect(config.codexModel).toBe("gpt-test");
+    expect(config.codexTimezone).toBe("Asia/Shanghai");
+    expect(config.gatewayTimezone).toBe("Asia/Shanghai");
     expect(config.codexSandbox).toBe("read-only");
     expect(config.approvalTimeoutMs).toBe(45_000);
     expect(config.logLevel).toBe("debug");
+  });
+
+  it.each([
+    [undefined, "Asia/Shanghai"],
+    ["system", undefined],
+    ["America/Los_Angeles", "America/Los_Angeles"],
+  ])("resolves gateway timezone %s against the App Server setting", (timezone, expected) => {
+    const fixture = createFixture({
+      codex: { timezone: "Asia/Shanghai" },
+      ...(timezone === undefined ? {} : { gateway: { timezone } }),
+    });
+    const config = loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath }).config;
+    expect(config.gatewayTimezone).toBe(expected);
+  });
+
+  it("rejects unknown custom and inherited gateway timezones", () => {
+    for (const overrides of [{ gateway: { timezone: "Unknown/Zone" } },
+      { codex: { timezone: "Unknown/Zone" } }]) {
+      const fixture = createFixture(overrides);
+      expect(() => loadRuntimeConfig({ CODEX_CONNECT_CONFIG_FILE: fixture.configPath }))
+        .toThrow(ConfigurationError);
+    }
   });
 
   it.each(["full", "compact", "hidden"] as const)(

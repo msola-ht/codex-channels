@@ -150,6 +150,8 @@ function createWeixinModule(
           {
             platform: process.platform,
             architecture: process.arch,
+            ...(options.config.codexTimezone === undefined
+              ? {} : { appServerTimezone: options.config.codexTimezone }),
             gatewayVersion: options.gatewayVersion,
             nodeVersion: process.version,
             transport: "Unix WebSocket",
@@ -260,6 +262,8 @@ function createFeishuModule(
             {
               platform: process.platform,
               architecture: process.arch,
+              ...(options.config.codexTimezone === undefined
+                ? {} : { appServerTimezone: options.config.codexTimezone }),
               gatewayVersion: options.gatewayVersion,
               nodeVersion: process.version,
               transport: "Unix WebSocket",
@@ -335,6 +339,7 @@ function createTelegramModule(
     debugEnabled: isDebugLogLevel(config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
     gatewayVersion: options.gatewayVersion,
+    ...(config.codexTimezone === undefined ? {} : { appServerTimezone: config.codexTimezone }),
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
     openAiConnectivity: options.openAiConnectivity,
   });

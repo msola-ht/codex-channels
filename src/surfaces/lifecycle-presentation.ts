@@ -65,6 +65,7 @@ export interface LifecyclePresentationSection {
 export interface StartupRuntimeInfo {
   platform: NodeJS.Platform;
   architecture: string;
+  appServerTimezone?: string;
   gatewayVersion: string;
   nodeVersion: string;
   transport: string;
@@ -113,6 +114,16 @@ export function createStartupPresentation(
       {
         label: "系统",
         value: `${platformLabel(runtime.platform)} · ${runtime.architecture}`,
+      },
+      {
+        label: "App Server 时区",
+        value: runtime.appServerTimezone === undefined
+          ? "跟随系统（未配置）"
+          : `${runtime.appServerTimezone}（配置）`,
+      },
+      {
+        label: "网关时区",
+        value: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
       {
         label: "版本",

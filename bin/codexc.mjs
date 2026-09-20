@@ -92,7 +92,7 @@ const helpText = {
   init                         初始化用户目录和配置
   setup [--json]               配置 Provider、通讯渠道与项目技能（接入向导）
   config [--json]              管理 Codex 新会话偏好与 Gateway 日常设置
-  timezone                     设置模型可见的时区与当前日期（App Server 与 WebUI）
+  timezone                     设置 App Server、WebUI 或网关时区
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
 

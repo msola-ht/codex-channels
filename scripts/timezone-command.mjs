@@ -24,6 +24,7 @@ export const commonTimezones = [
 ];
 
 export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]
+      codexc timezone --gateway [<IANA 时区>|--follow-app-server|--system] [--json]
 
 设置 App Server 与 WebUI 服务进程时区，决定模型请求 environment context 里的时区与当前日期，
 WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿用运行环境的系统时区。
@@ -34,9 +35,17 @@ WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿�
   codexc timezone --system           删除该配置，恢复系统时区
   codexc timezone --json             只读输出当前配置；
                                      与时区名称或 --system 一起使用时输出写入结果
+  codexc timezone --gateway          交互设置网关时区
+  codexc timezone --gateway --follow-app-server
+                                     网关启动时跟随 codex.timezone，未配置则沿用系统时区
+  codexc timezone --gateway Asia/Shanghai
+                                     为网关设置独立 IANA 时区
+  codexc timezone --gateway --system 写入 gateway.timezone = "system"，使用系统时区
 
-该值只写入 App Server 子进程与 WebUI 服务进程环境，不修改系统时区；
-重启 App Server 与 WebUI 后生效。`;
+默认入口写入 App Server 与 WebUI 时区配置，未设置独立时区的网关也跟随；不修改系统时区。
+修改 App Server 时区后，App Server、Gateway 与 WebUI 均需重启；托管网关自动重启，
+直接运行的网关需重新执行原启动命令。--gateway 只设置网关，重启网关后生效；
+网关未设置时默认跟随 codex.timezone，--follow-app-server 删除网关独立设置。`;
 
 /**
  * 解析 `codexc timezone` 参数：只接受一个 IANA 时区名称或 `--system`，两者互斥。
@@ -49,7 +58,19 @@ export function parseTimezoneCommandArgs(
   let timezone = null;
   let useSystemTimezone = false;
   let json = false;
+  let gateway = false;
+  let followAppServer = false;
   for (const arg of args) {
+    if (arg === "--gateway") {
+      if (gateway) throw usageError("--gateway 只能出现一次");
+      gateway = true;
+      continue;
+    }
+    if (arg === "--follow-app-server") {
+      if (followAppServer) throw usageError("--follow-app-server 只能出现一次");
+      followAppServer = true;
+      continue;
+    }
     if (arg === "--system") {
       if (useSystemTimezone) throw usageError("--system 只能出现一次");
       useSystemTimezone = true;
@@ -67,6 +88,12 @@ export function parseTimezoneCommandArgs(
   if (timezone !== null && useSystemTimezone) {
     throw usageError("--system 不能与时区名称同时使用");
   }
+  if (followAppServer && (!gateway || useSystemTimezone || timezone !== null)) {
+    throw usageError("--follow-app-server 必须与 --gateway 一起使用，且不能与 --system 或时区名称同时使用");
+  }
+  const target = gateway ? { gateway: true } : {};
+  if (followAppServer) return { action: "set", timezone: "app-server", json, ...target };
+  if (gateway && timezone === "system") throw usageError("系统时区请使用 --system");
   if (timezone !== null && !timezonePattern.test(timezone)) {
     throw usageError(
       `时区名称无效：${timezone}；需要 IANA 名称（如 Asia/Shanghai、America/Los_Angeles）`,
@@ -75,9 +102,9 @@ export function parseTimezoneCommandArgs(
   if (timezone !== null && !isKnownTimezone(timezone, { exists, root })) {
     throw usageError(`系统时区库中没有 ${timezone}`);
   }
-  if (timezone !== null) return { action: "set", timezone, json };
-  if (useSystemTimezone) return { action: "clear", json };
-  return { action: json ? "status" : "prompt", json };
+  if (timezone !== null) return { action: "set", timezone, json, ...target };
+  if (useSystemTimezone) return { action: "clear", json, ...target };
+  return { action: json ? "status" : "prompt", json, ...target };
 }
 
 /** 系统时区库缺失时不做存在性判断，交给运行 App Server 的平台解析。 */
@@ -90,13 +117,16 @@ export function isKnownTimezone(
 }
 
 /** 交互选择的可选项：恢复系统时区、常见时区、当前值（不在常见列表时）与手动输入。 */
-export function timezoneChoices(current) {
+export function timezoneChoices(current, gateway = false) {
   const common = commonTimezones.map(({ value, hint }) => ({ value, label: value, hint }));
-  const configured = current !== null && !commonTimezones.some(({ value }) => value === current)
+  const configured = current !== null && !(gateway && (current === "app-server" || current === "system"))
+    && !commonTimezones.some(({ value }) => value === current)
     ? [{ value: current, label: current, hint: "当前配置" }]
     : [];
   return [
-    { value: systemTimezoneValue, label: "恢复系统时区", hint: "删除 codex.timezone，沿用系统时区" },
+    ...(gateway ? [{ value: "app-server", label: "跟随 App Server（默认）", hint: "删除 gateway.timezone；App Server 未配置则沿用系统时区" }] : []),
+    { value: systemTimezoneValue, label: gateway ? "系统时区" : "恢复系统时区", hint: gateway
+      ? "独立使用系统时区，不跟随 App Server" : "删除 codex.timezone，沿用系统时区" },
     ...configured,
     ...common,
     { value: customTimezoneValue, label: "其他（手动输入 IANA 名称）", hint: "如 Etc/GMT+8、Asia/Kolkata" },
@@ -124,7 +154,8 @@ export async function runTimezoneCommand(args = [], {
 } = {}) {
   const parsed = parseTimezoneCommandArgs(args);
   const settings = loadGatewaySettings(environment);
-  const current = settings.system.appServerTimezone;
+  const gateway = parsed.gateway === true;
+  const current = gateway ? settings.system.gatewayTimezone : settings.system.appServerTimezone;
   if (parsed.action === "status") {
     output.write(`${JSON.stringify({
       timezone: current,
@@ -133,16 +164,17 @@ export async function runTimezoneCommand(args = [], {
     return { action: "status", timezone: current, configPath: settings.configPath };
   }
   if (parsed.action === "prompt" && (!output.isTTY || !prompts)) {
-    writeCurrentTimezone({ environment, output, current, configPath: settings.configPath });
+    writeCurrentTimezone({ environment, output, current, configPath: settings.configPath, gateway });
     return { action: "status", timezone: current, configPath: settings.configPath };
   }
-  let next = parsed.action === "clear" ? null : parsed.timezone;
+  let next = parsed.action === "clear" ? (gateway ? "system" : null) : parsed.timezone;
   if (parsed.action === "prompt") {
-    const choices = timezoneChoices(current);
+    const choices = timezoneChoices(current, gateway);
     const value = await prompts.select({
-      message: "模型可见时区",
+      message: gateway ? "网关时区" : "模型可见时区",
       showInstructions: false,
-      initialValue: current !== null && choices.some((choice) => choice.value === current)
+      initialValue: gateway && current === null ? "app-server"
+        : current !== null && choices.some((choice) => choice.value === current)
         ? current
         : systemTimezoneValue,
       options: choices,
@@ -153,7 +185,9 @@ export async function runTimezoneCommand(args = [], {
     }
     if (value === customTimezoneValue) {
       const typed = await prompts.text({
-        message: "IANA 时区名称（如 Asia/Kolkata、Etc/GMT+8）；留空恢复系统时区",
+        message: gateway
+          ? "IANA 时区名称（如 Asia/Kolkata、Etc/GMT+8）；留空跟随 App Server"
+          : "IANA 时区名称（如 Asia/Kolkata、Etc/GMT+8）；留空恢复系统时区",
         initialValue: "",
         validate: normalize,
       });
@@ -163,12 +197,12 @@ export async function runTimezoneCommand(args = [], {
       }
       next = typed.trim() === "" ? null : typed.trim();
     } else {
-      next = value === systemTimezoneValue ? null : value;
+      next = value === systemTimezoneValue ? (gateway ? "system" : null) : value;
     }
   }
   const result = updateGatewaySetting({
-    kind: "system.app-server-timezone",
-    value: next,
+    kind: gateway ? "system.gateway-timezone" : "system.app-server-timezone",
+    value: gateway && next === "app-server" ? null : next,
   }, {
     environment,
     expectedRevision: settings.revision,
@@ -181,7 +215,9 @@ export async function runTimezoneCommand(args = [], {
     })}\n`);
     return { action: "saved", timezone: result.value, configPath: result.configPath };
   }
-  writeCliMessage("success", result.value === null
+  writeCliMessage("success", gateway
+    ? `网关时区已设为${gatewayTimezoneLabel(result.value)}：${result.configPath}`
+    : result.value === null
     ? `已恢复系统时区，App Server 与 WebUI 下次启动后使用运行环境的时区：${result.configPath}`
     : `模型可见时区已设为 ${result.value}（App Server 与 WebUI）：${result.configPath}`, {
     stdout: output,
@@ -197,13 +233,20 @@ export async function runTimezoneCommand(args = [], {
   };
 }
 
-function writeCurrentTimezone({ environment, output, current, configPath }) {
-  writeCliMessage("note", current === null
+function writeCurrentTimezone({ environment, output, current, configPath, gateway }) {
+  writeCliMessage("note", gateway
+    ? `当前网关时区：${gatewayTimezoneLabel(current)}（${configPath}）`
+    : current === null
     ? `当前未设置模型可见时区，App Server 与 WebUI 沿用系统时区：${configPath}`
     : `当前模型可见时区：${current}（App Server 与 WebUI，${configPath}）`, {
     stdout: output,
     environment,
   });
+}
+
+function gatewayTimezoneLabel(value) {
+  if (value === null || value === "app-server") return "跟随 App Server";
+  return value === "system" ? "系统时区" : value;
 }
 
 function usageError(message) {

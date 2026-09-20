@@ -566,6 +566,24 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it("sets the gateway timezone through the system settings", async () => {
+    const fixture = createFixture();
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn().mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("gateway_timezone").mockResolvedValueOnce("Asia/Tokyo"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts,
+    });
+    expect(result).toMatchObject({ timezone: "Asia/Tokyo", activation: "restart-gateway" });
+    expect(readGatewayConfig(fixture.configPath).gateway).toEqual({ timezone: "Asia/Tokyo" });
+  });
+
   it("sets the approval timeout through the system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];

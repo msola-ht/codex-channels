@@ -14,7 +14,7 @@ export type ConfigActivationTarget =
   | "gateway"
   | "webui"
   | "app-server"
-  | "app-server-webui"
+  | "app-server-gateway-webui"
   | "all"
   | "services"
   | "unknown";

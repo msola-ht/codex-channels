@@ -152,11 +152,12 @@ describe("Gateway Config management", () => {
       expectedRevision: settings.revision,
     })).toMatchObject({
       value: "America/Los_Angeles",
-      activation: "restart-app-server-webui",
+      activation: "restart-app-server-gateway-webui",
       activationResult: {
-        target: "app-server-webui",
+        target: "app-server-gateway-webui",
         commands: [
           "codexc service restart app-server",
+          "codexc service restart gateway",
           "codexc service restart webui",
         ],
       },

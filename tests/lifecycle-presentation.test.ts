@@ -79,12 +79,15 @@ describe("shared Surface lifecycle presentation", () => {
         transport: "Unix WebSocket",
         codexUpstreamUserAgent: null,
         openAiConnectivity: "unreachable",
+        appServerTimezone: "Asia/Shanghai",
       },
     );
 
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
       { label: "系统", value: "Linux · x64" },
+      { label: "App Server 时区", value: "Asia/Shanghai（配置）" },
+      { label: "网关时区", value: Intl.DateTimeFormat().resolvedOptions().timeZone },
       {
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
@@ -136,6 +139,8 @@ describe("shared Surface lifecycle presentation", () => {
     expect(presentation.fields).toEqual([
       { label: "App Server", value: "已连接" },
       { label: "系统", value: "Linux · x64" },
+      { label: "App Server 时区", value: "跟随系统（未配置）" },
+      { label: "网关时区", value: Intl.DateTimeFormat().resolvedOptions().timeZone },
       {
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
@@ -356,6 +361,8 @@ describe("shared Surface lifecycle presentation", () => {
       "",
       "App Server：已连接",
       "系统：Linux · x64",
+      "App Server 时区：跟随系统（未配置）",
+      `网关时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
       `版本：Codex Connect ${gatewayMetadata.version} · Codex 0.146.0`,
       "",
       "运行环境：",

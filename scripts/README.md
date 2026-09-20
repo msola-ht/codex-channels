@@ -308,11 +308,13 @@
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；快捷开关只在 `info` / `debug`
   间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
   `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
-  编辑，留空即删除配置；模型可见时区与 `codexc timezone` 共用同一实现。
+  编辑，留空即删除配置；模型可见时区与网关时区分别复用 `codexc timezone` 与 `codexc timezone --gateway`。
 - `timezone-command.mjs`：实现公开 `codexc timezone`，解析 IANA 时区名称与 `--system` / `--json`，
   交互入口只列常见时区，并提供「恢复系统时区」与「其他（手动输入 IANA 名称）」两个动作项，
-  在边界校验格式与存在性后通过 Config 管理接口写入 `[codex].timezone`，并提示重启 App Server 与
-  WebUI；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的系统设置菜单复用同一实现。
+  在边界校验格式与存在性后通过 Config 管理接口写入 `[codex].timezone`，并提示 App Server、Gateway 与
+  WebUI 的重启要求；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的系统设置菜单复用同一实现。
+  `--gateway` 管理 `[gateway].timezone`：缺省跟随 App Server，`--system` 选择独立系统时区，
+  IANA 名称设置自定义时区，`--follow-app-server` 删除独立设置；修改后提示重启网关。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
@@ -579,7 +581,8 @@
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
   新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
-  共享第三方子代理使用 `restart / app-server`，本模块不承载服务控制。
+  共享第三方子代理使用 `restart / app-server`，App Server 时区使用
+  `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示。

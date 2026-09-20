@@ -7,6 +7,7 @@ import {
   parseGatewayConfig,
   timezonePattern,
   validateCodexConfigDocument,
+  validateGatewayProcessConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
@@ -55,6 +56,7 @@ export function loadGatewaySettings(environment = process.env) {
   const document = snapshot.document;
   const display = table(document.display);
   const codex = table(document.codex);
+  const gateway = table(document.gateway);
   const clientIdentity = table(codex.client_identity);
   const approval = table(document.approval);
   const conversation = table(document.conversation);
@@ -106,6 +108,7 @@ export function loadGatewaySettings(environment = process.env) {
         defaults: officialTuiIdentityDefaults(),
       },
       appServerTimezone: typeof codex.timezone === "string" ? codex.timezone : null,
+      gatewayTimezone: typeof gateway.timezone === "string" ? gateway.timezone : null,
       workspaces,
     },
     automation: {
@@ -375,7 +378,17 @@ function applySetting(document, input) {
       if (timezone === null) delete codex.timezone;
       else codex.timezone = timezone;
       document.codex = validateCodexConfigDocument(codex);
-      return changed(timezone, "restart-app-server-webui");
+      return changed(timezone, "restart-app-server-gateway-webui");
+    }
+    case "system.gateway-timezone": {
+      const timezone = optionalStrictString(input.value, 64, "value", "网关时区");
+      const gateway = { ...table(document.gateway) };
+      if (timezone === null) delete gateway.timezone;
+      else gateway.timezone = timezone;
+      const validated = validateGatewayProcessConfigDocument(gateway);
+      if (timezone === null) delete document.gateway;
+      else document.gateway = validated;
+      return changed(timezone, "restart-gateway");
     }
     case "automation.scheduled-tasks": {
       const value = booleanValue(input.value, "value", "计划任务");

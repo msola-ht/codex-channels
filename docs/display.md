@@ -168,7 +168,10 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 HTML 和微信结构化字段渲染。
 
 渠道启动通知默认在正式模式显示 Codex Connect 与 Codex 两个版本（分别对应 codexc 网关与
-Codex CLI）；Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
+Codex CLI），并在“系统”下方分别显示“App Server 时区”和“网关时区”。App Server 时区使用
+Gateway 启动时读取的 `codex.timezone` 并标注“配置”，未配置时显示“跟随系统（未配置）”；网关时区
+使用 Gateway 进程的实际时区。App Server 字段不表示已核实其实际生效状态，配置生效条件见
+[模型可见时区](model-timezone.md)。Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
 “运行环境”小节。OpenAI 连通性检查先从 App Server 读取当前认证路由，再只探测对应的 API Key
 或 ChatGPT 官方线路；自定义 Base URL 按 API 线路检查。代理连接失败会在总计 12 秒的启动窗口内
 有限重试；该总时限包含 `account/read`，超时会取消未完成的 RPC。仍不可达、Base URL 路径无效、

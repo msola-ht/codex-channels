@@ -7,7 +7,8 @@
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。
 - `config-event-queue.d.mts`：声明配置事件队列共享模块的 TypeScript 接口。
 - `gateway-config.mjs`：安全解析、严格校验 Telegram、飞书私聊与微信私聊配置，并提供复用同一
-  子 Schema 的严格 `[codex]` 局部校验；在保留已有注释的前提下合并缺失的 Schema 安全默认值，
+  子 Schema 的严格 `[codex]`、`[gateway]` 局部校验；网关时区接受 `system` 或 Node.js 支持的 IANA 名称。
+  在保留已有注释的前提下合并缺失的 Schema 安全默认值，
   所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
   更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
   拒绝并发覆盖，

@@ -115,8 +115,9 @@
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
   模型请求失败样本，保存错误原文与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
   保留协议代码，不携带任何平台上下文或敏感凭据。
-- `config-lifecycle.ts`：在任何 Surface 或指标组件启动前获取配置级 Gateway 所有权，随后管理配置
-  监听、防抖重载、持久配置事件投递、信号、所有权释放与进程退出；只有应用启动完成后才把所有权
+- `config-lifecycle.ts`：在创建应用组件前应用网关进程时区，并在任何 Surface 或指标组件启动前
+  获取配置级 Gateway 所有权；管理配置监听、防抖重载、持久配置事件投递、信号、所有权释放与
+  进程退出；只有应用启动完成后才把所有权
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
 - `provider-settings-watcher.ts`：监听受管第三方 Provider 的模型目录、Profile 与管理标记变化，
   校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并

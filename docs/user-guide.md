@@ -58,7 +58,7 @@ Gateway 配置位于：
 
 `codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、服务、代理、Workspace、WebUI 和本地指标存储。配置示例见 [`config.example.toml`](../config.example.toml)。
 
-`codexc timezone` 单独设置模型可见时区：App Server 请求 environment context 里的时区与当前日期，WebUI 页面时间同步跟随；缺省沿用系统时区，细节见[`模型可见时区`](model-timezone.md)。
+`codexc timezone` 设置模型可见时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`模型可见时区`](model-timezone.md)。
 
 Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允许用户；飞书需要应用凭据和允许的 `open_id`；微信需要扫码凭据、账号和允许用户，并将 `weixin.enabled` 设为 `true`。
 

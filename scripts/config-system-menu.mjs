@@ -75,6 +75,11 @@ export async function runSystemSettings({
         label: "模型可见时区",
         hint: "codex.timezone；缺省沿用系统时区，决定模型看到的时区与当前日期，WebUI 同步跟随",
       },
+      {
+        value: "gateway_timezone",
+        label: "网关时区",
+        hint: "默认跟随 App Server，也可选择系统或自定义时区；重启网关后生效",
+      },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -109,6 +114,10 @@ export async function runSystemSettings({
   }
   if (section === "app_server_timezone") {
     return runAppServerTimezone({ environment, output, prompts, writeConfig });
+  }
+  if (section === "gateway_timezone") {
+    const result = await runTimezoneCommand(["--gateway"], { environment, output, prompts, writeConfig });
+    return result.action === "cancelled" ? { action: "back" } : result;
   }
   throw new Error(`未知系统设置：${String(section)}`);
 }

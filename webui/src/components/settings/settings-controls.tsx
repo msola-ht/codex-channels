@@ -145,8 +145,8 @@ function formatActivation(activation: PendingSetting["activation"]): string {
   if (activation.status === "restart" && activation.target === "all") {
     return "重启 Gateway 与 App Server"
   }
-  if (activation.status === "restart" && activation.target === "app-server-webui") {
-    return "重启 App Server 与 WebUI"
+  if (activation.status === "restart" && activation.target === "app-server-gateway-webui") {
+    return "重启 App Server 与 WebUI；托管网关自动重启，直接运行的网关需重新执行原启动命令"
   }
   if (activation.status === "restart" && activation.target === "webui") {
     return "重启 WebUI"

@@ -79,6 +79,8 @@ function restartRequiredReasons(
     [configChange("surface.weixin.enabled", "weixin"), current.weixin !== undefined, next.weixin !== undefined],
     [configChange("codex.default-model"), current.codexModel, next.codexModel],
     [configChange("codex.sandbox"), current.codexSandbox, next.codexSandbox],
+    [configChange("gateway.timezone"), current.gatewayTimezone, next.gatewayTimezone],
+    [configChange("codex.timezone"), current.codexTimezone, next.codexTimezone],
     [
       configChange("codex.client-identity"),
       JSON.stringify(current.codexClientIdentity),

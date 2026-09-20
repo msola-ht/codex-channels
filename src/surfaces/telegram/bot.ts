@@ -103,6 +103,7 @@ export interface TelegramAudioPort {
 
 export interface TelegramSurfaceOptions {
   gatewayVersion: string;
+  appServerTimezone?: string;
   commands: ConversationCommandExecutor;
   actorRegistry?: ConversationActorRegistry;
   onFatal?: (error: Error) => void;
@@ -273,6 +274,8 @@ export class TelegramSurface {
             text: formatStartupNotification(workspaces, status, {
               platform: process.platform,
               architecture: process.arch,
+              ...(options.appServerTimezone === undefined
+                ? {} : { appServerTimezone: options.appServerTimezone }),
               gatewayVersion: options.gatewayVersion,
               nodeVersion: process.version,
               transport: "Unix WebSocket",

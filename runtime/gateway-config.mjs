@@ -192,6 +192,20 @@ const debugSchema = z.strictObject({
   model_traffic_retention_days: z.number().int().min(0).max(36_500).default(30),
 });
 
+const gatewaySchema = z.strictObject({
+  timezone: z.union([
+    z.literal("system"),
+    timezoneSchema.refine((timeZone) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "网关时区必须是 Node.js 支持的 IANA 名称"),
+  ]).optional(),
+});
+
 const gatewayDocumentSchema = z.strictObject({
   version: z.literal(1),
   default_workspace: z.string().trim().min(1),
@@ -205,6 +219,7 @@ const gatewayDocumentSchema = z.strictObject({
     no_proxy: z.string().optional(),
   }).optional(),
   codex: codexSchema,
+  gateway: gatewaySchema.optional(),
   approval: z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(900),
   }).default({ timeout_seconds: 900 }),
@@ -292,6 +307,14 @@ export function validateCodexConfigDocument(document) {
   const parsed = codexSchema.safeParse(document);
   if (!parsed.success) {
     throw new Error(`config.toml 的 [codex] 配置无效：\n${z.prettifyError(parsed.error)}`);
+  }
+  return parsed.data;
+}
+
+export function validateGatewayProcessConfigDocument(document) {
+  const parsed = gatewaySchema.safeParse(document);
+  if (!parsed.success) {
+    throw new Error(`config.toml 的 [gateway] 配置无效：\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }
