@@ -190,9 +190,10 @@ describe("JsonRpcClient config", () => {
       });
       await client.connect();
 
-      await expect(client.readUserConfigSnapshot()).resolves.toEqual({
+      await expect(client.readUserConfigSnapshot()).resolves.toMatchObject({
         config: { agents: { ds: { config_file: "/tmp/ds.toml" } } },
         version: "sha256:current",
+        toolConfig: expect.any(Object),
       });
       await client.writeUserConfigEdits(
         [{ keyPath: "agents.external", value: null }],

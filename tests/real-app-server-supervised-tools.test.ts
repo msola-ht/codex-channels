@@ -10,6 +10,8 @@ import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
+import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
@@ -18,6 +20,95 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server tools", () => {
+    it("preserves CUA titles through real MCP Item lifecycle notifications", async () => {
+      const testRuntime = mkdtempSync(join(tmpdir(), "codex-cua-contract-"));
+      const codexHome = join(testRuntime, "home");
+      const title = "检查空白页面";
+      const operations: OperationUpdate[] = [];
+      let requestCount = 0;
+      let completed = false;
+      const apiServer = createServer((request, response) => {
+        request.resume();
+        if (request.method !== "POST" || request.url !== "/responses") {
+          response.writeHead(404).end();
+          return;
+        }
+        const id = `cua-response-${++requestCount}`;
+        const item = requestCount === 1
+          ? {
+              type: "function_call", call_id: "cua-call", namespace: "mcp__cua_repl", name: "js",
+              arguments: JSON.stringify({ title, code: "fixture only; not executed" }),
+            }
+          : {
+              type: "message", role: "assistant", id: "cua-answer",
+              content: [{ type: "output_text", text: "done" }],
+            };
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        for (const event of [
+          { type: "response.created", response: { id } },
+          { type: "response.output_item.done", item },
+          completedResponseEvent(id),
+        ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end();
+      });
+      let client: CodexAppServerClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>((resolveListen) => apiServer.listen(0, "127.0.0.1", resolveListen));
+        const address = apiServer.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        const mcpPath = join(testRuntime, "mcp.mjs");
+        writeFileSync(mcpPath, `
+          import { createInterface } from 'node:readline';
+          createInterface({input:process.stdin}).on('line', line => {
+            const m=JSON.parse(line);
+            if (m.id === undefined) return;
+            let result;
+            if (m.method === 'initialize') result={protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'cua-fixture',version:'1'}};
+            else if (m.method === 'tools/list') result={tools:[{name:'js',description:'Read a fixture',annotations:{readOnlyHint:true},inputSchema:{type:'object',properties:{title:{type:'string'},code:{type:'string'}}}}]};
+            else if (m.method === 'tools/call') result={content:[{type:'text',text:'fixture result'}],isError:false};
+            else result={};
+            process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
+          });
+        `);
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "cua-contract-model"', 'model_provider = "cua-contract"',
+          '[mcp_servers.cua_repl]', `command = ${JSON.stringify(process.execPath)}`,
+          `args = [${JSON.stringify(mcpPath)}]`,
+          '[model_providers.cua-contract]', 'name = "CUA contract"',
+          `base_url = "http://127.0.0.1:${address.port}"`, 'wire_api = "responses"',
+          'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"));
+        client = new CodexAppServerClient(new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: testRuntime,
+          environment: { ...process.env, CODEX_HOME: codexHome },
+        })), { sandbox: "read-only" });
+        await client.connect();
+        const { thread } = await client.startThread(testRuntime, { ephemeral: true, approvalPolicy: "never" });
+        removeNotification = client.onNotification((notification) => {
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "item.operation.updated" && event.threadId === thread.id) {
+            operations.push(event.operation);
+          }
+          if (event?.type === "turn.completed" && event.threadId === thread.id) completed = true;
+        });
+        await client.startTurn(thread.id, [{ type: "text", text: "Run the fixture." }], "codex_connect:cua-contract", testRuntime);
+        await waitFor(() => completed, 15_000);
+        expect(requestCount).toBe(2);
+        expect(operations).toEqual([
+          expect.objectContaining({ kind: "mcpTool", action: "computerUse", status: "running", detail: `${title} · cua_repl.js` }),
+          expect.objectContaining({ kind: "mcpTool", action: "computerUse", status: "completed", detail: `${title} · cua_repl.js` }),
+        ]);
+        expect(JSON.stringify(operations)).not.toContain("fixture only");
+      } finally {
+        removeNotification?.();
+        await client?.close();
+        await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
+        rmSync(testRuntime, { recursive: true, force: true });
+      }
+    }, 30_000);
+
     it("routes standalone web search through the OpenAI proxy path allowlist", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-search-proxy-contract-"));
       const codexHome = join(testRuntime, "codex-home");

@@ -182,6 +182,8 @@ Adapter 负责。
 保持原详情，多项生成一次分类计数汇总，并展示最多 8 个去重后的详情及各自次数；
 超出时明确省略数量。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样
 不进入缓冲。
+Computer Use 的 MCP 操作也不进入查询缓冲；飞书及时展示调用开始和终态，复用已有去重、
+顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗。
 `generated-image.ts` 对 App Server `imageGeneration.savedPath` 指向的生成图片和
 `codexc channel send-image` 提交的渠道 spool 图片执行同一读取校验：绝对路径、拒绝符号链接、
 空文件、超过 10 MiB 的内容和非 PNG/JPEG 签名；Telegram、飞书与微信分别负责平台上传和发送，

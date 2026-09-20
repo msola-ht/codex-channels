@@ -246,6 +246,7 @@
   之后可用 `primary-provider switch` 从备份恢复；同时移除冲突的顶层 `openai_base_url`，从第三方
   模式恢复时清除第三方顶层模型。设备登录完成后在统一 Provider 管理事务内重新读取配置与角色
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
+- `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
   Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、实验性上下文管理、TUI 空闲总结，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为

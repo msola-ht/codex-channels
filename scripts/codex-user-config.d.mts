@@ -41,6 +41,7 @@ export interface CodexUserConfigTransactionClient extends CodexUserConfigClientL
   readUserConfigSnapshot(): Promise<{
     config: Record<string, CodexUserConfigValue | undefined>;
     version: string;
+    toolConfig?: Record<string, CodexUserConfigValue | undefined>;
   }>;
   writeUserConfigEdits(
     edits: CodexUserConfigEdit[],

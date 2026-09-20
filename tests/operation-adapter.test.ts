@@ -6,6 +6,43 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("operation normalization", () => {
+  it("keeps the CUA action title without exposing code or tool results", () => {
+    const operation = toOperationUpdate({
+      type: "mcpToolCall", id: "cua-1", server: "cua_repl", tool: "js",
+      arguments: { title: "检查浏览器 TOKEN=private-token", code: "private-code" },
+      result: { content: [{ text: "private-result" }] },
+    }, "started");
+    expect(operation).toMatchObject({
+      kind: "mcpTool", action: "computerUse", status: "running",
+      detail: "检查浏览器 TOKEN=[REDACTED] · cua_repl.js",
+    });
+    expect(JSON.stringify(operation)).not.toMatch(/private-token|private-code|private-result/);
+  });
+
+  it.each([undefined, { title: " " }, { title: 12 }, "invalid"])(
+    "keeps CUA calls visible without a usable title: %s", (args) => {
+      expect(toOperationUpdate({
+        type: "mcpToolCall", id: "cua-1", server: "cua_repl", tool: "js", arguments: args,
+      }, "completed")).toMatchObject({ action: "computerUse", detail: "cua_repl.js" });
+    },
+  );
+
+  it("does not interpret other MCP tools' title arguments as CUA descriptions", () => {
+    expect(toOperationUpdate({
+      type: "mcpToolCall", id: "other", server: "issues", tool: "js",
+      arguments: { title: "private issue title" },
+    }, "completed")).toEqual({
+      itemId: "other", kind: "mcpTool", status: "completed", detail: "issues.js", readOnlyHint: null,
+    });
+  });
+
+  it("labels CUA reset calls without reading unsupported arguments", () => {
+    expect(toOperationUpdate({
+      type: "mcpToolCall", id: "reset", server: "cua_repl", tool: "js_reset",
+      arguments: { title: "not a reset parameter" },
+    }, "completed")).toMatchObject({ action: "computerUse", detail: "cua_repl.js_reset" });
+  });
+
   it.each([
     [{ type: "mcpToolCall", id: "1", server: "github", tool: "search", status: "completed", readOnlyHint: true }, "mcpTool", "github.search", undefined],
     [{ type: "dynamicToolCall", id: "2", namespace: "browser", tool: "open", status: "completed" }, "dynamicTool", "browser.open", undefined],

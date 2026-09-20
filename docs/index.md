@@ -129,6 +129,21 @@
 
 ## 当前支持矩阵
 
+Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/completed` 和
+`ThreadItem.mcpToolCall.arguments`：[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)
+只对 `cua_repl.js` / `js_reset` 标记操作类别，并提取 `js` 的 `title`；飞书
+[`outbox.ts`](../src/surfaces/feishu/outbox.ts) 及时显示开始及终态，不等待查询汇总。
+由 [`operation-adapter.test.ts`](../tests/operation-adapter.test.ts)、
+[`feishu-outbox-operations.test.ts`](../tests/feishu-outbox-operations.test.ts) 和
+[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)
+中的真实 MCP Item 合同验证。此展示不代表操作权限或浏览器连接已可用，未接入
+`item/mcpToolCall/progress`，也不解析执行代码、原始结果或截图。
+飞书 MCP 工具审批复用已支持的 `mcpServer/elicitation/request`，分别映射允许一次、
+会话／持久允许、拒绝与取消；[`feishu-interactions.test.ts`](../tests/feishu-interactions.test.ts)、
+[`approval-coordinator.test.ts`](../tests/approval-coordinator.test.ts) 及
+[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)
+覆盖按钮、稳定决定和真实协议往返，不新增系统或网站权限管理接口。
+
 本表列出项目当前主动调用或消费的协议能力。未列出的生成类型不能直接视为已支持能力。
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
@@ -227,8 +242,16 @@ Schema v17 保存可空转储标签、实际 writer session 与 interaction，�
 旧库由 `codexc metrics upgrade` 在停机、检查点和私有备份后事务重建，新增字段保持 NULL、已有 TTFT 保留，保留请求、
 子代理关系与账户快照，历史运行归属不按时间猜测；`quota_windows` 继续用于 OpenCode Go 本地 Token 的窗口归属。
 
-CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，只读取全局用户配置；渠道跨 Provider
+CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。
+电脑、浏览器与已有 MCP 设置由 [`codex-tool-settings.mjs`](../scripts/codex-tool-settings.mjs) 受控投影，
+复用上述读取和带 `expectedVersion` 的 `config/batchWrite`，不新增 RPC。字段依据固定版
+[`computer_use.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/computer_use.rs)、
+[`browser_use.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/browser_use.rs)、
+[`mcp_types.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/mcp_types.rs) 和
+[`types.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/types.rs) 的插件覆盖白名单；
+由 [`codex-user-settings-management.test.ts`](../tests/codex-user-settings-management.test.ts) 与
+[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 验证字段隔离、带点键与精确删除。
 渠道选择 OpenAI 官方模型时不继承当前 Thread 或用户配置中的 Fast，下一 Turn 显式使用标准服务层级；
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
 模型、思考等级、Fast、计划清单工具、实验性上下文管理、

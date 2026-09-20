@@ -524,7 +524,13 @@ contractSuite("isolated Codex App Server state contract", () => {
   });
 
   describe("configuration and input", () => {
-  it("round-trips MCP tool approval metadata through the real App Server", async () => {
+  it.each([
+    ["accept", null],
+    ["accept", "session"],
+    ["accept", "always"],
+    ["decline", null],
+    ["cancel", null],
+  ] as const)("round-trips MCP tool approval metadata through the real App Server: %s / %s", async (action, persist) => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
     let observed: ApprovalRequest | undefined;
@@ -534,9 +540,9 @@ contractSuite("isolated Codex App Server state contract", () => {
           observed = approval;
           return {
             type: "elicitation",
-            action: "accept",
+            action,
             content: null,
-            persist: "session",
+            persist,
           };
         },
       }));
@@ -573,11 +579,10 @@ contractSuite("isolated Codex App Server state contract", () => {
         },
       });
       expect(response.isError).toBe(false);
-      expect(JSON.parse(String(response.content[0]?.text))).toEqual({
-        action: "accept",
-        content: {},
-        _meta: { persist: "session" },
-      });
+      const reply = JSON.parse(String(response.content[0]?.text));
+      expect(reply.action).toBe(action);
+      expect(reply.content ?? null).toEqual(action === "accept" ? {} : null);
+      expect(reply._meta?.persist ?? null).toBe(persist);
     } finally {
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId);
@@ -940,6 +945,48 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(after.marketplaces).toEqual(before.marketplaces);
     expect(after.plugins).toEqual(before.plugins);
     expect(after.model_providers).toEqual(before.model_providers);
+  }, 15_000);
+
+  it("round-trips native tool policies and quoted keys through versioned config", async () => {
+    const before = await ownerClient.readUserConfigSnapshot();
+    const createClient = async () => ({
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: () => ownerClient.readUserConfigSnapshot(),
+      writeUserConfigEdits: ownerClient.writeUserConfigEdits.bind(ownerClient),
+      listModels: async () => [],
+      readDefaultModelSettings: ownerClient.readDefaultModelSettings.bind(ownerClient),
+      writeDefaultModelSettings: ownerClient.writeDefaultModelSettings.bind(ownerClient),
+    });
+    try {
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "computer_use", value: { default_app_access: "deny", macos: { bundle_ids: { "com.example.Contract": "allow" } } } },
+        { keyPath: "browser_use", value: { origins: { "https://example.com": { access: "deny", uploads: "deny" } } } },
+      ], { expectedVersion: before.version });
+      const state = await loadCodexUserSettings({ createClient, primaryProvider: () => "contract" });
+      expect(state.toolSettings.mergedAvailable).toBe(true);
+      expect(state.toolSettings.fields[0]).toMatchObject({ userValue: "deny", mergedValue: "deny" });
+      for (const [path, value] of [
+        [["computer_use", "macos", "bundle_ids", "com.example.Contract"], "deny"],
+        [["browser_use", "origins", "https://example.com", "access"], "allow"],
+        [["browser_use", "origins", "https://example.com", "access"], null],
+      ] as const) {
+        const snapshot = await ownerClient.readUserConfigSnapshot();
+        await updateCodexUserSetting({ kind: "tool-access", path: [...path], value }, {
+          createClient, primaryProvider: () => "contract", expectedVersion: snapshot.version,
+        });
+      }
+      const after = await peerClient.readUserConfigSnapshot();
+      expect(after.config.computer_use).toMatchObject({ macos: { bundle_ids: { "com.example.Contract": "deny" } } });
+      expect(after.config.browser_use).toEqual({ origins: { "https://example.com": { uploads: "deny" } } });
+      expect(after.config.mcp_servers).toEqual(before.config.mcp_servers);
+      expect(after.config.plugins).toEqual(before.config.plugins);
+    } finally {
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "computer_use", value: before.config.computer_use ?? null },
+        { keyPath: "browser_use", value: before.config.browser_use ?? null },
+      ]);
+    }
   }, 15_000);
 
   it("persists every unified user default through one official config transaction", async () => {

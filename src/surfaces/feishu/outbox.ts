@@ -15,7 +15,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
+import { isComputerUseOperation, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -307,16 +307,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
           this.heldApprovalOperations.set(operationKey, event.operation);
           return;
         }
-        return;
-      } else {
-        if (event.operation.kind === "command") {
-          flushStreamBeforeOutput();
-        }
-        flushStreamBeforeOutput();
-        const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
-        if (!this.acceptOperationDisplay(event, markdown)) return;
-        this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), true);
+        if (!isComputerUseOperation(event.operation)) return;
       }
+      flushStreamBeforeOutput();
+      const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
+      if (!this.acceptOperationDisplay(event, markdown)) return;
+      this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), isCriticalOutputEvent(event));
       return;
     }
     if (event.type === "plan.updated") {

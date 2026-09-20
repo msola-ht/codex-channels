@@ -4,6 +4,65 @@ import { runCodexUserSettingsSetup } from "../scripts/codex-user-settings-setup.
 import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings setup", () => {
+  it.each([
+    { type: "number", invalid: ["30s", "-1", "0", "1e400", "false"], accepted: "30", value: 30 },
+    { type: "integer", invalid: ["1.5", "0", "9007199254740992"], accepted: "2", value: 2 },
+    { type: "list", invalid: ['[read]', '["read","read"]', '[""]', '[1]'], accepted: '["read"]', value: ["read"] },
+    { type: "list", invalid: ["false"], accepted: "", value: null },
+  ] as const)("validates $type input before confirmation and permits correction", async ({ type, invalid, accepted, value }) => {
+    const state = settingsState();
+    const path = ["mcp_servers", "sample", "tool_timeout_sec"];
+    state.toolSettings = { mergedAvailable: true, fields: [{ path, label: "测试字段", type, options: null, userValue: null, mergedValue: null }] };
+    const updateSetting = vi.fn(async () => ({ kind: "tool-access" as const, previousVersion: "version-1", value: {}, activation: "next-thread" as const }));
+    const confirm = vi.fn(async () => true);
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, loadSettings: async () => state, updateSetting,
+      prompts: {
+        select: vi.fn().mockResolvedValueOnce("tool-access").mockResolvedValueOnce(0),
+        text: async ({ validate }) => {
+          expect(validate).toBeTypeOf("function");
+          for (const input of invalid) {
+            expect(validate?.(input)).toEqual(expect.any(String));
+            expect(confirm).not.toHaveBeenCalled();
+            expect(updateSetting).not.toHaveBeenCalled();
+          }
+          expect(validate?.(accepted)).toBeUndefined();
+          return accepted;
+        },
+        confirm, isCancel: () => false,
+      },
+    });
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(updateSetting).toHaveBeenCalledWith({ kind: "tool-access", path, value }, expect.objectContaining({ expectedVersion: "version-1" }));
+  });
+
+  it("allows cancelling tool text input without confirming or writing", async () => {
+    const cancel = Symbol("cancel");
+    const state = settingsState();
+    state.toolSettings = { mergedAvailable: true, fields: [{ path: ["mcp_servers", "sample", "enabled_tools"], label: "工具列表", type: "list", options: null, userValue: null, mergedValue: null }] };
+    const updateSetting = vi.fn();
+    const confirm = vi.fn();
+    await expect(runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, loadSettings: async () => state, updateSetting,
+      prompts: { select: vi.fn().mockResolvedValueOnce("tool-access").mockResolvedValueOnce(0), text: async () => cancel, confirm, isCancel: (value) => value === cancel },
+    })).resolves.toEqual({ action: "back" });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(updateSetting).not.toHaveBeenCalled();
+  });
+  it.each([true, false])("saves native tool policy only when confirmed: %s", async (confirmed) => {
+    const updateSetting = vi.fn(async () => ({ kind: "tool-access" as const, previousVersion: "version-1", value: {}, activation: "next-thread" as const }));
+    const state = settingsState();
+    state.toolSettings = { mergedAvailable: true, fields: [{
+      path: ["computer_use", "default_app_access"], label: "默认应用访问", type: "choice",
+      options: ["allow", "deny"], userValue: null, mergedValue: "deny",
+    }] };
+    await runCodexUserSettingsSetup({
+      environment: {}, output: { write: () => undefined }, loadSettings: async () => state, updateSetting,
+      prompts: { select: vi.fn().mockResolvedValueOnce("tool-access").mockResolvedValueOnce(0).mockResolvedValueOnce('"deny"'), confirm: vi.fn(async () => confirmed), isCancel: () => false },
+    });
+    if (confirmed) expect(updateSetting).toHaveBeenCalledWith({ kind: "tool-access", path: ["computer_use", "default_app_access"], value: "deny" }, expect.objectContaining({ expectedVersion: "version-1" }));
+    else expect(updateSetting).not.toHaveBeenCalled();
+  });
   it.each([undefined, null, "auto", "concise", "detailed", "none"] as const)(
     "defaults an unset reasoning summary to none and preserves %s",
     async (reasoningSummary) => {
@@ -165,6 +224,7 @@ describe("Codex user settings setup", () => {
       "context-management",
       "auto-recap",
       "permissions",
+      "tool-access",
       "back",
     ]);
   });
@@ -339,6 +399,7 @@ describe("Codex user settings setup", () => {
 
 function settingsState(): CodexUserSettingsState {
   return {
+    toolSettings: { mergedAvailable: false, fields: [] },
     version: "version-1",
     provider: "openai",
     defaultsEditable: true,

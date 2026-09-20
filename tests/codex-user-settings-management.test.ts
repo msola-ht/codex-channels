@@ -11,6 +11,48 @@ import {
 } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings management", () => {
+  it("projects native policy separately from merged config without exposing MCP secrets", async () => {
+    const config = {
+      computer_use: { default_app_access: "allow" },
+      mcp_servers: { test: { command: "private-command", env: { TOKEN: "private-token" }, tool_timeout_sec: 20 } },
+      plugins: { "use@bundled": { mcp_servers: { cua: { enabled: true } } } },
+    };
+    const client = settingsClient(config);
+    vi.mocked(client.readUserConfigSnapshot).mockResolvedValue({ config, version: "version-1", toolConfig: {
+      ...config, computer_use: { default_app_access: "deny" },
+    } });
+    const state = await loadCodexUserSettings({ createClient: async () => client, primaryProvider: () => "openai" });
+    expect(state.toolSettings.fields[0]).toMatchObject({ userValue: "allow", mergedValue: "deny" });
+    expect(JSON.stringify(state.toolSettings)).not.toContain("private-");
+    expect(state.toolSettings.fields.some((field) => field.path[0] === "plugins" && field.path.includes("tool_timeout_sec"))).toBe(false);
+  });
+
+  it.each(["deny", null])("writes only a quoted application key with value %s", async (value) => {
+    const client = settingsClient({ computer_use: { macos: { bundle_ids: { "com.example.App": "allow" } } } });
+    const path = ["computer_use", "macos", "bundle_ids", "com.example.App"];
+    const dependencies = { createClient: async () => client, primaryProvider: () => "openai", expectedVersion: "version-1" };
+    await previewCodexUserSetting({ kind: "tool-access", path, value }, dependencies);
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    await updateCodexUserSetting({ kind: "tool-access", path, value }, dependencies);
+    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+      { keyPath: '"computer_use"."macos"."bundle_ids"."com.example.App"', value },
+    ], { expectedVersion: "version-1" });
+  });
+
+  it.each([
+    { path: ["mcp_servers", "test", "command"], value: "unsafe" },
+    { path: ["plugins", "use@bundled", "mcp_servers", "cua", "tool_timeout_sec"], value: 30 },
+    { path: ["mcp_servers", "test", "tool_timeout_sec"], value: -1 },
+    { path: ["mcp_servers", "test", "enabled_tools"], value: ["read", "read"] },
+    { path: ["computer_use", "default_app_access"], value: "approve" },
+  ])("rejects unsupported or invalid tool settings: $path", async ({ path, value }) => {
+    const client = settingsClient({ mcp_servers: { test: { command: "node" } }, plugins: { "use@bundled": { mcp_servers: { cua: {} } } } });
+    await expect(updateCodexUserSetting({ kind: "tool-access", path, value }, {
+      createClient: async () => client, primaryProvider: () => "openai", expectedVersion: "version-1",
+    })).rejects.toMatchObject({ name: "CodexUserSettingsError" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
   it("loads one redacted user-level settings snapshot", async () => {
     const client = settingsClient({
       model: "gpt-test",
@@ -31,6 +73,7 @@ describe("Codex user settings management", () => {
     })).resolves.toEqual({
       version: "version-1",
       provider: "openai",
+      toolSettings: expect.objectContaining({ mergedAvailable: false }),
       defaultsEditable: true,
       models: [projectedModel()],
       defaults: {

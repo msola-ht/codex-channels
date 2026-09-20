@@ -75,6 +75,8 @@
   `readOnlyHint` 能力提示，把多代理工具调用的 `interrupted` 归为失败，并在离开 Client 边界前
   清洗命令、查询及上游错误中的敏感文本；只把 `imageGeneration.savedPath` 映射为稳定生成图片
   产物路径，不把 `imageView` 当作可外发产物。
+  `cua_repl.js` / `js_reset` 归为 MCP 的 `computerUse` 操作，`js` 只提取参数中的操作标题并
+  脱敏限长，不把执行代码或原始结果带入稳定事件。
 - `server-request-adapter.ts`：把命令、文件、临时权限、用户输入和 MCP elicitation 五类
   Server Request 解码为 Approval 稳定请求；命令审批只接受缺省或明确的 `kind=command`，
   `writeStdin` 与未知种类在没有独立预览合同前安全拒绝；其中按固定版本的空对象 Schema 与

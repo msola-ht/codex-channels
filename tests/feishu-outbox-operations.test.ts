@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FeishuOutbox,
 } from "../src/surfaces/feishu/index.js";
+import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { completed, operationUpdated, turnCompleted } from "./support/feishu-outbox-fixtures.js";
 
 
@@ -27,6 +28,49 @@ afterEach(() => {
 
 
 describe("Feishu outbox operation summaries", () => {
+  it.each([
+    ["compact", "completed", "已完成"],
+    ["compact", "failed", "失败"],
+    ["full", "completed", "已完成"],
+    ["full", "failed", "失败"],
+    ["hidden", "completed", "已完成"],
+    ["hidden", "failed", "失败"],
+  ] as const)(
+    "delivers CUA lifecycle before the final reply in %s mode: %s", async (display, status, label) => {
+      const markdownCards: string[] = [];
+      const outbox = new FeishuOutbox("cli_app", {
+        ...cardMethods, sendText: async () => {}, sendPost: async () => {},
+        sendMarkdownCard: async (_chatId, markdown) => { markdownCards.push(markdown); },
+      }, pino({ level: "silent" }), { operationUpdateDisplay: display });
+      for (const phase of ["started", "completed"] as const) {
+        const input = toConversationInputEvent({
+          method: `item/${phase}`,
+          params: {
+            threadId: "thread-1", turnId: "turn-1",
+            item: {
+              type: "mcpToolCall", id: "cua-1", server: "cua_repl", tool: "js",
+              status: phase === "started" ? "inProgress" : status,
+              arguments: { title: "检查 Chrome 标签页", code: "private-code" },
+            },
+          },
+        });
+        if (input?.type !== "item.operation.updated") throw new Error("Missing operation");
+        const output = { ...operationUpdated("running"), operation: input.operation };
+        outbox.handle(output);
+        outbox.handle(output);
+        await settle();
+        expect(markdownCards).toHaveLength(display === "hidden" ? 0 : phase === "started" ? 1 : 2);
+      }
+      await outbox.close();
+      if (display !== "hidden") {
+        expect(markdownCards[0]).toContain("电脑与浏览器操作 · 运行中");
+        expect(markdownCards[1]).toContain(`电脑与浏览器操作 · ${label}`);
+        expect(markdownCards.every((card) => card.includes("检查 Chrome 标签页"))).toBe(true);
+        expect(markdownCards.join("\n")).not.toContain("private-code");
+      }
+    },
+  );
+
   it("keeps completed tools as static CardKit cards in conversation order", async () => {
     const operations: string[] = [];
     const outbox = new FeishuOutbox(

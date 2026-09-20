@@ -50,7 +50,7 @@ describe("management security core", () => {
       sessionId: "session-a",
       operation: "provider.remove",
       inputFingerprint: fingerprintManagementValue({ provider: "relay" }),
-      resourceRevision: fingerprintManagementValue("revision-a"),
+      resourceRevision: `sha256:${"a".repeat(64)}`,
       previewFingerprint: fingerprintManagementValue({ removes: ["relay"] }),
     };
     const issued = confirmations.issue(binding);
@@ -66,7 +66,7 @@ describe("management security core", () => {
     const replacement = confirmations.issue(binding);
     expect(() => confirmations.consume(replacement.token, {
       ...binding,
-      resourceRevision: fingerprintManagementValue("revision-b"),
+      resourceRevision: `sha256:${"b".repeat(64)}`,
     })).toThrow(expect.objectContaining({ code: "management.confirmation-invalid" }));
 
     const malformed = confirmations.issue(binding);

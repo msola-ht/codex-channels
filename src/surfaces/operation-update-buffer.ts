@@ -2,7 +2,7 @@ import type {
   OperationUpdate,
   OutputEvent,
 } from "../conversation-core/index.js";
-import { mcpToolCapabilityLabel } from "./operation-presentation.js";
+import { isComputerUseOperation, mcpToolCapabilityLabel } from "./operation-presentation.js";
 
 const maximumBufferedTurns = 100;
 const maximumOperationsPerTurn = 100;
@@ -53,7 +53,7 @@ export class OperationUpdateBuffer<T> {
   accept(event: OperationUpdatedEvent, target: T): boolean {
     const operation = event.operation;
     const turnKey = outputTurnKey(event.threadId, event.turnId);
-    if (!isBufferedOperation(operation)) {
+    if (!isBufferedOperation(operation) || isComputerUseOperation(operation)) {
       return false;
     }
     if (operation.status === "completed") {

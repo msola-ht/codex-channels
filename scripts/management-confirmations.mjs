@@ -29,7 +29,7 @@ export class ManagementConfirmationStore {
       sessionId: identifier(sessionId, "会话 ID"),
       operation: identifier(operation, "操作类型"),
       inputFingerprint: fingerprint(inputFingerprint, "输入指纹"),
-      resourceRevision: fingerprint(resourceRevision, "资源修订"),
+      resourceRevision: identifier(resourceRevision, "资源修订"),
       previewFingerprint: fingerprint(previewFingerprint, "预览指纹"),
       expiresAt: now + ttlMs,
     });
@@ -85,7 +85,7 @@ function normalizeBinding(binding) {
     sessionId: identifier(binding.sessionId, "会话 ID"),
     operation: identifier(binding.operation, "操作类型"),
     inputFingerprint: fingerprint(binding.inputFingerprint, "输入指纹"),
-    resourceRevision: fingerprint(binding.resourceRevision, "资源修订"),
+    resourceRevision: identifier(binding.resourceRevision, "资源修订"),
     previewFingerprint: fingerprint(binding.previewFingerprint, "预览指纹"),
   };
 }

@@ -53,4 +53,6 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 详细行为见 `docs/webui.md`。
 
+`components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
+
 调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。

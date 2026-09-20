@@ -1,6 +1,7 @@
 import { loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import { supportedPublicApprovalPolicies } from "./codex-public-cli-contract.mjs";
+import { projectToolSettings, toolSettingEdits } from "./codex-tool-settings.mjs";
 
 const sandboxModes = new Set(["read-only", "workspace-write"]);
 const approvalPolicies = new Set(supportedPublicApprovalPolicies);
@@ -68,6 +69,7 @@ export async function updateCodexUserSetting(
     }
     const { edits, value } = createEdits(input, {
       config: snapshot.config,
+      toolConfig: snapshot.toolConfig,
       provider,
       models,
     });
@@ -126,6 +128,7 @@ export async function previewCodexUserSetting(
     }
     const { value } = createEdits(input, {
       config: snapshot.config,
+      toolConfig: snapshot.toolConfig,
       provider,
       models,
     });
@@ -190,6 +193,7 @@ function projectSettings(snapshot, provider, rawModels) {
   const workspaceSandbox = record(config.sandbox_workspace_write);
   return {
     version: snapshot.version,
+    toolSettings: projectToolSettings(config, snapshot.toolConfig),
     provider,
     defaultsEditable: provider === "openai",
     models,
@@ -239,11 +243,13 @@ function compactPercent(config) {
   return Math.round(Math.min(100, autoCompactLimit * 100 / contextWindow));
 }
 
-function createEdits(input, { config, provider, models }) {
+function createEdits(input, { config, toolConfig, provider, models }) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "Codex 用户设置输入必须是对象");
   }
   switch (input.kind) {
+    case "tool-access":
+      return toolSettingEdits(input, config, toolConfig, invalid);
     case "all":
       return allEdits(input, provider, config, models);
     case "defaults":

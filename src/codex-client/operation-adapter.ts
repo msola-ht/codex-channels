@@ -48,10 +48,18 @@ export function toOperationUpdate(
     case "mcpToolCall": {
       const server = stringValue(item.server);
       const tool = stringValue(item.tool);
+      const computerUse = server === "cua_repl" && (tool === "js" || tool === "js_reset");
+      const title = computerUse && tool === "js"
+        ? stringValue(recordValue(item.arguments)?.title)
+        : undefined;
+      const toolName = tool ? server ? `${server}.${tool}` : tool : undefined;
       return {
         ...common,
         kind: "mcpTool",
-        ...(tool ? { detail: server ? `${server}.${tool}` : tool } : {}),
+        ...(computerUse ? { action: "computerUse" } : {}),
+        ...(toolName ? {
+          detail: title ? `${sanitizeOperationText(title)} · ${toolName}` : toolName,
+        } : {}),
         readOnlyHint: typeof item.readOnlyHint === "boolean"
           ? item.readOnlyHint
           : null,

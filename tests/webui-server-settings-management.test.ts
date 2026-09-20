@@ -285,6 +285,38 @@ describe("webui server settings and task management", () => {
     expect(await response.json()).toMatchObject({ error: { code: "setting_not_allowed" } });
   });
 
+  it.each(["tool-access", "permissions"])("requires a one-time confirmation before changing %s", async (kind) => {
+    const fixture = createFixture();
+    const setting = { kind, path: ["computer_use", "default_app_access"], value: "allow" };
+    const revision = `sha256:${"a".repeat(64)}`;
+    let writes = 0;
+    const result = { kind, previousVersion: revision, value: { path: setting.path, value: "allow" }, activation: "next-thread" as const };
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, {
+      token: "webui-token", managementOrigin,
+      loadCodexSettings: async () => ({ version: revision }),
+      previewCodexSetting: async () => result,
+      updateCodexSetting: async () => { writes += 1; return result; },
+    });
+    const headers = { authorization: "Bearer webui-token", origin: managementOrigin, "content-type": "application/json" };
+    const body = { revision, setting };
+    const url = `${origin}/api/v1/management/codex/settings`;
+    const denied = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(body) });
+    expect(denied.status).toBe(409);
+    expect(writes).toBe(0);
+    const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+    expect(preview.status, await preview.clone().text()).toBe(200);
+    const confirmation = await preview.json() as { confirmationRequired: boolean; confirmationToken: string };
+    expect(confirmation.confirmationRequired).toBe(true);
+    const confirmed = { ...body, confirmationToken: confirmation.confirmationToken };
+    const saved = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(confirmed) });
+    expect(saved.status).toBe(200);
+    expect(writes).toBe(1);
+    const replay = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(confirmed) });
+    expect(replay.status).toBe(409);
+    expect(writes).toBe(1);
+  });
+
   it("reads, previews and writes App Server user settings through the shared management token", async () => {
     const fixture = createFixture();
     let settings = {
