@@ -9,10 +9,11 @@
 
 ## 命令范围
 
-- `init`、`setup`、`config`：初始化、从统一菜单选择配置模块，或打开交互式配置与设置菜单
-  （操作详情、计划更新、调试模式、审批超时、Sandbox、默认工作区与
-  模型、WebUI、指标、Telegram 消息格式等配置文件参数，以及配置路径）；`config` 在非交互终端仍直接显示
-  用户级 `.codex-connect` 配置路径；`--json` 只输出路径与文件存在状态，不读取或输出配置正文。
+- `init`、`setup`、`config`：初始化用户目录；通过 Setup 接入 Provider、通讯渠道和项目技能；
+  通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
+  审批超时、Sandbox、默认工作区、模型覆盖、WebUI、指标、Telegram 消息格式和配置路径。
+  `setup --json` 保留交互并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
+  `.codex-connect` 配置路径，`config --json` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
   交互终端使用不同颜色并汇总结果；`--json` 输出全部脱敏检查、分类计数与健康状态；Linux 缺少

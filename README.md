@@ -50,8 +50,8 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ## 常用入口
 
 ```bash
-codexc setup                 # Codex 用户设置、Provider、渠道和项目技能
-codexc config                # Gateway 显示、系统、自动化、代理、WebUI 和本地指标存储
+codexc setup                 # Provider、渠道和项目技能接入
+codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc timezone              # 模型可见的时区与当前日期（App Server 与 WebUI）
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
@@ -66,7 +66,7 @@ codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
 ```
 
-计划清单工具在 `codexc setup → Codex 新会话默认值 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
+计划清单工具在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
 
 符合 OpenAI 后端权益的账户在普通用量耗尽后，会把当前 Session 自动切换到 Luna Reserve；当前 Gateway 进程持续运行、账户和 Thread 未切换且原模型仍可用时，会在普通用量恢复后切回。失败的消息需要重新发送，细节见[渠道展示与本地指标](docs/display.md#luna-reserve-自动回退)。
 

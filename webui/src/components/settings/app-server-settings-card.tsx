@@ -86,7 +86,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   return <>
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     <Card>
-      <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；写入后需重启全部服务生效。</CardDescription></CardHeader>
+      <CardHeader><CardTitle>Codex 新会话与用户偏好</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；各项设置的准确生效范围会在确认时显示。</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label="当前 Provider" value={settings.provider} badge />

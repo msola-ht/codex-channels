@@ -42,7 +42,7 @@ export async function runCodexUserSettingsSetup({
 } = {}) {
   const settings = await loadSettings({ environment, createClient, primaryProvider });
   const section = await prompts.select({
-    message: "选择 Codex 新会话默认值",
+    message: "选择 Codex 新会话与用户偏好",
     showInstructions: false,
     options: [
       ...(settings.defaultsEditable && settings.permissions.editable
@@ -174,7 +174,7 @@ export async function runCodexUserSettingsSetup({
       primaryProvider,
     });
   }
-  throw new Error(`未知 Codex 新会话默认值：${String(section)}`);
+  throw new Error(`未知 Codex 新会话与用户偏好：${String(section)}`);
 }
 
 async function runAllSettings({
@@ -225,7 +225,7 @@ async function runAllSettings({
   output.write(
     `Codex 核心默认值已更新：${modelDefaults.model.model} · ${modelDefaults.reasoningEffort} · Fast ${fastEnabled ? "开启" : "关闭"} · ${permissions.sandboxMode} · ${permissions.approvalPolicy} · 网络${permissions.networkAccess ? "开启" : "关闭"}\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -247,7 +247,7 @@ async function runFastSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 新会话默认 Fast 已${enabled ? "开启" : "关闭"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -288,7 +288,7 @@ async function runWebSearchSetting({
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 联网搜索模式已更新：${mode}\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -323,7 +323,7 @@ async function runUpdatePlanSetting({ environment, output, prompts, settings, up
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 计划清单工具已${value ? "开启" : "关闭"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -357,8 +357,8 @@ async function runContextManagementSetting({ environment, output, prompts, setti
     ...(createClient === undefined ? {} : { createClient }),
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
-  output.write(`实验性上下文管理已${value ? "开启" : "关闭"}；重启服务后，仅符合条件的官方 ChatGPT Codex 新会话生效。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  output.write(`实验性上下文管理已${value ? "开启" : "关闭"}；仅符合条件的官方 ChatGPT Codex 新会话生效。\n`);
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -393,7 +393,7 @@ async function runAutoRecapSetting({ environment, output, prompts, settings, upd
     ...(primaryProvider === undefined ? {} : { primaryProvider }),
   });
   output.write(`Codex 空闲总结已${value ? "开启" : "关闭"}。\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -473,7 +473,7 @@ async function runModelCompactSetting({
   output.write(
     `Codex 模型上下文与自动压缩已更新：窗口 ${contextWindow === null ? "模型默认" : `${contextWindow.toLocaleString()} tokens`} · 自动压缩 ${autoCompactPercent === null ? "默认 95%" : `${autoCompactPercent}%`}。\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -484,7 +484,7 @@ async function runPreferencesSetting({ environment, output, prompts, settings, u
   if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
   const result = await updateSetting({ kind: "preferences", ...preferences }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
   output.write("Codex 其他用户偏好已更新。\n");
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 
@@ -550,7 +550,7 @@ async function runPermissionSettings({
   output.write(
     `Codex 用户权限已更新：${sandboxMode} · ${approvalPolicy} · 网络${networkAccess ? "开启" : "关闭"}\n`,
   );
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 

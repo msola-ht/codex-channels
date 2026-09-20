@@ -56,7 +56,7 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
-`codexc setup` 管理 Codex 用户设置、模型 Provider、渠道和项目技能；`codexc config` 管理 Gateway 显示、服务、代理、Workspace、WebUI 和本地指标存储。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、服务、代理、Workspace、WebUI 和本地指标存储。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc timezone` 单独设置模型可见时区：App Server 请求 environment context 里的时区与当前日期，WebUI 页面时间同步跟随；缺省沿用系统时区，细节见[`模型可见时区`](model-timezone.md)。
 
@@ -64,7 +64,7 @@ Telegram、飞书和微信至少启用一个。Telegram 需要 Bot Token 和允�
 
 ### 计划相关设置
 
-在 `codexc setup → Codex 新会话默认值 → 计划清单工具` 中控制上游 `update_plan` 工具，默认关闭：
+在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中控制上游 `update_plan` 工具，默认关闭：
 
 ```toml
 [tools.update_plan]
@@ -79,39 +79,39 @@ enabled = true
 | `display.plan_updates` | Gateway 是否把 `turn/plan/updated` 通知展示到渠道，默认开启 |
 | `/plan` | 是否使用官方 Plan 协作模式 |
 
-上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改 Codex 用户设置后运行 `codexc service restart all`。
+上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。
 
 ### 实验性上下文管理
 
-在 `codexc setup → Codex 新会话默认值 → 实验性上下文管理` 中控制上游的实验性上下文管理，默认关闭：
+在 `codexc config → Codex 新会话与用户偏好 → 实验性上下文管理` 中控制上游的实验性上下文管理，默认关闭：
 
 ```toml
 [features.context_management]
 experimental_mode = true
 ```
 
-该值写入 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。保存后运行 `codexc service restart all`；它只对满足资格条件的官方 ChatGPT Codex 新会话生效，使用 API Key、自定义或第三方 Provider 的会话不会启用该能力。`codexc doctor` 只读显示当前开关状态和适用范围。
+该值写入 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。保存后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变。它只对满足资格条件的官方 ChatGPT Codex 新会话生效，使用 API Key、自定义或第三方 Provider 的会话不会启用该能力。`codexc doctor` 只读显示当前开关状态和适用范围。
 
 ### TUI 空闲总结
 
-在 `codexc setup → Codex 新会话默认值 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
+在 `codexc config → Codex 新会话与用户偏好 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
 
 ```toml
 [tui]
 auto_recap = false
 ```
 
-关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后运行 `codexc service restart all`。
+关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后由新启动的 TUI 读取，无需重启服务。
 
 ### 推理摘要
 
-在 `codexc setup → Codex 新会话默认值 → 其他用户偏好` 中选择推理摘要。开发基线 0.155.1
+在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.155.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
 
 首次运行包含 0.155.1 升级处理的 `codexc update` 时，会将 Codex 用户主配置的推理摘要统一设为
-`none`，包括已有的 `auto/concise/detailed`；完成后可以在 Setup 重新选择，后续更新不会再次覆盖。
+`none`，包括已有的 `auto/concise/detailed`；完成后可以在 Config 重新选择，后续更新不会再次覆盖。
 独立 Profile 的显式覆盖保持不变。更新按当前 Codex 配置目录记录一次完成状态，写入失败会明确报错。
 
 ### 渠道会话空闲自动解除

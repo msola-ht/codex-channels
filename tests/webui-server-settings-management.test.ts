@@ -299,8 +299,8 @@ describe("webui server settings and task management", () => {
       token: "webui-token",
       managementOrigin: "http://127.0.0.1:0",
       loadCodexSettings: async () => settings,
-      previewCodexSetting: async (input: unknown) => ({ kind: (input as { kind: string }).kind, previousVersion: settings.version, value: { enabled: true }, activation: "restart-all" as const }),
-      updateCodexSetting: async (input: unknown) => { settings = { ...settings, version: "codex-v2" }; return { kind: (input as { kind: string }).kind, previousVersion: "codex-v1", value: { enabled: true }, activation: "restart-all" as const }; },
+      previewCodexSetting: async (input: unknown) => ({ kind: (input as { kind: string }).kind, previousVersion: settings.version, value: { enabled: true }, activation: "next-thread" as const }),
+      updateCodexSetting: async (input: unknown) => { settings = { ...settings, version: "codex-v2" }; return { kind: (input as { kind: string }).kind, previousVersion: "codex-v1", value: { enabled: true }, activation: "next-thread" as const }; },
     });
     const headers = { authorization: "Bearer webui-token" };
     const read = await fetch(`${origin}/api/v1/management/codex/settings`, { headers });
@@ -308,7 +308,7 @@ describe("webui server settings and task management", () => {
     expect((await read.json()).version).toBe("codex-v1");
     const preview = await fetch(`${origin}/api/v1/management/codex/settings/preview`, { method: "POST", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
     expect(preview.status).toBe(200);
-    expect((await preview.json()).activation.status).toBe("restart");
+    expect((await preview.json()).activation.status).toBe("next-thread");
     const update = await fetch(`${origin}/api/v1/management/codex/settings`, { method: "PATCH", headers: { ...headers, origin: "http://127.0.0.1:0", "content-type": "application/json" }, body: JSON.stringify({ revision: "codex-v1", setting: { kind: "fast", enabled: true } }) });
     expect(update.status).toBe(200);
     expect((await update.json()).revision).toBe("codex-v2");

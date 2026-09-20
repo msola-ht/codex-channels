@@ -9,6 +9,12 @@ export function configActivationResult(activation) {
       return result("none", "none", []);
     case "reload":
       return result("reload", "gateway", ["codexc service reload"]);
+    case "next-thread":
+      return result("next-thread", "codex", []);
+    case "next-tui":
+      return result("next-tui", "codex", []);
+    case "next-thread-and-tui":
+      return result("next-thread-and-tui", "codex", []);
     case "restart-gateway":
       return result("restart", "gateway", ["codexc service restart gateway"]);
     case "restart-webui":

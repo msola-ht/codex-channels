@@ -407,7 +407,7 @@ if (document) {
     note(
       "实验性上下文管理",
       contextManagement.enabled ? "已开启" : "已关闭（上游默认）",
-      "仅 ChatGPT Plus、Pro、Pro Lite 的官方 Codex 新会话可用；运行 codexc setup → Codex 新会话默认值可修改，重启服务后生效",
+      "仅 ChatGPT Plus、Pro、Pro Lite 的官方 Codex 新会话可用；运行 codexc config → Codex 新会话与用户偏好可修改，新建或重新加载的 Thread 生效",
     );
   }
 
@@ -423,7 +423,7 @@ if (document) {
     note(
       "Codex 计划清单工具",
       updatePlan.enabled ? "已开启" : "已关闭（上游默认）",
-      "运行 codexc setup → Codex 新会话默认值 → 计划清单工具可修改；Gateway 的 display.plan_updates 只控制渠道展示",
+      "运行 codexc config → Codex 新会话与用户偏好 → 计划清单工具可修改；Gateway 的 display.plan_updates 只控制渠道展示",
     );
   }
 

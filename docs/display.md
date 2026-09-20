@@ -134,7 +134,7 @@ failed 请求计入异常记录，避免这类错误完全不可见。
 `context_window`，压缩阈值由上游按窗口默认推导，因此不显示该字段（会话区「上下文」分母已反映
 当前窗口）；官方模型优先读取主配置覆盖值（`model_context_window` / `model_auto_compact_token_limit`），
 未覆盖时显示默认 95%。
-`codexc setup` 的「Codex 新会话默认值 → 模型上下文与自动压缩」可读取并设置官方模型的
+`codexc config` 的「Codex 新会话与用户偏好 → 模型上下文与自动压缩」可读取并设置官方模型的
 上下文窗口与自动压缩百分比，未设置时按模型默认展示。
 
 - HTTP 与 WebSocket 客户端在完成事件前断开都计为中断；HTTP/SSE 已完成后的正常收尾断开不重复

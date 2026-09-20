@@ -76,7 +76,7 @@ describe("Codex user settings management", () => {
       primaryProvider: () => "openai",
     })).resolves.toMatchObject({
       kind: "defaults",
-      activation: "restart-all",
+      activation: "next-thread",
       value: { model: "gpt-test", reasoningEffort: "high" },
     });
 
@@ -118,7 +118,7 @@ describe("Codex user settings management", () => {
       primaryProvider: () => "openai",
     })).resolves.toMatchObject({
       kind: "all",
-      activation: "restart-all",
+      activation: "next-thread",
       value: {
         model: "gpt-test",
         reasoningEffort: "high",
@@ -168,7 +168,7 @@ describe("Codex user settings management", () => {
     })).resolves.toMatchObject({
       kind: "web-search",
       value: { mode: "live" },
-      activation: "restart-all",
+      activation: "next-thread",
     });
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
@@ -193,7 +193,7 @@ describe("Codex user settings management", () => {
       primaryProvider: () => "openai",
     })).resolves.toMatchObject({
       kind: "preferences",
-      activation: "restart-all",
+      activation: "next-thread-and-tui",
     });
 
     expect(client.listModels).toHaveBeenCalledOnce();
@@ -243,7 +243,7 @@ describe("Codex user settings management", () => {
     })).resolves.toMatchObject({
       kind: "update-plan",
       value: { enabled: true },
-      activation: "restart-all",
+      activation: "next-thread",
     });
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
@@ -264,7 +264,7 @@ describe("Codex user settings management", () => {
     })).resolves.toMatchObject({
       kind: "context-management",
       value: { enabled: true },
-      activation: "restart-all",
+      activation: "next-thread",
     });
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
@@ -285,7 +285,7 @@ describe("Codex user settings management", () => {
     })).resolves.toMatchObject({
       kind: "auto-recap",
       value: { enabled: false },
-      activation: "restart-all",
+      activation: "next-tui",
     });
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
@@ -439,7 +439,7 @@ describe("Codex user settings management", () => {
       primaryProvider: () => "openai",
     })).resolves.toMatchObject({
       kind: "model-compact",
-      activation: "restart-all",
+      activation: "next-thread",
       value: { contextWindow: 100_000, autoCompactPercent: 40 },
     });
 

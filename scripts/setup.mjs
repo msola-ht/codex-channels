@@ -8,8 +8,6 @@ import { runDeepseekSetup } from "./deepseek-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
-import { runCodexDefaultsSetup } from "./codex-defaults-setup.mjs";
-import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { runModelWindowSetup } from "./model-window-setup.mjs";
@@ -20,7 +18,6 @@ import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runSetup({
-  environment = process.env,
   input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
@@ -29,8 +26,6 @@ export async function runSetup({
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   skillSetup = runSkillSetup,
-  codexDefaultsSetup = runCodexDefaultsSetup,
-  codexUserSettingsSetup = runCodexUserSettingsSetup,
   openCodeGoSetup = runOpenCodeGoSetup,
   modelProviderDefaultSetup = runModelProviderDefaultSetup,
   modelWindowSetup = runModelWindowSetup,
@@ -49,13 +44,8 @@ export async function runSetup({
       options: [
         {
           value: "summary",
-          label: "配置总览",
+          label: "接入状态总览",
           hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
-        },
-        {
-          value: "codex_user",
-          label: "Codex 新会话默认值",
-          hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
         },
         {
           value: "models",
@@ -100,19 +90,6 @@ export async function runSetup({
         if (isBackResult(result)) continue;
         const enriched = enrichSetupResult(result, "restart-gateway");
         emitSetupResult(onResult, "channels", enriched);
-        if (stayOnMenu) continue;
-        return enriched;
-      }
-      case "codex_user": {
-        const result = await codexUserSettingsSetup({
-          environment,
-          output,
-          prompts,
-          defaultsSetup: codexDefaultsSetup,
-        });
-        if (isBackResult(result)) continue;
-        const enriched = enrichSetupResult(result, "restart-all");
-        emitSetupResult(onResult, "codex_user", enriched);
         if (stayOnMenu) continue;
         return enriched;
       }
@@ -330,7 +307,7 @@ async function runChannelSetup({
       {
         value: "telegram",
         label: "Telegram",
-        hint: "Bot、用户授权与消息格式",
+        hint: "Bot 与用户授权；消息格式在 codexc config 中管理",
       },
       {
         value: "feishu",
@@ -405,7 +382,7 @@ function setupFallbackActivation(module, result) {
     deepseek: "restart-all",
     "opencode-go": "restart-all",
     provider_default: "restart-app-server",
-    agents: "restart-all",
+    agents: "restart-app-server",
   }[module];
 }
 

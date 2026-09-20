@@ -45,12 +45,8 @@ describe("Codex Connect setup", () => {
       showInstructions: false,
       options: [{
         value: "summary",
-        label: "配置总览",
+        label: "接入状态总览",
         hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
-      }, {
-        value: "codex_user",
-        label: "Codex 新会话默认值",
-        hint: "OpenAI 官方默认模型、思考等级、Fast、权限与用户偏好",
       }, {
         value: "models",
         label: "模型与提供商",
@@ -75,7 +71,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "telegram",
         label: "Telegram",
-        hint: "Bot、用户授权与消息格式",
+        hint: "Bot 与用户授权；消息格式在 codexc config 中管理",
       }, {
         value: "feishu",
         label: "飞书",
@@ -288,36 +284,6 @@ describe("Codex Connect setup", () => {
         commands: ["codexc service restart all"],
       },
     });
-  });
-
-  it("selects unified Codex user settings from the main category", async () => {
-    const environment = { CODEX_HOME: "/tmp/codex-home" };
-    const output = {};
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("codex_user"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-    const codexDefaultsSetup = vi.fn(async () => "codex-defaults-configured");
-    const codexUserSettingsSetup = vi.fn(async () => "codex-user-configured");
-
-    await expect(runSetup({
-      environment,
-      output,
-      prompts,
-      codexDefaultsSetup,
-      codexUserSettingsSetup,
-    })).resolves.toBe("codex-user-configured");
-
-    expect(codexUserSettingsSetup).toHaveBeenCalledWith({
-      environment,
-      output,
-      prompts,
-      defaultsSetup: codexDefaultsSetup,
-    });
-    expect(codexDefaultsSetup).not.toHaveBeenCalled();
   });
 
   it("selects the custom primary Provider setup under models and providers", async () => {

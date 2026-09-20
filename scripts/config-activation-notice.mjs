@@ -46,6 +46,15 @@ function activationNotice(activation) {
   if (activation.status === "reload" && activation.target === "gateway") {
     return "配置已保存。Gateway 将热加载新配置；如需手动触发，请执行 codexc service reload。";
   }
+  if (activation.status === "next-thread" && activation.target === "codex") {
+    return "配置已保存。新建或重新加载的 Codex Thread 将读取该设置；当前已加载的 Thread 保持不变，无需重启服务。";
+  }
+  if (activation.status === "next-tui" && activation.target === "codex") {
+    return "配置已保存。新启动的 Codex TUI 将读取该设置，无需重启后台服务。";
+  }
+  if (activation.status === "next-thread-and-tui" && activation.target === "codex") {
+    return "配置已保存。会话设置由新建或重新加载的 Codex Thread 读取，TUI 设置由新启动的 TUI 读取；当前已加载的 Thread 保持不变，无需重启后台服务。";
+  }
   if (activation.status === "restart" && activation.target === "gateway") {
     return "配置已保存。\n该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；"
       + "未运行时将在下次启动生效；现有 Thread 不会被修改。";

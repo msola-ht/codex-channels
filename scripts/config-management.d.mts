@@ -1,5 +1,6 @@
 export type GatewaySettingActivation =
   | "none"
+  | "reload"
   | "restart-gateway"
   | "restart-webui"
   | "restart-app-server"

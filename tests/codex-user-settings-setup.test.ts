@@ -11,7 +11,7 @@ describe("Codex user settings setup", () => {
         kind: "preferences" as const,
         previousVersion: "version-1",
         value: {},
-        activation: "restart-all" as const,
+        activation: "next-thread-and-tui" as const,
       }));
       const prompts = {
         select: vi.fn(async (options: { initialValue?: unknown }) => options.initialValue)
@@ -50,7 +50,7 @@ describe("Codex user settings setup", () => {
       kind: "all" as const,
       previousVersion: "version-1",
       value: {},
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -95,7 +95,7 @@ describe("Codex user settings setup", () => {
       kind: "permissions" as const,
       previousVersion: "version-1",
       value: {},
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -175,7 +175,7 @@ describe("Codex user settings setup", () => {
       kind: "update-plan" as const,
       previousVersion: "version-1",
       value: { enabled: true },
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -209,7 +209,7 @@ describe("Codex user settings setup", () => {
       kind: "auto-recap" as const,
       previousVersion: "version-1",
       value: { enabled: false },
-      activation: "restart-all" as const,
+      activation: "next-tui" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -243,7 +243,7 @@ describe("Codex user settings setup", () => {
       kind: "context-management" as const,
       previousVersion: "version-1",
       value: { enabled: true },
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -305,7 +305,7 @@ describe("Codex user settings setup", () => {
       kind: "model-compact" as const,
       previousVersion: "version-1",
       value: { contextWindow: 100_000, autoCompactPercent: 40 },
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn(async () => "model-compact"),

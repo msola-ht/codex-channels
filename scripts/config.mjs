@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,7 +9,6 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   runDisplaySettings,
@@ -21,6 +19,7 @@ import { runWebuiSettings } from "./config-webui-menu.mjs";
 import { runDebugSetup } from "./debug-setup.mjs";
 import { runMetricsSettings } from "./metrics-config-menu.mjs";
 import { writeGatewayConfigSummary } from "./config-summary.mjs";
+import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import {
   runAdvancedSettings,
   runAutomationSettings,
@@ -35,8 +34,7 @@ export async function runConfig({
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
   debugSetup = runDebugSetup,
-  restartGateway,
-  restartWebui,
+  codexUserSettingsSetup = runCodexUserSettingsSetup,
   stayOnMenu = false,
 } = {}) {
   const { configPath, dataDir } = resolveConfigPaths(environment);
@@ -52,15 +50,26 @@ export async function runConfig({
   }
   prompts.intro("Codex Connect Config");
   while (true) {
-    const document = readGatewayConfig(configPath);
-    const telegram = table(document.telegram);
+    let document;
+    let gatewayConfigError;
+    try {
+      document = readGatewayConfig(configPath);
+    } catch (error) {
+      gatewayConfigError = error;
+    }
+    const telegram = table(document?.telegram);
     const telegramConfigured = typeof telegram.bot_token === "string"
       && telegram.bot_token.trim().length > 0;
     const section = await prompts.select({
       message: "选择配置项",
       showInstructions: false,
       options: [
-        { value: "summary", label: "配置总览", hint: "脱敏显示当前 Gateway 设置、来源与作用范围" },
+        { value: "summary", label: "Gateway 配置总览", hint: "脱敏显示当前 Gateway 设置、来源与作用范围" },
+        {
+          value: "codex_user",
+          label: "Codex 新会话与用户偏好",
+          hint: "默认模型、思考等级、Fast、权限、推理摘要与其他用户偏好",
+        },
         { value: "display", label: "显示设置", hint: "操作详情、计划更新、思考状态" },
         {
           value: "system",
@@ -83,18 +92,29 @@ export async function runConfig({
       prompts.cancel("Config 已取消");
       return undefined;
     }
+    if (
+      section !== "codex_user"
+      && section !== "paths"
+      && gatewayConfigError !== undefined
+    ) {
+      throw gatewayConfigError;
+    }
     const common = {
       environment,
       output,
       prompts,
       writeConfig,
-      restartGateway,
-      restartWebui,
     };
     switch (section) {
       case "summary":
         writeGatewayConfigSummary(output, document, configPath);
         continue;
+      case "codex_user": {
+        const result = await codexUserSettingsSetup({ environment, output, prompts });
+        if (isBackResult(result)) continue;
+        if (stayOnMenu) continue;
+        return result;
+      }
       case "display": {
         const result = await runDisplaySettings(common);
         if (isBackResult(result)) continue;
@@ -152,26 +172,6 @@ export async function runConfig({
   }
 }
 
-export function restartServiceTarget(target, environment = process.env) {
-  return new Promise((resolve, reject) => {
-    const invocation = resolveExecutableInvocation(
-      "codexc",
-      ["service", "restart", target],
-      environment,
-    );
-    execFile(invocation.file, invocation.args, {
-      env: environment,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(String(stderr || stdout || error.message).trim()));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
 function resolveConfigPaths(environment) {
   const explicit = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   if (explicit) return { configPath: explicit, dataDir: dirname(explicit) };
@@ -212,8 +212,6 @@ if (
   } else {
     runConfig({
       json,
-      restartGateway: () => restartServiceTarget("gateway", process.env),
-      restartWebui: () => restartServiceTarget("webui", process.env),
       stayOnMenu: true,
     }).catch((error) => {
       writeCliMessage("failure", error instanceof Error ? error.message : String(error));

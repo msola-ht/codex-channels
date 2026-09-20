@@ -89,6 +89,11 @@ export interface CodexUserSettingsDependencies {
   primaryProvider?: (environment: NodeJS.ProcessEnv) => string;
 }
 
+export type CodexUserSettingActivation =
+  | "next-thread"
+  | "next-tui"
+  | "next-thread-and-tui";
+
 export function loadCodexUserSettings(
   options?: CodexUserSettingsDependencies,
 ): Promise<CodexUserSettingsState>;
@@ -100,7 +105,7 @@ export function updateCodexUserSetting(
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
-  activation: "restart-all";
+  activation: CodexUserSettingActivation;
 }>;
 
 export function previewCodexUserSetting(
@@ -110,5 +115,5 @@ export function previewCodexUserSetting(
   kind: CodexUserSettingInput["kind"];
   previousVersion: string;
   value: Record<string, unknown>;
-  activation: "restart-all";
+  activation: CodexUserSettingActivation;
 }>;

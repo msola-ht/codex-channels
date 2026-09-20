@@ -166,8 +166,8 @@
   （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
-  “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
+- `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
+  和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义。公开 CLI 的 `codexc setup --json` 将交互提示
   写入 stderr，并按每行一个事件把脱敏结果写入 stdout；默认 `codexc setup` 仍保持纯交互文本输出。
@@ -237,7 +237,7 @@
 - `agents.mjs`：提供不依赖终端提示的共享第三方子代理 Provider 列表、配置/停用预览与执行接口，
   `codexc agents` 复用该接口；`status --json` 返回稳定配置状态，Provider 与模型未配置时显式使用
   `null`，不要求 Gateway 已初始化。角色文件和 Codex 主配置复用统一 Provider 管理事务，避免与
-  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和全部服务重启动作。
+  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和 App Server 重启动作。
 - `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
   模型选择和停用确认，只编排 `agents.mjs` 的管理接口；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
@@ -251,7 +251,7 @@
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
-- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 新会话默认值”
+- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
   适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、实验性上下文管理、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、人格、
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
@@ -280,8 +280,8 @@
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
-- `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
-  配置文件中可安全编辑的参数：显示设置（操作详情、计划更新、默认关闭的思考状态）、系统设置
+- `config.mjs`：`codexc config` 的顶层交互编排，统一提供 Codex 新会话与用户偏好，以及不显示凭据
+  或代理值的 Gateway 配置总览和可安全编辑的参数：显示设置（操作详情、计划更新、默认关闭的思考状态）、系统设置
   （调试快捷开关、模型请求转储、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
@@ -576,10 +576,13 @@
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
-  稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用，不承载服务控制。
-- `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
-  Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
-  WebUI 的专属重启要求继续单独提示。
+  稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
+  `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
+  新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
+  共享第三方子代理使用 `restart / app-server`，本模块不承载服务控制。
+- `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
+  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
+  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
   WebUI 独立不并入 `all`，

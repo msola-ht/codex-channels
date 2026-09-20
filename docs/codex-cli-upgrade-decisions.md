@@ -28,7 +28,7 @@
 | 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
 | --- | --- | --- | --- |
 | 0.155.1 精确基线 | 让 Gateway 与 App Server 使用同一正式 CLI 协议 | 重新生成协议，同步版本与 CI；不保留旧 CLI 兼容分支 | `codex-protocol`、`protocol:check`、真实 App Server 合同 |
-| 推理摘要默认关闭与首次更新重置 | 避免 Provider 不支持摘要导致请求失败 | Setup 未配置时预选 `none`；首次执行本版 `update` 将用户主配置（含已有显式值）统一设为 `none` 并记录完成，之后保留用户重新选择的值；独立 Profile 不变，不在渠道 Turn 中注入覆盖 | [`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`local-update.mjs`](../scripts/local-update.mjs)、本地更新回归测试及跨 Client 配置真实合同 |
+| 推理摘要默认关闭与首次更新重置 | 避免 Provider 不支持摘要导致请求失败 | Codex 用户配置未显式设置 `model_reasoning_summary` 时预选 `none`；首次执行本版 `update` 将用户主配置（含已有显式值）统一设为 `none` 并记录完成，之后保留用户重新选择的值；独立 Profile 不变，不在渠道 Turn 中注入覆盖 | [`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`local-update.mjs`](../scripts/local-update.mjs)、本地更新回归测试及跨 Client 配置真实合同 |
 | 流式压缩与旧端点移除 | 让压缩沿当前 CLI 的 Responses 通路执行并计入压缩统计 | 上游已删除旧 CompactClient；代理删除 `/responses/compact` 路由及其路径推断，旧请求明确返回 404，继续按 `request_kind=compaction` 识别 `/responses` 上的压缩 | [`request-routing.ts`](../src/provider-proxy/request-routing.ts)、HTTP 路由、HTTP/WebSocket 指标测试 |
 | 压缩失败保留输入 | 长会话在 Turn 前压缩失败时，用户刚发送的输入仍可留在官方历史里 | 随上游获得；保存不代表执行成功，Gateway 不保存消息副本或自动重发 | `codex-client` / `conversation-core` 现有生命周期；上游 `core/tests/suite/compact_remote.rs` |
 | MCP 认证状态、交互取消与重连修复 | 让用户更准确识别需要重新登录的 Server，并结束已取消的交互 | 随上游获得，继续通过既有 `authStatus/runtimeStatus`、`/mcp health` 和审批失效路径呈现，不复制 OAuth 刷新或取消状态 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、MCP 与审批测试、真实工具合同 |
@@ -115,8 +115,8 @@
 | --- | --- | --- | --- |
 | `0.153.4` 精确协议基线 | 让 Gateway、App Server 和生成类型使用同一正式版本 | 采用官方正式版并重新生成协议；不保留旧 CLI 兼容分支，继续由受控导出和支持矩阵限制公开能力 | [`src/codex-protocol/`](../src/codex-protocol/README.md)、`npm run codex:upgrade -- 0.153.4`、`npm run protocol:check`、`npm run check` |
 | Astra 模型选择器与异步澄清提示 | 让原生 Codex 客户端使用捆绑的 Astra 模型选择器，并在需要澄清时给出更准确的提示 | 随锁定 CLI 自动获得；Gateway 不复制 TUI、模型选择器或提示文案逻辑 | 目标 CLI 版本检查、真实 App Server 合同 |
-| TUI 空闲总结开关 | 让管理员控制终端失去焦点后是否自动生成会话回顾 | 通过 `codexc setup → Codex 新会话默认值 → 空闲总结` 写入 `tui.auto_recap`，默认写入 `false`；手动 `/recap` 不受影响 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置写入测试 |
-| 实验性上下文管理开关 | 为符合条件的官方 ChatGPT Codex 新会话启用上游上下文管理 | `codexc setup → Codex 新会话默认值 → 实验性上下文管理` 通过版本化 `config/batchWrite` 写入 `features.context_management.experimental_mode`，默认关闭；Doctor 只读显示状态 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`doctor.mjs`](../scripts/doctor.mjs)、真实 App Server 配置合同 |
+| TUI 空闲总结开关 | 让管理员控制终端失去焦点后是否自动生成会话回顾 | 通过 `codexc config → Codex 新会话与用户偏好 → 空闲总结` 写入 `tui.auto_recap`，默认写入 `false`；手动 `/recap` 不受影响 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置写入测试 |
+| 实验性上下文管理开关 | 为符合条件的官方 ChatGPT Codex 新会话启用上游上下文管理 | `codexc config → Codex 新会话与用户偏好 → 实验性上下文管理` 通过版本化 `config/batchWrite` 写入 `features.context_management.experimental_mode`，默认关闭；Doctor 只读显示状态 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`doctor.mjs`](../scripts/doctor.mjs)、真实 App Server 配置合同 |
 | 官方内置 Pinned 分区保留与自定义 Thread 分区撤回 | 让用户继续通过 `/pin`、`/unpin` 固定会话，并明确不再提供本项目的自定义分区目录、管理员权限和外观扩展 | 0.153.4 撤回 0.147.0 曾采用的自定义 Thread 分区管理：删除 `thread_sections.administrators`、`ThreadSectionAccessPolicy` 与 `threadSection/*` 客户端方法，保留官方内置 Pinned 分区并由既有 `/pin`、`/unpin` 使用 `thread/section/move`；0.153.4 的 `/section` 迁移提示在 0.154.0 删除命令入口和专属错误码，旧配置中的 `[thread_sections]` 继续失败关闭 | [`thread-adapter.ts`](../src/codex-client/thread-adapter.ts)、[`conversation-service.ts`](../src/application/conversation-service.ts)、[`client.ts`](../src/codex-client/client.ts)、[`config.test.ts`](../tests/config.test.ts)、[`json-rpc-threads.test.ts`](../tests/json-rpc-threads.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 
 ### 明确不采用
@@ -160,7 +160,7 @@
 | Thread 恢复与 MCP 缓存修复 | 让恢复会话保留工作目录，并让 MCP 工具在缓存刷新或鉴权失败后继续可用 | Gateway 继续把 Thread 和 MCP 状态交给 App Server，不建立平行缓存或恢复实现 | [`codex-client/`](../src/codex-client/README.md)、真实 App Server 合同 |
 | MCP 包样式名称 | 允许 MCP Server 名称包含 `: @ / .` 等包管理器常用字符 | Gateway 只做非空字符串校验，未复制旧字符白名单；新名称由上游直接承载 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、MCP 真实合同 |
 | Thread 分页读取提示 | 让客户端在长会话中优先使用元数据读取和分页历史 | Gateway 已使用 `includeTurns: false`、`thread/turns/list` 的元数据/摘要路径，无需新增兼容层 | [`client.ts`](../src/codex-client/client.ts)、[`thread-history-port.ts`](../src/application/thread-history-port.ts) |
-| 计划清单工具开关 | 让管理员决定模型是否可以创建和更新执行计划 | `codexc setup → Codex 新会话默认值 → 计划清单工具` 写入官方 `tools.update_plan.enabled`，默认关闭；`codexc update` 会提示状态，`codexc doctor` 只读诊断；Gateway `display.plan_updates` 仍只控制渠道展示 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`source-update.mjs`](../scripts/source-update.mjs)、[`doctor.mjs`](../scripts/doctor.mjs) |
+| 计划清单工具开关 | 让管理员决定模型是否可以创建和更新执行计划 | `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 写入官方 `tools.update_plan.enabled`，默认关闭；`codexc update` 会提示状态，`codexc doctor` 只读诊断；Gateway `display.plan_updates` 仍只控制渠道展示 | [`codex-user-settings-management.mjs`](../scripts/codex-user-settings-management.mjs)、[`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`source-update.mjs`](../scripts/source-update.mjs)、[`doctor.mjs`](../scripts/doctor.mjs) |
 
 ### 待评估
 

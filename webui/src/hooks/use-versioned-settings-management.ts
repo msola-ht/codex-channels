@@ -46,7 +46,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
           before: currentValue(snapshot, setting),
           value: result.value,
           label,
-          target: result.activation.target,
+          activation: result.activation,
           ...(result.confirmationToken === undefined ? {} : { confirmationToken: result.confirmationToken }),
         },
       })

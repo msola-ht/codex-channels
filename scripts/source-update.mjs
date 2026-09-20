@@ -742,7 +742,7 @@ function writeCodexPlanSettingNotice(writeMessage, environment) {
     writeMessage,
     "note",
     `Codex 计划清单工具：${status.enabled ? "开启" : "关闭（默认）"}`
-      + "；可在 codexc setup → Codex 新会话默认值中修改",
+      + "；可在 codexc config → Codex 新会话与用户偏好中修改",
   );
 }
 

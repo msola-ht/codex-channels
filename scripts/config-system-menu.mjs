@@ -52,13 +52,13 @@ export async function runSystemSettings({
       {
         value: "sandbox",
         label: "Gateway 渠道 Sandbox",
-        hint: "外部渠道默认值；Codex 新会话默认值在 Setup 中管理",
+        hint: "外部渠道默认值；Codex 新会话与用户偏好在 Config 中管理",
       },
       { value: "default_workspace", label: "默认工作区", hint: "default_workspace" },
       {
         value: "default_model",
         label: "渠道新会话模型覆盖",
-        hint: "仅覆盖 Gateway 新 Thread；Codex 全局模型与思考等级请用 codexc setup",
+        hint: "仅覆盖 Gateway 新 Thread；Codex 全局模型与思考等级请用 codexc config",
       },
       {
         value: "official_tui_identity",

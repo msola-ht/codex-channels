@@ -7,7 +7,7 @@ import { parse } from "smol-toml";
 import { agentRolesConfigPath } from "../runtime/agent-roles.mjs";
 import {
   writeCliMessage,
-  writeCliRemediationRestartAll,
+  writeCliRemediationRestartAppServer,
 } from "../runtime/cli-presentation.mjs";
 import { loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import {
@@ -83,7 +83,7 @@ export function previewThirdPartyAgentChange(
       operation: "disable",
       current,
       willChange: current.configured,
-      activation: current.configured ? "restart-all" : "none",
+      activation: current.configured ? "restart-app-server" : "none",
     };
   }
   const providerId = requiredAgentString(input.provider, "provider", "Provider 不能为空");
@@ -129,7 +129,7 @@ export function previewThirdPartyAgentChange(
     willChange: !current.configured
       || current.provider !== provider.provider
       || current.model !== modelOption.model,
-    activation: "restart-all",
+    activation: "restart-app-server",
   };
 }
 
@@ -155,7 +155,7 @@ export async function applyThirdPartyAgentChange(
       const removed = preview.willChange ? await disableRole(environment) : false;
       return {
         action: removed ? "disabled" : "unchanged",
-        activation: removed ? "restart-all" : "none",
+        activation: removed ? "restart-app-server" : "none",
         previous: preview.current,
       };
     }
@@ -166,7 +166,7 @@ export async function applyThirdPartyAgentChange(
     );
     return {
       action: "configured",
-      activation: "restart-all",
+      activation: "restart-app-server",
       previous: preview.current,
       selection: {
         provider: selection.provider,
@@ -505,7 +505,7 @@ async function runAgentsCli() {
       "success",
       `已配置共享第三方子代理：${selection.provider} / ${selection.model}（agents.external）。`,
     );
-    writeCliRemediationRestartAll();
+    writeCliRemediationRestartAppServer();
     printStatus(process.env);
   } else if (command === "disable" && provider === undefined) {
     const result = await applyThirdPartyAgentChange(
@@ -514,7 +514,7 @@ async function runAgentsCli() {
     );
     if (result.action === "disabled") {
       writeCliMessage("success", "已移除共享第三方子代理。");
-      writeCliRemediationRestartAll();
+      writeCliRemediationRestartAppServer();
     } else {
       writeCliMessage("note", "当前没有本项目管理的第三方子代理，无需处理。");
     }

@@ -41,3 +41,6 @@ export function writeCliMessage(
 export function writeCliRemediationRestartAll(
   options?: CliMessageWriterOptions,
 ): void;
+export function writeCliRemediationRestartAppServer(
+  options?: CliMessageWriterOptions,
+): void;

@@ -88,7 +88,34 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-    it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
+  it("opens Codex user settings without requiring a Gateway configuration", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-config-codex-user-"));
+    roots.push(root);
+    const configPath = join(root, "missing", "config.toml");
+    const output = { write: vi.fn(), isTTY: true };
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn().mockResolvedValueOnce("codex_user"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const codexUserSettingsSetup = vi.fn(async () => ({ action: "configured" }));
+
+    await expect(runConfig({
+      environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
+      output,
+      prompts,
+      codexUserSettingsSetup,
+    })).resolves.toEqual({ action: "configured" });
+
+    expect(codexUserSettingsSetup).toHaveBeenCalledWith({
+      environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
+      output,
+      prompts,
+    });
+  });
+
+  it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);
     document.telegram = {
@@ -926,6 +953,7 @@ describe("Codex Connect config menu", () => {
     const options = select.mock.calls[0]?.[0]?.options ?? [];
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("summary");
+    expect(values).toContain("codex_user");
     expect(values).toContain("automation");
     expect(values).toContain("network");
     expect(values).toContain("advanced");

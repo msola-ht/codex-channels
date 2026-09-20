@@ -180,6 +180,9 @@ codexc agents status
 codexc agents disable
 ```
 
+配置或停用共享子代理后只需运行 `codexc service restart app-server`；Gateway 会自动重连，
+无需重启 Gateway。
+
 修改 DeepSeek 的默认模型、OpenCode Go 默认账户或重新运行 Provider Setup 也不会自动刷新该角色；
 需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
 `codexc agents configure ...`。

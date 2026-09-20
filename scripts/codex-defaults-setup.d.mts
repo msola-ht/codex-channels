@@ -1,12 +1,13 @@
 import type { CodexDefaultSettingsClient } from "./codex-user-config.mjs";
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
+import type { CodexUserSettingActivation } from "./codex-user-settings-management.mjs";
 
 export type CodexDefaultsClient = CodexDefaultSettingsClient;
 
 export interface CodexDefaultsSetupResult {
   model: string;
   effort: string;
-  activation: "restart-all";
+  activation: CodexUserSettingActivation;
   activationResult: ConfigActivationResult;
 }
 
