@@ -146,14 +146,30 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 
 ### 代理与权限
 
-无法直连 OpenAI 时，在 Gateway 配置中设置 HTTP(S) 代理：
+共享代理统一保存在当前 Codex Home 的 `.env`，默认 `~/.codex/.env`。执行
+`codexc config → 网络代理`，或在 WebUI 设置页修改；批量输入留空保持原值，取消不写入。
+例如：
 
-```toml
-[network]
-https_proxy = "http://127.0.0.1:7890"
+```dotenv
+HTTP_PROXY="http://127.0.0.1:7897"
+HTTPS_PROXY="http://127.0.0.1:7897"
+ALL_PROXY="socks5://127.0.0.1:7897"
+NO_PROXY="localhost,127.0.0.1"
 ```
 
-Windows 不自动读取 WinINET/WinHTTP，只使用 TOML 或标准代理环境变量。Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
+Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务结束时执行
+`codexc service restart all`，独立 Codex 进程也需重新启动。Gateway 只读取四个代理变量，
+不把文件中的其他变量注入自身环境。代理值使用字面值，美元符号使用单引号包围或反斜杠转义，
+不支持代理值中的变量插值。原有注释、其他设置和未修改字段会保留。
+`ALL_PROXY` 可保存 SOCKS5 地址，但必须同时在此文件配置 HTTP(S) 协议的 `HTTP_PROXY`，
+供 Gateway 的 HTTP(S) 客户端使用；缺少时读取或保存都会明确报错。
+
+`.env` 字段优先于继承的标准代理环境变量；同名大小写同时存在时大写优先。已有任一代理地址时，
+不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
+`codexc update` 会备份并迁移旧 TOML `[network]` 到 `.env`，成功后删除 `[network]`；
+若待迁移值与 `.env` 已配置的值冲突则明确报错，不覆盖现有值。正常启动不再接受旧 `[network]`。
+
+Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
 
 ## 4. Workspace、Provider 与终端
 

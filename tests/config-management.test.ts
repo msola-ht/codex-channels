@@ -1,7 +1,9 @@
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +16,7 @@ import {
   normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
+import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { configActivationResult } from "../scripts/config-activation-result.mjs";
 import {
   GatewayConfigConflictError,
@@ -29,6 +32,38 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
+  it("rejects a stale revision after only the proxy file changes", () => {
+    const fixture = createFixture();
+    const before = loadGatewaySettings(fixture.environment);
+    writeCodexProxySettings({ https_proxy: "http://localhost:7897" }, fixture.environment);
+    expect(loadGatewaySettings(fixture.environment).revision).not.toBe(before.revision);
+    expect(() => updateGatewaySetting({
+      kind: "network.proxy", field: "https_proxy", action: "set", value: "http://localhost:7898",
+    }, { environment: fixture.environment, expectedRevision: before.revision }))
+      .toThrow(expect.objectContaining({ code: "stale-revision" }));
+    expect(readCodexProxySettings(fixture.environment).https_proxy).toBe("http://localhost:7897");
+  });
+
+  it("requires an HTTP route when saving or retaining SOCKS ALL_PROXY", () => {
+    const fixture = createFixture();
+    expect(() => writeCodexProxySettings({ all_proxy: "socks5://localhost:7897" }, fixture.environment))
+      .toThrow("必须同时配置 HTTP_PROXY");
+    writeCodexProxySettings({ http_proxy: "http://localhost:7897", all_proxy: "socks5://localhost:7897" }, fixture.environment);
+    expect(() => writeCodexProxySettings({ http_proxy: null }, fixture.environment))
+      .toThrow("必须同时配置 HTTP_PROXY");
+    expect(readCodexProxySettings(fixture.environment).http_proxy).toBe("http://localhost:7897");
+  });
+
+  it("rejects invalid quoted suffixes while accepting trailing comments", () => {
+    const fixture = createFixture();
+    mkdirSync(fixture.environment.CODEX_HOME, { recursive: true });
+    const path = join(fixture.environment.CODEX_HOME, ".env");
+    writeFileSync(path, 'HTTPS_PROXY="http://localhost:7897"garbage\n');
+    expect(() => readCodexProxySettings(fixture.environment)).toThrow("引号后存在无效内容");
+    writeFileSync(path, 'HTTPS_PROXY="http://localhost:7897" # comment\n');
+    expect(readCodexProxySettings(fixture.environment).https_proxy).toBe("http://localhost:7897");
+  });
+
   it("normalizes activation scopes for machine consumers", () => {
     expect(normalizeGatewayActivation("none")).toBe("none");
     expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
@@ -109,7 +144,7 @@ describe("Gateway Config management", () => {
       expectedRevision: settings.revision,
     })).toMatchObject({
       value: { field: "https_proxy", configured: true },
-      activation: "reinstall-services",
+      activation: "restart-all",
     });
 
     settings = loadGatewaySettings(fixture.environment);
@@ -269,14 +304,29 @@ describe("Gateway Config management", () => {
 
     expect(result).toMatchObject({
       value: { fields: ["http_proxy", "https_proxy", "all_proxy"] },
-      activation: "reinstall-services",
+      activation: "restart-all",
     });
-    expect(readGatewayConfig(fixture.configPath).network).toEqual({
+    expect(readCodexProxySettings(fixture.environment)).toEqual({
       http_proxy: "http://127.0.0.1:7890",
       https_proxy: "http://127.0.0.1:7891",
       all_proxy: "http://127.0.0.1:7892",
-      no_proxy: "localhost,127.0.0.1",
     });
+  });
+
+  it("rejects an invalid protocol in a shared proxy batch without partially writing valid fields", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+    const before = readFileSync(fixture.configPath, "utf8");
+    expect(() => updateGatewaySetting({
+      kind: "network.proxy-batch",
+      values: {
+        http_proxy: "http://localhost:7897",
+        https_proxy: "http://localhost:7897",
+        all_proxy: "ftp://localhost:7897",
+      },
+    }, { environment: fixture.environment, expectedRevision: settings.revision }))
+      .toThrow("ALL_PROXY 不支持此代理协议或缺少主机");
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
   });
 
   it("returns stable field and code information for invalid input", () => {
@@ -424,6 +474,7 @@ function createFixture() {
   roots.push(root);
   const environment = {
     ...process.env,
+    CODEX_HOME: join(root, ".codex"),
     CODEX_CONNECT_HOME: join(root, ".codex-connect"),
     CODEX_CONNECT_CONFIG_FILE: "",
   };

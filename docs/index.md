@@ -148,6 +148,7 @@ Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/co
 `codexc setup` 的脱敏总览复用既有 `config/read` 显示全局默认模型与思考等级，入口位于
 [`setup-summary.mjs`](../scripts/setup-summary.mjs)，由 [`setup.test.ts`](../tests/setup.test.ts) 验证；
 用户设置入口位于 `codexc config → Codex 新会话与用户偏好`，在显式确认后复用下表已有的版本化配置事务，不新增协议方法，也不修改登录状态。
+网络代理菜单通过 [`codex-proxy-env.mjs`](../runtime/codex-proxy-env.mjs) 写入 Codex Home 的 `.env`，依据固定版本 [`arg0::load_dotenv`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/arg0/src/lib.rs) 的加载语义，由 [`config-menu.test.ts`](../tests/config-menu.test.ts) 验证，不新增 RPC。
 渠道选择 OpenAI 模型时，`model-selection-service.ts` 复用 `writeDefaultFastMode(false)` / `config/batchWrite`
 把用户级 `service_tier` 保存为 `default`，同时保留下一 Turn 的显式 Standard 覆盖；保存失败不切换会话。
 第三方模型选择不修改 OpenAI 默认值；`model-selection-service.test.ts` 和

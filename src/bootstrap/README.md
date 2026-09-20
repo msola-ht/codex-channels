@@ -123,8 +123,8 @@
   校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
   等待修复，重启失败按冷却时间重试；等待、重启中、生效和失败状态通过共享配置变更通知投递给
   所有渠道，停止 Gateway 时一并关闭。
-- `network-proxy-watcher.ts`：按字段保留 TOML 与标准环境代理优先级，监听系统发现参与解析后的
-  有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
+- `network-proxy-watcher.ts`：按字段保留 Codex `.env` 与标准环境代理优先级；已有任一代理地址时跳过系统查询，
+  否则监听系统发现参与解析后的有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
   后台服务与前台入口，不自动重启共享进程。系统查询异步执行且不重叠，失败保留上次结果并告警；
   停止 Gateway 时取消后续检查及在途查询，并等待查询结束。
 - `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启

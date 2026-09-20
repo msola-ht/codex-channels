@@ -20,13 +20,7 @@ enabled = false
 # account_id = "不透明账号@im.bot"
 # allowed_user_ids = ["不透明用户@im.wechat"]
 
-[network]
-# Telegram、飞书和微信共用；留空时依次使用标准代理环境变量和当前系统代理。
-# 填写的字段优先，no_proxy 按每个请求的目标域名决定直连。
-http_proxy = ""
-https_proxy = ""
-all_proxy = ""
-no_proxy = "localhost,127.0.0.1"
+# 共享网络代理通过 codexc config 写入 ~/.codex/.env，不在 Gateway TOML 中保存。
 
 [codex]
 binary = "codex"

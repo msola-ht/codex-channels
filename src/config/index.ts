@@ -1,3 +1,4 @@
+import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import {
   existsSync,
   lstatSync,
@@ -238,7 +239,7 @@ function loadValidatedConfigDocument(
     throw new ConfigurationError(`default_workspace 不存在：${raw.default_workspace}`);
   }
   const proxyEnvironment = resolveProxyEnvironment(
-    raw.network,
+    readCodexProxySettings(environment),
     environment,
     detectSystemProxy ? {} : { readSystemProxy: () => ({}) },
   );

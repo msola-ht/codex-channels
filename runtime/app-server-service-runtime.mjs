@@ -1,3 +1,4 @@
+import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
@@ -123,7 +124,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const upstreamAgents = new Set();
   const upstreamAgentsByProxyUrl = new Map();
   const proxySelector = createRefreshableHttpProxySelector(
-    runtime.document.network ?? {},
+    readCodexProxySettings(runtime.environment),
     process.env,
   );
   let supervisorOwner;

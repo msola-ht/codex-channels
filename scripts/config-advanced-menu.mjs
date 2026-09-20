@@ -39,10 +39,10 @@ export async function runNetworkSettings({
 }) {
   const settings = loadGatewaySettings(environment);
   const field = await prompts.select({
-    message: "选择网络代理设置",
+    message: "选择网络代理设置（统一写入 Codex .env）",
     showInstructions: false,
     options: [
-      { value: "batch", label: "一次设置 HTTP / HTTPS / 通用代理", hint: "一次校验并写入三个代理 URL" },
+      { value: "batch", label: "一次设置 HTTP / HTTPS / 通用代理", hint: "写入 ~/.codex/.env，Codex 与 Gateway 共用" },
       ...proxyFields.map(([value, label]) => ({
         value,
         label,
@@ -75,7 +75,7 @@ export async function runNetworkSettings({
           validate: (candidate) => validateNetworkProxyValue(field, candidate),
         })
       : await prompts.text({
-          message: "代理 URL（http:// 或 https://；留空取消）",
+          message: `代理 URL（${field === "all_proxy" ? "HTTP(S) / SOCKS5" : "HTTP(S)"}；留空取消）`,
           validate: (candidate) => validateNetworkProxyValue(field, candidate),
         });
     if (prompts.isCancel(value) || stringValue(value) === "") return { action: "back" };

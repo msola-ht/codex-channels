@@ -1,3 +1,4 @@
+import { writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -264,29 +265,21 @@ describe("Telegram setup", () => {
   });
 
   it("uses the same proxy precedence as the Gateway", () => {
-    expect(resolveTelegramProxy({
-      telegram: { proxy_url: "" },
-      network: {
-        https_proxy: "https://secure-proxy.example",
-        http_proxy: "http://fallback.example",
-      },
-    })).toBe("https://secure-proxy.example/");
-    expect(resolveTelegramProxy({
-      telegram: { proxy_url: "http://telegram-proxy.example" },
-      network: { https_proxy: "https://secure-proxy.example" },
-    })).toBe("http://telegram-proxy.example/");
-    expect(() => resolveTelegramProxy({
-      telegram: { proxy_url: "socks5://telegram-proxy.example" },
-    })).toThrow("只支持 http:// 或 https://");
-    expect(() => resolveTelegramProxy({
-      network: { https_proxy: "not-a-url" },
-    })).toThrow("不是有效 URL");
+    const root = mkdtempSync(join(tmpdir(), "codexc-telegram-proxy-"));
+    temporaryDirectories.push(root);
+    const environment = { CODEX_HOME: root };
+    writeCodexProxySettings({ https_proxy: "https://secure-proxy.example", http_proxy: "http://fallback.example" }, environment);
+    expect(resolveTelegramProxy({ telegram: { proxy_url: "" } }, environment)).toBe("https://secure-proxy.example/");
+    expect(resolveTelegramProxy({ telegram: { proxy_url: "http://telegram-proxy.example" } }, environment)).toBe("http://telegram-proxy.example/");
+    expect(() => resolveTelegramProxy({ telegram: { proxy_url: "socks5://telegram-proxy.example" } }, environment)).toThrow("只支持 http:// 或 https://");
   });
 
   it("uses inherited and system proxies through the shared resolver", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-telegram-proxy-"));
+    temporaryDirectories.push(root);
     expect(resolveTelegramProxy(
       { telegram: {}, network: {} },
-      { HTTPS_PROXY: "http://environment-proxy.example:8443" },
+      { CODEX_HOME: root, HTTPS_PROXY: "http://environment-proxy.example:8443" },
       { platform: "darwin", readSystemProxy: () => ({}) },
     )).toBe("http://environment-proxy.example:8443/");
 
@@ -294,8 +287,8 @@ describe("Telegram setup", () => {
       https_proxy: "http://127.0.0.1:7897",
     }));
     expect(resolveTelegramProxy(
-      { telegram: {}, network: {} },
-      {},
+      { telegram: {} },
+      { CODEX_HOME: root },
       { platform: "darwin", readSystemProxy },
     )).toBe("http://127.0.0.1:7897/");
     expect(readSystemProxy).toHaveBeenCalledWith("darwin");

@@ -175,7 +175,6 @@ try {
       allowed_user_ids: [123],
       message_format: "html",
     },
-    network: {},
     codex: {
       binary: "codex",
       socket_path: "runtime/codex-app-server.sock",

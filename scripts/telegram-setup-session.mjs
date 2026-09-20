@@ -1,3 +1,4 @@
+import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { Bot } from "grammy";
@@ -477,7 +478,7 @@ export function resolveTelegramProxy(
   options = {},
 ) {
   const telegram = table(document.telegram);
-  const network = table(document.network);
+  const network = readCodexProxySettings(environment);
   return resolveHttpProxyUrl(
     stringValue(telegram.proxy_url),
     resolveProxyEnvironment(network, environment, options),

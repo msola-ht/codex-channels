@@ -212,12 +212,6 @@ const gatewayDocumentSchema = z.strictObject({
   telegram: telegramSchema.optional(),
   feishu: feishuSchema.optional(),
   weixin: weixinSetupSchema.optional(),
-  network: z.strictObject({
-    http_proxy: z.string().optional(),
-    https_proxy: z.string().optional(),
-    all_proxy: z.string().optional(),
-    no_proxy: z.string().optional(),
-  }).optional(),
   codex: codexSchema,
   gateway: gatewaySchema.optional(),
   approval: z.strictObject({

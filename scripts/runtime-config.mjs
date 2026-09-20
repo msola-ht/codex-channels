@@ -70,12 +70,6 @@ export function initializeUserData({ environment = process.env, cwd = process.cw
       allowed_user_ids: [],
       message_format: "html",
     },
-    network: {
-      http_proxy: "",
-      https_proxy: "",
-      all_proxy: "",
-      no_proxy: "localhost,127.0.0.1",
-    },
     codex: {
       binary: "codex",
       socket_path: "runtime/codex-app-server.sock",

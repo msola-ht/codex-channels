@@ -656,7 +656,6 @@ function createFixture() {
     codex: { binary: "codex", socket_path: "runtime/app-server.sock" },
     debug: { model_traffic_dump: true, model_traffic_input_items: 3 },
     default_workspace: "main",
-    network: {},
     telegram: { allowed_user_ids: [1], bot_token: "token", message_format: "html" },
     version: 1,
     workspaces: [{ cwd: join(root, "workspace"), id: "main", name: "Main" }],

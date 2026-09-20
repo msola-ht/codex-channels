@@ -77,11 +77,10 @@ describe("asynchronous system proxy discovery", () => {
     await expect(selector.select("https://localhost")).resolves.toBeUndefined();
   });
 
-  it("does not query the system when explicit sources resolve every field", async () => {
+  it("does not query the system when only an explicit HTTPS proxy is configured", async () => {
     const readSystemProxy = vi.fn();
     const selector = createRefreshableHttpProxySelector({
-      http_proxy: "http://127.0.0.1:7890", https_proxy: "http://127.0.0.1:7890",
-      all_proxy: "http://127.0.0.1:7890", no_proxy: "localhost",
+      https_proxy: "http://127.0.0.1:7890",
     }, {}, { readSystemProxy });
     await expect(selector.select("https://example.test")).resolves.toBe("http://127.0.0.1:7890/");
     expect(readSystemProxy).not.toHaveBeenCalled();

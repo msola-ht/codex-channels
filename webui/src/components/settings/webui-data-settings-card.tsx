@@ -102,7 +102,7 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
 
       <Separator />
       <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">显式网络代理</h3><p className="text-xs text-muted-foreground">现有代理值不会回显；修改后需要重新安装服务定义。</p></div>
+        <div><h3 className="font-medium">网络代理（Codex .env）</h3><p className="text-xs text-muted-foreground">Codex 与 Gateway 共用 ~/.codex/.env；现有值不会回显，修改后重启全部服务生效。</p></div>
         <FieldGroup className="gap-3">
           {proxyFields.map(([field, label, placeholder]) => {
             const configured = settings.network.configuredFields.includes(field)

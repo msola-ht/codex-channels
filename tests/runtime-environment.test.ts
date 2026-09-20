@@ -9,8 +9,9 @@ vi.mock("../scripts/runtime-config.mjs", () => ({
   userDataDir: () => "/tmp/proxy-test",
 }));
 vi.mock("../runtime/gateway-config.mjs", () => ({
-  readGatewayConfig: () => ({ network: { no_proxy: "localhost" }, codex: { binary: "codex" } }),
+  readGatewayConfig: () => ({ codex: { binary: "codex" } }),
 }));
+vi.mock("../runtime/codex-proxy-env.mjs", () => ({ readCodexProxySettings: () => ({ no_proxy: "localhost" }) }));
 vi.mock("../runtime/opencode-go-accounts.mjs", () => ({ migrateLegacyOpencodeGoAccount: () => undefined }));
 vi.mock("../runtime/network-proxy.mjs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../runtime/network-proxy.mjs")>();

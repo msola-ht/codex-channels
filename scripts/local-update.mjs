@@ -35,6 +35,7 @@ import {
   writePrivateFileAtomicSync,
 } from "../runtime/private-file.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
+import { codexProxyFields, readCodexProxySnapshot, renderCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { updateCodexUserConfig } from "./codex-user-config.mjs";
 import {
   assertManagedModelProviderCapabilities,
@@ -158,9 +159,24 @@ export function updateGatewayConfiguration(environment = process.env, options = 
   }
   copyFileSync(configPath, backupPath);
   securePrivateFileSync(backupPath);
+  let proxyMigration;
+  let proxyWritten = false;
+  let proxyBackupPath;
   try {
     const document = readGatewayConfig(configPath);
+    proxyMigration = planProxyMigration(document, environment);
     const removedPaths = removeObsoleteGatewayConfig(document);
+    validateGatewayConfigDocument(document);
+    if (proxyMigration?.changed) {
+      if (proxyMigration.content !== null) {
+        const candidate = `${proxyMigration.path}.pre-update.${backupTimestamp(now())}.bak`;
+        if (existsSync(candidate)) throw new Error("Codex .env 迁移备份已存在");
+        writePrivateFileAtomicSync(candidate, proxyMigration.content);
+        proxyBackupPath = candidate;
+      }
+      writePrivateFileAtomicSync(proxyMigration.path, proxyMigration.nextContent);
+      proxyWritten = true;
+    }
     if (removedPaths.length > 0) writeGatewayConfig(configPath, document);
     (options.loadConfig ?? (() => loadRuntimeConfig(environment)))();
     const changed = readFileSync(configPath, "utf8") !== before;
@@ -179,6 +195,11 @@ export function updateGatewayConfiguration(environment = process.env, options = 
       removedPaths,
     };
   } catch (error) {
+    if (proxyWritten) {
+      if (proxyMigration.content === null) unlinkSync(proxyMigration.path);
+      else writePrivateFileAtomicSync(proxyMigration.path, proxyMigration.content);
+    }
+    if (proxyBackupPath && existsSync(proxyBackupPath)) unlinkSync(proxyBackupPath);
     if (readFileSync(configPath, "utf8") !== before) {
       copyFileSync(backupPath, configPath);
       securePrivateFileSync(configPath);
@@ -192,6 +213,7 @@ export function inspectGatewayConfiguration(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const content = readFileSync(configPath, "utf8");
   const source = parseGatewayConfig(content, configPath);
+  planProxyMigration(source, environment);
   const removedPaths = removeObsoleteGatewayConfig(source);
   const defaults = validateGatewayConfigDocument(source);
   loadConfigDocument(stringify(source), dirname(configPath), {
@@ -488,6 +510,10 @@ export async function refreshManagedProviderCatalogsForUpdate(
 
 function removeObsoleteGatewayConfig(document) {
   const removedPaths = [];
+  if (Object.hasOwn(document, "network")) {
+    delete document.network;
+    removedPaths.push("network");
+  }
   // 旧 Schema 会由运行中的 Gateway 补入空数组；非空注册表仍交给严格校验拒绝。
   if (Array.isArray(document.api_providers) && document.api_providers.length === 0) {
     delete document.api_providers;
@@ -516,6 +542,28 @@ function removeObsoleteGatewayConfig(document) {
     }
   }
   return removedPaths;
+}
+
+function planProxyMigration(document, environment) {
+  if (!Object.hasOwn(document, "network")) return undefined;
+  const legacy = document.network;
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)
+    || Object.keys(legacy).some((field) => !codexProxyFields.includes(field))) {
+    throw new Error("旧 network 代理配置无效，无法迁移");
+  }
+  const snapshot = readCodexProxySnapshot(environment);
+  const changes = {};
+  for (const [field, value] of Object.entries(legacy)) {
+    if (typeof value !== "string") throw new Error("旧 network 代理值必须是文本");
+    if (value.trim() === "") continue;
+    const current = snapshot.settings[field];
+    if (current !== undefined && current !== value.trim()) {
+      throw new Error(`旧 network.${field} 与 Codex .env 冲突，请统一后重试；未覆盖任何代理值`);
+    }
+    if (current === undefined) changes[field] = value.trim();
+  }
+  const nextContent = renderCodexProxySettings(snapshot, changes);
+  return { ...snapshot, nextContent, changed: nextContent !== (snapshot.content ?? "") };
 }
 
 export function inspectCoreServiceInstallation(

@@ -52,6 +52,59 @@ afterEach(() => {
 });
 
 describe("local update", () => {
+  it("migrates legacy network settings to Codex dotenv and removes the TOML section", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { http_proxy: "http://127.0.0.1:7897", https_proxy: "http://127.0.0.1:7897", no_proxy: "localhost" };
+    writeGatewayConfig(configPath, document);
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    mkdirSync(environment.CODEX_HOME!, { recursive: true });
+    writeFileSync(dotenvPath, '# preserved\nOTHER="value"\n', { mode: 0o600 });
+    expect(inspectGatewayConfiguration(environment).removedPaths).toContain("network");
+    expect(readFileSync(dotenvPath, "utf8")).toBe('# preserved\nOTHER="value"\n');
+    const result = updateGatewayConfiguration(environment);
+    expect(result.removedPaths).toContain("network");
+    expect(readGatewayConfig(configPath)).not.toHaveProperty("network");
+    expect(readFileSync(dotenvPath, "utf8")).toBe('# preserved\nOTHER="value"\nHTTP_PROXY="http://127.0.0.1:7897"\nHTTPS_PROXY="http://127.0.0.1:7897"\nNO_PROXY="localhost"\n');
+    expect(result.backupPath).not.toBeNull();
+    expect(updateGatewayConfiguration(environment).changed).toBe(false);
+  });
+
+  it("rejects conflicting legacy proxies without changing either file", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { https_proxy: "http://old:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    mkdirSync(environment.CODEX_HOME!, { recursive: true });
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    const dotenv = 'HTTPS_PROXY="http://current:7897"\n';
+    writeFileSync(dotenvPath, dotenv, { mode: 0o600 });
+    expect(() => inspectGatewayConfiguration(environment)).toThrow("冲突");
+    expect(() => updateGatewayConfiguration(environment)).toThrow("冲突");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readFileSync(dotenvPath, "utf8")).toBe(dotenv);
+  });
+
+  it.each([false, true])("restores both proxy files on failed migration with existing dotenv=%s", (existing) => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { https_proxy: "http://localhost:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    if (existing) {
+      mkdirSync(environment.CODEX_HOME!, { recursive: true });
+      writeFileSync(dotenvPath, "OTHER=value\n", { mode: 0o600 });
+    }
+    expect(() => updateGatewayConfiguration(environment, {
+      loadConfig: () => { throw new Error("validation failed"); },
+    })).toThrow("validation failed");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    if (existing) expect(readFileSync(dotenvPath, "utf8")).toBe("OTHER=value\n");
+    else expect(existsSync(dotenvPath)).toBe(false);
+  });
+
   it.each([undefined, "auto", "concise", "detailed", "none"])(
     "sets reasoning summary %s to none once and preserves subsequent choices",
     async (summary) => {
@@ -1127,6 +1180,7 @@ function fixture() {
   const environment = {
     ...process.env,
     CODEX_CONNECT_HOME: home,
+    CODEX_HOME: join(home, ".codex"),
     CODEX_CONNECT_CONFIG_FILE: "",
   };
   const { configPath, dataDir } = initializeUserData({ environment, cwd: home });

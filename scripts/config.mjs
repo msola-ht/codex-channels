@@ -107,7 +107,7 @@ export async function runConfig({
     };
     switch (section) {
       case "summary":
-        writeGatewayConfigSummary(output, document, configPath);
+        writeGatewayConfigSummary(output, document, configPath, environment);
         continue;
       case "codex_user": {
         const result = await codexUserSettingsSetup({ environment, output, prompts });
