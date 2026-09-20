@@ -19,8 +19,8 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   从本轮开始到完成的总耗时。主 Turn 与子代理完成卡片不显示“上游轮次首 Token”；指标采集、存储及 WebUI 展示保留。
   `/metrics` 最近运行聚合保留上游轮次首 Token，并标明不是单请求首内容；单请求首内容延迟仅在请求明细、导出和转储中展示，不合成为轮次首内容。
   上游轮次首 Token 来自 Responses WebSocket 的上游 timing 事件，只有请求带
-  `x-responsesapi-include-timing-metrics` 时才下发；该头由 App Server 按自身 `runtime_metrics`
-  特性生成并原样透传，代理不注入，因此 HTTP/SSE 请求与上游不下发该事件的请求始终显示“未提供”。
+  `x-responsesapi-include-timing-metrics` 时才下发；该内部头不由网关请求或注入，只按客户端原样透传，
+  HTTP/SSE 请求也从不携带，因此这些上游项在默认配置下始终显示“未提供”。
   完成卡片的运行、任务与会话摘要统一标为“Token/s”，`/metrics` 保留“平均 Token/s”：范围内有效请求输出速率的算术平均。单请求为 `outputTokens × 1000 / totalDurationMs`，只纳入输出 Token 与总耗时都大于零的记录；不扣首字等待，不从输出中减去推理 Token，不额外限制请求状态，压缩请求沿用原统计范围。平均值从原始请求直接计算，不对各轮或子代理均值再次平均；不是总 Token 除以 Turn/会话墙钟耗时，也不是纯生成速度。历史缺少耗时或无有效样本时显示“未提供”，不按旧时间戳补算。正式和调试模式均显示；该派生值不新增存储字段。
   请求明细和转储的“首字耗时”从上游转发开始计到首个符合条件的事件，
   HTTP/SSE 采用 semantic 事件口径，WebSocket 采用 delta 与指定 done 事件口径，不要求文本非空；详见[WebUI 请求明细](webui.md)。
