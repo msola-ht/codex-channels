@@ -54,6 +54,7 @@ export type LocalUpdateStage =
   | "obsolete-services"
   | "provider-files"
   | "provider-catalogs"
+  | "codex-settings"
   | "config"
   | "databases"
   | "validate-offline"
@@ -218,6 +219,7 @@ export function updateLocalInstallation(
     stopServices?: () => void;
     updateProviderFiles?: () => unknown;
     updateProviderCatalogs?: () => unknown | Promise<unknown>;
+    updateCodexSettings?: () => unknown | Promise<unknown>;
     updateConfig?: () => unknown;
     updateDatabases?: () => unknown;
     validateOffline?: () => unknown;
@@ -232,6 +234,11 @@ export function updateLocalInstallation(
 }>;
 
 export function getLocalUpdateFailure(error: unknown): LocalUpdateFailure | undefined;
+
+export function updateReasoningSummaryOnce(
+  environment?: LocalUpdateEnvironment,
+  options?: Parameters<typeof import("./codex-user-config.mjs").updateCodexUserConfig>[2],
+): Promise<{ changed: boolean }>;
 
 export function inspectLocalUpdatePlan(
   environment?: LocalUpdateEnvironment,

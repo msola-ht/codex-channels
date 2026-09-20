@@ -38,6 +38,10 @@
 `thread/attachment/add|list|remove` 和 `thread/attachment/updated`，均只保留在生成层；
 `FeedbackUploadResponse.promptHash` 也不进入业务边界。受控导出、当前调用方法和审批种类没有增加。
 具体收益、适配与不采用原因见[升级决策记录](codex-cli-upgrade-decisions.md#01551)。
+[`local-update.mjs`](../scripts/local-update.mjs) 的首次摘要设置复用既有 `config/read` 与带修订的
+`config/batchWrite`：用户主配置统一设为 `none`，完成标记保证后续更新保留用户选择；由
+[`local-update.test.ts`](../tests/local-update.test.ts) 和
+[`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 验证。
 
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。

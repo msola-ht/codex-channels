@@ -108,7 +108,11 @@ auto_recap = false
 在 `codexc setup → Codex 新会话默认值 → 其他用户偏好` 中选择推理摘要。开发基线 0.155.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
-检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`；升级不会改写已有值。
+检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
+
+首次运行包含 0.155.1 升级处理的 `codexc update` 时，会将 Codex 用户主配置的推理摘要统一设为
+`none`，包括已有的 `auto/concise/detailed`；完成后可以在 Setup 重新选择，后续更新不会再次覆盖。
+独立 Profile 的显式覆盖保持不变。更新按当前 Codex 配置目录记录一次完成状态，写入失败会明确报错。
 
 ### 渠道会话空闲自动解除
 

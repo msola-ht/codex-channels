@@ -14,6 +14,7 @@ import { parse } from "smol-toml";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { updateReasoningSummaryOnce } from "../scripts/local-update.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -1005,16 +1006,22 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
-  it("round-trips disabled and explicit reasoning summaries across clients", async () => {
+  it("resets reasoning summary once and preserves later choices across clients", async () => {
     const before = await ownerClient.readUserConfigSnapshot();
+    const environment = { ...process.env, CODEX_HOME: codexHome };
     try {
-      for (const summary of ["none", "auto"] as const) {
+      for (const summary of ["detailed", "auto"] as const) {
         const current = await ownerClient.readUserConfigSnapshot();
         await ownerClient.writeUserConfigEdits([
           { keyPath: "model_reasoning_summary", value: summary },
         ], { expectedVersion: current.version });
         const peer = await peerClient.readUserConfigSnapshot();
         expect(peer.config.model_reasoning_summary).toBe(summary);
+        expect(await updateReasoningSummaryOnce(environment)).toEqual({
+          changed: summary === "detailed",
+        });
+        const updated = await peerClient.readUserConfigSnapshot();
+        expect(updated.config.model_reasoning_summary).toBe(summary === "detailed" ? "none" : "auto");
       }
     } finally {
       await ownerClient.writeUserConfigEdits([

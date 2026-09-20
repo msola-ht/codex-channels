@@ -28,7 +28,7 @@
 | 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
 | --- | --- | --- | --- |
 | 0.155.1 精确基线 | 让 Gateway 与 App Server 使用同一正式 CLI 协议 | 重新生成协议，同步版本与 CI；不保留旧 CLI 兼容分支 | `codex-protocol`、`protocol:check`、真实 App Server 合同 |
-| 未配置推理摘要时预选关闭 | 避免用户保存其他偏好时无意开启 Provider 不支持的摘要 | Setup 未配置值改为 `none`；已有 `auto/concise/detailed/none` 原样保留，不修改用户现有配置，也不在渠道 Turn 中注入额外覆盖 | [`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置回归测试及跨 Client 配置真实合同 |
+| 推理摘要默认关闭与首次更新重置 | 避免 Provider 不支持摘要导致请求失败 | Setup 未配置时预选 `none`；首次执行本版 `update` 将用户主配置（含已有显式值）统一设为 `none` 并记录完成，之后保留用户重新选择的值；独立 Profile 不变，不在渠道 Turn 中注入覆盖 | [`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、[`local-update.mjs`](../scripts/local-update.mjs)、本地更新回归测试及跨 Client 配置真实合同 |
 | 流式压缩与旧端点移除 | 让压缩沿当前 CLI 的 Responses 通路执行并计入压缩统计 | 上游已删除旧 CompactClient；代理删除 `/responses/compact` 路由及其路径推断，旧请求明确返回 404，继续按 `request_kind=compaction` 识别 `/responses` 上的压缩 | [`request-routing.ts`](../src/provider-proxy/request-routing.ts)、HTTP 路由、HTTP/WebSocket 指标测试 |
 | 压缩失败保留输入 | 长会话在 Turn 前压缩失败时，用户刚发送的输入仍可留在官方历史里 | 随上游获得；保存不代表执行成功，Gateway 不保存消息副本或自动重发 | `codex-client` / `conversation-core` 现有生命周期；上游 `core/tests/suite/compact_remote.rs` |
 | MCP 认证状态、交互取消与重连修复 | 让用户更准确识别需要重新登录的 Server，并结束已取消的交互 | 随上游获得，继续通过既有 `authStatus/runtimeStatus`、`/mcp health` 和审批失效路径呈现，不复制 OAuth 刷新或取消状态 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、MCP 与审批测试、真实工具合同 |
