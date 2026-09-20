@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -35,6 +36,7 @@ import {
   updateDatabases,
   updateGatewayConfiguration,
   updateLocalInstallation,
+  updateReasoningSummaryOnce,
   inspectSessionDisplayCache,
   updateSessionDisplayCache,
   waitForCoreServiceTarget,
@@ -50,6 +52,89 @@ afterEach(() => {
 });
 
 describe("local update", () => {
+  it.each([undefined, "auto", "concise", "detailed", "none"])(
+    "sets reasoning summary %s to none once and preserves subsequent choices",
+    async (summary) => {
+      const codexHome = mkdtempSync(join(tmpdir(), "codexc-summary-update-"));
+      temporaryDirectories.push(codexHome);
+      const config: Record<string, unknown> = summary === undefined
+        ? {} : { model_reasoning_summary: summary };
+      const client = {
+        connect: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        readUserConfigSnapshot: vi.fn(async () => ({
+          config: summary === undefined ? {} : { model_reasoning_summary: summary },
+          version: "revision-1",
+        })),
+        writeUserConfigEdits: vi.fn(async () => { config.model_reasoning_summary = "none"; }),
+      };
+      const options = { createClient: async () => client };
+      const environment = { CODEX_HOME: codexHome };
+      expect(await updateReasoningSummaryOnce(environment, options))
+        .toEqual({ changed: summary !== "none" });
+      if (summary !== "none") {
+        expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
+          { keyPath: "model_reasoning_summary", value: "none" },
+        ], { expectedVersion: "revision-1" });
+      } else {
+        expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+      }
+      expect(readFileSync(join(codexHome, ".codexc-reasoning-summary-0.155.1"), "utf8"))
+        .toBe("completed\n");
+      config.model_reasoning_summary = "detailed";
+      expect(await updateReasoningSummaryOnce(environment, options)).toEqual({ changed: false });
+      expect(config.model_reasoning_summary).toBe("detailed");
+      expect(client.connect).toHaveBeenCalledOnce();
+      expect(client.close).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not mark failed reasoning summary writes complete", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-summary-failure-"));
+    temporaryDirectories.push(codexHome);
+    const client = {
+      connect: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      readUserConfigSnapshot: vi.fn(async () => ({ config: {}, version: "revision-1" })),
+      writeUserConfigEdits: vi.fn(async () => { throw new Error("configVersionConflict"); }),
+    };
+    await expect(updateReasoningSummaryOnce({ CODEX_HOME: codexHome }, {
+      createClient: async () => client,
+    })).rejects.toThrow("configVersionConflict");
+    expect(existsSync(join(codexHome, ".codexc-reasoning-summary-0.155.1"))).toBe(false);
+    expect(client.writeUserConfigEdits).toHaveBeenCalledOnce();
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it("reports the settings stage failure and restores stopped services", async () => {
+    const calls: string[] = [];
+    let failure: unknown;
+    try {
+      await updateLocalInstallation(terminalEnvironment(), {
+        inspectConfig: () => ({ configPath: "/config" }),
+        inspectDatabases: () => ({ state: {}, metrics: {} }),
+        inspectServices: () => ({ installed: true }),
+        stopServices: () => { calls.push("stop"); },
+        updateProviderFiles: () => undefined,
+        updateProviderCatalogs: () => undefined,
+        updateCodexSettings: async () => {
+          calls.push("settings");
+          throw new Error("configVersionConflict");
+        },
+        updateConfig: () => { calls.push("config"); },
+        startServices: () => { calls.push("start"); },
+        waitForServices: async () => { calls.push("ready"); },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(getLocalUpdateFailure(failure)).toMatchObject({
+      stage: "codex-settings",
+      recovery: { changes: "partial", services: "restored" },
+    });
+    expect(calls).toEqual(["stop", "settings", "start", "ready"]);
+  });
+
   it("updates catalog definitions through declared adapters and shares one source download", async () => {
     const download = vi.fn(async () => ({ catalog: {}, sha256: "test" }));
     const calls: string[] = [];
@@ -473,6 +558,7 @@ describe("local update", () => {
         calls.push("update-provider-catalogs");
         return "provider-catalogs";
       },
+      updateCodexSettings: () => undefined,
       updateConfig: () => {
         calls.push("update-config");
         return "config";
@@ -525,6 +611,8 @@ describe("local update", () => {
       ["provider-files", "completed"],
       ["provider-catalogs", "started"],
       ["provider-catalogs", "completed"],
+      ["codex-settings", "started"],
+      ["codex-settings", "completed"],
       ["config", "started"],
       ["config", "completed"],
       ["databases", "started"],
@@ -558,6 +646,7 @@ describe("local update", () => {
         "stop-services",
         "provider-files",
         "provider-catalogs",
+        "codex-settings",
         "config",
         "databases",
         "validate-offline",
@@ -582,6 +671,7 @@ describe("local update", () => {
       inspectDatabases: () => ({ state: {}, metrics: {} }),
       inspectServices: () => ({ installed: true }),
       stopServices: () => calls.push("stop"),
+      updateCodexSettings: () => undefined,
       updateConfig: () => calls.push("config"),
     })).rejects.toThrow("本地更新预检状态已变化");
     expect(calls).toEqual([]);
@@ -608,6 +698,7 @@ describe("local update", () => {
         calls.push("update-provider-catalogs");
         return "provider-catalogs";
       },
+      updateCodexSettings: () => undefined,
       updateConfig: () => {
         calls.push("update-config");
         return "config";
@@ -703,6 +794,7 @@ describe("local update", () => {
       }),
       inspectDatabases: () => ({ state: {}, metrics: {} }),
       inspectServices: () => ({ installed: false }),
+      updateCodexSettings: () => undefined,
       updateConfig: () => "config",
       updateProviderCatalogs: () => "provider-catalogs",
       updateDatabases: () => "databases",
@@ -748,6 +840,7 @@ describe("local update", () => {
           return { installed: false };
         },
         stopServices: () => calls.push("stop"),
+        updateCodexSettings: () => undefined,
         updateConfig: () => calls.push("update-config"),
         updateDatabases: () => calls.push("update-databases"),
         startServices: () => calls.push("start"),
@@ -794,6 +887,7 @@ describe("local update", () => {
         stopServices: () => calls.push("stop"),
         updateProviderFiles: () => calls.push("update-provider-files"),
         updateProviderCatalogs: () => calls.push("update-provider-catalogs"),
+        updateCodexSettings: () => undefined,
         updateConfig: () => calls.push("update-config"),
         updateDatabases: () => {
           calls.push("update-databases");
@@ -819,6 +913,7 @@ describe("local update", () => {
         "stop-services",
         "provider-files",
         "provider-catalogs",
+        "codex-settings",
         "config",
         "restore-services",
       ],
@@ -847,6 +942,7 @@ describe("local update", () => {
         calls.push("inspect-databases");
         throw new Error("schema mismatch");
       },
+      updateCodexSettings: () => undefined,
       updateConfig: () => {
         calls.push("update-config");
       },

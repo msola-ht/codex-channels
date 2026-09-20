@@ -88,7 +88,34 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-    it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
+  it("opens Codex user settings without requiring a Gateway configuration", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-connect-config-codex-user-"));
+    roots.push(root);
+    const configPath = join(root, "missing", "config.toml");
+    const output = { write: vi.fn(), isTTY: true };
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn().mockResolvedValueOnce("codex_user"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const codexUserSettingsSetup = vi.fn(async () => ({ action: "configured" }));
+
+    await expect(runConfig({
+      environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
+      output,
+      prompts,
+      codexUserSettingsSetup,
+    })).resolves.toEqual({ action: "configured" });
+
+    expect(codexUserSettingsSetup).toHaveBeenCalledWith({
+      environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
+      output,
+      prompts,
+    });
+  });
+
+  it("prints a redacted Gateway configuration summary and keeps the menu open", async () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);
     document.telegram = {
@@ -98,6 +125,7 @@ describe("Codex Connect config menu", () => {
     };
     document.network = { https_proxy: "http://proxy-user:proxy-secret@127.0.0.1:7890" };
     document.scheduled_tasks = { enabled: true };
+    document.display = { operation_updates: "compact", plan_updates: true };
     writeGatewayConfig(fixture.configPath, document);
     const output: string[] = [];
     const select = vi.fn()
@@ -119,6 +147,7 @@ describe("Codex Connect config menu", () => {
     expect(rendered).toContain("Gateway 配置总览");
     expect(rendered).toContain("通讯渠道：Telegram");
     expect(rendered).toContain("计划任务：开启");
+    expect(rendered).toContain("思考状态：关闭");
     expect(rendered).toContain("调用详情记录：关闭");
     expect(rendered).toContain("显式网络代理：https_proxy");
     expect(rendered).toContain("Codex 官方与第三方 Provider 配置由 codexc setup 管理");
@@ -520,7 +549,7 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("reasoning")
-        .mockResolvedValueOnce("disabled"),
+        .mockResolvedValueOnce("enabled"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -531,10 +560,28 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ reasoningEnabled: false, configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
+    expect(result).toEqual({ reasoningEnabled: true, configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
-      reasoning: false,
+      reasoning: true,
     });
+  });
+
+  it("sets the gateway timezone through the system settings", async () => {
+    const fixture = createFixture();
+    const prompts = {
+      intro: vi.fn(),
+      select: vi.fn().mockResolvedValueOnce("system")
+        .mockResolvedValueOnce("gateway_timezone").mockResolvedValueOnce("Asia/Tokyo"),
+      isCancel: () => false,
+      cancel: vi.fn(),
+    };
+    const result = await runConfig({
+      environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true },
+      prompts,
+    });
+    expect(result).toMatchObject({ timezone: "Asia/Tokyo", activation: "restart-gateway" });
+    expect(readGatewayConfig(fixture.configPath).gateway).toEqual({ timezone: "Asia/Tokyo" });
   });
 
   it("sets the approval timeout through the system settings", async () => {
@@ -924,6 +971,7 @@ describe("Codex Connect config menu", () => {
     const options = select.mock.calls[0]?.[0]?.options ?? [];
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("summary");
+    expect(values).toContain("codex_user");
     expect(values).toContain("automation");
     expect(values).toContain("network");
     expect(values).toContain("advanced");

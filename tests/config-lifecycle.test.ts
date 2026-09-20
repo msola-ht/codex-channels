@@ -156,6 +156,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.useRealTimers();
   if (originalSupervised === undefined) {
     delete process.env.CODEX_CONNECT_GATEWAY_SUPERVISED;
@@ -171,6 +172,20 @@ afterEach(() => {
 });
 
 describe("runGatewayProcess", () => {
+  it("applies the gateway timezone before constructing application components", async () => {
+    isolateProcessLifecycle();
+    vi.stubEnv("TZ", "UTC");
+    mocks.loadRuntimeConfig.mockReturnValue({
+      ...runtime, config: { ...runtime.config, gatewayTimezone: "Asia/Shanghai" },
+    });
+    mocks.createLogger.mockImplementation(() => {
+      expect(process.env.TZ).toBe("Asia/Shanghai");
+      return mocks.logger;
+    });
+    await runGatewayProcess();
+    expect(process.env.TZ).toBe("Asia/Shanghai");
+  });
+
   it("acquires ownership, starts components, watches config, and marks ready in order", async () => {
     const processHandlers = isolateProcessLifecycle();
     const watchedPaths: string[] = [];

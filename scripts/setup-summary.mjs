@@ -55,7 +55,7 @@ export async function writeSetupConfigurationSummary({
 } = {}) {
   const summary = await loadSetupConfigurationSummary(options);
   output.write([
-    "Setup 配置总览",
+    "Setup 接入状态总览",
     `- 主 Provider：${primaryLabel(summary.primary, summary.officialAuth)}`,
     `- Codex 全局默认值：${summary.codexDefaults.model ?? "跟随 Provider 默认模型"} · ${summary.codexDefaults.effort ?? "跟随模型默认思考等级"}`,
     `- 可切换 Provider：${summary.switchingProviders.map((provider) => provider.displayName).join("、") || "未配置"}`,

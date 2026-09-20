@@ -41,7 +41,11 @@
   最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
   `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
-  观察者或 CLI 展示异常不改变更新事务。Registry 安装直接委派现有本地更新，不修改程序包。
+  观察者或 CLI 展示异常不改变更新事务。本地 `install:global` 构建安装与 Registry 安装也先按
+  已安装包锁定版本确认、临时校验并同步配套 Codex CLI，再委派本地更新；不修改 Gateway 程序包。
+  这两种安装的 CLI 临时候选目录在成功或失败后清理，合同通过前不安装全局 CLI、不停止服务。
+  受管源码没有新提交时同样复用该流程，在一个 `local-update` 阶段内完成 CLI 同步、按需刷新旧命令
+  和本地更新；CLI 主入口不再重复执行本地更新。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -60,6 +64,9 @@
   若 `[codex].terminal_identity` 未配置且运行更新命令的终端可探测，则按该终端补入该配置并提示
   一次，使值随下一次 App Server 启动生效；其余服务命令不改写该配置。公开服务命令复用同一按
   目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
+  首次本地更新通过带修订检查的官方配置事务将根级 `model_reasoning_summary` 统一写为 `none`，
+  成功后在当前 Codex Home 保存 `.codexc-reasoning-summary-0.155.1` 完成标记；不修改独立 Profile，
+  后续更新保留用户重新选择的值。标记不含配置正文，写入失败不记录完成；可通过 Setup 重新选择摘要。
   源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
   服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
   和修复建议，不要求调用方解析异常文案。
@@ -159,8 +166,8 @@
   （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责收集查询、导出、清理和重置参数，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
-- `setup.mjs`：使用 `@clack/prompts` 提供统一设置类别菜单和脱敏总览，并把“Codex 新会话默认值”
-  “模型与提供商”“通讯渠道”和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
+- `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
+  和“项目技能”流程委派给具体适配器；模型与提供商下分 OpenAI 官方
   登录/恢复与第三方 Provider 两级，子模块返回时停留在所属层级；配置写入后的激活结果由
   `config-activation-result.mjs` 提供统一状态和目标定义。公开 CLI 的 `codexc setup --json` 将交互提示
   写入 stderr，并按每行一个事件把脱敏结果写入 stdout；默认 `codexc setup` 仍保持纯交互文本输出。
@@ -230,7 +237,7 @@
 - `agents.mjs`：提供不依赖终端提示的共享第三方子代理 Provider 列表、配置/停用预览与执行接口，
   `codexc agents` 复用该接口；`status --json` 返回稳定配置状态，Provider 与模型未配置时显式使用
   `null`，不要求 Gateway 已初始化。角色文件和 Codex 主配置复用统一 Provider 管理事务，避免与
-  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和全部服务重启动作。
+  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和 App Server 重启动作。
 - `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
   模型选择和停用确认，只编排 `agents.mjs` 的管理接口；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
@@ -244,8 +251,8 @@
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
-- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc setup` 的“Codex 新会话默认值”
-  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、实验性上下文管理、TUI 空闲总结、Plan 思考等级、推理摘要、输出详细程度、人格、
+- `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
+  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、实验性上下文管理、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、人格、
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
@@ -273,8 +280,8 @@
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
   hermes 运行时的 `.skill-lock.json`。
-- `config.mjs`：`codexc config` 的顶层交互编排，先提供不显示凭据或代理值的配置总览，再覆盖
-  配置文件中可安全编辑的参数：显示设置（操作详情、计划更新）、系统设置
+- `config.mjs`：`codexc config` 的顶层交互编排，统一提供 Codex 新会话与用户偏好，以及不显示凭据
+  或代理值的 Gateway 配置总览和可安全编辑的参数：显示设置（操作详情、计划更新、默认关闭的思考状态）、系统设置
   （调试快捷开关、模型请求转储、审批超时、Sandbox、默认工作区、渠道新会话模型覆盖与官方 TUI 身份）、自动化（计划任务）、网络代理、日志等级与开发中功能、WebUI 设置（监听地址、端口、访问令牌）、指标存储
   （本地保留天数与最大记录数）、
   Telegram 消息格式和配置路径查看；修改通过私有原子写入保存，非交互终端直接输出用户目录与
@@ -295,17 +302,19 @@
   的脱敏投影、输入校验与文档修改语义；CLI 菜单不再直接读写这些配置段。
 - `config-advanced-menu.mjs`：管理计划任务、显式 HTTP(S) 代理、日志等级与
   开发中的 Plugin API；完整日志等级与系统设置中的调试快捷开关共用 `debug-setup.mjs` 的唯一写入入口，代理输入可见但既有值、输出和日志均不回显；HTTP、HTTPS 与通用代理支持一次性原子写入。
-- `config-display-menu.mjs`：独立管理操作详情、计划更新和 Telegram 消息格式；
+- `config-display-menu.mjs`：独立管理操作详情、计划更新、默认关闭的渠道思考状态和 Telegram 消息格式；
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理调试快捷开关、模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；快捷开关只在 `info` / `debug`
   间切换，其他日志等级由高级设置选择，两条路径都委派给 `debug-setup.mjs`；模型请求转储独立写入
   `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
-  编辑，留空即删除配置；模型可见时区与 `codexc timezone` 共用同一实现。
+  编辑，留空即删除配置；模型可见时区与网关时区分别复用 `codexc timezone` 与 `codexc timezone --gateway`。
 - `timezone-command.mjs`：实现公开 `codexc timezone`，解析 IANA 时区名称与 `--system` / `--json`，
   交互入口只列常见时区，并提供「恢复系统时区」与「其他（手动输入 IANA 名称）」两个动作项，
-  在边界校验格式与存在性后通过 Config 管理接口写入 `[codex].timezone`，并提示重启 App Server 与
-  WebUI；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的系统设置菜单复用同一实现。
+  在边界校验格式与存在性后通过 Config 管理接口写入 `[codex].timezone`，并提示 App Server、Gateway 与
+  WebUI 的重启要求；缺省不写入配置，非交互终端只报告当前值，`codexc config` 的系统设置菜单复用同一实现。
+  `--gateway` 管理 `[gateway].timezone`：缺省跟随 App Server，`--system` 选择独立系统时区，
+  IANA 名称设置自定义时区，`--follow-app-server` 删除独立设置；修改后提示重启网关。
 - `config-webui-menu.mjs`：独立管理 WebUI 监听地址、端口和访问令牌交互；保持公网监听必须配置
   令牌的失败关闭约束，`config.mjs` 只负责把顶层选择路由到该领域菜单。
 - `config-workspace-menu.mjs`：管理 `codexc work` 的 Workspace Sandbox、审批策略与 Permission Profile；
@@ -569,10 +578,14 @@
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
-  稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用，不承载服务控制。
-- `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一 Gateway 配置写入后的生效提示，区分自动重新读取、需要重建
-  Gateway 连接，以及需要通过 `codexc service install` 重新生成 App Server 服务环境的变化；
-  WebUI 的专属重启要求继续单独提示。
+  稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
+  `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
+  新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
+  共享第三方子代理使用 `restart / app-server`，App Server 时区使用
+  `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
+- `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
+  Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
+  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
   WebUI 独立不并入 `all`，

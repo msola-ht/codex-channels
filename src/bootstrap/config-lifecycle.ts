@@ -40,6 +40,9 @@ const providerSettingsAction: Record<
 export async function runGatewayProcess(): Promise<void> {
   const runtime = loadRuntimeConfig();
   const config = runtime.config;
+  if (config.gatewayTimezone !== undefined) {
+    process.env.TZ = config.gatewayTimezone;
+  }
   const gatewayOwner = new GatewayOwner(runtime.configPath);
   await gatewayOwner.start();
   const eventQueuePath = configEventQueuePath(dirname(runtime.configPath));

@@ -93,7 +93,7 @@ export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: {
     <ManagementConfirmationDialog
       open={pending !== null}
       title="确认配置修改"
-      description="确认后写入对应配置，不会自动执行生效目标。"
+      description="确认后写入对应配置；下方显示实际生效方式。"
       saving={saving}
       confirmVariant={destructive ? "destructive" : "default"}
       onConfirm={onConfirm}
@@ -101,7 +101,10 @@ export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: {
     >
       {pending !== null ? <>
           <p>{pending.label}将从“{formatPreviewValue(pending.before)}”改为“{formatPreviewValue(pending.value)}”。</p>
-          <p className="text-muted-foreground">生效目标：{pending.target}</p>
+          <p className="text-muted-foreground">生效方式：{formatActivation(pending.activation)}</p>
+          {pending.activation.commands.length > 0
+            ? <p className="text-muted-foreground">{activationCommandLabel(pending.activation)}：{pending.activation.commands.join("；")}</p>
+            : null}
         </> : null}
     </ManagementConfirmationDialog>
   )
@@ -117,4 +120,41 @@ export function ManagedSelect({ label, value, options, disabled, onChange }: { l
 function formatPreviewValue(value: unknown): string {
   if (value !== null && typeof value === "object") return JSON.stringify(value)
   return String(value)
+}
+
+function formatActivation(activation: PendingSetting["activation"]): string {
+  if (activation.status === "none") return "当前值未变化"
+  if (activation.status === "next-thread" && activation.target === "codex") {
+    return "新建或重新加载的 Thread 生效；当前已加载的 Thread 不变，无需重启服务"
+  }
+  if (activation.status === "next-tui" && activation.target === "codex") {
+    return "新启动的 TUI 生效；无需重启后台服务"
+  }
+  if (activation.status === "next-thread-and-tui" && activation.target === "codex") {
+    return "会话设置由新建或重新加载的 Thread 读取，TUI 设置由新启动的 TUI 读取；当前已加载的 Thread 不变，无需重启后台服务"
+  }
+  if (activation.status === "reload" && activation.target === "gateway") {
+    return "Gateway 自动热加载"
+  }
+  if (activation.status === "restart" && activation.target === "gateway") {
+    return "后台 Gateway 自动重启；前台 Gateway 需重新启动"
+  }
+  if (activation.status === "restart" && activation.target === "app-server") {
+    return "重启 App Server"
+  }
+  if (activation.status === "restart" && activation.target === "all") {
+    return "重启 Gateway 与 App Server"
+  }
+  if (activation.status === "restart" && activation.target === "app-server-gateway-webui") {
+    return "重启 App Server 与 WebUI；托管网关自动重启，直接运行的网关需重新执行原启动命令"
+  }
+  if (activation.status === "restart" && activation.target === "webui") {
+    return "重启 WebUI"
+  }
+  if (activation.status === "reinstall-required") return "重新安装服务定义"
+  return `${activation.status} / ${activation.target}`
+}
+
+function activationCommandLabel(activation: PendingSetting["activation"]): string {
+  return activation.status === "reload" ? "手动触发" : "命令"
 }

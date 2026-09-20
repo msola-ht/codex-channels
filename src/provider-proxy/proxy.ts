@@ -23,7 +23,6 @@ import {
   isSupportedHttpRoute,
   parseListenAddress,
   resolveProxyRoute,
-  responseOperation,
   upstreamPath,
   upstreamWebSocketPath,
   websocketProtocols,
@@ -74,7 +73,7 @@ export interface ProviderProxyOptions {
   upstreamPort?: number;
   upstreamProtocol?: "http" | "https";
   upstreamBasePath?: string;
-  /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.154.0 API 路径。 */
+  /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.155.1 API 路径。 */
   allowOpenAiApiPaths?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
@@ -294,7 +293,7 @@ export class ProviderProxy {
       request.resume();
       const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
       const metrics = createMetricsState(metadata, startedAtMs, "http",
-        responseOperation(route, metadata.operation),
+        metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs, startedAtMonotonicMs);
       metrics.httpStatus = 502;
       if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -307,7 +306,7 @@ export class ProviderProxy {
       exchange?.responseHead(502, {});
       exchange?.observeRequestMetrics(metrics);
       exchange?.failure("upstream_route", undefined, failedAtMonotonicMs);
-      if (route.kind === "response" || route.kind === "compact") {
+      if (route.kind === "response") {
         await this.deliverMetrics(metrics, route.accountId);
       }
       response.writeHead(502, { "content-type": "application/json" });
@@ -325,7 +324,7 @@ export class ProviderProxy {
       turnMetadata,
       startedAtMs,
       "http",
-      responseOperation(route, turnMetadata.operation),
+      turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
       forwardingStartedAtMonotonicMs,
       startedAtMonotonicMs,
@@ -345,7 +344,7 @@ export class ProviderProxy {
     if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
     }
-    const recordsResponseMetrics = route.kind === "response" || route.kind === "compact";
+    const recordsResponseMetrics = route.kind === "response";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
       if (!recordsResponseMetrics) return Promise.resolve();

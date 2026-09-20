@@ -24,7 +24,7 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   完成卡片的运行、任务与会话摘要统一标为“Token/s”，`/metrics` 保留“平均 Token/s”：范围内有效请求输出速率的算术平均。单请求为 `outputTokens × 1000 / totalDurationMs`，只纳入输出 Token 与总耗时都大于零的记录；不扣首字等待，不从输出中减去推理 Token，不额外限制请求状态，压缩请求沿用原统计范围。平均值从原始请求直接计算，不对各轮或子代理均值再次平均；不是总 Token 除以 Turn/会话墙钟耗时，也不是纯生成速度。历史缺少耗时或无有效样本时显示“未提供”，不按旧时间戳补算。正式和调试模式均显示；该派生值不新增存储字段。
   请求明细和转储的“首字耗时”从上游转发开始计到首个符合条件的事件，
   HTTP/SSE 采用 semantic 事件口径，WebSocket 采用 delta 与指定 done 事件口径，不要求文本非空；详见[WebUI 请求明细](webui.md)。
-  当前锁定 Codex 0.154.0 的首轮 `generate=false` WebSocket 预热不属于模型推理，
+  当前锁定 Codex 0.155.1 的首轮 `generate=false` WebSocket 预热不属于模型推理，
   不计入请求数或 Token。Turn 完成前会等待当前 Thread 与 Turn 已入队的指标写入，并从本地指标库重建本轮统计；因此 Gateway
   在长 Turn 中途重启后，完成卡片仍包含重启前后的本次用量，会话累计也包含本轮已经落库的请求。
 - 会话区在正式与调试模式都显示当前工作区、Session 名称和 Session ID，保留 Session 累计上下文、压缩次数、Goal 与 Git 分支，并显示递归包含全部已关联子代理后代的
@@ -52,7 +52,7 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
 
 OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation 实际绑定都属于 OpenAI 时，
 在同一回复追加“当前 Thread 官方估算”区块。待生效的第三方 Provider 选择仍按既有规则决定
-`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.154.0 App Server 活动
+`/usage` 的账户来源，不会为其查询当前 OpenAI Thread。官方估算按当前锁定的 0.155.1 App Server 活动
 账户读取，只覆盖精确当前 Thread，不递归或合计子代理，也不写入本地指标库。
 
 - Credits 和可选美元费用按百万分之一整数单位转换为有界小数；缺少美元值时不显示费用行。
@@ -124,17 +124,17 @@ JSON / CSV 导出仍保留精确整数。
 未发起上游请求的 Turn 级失败（例如 OpenAI 用量上限拒绝 turn/start）同样作为无 Token 的
 failed 请求计入异常记录，避免这类错误完全不可见。
 
-统计代理把上下文压缩（旧版 `/responses/compact` 与 remote compaction v2）保留为
+统计代理把 `/responses` 上的上下文压缩（remote compaction v2）保留为
 `compact` 操作：其请求与 Token 继续计入总计，同时在完成卡片、会话指标和全局/提供商/
 模型汇总中单列压缩次数、实际请求模型与 Token。这里的模型是代理实际观测到的请求模型。
-当前锁定的 Codex CLI 0.154.0 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
+当前锁定的 Codex CLI 0.155.1 没有独立压缩模型配置；常规压缩复用 Turn 模型，模型切换兼容压缩
 可能先使用上一模型，并在受支持的失败条件下回退当前模型。
 
 完成卡片的模型/提供商之下会单列「自动压缩：X%」。受管第三方 Provider 只配置模型目录里的
 `context_window`，压缩阈值由上游按窗口默认推导，因此不显示该字段（会话区「上下文」分母已反映
 当前窗口）；官方模型优先读取主配置覆盖值（`model_context_window` / `model_auto_compact_token_limit`），
 未覆盖时显示默认 95%。
-`codexc setup` 的「Codex 新会话默认值 → 模型上下文与自动压缩」可读取并设置官方模型的
+`codexc config` 的「Codex 新会话与用户偏好 → 模型上下文与自动压缩」可读取并设置官方模型的
 上下文窗口与自动压缩百分比，未设置时按模型默认展示。
 
 - HTTP 与 WebSocket 客户端在完成事件前断开都计为中断；HTTP/SSE 已完成后的正常收尾断开不重复
@@ -168,7 +168,10 @@ OpenAI `/limits` 在额度响应包含 10,080 分钟周窗口和有效重置时�
 HTML 和微信结构化字段渲染。
 
 渠道启动通知默认在正式模式显示 Codex Connect 与 Codex 两个版本（分别对应 codexc 网关与
-Codex CLI）；Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
+Codex CLI），并在“系统”下方分别显示“App Server 时区”和“网关时区”。App Server 时区使用
+Gateway 启动时读取的 `codex.timezone` 并标注“配置”，未配置时显示“跟随系统（未配置）”；网关时区
+使用 Gateway 进程的实际时区。App Server 字段不表示已核实其实际生效状态，配置生效条件见
+[模型可见时区](model-timezone.md)。Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
 “运行环境”小节。OpenAI 连通性检查先从 App Server 读取当前认证路由，再只探测对应的 API Key
 或 ChatGPT 官方线路；自定义 Base URL 按 API 线路检查。代理连接失败会在总计 12 秒的启动窗口内
 有限重试；该总时限包含 `account/read`，超时会取消未完成的 RPC。仍不可达、Base URL 路径无效、
@@ -304,8 +307,9 @@ Turn 的启动回复直接登记为 Thread 状态消息，后续 `active` 不再
 这张回复并保留扩展身份。
 
 Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`summaryPartAdded` 与
-`textDelta` 通知。飞书和 Telegram 按顺序展示“思考中…”状态；连续思考只显示一次，操作打断后
-再次思考时重新显示一次。每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；
+`textDelta` 通知。渠道思考状态默认不显示；在 `codexc config → 显示设置 → 思考状态显示` 中开启后，
+飞书和 Telegram 按顺序展示“思考中…”状态，连续思考只显示一次，操作打断后再次思考时重新显示一次。
+每段独立从 0 开始计时，超过 1 秒时附“耗时”字段并每秒流式原地更新；
 飞书使用每段一张的流式卡片，Telegram 原地编辑同一条面板。微信不主动发送推理状态，以保留单次
 回复窗口预算。`display.reasoning = false` 时关闭支持渠道的思考状态；摘要与原始思维链内容不进入
 渠道；首个回复增量、Turn 错误或完成时结束本段。

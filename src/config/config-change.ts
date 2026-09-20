@@ -4,6 +4,8 @@ export type GlobalConfigChangeCode =
   | "codex.default-model"
   | "codex.sandbox"
   | "codex.client-identity"
+  | "codex.timezone"
+  | "gateway.timezone"
   | "network.proxy"
   | "storage.database"
   | "approval.timeout"

@@ -47,8 +47,14 @@ sandbox = "workspace-write"
 # 也可以直接填写「终端名」或「终端名/版本」；重启服务后生效：
 # terminal_identity = "iTerm.app/3.5.14"
 # 模型可见时区：App Server 请求里的 environment context 时区与当前日期，WebUI 页面时间同步跟随；
-# 缺省沿用系统时区，只写入这两个服务进程，不修改系统。用 codexc timezone 设置，重启后生效：
+# 缺省沿用系统时区，网关默认也跟随此配置，不修改系统。用 codexc timezone 设置，重启后生效：
 # timezone = "America/Los_Angeles"
+
+[gateway]
+# 不设置 timezone 时跟随 codex.timezone；App Server 未配置时沿用系统时区。
+# 用 codexc timezone --gateway 选择；重启网关后生效。
+# timezone = "system"        # 独立使用系统时区
+# timezone = "Asia/Shanghai" # 自定义 IANA 时区
 
 [approval]
 timeout_seconds = 900
@@ -64,8 +70,8 @@ idle_release_minutes = 15
 operation_updates = "compact"
 # 是否在渠道显示 App Server 的自动任务计划更新。
 plan_updates = true
-# 是否在渠道显示“思考中”状态卡；false 时不显示。
-reasoning = true
+# 是否在渠道显示“思考中”状态卡；默认 false，不显示。
+reasoning = false
 
 [experimental]
 # Codex 0.148.0 Plugin API 仍在开发中，默认关闭；仅在需要调试时显式开启。

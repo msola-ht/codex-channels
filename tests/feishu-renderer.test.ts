@@ -94,6 +94,8 @@ describe("Feishu output renderer", () => {
       "",
       "- App Server：已连接",
       "- 系统：macOS · arm64",
+      "- App Server 时区：跟随系统（未配置）",
+      `- 网关时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
       `- 版本：Codex Connect ${gatewayMetadata.version} · Codex 0.146.0`,
       "",
       "### 运行环境",

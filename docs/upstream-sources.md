@@ -15,7 +15,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 | 用途 | 本地目录 | 官方仓库 | 当前基线 |
 | --- | --- | --- | --- |
-| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex` | `openai/codex` | `rust-v0.154.0`，提交 `6b9826e3aa83b1a5947db50f4332cb9c65f1b340` |
+| Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex` | `openai/codex` | `rust-v0.155.1`，提交 `be2951ea34f0d295ed0becf97079f92fa5f6950e` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.6`，提交 `cef0bfc390393f716903e16d50408118047f87e0` |
 | 飞书官方 Node SDK | `upstream/larksuite-node-sdk` | `larksuite/node-sdk` | `@larksuiteoapi/node-sdk@1.73.3`，提交 `af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513` |
 | 飞书官方 OpenClaw 插件参考 | `upstream/openclaw-lark` | `larksuite/openclaw-lark` | 提交 `dde0be3680d6fd5443cab426c8f4b3216266346a` |
@@ -40,7 +40,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 新工作区没有 `upstream/` 时，按当前锁定基线显式克隆：
 
 ```text
-git clone --depth 1 --branch rust-v0.154.0 https://github.com/openai/codex.git upstream/openai-codex
+git clone --depth 1 --branch rust-v0.155.1 https://github.com/openai/codex.git upstream/openai-codex
 git clone --branch v2.4.6 https://github.com/Tencent/openclaw-weixin.git upstream/openclaw-weixin
 git clone https://github.com/larksuite/node-sdk.git upstream/larksuite-node-sdk
 git -C upstream/larksuite-node-sdk checkout af41737d1e9d0fdb08bdbbbe3019a7c64b3d9513

@@ -21,6 +21,7 @@ import {
   inspectManagedSourceUpdatePlan,
   managedSourceCheckout,
   updateManagedSourceInstallation,
+  updateInstalledPackage,
   writeSourceUpdateFailure,
 } from "../scripts/source-update.mjs";
 
@@ -33,6 +34,83 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
+  it("synchronizes Codex for a locally built global package before local update", async () => {
+    const fixture = createInstalledFixture("codexc-package-update-");
+    writePackageVersion(fixture.checkout, "0.148.0");
+    const calls: string[] = [];
+    await updateInstalledPackage(fixture.environment, {
+      projectDir: fixture.checkout,
+      inspectStaged: async () => ({ services: { installed: true } }),
+      confirmCodexCliInstall: (request) => {
+        expect(request).toEqual({ currentVersion: "0.147.0", requiredVersion: "0.148.0" });
+        calls.push("confirm");
+        return true;
+      },
+      installCodexCliForValidation: (version) => {
+        calls.push("prepare");
+        return writeFakeCodex(join(fixture.installRoot, "candidate-codex"), version);
+      },
+      validateCodexContract: (_checkout, environment) => {
+        expect(environment.CODEX_BINARY).not.toBe(fixture.environment.CODEX_BINARY);
+        calls.push("validate");
+      },
+      stopServices: () => { calls.push("stop"); },
+      installCodexCli: (version) => {
+        calls.push("install");
+        writeFakeCodex(fixture.codex, version);
+      },
+      runLocalUpdate: () => { calls.push("local-update"); },
+    });
+    expect(calls).toEqual(["confirm", "prepare", "validate", "stop", "install", "local-update"]);
+  });
+
+  it.each(["declined", "noninteractive", "contract", "install"])(
+    "does not continue package update after %s failure",
+    async (failure) => {
+      const fixture = createInstalledFixture("codexc-package-update-failure-");
+      writePackageVersion(fixture.checkout, "0.148.0");
+      const calls: string[] = [];
+      await expect(updateInstalledPackage(fixture.environment, {
+        projectDir: fixture.checkout,
+        inspectStaged: async () => ({ services: { installed: true } }),
+        ...(failure === "noninteractive" ? {} : { confirmCodexCliInstall: () => failure !== "declined" }),
+        installCodexCliForValidation: (version) => {
+          calls.push("prepare");
+          return writeFakeCodex(join(fixture.installRoot, "candidate-codex"), version);
+        },
+        validateCodexContract: () => {
+          calls.push("validate");
+          if (failure === "contract") throw new Error("contract failed");
+        },
+        stopServices: () => { calls.push("stop"); },
+        installCodexCli: () => {
+          calls.push("install");
+          throw new Error("install failed");
+        },
+        startServices: () => { calls.push("restore"); },
+        runLocalUpdate: () => { calls.push("local-update"); },
+      })).rejects.toThrow(failure === "contract" ? /contract failed/u
+        : failure === "install" ? /install failed/u : /版本不匹配/u);
+      expect(calls).toEqual(failure === "install"
+        ? ["prepare", "validate", "stop", "install", "restore"]
+        : failure === "contract" ? ["prepare", "validate"] : []);
+    },
+  );
+
+  it("validates a matching package CLI without reinstalling it", async () => {
+    const fixture = createInstalledFixture("codexc-package-current-");
+    const calls: string[] = [];
+    await updateInstalledPackage(fixture.environment, {
+      projectDir: fixture.checkout,
+      inspectStaged: async () => ({ services: { installed: false } }),
+      confirmCodexCliInstall: () => { throw new Error("unexpected confirmation"); },
+      installCodexCli: () => { throw new Error("unexpected install"); },
+      validateCodexContract: () => { calls.push("validate"); },
+      runLocalUpdate: () => { calls.push("local-update"); },
+    });
+    expect(calls).toEqual(["validate", "local-update"]);
+  });
+
   it("returns a redacted revisioned plan before changing a managed checkout", () => {
     const fixture = createInstalledFixture("codexc-source-update-plan-");
 
@@ -224,7 +302,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       ["note", "正在克隆 Git main 候选源码。"],
       ["note", "正在构建并预检候选源码；详细日志仅在失败时显示。"],
       ["note", "正在核对候选版本的 Codex 公开合同。"],
-      ["note", "Codex 计划清单工具：关闭（默认）；可在 codexc setup → Codex 新会话默认值中修改"],
+      ["note", "Codex 计划清单工具：关闭（默认）；可在 codexc config → Codex 新会话与用户偏好中修改"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。"],
     ]);
@@ -322,11 +400,13 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       managed: true,
       updateAvailable: false,
       refreshCommand: true,
-      steps: ["inspect", "validate-codex-contract", "refresh-command"],
+      steps: ["inspect", "local-update"],
     });
 
     const result = await updateManagedSourceInstallation(fixture.environment, {
       buildCheckout: () => { throw new Error("不应重新构建"); },
+      inspectStaged: async () => ({ services: { installed: false } }),
+      runLocalUpdate: () => undefined,
       installGlobalPackage: () => { globalInstalls += 1; },
       projectDir: fixture.checkout,
       repository: fixture.repository,
@@ -357,6 +437,48 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(managedSourceCheckout(fixture.environment, globalPackage)).toBe(fixture.checkout);
   });
 
+  it.each(["older", "matching", "declined"])(
+    "handles a %s CLI when managed source is already current",
+    async (state) => {
+      const fixture = createInstalledFixture("codexc-current-source-cli-");
+      runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
+      if (state !== "matching") writeFakeCodex(fixture.codex, "0.146.0");
+      const calls: string[] = [];
+      const update = updateManagedSourceInstallation(fixture.environment, {
+        projectDir: fixture.checkout,
+        repository: fixture.repository,
+        buildCheckout: () => { throw new Error("unexpected rebuild"); },
+        inspectStaged: async () => ({ services: { installed: true } }),
+        confirmCodexCliInstall: () => {
+          calls.push("confirm");
+          return state !== "declined";
+        },
+        installCodexCliForValidation: (version) => {
+          calls.push("prepare");
+          return writeFakeCodex(join(fixture.installRoot, "candidate-codex"), version);
+        },
+        validateCodexContract: () => { calls.push("validate"); },
+        stopServices: () => { calls.push("stop"); },
+        installCodexCli: (version) => {
+          calls.push("install");
+          writeFakeCodex(fixture.codex, version);
+        },
+        installGlobalPackage: () => { calls.push("refresh"); },
+        runLocalUpdate: () => { calls.push("local-update"); },
+      });
+      if (state === "declined") {
+        await expect(update).rejects.toThrow("版本不匹配");
+        expect(calls).toEqual(["confirm"]);
+      } else {
+        expect(await update).toMatchObject({ changed: false, commit: fixture.latestCommit });
+        expect(calls).toEqual(state === "matching"
+          ? ["validate", "refresh", "local-update"]
+          : ["confirm", "prepare", "validate", "stop", "install", "refresh", "local-update"]);
+      }
+      expect(gitOutput(fixture.checkout, ["rev-parse", "HEAD"])).toBe(fixture.latestCommit);
+    },
+  );
+
   it("refuses an unrelated legacy command before replacing the global package", async () => {
     const fixture = createInstalledFixture("codexc-source-unrelated-launcher-");
     runGit(fixture.checkout, ["reset", "--quiet", "--hard", fixture.latestCommit]);
@@ -365,6 +487,8 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
 
     await expect(updateManagedSourceInstallation(fixture.environment, {
       installGlobalPackage: () => { globalInstalls += 1; },
+      inspectStaged: async () => ({ services: { installed: false } }),
+      runLocalUpdate: () => undefined,
       projectDir: fixture.checkout,
       repository: fixture.repository,
     })).rejects.toThrow("旧命令入口不属于受管源码安装");

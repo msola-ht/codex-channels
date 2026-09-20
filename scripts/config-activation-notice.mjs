@@ -39,12 +39,23 @@ function activationNotice(activation) {
   if (activation.target === "app-server") {
     return "配置已保存。请重启 App Server：codexc service restart app-server";
   }
-  if (activation.target === "app-server-webui") {
-    return "配置已保存。请重启 App Server 与 WebUI："
-      + "codexc service restart app-server；codexc service restart webui";
+  if (activation.target === "app-server-gateway-webui") {
+    return "配置已保存。App Server、Gateway 与 WebUI 均需重启。请重启 App Server 与 WebUI："
+      + "codexc service restart app-server；codexc service restart webui。"
+      + "托管网关会通过配置监听自动重启；如需手动重启，执行 codexc service restart gateway。"
+      + "直接运行的网关需重新执行原启动命令（如 npm run dev 或 npm start）。";
   }
   if (activation.status === "reload" && activation.target === "gateway") {
     return "配置已保存。Gateway 将热加载新配置；如需手动触发，请执行 codexc service reload。";
+  }
+  if (activation.status === "next-thread" && activation.target === "codex") {
+    return "配置已保存。新建或重新加载的 Codex Thread 将读取该设置；当前已加载的 Thread 保持不变，无需重启服务。";
+  }
+  if (activation.status === "next-tui" && activation.target === "codex") {
+    return "配置已保存。新启动的 Codex TUI 将读取该设置，无需重启后台服务。";
+  }
+  if (activation.status === "next-thread-and-tui" && activation.target === "codex") {
+    return "配置已保存。会话设置由新建或重新加载的 Codex Thread 读取，TUI 设置由新启动的 TUI 读取；当前已加载的 Thread 保持不变，无需重启后台服务。";
   }
   if (activation.status === "restart" && activation.target === "gateway") {
     return "配置已保存。\n该设置需要重建 Gateway 连接；后台服务运行时会自动重启，前台进程需重新启动；"

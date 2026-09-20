@@ -163,7 +163,7 @@ contractSuite("real Codex Desktop App bridge", () => {
             clientInfo: {
               name: "codex_connect_desktop_stdio_contract",
               title: "Codex Desktop Stdio Contract",
-              version: "0.154.0",
+              version: "0.155.1",
             },
             capabilities: {
               experimentalApi: false,
@@ -278,7 +278,7 @@ class RawBridgeClient {
       clientInfo: {
         name: this.clientName,
         title: "Codex Desktop Bridge Contract",
-        version: "0.154.0",
+        version: "0.155.1",
       },
       capabilities: {
         experimentalApi: false,

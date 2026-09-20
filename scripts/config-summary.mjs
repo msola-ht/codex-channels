@@ -19,7 +19,7 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
     `- WebUI：${summary.webui}`,
     `- 本地指标保留：${summary.metricsRetentionDays} 天 / ${summary.metricsMaxRows} 行`,
-    "- 作用范围：以上均为 Gateway 配置；Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
+    "- 作用范围：以上均为 Gateway 配置；Codex 用户偏好由当前 Config 菜单管理，Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
     "",
   ].join("\n"));
   return summary;
@@ -55,7 +55,7 @@ export function gatewayConfigSummary(document, configPath) {
       ? display.operation_updates
       : "compact",
     planUpdates: display.plan_updates !== false,
-    reasoning: display.reasoning !== false,
+    reasoning: display.reasoning === true,
     idleReleaseMinutes: numberValue(conversation.idle_release_minutes) ?? 15,
     scheduledTasks: scheduledTasks.enabled === true,
     modelTrafficDump: debug.model_traffic_dump === true,

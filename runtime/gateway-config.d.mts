@@ -50,6 +50,7 @@ export interface GatewayConfigDocument {
     };
   };
   approval: { timeout_seconds: number };
+  gateway?: { timezone?: string };
   conversation: { idle_release_minutes: number };
   display: {
     operation_updates: "full" | "compact" | "hidden";
@@ -95,6 +96,7 @@ export const timezonePattern: RegExp;
 export function tomlErrorSummary(error: unknown): string;
 export function validateGatewayConfigDocument(document: unknown): GatewayConfigDocument;
 export function validateCodexConfigDocument(document: unknown): GatewayConfigDocument["codex"];
+export function validateGatewayProcessConfigDocument(document: unknown): { timezone?: string };
 export function validateWebuiConfigDocument(
   document: unknown,
 ): {

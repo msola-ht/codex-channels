@@ -47,11 +47,11 @@ describe("published README synchronization", () => {
 
   it("synchronizes the current concise repository README", () => {
     const repositoryReadme = readFileSync(resolve("README.md"), "utf8");
-    const rendered = renderPublishedReadme(repositoryReadme, "0.154.0");
+    const rendered = renderPublishedReadme(repositoryReadme, "0.155.1");
 
-    expect(rendered).toContain("当前正式版：`0.154.0`");
-    expect(rendered).toContain("@openai/codex@0.154.0");
-    expect(rendered).toContain("@hegenai/codexc@0.154.0");
+    expect(rendered).toContain("当前正式版：`0.155.1`");
+    expect(rendered).toContain("@openai/codex@0.155.1");
+    expect(rendered).toContain("@hegenai/codexc@0.155.1");
     expect(rendered).not.toContain("@hegenai/codexc@0.150.1");
   });
 

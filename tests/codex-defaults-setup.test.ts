@@ -11,7 +11,7 @@ describe("Codex official defaults setup", () => {
       kind: "defaults" as const,
       previousVersion: "version-1",
       value: { model: "gpt-test", reasoningEffort: "high" },
-      activation: "restart-all" as const,
+      activation: "next-thread" as const,
     }));
     const prompts = {
       select: vi.fn()
@@ -30,11 +30,11 @@ describe("Codex official defaults setup", () => {
     })).resolves.toMatchObject({
       model: "gpt-test",
       effort: "high",
-      activation: "restart-all",
+      activation: "next-thread",
       activationResult: {
-        status: "restart",
-        target: "all",
-        commands: ["codexc service restart all"],
+        status: "next-thread",
+        target: "codex",
+        commands: [],
       },
     });
 
@@ -47,7 +47,7 @@ describe("Codex official defaults setup", () => {
       expectedVersion: "version-1",
     }));
     expect(output.join("")).toContain("Codex 全局默认设置已更新");
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("新建或重新加载的 Codex Thread 将读取该设置");
   });
 
   it("does not write global defaults when the user rejects the final confirmation", async () => {

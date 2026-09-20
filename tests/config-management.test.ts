@@ -51,6 +51,9 @@ describe("Gateway Config management", () => {
 
   it("loads a credential-free structured settings model", () => {
     const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.display = { operation_updates: "compact", plan_updates: true };
+    writeGatewayConfig(fixture.configPath, document);
     const settings = loadGatewaySettings(fixture.environment);
 
     expect(settings).toMatchObject({
@@ -59,7 +62,7 @@ describe("Gateway Config management", () => {
       display: {
         operationUpdates: "compact",
         planUpdatesEnabled: true,
-        reasoningEnabled: true,
+        reasoningEnabled: false,
       },
       system: {
         approvalTimeoutSeconds: 900,
@@ -149,11 +152,12 @@ describe("Gateway Config management", () => {
       expectedRevision: settings.revision,
     })).toMatchObject({
       value: "America/Los_Angeles",
-      activation: "restart-app-server-webui",
+      activation: "restart-app-server-gateway-webui",
       activationResult: {
-        target: "app-server-webui",
+        target: "app-server-gateway-webui",
         commands: [
           "codexc service restart app-server",
+          "codexc service restart gateway",
           "codexc service restart webui",
         ],
       },
@@ -302,7 +306,7 @@ describe("Gateway Config management", () => {
     ) => unknown;
     expect(() => callWithoutRevision({
       kind: "display.reasoning",
-      value: false,
+      value: true,
     }, { environment: fixture.environment })).toThrow(expect.objectContaining({
       code: "required-revision",
       field: "revision",
@@ -310,7 +314,7 @@ describe("Gateway Config management", () => {
 
     updateGatewaySetting({
       kind: "display.reasoning",
-      value: false,
+      value: true,
     }, {
       environment: fixture.environment,
       expectedRevision: settings.revision,
@@ -336,7 +340,7 @@ describe("Gateway Config management", () => {
 
     expect(() => updateGatewaySetting({
       kind: "display.reasoning",
-      value: false,
+      value: true,
     }, {
       environment: fixture.environment,
       expectedRevision: settings.revision,
@@ -352,7 +356,7 @@ describe("Gateway Config management", () => {
 
     expect(() => updateGatewaySetting({
       kind: "display.reasoning",
-      value: false,
+      value: true,
     }, {
       environment: fixture.environment,
       expectedRevision: settings.revision,

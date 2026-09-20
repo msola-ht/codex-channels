@@ -11,7 +11,6 @@ const openAiPostPaths = new Set([
 
 export type ProxyRouteKind =
   | "response"
-  | "compact"
   | "models"
   | "openai-http"
   | "openai-websocket"
@@ -95,14 +94,7 @@ export function isSupportedHttpRoute(
   if (route.kind === "openai-http") {
     return allowOpenAiApiPaths && method === "POST";
   }
-  return route.kind === "response" || route.kind === "compact";
-}
-
-export function responseOperation(
-  route: ResolvedProxyRoute,
-  metadataOperation: "response" | "compact",
-): "response" | "compact" {
-  return route.kind === "compact" ? "compact" : metadataOperation;
+  return route.kind === "response";
 }
 
 function resolvedRoute(
@@ -119,7 +111,6 @@ function resolvedRoute(
 
 function routeKind(pathname: string): ProxyRouteKind {
   if (pathname === "/responses") return "response";
-  if (pathname === "/responses/compact") return "compact";
   if (pathname === "/models") return "models";
   if (openAiPostPaths.has(pathname)) return "openai-http";
   if (

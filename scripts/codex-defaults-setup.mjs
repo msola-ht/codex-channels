@@ -42,7 +42,7 @@ export async function runCodexDefaultsSetup({
         label: model.displayName,
         hint: model.model,
       })),
-      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话默认值" }] : []),
+      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话与用户偏好" }] : []),
     ],
   });
   if (prompts.isCancel(selectedModel) || selectedModel === "back") {
@@ -71,7 +71,7 @@ export async function runCodexDefaultsSetup({
         label: option.effort,
         hint: option.description,
       })),
-      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话默认值" }] : []),
+      ...(allowBack ? [{ value: "back", label: "返回", hint: "返回 Codex 新会话与用户偏好" }] : []),
     ],
   });
   if (prompts.isCancel(selectedEffort) || selectedEffort === "back") {
@@ -88,7 +88,7 @@ export async function runCodexDefaultsSetup({
     output.write("已取消，未修改 Codex 全局配置。\n");
     return undefined;
   }
-  await updateSetting({
+  const result = await updateSetting({
     kind: "defaults",
     model: model.model,
     reasoningEffort: selectedEffort,
@@ -99,11 +99,12 @@ export async function runCodexDefaultsSetup({
     primaryProvider,
   });
   output.write(`Codex 全局默认设置已更新：${model.model} · ${selectedEffort}\n`);
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  const activationResult = configActivationResult(result.activation);
+  writeGatewayConfigActivationNotice(output, environment, activationResult);
   return {
     model: model.model,
     effort: selectedEffort,
-    activation: "restart-all",
-    activationResult: configActivationResult("restart-all"),
+    activation: result.activation,
+    activationResult,
   };
 }

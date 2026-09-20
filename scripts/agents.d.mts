@@ -52,13 +52,13 @@ export type ThirdPartyAgentChangePreview =
         modelDisplayName: string;
       };
       willChange: boolean;
-      activation: "restart-all";
+      activation: "restart-app-server";
     }
   | {
       operation: "disable";
       current: { configured: boolean; provider: string | null; model: string | null };
       willChange: boolean;
-      activation: "restart-all" | "none";
+      activation: "restart-app-server" | "none";
     };
 
 export class AgentsManagementError extends Error {
@@ -92,13 +92,13 @@ export function applyThirdPartyAgentChange(
 ): Promise<
   | {
       action: "configured";
-      activation: "restart-all";
+      activation: "restart-app-server";
       previous: ThirdPartyAgentChangePreview["current"];
       selection: { provider: string; model: string };
     }
   | {
       action: "disabled" | "unchanged";
-      activation: "restart-all" | "none";
+      activation: "restart-app-server" | "none";
       previous: ThirdPartyAgentChangePreview["current"];
     }
 >;

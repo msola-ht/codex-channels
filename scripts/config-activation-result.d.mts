@@ -1,15 +1,20 @@
 export type ConfigActivationStatus =
   | "none"
   | "reload"
+  | "next-thread"
+  | "next-tui"
+  | "next-thread-and-tui"
   | "restart"
   | "reinstall-required"
   | "failed";
 
 export type ConfigActivationTarget =
   | "none"
+  | "codex"
   | "gateway"
   | "webui"
   | "app-server"
+  | "app-server-gateway-webui"
   | "all"
   | "services"
   | "unknown";

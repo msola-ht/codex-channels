@@ -21,7 +21,7 @@ export type PendingSetting = {
   before: unknown
   value: unknown
   label: string
-  target: string
+  activation: ManagementSettingMutationResponse["activation"]
   confirmationToken?: string
 }
 

@@ -15,6 +15,26 @@ import { MemoryBindingStore } from "../src/storage/index.js";
 const mainWorkspace = { id: "main", name: "Main", cwd: "/workspace" };
 
 describe("Gateway config reload", () => {
+  it.each(["Asia/Shanghai", undefined])(
+    "recreates startup cards when the App Server timezone becomes %s with an independent gateway timezone",
+    (codexTimezone) => {
+      const current = { ...config(), codexTimezone: "Asia/Tokyo", gatewayTimezone: "UTC" };
+      const next = { ...config(), gatewayTimezone: "UTC",
+        ...(codexTimezone === undefined ? {} : { codexTimezone }) };
+      expect(classifyConfigReload(current, next)).toEqual({
+        action: "restart", changes: [{ code: "codex.timezone", scope: "global" }],
+      });
+    },
+  );
+
+  it("restarts when the resolved gateway timezone changes or returns to system", () => {
+    const current = config();
+    const next = { ...current, gatewayTimezone: "Asia/Shanghai" };
+    expect(classifyConfigReload(current, next)).toEqual({
+      action: "restart", changes: [{ code: "gateway.timezone", scope: "global" }],
+    });
+    expect(classifyConfigReload(next, current).action).toBe("restart");
+  });
   it("applies hot reloads through every composed Surface module", () => {
     const current = config();
     const next = config({

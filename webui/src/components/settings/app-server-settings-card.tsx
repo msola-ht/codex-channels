@@ -15,7 +15,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   const [contextWindow, setContextWindow] = useState("")
   const [compactPercent, setCompactPercent] = useState("")
   const [planEffort, setPlanEffort] = useState("")
-  const [reasoningSummary, setReasoningSummary] = useState("auto")
+  const [reasoningSummary, setReasoningSummary] = useState("none")
   const [verbosity, setVerbosity] = useState("medium")
   const [personality, setPersonality] = useState("none")
   const [startupUpdate, setStartupUpdate] = useState("true")
@@ -28,7 +28,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
     setContextWindow(settings.compact.contextWindow === null ? "" : String(settings.compact.contextWindow))
     setCompactPercent(settings.compact.autoCompactPercent === null ? "" : String(settings.compact.autoCompactPercent))
     setPlanEffort(settings.defaults.planModeReasoningEffort ?? selected?.defaultReasoningEffort ?? "")
-    setReasoningSummary(settings.defaults.reasoningSummary ?? "auto")
+    setReasoningSummary(settings.defaults.reasoningSummary ?? "none")
     setVerbosity(settings.defaults.verbosity ?? "medium")
     setPersonality(settings.defaults.personality ?? "none")
     setStartupUpdate(String(settings.defaults.checkForUpdateOnStartup ?? true))
@@ -86,7 +86,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   return <>
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     <Card>
-      <CardHeader><CardTitle>App Server 设置</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；写入后需重启全部服务生效。</CardDescription></CardHeader>
+      <CardHeader><CardTitle>Codex 新会话与用户偏好</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；各项设置的准确生效范围会在确认时显示。</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label="当前 Provider" value={settings.provider} badge />
@@ -115,10 +115,10 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
 
         <Separator />
         <section className="flex flex-col gap-3">
-          <div><h3 className="font-medium">其他用户偏好</h3><p className="text-xs text-muted-foreground">这些字段作为一组写入 Codex 用户配置。</p></div>
+          <div><h3 className="font-medium">其他用户偏好</h3><p className="text-xs text-muted-foreground">这些字段作为一组写入 Codex 用户配置；推理摘要未配置时默认关闭。</p></div>
           <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
             <ManagedSelect label="Plan 思考等级" value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={setPlanEffort} />
-            <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭"]]} disabled={officialDisabled} onChange={setReasoningSummary} />
+            <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭（未配置默认，none）"]]} disabled={officialDisabled} onChange={setReasoningSummary} />
             <ManagedSelect label="输出详细程度" value={verbosity} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} disabled={officialDisabled} onChange={setVerbosity} />
             <ManagedSelect label="模型人格" value={personality} options={[["none", "无"], ["friendly", "友好"], ["pragmatic", "务实"]]} disabled={officialDisabled} onChange={setPersonality} />
             <ManagedSelect label="启动时检查更新" value={startupUpdate} options={[["true", "开启"], ["false", "关闭"]]} disabled={officialDisabled} onChange={setStartupUpdate} />

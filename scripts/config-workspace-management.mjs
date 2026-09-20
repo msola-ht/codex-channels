@@ -36,7 +36,7 @@ export function applyWorkspaceSetting(document, input) {
   }
   return {
     value: projectWorkspaceSettings(document).find((workspace) => workspace.id === workspaceId),
-    activation: "none",
+    activation: "reload",
   };
 }
 

@@ -137,6 +137,8 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",
     "provider.settings": "第三方模型设置",
+    "gateway.timezone": "网关时区",
+    "codex.timezone": "App Server 时区",
     "surface.telegram.enabled": "Telegram 启用状态",
     "surface.telegram.token": "Telegram Bot Token",
     "surface.telegram.proxy": "Telegram 代理",

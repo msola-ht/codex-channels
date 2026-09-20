@@ -30,7 +30,12 @@ import {
 } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
-import { securePrivateFileSync } from "../runtime/private-file.mjs";
+import {
+  securePrivateFileSync,
+  writePrivateFileAtomicSync,
+} from "../runtime/private-file.mjs";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { updateCodexUserConfig } from "./codex-user-config.mjs";
 import {
   assertManagedModelProviderCapabilities,
   managedModelProviderDefinitions,
@@ -200,6 +205,23 @@ export function inspectGatewayConfiguration(environment = process.env) {
   };
 }
 
+export async function updateReasoningSummaryOnce(environment = process.env, options = {}) {
+  const markerPath = join(codexHomePath(environment), ".codexc-reasoning-summary-0.155.1");
+  if (existsSync(markerPath)) {
+    if (readFileSync(markerPath, "utf8") !== "completed\n") {
+      throw new Error("Codex 0.155.1 推理摘要更新标记无效");
+    }
+    return { changed: false };
+  }
+  let changed = false;
+  await updateCodexUserConfig(environment, (config) => {
+    changed = config.model_reasoning_summary !== "none";
+    return changed ? [{ keyPath: "model_reasoning_summary", value: "none" }] : [];
+  }, options);
+  writePrivateFileAtomicSync(markerPath, "completed\n");
+  return { changed };
+}
+
 export async function updateLocalInstallation(environment = process.env, options = {}) {
   const completedStages = [];
   let activeStage = "inspect";
@@ -284,6 +306,12 @@ export async function updateLocalInstallation(environment = process.env, options
     providerCatalogs = await runStage("provider-catalogs", () =>
       (options.updateProviderCatalogs
         ?? (() => refreshManagedProviderCatalogsForUpdate(environment)))());
+    await runStage("codex-settings", () =>
+      (options.updateCodexSettings ?? (async () => {
+        const result = await updateReasoningSummaryOnce(environment);
+        if (result.changed) writeCliMessage("success", "首次更新已将 Codex 推理摘要设为关闭；后续更新保留用户选择。");
+        return result;
+      }))());
     config = await runStage("config", () =>
       (options.updateConfig
         ?? (() => updateGatewayConfiguration(environment)))());
@@ -378,6 +406,7 @@ export async function inspectLocalUpdatePlan(
     ...((services.obsoleteServices?.length ?? 0) > 0 ? ["obsolete-services"] : []),
     "provider-files",
     "provider-catalogs",
+    "codex-settings",
     "config",
     "databases",
     "validate-offline",
@@ -969,6 +998,7 @@ function annotateLocalUpdateFailure(error, details) {
     "obsolete-services",
     "provider-files",
     "provider-catalogs",
+    "codex-settings",
     "config",
     "databases",
     "validate-offline",

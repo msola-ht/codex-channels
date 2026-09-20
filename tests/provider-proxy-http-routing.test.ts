@@ -34,9 +34,9 @@ describe("ProviderProxy HTTP routing", () => {
     });
     await proxy.start();
     openServers.push(proxy);
-    const response = await fetch(`http://${proxy.address()}/go/test/responses/compact`, {
+    const response = await fetch(`http://${proxy.address()}/go/test/responses`, {
       method: "POST", body: "{}",
-      headers: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread-test", turn_id: "turn-test" }) },
+      headers: { "x-codex-turn-metadata": JSON.stringify({ thread_id: "thread-test", turn_id: "turn-test", request_kind: "compaction" }) },
     });
     await response.text();
     expect(response.status).toBe(502);
@@ -426,7 +426,7 @@ it("rejects a non-loopback listen address", async () => {
     await expect(proxy.start()).rejects.toThrow(/回环/u);
   });
 
-it("forwards HTTP compaction requests through the configured upstream base path", async () => {
+it("rejects the retired HTTP compaction endpoint without forwarding or recording metrics", async () => {
     let receivedPath = "";
     const metrics: ProviderProxyMetrics[] = [];
     const upstream = createServer((request, response) => {
@@ -474,14 +474,9 @@ it("forwards HTTP compaction requests through the configured upstream base path"
       request.end("{}");
     });
 
-    expect(status).toBe(200);
-    expect(receivedPath).toBe("/v1/responses/compact?mode=test");
-    expect(metrics).toEqual([expect.objectContaining({
-      operation: "compact",
-      responseFormat: "json",
-      status: "completed",
-      httpStatus: 200,
-    })]);
+    expect(status).toBe(404);
+    expect(receivedPath).toBe("");
+    expect(metrics).toEqual([]);
   });
 
 it("forwards the Codex model catalog request through the configured upstream base path", async () => {
@@ -567,7 +562,7 @@ it("rejects unsupported paths", async () => {
     expect(status).toBe(404);
   });
 
-it("forwards the locked OpenAI 0.154.0 HTTP API paths without recording response metrics", async () => {
+it("forwards the locked OpenAI HTTP API paths without recording response metrics", async () => {
     const received: Array<{ method: string; path: string }> = [];
     const upstream = createServer((request, response) => {
       received.push({

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { parseTimezoneCommandArgs, runTimezoneCommand, timezoneChoices } from "../scripts/timezone-command.mjs";
 import { loadGatewaySettings } from "../scripts/config-management.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];
@@ -43,6 +43,79 @@ function captureOutput(isTTY = false) {
 }
 
 describe("codexc timezone", () => {
+  it.each([
+    [["--gateway", "--system"], "system"],
+    [["--gateway", "UTC"], "UTC"],
+    [["--gateway", "--follow-app-server"], null],
+  ] as const)("repairs an invalid stored timezone with %j", async (args, expected) => {
+    const fixture = createFixture();
+    writeGatewayConfig(fixture.configPath, {
+      ...readGatewayConfig(fixture.configPath), gateway: { timezone: "Unknown/Zone" },
+    });
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe("Unknown/Zone");
+    await runTimezoneCommand(args, {
+      environment: fixture.environment, output: captureOutput().stream,
+    });
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe(expected);
+  });
+
+  it("repairs an invalid timezone through the interactive menu", async () => {
+    const fixture = createFixture();
+    writeGatewayConfig(fixture.configPath, {
+      ...readGatewayConfig(fixture.configPath), gateway: { timezone: "Unknown/Zone" },
+    });
+    const options = { environment: fixture.environment, output: captureOutput(true).stream };
+    await expect(runTimezoneCommand(["--gateway"], {
+      ...options, prompts: { select: async () => "Unknown/Zone", isCancel: () => false },
+    })).rejects.toThrow("[gateway]");
+    await runTimezoneCommand(["--gateway"], {
+      ...options, prompts: { select: async () => "UTC", isCancel: () => false },
+    });
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe("UTC");
+  });
+
+  it("sets a gateway timezone, selects system, and restores following App Server", async () => {
+    const fixture = createFixture();
+    const output = captureOutput();
+    const options = { environment: fixture.environment, output: output.stream };
+    await runTimezoneCommand(["--gateway", "Asia/Tokyo"], options);
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe("Asia/Tokyo");
+    expect(loadGatewaySettings(fixture.environment).system.appServerTimezone).toBeNull();
+    expect(output.text()).toContain("后台服务运行时会自动重启");
+    await runTimezoneCommand(["--gateway", "--system"], options);
+    expect(readGatewayConfig(fixture.configPath).gateway).toMatchObject({ timezone: "system" });
+    await runTimezoneCommand(["--gateway", "--follow-app-server"], options);
+    expect(readGatewayConfig(fixture.configPath).gateway ?? {}).not.toHaveProperty("timezone");
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBeNull();
+  });
+
+  it("defaults the gateway menu to following App Server and supports system and manual choices", async () => {
+    const fixture = createFixture();
+    const select = vi.fn().mockResolvedValue("__system__");
+    const options = { environment: fixture.environment, output: captureOutput(true).stream };
+    await runTimezoneCommand(["--gateway"], {
+      ...options, prompts: { select, isCancel: () => false },
+    });
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ initialValue: "app-server" }));
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe("system");
+    await runTimezoneCommand(["--gateway"], {
+      ...options, prompts: {
+        select: vi.fn().mockResolvedValue("__custom__"),
+        text: vi.fn().mockResolvedValue("Asia/Kolkata"), isCancel: () => false,
+      },
+    });
+    expect(loadGatewaySettings(fixture.environment).system.gatewayTimezone).toBe("Asia/Kolkata");
+    expect(timezoneChoices("system", true).filter(({ value }: { value: string }) => value === "system"))
+      .toEqual([]);
+  });
+
+  it("rejects conflicting follow flags", () => {
+    for (const args of [["--follow-app-server"], ["--gateway", "--follow-app-server", "--system"],
+      ["--gateway", "--follow-app-server", "UTC"], ["--gateway", "--gateway"]]) {
+      expect(() => parseTimezoneCommandArgs(args)).toThrow();
+    }
+  });
+
   it("offers common timezones, the current value and manual input", () => {
     expect(timezoneChoices(null).map(({ value }: { value: string }) => value)).toEqual([
       "__system__",
@@ -174,6 +247,8 @@ describe("codexc timezone", () => {
     expect(loadGatewaySettings(fixture.environment).system.appServerTimezone)
       .toBe("America/Los_Angeles");
     expect(saved.text()).toContain("codexc service restart app-server");
+    expect(saved.text()).toContain("codexc service restart gateway");
+    expect(saved.text()).toContain("直接运行的网关需重新执行原启动命令");
 
     const cleared = captureOutput();
     await expect(runTimezoneCommand(["--system"], {
@@ -183,6 +258,7 @@ describe("codexc timezone", () => {
     expect(readGatewayConfig(fixture.configPath).codex ?? {})
       .not.toHaveProperty("timezone");
     expect(cleared.text()).toContain("已恢复系统时区");
+    expect(cleared.text()).toContain("codexc service restart gateway");
   });
 
   it("reports the current value in non-interactive terminals", async () => {

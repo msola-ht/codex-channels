@@ -62,6 +62,8 @@ export interface GatewayConfig {
   defaultWorkspaceId: string;
   codexSocketPath: string;
   codexModel?: string;
+  codexTimezone?: string;
+  gatewayTimezone?: string;
   codexSandbox: "read-only" | "workspace-write";
   codexClientIdentity?: {
     name?: string;
@@ -223,6 +225,15 @@ function loadValidatedConfigDocument(
   } = {},
 ): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
+  const gatewayTimezone = raw.gateway?.timezone === "system"
+    ? undefined : raw.gateway?.timezone ?? raw.codex.timezone;
+  if (raw.gateway?.timezone === undefined && gatewayTimezone !== undefined) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: gatewayTimezone });
+    } catch {
+      throw new ConfigurationError("网关时区必须是 Node.js 支持的 IANA 名称");
+    }
+  }
   if (!workspaces.some((workspace) => workspace.id === raw.default_workspace)) {
     throw new ConfigurationError(`default_workspace 不存在：${raw.default_workspace}`);
   }
@@ -271,6 +282,8 @@ function loadValidatedConfigDocument(
     defaultWorkspaceId: raw.default_workspace,
     codexSocketPath: resolveConfiguredPath(raw.codex.socket_path, baseDirectory),
     ...(raw.codex.default_model ? { codexModel: raw.codex.default_model } : {}),
+    ...(raw.codex.timezone === undefined ? {} : { codexTimezone: raw.codex.timezone }),
+    ...(gatewayTimezone === undefined ? {} : { gatewayTimezone }),
     codexSandbox: raw.codex.sandbox,
     ...(raw.codex.client_identity
       ? { codexClientIdentity: raw.codex.client_identity }

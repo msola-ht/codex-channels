@@ -88,7 +88,7 @@ export async function updateCodexUserSetting(
       kind: input.kind,
       previousVersion: expectedVersion,
       value,
-      activation: "restart-all",
+      activation: codexUserSettingActivation(input.kind),
     };
   } finally {
     await client.close().catch(() => undefined);
@@ -133,11 +133,17 @@ export async function previewCodexUserSetting(
       kind: input.kind,
       previousVersion: expectedVersion,
       value,
-      activation: "restart-all",
+      activation: codexUserSettingActivation(input.kind),
     };
   } finally {
     await client.close().catch(() => undefined);
   }
+}
+
+function codexUserSettingActivation(kind) {
+  if (kind === "auto-recap") return "next-tui";
+  if (kind === "preferences") return "next-thread-and-tui";
+  return "next-thread";
 }
 
 function projectSettings(snapshot, provider, rawModels) {

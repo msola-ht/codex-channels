@@ -74,7 +74,7 @@ describe("codexc agents script", () => {
         modelDisplayName: "DeepSeek V4 Pro",
       },
       willChange: true,
-      activation: "restart-all",
+      activation: "restart-app-server",
     });
   });
 
@@ -113,7 +113,7 @@ describe("codexc agents script", () => {
     );
     expect(configured).toEqual({
       action: "configured",
-      activation: "restart-all",
+      activation: "restart-app-server",
       previous: { configured: false, provider: null, model: null },
       selection: { provider: "deepseek", model: "deepseek-flash" },
     });
@@ -199,16 +199,16 @@ describe("codexc agents script", () => {
       action: "configured",
       provider: "deepseek",
       model: "deepseek-v4-pro",
-      activation: "restart-all",
+      activation: "restart-app-server",
       activationResult: {
         status: "restart",
-        target: "all",
-        commands: ["codexc service restart all"],
+        target: "app-server",
+        commands: ["codexc service restart app-server"],
       },
     });
     expect(configureRole).toHaveBeenCalledWith("deepseek", "deepseek-v4-pro", {});
     expect(output.join("")).toContain("已配置共享第三方子代理：deepseek / deepseek-v4-pro");
-    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).toContain("codexc service restart app-server");
   });
 
   it("confirms before disabling the shared role through the Setup menu", async () => {
@@ -239,11 +239,11 @@ describe("codexc agents script", () => {
 
     expect(result).toEqual({
       action: "disabled",
-      activation: "restart-all",
+      activation: "restart-app-server",
       activationResult: {
         status: "restart",
-        target: "all",
-        commands: ["codexc service restart all"],
+        target: "app-server",
+        commands: ["codexc service restart app-server"],
       },
     });
     expect(prompts.confirm).toHaveBeenCalledOnce();

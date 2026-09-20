@@ -2,7 +2,7 @@ import * as clackPrompts from "@clack/prompts";
 
 import {
   writeCliMessage,
-  writeCliRemediationRestartAll,
+  writeCliRemediationRestartAppServer,
 } from "../runtime/cli-presentation.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
@@ -76,14 +76,14 @@ export async function runThirdPartyAgentSetup({
         stdout: output,
         environment,
       });
-      writeCliRemediationRestartAll({ stdout: output, environment });
+      writeCliRemediationRestartAppServer({ stdout: output, environment });
     } else {
       writeCliMessage("note", "当前没有本项目管理的第三方子代理，无需处理。", {
         stdout: output,
         environment,
       });
     }
-    const activation = result.action === "disabled" ? "restart-all" : "none";
+    const activation = result.action === "disabled" ? "restart-app-server" : "none";
     return {
       action: "disabled",
       activation,
@@ -145,12 +145,12 @@ export async function runThirdPartyAgentSetup({
     `已配置共享第三方子代理：${selection.provider} / ${selection.model}（agents.external）。`,
     { stdout: output, environment },
   );
-  writeCliRemediationRestartAll({ stdout: output, environment });
+  writeCliRemediationRestartAppServer({ stdout: output, environment });
   return {
     action: "configured",
     provider: selection.provider,
     model: selection.model,
-    activation: "restart-all",
-    activationResult: configActivationResult("restart-all"),
+    activation: "restart-app-server",
+    activationResult: configActivationResult("restart-app-server"),
   };
 }

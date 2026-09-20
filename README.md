@@ -8,7 +8,7 @@
 
 在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，因此聊天渠道和原生 TUI 可以继续使用同一组 Thread、Workspace 和运行状态。
 
-当前 `main` 开发基线：`0.154.0`；当前正式版：`0.154.0`。
+当前 `main` 开发基线：`0.155.1`；当前正式版：`0.155.1`。
 
 完整安装、配置、渠道命令、服务管理、升级、排障和开发说明见[《Codex Connect 使用指导》](docs/user-guide.md)。
 
@@ -17,8 +17,8 @@
 安装正式版配套 CLI：
 
 ```bash
-npm install -g @openai/codex@0.154.0
-npm install -g @hegenai/codexc@0.154.0
+npm install -g @openai/codex@0.155.1
+npm install -g @hegenai/codexc@0.155.1
 ```
 
 初始化、配置并安装后台服务：
@@ -44,13 +44,15 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
+本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI 和本地配置。
+首次执行 0.155.1 的 `codexc update` 会将用户主配置的推理摘要设为关闭，后续更新保留重新选择的值，见[推理摘要设置](docs/user-guide.md#推理摘要)。
 
 ## 常用入口
 
 ```bash
-codexc setup                 # Codex 用户设置、Provider、渠道和项目技能
-codexc config                # Gateway 显示、系统、自动化、代理、WebUI 和本地指标存储
-codexc timezone              # 模型可见的时区与当前日期（App Server 与 WebUI）
+codexc setup                 # Provider、渠道和项目技能接入
+codexc config                # Codex 新会话偏好与 Gateway 日常设置
+codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
@@ -64,7 +66,7 @@ codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
 ```
 
-计划清单工具在 `codexc setup → Codex 新会话默认值 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
+计划清单工具在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
 
 符合 OpenAI 后端权益的账户在普通用量耗尽后，会把当前 Session 自动切换到 Luna Reserve；当前 Gateway 进程持续运行、账户和 Thread 未切换且原模型仍可用时，会在普通用量恢复后切回。失败的消息需要重新发送，细节见[渠道展示与本地指标](docs/display.md#luna-reserve-自动回退)。
 

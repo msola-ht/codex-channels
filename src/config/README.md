@@ -1,6 +1,10 @@
 # Config
 
 本目录负责把共享运行时已完成结构校验的 TOML 文档转换为 Gateway 运行配置。
+其中 `codexTimezone` 保留已有 `codex.timezone` 配置，供渠道启动卡展示，不修改 Gateway 进程时区。
+`gatewayTimezone` 是解析后的网关时区：缺省使用 `codex.timezone`，`gateway.timezone = "system"`
+保留进程继承的系统时区，其他值为自定义 IANA 名称；有效网关时区或 `codexTimezone` 变化要求重启
+Gateway，以刷新进程时区或渠道启动卡配置。
 
 ## 文件
 
@@ -40,12 +44,12 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 `turn/plan/updated` 的平台展示，不影响 Core 保存最新计划，也不切换 `/plan` 协作模式。
 
 上游模型是否能够产生这些通知由 Codex 用户配置的 `tools.update_plan.enabled` 控制，默认关闭；通过
-`codexc setup → Codex 新会话默认值 → 计划清单工具` 修改。该设置写入 `~/.codex/config.toml`，与 Gateway
+`codexc config → Codex 新会话与用户偏好 → 计划清单工具` 修改。该设置写入 `~/.codex/config.toml`，与 Gateway
 的 `display.plan_updates` 分开管理；`codexc update` 会在合同预检时提示当前状态，`codexc doctor` 只读诊断该项。
-变化需要重启 Gateway，不需要重启 App Server。
+变化由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，不需要重启 Gateway 或 App Server。
 
-`display.reasoning` 是“思考中”状态展示开关，默认开启；显式设为 `false` 时三渠道不再发送
-思考状态卡，其余输出保持不变。变化需要重启 Gateway，不需要重启 App Server。
+`display.reasoning` 是“思考中”状态展示开关，默认关闭；显式设为 `true` 时 Telegram 和飞书发送
+思考状态卡，微信继续不主动发送，其余输出保持不变。变化需要重启 Gateway，不需要重启 App Server。
 
 `logging.level` 是全局日志级别；`debug` 与 `trace` 同时启用全局调试模式，`info`、`warn`、
 `error` 和 `fatal` 关闭调试模式。调试模式允许各模块记录受约束的类型、阶段、耗时和结果；
@@ -53,7 +57,7 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 仍不得进入日志。可通过 `codexc config` 的“高级设置 → 日志等级”选择完整等级，变化需要重启
 Gateway，不需要重启 App Server。
 
-`experimental.plugin_api` 控制当前锁定 Codex 0.154.0 的开发中 Plugin 调试入口，默认关闭；未显式开启时
+`experimental.plugin_api` 控制当前锁定 Codex 0.155.1 的开发中 Plugin 调试入口，默认关闭；未显式开启时
 `/plugin` 的列表与调用在 Application 边界失败关闭，不发送 `plugin/installed` 或 mention
 请求。变化需要重启 Gateway，不需要重启 App Server；Doctor 始终显示开关状态与风险提示。
 
@@ -94,8 +98,9 @@ Workspace 上配置。
 后删除最旧记录。变化需要重启 Gateway，不改变 SQLite Schema；手工立即清理使用
 `codexc metrics cleanup`，该命令先创建私有备份。
 
-`codexc config` 只编辑以上严格 Schema 已支持且适合日常操作的 Gateway 设置，并提供不显示凭据、
-令牌或代理值的配置总览。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
+`codexc config` 统一管理 Codex 新会话与用户偏好，以及以上严格 Schema 已支持且适合日常操作的
+Gateway 设置，并提供不显示凭据、令牌或代理值的配置总览。Codex 设置入口不依赖 Gateway 配置已经
+初始化或可解析；选择 Gateway 设置时仍会明确报告对应配置错误。需要重建渠道连接的变化在后台 Gateway 运行时自动重启，未运行时在下次
 启动生效，前台进程需重新启动；
 显式网络代理会改变 App Server 服务环境，因此保存后必须运行 `codexc service install` 重新生成
 服务定义。Codex 官方与第三方 Provider 配置仍由 `codexc setup` 管理。
