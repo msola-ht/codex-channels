@@ -15,6 +15,8 @@
 
 ## 发行记录
 
+- [`docs/releases/v0.155.1.md`](docs/releases/v0.155.1.md)：对应 `codex-cli 0.155.1` 的
+  正式发布准备、用户可见改动、兼容边界与验证范围。
 - [`docs/releases/v0.154.0.md`](docs/releases/v0.154.0.md)：对应 `codex-cli 0.154.0` 的
   `v0.154.0` 正式发行说明、用户可见改动、兼容边界与验证范围。
 - [`docs/releases/v0.153.4.md`](docs/releases/v0.153.4.md)：对应 `codex-cli 0.153.4` 的

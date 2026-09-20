@@ -15,8 +15,8 @@ App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gatew
 安装配套的 Codex CLI 与 Gateway：
 
 ```bash
-npm install -g @openai/codex@0.154.0
-npm install -g @hegenai/codexc@0.154.0
+npm install -g @openai/codex@0.155.1
+npm install -g @hegenai/codexc@0.155.1
 ```
 
 安装或升级后，重启服务并检查：

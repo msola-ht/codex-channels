@@ -20,7 +20,7 @@
 ## 0.155.1
 
 - 官方 Release：[`rust-v0.155.0`](https://github.com/openai/codex/releases/tag/rust-v0.155.0)、[`rust-v0.155.1`](https://github.com/openai/codex/releases/tag/rust-v0.155.1)。
-- 项目决策：以 0.155.1 作为未发布开发基线，吸收 0.155.0 的修复及 0.155.1 的摘要默认行为；正式安装入口仍为 0.154.0。
+- 项目决策：以 0.155.1 作为开发与正式发布目标，吸收 0.155.0 的修复及 0.155.1 的摘要默认行为；安装入口已为发布同步至 0.155.1，Tag、npm 与 GitHub Release 按正式发布流程另行执行。
 - 协议审查：861 个生成文件，167 个 Client Request、84 个 Notification、11 个 Server Request；受控类型导出仍为 68 个，业务 Request 仍为 44 个。公开 CLI 参数合同没有变化。
 
 ### 已采用
