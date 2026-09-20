@@ -92,9 +92,10 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
-页面加载时先通过 `GET /api/v1/time` 获取服务端系统 IANA 时区与当前时间；该接口同样受访问令牌鉴权，
-不接受浏览器覆盖时区。加载失败时明确报错，不按浏览器时区显示。请求、转储、额度重置和更新时间等
-统一按服务端时区格式化，页头标明时区及 UTC 偏移；夏令时按该时区在各时间点的规则计算。
+页面加载时先通过 `GET /api/v1/time` 获取服务端进程 IANA 时区与当前时间，缺省为系统时区，可用
+[`codex.timezone`](model-timezone.md) 覆盖；该接口同样受访问令牌鉴权，不接受浏览器覆盖时区。
+加载失败时明确报错，不按浏览器时区显示。请求、转储、额度重置和更新时间等统一按服务端时区格式化，
+页头标明时区及 UTC 偏移；夏令时按该时区在各时间点的规则计算。
 设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 
 调用详情页读取用户数据目录 `traffic/` 下 `[debug].model_traffic_dump` 生成的 V2 session，默认展示全部
@@ -156,9 +157,9 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 本次调用展示转发前准备、转发至首字、首字至结束与总耗时；缺少首字或中断前未走到的阶段不补值。HTTP 请求接收与转发可重叠，响应头至结束也包含背压暂停，均不解释为纯生成耗时。WS 另列进入转发时连接是否就绪、至提交发送的等待及提交至首字；每次调用独立记录，不复用连接握手耗时，提交发送不表示上游已收到。
 结束优先复用首次模型终态的总耗时；无终态时为上游结束或观察失败的时间，不包含其后客户端收到全部内容的耗时。历史调用没有 `callTiming` 时保留原墙钟耗时并明确未记录新阶段；无效或倒序节点不计算对应差值，不混用墙钟与单调时钟。V2 记录仅增加可选字段，原记录无需改写，回滚程序可忽略该字段。总耗时独立经指标 IPC 保存到 Schema v18，其余分段只保存在调用记录；需加载新版本 App Server 采集端才能产生节点。
 上游首 Token、最大排队、轮次累计生成、logical turn 和客户端工具暂停保持独立分组，不能与本次调用阶段相加或相减来估算网络延迟。
-连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 由本地代理在握手时显式
-请求 timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会
-移除该内部请求头。
+上游 timing 事件只在请求带 `x-responsesapi-include-timing-metrics` 时下发；该头由 App Server 按自身
+`runtime_metrics` 特性生成，代理不注入也不删除，出站握手头因此与原生客户端一致。HTTP/SSE 请求不带
+该头，不会产生上游 timing 数据，相关项显示“未提供”。
 上游数据从本次调用的 `responsesapi.websocket_timing.timing_metrics` 读取，仅接受
 `timing_scope=logical_turn` 且 `response_id` 与终态一致的事件，不受 trace 页码影响；缺失项显示
 “未提供”。各项口径可能重叠，不能相加，不代表完整对话轮次，差值也不作为网络延迟。
@@ -198,7 +199,7 @@ App Server 约每 24 小时在完整逻辑调用之间轮转 writer session，�
 前端整批替换结果，不混用上次图表；重新加载整个 WebUI 后恢复默认最近 30 天。
 OpenAI 周额度读取当前快照，不随所选历史日期回退。账户余额和外部额度仍保留独立获取时间，不伪装成指标快照。
 既有 API 的 `24h`、`90d` 查询继续支持，但不列在时间选择菜单中。
-日期按 WebUI 服务所在主机本地时区解析，包含结束日并截断到当前时刻。
+日期按 WebUI 服务进程时区解析，缺省为系统时区，包含结束日并截断到当前时刻。
 存储毫秒时间戳、API/JSON/CSV 中的时间戳和 UTC ISO 时间保持不变；原始上游正文不改写。
 Threads 和每轮明细默认全部保留历史，控制台、请求和错误页面默认最近 30 天。分页 `offset` 从 0 开始，
 `limit` 为 1–500。请求排序 `direction` 支持 `asc|desc`，`sort` 支持 `time`、`provider`、

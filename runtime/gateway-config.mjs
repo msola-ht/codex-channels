@@ -133,6 +133,17 @@ const terminalIdentitySchema = z.string().max(
   "terminal_identity 必须是「终端名」或「终端名/版本」，字符限字母、数字、.、_、-，且以字母或数字开头",
 );
 
+/** `[codex].timezone` 的字面格式：IANA 时区名称，例如 `Asia/Shanghai`、`Etc/GMT+8`。 */
+export const timezonePattern = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/u;
+
+const timezoneSchema = z.string().max(
+  64,
+  "timezone 长度不能超过 64 个字符",
+).regex(
+  timezonePattern,
+  "timezone 必须是 IANA 时区名称（如 Asia/Shanghai），字符限字母、数字、_、+、- 与 /，且以字母开头",
+);
+
 function containsControlCharacter(value) {
   for (const character of value) {
     const code = character.codePointAt(0);
@@ -167,6 +178,7 @@ const codexSchema = z.strictObject({
   client_identity: clientIdentitySchema.optional(),
   upstream_user_agent: upstreamUserAgentSchema.optional(),
   terminal_identity: terminalIdentitySchema.optional(),
+  timezone: timezoneSchema.optional(),
   desktop_app: z.strictObject({
     enabled: z.boolean().default(false),
     port: z.number().int().min(1).max(65_535).default(47_821),

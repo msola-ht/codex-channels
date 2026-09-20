@@ -10,6 +10,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { createWebuiServer, resolveWebuiSettings } from "../scripts/webui-server.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { applyConfiguredTimezone } from "../scripts/webui-server.mjs";
+import {
+  loadGatewaySettings,
+  updateGatewaySetting,
+} from "../scripts/config-management.mjs";
 import {
   cleanupWebuiTestFixtures,
   createWebuiStaticDir,
@@ -166,6 +172,33 @@ describe("webui server access and settings resolution", () => {
 
     expect(() => resolveWebuiSettings({ environment: fixture.environment }))
       .toThrow(/绑定非回环地址时必须设置 token/u);
+  });
+
+  it("lets the WebUI process follow the configured model-visible timezone", () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.home, "config.toml");
+    const environment: NodeJS.ProcessEnv = {
+      ...fixture.environment,
+      TZ: "Asia/Shanghai",
+    };
+
+    applyConfiguredTimezone(environment, join(fixture.home, "absent.toml"));
+    expect(environment.TZ).toBe("Asia/Shanghai");
+
+    applyConfiguredTimezone(environment, configPath);
+    expect(environment.TZ).toBe("Asia/Shanghai");
+
+    const settings = loadGatewaySettings(fixture.environment);
+    updateGatewaySetting({
+      kind: "system.app-server-timezone",
+      value: "America/Los_Angeles",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+
+    applyConfiguredTimezone(environment, configPath);
+    expect(environment.TZ).toBe("America/Los_Angeles");
   });
 
   it("still applies the token when configured", () => {

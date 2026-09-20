@@ -18,6 +18,9 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   中断、未完整观测和失败数量，同时展示 Token 与缓存命中；官方 `Turn.durationMs` 可用时另显示
   从本轮开始到完成的总耗时。主 Turn 与子代理完成卡片不显示“上游轮次首 Token”；指标采集、存储及 WebUI 展示保留。
   `/metrics` 最近运行聚合保留上游轮次首 Token，并标明不是单请求首内容；单请求首内容延迟仅在请求明细、导出和转储中展示，不合成为轮次首内容。
+  上游轮次首 Token 来自 Responses WebSocket 的上游 timing 事件，只有请求带
+  `x-responsesapi-include-timing-metrics` 时才下发；该头由 App Server 按自身 `runtime_metrics`
+  特性生成并原样透传，代理不注入，因此 HTTP/SSE 请求与上游不下发该事件的请求始终显示“未提供”。
   完成卡片的运行、任务与会话摘要统一标为“Token/s”，`/metrics` 保留“平均 Token/s”：范围内有效请求输出速率的算术平均。单请求为 `outputTokens × 1000 / totalDurationMs`，只纳入输出 Token 与总耗时都大于零的记录；不扣首字等待，不从输出中减去推理 Token，不额外限制请求状态，压缩请求沿用原统计范围。平均值从原始请求直接计算，不对各轮或子代理均值再次平均；不是总 Token 除以 Turn/会话墙钟耗时，也不是纯生成速度。历史缺少耗时或无有效样本时显示“未提供”，不按旧时间戳补算。正式和调试模式均显示；该派生值不新增存储字段。
   请求明细和转储的“首字耗时”从上游转发开始计到首个符合条件的事件，
   HTTP/SSE 采用 semantic 事件口径，WebSocket 采用 delta 与指定 done 事件口径，不要求文本非空；详见[WebUI 请求明细](webui.md)。
@@ -90,8 +93,9 @@ Gateway 检测到活动 Turn 时会等其完成后再写入设置，避免把已
 `codexc metrics turns <Thread ID>` 仍列出指定 Thread 自身的 Turn 明细，不把子代理任务拆入公开
 Turn 行，避免改变既有输出结构。渠道 `/metrics` 只查询当前绑定 Thread，不接受任意 Thread ID。
 范围统一为滚动窗口 `24h` / `7d` / `30d` / `90d` 和 `all`，渠道、CLI 与 WebUI 使用相同名称。
-CLI 与 WebUI 还支持 `today` / `yesterday`，分别按主机本地时区统计今天截至当前时刻、昨天完整自然日。
-WebUI 的每日分组和所有格式化时间统一跟随服务端系统时区，浏览器时区不改变日期归属；
+CLI 与 WebUI 还支持 `today` / `yesterday`，分别统计今天截至当前时刻、昨天完整自然日。
+WebUI 的每日分组和所有格式化时间统一跟随服务端进程时区，缺省为系统时区，可用
+[`codex.timezone`](model-timezone.md) 覆盖；浏览器时区不改变日期归属。
 CLI 人类可读的指标报告、导出与菜单使用执行主机本地时间，报告标明时区。JSON/CSV 中的时间戳和
 UTC ISO 时间以及原始上游转储保持原格式，不迁移历史记录；耗时不受时区影响。
 WebUI 菜单只展示今天、昨天、最近 7 天、最近 30 天、全部历史和自定义日期。

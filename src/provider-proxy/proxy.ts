@@ -76,8 +76,6 @@ export interface ProviderProxyOptions {
   upstreamBasePath?: string;
   /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.154.0 API 路径。 */
   allowOpenAiApiPaths?: boolean;
-  /** 仅确认的官方 OpenAI 上游请求 Responses WebSocket timing 事件。 */
-  requestOpenAiTimingMetrics?: boolean;
   /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
   accountIds?: readonly string[];
   /** 共享代理无账户前缀请求归属的默认账户。 */
@@ -131,7 +129,6 @@ export class ProviderProxy {
   private readonly externalRoleReasoningEffort: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
-  private readonly requestOpenAiTimingMetrics: boolean;
   private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
@@ -180,7 +177,6 @@ export class ProviderProxy {
     }
     this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
-    this.requestOpenAiTimingMetrics = options.requestOpenAiTimingMetrics ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
       ? undefined
@@ -582,7 +578,6 @@ export class ProviderProxy {
         target.host,
         target.port,
         this.upstreamUserAgent,
-        recordsResponseMetrics && this.requestOpenAiTimingMetrics,
       ),
       handshakeTimeout: this.timeoutMs,
     });
@@ -604,30 +599,30 @@ export class ProviderProxy {
     client.on("message", (data, isBinary) => {
       const receivedAtMonotonicMs = performance.now();
       exchange?.webSocketFrame("client", data, isBinary, receivedAtMonotonicMs);
-      const sanitized = recordsResponseMetrics
-        ? sanitizeClientWebSocketMessage(data, isBinary)
-        : { data };
+      const inspected = recordsResponseMetrics
+        ? inspectClientWebSocketMessage(data, isBinary)
+        : undefined;
       const startedAtMonotonicMs = performance.now();
-      const callTiming = sanitized.metadata ? exchange?.callTiming : undefined;
+      const callTiming = inspected?.metadata ? exchange?.callTiming : undefined;
       callTiming?.forwarding(startedAtMonotonicMs, upstream.readyState === WebSocket.OPEN);
-      if (sanitized.metadata) {
-        activeMetrics = sanitized.recordsMetrics === false
+      if (inspected?.metadata) {
+        activeMetrics = inspected.recordsMetrics === false
           ? undefined
           : createMetricsState(
-              sanitized.metadata,
-              sanitized.requestStartedAtMs ?? Date.now(),
+              inspected.metadata,
+              inspected.requestStartedAtMs ?? Date.now(),
               "websocket",
-              sanitized.metadata.operation,
+              inspected.metadata.operation,
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
               startedAtMonotonicMs,
               receivedAtMonotonicMs,
             );
         if (activeMetrics) {
-          activeMetrics.model = sanitized.model ?? null;
-          activeMetrics.requestModel = sanitized.model ?? null;
+          activeMetrics.model = inspected.model ?? null;
+          activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
-          activeMetrics.serviceTier = sanitized.serviceTier ?? null;
-          activeMetrics.reasoningEffort = sanitized.reasoningEffort
+          activeMetrics.serviceTier = inspected.serviceTier ?? null;
+          activeMetrics.reasoningEffort = inspected.reasoningEffort
             ?? (route.externalRole
               ? this.externalRoleReasoningEffort ?? null
               : null);
@@ -635,9 +630,9 @@ export class ProviderProxy {
       }
       if (upstream.readyState === WebSocket.OPEN) {
         callTiming?.submitted(performance.now());
-        upstream.send(sanitized.data, { binary: isBinary });
+        upstream.send(data, { binary: isBinary });
       } else if (upstream.readyState === WebSocket.CONNECTING) {
-        pending.push({ data: sanitized.data, isBinary, timing: callTiming });
+        pending.push({ data, isBinary, timing: callTiming });
       }
     });
     upstream.on("open", () => {
@@ -848,11 +843,14 @@ function isExpectedStreamAbort(error: Error): boolean {
     && error.code === "ECONNRESET";
 }
 
-function sanitizeClientWebSocketMessage(
+/**
+ * 只读取出站 `response.create` 的指标字段，不改写帧内容：上游收到的请求与客户端发出的字节一致，
+ * 避免出现客户端自相矛盾的私有元数据投影。
+ */
+function inspectClientWebSocketMessage(
   data: RawData,
   isBinary: boolean,
 ): {
-  data: RawData | string;
   metadata?: TurnMetadata;
   recordsMetrics?: boolean;
   requestStartedAtMs?: number;
@@ -860,9 +858,9 @@ function sanitizeClientWebSocketMessage(
   serviceTier?: string;
   reasoningEffort?: string;
 } {
-  if (isBinary) return { data };
+  if (isBinary) return {};
   const parsed = parseJsonPayload(rawDataText(data));
-  if (parsed?.type !== "response.create") return { data };
+  if (parsed?.type !== "response.create") return {};
   const clientMetadata = asRecord(parsed.client_metadata);
   const rawMetadata = clientMetadata?.["x-codex-turn-metadata"];
   const requestStartedAtMs = requestStartTimestamp(clientMetadata);
@@ -878,21 +876,7 @@ function sanitizeClientWebSocketMessage(
     parsedMetadata?.request_kind === "prewarm"
     && parsed.generate === false
   );
-  if (!clientMetadata || rawMetadata === undefined) {
-    return {
-      data,
-      metadata,
-      recordsMetrics,
-      ...(requestStartedAtMs ? { requestStartedAtMs } : {}),
-      ...(model ? { model } : {}),
-      ...(serviceTier ? { serviceTier } : {}),
-      ...(reasoningEffort ? { reasoningEffort } : {}),
-    };
-  }
-  const sanitizedMetadata = { ...clientMetadata };
-  delete sanitizedMetadata["x-codex-turn-metadata"];
   return {
-    data: JSON.stringify({ ...parsed, client_metadata: sanitizedMetadata }),
     metadata,
     recordsMetrics,
     ...(requestStartedAtMs ? { requestStartedAtMs } : {}),

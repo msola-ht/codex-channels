@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   GatewayConfigConflictError,
   parseGatewayConfig,
+  timezonePattern,
   validateCodexConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
@@ -104,6 +105,7 @@ export function loadGatewaySettings(environment = process.env) {
           : null,
         defaults: officialTuiIdentityDefaults(),
       },
+      appServerTimezone: typeof codex.timezone === "string" ? codex.timezone : null,
       workspaces,
     },
     automation: {
@@ -354,6 +356,26 @@ function applySetting(document, input) {
         { clientIdentity, upstreamUserAgent, terminalIdentity },
         "restart-all",
       );
+    }
+    case "system.app-server-timezone": {
+      const timezone = optionalStrictString(
+        input.value,
+        64,
+        "value",
+        "时区",
+      );
+      if (timezone !== null && !timezonePattern.test(timezone)) {
+        throw invalid(
+          "value",
+          "invalid-value",
+          "时区必须是 IANA 名称（如 Asia/Shanghai、America/Los_Angeles）",
+        );
+      }
+      const codex = { ...table(document.codex) };
+      if (timezone === null) delete codex.timezone;
+      else codex.timezone = timezone;
+      document.codex = validateCodexConfigDocument(codex);
+      return changed(timezone, "restart-app-server-webui");
     }
     case "automation.scheduled-tasks": {
       const value = booleanValue(input.value, "value", "计划任务");

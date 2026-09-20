@@ -50,6 +50,8 @@
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
   身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
+- [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
+  来源、`codex.timezone` 配置、`codexc timezone` 命令、WebUI 时间跟随与生效边界。
 - [`docs/opencode-go-multi-account.md`](docs/opencode-go-multi-account.md)：OpenCode Go
   多账户实现（账户文件、CLI/Setup、共享代理、会话切换与租约生命周期）。
 - [`docs/feishu-surface-plan.md`](docs/feishu-surface-plan.md)：飞书 Surface 当前设计决策与停止条件。

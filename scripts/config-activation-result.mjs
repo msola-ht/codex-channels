@@ -15,6 +15,11 @@ export function configActivationResult(activation) {
       return result("restart", "webui", ["codexc service restart webui"]);
     case "restart-app-server":
       return result("restart", "app-server", ["codexc service restart app-server"]);
+    case "restart-app-server-webui":
+      return result("restart", "app-server-webui", [
+        "codexc service restart app-server",
+        "codexc service restart webui",
+      ]);
     case "restart-all":
       return result("restart", "all", ["codexc service restart all"]);
     case "reinstall-services":

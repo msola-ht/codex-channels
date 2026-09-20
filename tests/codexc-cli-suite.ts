@@ -164,6 +164,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["service", "status", "--help"], "用法：codexc service status"],
       [["service", "logs", "--help"], "用法：codexc service logs"],
       [["config", "-h"], "用法：codexc config"],
+      [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
       [["rules", "-h"], "用法：codexc rules"],
       [["rules", "init", "-h"], "用法：codexc rules init"],
@@ -1684,6 +1685,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "-c",
       expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
       "app-server",
+      "--enable",
+      "runtime_metrics",
       "--listen",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
@@ -1836,6 +1839,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         "-c",
         `model_catalog_json=${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
         "app-server",
+        "--enable",
+        "runtime_metrics",
         "--listen",
         `unix://${join(home, "runtime", "codex-app-server.sock")}`,
       ],
@@ -1928,6 +1933,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "-c",
       expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
       "app-server",
+      "--enable",
+      "runtime_metrics",
       "--listen",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);
@@ -2010,6 +2017,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "-c",
       expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
       "app-server",
+      "--enable",
+      "runtime_metrics",
       "--listen",
       `unix://${join(home, "runtime", "codex-app-server.sock")}`,
     ]);

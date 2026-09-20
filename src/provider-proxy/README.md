@@ -13,7 +13,7 @@
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
   OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
-  `x-codex-turn-metadata` 在本地读取后移除，Hop-by-hop Header 不透传；
+  `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
   HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
   此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
@@ -33,7 +33,7 @@
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照
   与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.154.0 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
-  转发并移除私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
+  转发其私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，
   Responses WebSocket 只从 `codex.rate_limits` 事件提取同一窗口；百分比转换为定点整数并随当前
   请求指标投递，不保存完整 Header、事件正文或其他额度桶。
@@ -72,9 +72,8 @@
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
   `[codex].upstream_user_agent` 时覆盖出站 `User-Agent`，缺省则原样透传 App Server 生成的 UA；
-  确认连接 `api.openai.com` 或 `chatgpt.com` 的官方 OpenAI Responses WebSocket 还会显式请求上游
-  timing 事件；指向其他主机的自定义 `openai_base_url`、第三方 Provider 与其他 WebSocket 路径会移除
-  该内部请求头；
+  `x-responsesapi-include-timing-metrics` 由 App Server 按自身 `runtime_metrics` 特性生成并原样透传，
+  代理不注入、也不删除，出站握手头因此与原生客户端一致；
   不影响私有元数据；该请求实际发往上游的 UA 由响应指标观察器写入指标记录，供 WebUI 请求明细读取。
 - `metrics-channel.ts`：App Server 服务把单条有界指标写入 Gateway 拥有的当前用户私有 IPC；Unix 使用
   `0600` Socket，Windows 使用共享运行时提供的认证命名管道。接收端归约后返回确认，保证短回复的

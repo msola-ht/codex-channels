@@ -136,6 +136,53 @@ describe("Gateway Config management", () => {
     });
   });
 
+  it("writes and clears the App Server timezone", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+    expect(settings.system.appServerTimezone).toBeNull();
+
+    expect(updateGatewaySetting({
+      kind: "system.app-server-timezone",
+      value: "America/Los_Angeles",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      value: "America/Los_Angeles",
+      activation: "restart-app-server-webui",
+      activationResult: {
+        target: "app-server-webui",
+        commands: [
+          "codexc service restart app-server",
+          "codexc service restart webui",
+        ],
+      },
+    });
+    expect(readGatewayConfig(fixture.configPath).codex ?? {}).toMatchObject({
+      timezone: "America/Los_Angeles",
+    });
+
+    settings = loadGatewaySettings(fixture.environment);
+    expect(settings.system.appServerTimezone).toBe("America/Los_Angeles");
+    expect(() => updateGatewaySetting({
+      kind: "system.app-server-timezone",
+      value: "Los Angeles",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toThrow(expect.objectContaining({ code: "invalid-value", field: "value" }));
+
+    updateGatewaySetting({
+      kind: "system.app-server-timezone",
+      value: null,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    });
+    expect(readGatewayConfig(fixture.configPath).codex ?? {})
+      .not.toHaveProperty("timezone");
+  });
+
   it("updates the model traffic dump switch without replacing its size controls", () => {
     const fixture = createFixture();
     const document = readGatewayConfig(fixture.configPath);
