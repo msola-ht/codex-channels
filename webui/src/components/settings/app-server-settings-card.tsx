@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, PendingSettingDialog, SettingsRow } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsError } from "@/components/settings/settings-feedback"
 import type { CodexSettingsController } from "@/lib/settings-management"
+import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 
 export function AppServerSettingsCard({ management, onChanged }: { management: CodexSettingsController; onChanged?: () => void }) {
   const settings = management.codexSettings
@@ -127,6 +128,8 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
           <Button className="self-start" variant="outline" disabled={officialDisabled || planEffort === ""} onClick={savePreferences}>保存用户偏好</Button>
         </section>
 
+        <Separator />
+        <ToolAccessSettings management={management} />
         {localError !== null ? <Alert variant="destructive"><AlertDescription>{localError}</AlertDescription></Alert> : null}
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </CardContent>

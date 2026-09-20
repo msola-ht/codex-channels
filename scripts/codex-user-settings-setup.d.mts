@@ -4,6 +4,7 @@ export function runCodexUserSettingsSetup(options?: {
   prompts?: {
     select(options: unknown): Promise<unknown>;
     confirm(options: unknown): Promise<unknown>;
+    text?(options: { message: string; initialValue?: string; validate?: (value: string) => string | undefined }): Promise<string | symbol>;
     isCancel(value: unknown): boolean;
   };
   defaultsSetup?: typeof import("./codex-defaults-setup.mjs").runCodexDefaultsSetup;

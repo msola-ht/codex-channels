@@ -1,6 +1,9 @@
 import type { CodexUserConfigClient } from "./codex-user-config.mjs";
+import type { CodexUserConfigValue } from "./codex-user-config.mjs";
+import type { CodexToolSettings } from "./codex-tool-settings.mjs";
 
 export type CodexUserSettingInput =
+  | { kind: "tool-access"; path: string[]; value: CodexUserConfigValue }
   | {
       kind: "all";
       model: string;
@@ -38,6 +41,7 @@ export type CodexUserSettingInput =
     };
 
 export interface CodexUserSettingsState {
+  toolSettings: CodexToolSettings;
   version: string;
   provider: string;
   defaultsEditable: boolean;

@@ -11,6 +11,7 @@ export const interactionOutcome = {
   mcpAllowedAlways: "已始终允许",
   mcpAllowedOnce: "已允许一次",
   mcpAllowedSession: "已在本会话允许",
+  mcpDeclined: "已拒绝",
   resolvedElsewhere: "已在其他客户端处理",
   timedOut: "请求已超时",
   userInputFailed: "输入请求无法继续，已安全取消",

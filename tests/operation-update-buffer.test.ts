@@ -10,6 +10,16 @@ import {
 } from "../src/surfaces/operation-update-buffer.js";
 
 describe("OperationUpdateBuffer", () => {
+  it.each(["running", "completed", "failed", "declined"] as const)(
+    "does not defer CUA %s updates to the final answer", (status) => {
+      const buffer = new OperationUpdateBuffer<string>();
+      expect(buffer.accept(operationEvent({
+        itemId: "cua-1", kind: "mcpTool", action: "computerUse", status,
+      }), "chat")).toBe(false);
+      expect(buffer.flush(turnCompleted())).toBeNull();
+    },
+  );
+
   it("buffers successful query operations once per item and summarizes them", () => {
     const buffer = new OperationUpdateBuffer<string>();
     const first = operation("mcp-1", "mcpTool", "completed", 100);

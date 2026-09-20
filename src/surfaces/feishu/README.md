@@ -42,7 +42,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   文件名、UTF-8 和控制字符，不创建本地文件。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
-- `operation-format.ts`：把单个操作终态渲染为包含脱敏详情的静态 CardKit Markdown。
+- `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
+  使用可原地更新的开始／终态卡片，不展示 MCP 读写声明标签，其他操作沿用终态展示。
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
@@ -51,6 +52,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
   `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
 - `input-card.ts`：生成 CardKit 2.0 有界用户输入表单、MCP JSON 表单、工具审批、HTTP(S) URL 确认和处理结果卡片。
+  MCP 工具审批分别提供一次批准、上游允许的持久范围、拒绝与取消，拒绝和取消不携带持久范围。
 - `interactions.ts`：维护私聊审批、用户输入和 MCP elicitation 的一次性令牌、Actor 绑定、
   请求去重、过期、取消和跨客户端失效。
 - `media.ts`：通过官方消息资源 API 下载私聊图片，并调用 Surface 共用暂存器完成大小、签名、
@@ -66,7 +68,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   `turn.completed` 结束统计均包含当前 Workspace Git 分支。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、阶段性最终正文及首张流式卡片原生回复同一输入；回复目标
-  保留到 Turn 终态，完成的原生生成图片
+  保留到 Turn 终态；Computer Use 按 Item 保存卡片消息 ID 并原地更新终态，更新失败时记录错误并
+  单独发送终态消息。完成的原生生成图片
   独立于操作显示档位上传并发送。
 - `status-card.ts`：把 Session 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。
 - `surface.ts`：组合单账号连接、Inbox、Application Adapter、Outbox 和失败关闭交互端口，并由

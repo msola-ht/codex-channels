@@ -7,6 +7,7 @@ import {
 } from "./codex-user-settings-management.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
+import { toolSettingValueError } from "./codex-tool-settings.mjs";
 
 const reasoningSummaryLabels = {
   auto: "自动",
@@ -99,10 +100,14 @@ export async function runCodexUserSettingsSetup({
         label: "沙盒、审批与网络",
         hint: permissionHint(settings.permissions),
       },
+      { value: "tool-access", label: "电脑、浏览器与 MCP", hint: "查看合并配置，管理原生访问策略与已有 MCP 参数" },
       { value: "back", label: "返回", hint: "返回设置类别" },
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
+  if (section === "tool-access") {
+    return runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider });
+  }
   if (section === "all") {
     return runAllSettings({
       environment,
@@ -175,6 +180,55 @@ export async function runCodexUserSettingsSetup({
     });
   }
   throw new Error(`未知 Codex 新会话与用户偏好：${String(section)}`);
+}
+
+async function runToolSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
+  output.write("用户设置与合并配置不代表最终授权；组织策略、工具审批和系统权限仍然适用。\n");
+  const fields = settings.toolSettings.fields;
+  const selected = await prompts.select({
+    message: "选择电脑、浏览器或 MCP 设置",
+    options: fields.map((field, index) => ({ value: index, label: field.label })),
+  });
+  if (prompts.isCancel(selected)) return { action: "back" };
+  const field = fields[selected];
+  output.write(`用户设置：${JSON.stringify(field.userValue)}；合并配置：${settings.toolSettings.mergedAvailable ? JSON.stringify(field.mergedValue) : "不可用"}\n`);
+  let value;
+  if (field.type === "choice" || field.type === "boolean") {
+    const options = field.type === "boolean" ? [true, false] : field.options;
+    const selection = await prompts.select({
+      message: field.label,
+      options: [{ value: "inherit", label: "移除用户设置，跟随上游配置" },
+        ...options.map((option) => ({ value: JSON.stringify(option), label: String(option) }))],
+    });
+    if (prompts.isCancel(selection)) return { action: "back" };
+    value = selection === "inherit" ? null : JSON.parse(selection);
+  } else {
+    const entered = await prompts.text({
+      message: field.type === "list" ? "工具名 JSON 数组；[] 表示空列表；留空移除用户设置" : "正数；留空移除用户设置",
+      initialValue: field.userValue === null ? "" : JSON.stringify(field.userValue),
+      validate: (text) => {
+        let parsed;
+        try {
+          parsed = text.trim() === "" ? null : JSON.parse(text);
+        } catch {
+          return field.type === "list"
+            ? "请输入工具名 JSON 数组，例如 [\"read\"]；留空移除用户设置"
+            : "请输入数字，不要添加单位；留空移除用户设置";
+        }
+        return toolSettingValueError(field, parsed);
+      },
+    });
+    if (prompts.isCancel(entered)) return { action: "back" };
+    value = entered.trim() === "" ? null : JSON.parse(entered);
+  }
+  const confirmed = await prompts.confirm({ message: `保存 ${field.label}：${JSON.stringify(value)}？`, initialValue: false });
+  if (prompts.isCancel(confirmed) || confirmed !== true) return { action: "back" };
+  const result = await updateSetting({ kind: "tool-access", path: field.path, value }, {
+    environment, expectedVersion: settings.version, createClient, primaryProvider,
+  });
+  output.write("已保存 Codex 工具设置。插件启动参数由插件清单管理；本页不修改操作系统权限。\n");
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  return result;
 }
 
 async function runAllSettings({

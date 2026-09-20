@@ -862,7 +862,13 @@ describe("Feishu interaction port", () => {
     await fixture.interactions.close();
   });
 
-  it("renders MCP tool approval choices instead of a JSON form", async () => {
+  it.each([
+    ["mcp-once", "accept", "once"],
+    ["mcp-session", "accept", "session"],
+    ["mcp-always", "accept", "always"],
+    ["mcp-decline", "decline", undefined],
+    ["cancel", "cancel", undefined],
+  ] as const)("maps MCP tool approval choice %s without a JSON form", async (choice, action, scope) => {
     const fixture = createConfiguredFixture();
     const request: Extract<InteractionRequest, { type: "elicitation" }> = {
       ...elicitationRequest(),
@@ -885,11 +891,13 @@ describe("Feishu interaction port", () => {
     expect(cardJson).toContain("允许一次");
     expect(cardJson).toContain("本会话允许");
     expect(cardJson).toContain("始终允许");
+    expect(cardJson).toContain("拒绝");
+    expect(cardJson).toContain("取消");
     expect(cardJson).not.toContain("codexc_mcp_form");
 
     const token = interactionToken(
       fixture.sentCards[0]!.card,
-      "mcp-session",
+      choice,
     );
     expect(fixture.interactions.handleCardAction({
       messageId: "om_card",
@@ -898,16 +906,23 @@ describe("Feishu interaction port", () => {
       tag: "button",
       value: {
         interaction_token: token,
-        decision: "mcp-session",
+        decision: choice,
       },
     })).toBe("accepted");
     await expect(decision).resolves.toEqual({
       type: "elicitation",
-      action: "accept",
+      action,
       content: null,
-      scope: "session",
+      ...(scope ? { scope } : {}),
     });
+    expect(fixture.interactions.handleCardAction({
+      messageId: "om_card", chatId: target.conversationId, actorOpenId: "ou_actor", tag: "button",
+      value: { interaction_token: token, decision: choice },
+    })).toBe("stale");
     await fixture.interactions.close();
+    if (action === "decline") {
+      expect(JSON.stringify(fixture.updatedCards)).toContain("已拒绝");
+    }
   });
 
   it("cancels pending user input when another client resolves it", async () => {

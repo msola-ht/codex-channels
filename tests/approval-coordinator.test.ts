@@ -853,12 +853,18 @@ describe("ApprovalCoordinator", () => {
     expect(interaction.requests).toEqual([]);
   });
 
-  it("maps an MCP tool approval to a session decision without asking for JSON", async () => {
+  it.each([
+    ["accept", "once", null],
+    ["accept", "session", "session"],
+    ["accept", "always", "always"],
+    ["decline", undefined, null],
+    ["cancel", undefined, null],
+  ] as const)("maps MCP tool approval %s / %s without expanding its scope", async (action, scope, persist) => {
     const interaction = new FakeInteraction({
       type: "elicitation",
-      action: "accept",
+      action,
       content: null,
-      scope: "session",
+      ...(scope ? { scope } : {}),
     });
     const coordinator = new ApprovalCoordinator(
       routerWithTarget(),
@@ -910,9 +916,9 @@ describe("ApprovalCoordinator", () => {
       expiresInMs: 30_000,
     });
     expect(response).toEqual({
-      action: "accept",
+      action,
       content: null,
-      _meta: { persist: "session" },
+      _meta: persist === null ? null : { persist },
     });
   });
 

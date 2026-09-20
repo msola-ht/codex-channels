@@ -72,6 +72,8 @@ codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置�
 
 模型请求指标保存在本机 `request-metrics.sqlite3`，由 `codexc metrics` 和本地 WebUI 读取；当前部署不包含远程指标中心或云端同步服务。
 
+电脑、浏览器与已有 MCP 的原生配置可在 `codexc config` 的 Codex 用户偏好或 WebUI 的 App Server 设置中管理，范围见[使用指导](docs/user-guide.md#computer-use-与浏览器排障)。
+
 ## 配置位置
 
 Gateway 配置：

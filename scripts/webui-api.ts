@@ -415,6 +415,7 @@ export interface ManagementSettingMutationResponse {
 }
 
 export interface CodexUserSettingsResponse {
+  toolSettings: import("./codex-tool-settings.mjs").CodexToolSettings
   version: string
   provider: string
   defaultsEditable: boolean

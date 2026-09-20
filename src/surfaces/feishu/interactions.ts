@@ -452,6 +452,12 @@ function mapMcpToolApprovalDecision(
   decision: Extract<InteractionDecision, { type: "elicitation" }>;
   outcome: string;
 } | undefined {
+  if (action === "mcp-decline") {
+    return {
+      decision: { type: "elicitation", action: "decline", content: null },
+      outcome: interactionOutcome.mcpDeclined,
+    };
+  }
   const scope = action === "mcp-once"
     ? "once"
     : action === "mcp-session" && request.toolApproval?.allowSession

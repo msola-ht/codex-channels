@@ -18,6 +18,10 @@ export function useCodexSettingsManagement(): CodexSettingsController {
 }
 
 function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSettingInput): unknown {
+  if (setting.kind === "tool-access") return {
+    path: setting.path,
+    value: settings.toolSettings.fields.find((field) => JSON.stringify(field.path) === JSON.stringify(setting.path))?.userValue ?? null,
+  }
   if (setting.kind === "defaults") return { model: settings.defaults.model, reasoningEffort: settings.defaults.reasoningEffort }
   if (setting.kind === "fast") return { enabled: settings.defaults.fastEnabled }
   if (setting.kind === "permissions") return {

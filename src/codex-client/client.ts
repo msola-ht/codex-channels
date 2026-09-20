@@ -732,6 +732,7 @@ export class CodexAppServerClient implements
   async readUserConfigSnapshot(): Promise<{
     config: Record<string, JsonValue | undefined>;
     version: string;
+    toolConfig: Record<string, JsonValue | undefined>;
   }> {
     const response = await this.rpc.request<ConfigReadResponse>({
       method: "config/read",
@@ -756,6 +757,12 @@ export class CodexAppServerClient implements
     return {
       config: userLayer.config,
       version: userLayer.version,
+      toolConfig: {
+        computer_use: response.config.computer_use,
+        browser_use: response.config.browser_use,
+        mcp_servers: response.config.mcp_servers,
+        plugins: response.config.plugins,
+      },
     };
   }
 

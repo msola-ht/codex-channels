@@ -11,7 +11,8 @@ export type FeishuInputAction =
   | "cancel"
   | "mcp-once"
   | "mcp-session"
-  | "mcp-always";
+  | "mcp-always"
+  | "mcp-decline";
 
 const maximumQuestionCount = 3;
 const maximumInputLength = 1_000;
@@ -199,7 +200,8 @@ function renderToolApprovalCard(
           "mcp-always",
         )]
       : []),
-    actionButton("取消", "danger", interactionToken, "cancel"),
+    actionButton("拒绝", "danger", interactionToken, "mcp-decline"),
+    actionButton("取消", "default", interactionToken, "cancel"),
   ];
   return cardKitWithTitle(
     "MCP 工具请求批准",

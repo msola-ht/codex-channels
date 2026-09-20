@@ -3,6 +3,10 @@ import { formatElapsedDuration } from "./elapsed-duration.js";
 import { visibleUpstreamMessage } from "./output-copy.js";
 import type { OperationUpdateDisplay } from "./types.js";
 
+export function isComputerUseOperation(record: OperationUpdate): boolean {
+  return record.kind === "mcpTool" && record.action === "computerUse";
+}
+
 export function shouldDisplayOperation(
   record: OperationUpdate,
   display: OperationUpdateDisplay,
@@ -39,7 +43,7 @@ export function operationMetadata(record: OperationUpdate): string[] {
 }
 
 export function mcpToolCapabilityLabel(record: OperationUpdate): string | null {
-  if (record.kind !== "mcpTool") return null;
+  if (record.kind !== "mcpTool" || isComputerUseOperation(record)) return null;
   if (record.readOnlyHint === true) return "上游标记只读";
   if (record.readOnlyHint === false) return "可能写入";
   return "读写属性未知";
@@ -75,7 +79,7 @@ export function operationTitle(record: OperationUpdate): string {
     case "fileChange":
       return "修改文件";
     case "mcpTool":
-      return "调用 MCP 工具";
+      return isComputerUseOperation(record) ? "电脑与浏览器操作" : "调用 MCP 工具";
     case "dynamicTool":
       return "调用工具";
     case "subagent":
