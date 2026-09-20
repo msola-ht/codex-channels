@@ -43,7 +43,7 @@ export function operationMetadata(record: OperationUpdate): string[] {
 }
 
 export function mcpToolCapabilityLabel(record: OperationUpdate): string | null {
-  if (record.kind !== "mcpTool") return null;
+  if (record.kind !== "mcpTool" || isComputerUseOperation(record)) return null;
   if (record.readOnlyHint === true) return "上游标记只读";
   if (record.readOnlyHint === false) return "可能写入";
   return "读写属性未知";

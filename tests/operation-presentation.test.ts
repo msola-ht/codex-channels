@@ -76,6 +76,14 @@ describe("shared operation presentation", () => {
     expect(detail).toBe(`${"界".repeat(159)}…`);
   });
 
+  it.each([true, false, undefined])("does not label computer actions with MCP readOnlyHint=%s", (readOnlyHint) => {
+    expect(operationMetadata({
+      ...operation("mcpTool", "computerUse"),
+      ...(readOnlyHint === undefined ? {} : { readOnlyHint }),
+      durationMs: 125,
+    })).toEqual(["125 ms"]);
+  });
+
   it("shows local paths while preserving explicit sensitive placeholders", () => {
     const detail = [
       "/usr/bin/zsh -lc \"sed -n '1,400p'",

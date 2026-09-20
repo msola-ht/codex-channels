@@ -32,6 +32,7 @@ import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js
 import {
   formatFeishuOperation,
   formatFeishuOperationSummary,
+  renderFeishuComputerUseCard,
 } from "./operation-format.js";
 import {
   appendBoundedStreamText,
@@ -167,6 +168,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly activeOperations = new Set<string>();
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly operationDisplays = new Map<string, string>();
+  private readonly computerUseCards = new Map<string, { messageId?: string }>();
   private readonly pendingApprovalOperations = new Set<string>();
   private readonly heldApprovalOperations = new Map<string, Extract<OutputEvent, { type: "operation.updated" }>['operation']>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
@@ -312,6 +314,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
       flushStreamBeforeOutput();
       const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
       if (!this.acceptOperationDisplay(event, markdown)) return;
+      if (isComputerUseOperation(event.operation)) {
+        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
+        const state = this.computerUseCards.get(key) ?? {};
+        this.computerUseCards.set(key, state);
+        this.delivery.enqueue(
+          event.target.conversationId,
+          (signal) => this.deliverComputerUseCard(event, state, markdown, signal),
+          isCriticalOutputEvent(event),
+        );
+        return;
+      }
       this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), isCriticalOutputEvent(event));
       return;
     }
@@ -337,6 +350,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "turn.completed") {
       this.planMessages.delete(turnKey(event.threadId, event.turnId));
+      const prefix = `${turnKey(event.threadId, event.turnId)}\u0000`;
+      for (const key of this.computerUseCards.keys()) {
+        if (key.startsWith(prefix)) this.computerUseCards.delete(key);
+      }
       this.flushOperationUpdates(event.target.conversationId, event);
       const completion = renderFeishuOutput(
         event,
@@ -420,6 +437,33 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : this.sendText(event.target.conversationId, rendered, signal),
       event.type === "turn.started" || isCriticalOutputEvent(event),
     );
+  }
+
+  private async deliverComputerUseCard(
+    event: Extract<OutputEvent, { type: "operation.updated" }>,
+    state: { messageId?: string },
+    markdown: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    signal = this.closed ? undefined : signal;
+    const card = renderFeishuComputerUseCard(
+      event.operation,
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+    );
+    if (state.messageId === undefined) {
+      state.messageId = await this.messagePort.sendCard(event.target.conversationId, card, signal);
+      return;
+    }
+    try {
+      await this.messagePort.updateCard(state.messageId, card, signal);
+    } catch (error) {
+      if (signal?.aborted || event.operation.status === "running") throw error;
+      this.logger.warn(
+        { component: "Feishu", fallback: "markdown", ...surfaceErrorMetadata(error) },
+        "飞书电脑与浏览器操作卡片更新失败，已改为发送终态消息",
+      );
+      await this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal);
+    }
   }
 
   private async deliverPlanSnapshot(
@@ -746,6 +790,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.activeOperations.clear();
     this.reasoningGenerations.clear();
     this.operationDisplays.clear();
+    this.computerUseCards.clear();
     this.pendingApprovalOperations.clear();
     this.heldApprovalOperations.clear();
     this.operationUpdates.clear();
@@ -788,6 +833,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     for (const key of this.operationDisplays.keys()) {
       if (key.startsWith(prefix)) this.operationDisplays.delete(key);
+    }
+    for (const key of this.computerUseCards.keys()) {
+      if (key.startsWith(prefix)) this.computerUseCards.delete(key);
     }
   }
 

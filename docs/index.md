@@ -132,7 +132,7 @@
 Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/completed` 和
 `ThreadItem.mcpToolCall.arguments`：[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)
 只对 `cua_repl.js` / `js_reset` 标记操作类别，并提取 `js` 的 `title`；飞书
-[`outbox.ts`](../src/surfaces/feishu/outbox.ts) 及时显示开始及终态，不等待查询汇总。
+[`outbox.ts`](../src/surfaces/feishu/outbox.ts) 为同一操作创建并原地更新开始／终态卡片，不等待查询汇总。
 由 [`operation-adapter.test.ts`](../tests/operation-adapter.test.ts)、
 [`feishu-outbox-operations.test.ts`](../tests/feishu-outbox-operations.test.ts) 和
 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)

@@ -8,10 +8,35 @@ import {
   redactOperationDetail,
 } from "../operation-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
+import type { FeishuCardDocument } from "./approval-card.js";
+import { sanitizeFeishuMarkdown } from "./message-content.js";
 import {
   operationSummaryGroups,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
+
+export function renderFeishuComputerUseCard(
+  record: OperationUpdate,
+  display: Exclude<OperationUpdateDisplay, "hidden">,
+): FeishuCardDocument {
+  const detail = record.detail === undefined ? "" : inlineOperationDetail(
+    display === "compact"
+      ? compactOperationDetail(record.detail)
+      : safeOperationDetail(record.detail),
+  );
+  const content = withOperationDurationFooter(detail ? `\`${detail}\`` : "", record.durationMs);
+  return {
+    schema: "2.0",
+    config: { update_multi: true, wide_screen_mode: true },
+    header: {
+      template: record.status === "running" ? "blue" : record.status === "completed" ? "green" : "grey",
+      title: { tag: "plain_text", content: `${operationTitle(record)} · ${operationStatus(record.status)}` },
+    },
+    body: {
+      elements: content ? [{ tag: "markdown", content: sanitizeFeishuMarkdown(content) }] : [],
+    },
+  };
+}
 
 export function formatFeishuOperation(
   record: OperationUpdate,

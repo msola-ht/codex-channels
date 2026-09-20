@@ -2,8 +2,28 @@ import { describe, expect, it } from "vitest";
 
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { formatFeishuOperation } from "../src/surfaces/feishu/index.js";
+import { renderFeishuComputerUseCard } from "../src/surfaces/feishu/operation-format.js";
 
 describe("Feishu operation log formatter", () => {
+  it.each(["compact", "full"] as const)("renders an updatable CUA card with safe details and duration in %s mode", (display) => {
+    const card = renderFeishuComputerUseCard({
+      itemId: "cua-1", kind: "mcpTool", action: "computerUse", status: "completed",
+      detail: '查看 <at id="all">所有人</at> TOKEN=[REDACTED] · cua_repl.js',
+      readOnlyHint: true, durationMs: 1_720,
+    }, display);
+    expect(card).toMatchObject({
+      schema: "2.0", config: { update_multi: true, wide_screen_mode: true },
+      header: { template: "green", title: { content: "电脑与浏览器操作 · 已完成" } },
+    });
+    const content = JSON.stringify(card.body);
+    expect(content).toContain("1.72 s");
+    expect(content).toContain("TOKEN=[已隐藏]");
+    expect(content).toContain("&lt;at");
+    expect(content).not.toMatch(/<at|上游标记只读/);
+    expect(formatFeishuOperation({ itemId: "cua-1", kind: "mcpTool", action: "computerUse", status: "running", readOnlyHint: true }, display))
+      .toBe("**电脑与浏览器操作 · 运行中**");
+  });
+
   it("shows the concrete sanitized operation details and latest status", () => {
     const record: OperationUpdate = {
       itemId: "command-1",
