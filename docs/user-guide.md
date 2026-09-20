@@ -148,6 +148,7 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 
 共享代理统一保存在当前 Codex Home 的 `.env`，默认 `~/.codex/.env`。执行
 `codexc config → 网络代理`，或在 WebUI 设置页修改；批量输入留空保持原值，取消不写入。
+CLI 单项和批量代理设置均可选择 `127.0.0.1:7890`、`127.0.0.1:7897` 或自定义完整 URL；两个本地选项使用 HTTP 协议。
 例如：
 
 ```dotenv

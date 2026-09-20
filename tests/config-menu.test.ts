@@ -276,7 +276,7 @@ describe("Codex Connect config menu", () => {
         select: vi.fn()
           .mockResolvedValueOnce("network")
           .mockResolvedValueOnce("https_proxy")
-          .mockResolvedValueOnce("set"),
+          .mockResolvedValueOnce("set").mockResolvedValue("custom"),
         text: vi.fn(async () => proxy),
         isCancel: () => false,
         cancel: vi.fn(),
@@ -301,7 +301,7 @@ describe("Codex Connect config menu", () => {
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
         intro: vi.fn(),
-        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch"),
+        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch").mockResolvedValue("custom"),
         text,
         isCancel: () => false,
         cancel: vi.fn(),
@@ -323,6 +323,25 @@ describe("Codex Connect config menu", () => {
     expect(text).toHaveBeenCalledTimes(3);
   });
 
+  it.each([
+    ["http_proxy", 7890], ["http_proxy", 7897],
+    ["https_proxy", 7890], ["https_proxy", 7897],
+    ["all_proxy", 7890], ["all_proxy", 7897],
+  ] as const)("selects %s port %s without requesting text", async (field, port) => {
+    const fixture = createFixture();
+    const text = vi.fn();
+    await runNetworkSettings({
+      environment: fixture.environment, output: { write: vi.fn() },
+      prompts: {
+        select: vi.fn().mockResolvedValueOnce(field).mockResolvedValueOnce("set")
+          .mockResolvedValueOnce(`http://127.0.0.1:${port}`),
+        text, isCancel: () => false,
+      },
+    });
+    expect(readCodexProxySettings(fixture.environment)[field]).toBe(`http://127.0.0.1:${port}`);
+    expect(text).not.toHaveBeenCalled();
+  });
+
   it("writes Codex proxy settings to its own home without changing Gateway config", async () => {
     const fixture = createFixture();
     const codexHome = join(fixture.dataDir, "codex");
@@ -334,7 +353,7 @@ describe("Codex Connect config menu", () => {
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
         intro: vi.fn(),
-        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch"),
+        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch").mockResolvedValue("custom"),
         text: vi.fn().mockResolvedValueOnce("http://127.0.0.1:7897")
           .mockResolvedValueOnce("http://user:proxy-secret@127.0.0.1:7897")
           .mockResolvedValueOnce("socks5://127.0.0.1:7897"),
@@ -359,7 +378,7 @@ describe("Codex Connect config menu", () => {
     await runNetworkSettings({
       environment: { ...fixture.environment, CODEX_HOME: fixture.dataDir }, output: { write: vi.fn() },
       prompts: {
-        select: vi.fn().mockResolvedValue("batch"),
+        select: vi.fn().mockResolvedValueOnce("batch").mockResolvedValue("custom"),
         text: vi.fn().mockResolvedValueOnce("http://user:pa$word@localhost:7897")
           .mockResolvedValueOnce("").mockResolvedValueOnce("socks5h://localhost:7897"),
         isCancel: () => false,
@@ -378,7 +397,7 @@ describe("Codex Connect config menu", () => {
       : vi.fn().mockResolvedValue(action === "blank" ? "" : "socks5://localhost:7897");
     const pending = runNetworkSettings({
       environment: { ...fixture.environment, CODEX_HOME: fixture.dataDir }, output: { write: vi.fn() },
-      prompts: { select: vi.fn().mockResolvedValue("batch"), text, isCancel: (value: unknown) => value === cancelled },
+      prompts: { select: vi.fn().mockResolvedValueOnce("batch").mockResolvedValue("custom"), text, isCancel: (value: unknown) => value === cancelled },
     });
     if (action === "invalid") await expect(pending).rejects.toThrow("HTTP_PROXY 不支持");
     else await expect(pending).resolves.toEqual({ action: "back" });

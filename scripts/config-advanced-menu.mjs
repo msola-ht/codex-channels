@@ -74,10 +74,7 @@ export async function runNetworkSettings({
           message: "NO_PROXY（逗号分隔主机；留空取消）",
           validate: (candidate) => validateNetworkProxyValue(field, candidate),
         })
-      : await prompts.text({
-          message: `代理 URL（${field === "all_proxy" ? "HTTP(S) / SOCKS5" : "HTTP(S)"}；留空取消）`,
-          validate: (candidate) => validateNetworkProxyValue(field, candidate),
-        });
+      : await selectProxyValue(prompts, field, "代理", false);
     if (prompts.isCancel(value) || stringValue(value) === "") return { action: "back" };
   } else if (action !== "clear") {
     throw new Error(`未知网络代理操作：${String(action)}`);
@@ -96,14 +93,7 @@ export async function runNetworkSettings({
 async function runProxyBatch({ environment, output, prompts, writeConfig, settings }) {
   const values = {};
   for (const [field, label] of proxyFields.slice(0, 3)) {
-    const value = await prompts.text({
-      message: `${label} URL（留空保持当前值）`,
-      initialValue: "",
-      validate: (candidate) => {
-        const normalized = stringValue(candidate);
-        return normalized === "" ? undefined : validateNetworkProxyValue(field, normalized);
-      },
-    });
+    const value = await selectProxyValue(prompts, field, label, true);
     if (prompts.isCancel(value)) return { action: "back" };
     if (stringValue(value) !== "") values[field] = stringValue(value);
   }
@@ -115,6 +105,27 @@ async function runProxyBatch({ environment, output, prompts, writeConfig, settin
   output.write(`HTTP、HTTPS、通用代理已一次性更新：${result.configPath}\n`);
   writeGatewayConfigActivationNotice(output, environment, result.activationResult);
   return { fields: Object.keys(values), configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
+}
+
+async function selectProxyValue(prompts, field, label, batch) {
+  const selected = await prompts.select({
+    message: `选择${label}地址`,
+    showInstructions: false,
+    options: [
+      { value: "http://127.0.0.1:7890", label: "127.0.0.1:7890" },
+      { value: "http://127.0.0.1:7897", label: "127.0.0.1:7897" },
+      { value: "custom", label: "自定义" },
+      { value: "back", label: batch ? "保持当前值" : "取消" },
+    ],
+  });
+  if (prompts.isCancel(selected)) return selected;
+  if (selected === "back") return "";
+  if (selected === "http://127.0.0.1:7890" || selected === "http://127.0.0.1:7897") return selected;
+  if (selected !== "custom") throw new Error(`未知代理地址选项：${String(selected)}`);
+  return prompts.text({
+    message: `${label} URL（${batch ? "留空保持当前值" : "留空取消"}）`,
+    validate: (candidate) => validateNetworkProxyValue(field, candidate),
+  });
 }
 
 export async function runAdvancedSettings(options) {
