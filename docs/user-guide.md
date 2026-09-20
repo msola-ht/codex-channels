@@ -262,6 +262,10 @@ codexc update
 codexc doctor
 ```
 
+本地源码通过 `npm run install:global` 安装后，运行 `codexc update` 同步已安装包要求的
+Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI 和本地配置；
+非交互调用会给出精确版本安装命令并退出，不静默安装。
+
 更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
 从包含直接 API Provider 预留注册表的旧版升级时，`codexc update` 会识别旧 Schema 自动补入的

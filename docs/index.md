@@ -42,6 +42,9 @@
 `config/batchWrite`：用户主配置统一设为 `none`，完成标记保证后续更新保留用户选择；由
 [`local-update.test.ts`](../tests/local-update.test.ts) 和
 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 验证。
+本地构建或 Registry 包的 `codexc update` 由 [`source-update.mjs`](../scripts/source-update.mjs)
+按已安装包的精确 CLI 基线完成临时候选公开合同校验、确认安装和本地更新，验证见
+[`source-update.test.ts`](../tests/source-update.test.ts)。
 
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。

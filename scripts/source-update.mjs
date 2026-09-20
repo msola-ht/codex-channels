@@ -12,6 +12,7 @@ import {
   rmSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
 import { parse } from "smol-toml";
@@ -101,10 +102,7 @@ export function inspectManagedSourceUpdatePlan(
             "local-update",
             "cleanup",
           ]
-        : [
-            "validate-codex-contract",
-            ...(refreshCommand ? ["refresh-command"] : []),
-          ]),
+        : ["local-update"]),
     ],
   });
 }
@@ -161,33 +159,22 @@ export async function updateManagedSourceInstallation(
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
     try {
-      writeMessageSafely(writeMessage, "note", "正在核对 Codex 公开合同和用户设置。");
-      await runStage(
-        "validate-codex-contract",
-        () => (options.validateCodexContract ?? validateCodexContract)(
-          checkout,
-          environment,
-          options,
-        ),
-      );
+      await runStage("local-update", () => updateInstalledPackage(environment, {
+        ...options,
+        projectDir: checkout,
+        runLocalUpdate: async () => {
+          if (plan.refreshCommand) {
+            await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
+          }
+          await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+        },
+      }));
       writeCodexPlanSettingNotice(writeMessage, environment);
-      if (plan.refreshCommand) {
-        await runStage(
-          "refresh-command",
-          () => installManagedSourceCommand(
-            checkout,
-            installRoot,
-            environment,
-            writeMessage,
-            options,
-          ),
-        );
-      }
     } catch (error) {
       throw annotateSourceUpdateFailure(error, {
         stage: activeStage,
         completedStages,
-        recovery: { services: "not-needed", source: "unchanged" },
+        recovery: { services: "unknown", source: "unchanged" },
         recommendation: "按错误提示修复 Codex CLI 合同、用户设置或全局命令后重新运行 codexc update",
       });
     }
@@ -820,8 +807,10 @@ function codexValidationInstallFailureError(expected, cause) {
   );
 }
 
-function installCodexCliForValidation(version, checkout, environment, options) {
-  const prefix = join(resolve(checkout, ".."), "codex-cli-contract");
+function installCodexCliForValidation(
+  version, checkout, environment, options,
+  prefix = join(resolve(checkout, ".."), "codex-cli-contract"),
+) {
   run(
     process.platform === "win32" ? "npm.cmd" : "npm",
     [
@@ -1035,20 +1024,56 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+export async function updateInstalledPackage(environment = process.env, options = {}) {
+  assertSourceUpdateCaller(environment);
+  const checkout = options.projectDir ?? packageDir;
+  const expected = codexVersion(checkout);
+  const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
+  const writeMessage = options.writeMessage ?? writeCliMessage;
+  let temporaryDirectory;
+  let servicesStopped = false;
+  try {
+    const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
+      ...options,
+      installCodexCliForValidation: options.installCodexCliForValidation
+        ?? ((version, directory, validationEnvironment, validationOptions) => {
+          temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-cli-update-"));
+          return installCodexCliForValidation(
+            version, directory, validationEnvironment, validationOptions, temporaryDirectory,
+          );
+        }),
+    });
+    await (options.validateCodexContract ?? validateCodexContract)(
+      checkout, prepared.validationEnvironment, options,
+    );
+    if (prepared.installRequired && inspection.services.installed) {
+      servicesStopped = true;
+      await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
+    }
+    await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
+    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+  } catch (error) {
+    if (servicesStopped) {
+      try {
+        await (options.startServices ?? startCoreServices)(checkout, environment, options);
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
+      }
+    }
+    throw error;
+  } finally {
+    if (temporaryDirectory) rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const checkout = managedSourceCheckout();
-  if (!checkout) {
-    validateCodexContract(packageDir, process.env, {});
-    await runLocalUpdate(packageDir, process.env, {});
-    return;
-  }
   const prompter = process.stdin.isTTY && process.stdout.isTTY
     ? createPrompter(process.stdin, process.stdout)
     : undefined;
   let result;
   try {
-    result = await updateManagedSourceInstallation(process.env, {
-      projectDir: checkout,
+    const options = {
       ...(prompter
         ? {
             confirmCodexCliInstall: ({ currentVersion, requiredVersion }) =>
@@ -1058,16 +1083,20 @@ async function main() {
               ),
           }
         : {}),
-    });
+    };
+    if (!checkout) {
+      await updateInstalledPackage(process.env, options);
+      return;
+    }
+    result = await updateManagedSourceInstallation(process.env, { ...options, projectDir: checkout });
   } finally {
     prompter?.close();
   }
   if (!result.changed) {
     writeCliMessage(
       "note",
-      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），跳过依赖安装与构建；继续检查本地配置和数据库。`,
+      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 检查与本地更新已完成。`,
     );
-    await runLocalUpdate(checkout, process.env, {});
     return;
   }
   writeCliMessage(

@@ -44,6 +44,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
+本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI 和本地配置。
 首次执行 0.155.1 的 `codexc update` 会将用户主配置的推理摘要设为关闭，后续更新保留重新选择的值，见[推理摘要设置](docs/user-guide.md#推理摘要)。
 
 ## 常用入口

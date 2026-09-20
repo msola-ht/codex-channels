@@ -41,7 +41,11 @@
   最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
   明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
   `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
-  观察者或 CLI 展示异常不改变更新事务。Registry 安装直接委派现有本地更新，不修改程序包。
+  观察者或 CLI 展示异常不改变更新事务。本地 `install:global` 构建安装与 Registry 安装也先按
+  已安装包锁定版本确认、临时校验并同步配套 Codex CLI，再委派本地更新；不修改 Gateway 程序包。
+  这两种安装的 CLI 临时候选目录在成功或失败后清理，合同通过前不安装全局 CLI、不停止服务。
+  受管源码没有新提交时同样复用该流程，在一个 `local-update` 阶段内完成 CLI 同步、按需刷新旧命令
+  和本地更新；CLI 主入口不再重复执行本地更新。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，

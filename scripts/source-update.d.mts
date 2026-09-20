@@ -140,6 +140,11 @@ export function updateManagedSourceInstallation(
   options?: SourceUpdateOptions,
 ): Promise<SourceUpdateResult>;
 
+export function updateInstalledPackage(
+  environment?: NodeJS.ProcessEnv,
+  options?: SourceUpdateOptions,
+): Promise<void>;
+
 export function inspectManagedSourceUpdatePlan(
   environment?: NodeJS.ProcessEnv,
   options?: Pick<SourceUpdateOptions, "projectDir" | "repository" | "captureCommand">,
