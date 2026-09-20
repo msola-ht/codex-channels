@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { codexHomePath } from "./codex-home.mjs";
+import { GatewayConfigConflictError, withGatewayConfigLock } from "./gateway-config.mjs";
 import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 export const codexProxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_proxy"];
@@ -79,8 +80,23 @@ export function writeCodexProxySettings(changes, environment = process.env) {
   const snapshot = readCodexProxySnapshot(environment);
   const content = renderCodexProxySettings(snapshot, changes);
   const changed = content !== (snapshot.content ?? "");
-  if (changed) writePrivateFileAtomicSync(snapshot.path, content);
+  if (changed) writeCodexProxySnapshot(snapshot, content);
   return { configPath: snapshot.path, changed };
+}
+
+export function writeCodexProxySnapshot(snapshot, content) {
+  return withGatewayConfigLock(snapshot.path, () => {
+    let current = null;
+    try {
+      current = readFileSync(snapshot.path, "utf8");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (current !== snapshot.content) {
+      throw new GatewayConfigConflictError("Codex .env 在写入期间已发生变化，请重新读取设置");
+    }
+    writePrivateFileAtomicSync(snapshot.path, content);
+  });
 }
 
 export function validateCodexProxyValue(field, value) {

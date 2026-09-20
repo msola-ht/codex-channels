@@ -5,4 +5,5 @@ export function readCodexProxySnapshot(environment?: NodeJS.ProcessEnv): CodexPr
 export function readCodexProxySettings(environment?: NodeJS.ProcessEnv): ProxySettings;
 export function renderCodexProxySettings(snapshot: CodexProxySnapshot, changes: Partial<Record<keyof ProxySettings, string | null>>): string;
 export function writeCodexProxySettings(changes: Partial<Record<keyof ProxySettings, string | null>>, environment?: NodeJS.ProcessEnv): { configPath: string; changed: boolean };
+export function writeCodexProxySnapshot(snapshot: CodexProxySnapshot, content: string): void;
 export function validateCodexProxyValue(field: string, value: string): string | undefined;

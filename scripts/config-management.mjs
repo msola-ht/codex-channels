@@ -10,7 +10,7 @@ import {
   validateGatewayProcessConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
-import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue } from "../runtime/codex-proxy-env.mjs";
+import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -140,7 +140,7 @@ export function updateGatewaySetting(
     expectedRevision,
     readConfig = readFileSync,
     writeConfig = writeGatewayConfig,
-    writeProxyConfig = writePrivateFileAtomicSync,
+    writeProxyConfig = (_path, content, snapshot) => writeCodexProxySnapshot(snapshot, content),
     skipBackup = false,
   } = {},
 ) {
@@ -165,7 +165,16 @@ export function updateGatewaySetting(
     }
     const content = renderCodexProxySettings(proxySnapshot, values);
     const modified = content !== (proxySnapshot.content ?? "");
-    if (modified) writeProxyConfig(proxySnapshot.path, content);
+    if (modified) {
+      try {
+        writeProxyConfig(proxySnapshot.path, content, proxySnapshot);
+      } catch (error) {
+        if (error instanceof GatewayConfigConflictError) {
+          throw invalid("revision", "stale-revision", "Codex .env 已变化或正在写入，请重新读取设置");
+        }
+        throw error;
+      }
+    }
     const activation = modified ? "restart-all" : "none";
     return {
       kind: input.kind, configPath: proxySnapshot.path, previousRevision: snapshot.revision,

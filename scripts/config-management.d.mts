@@ -160,7 +160,7 @@ export function updateGatewaySetting(
     expectedRevision: string;
     readConfig?: (configPath: string, encoding: "utf8") => string;
     writeConfig?: (configPath: string, document: unknown) => void;
-    writeProxyConfig?: (configPath: string, content: string) => void;
+    writeProxyConfig?: (configPath: string, content: string, snapshot: import("../runtime/codex-proxy-env.mjs").CodexProxySnapshot) => void;
     skipBackup?: boolean;
   },
 ): {

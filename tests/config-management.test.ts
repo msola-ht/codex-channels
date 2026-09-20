@@ -16,7 +16,7 @@ import {
   normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
-import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
+import { readCodexProxySettings, readCodexProxySnapshot, renderCodexProxySettings, writeCodexProxySettings, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { configActivationResult } from "../scripts/config-activation-result.mjs";
 import {
   GatewayConfigConflictError,
@@ -32,6 +32,36 @@ afterEach(() => {
 });
 
 describe("Gateway Config management", () => {
+  it.each([false, true])("rejects a competing proxy snapshot with existing file=%s", (existing) => {
+    const fixture = createFixture();
+    if (existing) writeCodexProxySettings({ no_proxy: "localhost" }, fixture.environment);
+    const first = readCodexProxySnapshot(fixture.environment);
+    const second = readCodexProxySnapshot(fixture.environment);
+    writeCodexProxySnapshot(first, renderCodexProxySettings(first, { http_proxy: "http://localhost:7890" }));
+    expect(() => writeCodexProxySnapshot(second, renderCodexProxySettings(second, { https_proxy: "http://localhost:7897" })))
+      .toThrow(GatewayConfigConflictError);
+    expect(readCodexProxySettings(fixture.environment)).toEqual({
+      ...(existing ? { no_proxy: "localhost" } : {}), http_proxy: "http://localhost:7890",
+    });
+    writeCodexProxySettings({ https_proxy: "http://localhost:7897" }, fixture.environment);
+    expect(readCodexProxySettings(fixture.environment).https_proxy).toBe("http://localhost:7897");
+  });
+
+  it("reports a proxy conflict occurring after the revision check without overwriting it", () => {
+    const fixture = createFixture();
+    const settings = loadGatewaySettings(fixture.environment);
+    expect(() => updateGatewaySetting({
+      kind: "network.proxy", field: "https_proxy", action: "set", value: "http://localhost:7897",
+    }, {
+      environment: fixture.environment, expectedRevision: settings.revision,
+      writeProxyConfig: (_path, content, snapshot) => {
+        writeCodexProxySettings({ http_proxy: "http://localhost:7890" }, fixture.environment);
+        writeCodexProxySnapshot(snapshot, content);
+      },
+    })).toThrow(expect.objectContaining({ code: "stale-revision" }));
+    expect(readCodexProxySettings(fixture.environment)).toEqual({ http_proxy: "http://localhost:7890" });
+  });
+
   it("rejects a stale revision after only the proxy file changes", () => {
     const fixture = createFixture();
     const before = loadGatewaySettings(fixture.environment);
