@@ -227,7 +227,7 @@ describe("Gateway config.toml", () => {
     expect(runtime.config.telegramMessageFormat).toBe("rich");
     expect(runtime.config.operationUpdateDisplay).toBe("compact");
     expect(runtime.config.planUpdatesEnabled).toBe(true);
-    expect(runtime.config.reasoningEnabled).toBe(true);
+    expect(runtime.config.reasoningEnabled).toBe(false);
     expect(runtime.config.pluginApiEnabled).toBe(false);
     expect(runtime.config.scheduledTasksEnabled).toBe(false);
     expect(runtime.config.idleReleaseMinutes).toBe(15);
@@ -467,7 +467,7 @@ describe("Gateway config.toml", () => {
     expect(persisted.display).toEqual({
       operation_updates: "compact",
       plan_updates: true,
-      reasoning: true,
+      reasoning: false,
     });
     expect(persisted.experimental).toEqual({ plugin_api: false });
     expect(persisted.debug).toBeUndefined();
@@ -645,18 +645,18 @@ cwd = "/tmp/workspace"
     }).config.planUpdatesEnabled).toBe(false);
   });
 
-  it("preserves an explicit reasoning display opt-out", () => {
+  it("preserves an explicit reasoning display opt-in", () => {
     const fixture = createFixture({
       display: {
         operation_updates: "compact",
         plan_updates: true,
-        reasoning: false,
+        reasoning: true,
       },
     });
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
-    }).config.reasoningEnabled).toBe(false);
+    }).config.reasoningEnabled).toBe(true);
   });
 
   it("preserves the explicit conversation idle release minutes", () => {

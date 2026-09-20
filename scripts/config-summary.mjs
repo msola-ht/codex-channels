@@ -55,7 +55,7 @@ export function gatewayConfigSummary(document, configPath) {
       ? display.operation_updates
       : "compact",
     planUpdates: display.plan_updates !== false,
-    reasoning: display.reasoning !== false,
+    reasoning: display.reasoning === true,
     idleReleaseMinutes: numberValue(conversation.idle_release_minutes) ?? 15,
     scheduledTasks: scheduledTasks.enabled === true,
     modelTrafficDump: debug.model_traffic_dump === true,

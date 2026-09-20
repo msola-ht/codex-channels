@@ -214,11 +214,11 @@ const gatewayDocumentSchema = z.strictObject({
   display: z.strictObject({
     operation_updates: z.enum(["full", "compact", "hidden"]).default("compact"),
     plan_updates: z.boolean().default(true),
-    reasoning: z.boolean().default(true),
+    reasoning: z.boolean().default(false),
   }).default({
     operation_updates: "compact",
     plan_updates: true,
-    reasoning: true,
+    reasoning: false,
   }),
   experimental: z.strictObject({
     plugin_api: z.boolean().default(false),

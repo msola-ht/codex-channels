@@ -17,7 +17,7 @@ export async function runDisplaySettings({
     options: [
       { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
       { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
-      { value: "reasoning", label: "思考状态显示", hint: "是否显示“思考中”状态卡" },
+      { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
       { value: "back", label: "返回", hint: "返回配置菜单" },
     ],
   });
@@ -124,7 +124,7 @@ async function runReasoningToggle({ environment, output, prompts, writeConfig })
     initialValue: settings.display.reasoningEnabled ? "enabled" : "disabled",
     options: [
       { value: "enabled", label: "开启", hint: "显示“思考中”状态卡" },
-      { value: "disabled", label: "关闭", hint: "隐藏“思考中”状态卡" },
+      { value: "disabled", label: "关闭（默认）", hint: "隐藏“思考中”状态卡" },
       { value: "back", label: "返回上一级" },
     ],
   });

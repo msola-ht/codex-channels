@@ -73,7 +73,7 @@ export function loadGatewaySettings(environment = process.env) {
         ? display.operation_updates
         : "compact",
       planUpdatesEnabled: display.plan_updates !== false,
-      reasoningEnabled: display.reasoning !== false,
+      reasoningEnabled: display.reasoning === true,
     },
     system: {
       approvalTimeoutSeconds: integerInRange(approval.timeout_seconds, 30, 3_600) ?? 900,

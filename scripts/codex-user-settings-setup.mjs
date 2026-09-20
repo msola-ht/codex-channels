@@ -8,11 +8,16 @@ import {
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
-const reasoningSummaryLabels = { auto: "自动", concise: "简洁", detailed: "详细", none: "关闭" };
+const reasoningSummaryLabels = {
+  auto: "自动",
+  concise: "简洁",
+  detailed: "详细",
+  none: "关闭（未配置默认，none）",
+};
 const verbosityLabels = { low: "简短", medium: "适中", high: "详细" };
 const personalityLabels = { none: "默认", friendly: "友好", pragmatic: "务实" };
 const historyPersistenceLabels = { "save-all": "保存", none: "不保存" };
-const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", concise: "优先压缩为简短摘要", detailed: "保留更多推理摘要内容", none: "不生成推理摘要" };
+const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", concise: "优先压缩为简短摘要", detailed: "保留更多推理摘要内容", none: "不生成推理摘要；未配置时默认选择" };
 const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
 const personalityHints = { none: "使用 Codex 默认人格", friendly: "语气更友好自然", pragmatic: "更直接、注重执行" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
@@ -87,7 +92,7 @@ export async function runCodexUserSettingsSetup({
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
-        hint: "Plan、推理摘要、输出详细程度、人格、更新检查与历史",
+        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、人格、更新检查与历史",
       }] : []),
       {
         value: "permissions",
