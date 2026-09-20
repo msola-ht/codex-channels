@@ -39,8 +39,8 @@
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
-- [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：各正式版本对本项目的
-  采用、暂缓和拒绝决策。
+- [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、
+  不采用原因、重新评估条件与基线升级影响。
 - [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：Codex 0.148.0
   原生 Thread Queue 替换方案、分页历史与 Revert 的实施边界和验收链路。
 - [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：Codex 0.148.0
