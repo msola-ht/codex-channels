@@ -78,7 +78,7 @@
 - `proxy-fetch.ts`：向 Bootstrap 组合代码转发 Runtime 共享的代理 Fetch 接口；代理选择与
   Dispatcher 复用由 `runtime/proxy-fetch.mjs` 实现。
 - `openai-connectivity.ts`：在 OpenAI Provider 启动时复用同一代理做有界、无凭据的 HTTP
-  连通探测；组合根先通过稳定 `account/read` 判断当前使用 API Key 还是 ChatGPT 路由，再按官方
+  连通探测；缺少当前 Codex Home 的 `auth.json` 时跳过。存在鉴权文件时，组合根先通过稳定 `account/read` 判断当前使用 API Key 还是 ChatGPT 路由，再按官方
   Doctor 的端点规则只探测活动线路。API 与自定义 `openai_base_url` 使用 `/responses` 传输探测和
   `/models` 路径校验，ChatGPT 使用 `/backend-api/codex/responses`；`account/read` 与 HTTP 探测共同受
   总计 12 秒的启动窗口约束，传输失败在剩余时间内有限退避重试，以覆盖已解析代理地址的监听稍晚于
