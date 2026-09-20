@@ -56,17 +56,17 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
   Chat 内任务、Worktree、模型、权限和 RRULE 的当前产品行为。
 - [OpenAI App Server 文档](https://learn.chatgpt.com/docs/app-server)：App Server 定位、JSON-RPC、
   Thread/Turn 与实验动态工具；官方建议自动化作业或 CI 使用 Codex SDK。
-- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
+- [`thread.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server-protocol/src/protocol/v2/thread.rs)：
   `threadSource` 与实验 `dynamicTools`。
-- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
+- [`turn.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server-protocol/src/protocol/v2/turn.rs)：
   实验 `additionalContext`。
-- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
+- [`plugin.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server-protocol/src/protocol/v2/plugin.rs)：
   `ScheduledTaskSummary` 及其有限 Schedule 类型。
-- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server/README.md)：
+- [`app-server/README.md`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/README.md)：
   `dynamicTools` 与 `item/tool/call` 的宿主回调合同。
 
-项目内 `upstream/openai-codex` 必须保持在 `rust-v0.154.0` 的提交
-`6b9826e3aa83b1a5947db50f4332cb9c65f1b340`。当前网页文档描述的新产品能力不能反向当作固定版
+项目内 `upstream/openai-codex` 必须保持在 `rust-v0.155.1` 的提交
+`be2951ea34f0d295ed0becf97079f92fa5f6950e`。当前网页文档描述的新产品能力不能反向当作固定版
 协议字段。
 
 ## 采用方案

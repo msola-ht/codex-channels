@@ -1005,6 +1005,24 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("round-trips disabled and explicit reasoning summaries across clients", async () => {
+    const before = await ownerClient.readUserConfigSnapshot();
+    try {
+      for (const summary of ["none", "auto"] as const) {
+        const current = await ownerClient.readUserConfigSnapshot();
+        await ownerClient.writeUserConfigEdits([
+          { keyPath: "model_reasoning_summary", value: summary },
+        ], { expectedVersion: current.version });
+        const peer = await peerClient.readUserConfigSnapshot();
+        expect(peer.config.model_reasoning_summary).toBe(summary);
+      }
+    } finally {
+      await ownerClient.writeUserConfigEdits([
+        { keyPath: "model_reasoning_summary", value: before.config.model_reasoning_summary ?? null },
+      ]);
+    }
+  }, 15_000);
+
   it("persists and removes an agent role through the official user config transaction", async () => {
     const configPath = join(codexHome, "config.toml");
     const roleConfigPath = join(codexHome, "contract-agent.config.toml");

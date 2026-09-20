@@ -492,7 +492,7 @@ async function promptPreferences(prompts, settings) {
   if (!model || model.reasoningEfforts.length === 0) throw new Error("当前没有可用模型思考等级");
   const planModeReasoningEffort = await pick("Plan 默认思考等级", settings.defaults.planModeReasoningEffort ?? model.defaultReasoningEffort, model.reasoningEfforts.map((item) => ({ value: item.effort, label: item.effort, hint: item.description })));
   if (planModeReasoningEffort === null) return null;
-  const reasoningSummary = await pick("推理摘要", settings.defaults.reasoningSummary ?? "auto", Object.entries(reasoningSummaryLabels).map(([value, label]) => ({ value, label, hint: reasoningSummaryHints[value] })));
+  const reasoningSummary = await pick("推理摘要", settings.defaults.reasoningSummary ?? "none", Object.entries(reasoningSummaryLabels).map(([value, label]) => ({ value, label, hint: reasoningSummaryHints[value] })));
   if (reasoningSummary === null) return null;
   const verbosity = await pick("输出详细程度", settings.defaults.verbosity ?? "medium", Object.entries(verbosityLabels).map(([value, label]) => ({ value, label, hint: verbosityHints[value] })));
   if (verbosity === null) return null;

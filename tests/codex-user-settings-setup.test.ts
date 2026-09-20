@@ -4,6 +4,46 @@ import { runCodexUserSettingsSetup } from "../scripts/codex-user-settings-setup.
 import type { CodexUserSettingsState } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings setup", () => {
+  it.each([undefined, null, "auto", "concise", "detailed", "none"] as const)(
+    "defaults an unset reasoning summary to none and preserves %s",
+    async (reasoningSummary) => {
+      const updateSetting = vi.fn(async () => ({
+        kind: "preferences" as const,
+        previousVersion: "version-1",
+        value: {},
+        activation: "restart-all" as const,
+      }));
+      const prompts = {
+        select: vi.fn(async (options: { initialValue?: unknown }) => options.initialValue)
+          .mockResolvedValueOnce("preferences"),
+        confirm: vi.fn(async () => true),
+        isCancel: () => false,
+      };
+
+      await runCodexUserSettingsSetup({
+        environment: {},
+        output: { write: () => undefined },
+        prompts,
+        loadSettings: async () => {
+          const state = settingsState();
+          return {
+            ...state,
+            defaults: {
+              ...state.defaults,
+              ...(reasoningSummary === undefined ? {} : { reasoningSummary }),
+            },
+          };
+        },
+        updateSetting,
+      });
+
+      expect(updateSetting).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "preferences",
+        reasoningSummary: reasoningSummary ?? "none",
+      }), expect.anything());
+    },
+  );
+
   it("writes every user default after one final confirmation", async () => {
     const output: string[] = [];
     const updateSetting = vi.fn(async () => ({

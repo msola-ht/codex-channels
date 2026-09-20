@@ -17,6 +17,50 @@
 - 生成协议出现类型或 RPC 不代表项目支持。公开能力仍以 [`docs/index.md`](index.md) 的支持矩阵、
   受控导出、业务入口和验证共同为准。
 
+## 0.155.1
+
+- 官方 Release：[`rust-v0.155.0`](https://github.com/openai/codex/releases/tag/rust-v0.155.0)、[`rust-v0.155.1`](https://github.com/openai/codex/releases/tag/rust-v0.155.1)。
+- 项目决策：以 0.155.1 作为未发布开发基线，吸收 0.155.0 的修复及 0.155.1 的摘要默认行为；正式安装入口仍为 0.154.0。
+- 协议审查：861 个生成文件，167 个 Client Request、84 个 Notification、11 个 Server Request；受控类型导出仍为 68 个，业务 Request 仍为 44 个。公开 CLI 参数合同没有变化。
+
+### 已采用
+
+| 变化 | 它是做什么的 | 项目收益与处理 | 本地入口或验证 |
+| --- | --- | --- | --- |
+| 0.155.1 精确基线 | 让 Gateway 与 App Server 使用同一正式 CLI 协议 | 重新生成协议，同步版本与 CI；不保留旧 CLI 兼容分支 | `codex-protocol`、`protocol:check`、真实 App Server 合同 |
+| 未配置推理摘要时预选关闭 | 避免用户保存其他偏好时无意开启 Provider 不支持的摘要 | Setup 未配置值改为 `none`；已有 `auto/concise/detailed/none` 原样保留，不修改用户现有配置，也不在渠道 Turn 中注入额外覆盖 | [`codex-user-settings-setup.mjs`](../scripts/codex-user-settings-setup.mjs)、设置回归测试及跨 Client 配置真实合同 |
+| 流式压缩与旧端点移除 | 让压缩沿当前 CLI 的 Responses 通路执行并计入压缩统计 | 上游已删除旧 CompactClient；代理删除 `/responses/compact` 路由及其路径推断，旧请求明确返回 404，继续按 `request_kind=compaction` 识别 `/responses` 上的压缩 | [`request-routing.ts`](../src/provider-proxy/request-routing.ts)、HTTP 路由、HTTP/WebSocket 指标测试 |
+| 压缩失败保留输入 | 长会话在 Turn 前压缩失败时，用户刚发送的输入仍可留在官方历史里 | 随上游获得；保存不代表执行成功，Gateway 不保存消息副本或自动重发 | `codex-client` / `conversation-core` 现有生命周期；上游 `core/tests/suite/compact_remote.rs` |
+| MCP 认证状态、交互取消与重连修复 | 让用户更准确识别需要重新登录的 Server，并结束已取消的交互 | 随上游获得，继续通过既有 `authStatus/runtimeStatus`、`/mcp health` 和审批失效路径呈现，不复制 OAuth 刷新或取消状态 | [`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、MCP 与审批测试、真实工具合同 |
+| Thread 恢复与 Revert 设置保留 | 让恢复后的会话保持官方保存的工作根和回退后的设置 | 随上游获得；Gateway 仍按授权 Workspace 恢复，不增加自建历史或权限推断 | `thread-adapter`、Session Router、Queue/Revert 与监管恢复真实合同 |
+| Goal 空续跑阻塞 | 连续三轮没有有效活动的空自动续跑后停止空转 | 随上游获得，沿用 `blocked` 状态，不新增 Gateway 计数器或调度器 | [`turn-adapter.ts`](../src/codex-client/turn-adapter.ts)、Goal 合同；上游 `thread_goal_empty_responses.rs` |
+| Guardian、账户与模型缓存修复 | 改善自动审查证据完整性，并清除切换身份后的旧连接和模型缓存 | 随上游获得；不改变渠道审批范围、Provider 路由或账户归属规则 | 现有 Approval、模型与账户适配器，以及隔离真实合同 |
+
+### 明确不采用
+
+| 上游能力 | 它是做什么的 | 当前不采用原因 |
+| --- | --- | --- |
+| 实验实时语音 `/voice` | 持续收音并显示实时转录 | 属于原生 TUI / Realtime；渠道继续只支持受控一次性音频，不新增实时音频会话 |
+| Touch ID 与 `userVerification/cancel` | 用本机设备凭据确认身份并取消验证 | Gateway 没有设备签名交互合同；继续不声明用户验证扩展、不导出五个相关 RPC，并取消未协商 elicitation |
+| 官方 daemon 更新与恢复 | 自动更新 daemon 并恢复其管理的 Thread 和 Goal | 项目由 `codexc service` 监管精确版本和 Provider 实例，不接管官方 daemon 生命周期，也不把其恢复能力算作本项目服务能力 |
+| `thread/attachment/*` | 在 Thread 上维护带类型、身份键和 JSON 内容的独立关联记录 | 当前无对应产品需求，不是通用文件上传或媒体发送合同；不增加持久化、入口或受控导出 |
+| `memory/status` 与 memory v2 管理 | 查询第二版记忆处理的就绪状态 | 当前不提供记忆管理功能，不新增入口或版本选择配置 |
+| `FeedbackUploadResponse.promptHash` | 在反馈结果中返回提示元数据摘要 | 当前没有反馈上传入口，不导出或保存此字段 |
+| Bedrock 凭据命令 | 通过外部命令获取、缓存和刷新 AWS 凭据 | 当前没有 Bedrock Provider 接入需求，不增加凭据执行机制 |
+
+### 纯上游变化
+
+- 原生 TUI 推理摘要状态行、完成时间、tmux 与历史显示、代理总览及 Worktree 管理由配套 CLI 提供，Gateway 不复制界面或扩展删除入口。
+- WSL 沙箱、凭据代理和 Shell snapshot 修复随对应平台的上游运行时获得；本次 macOS 验证不代表完成 Windows/WSL 实机验收。
+- Python SDK 发布流程不影响本 TypeScript Gateway。
+
+### App Server 维护决策
+
+- 新增五个 Client Request 和一个通知只保留在生成层；没有新增 Server Request，未知通知继续按现有策略忽略，未知高权限请求继续失败关闭。
+- 初始化中的 Touch ID 自动协商仅用于上游支持设备的进程内 `codex-tui`；Gateway 的独立 Unix WebSocket Client 不借此开启该能力。
+- 完整验证使用临时安装的精确 0.155.1 CLI 与隔离 `CODEX_HOME`。打包 Desktop 的私有工具 Pipe、签名链以及在线第三方模型请求仍需另行实机验收，既有 0.154.0 实测记录不改写成新版本结果。
+- 本地 macOS 验证通过：`protocol:check`、`verify:commit`（含类型、Lint、Gateway/WebUI 构建、文档、3392 项测试、Shell、tarball 与 launchd 模板）、7 组真实 App Server 合同共 34 项，以及 `test:package` 的 tarball 和干净源码全局安装冒烟；全量测试中另有 73 项条件式跳过，不计为通过。未执行远端 CI、发布或正式服务部署。
+
 ## 0.154.0
 
 - 官方 Release：[`rust-v0.154.0`](https://github.com/openai/codex/releases/tag/rust-v0.154.0)

@@ -6,7 +6,7 @@
 台电脑上的 Codex Desktop App 与 `codex-channels` 同时连接本项目监管的同一个主 OpenAI App
 Server，使 Desktop、渠道和 `codexc remote` 看到同一份 Thread、Turn、Item 与实时通知。
 
-当前锁定的 Codex CLI 0.154.0 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
+当前锁定的 Codex CLI 0.155.1 已支持多客户端连接同一 App Server；Codex Desktop App 当前构建还
 包含未公开的 WebSocket 与强制 CLI 启动入口。macOS 使用强制 CLI 与受管 stdio Proxy，Windows
 继续使用 `CODEX_APP_SERVER_WS_URL`。这些入口不属于公开稳定合同，因此功能必须默认关闭、严格做
 平台兼容探测，并在入口消失或行为改变时失败关闭。官方 Remote Control 的云端配对、Environment
@@ -65,8 +65,9 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
 
 ### 官方锁定版本
 
-- 项目固定 `codex-cli 0.154.0`，协议与实现仍以 [`Codex 协议索引`](index.md)和
-  `upstream/openai-codex` 的 `rust-v0.154.0` 锁定源码为准。
+- 项目固定 `codex-cli 0.155.1`，协议与实现仍以 [`Codex 协议索引`](index.md)和
+  `upstream/openai-codex` 的 `rust-v0.155.1` 锁定源码为准。下文 0.154.0 的实机结果是历史验收，
+  不代表 0.155.1 已完成打包 Desktop 私有工具 Pipe 与签名链的实机复核。
 - 官方远程客户端以 WebSocket 连接 App Server；每个连接独立执行一次
   `initialize` / `initialized`。
 - Unix 客户端可以直接通过 WebSocket-over-UDS 连接。官方
@@ -92,7 +93,7 @@ JSON-RPC 业务方法，不维护 Thread 索引，不读取 Codex 会话文件�
   已通过真实 Pipe 验证。因此修复必须同时满足动态环境交付和可信父进程链，不能只补变量或转发
   Socket。
 - Desktop 随包 Codex 为 `0.154.0-alpha.6.2`，与项目锁定协议基线不同，不能成为共享主 App
-  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.154.0 原生可执行文件；Desktop 随包内容
+  Server。实施只能继续运行项目解析出的精确 Codex CLI 0.155.1 原生可执行文件；Desktop 随包内容
   只提供同一 OpenAI Team 签名的 Node 托管进程和 MCP 资源。
 - 这些变量没有公开稳定文档。支持结论只能按经过真实验收的 Desktop 版本与平台记录，不能把
   “安装包中存在字符串”解释为完成兼容。
@@ -369,7 +370,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
 2. 受管入口只从 Desktop 继承当前启动生成的 Pipe 与随包资源路径，通过现有私有 Supervisor Socket
    建立租约。请求必须限定当前用户、主 Provider `openai`、已启用配置、类型为 Socket 且同属当前
    用户的 Unix 路径，以及正式 ChatGPT Bundle 内固定的签名 Node；不接受任意监听地址或远端路径。
-3. App Server 服务解析项目当前使用的 Codex CLI 原生可执行文件，要求版本继续为 0.154.0，并验证
+3. App Server 服务解析项目当前使用的 Codex CLI 原生可执行文件，要求版本为 0.155.1，并验证
    Codex 与托管 Node 都属于 OpenAI Team。主 App Server 的参数、Provider 代理、指标环境、工作目录
    和私有 UDS 均保持原样，只把直接父进程替换为签名 Node。
 4. 首次收到新 Pipe 时，Supervisor 串行终止并重启主 App Server 子进程，等待同一 UDS 恢复后才
@@ -405,7 +406,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
    不能宣称全平台完成。
 9. Desktop 随包提供的 `codex_app` MCP 在共享模式下保持可用；`bridgeReady`、Thread 双向共享或
    自动化双 Client 合同均不能替代该项实机验证。
-10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.154.0；不得以 Desktop 随包的预发布 CLI
+10. macOS 受管路径必须继续使用项目锁定的 Codex CLI 0.155.1；不得以 Desktop 随包的预发布 CLI
     替换协议事实来源，也不得让动态 Pipe、完整启动环境或工具消息进入日志与状态输出。
 
 ## 失败与回滚

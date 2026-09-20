@@ -103,6 +103,13 @@ auto_recap = false
 
 关闭只影响自动回顾，手动 `/recap` 仍然可用；修改后运行 `codexc service restart all`。
 
+### 推理摘要
+
+在 `codexc setup → Codex 新会话默认值 → 其他用户偏好` 中选择推理摘要。开发基线 0.155.1
+在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
+不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
+检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`；升级不会改写已有值。
+
 ### 渠道会话空闲自动解除
 
 在 `codexc config → 系统设置 → 会话空闲自动解除` 中设置渠道会话自动解除 Thread 绑定的全局
@@ -210,7 +217,8 @@ Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属�
 macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI 0.154.0；Desktop 传入的内置插件启用值会受控应用到共享主实例，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.155.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
 Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会先通过 App Server 的官方
 `thread/loaded/list` 和 `thread/read` 检查全部已加载的持久及临时 Thread；发现活动 Thread、
 `codexc remote` 主实例租约，或无法完成
