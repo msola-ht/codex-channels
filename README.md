@@ -94,6 +94,7 @@ Codex 用户配置：
 开机时网络或代理尚未就绪，Gateway 会在五分钟启动恢复窗口内有限复检，并在恢复后处理已观察到的 `codex_apps` 启动失败；详细边界见[启动连通性说明](docs/display.md)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
+未登录 OpenAI 且只配置一个第三方时，新会话和 `codexc remote` 自动使用该提供商的默认模型；多个第三方需先选择，见[Provider 默认选择](docs/provider-integration-guide.md)。
 旧版自动补入的空 `api_providers = []` 会由更新器备份后移除；非空旧配置需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工处理。
 
 ## 专题文档

@@ -19,6 +19,7 @@ export interface ProviderSettingsWatcherOptions {
   logger: Logger;
   hasActiveTurns: () => boolean;
   restartAppServer: () => Promise<void>;
+  refreshProviderModels: () => void;
   onStateChange?: (change: ProviderSettingsStateChange) => void;
   environment?: NodeJS.ProcessEnv;
   pollIntervalMs?: number;
@@ -53,6 +54,7 @@ export class ProviderSettingsWatcher {
   private readonly logger: Logger;
   private readonly hasActiveTurns: () => boolean;
   private readonly restartAppServer: () => Promise<void>;
+  private readonly refreshProviderModels: () => void;
   private readonly onStateChange:
     | ((change: ProviderSettingsStateChange) => void)
     | undefined;
@@ -79,6 +81,7 @@ export class ProviderSettingsWatcher {
     this.logger = options.logger;
     this.hasActiveTurns = options.hasActiveTurns;
     this.restartAppServer = options.restartAppServer;
+    this.refreshProviderModels = options.refreshProviderModels;
     this.onStateChange = options.onStateChange;
     this.environment = options.environment ?? process.env;
     this.pollIntervalMs = options.pollIntervalMs ?? defaultPollIntervalMs;
@@ -209,6 +212,7 @@ export class ProviderSettingsWatcher {
     );
     try {
       await this.restartAppServer();
+      this.refreshProviderModels();
       this.emitState("applied", providers);
       this.logger.info(
         { providers },
@@ -220,7 +224,7 @@ export class ProviderSettingsWatcher {
       this.pendingProviders = providers;
       this.logger.error(
         { err: error, providers },
-        "第三方模型设置变化后 App Server 重启失败，将在冷却后重试",
+        "第三方模型设置应用失败，将在冷却后重试",
       );
     } finally {
       this.restartInFlight = false;

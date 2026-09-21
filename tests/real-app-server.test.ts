@@ -16,6 +16,12 @@ import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
+import { ConversationService } from "../src/application/conversation-service.js";
+import type { ConversationCore } from "../src/conversation-core/index.js";
+import { SessionRouter } from "../src/session-routing/index.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
+import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 import { appendDiagnostic, appServerFailure, signalTestProcessTree, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
@@ -305,23 +311,36 @@ deepseekCatalogContractTest(
           },
         },
       });
-      const started = await client.startThread(workdir, {
-        model: "deepseek-v4-flash",
-        modelProvider: "deepseek",
-      });
-      const threadId = started.thread.id;
+      expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
+      const router = new SessionRouter(client, new MemoryBindingStore(), new WorkspaceRegistry([
+        { id: "contract", name: "Contract", cwd: workdir },
+      ], "contract"));
+      const selection = new ModelSelectionService(
+        client,
+        router,
+        undefined,
+        (await client.listModels()).map((model) => ({
+          ...model, provider: "deepseek", isDefault: model.model === "deepseek-v4-flash",
+        })),
+        "openai", [], () => false,
+      );
+      const target = { surface: "telegram" as const, accountId: "contract", conversationId: "default" };
+      const defaults = selection.threadStartOptions(target);
+      expect(defaults).toEqual({ model: "deepseek-v4-flash", modelProvider: "deepseek" });
+      const conversations = new ConversationService(client, router, {
+        activeTurn: () => undefined, markTurnStarted: () => undefined,
+      } as unknown as ConversationCore, selection, client);
+      await expect(conversations.getGoal(target)).resolves.toBeNull();
+      expect(router.modelSettings(target)).toMatchObject({ model: "deepseek-v4-flash", modelProvider: "deepseek" });
+      const threadId = router.current(target)!.threadId;
       let turnCompleted = false;
       const removeNotification = client.onNotification((notification) => {
         if (notification.method !== "turn/completed") return;
         const params = notification.params as { threadId?: unknown } | undefined;
         if (params?.threadId === threadId) turnCompleted = true;
       });
-      await client.startTurn(
-        threadId,
-        [{ type: "text", text: "Persist the contract fixture." }],
-        "codex_connect:deepseek-resume-contract",
-        workdir,
-      );
+      const submission = await conversations.submit(target, "Persist the contract fixture.");
+      expect(submission.threadId).toBe(threadId);
       await waitFor(() => turnCompleted, 10_000);
       expect(upstreamRequests).toBeGreaterThan(0);
       removeNotification();

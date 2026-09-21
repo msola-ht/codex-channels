@@ -29,6 +29,23 @@ function createGatewayApplicationFixture(
   ) as GatewayApplicationFixture;
 }
 
+it("keeps Provider settings notifications separate from model refresh", () => {
+  const events: string[] = [];
+  const application = createGatewayApplicationFixture({
+    refreshProviderModels: () => events.push("refresh"),
+    surfaceManager: { configurationChanged: ({ action }: { action: string }) => events.push(action) },
+  });
+  for (const action of [
+    "provider-settings-scheduled", "provider-settings-restarting", "provider-settings-failed",
+  ] as const) application.notifyProviderSettingsChange(action, ["deepseek"]);
+  expect(events).toEqual([
+    "provider-settings-scheduled", "provider-settings-restarting", "provider-settings-failed",
+  ]);
+  events.length = 0;
+  application.notifyProviderSettingsChange("provider-settings-applied", ["deepseek"]);
+  expect(events).toEqual(["provider-settings-applied"]);
+});
+
 vi.mock("../runtime/thread-writer-lock.mjs", () => ({
   inspectThreadWriterLock: vi.fn(),
   terminateThreadWriterHolder: vi.fn(),

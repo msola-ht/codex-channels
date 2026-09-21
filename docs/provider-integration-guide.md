@@ -162,7 +162,9 @@ codexc doctor
 - 新会话、同 Provider 历史 Thread、跨 Provider 新建 Thread 的模型与思考等级符合预期；
 - `codexc remote --profile sf-<Provider ID>` 能拉起隔离 App Server 并共享会话；
 - `/usage` 按账户形态展示余额或配额窗口与本机 Token 用量；
-- 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启；
+- 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启 App Server；
+  设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
+  重启或目录刷新失败时报告应用失败，并沿用 watcher 的冷却重试流程，刷新成功后才报告已应用；
 - `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
 ## 6. 用户配置的主 Provider
@@ -217,6 +219,17 @@ stream_max_retries = 0
 `~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
 官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc primary-provider list` 标注“未登录”，
 会话 `/model` 不列出官方 OpenAI 模型，只有第三方模型可继续选择。
+未绑定 Thread 且没有手动选择时，只有一个可选第三方 Provider 就自动使用它的 Profile 默认模型，
+不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
+普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
+先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
+多个第三方 Provider 可选时不按目录顺序决定默认值，先通过 `/model` 选择提供商和模型，再发送消息；
+选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
+已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
+同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
+目标 Thread 建立后该提示消失。
+`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；
+配置了多个第三方时明确提示指定 `--profile`。显式 Profile 和固定模式仍按原配置执行。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、OpenCode Go 保留命名空间

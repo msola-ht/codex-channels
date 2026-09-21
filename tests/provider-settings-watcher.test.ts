@@ -59,6 +59,7 @@ describe("ProviderSettingsWatcher", () => {
       restartAppServer: async () => {
         restartCalls.push("restart");
       },
+      refreshProviderModels: () => undefined,
       onStateChange: (change) => {
         stateEvents.push(change.kind);
       },
@@ -79,6 +80,44 @@ describe("ProviderSettingsWatcher", () => {
     watcher.start();
     return watcher;
   };
+
+  it("模型刷新失败进入失败状态，冷却后无需再次修改文件即可恢复", async () => {
+    now = 30_000;
+    let refreshCalls = 0;
+    let snapshot = "old";
+    const appliedSnapshots: string[] = [];
+    const instance = createWatcher({
+      nowMs: () => now,
+      restartCooldownMs: 30_000,
+      refreshProviderModels: () => {
+        refreshCalls += 1;
+        expect(restartCalls).toHaveLength(refreshCalls);
+        if (refreshCalls === 1) throw new Error("catalog read failed");
+        snapshot = "new";
+      },
+      onStateChange: (change) => {
+        if (change.kind === "applied") appliedSnapshots.push(snapshot);
+        stateEvents.push(change.kind);
+      },
+    });
+    writeCatalog('{"models":[{"slug":"deepseek-v4-flash"}]}\n');
+    await instance.checkNow();
+    expect(stateEvents).toEqual(["scheduled", "restarting", "failed"]);
+    expect(snapshot).toBe("old");
+    expect(appliedSnapshots).toEqual([]);
+    now = 59_000;
+    await instance.checkNow();
+    expect(refreshCalls).toBe(1);
+    now = 61_000;
+    await instance.checkNow();
+    expect(refreshCalls).toBe(2);
+    expect(stateEvents).toEqual(["scheduled", "restarting", "failed", "restarting", "applied"]);
+    expect(snapshot).toBe("new");
+    expect(appliedSnapshots).toEqual(["new"]);
+    now = 92_000;
+    await instance.checkNow();
+    expect(refreshCalls).toBe(2);
+  });
 
   it("启动时只建立基线，设置文件变化后只重启一次", async () => {
     const instance = createWatcher();

@@ -5,7 +5,7 @@ import {
   ConversationService,
   type ConversationQueryPort,
 } from "../src/application/conversation-service.js";
-import type { ModelSelectionService } from "../src/application/model-selection-service.js";
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
 import type { CollaborationModeSelectionService } from "../src/application/collaboration-mode-service.js";
 import {
   estimateWeeklyLimit,
@@ -18,7 +18,10 @@ import {
   type OutputEvent,
 } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/index.js";
-import type { SessionRouter } from "../src/session-routing/router.js";
+import { SessionRouter } from "../src/session-routing/router.js";
+import type { ThreadLifecyclePort, ThreadSession, ThreadStartOptions } from "../src/session-routing/index.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
+import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const main = { id: "main", name: "Main", cwd: "/workspace/main" };
@@ -64,7 +67,111 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
   };
 }
 
+function defaultProviderConversation(providers: string[]) {
+  const sessions = new Map<string, ThreadSession>();
+  const startThread = vi.fn(async (_cwd: string, options: ThreadStartOptions = {}): Promise<ThreadSession> => {
+    const id = `thread-${sessions.size}`;
+    const provider = options.modelProvider ?? "openai";
+    const session: ThreadSession = {
+      thread: {
+        id, sessionId: id, modelProvider: provider, preview: "", name: null, isPinned: false,
+        status: { type: "idle" }, cwd: main.cwd, source: "cli", historyMode: "paginated", activeTurnId: null,
+      },
+      model: options.model ?? "gpt-main", modelProvider: provider, reasoningEffort: "high",
+      serviceTier: null, contextCompactionItemIds: [],
+    };
+    sessions.set(id, session);
+    return session;
+  });
+  const lifecycle = {
+    listThreads: async () => [], startThread, unsubscribeThread: async () => undefined,
+    forkThread: async (id: string) => {
+      const original = sessions.get(id)!;
+      const nextId = `${id}-fork`;
+      const forked = { ...original, thread: { ...original.thread, id: nextId, sessionId: nextId } };
+      sessions.set(nextId, forked);
+      return forked;
+    },
+  } as unknown as ThreadLifecyclePort;
+  const router = new SessionRouter(lifecycle, new MemoryBindingStore(), new WorkspaceRegistry([main], main.id));
+  const models = new ModelSelectionService({
+    listModels: async () => [], writeDefaultFastMode: async () => undefined,
+    readDefaultReasoningEffort: async () => "high", readDefaultServiceTier: async () => null,
+  }, router, undefined, providers.map((provider) => ({
+    provider, id: "third-default", model: "third-default", displayName: provider, isDefault: true,
+    inputModalities: ["text"], supportedReasoningEfforts: [{ effort: "high", description: "High" }],
+    defaultReasoningEffort: "high", serviceTiers: [], defaultServiceTier: null,
+  })), "openai", [], () => false);
+  const startTurn = vi.fn(async () => ({ turnId: "turn-1" }));
+  const service = new ConversationService(turnPort({
+    startTurn, getGoal: async () => null, clearGoal: async () => undefined,
+    setGoal: async (threadId, objective) => ({
+      threadId, objective, status: "active", tokenBudget: null, tokensUsed: 0,
+      timeUsedSeconds: 0, createdAt: 1, updatedAt: 1,
+    }),
+    compactThread: async () => undefined,
+    startReview: async (threadId) => ({ threadId, turnId: "review-1" }),
+  }), router, {
+    activeTurn: () => undefined, markTurnStarted: vi.fn(), handle: vi.fn(),
+  } as unknown as ConversationCore, models, queryPort());
+  return { service, router, models, startThread, startTurn };
+}
+
 describe("ConversationService model selection", () => {
+  it("keeps the Provider switch notice until the target Thread is created, then clears it before the next Turn", async () => {
+    const { service, router, models } = defaultProviderConversation(["deepseek", "custom"]);
+    await router.ensure(target, { model: "third-default", modelProvider: "deepseek" });
+    await models.selectModel(target, { provider: "custom", model: "third-default" });
+    expect(router.current(target)).toBeUndefined();
+    expect(models.status(target).providerPending).toBe(true);
+    await models.selectModel(target, { provider: "custom", model: "third-default" });
+    expect((await models.state(target)).providerPending).toBe(true);
+    await service.getGoal(target);
+    expect(models.status(target).providerPending).toBe(false);
+    expect((await models.state(target)).providerPending).toBe(false);
+    await service.submit(target, "继续任务");
+    expect(models.hasPending(target)).toBe(false);
+    expect(models.status(target).providerPending).toBe(false);
+  });
+
+  const sessionCommands: Array<[string, (service: ConversationService) => Promise<unknown>]> = [
+    ["getGoal", (service) => service.getGoal(target)],
+    ["setGoal", (service) => service.setGoal(target, "完成任务")],
+    ["clearGoal", (service) => service.clearGoal(target)],
+    ["review", (service) => service.review(target, { type: "uncommittedChanges" })],
+    ["compact", (service) => service.compact(target)],
+    ["fork", (service) => service.fork(target)],
+  ];
+
+  it.each(sessionCommands)("keeps %s and the following message on the unauthenticated third-party default", async (_name, execute) => {
+    const { service, router, startThread, startTurn } = defaultProviderConversation(["deepseek"]);
+    await execute(service);
+    expect(startThread).toHaveBeenCalledWith(main.cwd, { model: "third-default", modelProvider: "deepseek" });
+    expect(router.modelSettings(target)).toMatchObject({ model: "third-default", modelProvider: "deepseek" });
+    const binding = router.current(target)!;
+    await service.submit(target, "继续任务");
+    expect(startTurn).toHaveBeenCalledWith(binding.threadId, expect.any(Array), expect.any(String), main.cwd, {});
+    expect(startThread).toHaveBeenCalledOnce();
+  });
+
+  it.each(sessionCommands)("rejects %s before creating a Thread when several unauthenticated Providers need selection", async (_name, execute) => {
+    const { service, router, startThread } = defaultProviderConversation(["deepseek", "custom"]);
+    await expect(execute(service)).rejects.toMatchObject({ code: "model.provider.selection-required" });
+    expect(startThread).not.toHaveBeenCalled();
+    expect(router.current(target)).toBeUndefined();
+  });
+
+  it.each(sessionCommands)("uses an explicit Provider selection in %s and preserves it for the following message", async (_name, execute) => {
+    const { service, router, models, startThread, startTurn } = defaultProviderConversation(["deepseek", "custom"]);
+    await models.selectModel(target, { provider: "custom", model: "third-default" });
+    await execute(service);
+    expect(startThread).toHaveBeenCalledWith(main.cwd, { model: "third-default", modelProvider: "custom" });
+    expect(models.status(target).providerPending).toBe(false);
+    await service.submit(target, "继续任务");
+    expect(startTurn).toHaveBeenCalledWith(router.current(target)!.threadId, expect.any(Array), expect.any(String), main.cwd, expect.any(Object));
+    expect(router.modelSettings(target)?.modelProvider).toBe("custom");
+  });
+
   it("queries global metrics without requiring a current Thread", () => {
     const report = {
       view: "global" as const,

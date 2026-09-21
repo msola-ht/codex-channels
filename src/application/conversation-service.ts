@@ -1353,7 +1353,7 @@ export class ConversationService implements
   compact(target: ConversationTarget): Promise<void> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       await this.codex.compactThread(binding.threadId);
     });
   }
@@ -1361,7 +1361,7 @@ export class ConversationService implements
   fork(target: ConversationTarget): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const current = await this.router.ensure(target);
+      const current = await this.ensureSession(target);
       if (await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
@@ -1419,7 +1419,7 @@ export class ConversationService implements
   review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
       return { threadId: result.threadId, turnId: result.turnId, steered: false };
@@ -1594,7 +1594,7 @@ export class ConversationService implements
 
   getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       return this.codex.getGoal(binding.threadId);
     });
   }
@@ -1605,7 +1605,7 @@ export class ConversationService implements
       return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
     }
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       const goal = await this.codex.setGoal(binding.threadId, normalized);
       this.core.handle({
         type: "thread.goal.updated",
@@ -1618,7 +1618,7 @@ export class ConversationService implements
 
   clearGoal(target: ConversationTarget): Promise<void> {
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       await this.codex.clearGoal(binding.threadId);
       this.core.handle({
         type: "thread.goal.cleared",
@@ -1674,6 +1674,13 @@ export class ConversationService implements
     };
   }
 
+  private ensureSession(target: ConversationTarget) {
+    const options = this.models.threadStartOptions?.(target) ?? {};
+    return Object.keys(options).length > 0
+      ? this.router.ensure(target, options)
+      : this.router.ensure(target);
+  }
+
   private async startNewTurn(
     target: ConversationTarget,
     input: TurnInput[],
@@ -1682,10 +1689,7 @@ export class ConversationService implements
     assertCurrent?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
-    const binding = Object.keys(threadStartOptions).length > 0
-      ? await this.router.ensure(target, threadStartOptions)
-      : await this.router.ensure(target);
+    const binding = await this.ensureSession(target);
     this.invalidateSessionDisplayTurnCount(binding.threadId);
     const workspace = this.router.workspace(target);
     const overrides = this.turnOverrides(target);

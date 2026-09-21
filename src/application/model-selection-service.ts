@@ -47,27 +47,36 @@ const standardServiceTierRequestValue = "default";
 
 export class ModelSelectionService {
   private readonly pendingByConversation = new Map<string, TurnOverrides>();
+  private readonly pendingProviderSwitches = new Set<string>();
   private readonly providerFilterByConversation = new Map<string, string>();
 
   constructor(
     private readonly codex: ModelSelectionPort,
     private readonly router: SessionRouter,
     private readonly configuredDefaultModel?: string,
-    private readonly supplementaryModels: readonly ModelOption[] = [],
+    private supplementaryModels: readonly ModelOption[] = [],
     private readonly primaryProvider = "openai",
     private readonly officialCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
     private readonly openaiAuthenticated: () => boolean = () => true,
     private readonly providersWithoutSubscription: () => ReadonlySet<string> = () => new Set(),
   ) {}
 
-  async state(target: ConversationTarget): Promise<ModelSelectionState> {
+  updateSupplementaryModels(models: readonly ModelOption[]): void {
+    this.supplementaryModels = models;
+  }
+
+  async state(target: ConversationTarget, requireSelection = false): Promise<ModelSelectionState> {
     const models = await this.listModels();
     let filter = this.providerFilterByConversation.get(this.key(target));
     if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
       this.providerFilterByConversation.delete(this.key(target));
       filter = undefined;
     }
-    return this.selectionState(target, models, filter);
+    const state = this.selectionState(target, models, filter);
+    if (requireSelection && state.modelProvider === undefined) {
+      throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
+    return state;
   }
 
   async browseProvider(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
@@ -101,6 +110,9 @@ export class ModelSelectionService {
     modality: ModelInputModality,
   ): Promise<void> {
     const current = this.resolveState(target, await this.listModels());
+    if (current.modelProvider === undefined) {
+      throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
     const model = findModel(current.models, current.model, current.modelProvider);
     if (!model) {
       throw new UserFacingError(
@@ -160,6 +172,7 @@ export class ModelSelectionService {
     const current = this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
+    const leavesThread = providerChanged && this.router.modelSettings(target) !== undefined;
     const resetOfficialFast = selectedProvider === "openai";
     const selectedFastTier = fastServiceTierId(selected);
     const providerDefaultEffort = providerChanged
@@ -198,7 +211,7 @@ export class ModelSelectionService {
     this.pendingByConversation.set(this.key(target), {
       ...pending,
       model: selected.model,
-      ...(providerChanged ? { modelProvider: selectedProvider } : {}),
+      modelProvider: selectedProvider,
       effort,
       ...(resetOfficialFast
         ? { serviceTier: standardServiceTierRequestValue }
@@ -214,6 +227,7 @@ export class ModelSelectionService {
           ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
           : {}),
     });
+    if (leavesThread) this.pendingProviderSwitches.add(this.key(target));
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
     return this.selectionState(target, models, selectedProvider);
   }
@@ -280,6 +294,25 @@ export class ModelSelectionService {
 
   threadStartOptions(target: ConversationTarget) {
     const pending = this.pendingByConversation.get(this.key(target));
+    if (!this.router.current(target) && this.officialUnavailable()) {
+      const selection = pending?.modelProvider
+        ? { provider: pending.modelProvider, model: pending.model }
+        : this.defaultThirdPartySelection();
+      if (!selection) {
+        throw new UserFacingError(
+          this.thirdPartyProviders().length === 0
+            ? "model.official.not-logged-in"
+            : "model.provider.selection-required",
+          "请先通过 /model 选择提供商和模型",
+        );
+      }
+      this.requireSubscribedProvider(selection.provider);
+      const model = pending?.model ?? selection.model;
+      return {
+        ...(model === undefined ? {} : { model }),
+        modelProvider: selection.provider,
+      };
+    }
     return {
       ...(pending?.model ? { model: pending.model } : {}),
       ...(pending?.modelProvider
@@ -311,6 +344,7 @@ export class ModelSelectionService {
   ): void {
     const key = this.key(target);
     this.pendingByConversation.delete(key);
+    this.pendingProviderSwitches.delete(key);
     if (!preference) return;
     const currentProvider = this.normalizeProvider(
       this.router.modelSettings(target)?.modelProvider,
@@ -345,28 +379,35 @@ export class ModelSelectionService {
       });
     }
     this.pendingByConversation.delete(key);
+    this.pendingProviderSwitches.delete(key);
   }
 
   clear(target: ConversationTarget): void {
     this.pendingByConversation.delete(this.key(target));
+    this.pendingProviderSwitches.delete(this.key(target));
     this.providerFilterByConversation.delete(this.key(target));
   }
 
   status(target: ConversationTarget): Omit<ModelSelectionState, "models"> {
     const pending = this.pendingByConversation.get(this.key(target));
     const current = this.router.modelSettings(target);
+    const fallback = !pending?.modelProvider && !current && this.officialUnavailable()
+      ? this.defaultThirdPartySelection()
+      : undefined;
     const serviceTierPending = hasServiceTierOverride(pending);
+    const provider = this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
+      ?? fallback?.provider ?? (this.officialUnavailable() ? undefined : this.primaryProvider);
     return {
-      model: pending?.model ?? current?.model ?? this.configuredDefaultModel ?? "默认模型",
-      modelProvider: this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
-        ?? this.primaryProvider,
+      model: pending?.model ?? current?.model ?? fallback?.model
+        ?? (this.officialUnavailable() ? "请选择模型" : this.configuredDefaultModel ?? "默认模型"),
+      ...(provider === undefined ? {} : { modelProvider: provider }),
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending ? pending?.serviceTier ?? null : current?.serviceTier ?? null,
       pending: pending !== undefined,
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
-      providerPending: hasOverride(pending, "modelProvider"),
+      providerPending: this.isProviderSwitchPending(target),
     };
   }
 
@@ -380,10 +421,13 @@ export class ModelSelectionService {
     }
     const pending = this.pendingByConversation.get(this.key(target));
     const current = this.router.modelSettings(target);
-    const configuredDefault = this.configuredDefaultModel
+    const selectedProvider = this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider);
+    const useConfiguredDefault = !this.officialUnavailable()
+      && (selectedProvider === undefined || selectedProvider === this.primaryProvider);
+    const configuredDefault = useConfiguredDefault && this.configuredDefaultModel
       ? findModel(models, this.configuredDefaultModel, this.primaryProvider)
       : undefined;
-    if (this.configuredDefaultModel && !configuredDefault) {
+    if (useConfiguredDefault && this.configuredDefaultModel && !configuredDefault) {
       throw new UserFacingError(
         "model.configured-default.missing",
         `配置的默认模型不属于当前主 Provider ${this.primaryProvider}：${this.configuredDefaultModel}`,
@@ -393,30 +437,34 @@ export class ModelSelectionService {
         },
       );
     }
-    const fallback = configuredDefault
+    const thirdPartyDefault = !current && !pending?.modelProvider && this.officialUnavailable()
+      ? this.defaultThirdPartySelection()
+      : undefined;
+    const fallback = this.officialUnavailable()
+      ? thirdPartyDefault && findModel(models, thirdPartyDefault.model, thirdPartyDefault.provider)
+      : configuredDefault
       ?? models.find((model) =>
         model.isDefault && (model.provider ?? "openai") === this.primaryProvider)
       ?? models.find((model) => (model.provider ?? "openai") === this.primaryProvider)
       ?? models[0]!;
-    const model = pending?.model ?? current?.model ?? fallback.model;
-    const selectedProvider = this.normalizeProvider(
+    if (thirdPartyDefault && !fallback) {
+      throw new UserFacingError("model.current.missing", "默认模型不在可用模型列表中", {
+        model: thirdPartyDefault.model,
+      });
+    }
+    const model = pending?.model ?? current?.model ?? fallback?.model ?? "请选择模型";
+    const provider = this.normalizeProvider(
       pending?.modelProvider
         ?? current?.modelProvider
-        ?? fallback.provider
-        ?? this.primaryProvider,
-    ) ?? this.primaryProvider;
-    const catalogModel = findModel(models, model, selectedProvider);
+        ?? (fallback ? fallback.provider ?? this.primaryProvider : undefined),
+    );
+    const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       models,
       ...(filter === undefined ? {} : { providerFilter: filter }),
       model,
-      modelProvider: this.normalizeProvider(
-        pending?.modelProvider
-          ?? current?.modelProvider
-          ?? catalogModel?.provider
-          ?? this.primaryProvider,
-      ) ?? this.primaryProvider,
+      ...(provider === undefined ? {} : { modelProvider: provider }),
       effort: pending?.effort ?? current?.effort ?? catalogModel?.defaultReasoningEffort ?? null,
       serviceTier: serviceTierPending
         ? pending?.serviceTier ?? null
@@ -427,14 +475,49 @@ export class ModelSelectionService {
       modelPending: hasOverride(pending, "model"),
       effortPending: hasOverride(pending, "effort"),
       serviceTierPending,
-      providerPending: hasOverride(pending, "modelProvider"),
+      providerPending: this.isProviderSwitchPending(target),
     };
+  }
+
+  private isProviderSwitchPending(target: ConversationTarget): boolean {
+    const key = this.key(target);
+    const selected = this.pendingByConversation.get(key)?.modelProvider;
+    if (selected === undefined) return false;
+    const current = this.router.modelSettings(target);
+    return current
+      ? this.normalizeProvider(selected) !== this.normalizeProvider(current.modelProvider ?? this.primaryProvider)
+      : this.pendingProviderSwitches.has(key);
   }
 
   private requireSubscribedProvider(provider: string): void {
     if (this.providersWithoutSubscription().has(provider)) {
       throw new UserFacingError("model.selection.expired", "账户已无有效订阅，请重新发送 /model 选择");
     }
+  }
+
+  private officialUnavailable(): boolean {
+    return this.primaryProvider === "openai" && !this.openaiAuthenticated();
+  }
+
+  private thirdPartyProviders(): string[] {
+    const blocked = this.providersWithoutSubscription();
+    return [...new Set([
+      ...this.supplementaryModels.filter((model) => model.available !== false)
+        .map((model) => model.provider ?? "openai"),
+      ...this.officialCatalogProviders.map((provider) => provider.provider),
+    ])].filter((provider) => provider !== "openai" && !blocked.has(provider));
+  }
+
+  private defaultThirdPartySelection(): ModelSelectionIdentity | undefined {
+    const providers = this.thirdPartyProviders();
+    if (providers.length !== 1) return undefined;
+    const provider = providers[0]!;
+    const model = this.officialCatalogProviders.find((entry) => entry.provider === provider)?.defaultModel
+      ?? this.supplementaryModels.find((entry) => entry.provider === provider && entry.isDefault)?.model;
+    if (!model) {
+      throw new UserFacingError("model.provider.default-missing", "提供商默认模型未配置", { provider });
+    }
+    return { provider, model };
   }
 
   private selectableModels(models: ModelOption[]): ModelOption[] {

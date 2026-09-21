@@ -151,6 +151,10 @@ export function formatSurfaceUserFacingError(
       return `配置的默认模型不属于当前主 Provider ${detail(error, "provider", "未知")}：${detail(error, "model", "未知")}`;
     case "model.official.not-logged-in":
       return "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login";
+    case "model.provider.selection-required":
+      return "OpenAI 官方未登录，已配置多个第三方提供商；请先通过 /model 选择提供商和模型";
+    case "model.provider.default-missing":
+      return `提供商 ${detail(error, "provider", "未知")} 的默认模型未配置，请通过 codexc setup 设置`;
     case "model.provider.mismatch":
       return error.message;
     case "model.unavailable":

@@ -1487,33 +1487,33 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
           "resume",
         ]);
       }
+      const passthroughCapture = join(root, "capture-passthrough.json");
+      await execFileAsync(
+        process.execPath,
+        [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
+        {
+          cwd: workspace,
+          env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
+          encoding: "utf8",
+        },
+      );
+      expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
+        "--remote",
+        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+        "-C",
+        realpathSync(workspace),
+        "--profile",
+        "sf-deepseek",
+        "resume",
+        "--",
+        "--profile",
+        "deepseek",
+        "--workspace",
+        "external",
+      ]);
     } finally {
       await supervisor.close();
     }
-
-    const passthroughCapture = join(root, "capture-passthrough.json");
-    const passthrough = spawnSync(
-      process.execPath,
-      [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
-      {
-        cwd: workspace,
-        env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
-        encoding: "utf8",
-      },
-    );
-    expect(passthrough.status, passthrough.stderr).toBe(0);
-    expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
-      "--remote",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-      "-C",
-      realpathSync(workspace),
-      "resume",
-      "--",
-      "--profile",
-      "deepseek",
-      "--workspace",
-      "external",
-    ]);
   }, 30_000);
 
   it("uses the native custom Profile without dropping the current Workspace permissions", async () => {
@@ -4326,7 +4326,7 @@ function writeManagedProviderFixture(
   writeFileSync(target, stringify({
     model: resolvedDefinition.defaultModel,
     model_provider: resolvedDefinition.id,
-    model_reasoning_effort: resolvedDefinition.defaultReasoningEffort,
+    ...(mode === "switching" ? { model_reasoning_effort: resolvedDefinition.defaultReasoningEffort } : {}),
     model_catalog_json: catalogPath,
     model_providers: {
       [resolvedDefinition.id]: {

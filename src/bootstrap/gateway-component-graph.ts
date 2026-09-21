@@ -27,6 +27,7 @@ import {
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
+  loadManagedModelProviderSettings,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   loadManagedModelWindow,
@@ -159,6 +160,7 @@ export abstract class GatewayComponentGraph {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly conversations: ConversationService;
+  readonly refreshProviderModels: () => void;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -207,12 +209,19 @@ export abstract class GatewayComponentGraph {
       primaryProvider,
       ...managedProviders.map(({ provider }) => provider),
     ]);
-    const supplementaryModels = providerDefinitions.flatMap((definition) =>
-      loadManagedModelOptions(
-        managedProviderDirectory(process.env, definition),
-        configuredProviders.has(definition.id),
-        definition,
-      ));
+    const readSupplementaryModels = () => {
+      const managedDefaults = loadManagedModelProviderSettings();
+      return providerDefinitions.flatMap((definition) =>
+        loadManagedModelOptions(
+          managedProviderDirectory(process.env, definition),
+          configuredProviders.has(definition.id),
+          definition,
+        ).map((model) => ({
+          ...model,
+          isDefault: model.model === managedDefaults.find((entry) => entry.provider === definition.id)?.model,
+        })));
+    };
+    const supplementaryModels = readSupplementaryModels();
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
       executableInvocation(codexBinary, args);
@@ -483,6 +492,7 @@ export abstract class GatewayComponentGraph {
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
     );
+    this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
       this.router,

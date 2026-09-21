@@ -37,7 +37,7 @@ export class CollaborationModeSelectionService {
     mode: CollaborationModeKind,
   ): Promise<CollaborationModeState> {
     const preset = await this.resolvePreset(mode);
-    const model = await this.models.state(target);
+    const model = await this.models.state(target, true);
     this.pendingByConversation.set(this.key(target), {
       mode,
       settings: {
