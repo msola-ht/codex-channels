@@ -41,6 +41,16 @@ export interface ThreadSession {
   contextCompactionItemIds: readonly string[];
 }
 
+export interface ThreadResumeSession extends ThreadSession {
+  settingsMatch: boolean;
+  effectiveSettings: {
+    cwd: string;
+    approvalPolicy: string;
+    sandbox: "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
+    permissions: string | null;
+  };
+}
+
 export interface ThreadDynamicToolSpec {
   type: "function";
   name: string;
@@ -80,7 +90,7 @@ export interface ThreadLifecyclePort {
     threadId: string,
     cwd: string,
     options?: ThreadStartOptions,
-  ): Promise<ThreadSession>;
+  ): Promise<ThreadResumeSession>;
   forkThread(
     threadId: string,
     cwd: string,

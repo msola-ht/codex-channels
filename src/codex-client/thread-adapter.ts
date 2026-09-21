@@ -7,6 +7,7 @@ import type {
 } from "../codex-protocol/index.js";
 import type {
   ThreadSession,
+  ThreadResumeSession,
   ThreadSnapshot,
   ThreadSectionSnapshot,
   ThreadSource,
@@ -96,6 +97,33 @@ export function toThreadSession(response: ThreadSessionResponse): ThreadSession 
     reasoningEffort: response.reasoningEffort,
     serviceTier: response.serviceTier,
     contextCompactionItemIds: contextCompactionItemIds(response.thread),
+  };
+}
+
+export function toThreadResumeSession(
+  response: ThreadResumeResponse,
+  requested: { cwd: string; approvalPolicy: string; sandbox?: string; permissions?: string },
+): ThreadResumeSession {
+  requireString(response.cwd, "resume cwd");
+  const sandboxModes = {
+    readOnly: "read-only",
+    workspaceWrite: "workspace-write",
+    dangerFullAccess: "danger-full-access",
+    externalSandbox: "external-sandbox",
+  } as const;
+  return {
+    ...toThreadSession(response),
+    settingsMatch: response.cwd === requested.cwd
+      && response.approvalPolicy === requested.approvalPolicy
+      && (requested.permissions !== undefined
+        ? response.activePermissionProfile?.id === requested.permissions
+        : sandboxModes[response.sandbox.type] === requested.sandbox),
+    effectiveSettings: {
+      cwd: response.cwd,
+      approvalPolicy: typeof response.approvalPolicy === "string" ? response.approvalPolicy : "granular",
+      sandbox: sandboxModes[response.sandbox.type],
+      permissions: response.activePermissionProfile?.id ?? null,
+    },
   };
 }
 

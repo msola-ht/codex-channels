@@ -24,7 +24,7 @@ import {
   ReportedChildExitError,
 } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
-import { parseCodexRemoteOptions } from "./codex-remote-options.mjs";
+import { defaultCodexRemoteProfile, parseCodexRemoteOptions } from "./codex-remote-options.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
 
@@ -49,6 +49,7 @@ async function runRemoteCli() {
   const { passthrough, selectedProfile, workspaceId } = parseCodexRemoteOptions(
     process.argv.slice(2),
     {
+      selectDefaultProfile: defaultCodexRemoteProfile,
       customSwitchingProfiles: customSwitchingProviders.map(
         ({ provider, profileName }) => ({
           providerId: provider,

@@ -149,6 +149,31 @@ describe("JsonRpcClient threads", () => {
       expect(session.contextCompactionItemIds).toEqual(["compact-1", "compact-2"]);
     });
 
+    it.each([
+      { cwd: "/different" },
+      { approvalPolicy: "never" },
+      { sandbox: { type: "dangerFullAccess" } },
+    ])("reports ignored resume settings from the authoritative response: %j", async (settings) => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = settings;
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      const resumed = await client.resumeThread("thread-1", "/tmp/project");
+      expect(resumed.settingsMatch).toBe(false);
+      expect(resumed.effectiveSettings).toMatchObject({ cwd: settings.cwd ?? "/tmp/project" });
+      await client.close();
+    });
+
+    it("compares a requested permission profile with the profile actually returned", async () => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = { activePermissionProfile: { id: ":workspace", extends: null } };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      expect((await client.resumeThread("thread-1", "/tmp/project", { permissions: ":read-only" })).settingsMatch).toBe(false);
+      expect((await client.resumeThread("thread-1", "/tmp/project", { permissions: ":workspace" })).settingsMatch).toBe(true);
+      await client.close();
+    });
+
     it("does not override process-owned provider configuration when resuming a thread", async () => {
       const transport = new FakeTransport();
       const client = new CodexAppServerClient(new JsonRpcClient(transport), {

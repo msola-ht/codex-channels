@@ -86,6 +86,11 @@
   App Server/Gateway 就绪的情况。推理端点 HEAD 返回 5xx 时报告线路异常，不被 `/models` 成功掩盖。
   失败和路径异常形成脱敏状态
   供渠道上线通知使用，但不阻断 Gateway；停止过程会取消仍在进行的探测。
+- `startup-network-recovery.ts`：拥有启动后的有限网络复检、额度重读和主 OpenAI 实例的单次 MCP 刷新；
+  接续会话后有界补读 MCP 快照，并保留读取期间更新的实时状态；429/5xx 继续有限复检。
+  首次快照失败在网络可达后仅补读一次，实时通知或关闭会取消待补读项，失败不等于健康。
+  只跟踪启动窗口内非授权类 `codex_apps` 失败，以真实状态通知确认恢复，停止时取消并有界等待。
+  与首次探测共用根目录 `startup-network-policy.json` 的截止时间和退避参数。
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文
@@ -122,7 +127,8 @@
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
 - `provider-settings-watcher.ts`：监听受管第三方 Provider 的模型目录、Profile 与管理标记变化，
   校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
-  等待修复，重启失败按冷却时间重试；等待、重启中、生效和失败状态通过共享配置变更通知投递给
+  等待修复；重启后刷新 Gateway 模型目录，两步均成功才报告生效，任一步失败按冷却时间重试；
+  等待、重启中、生效和失败状态通过共享配置变更通知投递给
   所有渠道，停止 Gateway 时一并关闭。
 - `network-proxy-watcher.ts`：按字段保留 Codex `.env` 与标准环境代理优先级；已有任一代理地址时跳过系统查询，
   否则监听系统发现参与解析后的有效代理变化；单独配置 `NO_PROXY` 不禁用观察。仅记录需手动刷新 Gateway 和 App Server 的提示，区分
@@ -154,6 +160,7 @@ Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Cli
 只取消该侧 Thread 的待处理交互，`thread/resume` 返回的活动 Turn 会重新归约到 Core。停止会中断启动中的 Codex 请求、取消并限时等待重连任务，且不会把主动关闭误判为永久
 Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，组合根保留绑定并让 Gateway 与
 其他 Thread 正常启动，按有界退避间隔只重试未恢复 Thread；占用与解除各投递一次结构化渠道通知。
+重试只保留仍匹配原 Conversation、Workspace 与 Session 的绑定；绑定被删除或切换后移除旧恢复任务。
 停止会取消等待计时器并限时等待在途恢复，不删除官方写锁或绕过 App Server 单写约束。
 启动失败、启动中停止和正常停止共享同一个组件关闭任务；除中断未完成连接所需
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有

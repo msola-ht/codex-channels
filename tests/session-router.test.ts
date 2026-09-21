@@ -5,7 +5,7 @@ import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
 import {
   SessionRouter,
   type ThreadLifecyclePort,
-  type ThreadSession,
+  type ThreadResumeSession,
   type ThreadSnapshot,
   type ThreadStatus,
 } from "../src/session-routing/index.js";
@@ -38,14 +38,16 @@ function thread(id: string, status: ThreadStatus): ThreadSnapshot {
 
 function session(
   value: ThreadSnapshot,
-  overrides: Partial<Omit<ThreadSession, "thread">> = {},
-): ThreadSession {
+  overrides: Partial<Omit<ThreadResumeSession, "thread">> = {},
+): ThreadResumeSession {
   return {
     thread: value,
+    settingsMatch: true,
     model: "gpt-main",
     reasoningEffort: "medium",
     serviceTier: "default",
     contextCompactionItemIds: [],
+    effectiveSettings: { cwd: value.cwd, approvalPolicy: "on-request", sandbox: "read-only", permissions: null },
     ...overrides,
   };
 }
@@ -56,7 +58,7 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
   };
   return {
     listThreads: unsupported,
-    readThread: unsupported,
+    readThread: async (id) => thread(id, { type: "idle" }),
     startThread: unsupported,
     resumeThread: unsupported,
     forkThread: unsupported,
@@ -68,6 +70,280 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it.each(["read", "resume", "cleanup"])("serializes workspace switching behind recovery at the %s boundary", async (phase) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
+    let release!: () => void;
+    let signal!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    let initial = true;
+    const subscriptions = new Set<string>();
+    const calls: string[] = [];
+    const router = new SessionRouter(threadPort({
+      readThread: async (id) => {
+        if (id === "history" && initial && phase === "read") {
+          signal(); await blocked;
+          initial = false;
+          return { ...thread(id, { type: "idle" }), cwd: "/other" };
+        }
+        return { ...thread(id, { type: "idle" }), cwd: id === "history" && !initial ? "/other" : "/workspace" };
+      },
+      resumeThread: async (id, cwd) => {
+        calls.push(`resume:${id}`);
+        subscriptions.add(id);
+        if (id === "history" && initial) {
+          if (phase === "resume") { signal(); await blocked; }
+          initial = false;
+          return session(thread(id, { type: "idle" }), { settingsMatch: false });
+        }
+        return session({ ...thread(id, { type: "idle" }), cwd });
+      },
+      unsubscribeThread: async (id) => {
+        calls.push(`unsubscribe:${id}`);
+        if (id === "history" && phase === "cleanup") { signal(); await blocked; }
+        subscriptions.delete(id);
+      },
+    }), store, registry);
+    const recovering = router.restoreSubscriptions();
+    await entered;
+    const switching = (async () => {
+      await router.selectWorkspace(target, "other");
+      return router.resume(target, "history");
+    })();
+    const independent = { ...target, conversationId: "independent" };
+    await router.resume(independent, "independent");
+    expect(calls.filter((call) => call === "resume:history")).toHaveLength(phase === "read" ? 0 : 1);
+    release();
+    await recovering;
+    expect(await switching).toMatchObject({ threadId: "history", workspaceId: "other" });
+    expect(router.current(target)?.workspaceId).toBe("other");
+    expect(subscriptions.has("history")).toBe(true);
+    expect(router.current(independent)?.threadId).toBe("independent");
+  });
+
+  it.each(["read", "resume"])("does not resurrect an officially removed binding after a late %s response", async (phase) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
+    let release!: () => void;
+    let signal!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    const onRestored = vi.fn();
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const resumeThread = vi.fn(async (id: string) => {
+      if (phase === "resume") { signal(); await blocked; }
+      return session(thread(id, { type: "idle" }));
+    });
+    const router = new SessionRouter(threadPort({
+      readThread: async (id) => {
+        if (phase === "read") { signal(); await blocked; }
+        return thread(id, { type: "idle" });
+      }, resumeThread, unsubscribeThread,
+    }), store, registry);
+    const recovering = router.restoreSubscriptions(() => true, onRestored);
+    await entered;
+    router.forgetThread("history");
+    release();
+    expect(await recovering).toEqual([]);
+    expect(router.current(target)).toBeUndefined();
+    expect(onRestored).not.toHaveBeenCalled();
+    expect(unsubscribeThread).toHaveBeenCalledTimes(phase === "resume" ? 1 : 0);
+  });
+
+  it("discards a queued recovery snapshot after the preceding detach completes", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
+    let release!: () => void;
+    let signal!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    const resumeThread = vi.fn();
+    const router = new SessionRouter(threadPort({ resumeThread,
+      unsubscribeThread: async () => { signal(); await blocked; },
+    }), store, registry);
+    const detaching = router.detach(target);
+    await entered;
+    const recovering = router.restoreSubscriptions();
+    release();
+    await detaching;
+    expect(await recovering).toEqual([]);
+    expect(router.current(target)).toBeUndefined();
+    expect(resumeThread).not.toHaveBeenCalled();
+  });
+
+  it("keeps the first successful subscription when another conversation concurrently resumes the same Thread", async () => {
+    let release!: () => void;
+    let signal!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const entered = new Promise<void>((resolve) => { signal = resolve; });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const resumeThread = vi.fn(async (id: string) => { signal(); await blocked; return session(thread(id, { type: "idle" })); });
+    const router = new SessionRouter(threadPort({ resumeThread, unsubscribeThread }), new MemoryBindingStore(), registry);
+    const first = router.resume(target, "history");
+    await entered;
+    const otherTarget = { ...target, conversationId: "other" };
+    const rejected = expect(router.resume(otherTarget, "history")).rejects.toMatchObject({ code: "thread.bound" });
+    release();
+    await first;
+    await rejected;
+    expect(resumeThread).toHaveBeenCalledTimes(1);
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+    expect(router.current(target)?.threadId).toBe("history");
+  });
+
+  it("rejects automatic continuation when the selected history becomes active during resume", async () => {
+    const historical = thread("historical", { type: "idle" });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      listThreads: async () => [historical],
+      resumeThread: async () => session({ ...historical, status: { type: "active" }, activeTurnId: "turn-1" }),
+      unsubscribeThread,
+    }), new MemoryBindingStore(), registry);
+    await expect(router.ensure(target)).rejects.toMatchObject({ code: "conversation.busy" });
+    expect(router.current(target)).toBeUndefined();
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("historical");
+  });
+
+  it.each([false, true])("restores the previous subscription after binding failure; invalid response=%s", async (invalidRestore) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "current", sessionId: "current" });
+    vi.spyOn(store, "switchForeground").mockImplementation(() => { throw new Error("binding failed"); });
+    const unsubscribeThread = vi.fn<(id: string) => Promise<void>>(async () => undefined);
+    const resumeThread = vi.fn(async (id: string) => session(thread(id, { type: "idle" }), {
+      settingsMatch: id !== "current" || !invalidRestore,
+    }));
+    const router = new SessionRouter(threadPort({ resumeThread, unsubscribeThread }), store, registry);
+    await expect(router.resume(target, "historical")).rejects.toThrow(invalidRestore ? "原订阅恢复失败" : "binding failed");
+    expect(resumeThread.mock.calls.map(([id]) => id)).toEqual(["historical", "current"]);
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(invalidRestore
+      ? ["current", "current", "historical"] : ["current", "historical"]);
+    expect(router.current(target)?.threadId).toBe(invalidRestore ? undefined : "current");
+  });
+
+  it.each(["settings", "cwd", "active-turn"])("cleans a newly restored subscription on %s mismatch", async (mismatch) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "current", sessionId: "current" });
+    const historical = thread("historical", { type: "idle" });
+    const result = session(historical);
+    if (mismatch === "settings") result.settingsMatch = false;
+    if (mismatch === "cwd") result.effectiveSettings.cwd = "/other";
+    if (mismatch === "active-turn") result.thread = { ...historical, status: { type: "active" }, activeTurnId: null };
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({ readThread: async () => historical,
+      resumeThread: async () => result, unsubscribeThread }), store, registry);
+    await expect(router.resume(target, historical.id, false, historical.cwd)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("historical");
+    expect(router.current(target)?.threadId).toBe("current");
+    expect(router.workspace(target).id).toBe("main");
+  });
+
+  it.each([false, true])("cleans the new subscription if the previous unsubscribe fails; cleanup failure=%s", async (cleanupFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "current", sessionId: "current" });
+    const historical = thread("historical", { type: "idle" });
+    const unsubscribeThread = vi.fn(async (id: string) => {
+      if (id === "current" || cleanupFails) throw new Error(`unsubscribe failed: ${id}`);
+    });
+    const router = new SessionRouter(threadPort({ readThread: async () => historical,
+      resumeThread: async () => session(historical), unsubscribeThread }), store, registry);
+    await expect(router.resume(target, historical.id)).rejects.toThrow(cleanupFails ? "新订阅清理失败" : "unsubscribe failed: current");
+    expect(unsubscribeThread.mock.calls.map(([id]) => id)).toEqual(["current", "historical"]);
+    expect(router.current(target)?.threadId).toBe("current");
+    expect(router.workspace(target).id).toBe("main");
+  });
+
+  it("does not overwrite a moved historical directory from a persisted binding on reconnect", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "historical", sessionId: "historical" });
+    const resumeThread = vi.fn();
+    const startThread = vi.fn(async () => session(thread("fresh", { type: "idle" })));
+    const router = new SessionRouter(threadPort({
+      readThread: async (id) => ({ ...thread(id, { type: "idle" }), cwd: "/other" }), resumeThread,
+      startThread,
+    }), store, registry);
+    const failures = await router.restoreSubscriptions();
+    expect(failures).toMatchObject([{ bindingRemoved: true, reason: "unavailable" }]);
+    expect(resumeThread).not.toHaveBeenCalled();
+    expect(router.current(target)).toBeUndefined();
+    expect(router.workspace(target).id).toBe("main");
+    expect((await router.ensure(target)).threadId).toBe("fresh");
+    expect(startThread).toHaveBeenCalledWith("/workspace", {});
+  });
+
+  it.each([false, true])("removes an invalid reconnect binding even if subscription cleanup fails=%s", async (cleanupFails) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "historical", sessionId: "historical" });
+    const unsubscribeThread = vi.fn(async () => {
+      if (cleanupFails) throw new Error("unsubscribe failed");
+    });
+    const startThread = vi.fn(async () => session(thread("fresh", { type: "idle" })));
+    const router = new SessionRouter(threadPort({
+      resumeThread: async (id) => session(thread(id, { type: "idle" }), { settingsMatch: false }), unsubscribeThread,
+      startThread,
+    }), store, registry);
+    expect(await router.restoreSubscriptions()).toMatchObject([{ bindingRemoved: true, reason: "unavailable" }]);
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("historical");
+    expect(router.current(target)).toBeUndefined();
+    expect((await router.ensure(target)).threadId).toBe("fresh");
+  });
+  it("rejects cross-workspace history before resume without changing the binding", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "current", sessionId: "current" });
+    const historical = { ...thread("historical", { type: "idle" }), cwd: "/other" };
+    const resumeThread = vi.fn(async () => session(historical, { effectiveSettings: {
+      cwd: "/other", approvalPolicy: "never", sandbox: "read-only", permissions: null,
+    } }));
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      readThread: async () => historical,
+      resumeThread,
+      unsubscribeThread,
+    }), store, new WorkspaceRegistry([
+      { id: "main", name: "Main", cwd: "/workspace", sandbox: "workspace-write" },
+      { id: "other", name: "Other", cwd: "/other", sandbox: "read-only", approvalPolicy: "never" },
+    ], "main"));
+
+    await expect(router.resume(target, historical.id, false, historical.cwd)).rejects.toMatchObject({ code: "thread.takeover.workspace" });
+    expect(resumeThread).not.toHaveBeenCalled();
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+    expect(router.workspace(target).id).toBe("main");
+    expect(router.current(target)?.threadId).toBe("current");
+  });
+
+  it.each(["changed", "unauthorized", "source", "rpc"])("preserves the original workspace and binding on %s recovery failure", async (failure) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "main", threadId: "current", sessionId: "current" });
+    const historical: ThreadSnapshot = {
+      ...thread("historical", { type: "idle" }),
+      cwd: failure === "unauthorized" ? "/unregistered" : "/workspace",
+      source: failure === "source" ? "automation" : "cli",
+    };
+    const resumeThread = vi.fn(async (): Promise<ThreadResumeSession> => { throw new Error("resume failed"); });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({ readThread: async () => historical, resumeThread, unsubscribeThread }), store, registry);
+
+    await expect(router.resume(target, historical.id, false, failure === "changed" ? "/other" : historical.cwd)).rejects.toThrow();
+
+    expect(router.current(target)?.threadId).toBe("current");
+    expect(router.workspace(target).id).toBe("main");
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+    expect(resumeThread).toHaveBeenCalledTimes(failure === "rpc" ? 1 : 0);
+  });
+
+  it("rejects takeover when authoritative history no longer matches the bound workspace", async () => {
+    const store = new MemoryBindingStore();
+    store.bind({ target: { ...target, surface: "feishu" }, workspaceId: "main", threadId: "historical", sessionId: "historical" });
+    const unsubscribeThread = vi.fn(async () => undefined);
+    const router = new SessionRouter(threadPort({
+      readThread: async (id) => ({ ...thread(id, { type: "idle" }), cwd: "/other" }),
+      unsubscribeThread,
+    }), store, registry);
+    await expect(router.transferBinding(target, "historical")).rejects.toMatchObject({ code: "thread.takeover.changed" });
+    expect(store.getByThread("historical")).toBeUndefined();
+    expect(unsubscribeThread).toHaveBeenCalledExactlyOnceWith("historical");
+  });
+
   it("removes a binding when its Provider was deleted", async () => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "deleted-provider", sessionId: "deleted-provider" });
@@ -112,6 +388,7 @@ describe("SessionRouter", () => {
     const started: unknown[] = [];
     const resumed: unknown[] = [];
     const client = threadPort({
+      readThread: async (id) => thread(id, { type: "idle" }),
       listThreads: async () => [],
       startThread: async (cwd, options) => {
         started.push({ cwd, options });
@@ -119,7 +396,9 @@ describe("SessionRouter", () => {
       },
       resumeThread: async (threadId, cwd, options) => {
         resumed.push({ threadId, cwd, options });
-        return session(thread(threadId, { type: "idle" }));
+        return session(thread(threadId, { type: "idle" }), { effectiveSettings: {
+          cwd, approvalPolicy: "never", sandbox: "workspace-write", permissions: null,
+        } });
       },
       unsubscribeThread: async () => {},
     });
@@ -597,6 +876,7 @@ describe("SessionRouter", () => {
     store.bind({ target, workspaceId: "main", threadId: "running", sessionId: "running" });
     const unsubscribed: string[] = [];
     const client = threadPort({
+      readThread: async (id) => thread(id, { type: "idle" }),
       resumeThread: async (threadId) => session(thread(threadId, { type: "idle" })),
       unsubscribeThread: async (threadId) => {
         unsubscribed.push(threadId);
@@ -898,6 +1178,7 @@ describe("SessionRouter", () => {
     });
     const unsubscribed: string[] = [];
     const client = threadPort({
+      readThread: async (id) => thread(id, { type: "idle" }),
       resumeThread: async () => {
         throw new JsonRpcError(-32602, "Thread not found");
       },
@@ -1017,6 +1298,7 @@ describe("SessionRouter", () => {
     const archived: string[] = [];
     const unarchived: string[] = [];
     const client = threadPort({
+      readThread: async (id) => thread(id, { type: "idle" }),
       listThreads: async () => [],
       startThread: async () => session(thread("current", { type: "idle" })),
       archiveThread: async (threadId: string) => {

@@ -98,6 +98,7 @@ import type {
   ThreadQueryOptions,
   ThreadDynamicToolSpec,
   ThreadSession,
+  ThreadResumeSession,
   ThreadStartOptions,
   ThreadSnapshot,
 } from "../session-routing/index.js";
@@ -105,6 +106,7 @@ import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
+  toThreadResumeSession,
   toThreadSnapshot,
 } from "./thread-adapter.js";
 import {
@@ -356,19 +358,22 @@ export class CodexAppServerClient implements
     threadId: string,
     cwd: string,
     options: ThreadStartOptions = {},
-  ): Promise<ThreadSession> {
+  ): Promise<ThreadResumeSession> {
+    const settings = {
+      cwd,
+      approvalPolicy: options.approvalPolicy ?? "on-request",
+      ...(options.permissions !== undefined
+        ? { permissions: options.permissions }
+        : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+    };
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
         threadId,
-        cwd,
-        approvalPolicy: options.approvalPolicy ?? "on-request",
-        ...(options.permissions !== undefined
-          ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+        ...settings,
       },
     }, { retryOverload: false });
-    return toThreadSession(response);
+    return toThreadResumeSession(response, settings);
   }
 
   async unsubscribeThread(threadId: string): Promise<void> {
@@ -807,7 +812,7 @@ export class CodexAppServerClient implements
     return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
   }
 
-  async listMcpServers(threadId?: string): Promise<McpServerSummary[]> {
+  async listMcpServers(threadId?: string, signal?: AbortSignal): Promise<McpServerSummary[]> {
     const servers: McpServerSummary[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -821,7 +826,7 @@ export class CodexAppServerClient implements
             ...(threadId ? { threadId } : {}),
             ...(cursor ? { cursor } : {}),
           },
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(signal ? { signal } : {}) });
       const page = toMcpServerSummaryPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -852,11 +857,11 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async reloadMcpServers(): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal): Promise<void> {
     await this.rpc.request<Record<string, never>>({
       method: "config/mcpServer/reload",
       params: undefined,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(signal ? { signal } : {}) });
   }
 
   async startMcpOAuthLogin(
@@ -937,7 +942,7 @@ export class CodexAppServerClient implements
   }
 
   async accountRateLimits(
-    options: { background?: boolean } = {},
+    options: { background?: boolean; signal?: AbortSignal } = {},
   ): Promise<AccountRateLimits> {
     const params = {
       supportsLunaReserve: true,
@@ -946,7 +951,7 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
     return toAccountRateLimits(response);
   }
 

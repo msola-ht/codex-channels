@@ -433,6 +433,7 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
+  无显式 Profile 且官方未登录时解析唯一第三方 Profile；多个候选要求明确选择，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式

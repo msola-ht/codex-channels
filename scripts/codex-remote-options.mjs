@@ -1,7 +1,13 @@
 import {
   loadManagedModelProviderDefinitions,
 } from "../runtime/model-provider-definitions.mjs";
-import { loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadConfiguredCustomPrimaryModelProvider,
+  loadConfiguredCustomSwitchingModelProviders,
+  loadManagedModelProviders,
+  loadPrimaryModelProvider,
+} from "../runtime/model-provider-runtime.mjs";
+import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
@@ -11,6 +17,7 @@ export function parseCodexRemoteOptions(
   {
     environment = process.env,
     managedProfileDefinitions: suppliedManagedProfileDefinitions,
+    selectDefaultProfile,
     customSwitchingProfiles = loadConfiguredCustomSwitchingModelProviders(environment)
       .map(({ provider, profileName }) => ({
         providerId: provider,
@@ -85,7 +92,31 @@ export function parseCodexRemoteOptions(
     }
     passthrough.push(argument);
   }
+  if (selectedProfile === undefined && !hasUnmanagedProfile && selectDefaultProfile) {
+    selectedProfile = selectDefaultProfile();
+  }
   return { passthrough, workspaceId, selectedProfile };
+}
+
+export function defaultCodexRemoteProfile(environment = process.env) {
+  if (
+    loadPrimaryModelProvider(environment) !== "openai"
+    || loadConfiguredCustomPrimaryModelProvider(environment) !== undefined
+    || hasCodexAuthFile(environment)
+  ) return undefined;
+  const enabled = new Set(loadManagedModelProviders(environment).map(({ provider }) => provider));
+  const profiles = [
+    ...loadManagedModelProviderDefinitions(environment)
+      .filter(({ id }) => enabled.has(id)).map(({ profileName }) => profileName),
+    ...loadConfiguredCustomSwitchingModelProviders(environment).map(({ profileName }) => profileName),
+  ];
+  if (profiles.length === 0) {
+    throw new Error("OpenAI 官方未登录，请先运行 codex login 或通过 codexc setup 配置第三方提供商");
+  }
+  if (profiles.length > 1) {
+    throw new Error(`OpenAI 官方未登录，已配置多个第三方提供商；请指定 --profile：${profiles.join("、")}`);
+  }
+  return profiles[0];
 }
 
 function customProviderIdArgument(args, index, definitions) {

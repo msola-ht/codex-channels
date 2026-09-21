@@ -35,6 +35,7 @@ type WithoutTarget<T> = T extends unknown ? Omit<T, "target"> : never;
 type UntargetedOutputEvent = WithoutTarget<OutputEvent>;
 
 export class ConversationCore {
+  private readonly turnRestoreObservers = new Map<string, Set<(turnId: string, active: boolean) => void>>();
   private readonly activeByThread = new Map<string, ActiveTurn>();
   private readonly errorsByTurn = new Map<string, { message: string; errorCode?: TurnErrorCode }>();
   private readonly usageByThread = new Map<string, ThreadTokenUsage>();
@@ -58,6 +59,35 @@ export class ConversationCore {
     private readonly router: ConversationRoutingPort,
     private readonly output: EventBus<OutputEvent>,
   ) {}
+
+  trackThreadActivity(threadId: string): {
+    restore: (target: ConversationTarget, activeTurnId: string | null) => void;
+    stop: () => void;
+  } {
+    let latestActive: string | null | undefined;
+    const completed = new Set<string>();
+    const observe = (turnId: string, active: boolean) => {
+      if (active) latestActive = turnId;
+      else {
+        completed.add(turnId);
+        if (latestActive === turnId) latestActive = null;
+      }
+    };
+    const observers = this.turnRestoreObservers.get(threadId) ?? new Set();
+    observers.add(observe);
+    this.turnRestoreObservers.set(threadId, observers);
+    return {
+      restore: (target, activeTurnId) => {
+        const current = latestActive !== undefined ? latestActive
+          : activeTurnId && !completed.has(activeTurnId) ? activeTurnId : null;
+        if (current) this.markTurnStarted(target, threadId, current);
+      },
+      stop: () => {
+        observers.delete(observe);
+        if (observers.size === 0) this.turnRestoreObservers.delete(threadId);
+      },
+    };
+  }
 
   markTurnStarted(
     target: ConversationTarget,
@@ -85,8 +115,11 @@ export class ConversationCore {
   }
 
   activeTurn(target: ConversationTarget): ActiveTurn | undefined {
-    const threadId = this.router.foregroundThreadId?.(target);
-    if (threadId) return this.activeByThread.get(threadId);
+    this.pruneUnboundTurns();
+    if (this.router.foregroundThreadId) {
+      const threadId = this.router.foregroundThreadId(target);
+      return threadId ? this.activeByThread.get(threadId) : undefined;
+    }
     return [...this.activeByThread.values()].find(
       (active) => this.key(active.target) === this.key(target)
         && !this.isBackgroundThread(active.threadId),
@@ -94,11 +127,24 @@ export class ConversationCore {
   }
 
   activeTurnForThread(threadId: string): ActiveTurn | undefined {
+    this.pruneUnboundTurns();
     return this.activeByThread.get(threadId);
   }
 
   hasActiveTurns(): boolean {
+    this.pruneUnboundTurns();
     return this.activeByThread.size > 0;
+  }
+
+  private pruneUnboundTurns(): void {
+    for (const [threadId, active] of this.activeByThread) {
+      const owner = this.router.targetForThread(threadId);
+      if (owner && this.key(owner) === this.key(active.target)) continue;
+      this.activeByThread.delete(threadId);
+      this.timingByThread.delete(threadId);
+      this.clearTurnResponseState(threadId);
+      this.disposeReasoning(threadId);
+    }
   }
 
   tokenUsage(threadId: string): ThreadTokenUsage | undefined {
@@ -200,6 +246,11 @@ export class ConversationCore {
   }
 
   handle(event: ConversationInputEvent): void {
+    if (event.type === "turn.started" || event.type === "turn.completed") {
+      for (const observe of this.turnRestoreObservers.get(event.threadId) ?? []) {
+        observe(event.turnId, event.type === "turn.started");
+      }
+    }
     switch (event.type) {
       case "turn.started": {
         this.clearReasoning(event.threadId);

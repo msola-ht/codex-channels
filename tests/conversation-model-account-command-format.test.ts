@@ -18,6 +18,25 @@ import {
 } from "../src/surfaces/conversation-command-format.js";
 
 describe("conversation model and account command formatting", () => {
+  it("shows no current Provider while an unauthenticated multi-Provider conversation awaits selection", () => {
+    const rendered = formatConversationModels({
+      kind: "models", view: "model",
+      state: {
+        models: ["custom-a", "custom-b"].map((provider) => ({
+          provider, id: "gpt-test", model: "gpt-test", displayName: provider,
+          supportedReasoningEfforts: [{ effort: "high", description: "High" }],
+          defaultReasoningEffort: "high", serviceTiers: [], defaultServiceTier: null,
+          isDefault: true, inputModalities: ["text"],
+        })),
+        model: "请选择模型", effort: null, serviceTier: null,
+        pending: false, modelPending: false, effortPending: false, serviceTierPending: false,
+      },
+    });
+    expect(rendered).toContain("当前 Provider：待选择");
+    expect(rendered).not.toContain("当前 Provider：OpenAI 官方");
+    expect(rendered).not.toContain("← 当前");
+  });
+
   it("groups reset credit expiry dates and preserves undisclosed and nonexpiring credits", () => {
     const limits = toAccountRateLimits({
       ordinaryUsageAllowed: true,

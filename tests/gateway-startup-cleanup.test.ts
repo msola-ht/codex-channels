@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
+import { BindingRestoreCoordinator, type BindingRestoreCoordinatorOptions } from "../src/bootstrap/binding-restore-coordinator.js";
 import {
   inspectThreadWriterLock,
   terminateThreadWriterHolder,
@@ -19,6 +20,21 @@ const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 type GatewayApplicationFixture = GatewayApplication & Record<string, unknown>;
 
+it.each(["removed", "moved"])("drops pending recovery when its original binding was %s", async (change) => {
+  const target = { surface: "feishu" as const, accountId: "default", conversationId: "review" };
+  const binding = { target, workspaceId: "old", threadId: "history", sessionId: "history" };
+  const pending = new Map([[binding.threadId, { binding, occupiedNotified: true, failureCount: 3 }]]);
+  const coordinator = new BindingRestoreCoordinator({
+    router: { allBindings: () => change === "removed" ? [] : [{ ...binding, workspaceId: "new" }] },
+  } as unknown as BindingRestoreCoordinatorOptions, {
+    disconnectedProviders: new Set(), disconnectedBindingsByProvider: new Map(),
+    pendingBindingRestores: pending, restoringThreadIds: new Set(), restoreAttempt: 1,
+  });
+  coordinator.schedule();
+  expect(pending.size).toBe(0);
+  await coordinator.close();
+});
+
 function createGatewayApplicationFixture(
   properties: Record<string, unknown>,
 ): GatewayApplicationFixture {
@@ -28,6 +44,23 @@ function createGatewayApplicationFixture(
     properties,
   ) as GatewayApplicationFixture;
 }
+
+it("keeps Provider settings notifications separate from model refresh", () => {
+  const events: string[] = [];
+  const application = createGatewayApplicationFixture({
+    refreshProviderModels: () => events.push("refresh"),
+    surfaceManager: { configurationChanged: ({ action }: { action: string }) => events.push(action) },
+  });
+  for (const action of [
+    "provider-settings-scheduled", "provider-settings-restarting", "provider-settings-failed",
+  ] as const) application.notifyProviderSettingsChange(action, ["deepseek"]);
+  expect(events).toEqual([
+    "provider-settings-scheduled", "provider-settings-restarting", "provider-settings-failed",
+  ]);
+  events.length = 0;
+  application.notifyProviderSettingsChange("provider-settings-applied", ["deepseek"]);
+  expect(events).toEqual(["provider-settings-applied"]);
+});
 
 vi.mock("../runtime/thread-writer-lock.mjs", () => ({
   inspectThreadWriterLock: vi.fn(),

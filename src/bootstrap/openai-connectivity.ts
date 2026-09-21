@@ -1,10 +1,12 @@
 import type { HttpClientProxySettings } from "../../runtime/network-proxy.mjs";
 
 import { createProxyFetch } from "./proxy-fetch.js";
+import startupNetworkPolicy from "../../startup-network-policy.json" with { type: "json" };
 
 export type OpenAiConnectivityStatus =
   | "reachable"
   | "route-warning"
+  | "temporarily-unavailable"
   | "invalid-base-url"
   | "indeterminate"
   | "unreachable"
@@ -16,7 +18,6 @@ const officialOpenAiBaseUrls = {
   api: "https://api.openai.com/v1",
   chatgpt: "https://chatgpt.com/backend-api/codex",
 } as const;
-const defaultRetryDelaysMs = [1_000, 2_000, 4_000] as const;
 
 export interface OpenAiConnectivityOptions {
   proxy: HttpClientProxySettings;
@@ -33,8 +34,8 @@ export async function checkOpenAiConnectivity(
   options: OpenAiConnectivityOptions,
 ): Promise<OpenAiConnectivityStatus> {
   const fetchImpl = options.fetchImpl ?? createProxyFetch(options.proxy);
-  const deadlineAt = Date.now() + (options.deadlineMs ?? 12_000);
-  const retryDelaysMs = options.retryDelaysMs ?? defaultRetryDelaysMs;
+  const deadlineAt = Date.now() + (options.deadlineMs ?? startupNetworkPolicy.probeDeadlineMs);
+  const retryDelaysMs = options.retryDelaysMs ?? startupNetworkPolicy.probeRetryDelaysMs;
   const plan = connectivityPlan(options);
 
   for (let attempt = 0; ; attempt += 1) {
@@ -46,7 +47,7 @@ export async function checkOpenAiConnectivity(
     const result = await probeOpenAiRoute(
       plan,
       fetchImpl,
-      Math.min(options.timeoutMs ?? 5_000, remainingMs),
+      Math.min(options.timeoutMs ?? startupNetworkPolicy.probeTimeoutMs, remainingMs),
       options.signal,
     );
     if (result !== "unreachable") {
@@ -94,6 +95,7 @@ async function probeOpenAiRoute(
   try {
     const inference = await requestAndDiscard(fetchImpl, plan.inferenceUrl, "HEAD", controller.signal);
     if (inference.status === 404) return "invalid-base-url";
+    if (inference.status === 429 || inference.status >= 500) return "temporarily-unavailable";
     if (!((inference.status >= 200 && inference.status < 300)
       || inference.status === 401 || inference.status === 403 || inference.status === 405)) {
       return "route-warning";
@@ -114,6 +116,7 @@ async function probeOpenAiRoute(
     ) {
       return "reachable";
     }
+    if (response.status === 429 || response.status >= 500) return "temporarily-unavailable";
     return response.status === 404 ? "invalid-base-url" : "route-warning";
   } catch (error) {
     if (signal?.aborted) {

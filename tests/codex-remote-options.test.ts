@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
-import { parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
+import { defaultCodexRemoteProfile, parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
+import { configuredHome, configureOpenCodeGo, testEnvironment } from "./model-provider-runtime-test-fixture.js";
 
 const isolatedEnvironment = {
   CODEX_HOME: join(tmpdir(), "codexc-remote-options-empty-codex"),
@@ -20,6 +21,24 @@ function parseCodexRemoteOptions(
 }
 
 describe("Codex Remote options", () => {
+  it("selects the sole switching Provider without official login and rejects ambiguous defaults", async () => {
+    const environment = testEnvironment(await configuredHome("switching"));
+    expect(defaultCodexRemoteProfile(environment)).toBe("sf-deepseek");
+    expect(parseCodexRemoteOptions([], {
+      selectDefaultProfile: () => defaultCodexRemoteProfile(environment),
+    }).selectedProfile).toBe("sf-deepseek");
+    configureOpenCodeGo(environment.CODEX_HOME!);
+    expect(() => defaultCodexRemoteProfile(environment)).toThrow("请指定 --profile");
+  });
+
+  it("preserves explicit profiles without resolving the unauthenticated default", () => {
+    const selectDefaultProfile = () => { throw new Error("must not resolve default"); };
+    expect(parseCodexRemoteOptions(["--profile", "sf-deepseek"], { selectDefaultProfile }).selectedProfile)
+      .toBe("sf-deepseek");
+    expect(parseCodexRemoteOptions(["--profile", "personal"], { selectDefaultProfile }).passthrough)
+      .toEqual(["--profile", "personal"]);
+  });
+
   it.each([
     [["--profile", "sf-deepseek"], "sf-deepseek"],
   ] as const)("selects a managed Provider profile from %j", (args, selectedProfile) => {

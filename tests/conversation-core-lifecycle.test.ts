@@ -15,6 +15,30 @@ import {
 } from "./conversation-core-test-fixture.js";
 
 describe("ConversationCore lifecycle", () => {
+  it("drops unbound activity without treating a valid background Turn as foreground", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const target = { surface: "feishu" as const, accountId: "default", conversationId: "100" };
+    const bound = new Set(["invalid", "background"]);
+    const core = new ConversationCore({
+      allBindings: () => [...bound].map((threadId) => ({ target, threadId })),
+      foregroundThreadId: () => undefined,
+      isBackgroundThread: (id) => id === "background" && bound.has(id),
+      targetForThread: (id) => bound.has(id) ? target : undefined,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.markTurnStarted(target, "invalid", "turn-invalid");
+    core.markTurnStarted(target, "background", "turn-background");
+    bound.delete("invalid");
+    expect(core.activeTurn(target)).toBeUndefined();
+    expect(core.activeTurnForThread("invalid")).toBeUndefined();
+    expect(core.activeTurnForThread("background")?.turnId).toBe("turn-background");
+    expect(core.hasActiveTurns()).toBe(true);
+    bound.clear();
+    expect(core.hasActiveTurns()).toBe(false);
+    await output.close();
+  });
+
   it("leaves async questions to their coordinator and keeps the Turn active without recording a final response", async () => {
     const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
     const events: OutputEvent[] = [];
@@ -1157,7 +1181,7 @@ describe("ConversationCore lifecycle", () => {
         { target: openaiTarget, threadId: "thread-openai" },
         { target: deepseekTarget, threadId: "thread-deepseek" },
       ],
-      targetForThread: () => undefined,
+      targetForThread: (id) => id === "thread-openai" ? openaiTarget : deepseekTarget,
       modelSettingsForThread: () => undefined,
       contextCompactionItemIdsForThread: () => undefined,
     }, output);

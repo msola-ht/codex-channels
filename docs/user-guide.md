@@ -352,6 +352,10 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。
 存在原 Thread 时，`/new` 的结果会显示 `恢复会话：/r <Thread ID>`，可直接复制该命令恢复旧会话。
+
+`/r` 的完整 ID、短 ID、名称和序号都只在当前工作区查找。恢复其他工作区的历史前，
+请先使用 `/work` 切换到会话所属工作区；恢复不会自动切换工作区或改写历史会话的目录。
+恢复时如果历史目录或实际权限与工作区不一致，会解除该绑定；下一条普通消息在当前工作区新建会话。
 `/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
 重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。

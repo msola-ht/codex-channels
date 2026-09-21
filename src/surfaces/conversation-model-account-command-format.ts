@@ -79,7 +79,7 @@ export function formatConversationModels(
     ].join("\n"));
   }
   if (state.providerFilter === undefined && providers.length > 1) {
-    const currentProvider = state.modelProvider ?? "openai";
+    const currentProvider = state.modelProvider;
     return toStructuredMarkdownList([
       formatModelStateLine(state),
       `思考等级：${state.effort ?? "模型默认"}`,
@@ -87,7 +87,7 @@ export function formatConversationModels(
         ? [`Fast 模式：${fast}${state.serviceTierPending ? "（下一次 Turn 生效）" : ""}`]
         : []),
       "",
-      `当前 Provider：${formatCodexProviderLabel(currentProvider)}`,
+      `当前 Provider：${currentProvider === undefined ? "待选择" : formatCodexProviderLabel(currentProvider)}`,
       "可用提供商：",
       ...providers.map((provider, index) =>
         `${index + 1}. ${formatCodexProviderLabel(provider)}${provider === currentProvider ? " ← 当前" : ""} · ${state.models.filter((model) => (model.provider ?? "openai") === provider).length} 个模型`,

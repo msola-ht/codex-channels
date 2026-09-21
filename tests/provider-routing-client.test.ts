@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ProviderIdleReleaser } from "../src/bootstrap/provider-idle-releaser.js";
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
 import {
   ProviderRoutingClient,
   type ProviderClientInstance,
 } from "../src/codex-client/provider-routing-client.js";
-import type { ThreadSession, ThreadSnapshot } from "../src/session-routing/index.js";
+import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/session-routing/index.js";
 
 const cwd = "/workspace";
 
@@ -70,18 +71,28 @@ describe("ProviderRoutingClient", () => {
     expect(deepseek.listThreads).not.toHaveBeenCalled();
   });
 
-  it("routes a new third-party Thread and its Turn to the matching App Server", async () => {
+  it.each([false, true])("routes an unauthenticated third-party default with explicit selection %s to its App Server", async (explicit) => {
     const openai = client();
     const deepseek = client();
     const started = session("thread-deepseek", "deepseek", "idle");
     deepseek.startThread.mockResolvedValue(started);
     deepseek.startTurn.mockResolvedValue({ turnId: "turn-1" });
     const routed = routing(openai, deepseek);
-
-    await expect(routed.startThread(cwd, {
-      model: "deepseek-v4-flash",
-      modelProvider: "deepseek",
-    })).resolves.toBe(started);
+    const models = [{
+      id: "deepseek-v4-flash", model: "deepseek-v4-flash", displayName: "DeepSeek",
+      provider: "deepseek", isDefault: true, inputModalities: ["text" as const],
+      supportedReasoningEfforts: [{ effort: "high", description: "High" }],
+      defaultReasoningEffort: "high", serviceTiers: [], defaultServiceTier: null,
+    }];
+    const selection = new ModelSelectionService({
+      listModels: async () => [], readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null, writeDefaultFastMode: async () => undefined,
+    }, {
+      current: () => undefined, modelSettings: () => undefined,
+    } as unknown as SessionRouter, undefined, models, "openai", [], () => false);
+    const target = { surface: "telegram" as const, accountId: "test", conversationId: "default" };
+    if (explicit) await selection.selectModel(target, { provider: "deepseek", model: "deepseek-v4-flash" });
+    await expect(routed.startThread(cwd, selection.threadStartOptions(target))).resolves.toBe(started);
     await routed.startTurn(
       "thread-deepseek",
       [{ type: "text", text: "hello" }],

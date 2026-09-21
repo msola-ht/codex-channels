@@ -200,6 +200,7 @@ export class FakeTransport extends BaseTransport {
   threadListData: Array<Record<string, unknown>> = [];
   threadLoadedListData: string[] = [];
   resumeThreadData: Record<string, unknown> = appServerThread();
+  resumeSettings: Record<string, unknown> = {};
   threadReadData: Record<string, unknown> = appServerThread();
   threadReadDataById = new Map<string, Record<string, unknown>>();
   metadataUpdateThreadData: Record<string, unknown> | undefined;
@@ -274,12 +275,19 @@ export class FakeTransport extends BaseTransport {
         ),
       );
     } else if (decoded.method === "thread/resume") {
+      const params = decoded.params as Record<string, unknown>;
       queueMicrotask(() =>
         this.emitMessage(
           JSON.stringify({
             id: decoded.id,
             result: {
               thread: this.resumeThreadData,
+              cwd: params.cwd,
+              approvalPolicy: params.approvalPolicy,
+              sandbox: { type: params.sandbox === "workspace-write" ? "workspaceWrite"
+                : params.sandbox === "danger-full-access" ? "dangerFullAccess" : "readOnly" },
+              activePermissionProfile: params.permissions ? { id: params.permissions, extends: null } : null,
+              ...this.resumeSettings,
               model: "gpt-default",
               reasoningEffort: "medium",
               serviceTier: "default",

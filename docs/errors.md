@@ -70,6 +70,8 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `model.unavailable` | 模型暂不可用并附原因 | 模型被上游禁用或不可用 |
 | `model.provider.mismatch` | 当前线程运行在 X 账户，不能使用 Y Provider 的模型 | 继续/恢复旧 Thread 时暂存了跨 Provider 模型 |
 | `model.official.not-logged-in` | OpenAI 官方未登录，当前没有可用模型 | 未检测到 Codex 官方鉴权文件 |
+| `model.provider.selection-required` | 请先通过 /model 选择提供商和模型 | 官方未登录且存在多个可选第三方，新会话不能隐式选择 Provider |
+| `model.provider.default-missing` | 提供商的默认模型未配置 | 唯一可选第三方没有有效默认模型；通过 codexc setup 设置 |
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |
 | `model.selector.not-found` | 找不到指定模型 | 选择器无匹配 |
@@ -86,13 +88,13 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | --- | --- | --- |
 | `session.selector.required` | /resume 用法提示 | 未提供会话选择参数 |
 | `session.selector.ambiguous` | 会话选择不唯一 | 选择器匹配多个会话 |
-| `session.selector.not-found` | 找不到指定会话 | 选择器无匹配 |
+| `session.selector.not-found` | 在当前工作区找不到指定会话；跨工作区恢复不受支持，请先使用 /work 切换到会话所属工作区 | 当前工作区内选择器无匹配 |
 | `sessions.usage` | /sessions 用法提示 | 参数格式错误 |
 | `archived-sessions.usage` | /archived 用法提示 | 参数格式错误 |
 | `thread.bound` | 该 Codex Thread 已绑定到其他会话 | 跨会话接管已绑定 Thread |
 | `thread.takeover.busy` | 原渠道或当前渠道仍有任务，暂不能接管 | 接管运行中的 Thread |
-| `thread.takeover.workspace` | 只能接管当前 Workspace 中的 Thread | 跨 Workspace 接管 |
-| `thread.takeover.changed` | 会话绑定刚刚发生变化，请重新打开会话列表后再试 | 接管期间绑定变更 |
+| `thread.takeover.workspace` | 只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区 | 跨工作区恢复或接管 |
+| `thread.takeover.changed` | 会话绑定或工作区已发生变化，请重新打开会话列表后再试 | 恢复或接管期间绑定、工作区或 Thread 目录变更 |
 | `workspace.missing` | Workspace 不存在或未获授权 | 配置的 Workspace 缺失 |
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |

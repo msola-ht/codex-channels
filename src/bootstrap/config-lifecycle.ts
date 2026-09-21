@@ -72,6 +72,7 @@ export async function runGatewayProcess(): Promise<void> {
     logger,
     hasActiveTurns: () => application.hasActiveTurns(),
     restartAppServer: () => restartAppServerService({ environment: process.env }),
+    refreshProviderModels: () => application.refreshProviderModels(),
     onStateChange: (change) =>
       application.notifyProviderSettingsChange(
         providerSettingsAction[change.kind],

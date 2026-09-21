@@ -2,6 +2,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
+import startupNetworkPolicy from "../../startup-network-policy.json" with { type: "json" };
+import { StartupNetworkRecovery } from "./startup-network-recovery.js";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -25,6 +27,7 @@ import {
   loadConfiguredCustomPrimaryModelProvider,
   loadConfiguredCustomSwitchingModelProviders,
   loadManagedModelProviders,
+  loadManagedModelProviderSettings,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
   loadManagedModelWindow,
@@ -157,6 +160,7 @@ export abstract class GatewayComponentGraph {
   private readonly threadState: ThreadStateSynchronizer;
   private readonly core: ConversationCore;
   private readonly conversations: ConversationService;
+  readonly refreshProviderModels: () => void;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -180,7 +184,8 @@ export abstract class GatewayComponentGraph {
   private bindingRestoreAttempt = 0;
   private readonly queueLifecycleTasks = new Set<Promise<void>>();
   private codexUpstreamUserAgent: string | undefined;
-  private openAiConnectivity: OpenAiConnectivityStatus = "not-applicable";
+  private openAiConnectivity: OpenAiConnectivityStatus | "recovering" = "not-applicable";
+  protected startupNetworkRecovery: StartupNetworkRecovery | undefined;
   protected openAiConnectivityAbort: AbortController | undefined;
   protected stopping = false;
 
@@ -204,12 +209,19 @@ export abstract class GatewayComponentGraph {
       primaryProvider,
       ...managedProviders.map(({ provider }) => provider),
     ]);
-    const supplementaryModels = providerDefinitions.flatMap((definition) =>
-      loadManagedModelOptions(
-        managedProviderDirectory(process.env, definition),
-        configuredProviders.has(definition.id),
-        definition,
-      ));
+    const readSupplementaryModels = () => {
+      const managedDefaults = loadManagedModelProviderSettings();
+      return providerDefinitions.flatMap((definition) =>
+        loadManagedModelOptions(
+          managedProviderDirectory(process.env, definition),
+          configuredProviders.has(definition.id),
+          definition,
+        ).map((model) => ({
+          ...model,
+          isDefault: model.model === managedDefaults.find((entry) => entry.provider === definition.id)?.model,
+        })));
+    };
+    const supplementaryModels = readSupplementaryModels();
     const codexBinary = resolveExecutable(effectiveCodexBinary(config.codexBinary));
     const createCodexProcessInvocation = (args: readonly string[]) =>
       executableInvocation(codexBinary, args);
@@ -480,6 +492,7 @@ export abstract class GatewayComponentGraph {
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
     );
+    this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
     const collaborationModes = new CollaborationModeSelectionService(
       this.codex,
       this.router,
@@ -915,6 +928,28 @@ export abstract class GatewayComponentGraph {
         type: "warning", target: event.target, threadId: event.threadId, message,
       }, true),
     });
+    if (primaryProvider === "openai" && this.customPrimaryProviderId === undefined) {
+      const primaryClient = clients.get(primaryProvider)!;
+      this.startupNetworkRecovery = new StartupNetworkRecovery({
+        logger,
+        probe: (signal) => this.probeOpenAiConnectivity(signal),
+        snapshot: (threadId, signal) => primaryClient.listMcpServers(threadId, signal),
+        // Use this instance only; the public /mcp reload deliberately refreshes all Providers.
+        reloadMcp: (signal) => primaryClient.reloadMcpServers(signal),
+        recovered: async (signal) => {
+          signal.throwIfAborted();
+          await this.refreshRateLimits(signal);
+        },
+        status: (status) => { this.openAiConnectivity = status; },
+        notify: (message) => {
+          logger.info(message);
+          for (const binding of this.router.allBindings()) {
+            if (this.codex.knownProvider(binding.threadId) !== "openai") continue;
+            this.output.publish({ type: "warning", target: binding.target, threadId: binding.threadId, message }, true);
+          }
+        },
+      });
+    }
     this.inbound.subscribe("conversation-core", (notification) => {
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {
@@ -924,6 +959,14 @@ export abstract class GatewayComponentGraph {
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
         this.asyncQuestions.handleInput(coreEvent);
+        if (coreEvent.type === "mcp.status.updated"
+          && (coreEvent.modelProvider === "openai"
+            || (coreEvent.threadId !== null && this.codex.knownProvider(coreEvent.threadId) === "openai"))) {
+          this.startupNetworkRecovery?.observeMcp(coreEvent);
+        }
+        if (coreEvent.type === "thread.closed" || coreEvent.type === "thread.archived" || coreEvent.type === "thread.deleted") {
+          this.startupNetworkRecovery?.forgetThread(coreEvent.threadId);
+        }
         if (
           coreEvent.type === "turn.started"
           || coreEvent.type === "turn.completed"
@@ -1133,7 +1176,7 @@ export abstract class GatewayComponentGraph {
         this.openAiConnectivityAbort = connectivityAbort;
         const [connectivity] = await Promise.all([
           this.probeOpenAiConnectivity(connectivityAbort.signal),
-          this.refreshRateLimits(),
+          this.refreshRateLimits(connectivityAbort.signal),
         ]).finally(() => {
           if (this.openAiConnectivityAbort === connectivityAbort) {
             this.openAiConnectivityAbort = undefined;
@@ -1156,6 +1199,11 @@ export abstract class GatewayComponentGraph {
       await this.scheduledTasks?.prepareRecovery();
       await this.restoreBindings();
       this.requireRunning();
+      if (this.openAiConnectivity !== "recovering") {
+        this.startupNetworkRecovery?.start(this.openAiConnectivity, this.router.allBindings()
+          .filter((binding) => this.codex.knownProvider(binding.threadId) === "openai")
+          .map((binding) => binding.threadId));
+      }
       this.logger.info(
         {
           transport: this.transport.kind,
@@ -1206,6 +1254,7 @@ export abstract class GatewayComponentGraph {
     this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
+      ["Startup Network Recovery", () => this.startupNetworkRecovery?.stop()],
       ["Scheduled Task Scheduler", () => this.scheduledTasks?.stop()],
       ["Queue Lifecycle", () => this.closeQueueLifecycleTasks()],
       ["Channel Image Spool", () => this.channelImageSpool.stop()],
@@ -1465,23 +1514,20 @@ export abstract class GatewayComponentGraph {
     return 95;
   }
 
-  private async refreshRateLimits(): Promise<void> {
-    let timeout: NodeJS.Timeout | undefined;
+  private async refreshRateLimits(signal?: AbortSignal): Promise<void> {
+    const deadline = new AbortController();
+    const timeout = setTimeout(() => deadline.abort(new Error("读取 Codex 周限超时")), startupNetworkPolicy.probeTimeoutMs);
+    timeout.unref();
+    const requestSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
     try {
-      const result = await Promise.race([
-        this.codex.accountRateLimits({ background: true }),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error("读取 Codex 周限超时")), 5_000);
-          timeout.unref();
-        }),
-      ]);
+      const result = await this.codex.accountRateLimits({ background: true, signal: requestSignal });
+      requestSignal.throwIfAborted();
       this.core.rememberRateLimits(result.limits);
     } catch (error) {
+      if (signal?.aborted) return;
       this.logger.warn({ err: error }, "读取 Codex 周限失败，启动通知暂不显示周限");
     } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
+      clearTimeout(timeout);
     }
   }
 
@@ -1492,7 +1538,7 @@ export abstract class GatewayComponentGraph {
       return "not-applicable";
     }
     const openAiBaseUrl = loadOpenAiBaseUrl();
-    const deadlineMs = 12_000;
+    const deadlineMs = startupNetworkPolicy.probeDeadlineMs;
     const deadlineAt = Date.now() + deadlineMs;
     const deadlineController = new AbortController();
     const abortForShutdown = () => deadlineController.abort(

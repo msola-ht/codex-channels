@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
     stop: vi.fn(),
     reloadConfig: vi.fn(),
     refreshAccountSnapshot: vi.fn(),
+    refreshProviderModels: vi.fn(),
     hasActiveTurns: vi.fn(),
     notifyProviderSettingsChange: vi.fn(),
     notifyConfigReloadFailure: vi.fn(),
@@ -50,6 +51,7 @@ const mocks = vi.hoisted(() => ({
     stop: vi.fn(),
   },
   providerSettingsOptions: undefined as undefined | {
+    refreshProviderModels(): void;
     onStateChange(change: { kind: string; providers: string[] }): void;
   },
 }));
@@ -238,6 +240,17 @@ describe("runGatewayProcess", () => {
       "provider-settings-restarting",
       ["deepseek"],
     );
+  });
+
+  it("forwards Provider model refresh failures to the watcher application path", async () => {
+    isolateProcessLifecycle();
+    await runGatewayProcess();
+    const error = new Error("catalog read failed");
+    mocks.application.refreshProviderModels.mockImplementationOnce(() => { throw error; });
+    expect(() => mocks.providerSettingsOptions!.refreshProviderModels()).toThrow(error);
+    mocks.providerSettingsOptions!.refreshProviderModels();
+    expect(mocks.application.refreshProviderModels).toHaveBeenCalledTimes(2);
+    expect(mocks.application.notifyProviderSettingsChange).not.toHaveBeenCalled();
   });
 
   it("retains unreadable config events and continues with the current configuration", async () => {

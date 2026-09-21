@@ -56,7 +56,7 @@ export function formatSurfaceUserFacingError(
     case "session.selector.ambiguous":
       return "会话选择不唯一";
     case "session.selector.not-found":
-      return "找不到指定会话";
+      return "在当前工作区找不到指定会话；跨工作区恢复不受支持，请先使用 /work 切换到会话所属工作区";
     case "sessions.usage":
       return sessionCommandUsageText;
     case "archived-sessions.usage":
@@ -66,9 +66,9 @@ export function formatSurfaceUserFacingError(
     case "thread.takeover.busy":
       return "原渠道或当前渠道仍有任务或待处理交互，暂不能接管";
     case "thread.takeover.workspace":
-      return "只能接管当前 Workspace 中的 Codex Session";
+      return "只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区";
     case "thread.takeover.changed":
-      return "会话绑定刚刚发生变化，请重新打开会话列表后再试";
+      return "会话绑定或工作区已发生变化，请重新打开会话列表后再试";
     case "goal.empty":
       return "目标不能为空";
     case "goal.usage":
@@ -151,6 +151,10 @@ export function formatSurfaceUserFacingError(
       return `配置的默认模型不属于当前主 Provider ${detail(error, "provider", "未知")}：${detail(error, "model", "未知")}`;
     case "model.official.not-logged-in":
       return "OpenAI 官方未登录，当前没有可用模型；请先运行 codex login";
+    case "model.provider.selection-required":
+      return "OpenAI 官方未登录，已配置多个第三方提供商；请先通过 /model 选择提供商和模型";
+    case "model.provider.default-missing":
+      return `提供商 ${detail(error, "provider", "未知")} 的默认模型未配置，请通过 codexc setup 设置`;
     case "model.provider.mismatch":
       return error.message;
     case "model.unavailable":

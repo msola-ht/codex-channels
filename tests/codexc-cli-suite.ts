@@ -65,6 +65,13 @@ function mkdtempSync(prefix: string): string {
   return root;
 }
 
+function authenticatedRemoteCodexHome(root: string): string {
+  const codexHome = join(root, ".codex");
+  mkdirSync(codexHome);
+  writeFileSync(join(codexHome, "auth.json"), "{}\n");
+  return codexHome;
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -1114,6 +1121,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1287,6 +1295,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
       CODEX_TEST_CAPTURE: capture,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     execFileSync(process.execPath, [cli, "work", "add", "--cwd", workspace], {
@@ -1329,6 +1338,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     mkdirSync(workspace);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1362,6 +1372,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1392,6 +1403,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1487,33 +1499,33 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
           "resume",
         ]);
       }
+      const passthroughCapture = join(root, "capture-passthrough.json");
+      await execFileAsync(
+        process.execPath,
+        [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
+        {
+          cwd: workspace,
+          env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
+          encoding: "utf8",
+        },
+      );
+      expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
+        "--remote",
+        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+        "-C",
+        realpathSync(workspace),
+        "--profile",
+        "sf-deepseek",
+        "resume",
+        "--",
+        "--profile",
+        "deepseek",
+        "--workspace",
+        "external",
+      ]);
     } finally {
       await supervisor.close();
     }
-
-    const passthroughCapture = join(root, "capture-passthrough.json");
-    const passthrough = spawnSync(
-      process.execPath,
-      [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
-      {
-        cwd: workspace,
-        env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
-        encoding: "utf8",
-      },
-    );
-    expect(passthrough.status, passthrough.stderr).toBe(0);
-    expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
-      "--remote",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-      "-C",
-      realpathSync(workspace),
-      "resume",
-      "--",
-      "--profile",
-      "deepseek",
-      "--workspace",
-      "external",
-    ]);
   }, 30_000);
 
   it("uses the native custom Profile without dropping the current Workspace permissions", async () => {
@@ -4326,7 +4338,7 @@ function writeManagedProviderFixture(
   writeFileSync(target, stringify({
     model: resolvedDefinition.defaultModel,
     model_provider: resolvedDefinition.id,
-    model_reasoning_effort: resolvedDefinition.defaultReasoningEffort,
+    ...(mode === "switching" ? { model_reasoning_effort: resolvedDefinition.defaultReasoningEffort } : {}),
     model_catalog_json: catalogPath,
     model_providers: {
       [resolvedDefinition.id]: {

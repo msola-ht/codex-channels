@@ -71,6 +71,47 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("refreshes the automatic Provider default without replacing explicit or bound models", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const boundTarget = { ...target, conversationId: "bound" };
+    const explicitTarget = { ...target, conversationId: "explicit" };
+    const oldModel = { ...model("third-old", ["high"], "high", true), provider: "deepseek" };
+    const newModel = { ...model("third-new", ["high"], "high", true), provider: "deepseek" };
+    const router = {
+      current: (value: typeof target) => value === boundTarget ? { threadId: "existing" } : undefined,
+      modelSettings: (value: typeof target) => value === boundTarget
+        ? { model: oldModel.model, modelProvider: "deepseek", effort: "high", serviceTier: null }
+        : undefined,
+      workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [oldModel], "openai", [], () => false);
+    await service.selectModel(explicitTarget, { provider: "deepseek", model: oldModel.model });
+    expect(service.threadStartOptions(target).model).toBe(oldModel.model);
+
+    service.updateSupplementaryModels([{ ...oldModel, isDefault: false }, newModel]);
+
+    expect(await service.state(target)).toMatchObject({ model: newModel.model, modelProvider: "deepseek" });
+    expect(service.status(target)).toMatchObject({ model: newModel.model, modelProvider: "deepseek" });
+    expect(service.threadStartOptions(target)).toEqual({ model: newModel.model, modelProvider: "deepseek" });
+    expect(await service.state(explicitTarget)).toMatchObject({ model: oldModel.model, pending: true });
+    expect(service.threadStartOptions(explicitTarget)).toEqual({ model: oldModel.model, modelProvider: "deepseek" });
+    expect(await service.state(boundTarget)).toMatchObject({ model: oldModel.model, pending: false });
+    expect(service.threadStartOptions(boundTarget)).toEqual({});
+  });
+
+  it("keeps complete model identity without reporting a Provider switch for a same-Provider selection", async () => {
+    const service = createService({ model: "gpt-main", modelProvider: "openai", effort: "medium", serviceTier: "default" });
+    const state = await service.selectModel(target, "gpt-deep");
+    expect(state.providerPending).toBe(false);
+    expect(service.status(target).providerPending).toBe(false);
+    expect(service.threadStartOptions(target)).toEqual({ model: "gpt-deep", modelProvider: "openai" });
+  });
+
   it("keeps an exact model selection bound to its provider after browsing is cleared", async () => {
     let blocked = new Set<string>();
     const newSession = vi.fn(async () => undefined);
@@ -192,7 +233,7 @@ describe("ModelSelectionService", () => {
       workspace: () => ({ id: "main", name: "main", cwd: "/workspace" }),
     } as unknown as SessionRouter;
     const thirdParty = {
-      ...model("deepseek-v4-flash", ["high", "max"], "high"),
+      ...model("deepseek-v4-flash", ["high", "max"], "high", true),
       provider: "deepseek",
     };
     const service = new ModelSelectionService(
@@ -210,6 +251,54 @@ describe("ModelSelectionService", () => {
     expect(state.models.map((entry) => entry.provider ?? "openai")).not.toContain("openai");
     expect(state.model).toBe("deepseek-v4-flash");
     expect(state.modelProvider).toBe("deepseek");
+    expect(service.status(target)).toMatchObject({ model: thirdParty.model, modelProvider: "deepseek" });
+    expect(service.threadStartOptions(target)).toEqual({ model: thirdParty.model, modelProvider: "deepseek" });
+    await service.selectModel(target, { provider: "deepseek", model: thirdParty.model });
+    expect(service.threadStartOptions(target)).toEqual({ model: thirdParty.model, modelProvider: "deepseek" });
+  });
+
+  it("uses the sole third-party configured default rather than catalog order or the unavailable official default", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      newSession: async () => undefined, workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, "gpt-main", [], "openai", [
+      { provider: "custom", displayName: "Custom", defaultModel: "gpt-deep" },
+    ], () => false);
+    expect(await service.state(target)).toMatchObject({ model: "gpt-deep", modelProvider: "custom" });
+    expect(service.threadStartOptions(target)).toEqual({ model: "gpt-deep", modelProvider: "custom" });
+    await service.selectModel(target, { provider: "custom", model: "gpt-main" });
+    expect(service.threadStartOptions(target)).toEqual({ model: "gpt-main", modelProvider: "custom" });
+  });
+
+  it("keeps multiple unauthenticated Provider choices browsable and requires an explicit selection before starting", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      newSession: async () => undefined, workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [], "openai", [
+      { provider: "custom-a", displayName: "A", defaultModel: "gpt-main" },
+      { provider: "custom-b", displayName: "B", defaultModel: "gpt-deep" },
+    ], () => false);
+    expect((await service.state(target)).modelProvider).toBeUndefined();
+    await expect(service.state(target, true)).rejects.toMatchObject({ code: "model.provider.selection-required" });
+    await expect(service.requireInputModality(target, "image")).rejects.toMatchObject({ code: "model.provider.selection-required" });
+    expect(() => service.threadStartOptions(target)).toThrow(expect.objectContaining({ code: "model.provider.selection-required" }));
+    expect((await service.browseProvider(target, "custom-b")).models).toHaveLength(2);
+    await service.selectModel(target, { provider: "custom-b", model: "gpt-deep" });
+    expect(service.threadStartOptions(target)).toEqual({ model: "gpt-deep", modelProvider: "custom-b" });
   });
 
   it("rejects model state when official OpenAI is unauthenticated and no third-party model exists", async () => {
@@ -236,6 +325,23 @@ describe("ModelSelectionService", () => {
     );
 
     await expect(service.state(target)).rejects.toThrow("OpenAI 官方未登录");
+  });
+
+  it("preserves the Provider of a bound Thread when official login is absent", async () => {
+    const codex = {
+      listModels: async () => models, writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null, readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => ({ threadId: "official-history" }),
+      modelSettings: () => ({ model: "gpt-main", modelProvider: "openai", effort: "high", serviceTier: null }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [], "openai", [
+      { provider: "custom", displayName: "Custom", defaultModel: "gpt-deep" },
+    ], () => false);
+    expect(await service.state(target)).toMatchObject({ model: "gpt-main", modelProvider: "openai" });
+    expect(service.status(target).modelProvider).toBe("openai");
+    expect(service.threadStartOptions(target)).toEqual({});
   });
 
   it("keeps custom switching Provider aliases when official OpenAI is unauthenticated", async () => {
@@ -499,6 +605,7 @@ describe("ModelSelectionService", () => {
     expect(selected).toMatchObject({ model: "gpt-deep", effort: "high", pending: true });
     expect(service.turnOverrides(target)).toEqual({
       model: "gpt-deep",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "default",
     });
@@ -802,6 +909,7 @@ describe("ModelSelectionService", () => {
 
     expect(service.turnOverrides(target)).toEqual({
       model: "gpt-deep",
+      modelProvider: "openai",
       effort: "high",
       serviceTier: "default",
     });
@@ -835,6 +943,7 @@ describe("ModelSelectionService", () => {
 
     expect(service.turnOverrides(target)).toEqual({
       model: "gpt-other",
+      modelProvider: "openai",
       effort: "medium",
       serviceTier: "default",
     });

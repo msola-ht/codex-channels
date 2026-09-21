@@ -68,6 +68,8 @@ export type UserFacingErrorCode =
   | "model.current.missing"
   | "model.configured-default.missing"
   | "model.official.not-logged-in"
+  | "model.provider.selection-required"
+  | "model.provider.default-missing"
   | "model.unavailable"
   | "model.provider.mismatch"
   | "model.selector.required"

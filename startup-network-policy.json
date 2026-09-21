@@ -1,0 +1,9 @@
+{
+  "probeDeadlineMs": 12000,
+  "probeTimeoutMs": 5000,
+  "probeRetryDelaysMs": [1000, 2000, 4000],
+  "recoveryDeadlineMs": 300000,
+  "recoveryRetryDelaysMs": [5000, 10000, 20000, 30000, 60000, 60000, 60000],
+  "mcpReadyTimeoutMs": 30000,
+  "stopTimeoutMs": 5000
+}

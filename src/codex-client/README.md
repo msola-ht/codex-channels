@@ -26,6 +26,7 @@
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
+  恢复结果保留响应的实际目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
   缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
@@ -93,7 +94,8 @@
   同一个 `config/batchWrite` 用户配置事务写入，受控的读改写流程从原始用户层取得版本并通过
   `expectedVersion` 拒绝并发覆盖；MCP 概览按 Thread 使用
   `toolsAndAuthOnly` 分页，详情使用 `full`；`config/mcpServer/reload` 不自动重试，成功只表示已加载 Thread
-  刷新了 MCP 配置，远端连接结果仍由后续运行状态查询确认；OAuth 不自动重试并消费
+  刷新了 MCP 配置，远端连接结果仍由后续运行状态查询确认；MCP 概览、刷新与账户额度读取接受调用方取消信号，
+  截止时间到达会清理 Pending Request，不代表撤销服务端已接收的刷新。OAuth 不自动重试并消费
   官方登录完成通知，资源读取保持只读；Permission
   Profile 按 CWD 分页。开发中 Plugin 只调用 `plugin/installed` 并经 Application 开关约束，
   不接入搜索、安装或分享。Thread 列表支持官方 `searchTerm`、`sectionId` 和

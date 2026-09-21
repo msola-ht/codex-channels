@@ -957,8 +957,10 @@ export class ConversationService implements
     target: ConversationTarget,
     selector: string,
   ): Promise<ConversationResumeResult> {
-    const sessions = pinnedFirst(await this.router.list(target));
-    const selected = resolveThread(sessions, selector.trim());
+    const { selected, selectionCwd } = await this.locked(target, async () => ({
+      selectionCwd: this.router.workspace(target).cwd,
+      selected: resolveThread(pinnedFirst(await this.router.list(target)), selector.trim()),
+    }));
     const owner = this.router.targetForThread(selected.id);
     if (owner && conversationTargetKey(owner) !== conversationTargetKey(target)) {
       if (this.router.isBackgroundThread?.(selected.id)) {
@@ -981,6 +983,9 @@ export class ConversationService implements
       }
       const transfers = this.transfers;
       return this.lockedTargets([owner, target], async () => {
+        if (selected.cwd !== this.router.workspace(target).cwd) {
+          throw new UserFacingError("thread.takeover.workspace", "只能接管当前 Workspace 中的 Codex Thread");
+        }
         const currentOwner = this.router.targetForThread(selected.id);
         if (
           !currentOwner
@@ -1034,6 +1039,10 @@ export class ConversationService implements
       });
     }
     return this.locked(target, async () => {
+      const currentCwd = this.router.workspace(target).cwd;
+      if (currentCwd !== selectionCwd || selected.cwd !== selectionCwd) {
+        throw new UserFacingError("thread.takeover.changed", "Workspace 已变化，请重新选择会话");
+      }
       const modelPreference = this.models.capturePreference?.(target);
       const currentOwner = this.router.targetForThread(selected.id);
       if (
@@ -1066,9 +1075,23 @@ export class ConversationService implements
           `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
         );
       }
-      const binding = preserveCurrent
-        ? await this.router.resume(target, selected.id, true)
-        : await this.router.resume(target, selected.id);
+      const activity = this.core.trackThreadActivity(selected.id);
+      let binding;
+      try {
+        binding = await this.router.resume(target, selected.id, preserveCurrent, selected.cwd,
+          {
+            assertCurrent: () => {
+              if (this.router.workspace(target).cwd !== currentCwd
+                || this.router.current?.(target)?.threadId !== current?.threadId
+                || (leavesCurrent && this.core.activeTurn(target)?.turnId !== active?.turnId)) {
+                throw new UserFacingError("thread.takeover.changed", "当前会话或工作区已变化，请重新选择");
+              }
+            },
+            restored: (restored, thread) => activity.restore(restored.target, thread.activeTurnId),
+          });
+      } finally {
+        activity.stop();
+      }
       this.invalidateRevertSnapshot(target);
       if (selectedHasQueue) {
         this.clearPendingSelections(target);
@@ -1353,7 +1376,7 @@ export class ConversationService implements
   compact(target: ConversationTarget): Promise<void> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       await this.codex.compactThread(binding.threadId);
     });
   }
@@ -1361,7 +1384,7 @@ export class ConversationService implements
   fork(target: ConversationTarget): Promise<string> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const current = await this.router.ensure(target);
+      const current = await this.ensureSession(target);
       if (await this.probeNativeQueueItems(current.threadId)) {
         throw new UserFacingError(
           "conversation.background-queued",
@@ -1419,7 +1442,7 @@ export class ConversationService implements
   review(target: ConversationTarget, reviewTarget: ReviewTarget): Promise<Submission> {
     return this.locked(target, async () => {
       this.requireIdle(target);
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       const result = await this.codex.startReview(binding.threadId, reviewTarget);
       this.core.markTurnStarted(target, result.threadId, result.turnId);
       return { threadId: result.threadId, turnId: result.turnId, steered: false };
@@ -1594,7 +1617,7 @@ export class ConversationService implements
 
   getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       return this.codex.getGoal(binding.threadId);
     });
   }
@@ -1605,7 +1628,7 @@ export class ConversationService implements
       return Promise.reject(new UserFacingError("goal.empty", "目标不能为空"));
     }
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       const goal = await this.codex.setGoal(binding.threadId, normalized);
       this.core.handle({
         type: "thread.goal.updated",
@@ -1618,7 +1641,7 @@ export class ConversationService implements
 
   clearGoal(target: ConversationTarget): Promise<void> {
     return this.locked(target, async () => {
-      const binding = await this.router.ensure(target);
+      const binding = await this.ensureSession(target);
       await this.codex.clearGoal(binding.threadId);
       this.core.handle({
         type: "thread.goal.cleared",
@@ -1674,6 +1697,13 @@ export class ConversationService implements
     };
   }
 
+  private ensureSession(target: ConversationTarget) {
+    const options = this.models.threadStartOptions?.(target) ?? {};
+    return Object.keys(options).length > 0
+      ? this.router.ensure(target, options)
+      : this.router.ensure(target);
+  }
+
   private async startNewTurn(
     target: ConversationTarget,
     input: TurnInput[],
@@ -1682,10 +1712,7 @@ export class ConversationService implements
     assertCurrent?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
-    const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
-    const binding = Object.keys(threadStartOptions).length > 0
-      ? await this.router.ensure(target, threadStartOptions)
-      : await this.router.ensure(target);
+    const binding = await this.ensureSession(target);
     this.invalidateSessionDisplayTurnCount(binding.threadId);
     const workspace = this.router.workspace(target);
     const overrides = this.turnOverrides(target);

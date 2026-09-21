@@ -16,13 +16,15 @@
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 只保留兼容门面委托。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
- 具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
+  具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
+  所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
+  通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、
   排队消息或待处理交互后调用路由层原子转移，并向原渠道发布关键解绑通知；
   扩展与账户查询分别委托给独立组件，通过 `ConversationQueryPort` 组合窄端口，Skill、MCP 与 Permission Profile 均使用稳定结果。
@@ -36,6 +38,10 @@
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  官方未登录时为未绑定会话解析唯一第三方的 Profile 默认模型，供状态、菜单与建线程复用；
+  受管 Provider 设置应用后更新补充模型目录与默认标记，保留已绑定模型及待生效的明确选择；
+  多个可选第三方保持未选择状态，发送前要求明确选择；模型选择始终保留 Provider 身份，
+  实际离开旧 Thread 的 Provider 切换提示与身份字段分开维护，目标 Thread 建立后不再提示待切换。
   模型选择入口按注入的共享账户状态过滤无有效订阅的 Provider，浏览和手动选择使用相同结果；
   结构化选择不依赖当前浏览范围，异步读取默认设置后及保存待生效选择前再次核对订阅。
   保留当前模型与完整目录用于已有会话的能力查询，不因订阅筛选自动切换或取消 Turn。

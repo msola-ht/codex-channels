@@ -72,8 +72,10 @@ export interface StartupRuntimeInfo {
   codexUpstreamUserAgent: string | null;
   debugEnabled?: boolean;
   openAiConnectivity?:
+    | "recovering"
     | "reachable"
     | "route-warning"
+    | "temporarily-unavailable"
     | "invalid-base-url"
     | "indeterminate"
     | "unreachable"
@@ -205,12 +207,16 @@ function openAiConnectivityFields(
   status: StartupRuntimeInfo["openAiConnectivity"],
 ): LifecyclePresentationLeafField[] {
   switch (status) {
+    case "recovering":
+      return [{ label: "OpenAI 网络", value: "暂不可达；正在后台复检" }];
     case "unreachable":
-      return [{ label: "OpenAI 网络", value: "连接失败；请检查代理设置" }];
+      return [{ label: "OpenAI 网络", value: "暂不可达；请检查网络或代理状态" }];
     case "invalid-base-url":
       return [{ label: "OpenAI 网络", value: "Base URL 路径无效；请检查配置" }];
     case "route-warning":
       return [{ label: "OpenAI 网络", value: "线路响应异常；请检查 Gateway 日志与 OpenAI Base URL" }];
+    case "temporarily-unavailable":
+      return [{ label: "OpenAI 网络", value: "线路暂时不可用；请稍后重试" }];
     case "indeterminate":
       return [{ label: "OpenAI 网络", value: "检测失败；请检查 App Server 连接与 Gateway 日志" }];
     case "reachable":

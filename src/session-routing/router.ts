@@ -14,6 +14,7 @@ import type {
 import type {
   ThreadLifecyclePort,
   ThreadSession,
+  ThreadResumeSession,
   ThreadSnapshot,
   ThreadStartOptions,
   ThreadDynamicToolSpec,
@@ -44,10 +45,12 @@ export interface ThreadListOptions {
 }
 
 const maximumBackgroundThreadsPerConversation = 3;
+class SupersededRestoreError extends Error {}
 
 export class SessionRouter {
   private readonly forceNew = new Set<string>();
   private readonly backgroundStartQueues = new Map<string, Promise<void>>();
+  private readonly threadLifecycleQueues = new Map<string, Promise<void>>();
   // 模型设置保留到进程结束：thread/list 不返回 model，
   // 会话列表需要借助本缓存标注已知模型的会话。
   private readonly modelSettingsByThread = new Map<string, ThreadModelSettings>();
@@ -201,83 +204,91 @@ export class SessionRouter {
   ): Promise<SubscriptionRestoreFailure[]> {
     const failures: SubscriptionRestoreFailure[] = [];
     for (const binding of this.bindings.list()) {
-      if (!shouldRestore(binding.target, binding)) {
-        continue;
-      }
-      let restoredBinding: ConversationBinding;
-      let restoredThread: ThreadSnapshot;
-      const wasBackground = this.bindings.isBackground(binding.threadId);
-      try {
-        const workspace = this.workspaces.require(binding.workspaceId);
-        const resumed = await this.codex.resumeThread(
-          binding.threadId,
-          workspace.cwd,
-          {
-            ...this.workspacePermissions(workspace),
-            ...optionsForBinding(binding),
-          },
-        );
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
-        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.contextCompactionItemIdsByThread.set(
-          resumed.thread.id,
-          resumed.contextCompactionItemIds,
-        );
-        restoredBinding = {
-          target: binding.target,
-          workspaceId: workspace.id,
-          threadId: resumed.thread.id,
-          sessionId: resumed.thread.sessionId,
-        };
-        restoredThread = resumed.thread;
-        if (wasBackground) {
-          this.bindings.bindBackground(restoredBinding);
-        } else {
-          this.bindings.bind(restoredBinding);
+      const failure = await this.withThreadLifecycle([binding.threadId], async (): Promise<SubscriptionRestoreFailure | undefined> => {
+        const isCurrent = () => this.sameBinding(binding, this.bindings.getByThread(binding.threadId))
+          && shouldRestore(binding.target, binding);
+        if (!isCurrent()) return undefined;
+        let restoredBinding: ConversationBinding;
+        let restoredThread: ThreadSnapshot;
+        const wasBackground = this.bindings.isBackground(binding.threadId);
+        try {
+          const workspace = this.workspaces.require(binding.workspaceId);
+          const historical = await this.codex.readThread(binding.threadId);
+          if (!isCurrent()) return undefined;
+          const resumed = await this.resumeInWorkspace(
+            historical,
+            workspace,
+            optionsForBinding(binding),
+            false,
+            isCurrent,
+          );
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+          this.contextCompactionItemIdsByThread.set(
+            resumed.thread.id,
+            resumed.contextCompactionItemIds,
+          );
+          restoredBinding = {
+            target: binding.target,
+            workspaceId: workspace.id,
+            threadId: resumed.thread.id,
+            sessionId: resumed.thread.sessionId,
+          };
+          restoredThread = resumed.thread;
+          if (wasBackground) {
+            this.bindings.bindBackground(restoredBinding);
+          } else {
+            this.bindings.bind(restoredBinding);
+          }
+        } catch (error) {
+          if (error instanceof SupersededRestoreError) return undefined;
+          const normalized = error instanceof Error ? error : new Error(String(error));
+          const incompatible = isIncompatibleRestoreError(normalized);
+          if (!incompatible && !isCurrent()) return undefined;
+          const bindingRemoved = incompatible || isUnavailableRestoreError(normalized);
+          if (incompatible) {
+            this.invalidateThreadBinding(binding.threadId);
+          } else if (bindingRemoved) {
+            this.bindings.removeThread(binding.threadId);
+            this.contextCompactionItemIdsByThread.delete(binding.threadId);
+            const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
+            if (!this.bindings.get(binding.target)) {
+              this.bindings.selectWorkspace(binding.target, workspace.id);
+            }
+            this.onBindingsChanged?.();
+          }
+          return {
+            binding,
+            error: normalized,
+            bindingRemoved,
+            reason: bindingRemoved
+              ? "unavailable"
+              : isActiveWriterRestoreError(normalized)
+                ? "active-writer"
+                : "other",
+          };
         }
-      } catch (error) {
-        if (!shouldRestore(binding.target, binding)) {
-          return failures;
-        }
-        const normalized = error instanceof Error ? error : new Error(String(error));
-        const bindingRemoved = isUnavailableRestoreError(normalized);
-        if (bindingRemoved) {
-          this.bindings.removeThread(binding.threadId);
-          const workspace = this.workspaces.get(binding.workspaceId) ?? this.workspaces.default();
-          if (!this.bindings.get(binding.target)) {
-            this.bindings.selectWorkspace(binding.target, workspace.id);
+        onRestored(restoredBinding, restoredThread);
+        if (
+          wasBackground
+          && restoredThread.status.type !== "active"
+          && !retainBackground(restoredBinding, restoredThread)
+        ) {
+          try {
+            await this.codex.unsubscribeThread(restoredBinding.threadId);
+            this.bindings.removeThread(restoredBinding.threadId);
+          } catch (error) {
+            return {
+              binding: restoredBinding,
+              error: error instanceof Error ? error : new Error(String(error)),
+              bindingRemoved: false,
+              reason: "other",
+            };
           }
         }
-        failures.push({
-          binding,
-          error: normalized,
-          bindingRemoved,
-          reason: bindingRemoved
-            ? "unavailable"
-            : isActiveWriterRestoreError(normalized)
-              ? "active-writer"
-              : "other",
-        });
-        continue;
-      }
-      onRestored(restoredBinding, restoredThread);
-      if (
-        wasBackground
-        && restoredThread.status.type !== "active"
-        && !retainBackground(restoredBinding, restoredThread)
-      ) {
-        try {
-          await this.codex.unsubscribeThread(restoredBinding.threadId);
-          this.bindings.removeThread(restoredBinding.threadId);
-        } catch (error) {
-          failures.push({
-            binding: restoredBinding,
-            error: error instanceof Error ? error : new Error(String(error)),
-            bindingRemoved: false,
-            reason: "other",
-          });
-        }
-      }
+        return undefined;
+      });
+      if (failure) failures.push(failure);
     }
     return failures;
   }
@@ -296,6 +307,11 @@ export class SessionRouter {
   ): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (current) {
+      const pending = this.threadLifecycleQueues.get(current.threadId);
+      if (pending) {
+        await pending;
+        return this.ensure(target, startOptions);
+      }
       return current;
     }
     const workspace = this.workspace(target);
@@ -312,21 +328,27 @@ export class SessionRouter {
           ),
       );
       if (candidate) {
-        const resumed = await this.codex.resumeThread(
-          candidate.id,
-          workspace.cwd,
-          this.workspacePermissions(workspace),
-        );
-        this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
-        this.namesByThread.set(resumed.thread.id, resumed.thread.name);
-        this.contextCompactionItemIdsByThread.set(
-          resumed.thread.id,
-          resumed.contextCompactionItemIds,
-        );
-        const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-        this.bindings.bind(binding);
-        this.clearForceNew(target, Date.now());
-        return binding;
+        return this.withThreadLifecycle([candidate.id], async () => {
+          if (this.bindings.getByThread(candidate.id)) {
+            throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
+          }
+          const resumed = await this.resumeInWorkspace(await this.codex.readThread(candidate.id), workspace, startOptions);
+          if (resumed.thread.status.type === "active") {
+            await this.cleanupFailedResume(candidate.id, new UserFacingError(
+              "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
+            ));
+          }
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+          this.namesByThread.set(resumed.thread.id, resumed.thread.name);
+          this.contextCompactionItemIdsByThread.set(
+            resumed.thread.id,
+            resumed.contextCompactionItemIds,
+          );
+          const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+          this.bindings.bind(binding);
+          this.clearForceNew(target, Date.now());
+          return binding;
+        });
       }
     }
 
@@ -454,21 +476,73 @@ export class SessionRouter {
     target: ConversationTarget,
     threadId: string,
     preserveCurrent = false,
+    expectedCwd?: string,
+    transition?: {
+      assertCurrent: () => void;
+      restored: (binding: ConversationBinding, thread: ThreadSnapshot) => void;
+    },
+  ): Promise<ConversationBinding> {
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
+      this.assertLifecycleCurrent(target, current);
+      return this.resumeUnlocked(target, threadId, preserveCurrent, expectedCwd, transition);
+    });
+  }
+
+  private async resumeUnlocked(
+    target: ConversationTarget,
+    threadId: string,
+    preserveCurrent = false,
+    expectedCwd?: string,
+    transition?: Parameters<SessionRouter["resume"]>[4],
   ): Promise<ConversationBinding> {
     const owner = this.bindings.getByThread(threadId);
     if (owner && this.key(owner.target) !== this.key(target)) {
       throw new UserFacingError("thread.bound", "该 Codex Thread 已绑定到其他会话");
     }
-    const workspace = this.workspace(target);
-    const resumed = await this.codex.resumeThread(
-      threadId,
-      workspace.cwd,
-      this.workspacePermissions(workspace),
-    );
-    const current = this.bindings.get(target);
-    if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
-      await this.detach(target);
+    const thread = await this.codex.readThread(threadId);
+    if (owner && thread.cwd !== this.workspaces.require(owner.workspaceId).cwd) {
+      await this.rejectIncompatibleThread(threadId, new UserFacingError(
+        "thread.takeover.changed", "历史目录与现有绑定不一致，已解除绑定",
+      ), true);
     }
+    if (expectedCwd !== undefined && thread.cwd !== expectedCwd) {
+      throw new UserFacingError("thread.takeover.changed", "Codex Thread 工作目录已变化，请重新选择");
+    }
+    const workspace = this.workspace(target);
+    if (thread.cwd !== workspace.cwd) {
+      throw new UserFacingError("thread.takeover.workspace", "不允许跨工作区恢复历史，请先切换工作区");
+    }
+    if (!["cli", "vscode", "appServer"].includes(thread.source)) {
+      throw new UserFacingError("session.selector.not-found", "找不到已授权工作区中的可恢复会话");
+    }
+    const resumed = await this.resumeInWorkspace(thread, workspace);
+    const current = this.bindings.get(target);
+    let previousUnsubscribed = false;
+    try {
+      transition?.assertCurrent();
+      if (current && current.threadId !== resumed.thread.id && !preserveCurrent) {
+        await this.codex.unsubscribeThread(current.threadId);
+        previousUnsubscribed = true;
+      }
+      transition?.assertCurrent();
+      const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
+      this.bindings.switchForeground(binding, preserveCurrent);
+    } catch (error) {
+      let failure = error;
+      if (previousUnsubscribed && current) {
+        try {
+          await this.resumeInWorkspace(
+            await this.codex.readThread(current.threadId), this.workspaces.require(current.workspaceId),
+            {}, false,
+          );
+        } catch (restoreError) {
+          failure = new AggregateError([error, restoreError], "绑定切换失败，且原订阅恢复失败", { cause: error });
+        }
+      }
+      await this.cleanupFailedResume(threadId, failure);
+    }
+    if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
     this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
     this.namesByThread.set(resumed.thread.id, resumed.thread.name);
     this.contextCompactionItemIdsByThread.set(
@@ -476,15 +550,91 @@ export class SessionRouter {
       resumed.contextCompactionItemIds,
     );
     const binding = { target, workspaceId: workspace.id, threadId: resumed.thread.id, sessionId: resumed.thread.sessionId };
-    this.bindings.switchForeground(binding, preserveCurrent);
     this.clearForceNew(target, Date.now());
+    transition?.restored(binding, resumed.thread);
+    this.onBindingsChanged?.();
     return binding;
+  }
+
+  private async resumeInWorkspace(
+    thread: ThreadSnapshot,
+    workspace: Workspace,
+    options: ThreadStartOptions = {},
+    preserveSubscription = this.bindings.getByThread(thread.id) !== undefined,
+    isCurrent?: () => boolean,
+  ): Promise<ThreadResumeSession> {
+    if (thread.cwd !== workspace.cwd) {
+      await this.rejectIncompatibleThread(thread.id, new UserFacingError(
+        "thread.takeover.changed", "历史目录与工作区不一致，请显式恢复会话",
+      ), preserveSubscription);
+    }
+    const threadId = thread.id;
+    const requested = { ...this.workspacePermissions(workspace), ...options };
+    const session = await this.codex.resumeThread(threadId, workspace.cwd, requested);
+    if (isCurrent && !isCurrent()) {
+      await this.cleanupFailedResume(threadId, new SupersededRestoreError(), this.bindings.getByThread(threadId) !== undefined);
+    }
+    const effective = session.effectiveSettings;
+    if (
+      session.thread.id !== threadId
+      || effective.cwd !== workspace.cwd
+      || !session.settingsMatch
+      || (session.thread.status.type === "active" && session.thread.activeTurnId === null)
+    ) {
+      await this.rejectIncompatibleThread(threadId, new UserFacingError(
+        "thread.takeover.changed", "恢复后的实际目录、权限或活动状态不符合要求，未切换会话",
+      ), true);
+    }
+    return session;
+  }
+
+  private invalidateThreadBinding(threadId: string): void {
+    const binding = this.bindings.getByThread(threadId);
+    if (!binding) return;
+    const wasForeground = this.bindings.get(binding.target)?.threadId === threadId;
+    this.bindings.removeThread(threadId);
+    this.contextCompactionItemIdsByThread.delete(threadId);
+    if (wasForeground) this.markForceNew(binding.target, Date.now());
+    this.onBindingsChanged?.();
+  }
+
+  private async rejectIncompatibleThread(
+    threadId: string,
+    error: UserFacingError,
+    subscribed: boolean,
+  ): Promise<never> {
+    this.invalidateThreadBinding(threadId);
+    if (subscribed) await this.cleanupFailedResume(threadId, error, false);
+    throw error;
+  }
+
+  private async cleanupFailedResume(
+    threadId: string,
+    error: unknown,
+    preserveSubscription = this.bindings.getByThread(threadId) !== undefined,
+  ): Promise<never> {
+    if (!preserveSubscription) {
+      try {
+        await this.codex.unsubscribeThread(threadId);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "恢复失败，且新订阅清理失败", { cause: cleanupError });
+      }
+    }
+    throw error;
   }
 
   async transferBinding(
     target: ConversationTarget,
     threadId: string,
   ): Promise<BindingTransfer> {
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], () => {
+      this.assertLifecycleCurrent(target, current);
+      return this.transferBindingUnlocked(target, threadId);
+    });
+  }
+
+  private async transferBindingUnlocked(target: ConversationTarget, threadId: string): Promise<BindingTransfer> {
     const owner = this.bindings.getByThread(threadId);
     if (!owner) {
       throw new UserFacingError(
@@ -515,6 +665,11 @@ export class SessionRouter {
         ? [this.codex.readThread(replaced.threadId)]
         : []),
     ]);
+    if (threads[0]?.cwd !== workspace.cwd) {
+      await this.rejectIncompatibleThread(threadId, new UserFacingError(
+        "thread.takeover.changed", "Codex Thread 工作目录与绑定已不一致，请重新选择",
+      ), true);
+    }
     if (threads.some((thread) => thread.status.type !== "idle")) {
       throw new UserFacingError(
         "thread.takeover.busy",
@@ -530,11 +685,7 @@ export class SessionRouter {
     } catch (error) {
       if (replaced && replaced.threadId !== threadId) {
         try {
-          await this.codex.resumeThread(
-            replaced.threadId,
-            workspace.cwd,
-            this.workspacePermissions(workspace),
-          );
+          await this.resumeInWorkspace(await this.codex.readThread(replaced.threadId), workspace, {}, false);
         } catch (restoreError) {
           throw new AggregateError(
             [error, restoreError],
@@ -554,43 +705,61 @@ export class SessionRouter {
   }
 
   async newSession(target: ConversationTarget, preserveCurrent = false): Promise<void> {
-    if (preserveCurrent) {
-      this.bindings.demote(target);
-    } else {
-      await this.detach(target);
-    }
-    this.markForceNew(target, Date.now());
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
+      this.assertLifecycleCurrent(target, current);
+      if (preserveCurrent) {
+        this.bindings.demote(target);
+      } else {
+        await this.detachUnlocked(target);
+      }
+      this.markForceNew(target, Date.now());
+    });
   }
 
   async releaseBackground(threadId: string): Promise<ConversationTarget | undefined> {
-    if (!this.bindings.isBackground(threadId)) return undefined;
-    const binding = this.bindings.getByThread(threadId);
-    if (!binding) return undefined;
-    await this.codex.unsubscribeThread(threadId);
-    this.bindings.removeThread(threadId);
-    this.contextCompactionItemIdsByThread.delete(threadId);
-    this.onBindingsChanged?.();
-    return binding.target;
+    return this.withThreadLifecycle([threadId], async () => {
+      if (!this.bindings.isBackground(threadId)) return undefined;
+      const binding = this.bindings.getByThread(threadId);
+      if (!binding) return undefined;
+      await this.codex.unsubscribeThread(threadId);
+      this.bindings.removeThread(threadId);
+      this.contextCompactionItemIdsByThread.delete(threadId);
+      this.onBindingsChanged?.();
+      return binding.target;
+    });
   }
 
   async selectWorkspace(target: ConversationTarget, workspaceId: string): Promise<Workspace> {
-    const workspace = this.workspaces.require(workspaceId);
-    if (this.workspace(target).id === workspace.id) {
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
+      this.assertLifecycleCurrent(target, current);
+      const workspace = this.workspaces.require(workspaceId);
+      if (this.workspace(target).id === workspace.id) {
+        return workspace;
+      }
+      await this.detachUnlocked(target);
+      this.bindings.selectWorkspace(target, workspace.id);
+      // Workspace changes start a fresh conversation.  Keep the marker until
+      // ensure() creates the first Thread so it cannot auto-resume history from
+      // the newly selected workspace.
+      this.markForceNew(target, Date.now());
       return workspace;
-    }
-    await this.detach(target);
-    this.bindings.selectWorkspace(target, workspace.id);
-    // Workspace changes start a fresh conversation.  Keep the marker until
-    // ensure() creates the first Thread so it cannot auto-resume history from
-    // the newly selected workspace.
-    this.markForceNew(target, Date.now());
-    return workspace;
+    });
   }
 
   async fork(
     target: ConversationTarget,
     startOptions: ThreadStartOptions = {},
   ): Promise<ConversationBinding> {
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle(current ? [current.threadId] : [], () => {
+      this.assertLifecycleCurrent(target, current);
+      return this.forkUnlocked(target, startOptions);
+    });
+  }
+
+  private async forkUnlocked(target: ConversationTarget, startOptions: ThreadStartOptions): Promise<ConversationBinding> {
     const current = this.bindings.get(target);
     if (!current) {
       throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
@@ -613,7 +782,7 @@ export class SessionRouter {
       forked.thread.id,
       forked.contextCompactionItemIds,
     );
-    await this.detach(target);
+    await this.detachUnlocked(target);
     const binding = {
       target,
       workspaceId: workspace.id,
@@ -626,24 +795,34 @@ export class SessionRouter {
   }
 
   async archive(target: ConversationTarget): Promise<string> {
-    const current = this.bindings.get(target);
-    if (!current) {
-      throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
-    }
-    await this.codex.archiveThread(current.threadId);
-    this.forgetThread(current.threadId);
-    this.markForceNew(target, Date.now());
-    return current.threadId;
+    const expected = this.bindings.get(target);
+    return this.withThreadLifecycle(expected ? [expected.threadId] : [], async () => {
+      this.assertLifecycleCurrent(target, expected);
+      const current = this.bindings.get(target);
+      if (!current) {
+        throw new UserFacingError("conversation.missing", "当前还没有 Codex Thread");
+      }
+      await this.codex.archiveThread(current.threadId);
+      this.forgetThread(current.threadId);
+      this.markForceNew(target, Date.now());
+      return current.threadId;
+    });
   }
 
   async archiveThread(threadId: string): Promise<void> {
-    await this.codex.archiveThread(threadId);
-    this.forgetThread(threadId);
+    return this.withThreadLifecycle([threadId], async () => {
+      await this.codex.archiveThread(threadId);
+      this.forgetThread(threadId);
+    });
   }
 
   async unarchive(target: ConversationTarget, threadId: string): Promise<ConversationBinding> {
-    await this.codex.unarchiveThread(threadId);
-    return this.resume(target, threadId);
+    const current = this.bindings.get(target);
+    return this.withThreadLifecycle([threadId, ...(current ? [current.threadId] : [])], async () => {
+      this.assertLifecycleCurrent(target, current);
+      await this.codex.unarchiveThread(threadId);
+      return this.resumeUnlocked(target, threadId);
+    });
   }
 
   forgetThread(threadId: string): ConversationTarget | undefined {
@@ -665,6 +844,14 @@ export class SessionRouter {
 
   async detach(target: ConversationTarget): Promise<void> {
     const current = this.bindings.get(target);
+    return this.withThreadLifecycle(current ? [current.threadId] : [], () => {
+      this.assertLifecycleCurrent(target, current);
+      return this.detachUnlocked(target);
+    });
+  }
+
+  private async detachUnlocked(target: ConversationTarget): Promise<void> {
+    const current = this.bindings.get(target);
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
@@ -676,6 +863,39 @@ export class SessionRouter {
   private shouldForceNew(target: ConversationTarget): boolean {
     return this.forceNew.has(this.key(target))
       || this.bindings.idleState(target).forceNew;
+  }
+
+  private sameBinding(expected: ConversationBinding, current: ConversationBinding | undefined): boolean {
+    return current !== undefined && current.threadId === expected.threadId
+      && current.sessionId === expected.sessionId && current.workspaceId === expected.workspaceId
+      && this.key(current.target) === this.key(expected.target);
+  }
+
+  private assertLifecycleCurrent(target: ConversationTarget, expected: ConversationBinding | undefined): void {
+    const current = this.bindings.get(target);
+    if (current && (!expected || !this.sameBinding(expected, current))) {
+      throw new UserFacingError("thread.takeover.changed", "等待期间会话绑定已变化，请重新选择");
+    }
+  }
+
+  private withThreadLifecycle<T>(threadIds: readonly string[], action: () => Promise<T>): Promise<T> {
+    const ids = [...new Set(threadIds)].sort();
+    const acquire = async (index: number): Promise<T> => {
+      const id = ids[index];
+      if (id === undefined) return action();
+      const previous = this.threadLifecycleQueues.get(id) ?? Promise.resolve();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const queued = previous.then(() => held);
+      this.threadLifecycleQueues.set(id, queued);
+      await previous;
+      try { return await acquire(index + 1); }
+      finally {
+        release();
+        if (this.threadLifecycleQueues.get(id) === queued) this.threadLifecycleQueues.delete(id);
+      }
+    };
+    return acquire(0);
   }
 
   private markForceNew(target: ConversationTarget, atMs: number): void {
@@ -707,6 +927,11 @@ export class SessionRouter {
       collaborationMode: "default",
     });
   }
+}
+
+function isIncompatibleRestoreError(error: unknown): boolean {
+  return error instanceof UserFacingError && error.code === "thread.takeover.changed"
+    || error instanceof AggregateError && error.errors.some(isIncompatibleRestoreError);
 }
 
 function isUnavailableRestoreError(error: Error): boolean {
