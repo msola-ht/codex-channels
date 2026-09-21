@@ -24,6 +24,7 @@ function createGatewayApplicationFixture(
 ): GatewayApplicationFixture {
   return Object.assign(
     Object.create(GatewayApplication.prototype),
+    { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
   ) as GatewayApplicationFixture;
 }
@@ -386,6 +387,10 @@ describe("GatewayApplication startup cleanup", () => {
       restoreSubscriptions: async () => [],
       overrides: {
         queueLifecycleTasks: new Set([queueTask]),
+        asyncQuestions: {
+          close: async () => { calls.push("questions:closed"); },
+          cancelThread: vi.fn(),
+        },
         surfaceManager: {
           start: async () => undefined,
           stop: async () => {
@@ -409,6 +414,7 @@ describe("GatewayApplication startup cleanup", () => {
     await expect(stopping).resolves.toBeUndefined();
     expect(calls).toEqual([
       "queue:finished",
+      "questions:closed",
       "surface:stopped",
       "codex:closed",
     ]);
@@ -1293,6 +1299,8 @@ describe("GatewayApplication startup cleanup", () => {
         threadIds: new Set(["thread-1"]),
       }]);
     });
+    const asyncQuestions = Reflect.get(application, "asyncQuestions");
+    expect(asyncQuestions.cancelThread).toHaveBeenCalledWith("thread-1");
 
     await expect(application.stop()).resolves.toBeUndefined();
   });

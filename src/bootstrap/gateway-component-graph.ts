@@ -110,6 +110,7 @@ import {
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
+import { AsyncQuestionCoordinator } from "./async-question-coordinator.js";
 import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
   createSurfaceModules,
@@ -150,6 +151,7 @@ export abstract class GatewayComponentGraph {
   protected readonly surfaceManager: SurfaceManager;
   private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
+  private readonly asyncQuestions: AsyncQuestionCoordinator;
   private readonly approval: ApprovalCoordinator;
   private readonly router: SessionRouter;
   private readonly threadState: ThreadStateSynchronizer;
@@ -304,6 +306,7 @@ export abstract class GatewayComponentGraph {
       this.workspaces,
       config.scheduledTasksEnabled ? [scheduledTaskToolSpec] : [],
       () => {
+        this.asyncQuestions?.cancelStale();
         void this.providerIdleReleaser?.closeIfIdle().catch((error) => {
           this.logger.warn(
             { err: error },
@@ -902,6 +905,16 @@ export abstract class GatewayComponentGraph {
       config.approvalTimeoutMs,
       logger,
     );
+    this.asyncQuestions = new AsyncQuestionCoordinator({
+      interactions: this.interactions,
+      timeoutMs: config.approvalTimeoutMs,
+      targetForThread: (threadId) => this.router.targetForThread(threadId),
+      currentThread: (target) => this.router.current(target)?.threadId,
+      submit: (target, threadId, text, isCurrent) => service.submitAsyncAnswer(target, threadId, text, isCurrent),
+      warn: (event, message) => this.output.publish({
+        type: "warning", target: event.target, threadId: event.threadId, message,
+      }, true),
+    });
     this.inbound.subscribe("conversation-core", (notification) => {
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {
@@ -910,6 +923,7 @@ export abstract class GatewayComponentGraph {
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
+        this.asyncQuestions.handleInput(coreEvent);
         if (
           coreEvent.type === "turn.started"
           || coreEvent.type === "turn.completed"
@@ -1198,6 +1212,7 @@ export abstract class GatewayComponentGraph {
       ["Provider Idle Releaser", () => this.providerIdleReleaser?.stop()],
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
+      ["Async Questions", () => this.asyncQuestions.close()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
@@ -1309,6 +1324,7 @@ export abstract class GatewayComponentGraph {
         .map((binding) => binding.threadId)
         .filter((threadId) => this.codex.knownProvider(threadId) === provider),
     );
+    for (const threadId of affectedThreadIds) this.asyncQuestions.cancelThread(threadId);
     let intentionallyReleased = false;
     try {
       const topology = await inspectAppServerSupervisor(this.config.codexSocketPath);

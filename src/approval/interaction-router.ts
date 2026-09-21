@@ -116,7 +116,8 @@ export class InteractionRouter implements InteractionPort {
         this.warnRejected(target, request, "interaction-capacity-exceeded");
         return Promise.resolve(safeInteractionDecision(request));
       }
-      const queueKey = this.conversationKey(target);
+      const queueKey = this.conversationKey(target)
+        + (request.type === "user-input" && request.asynchronous ? "\u0000async" : "\u0000blocking");
       const queue = this.queues.get(queueKey) ?? {
         entries: [],
       };

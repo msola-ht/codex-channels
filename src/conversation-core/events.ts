@@ -235,6 +235,11 @@ export interface TurnStartIdentity {
   name: string;
 }
 
+export interface AsyncUserQuestion {
+  title: string;
+  options: string[];
+}
+
 export type OutputEvent =
   | { type: "turn.started"; target: ConversationTarget; threadId: string; turnId: string; identity?: TurnStartIdentity; background?: boolean }
   | { type: "user.message"; target: ConversationTarget; threadId: string; turnId: string; itemId: string; text: string; background?: boolean }

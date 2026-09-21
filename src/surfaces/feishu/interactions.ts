@@ -96,7 +96,8 @@ export class FeishuInteractionPort implements InteractionPort {
       this.finish(
         resolution.token,
         safeInteractionDecision(resolution.pending.request),
-        interactionOutcome.resolvedElsewhere,
+        resolution.pending.request.type === "user-input" && resolution.pending.request.asynchronous
+          ? "问题已失效" : interactionOutcome.resolvedElsewhere,
       );
     }
   }
@@ -286,7 +287,7 @@ export class FeishuInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(request),
-          interactionOutcome.resolvedElsewhere,
+          request.type === "user-input" && request.asynchronous ? "问题已失效" : interactionOutcome.resolvedElsewhere,
         );
       }
     });

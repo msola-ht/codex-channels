@@ -128,7 +128,10 @@ export class WeixinInteractionPort implements InteractionPort {
     void this.finish(
       resolution.token,
       safeInteractionDecision(resolution.pending.request),
-      formatProcessedInteractionOutcome(interactionOutcome.resolvedElsewhere),
+      formatProcessedInteractionOutcome(
+        resolution.pending.request.type === "user-input" && resolution.pending.request.asynchronous
+          ? "问题已失效" : interactionOutcome.resolvedElsewhere,
+      ),
     );
   }
 

@@ -16,6 +16,8 @@
   渠道不可用、超时、关闭或不支持的交互默认拒绝或取消；渠道故障时只清理对应账号的活动与排队
   交互，恢复前的新请求立即失败关闭，不影响其他渠道账号。同时提供按 Thread 查询待处理交互的只读保护，
   供空闲会话跨渠道接管在转移绑定前失败关闭，不迁移审批、输入或 MCP 交互。
+  标记为异步的用户问题使用独立 Conversation 队列，等待可选回答不阻塞审批；这类问题由 Bootstrap
+  协调普通输入回传，不经过 `ApprovalCoordinator` 或 Server Request 响应编码。
 
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
 `turnId` 为 `null`，此时 App Server 请求 ID 是该交互的协议身份。未知、缺少必需归属信息或

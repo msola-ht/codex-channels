@@ -22,6 +22,7 @@ export type InteractionRequest =
     }
   | {
       type: "user-input";
+      asynchronous?: true;
       requestId: string;
       threadId: string;
       turnId: string;

@@ -389,7 +389,7 @@ describe("WeixinInteractionPort", () => {
     }
   });
 
-  it("collects fixed and free answers before resolving user input", async () => {
+  it.each([false, true])("collects fixed and free answers (async=%s)", async (asynchronous) => {
     const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(
       delivery,
@@ -399,6 +399,7 @@ describe("WeixinInteractionPort", () => {
       () => "input-token",
     );
     const request = userInputRequest({
+      ...(asynchronous ? { asynchronous: true } : {}),
       questions: [
         {
           id: "environment",
