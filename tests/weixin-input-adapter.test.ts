@@ -38,10 +38,10 @@ const target: ConversationTarget = {
 
 describe("Weixin quote resolution", () => {
   it("uses cached text along with the platform summary", () => {
-    expect(resolveWeixinQuotedText({ quotedMessageId: "7", quotedTitle: "摘要" }, "完整原文"))
-      .toBe("摘要 | 完整原文");
-    expect(resolveWeixinQuotedText({ quotedText: "平台正文", quotedTitle: "摘要" }, "缓存正文"))
-      .toBe("摘要 | 平台正文");
+    expect(resolveWeixinQuotedText({ quotedMessageId: "7", quotedTitle: "摘要" }, { text: "完整原文", truncated: false }))
+      .toBe("完整原文 | 摘要");
+    expect(resolveWeixinQuotedText({ quotedText: "平台正文", quotedTitle: "摘要" }, { text: "缓存正文", truncated: false }))
+      .toBe("平台正文 | 摘要");
   });
 
   it.each([0, 1])("resolves the hash-verified partial quote using end interpretation %s", (endindex) => {
@@ -49,14 +49,14 @@ describe("Weixin quote resolution", () => {
     expect(resolveWeixinQuotedText({ quotedPartial: {
       start: "甲", end: "乙", startindex: 0, endindex,
       quotemd5: createHash("md5").update(selected).digest("hex"),
-    } }, "乙前甲中乙后")).toBe(selected);
+    } }, { text: "乙前甲中乙后", truncated: false })).toBe(selected);
   });
 
   it("does not substitute the whole message when the partial quote is unavailable", () => {
     const reference = { quotedPartial: {
       start: "甲", end: "乙", startindex: 0, endindex: 0, quotemd5: "0".repeat(32),
     } };
-    expect(resolveWeixinQuotedText(reference, "甲中乙")).toBe("[局部引用无法还原，请重新发送所选文字]");
+    expect(resolveWeixinQuotedText(reference, { text: "甲中乙", truncated: false })).toBe("[局部引用无法还原，请重新发送所选文字]");
     expect(resolveWeixinQuotedText(reference, undefined)).toBe("[局部引用无法还原，请重新发送所选文字]");
   });
 });
@@ -303,7 +303,25 @@ describe("WeixinInputAdapter", () => {
     await adapter.stop();
   });
 
-  it("resolves a numeric server quote through parsing, authorization and the process cache", async () => {
+  it.each([
+    { name: "ordinary quote", original: "原始用户消息", title: "摘要", partial: undefined,
+      expected: "原始用户消息 | 摘要" },
+    { name: "artificial cache ellipsis", original: "前".repeat(7999) + "甲" + "乙".repeat(100) + "…",
+      title: "摘要", partial: { start: "甲", end: "…", startindex: 0, endindex: 0, quotemd5: "" },
+      expected: "[局部引用无法还原，请重新发送所选文字]" },
+    { name: "selection within a truncated cache", original: "甲乙" + "后".repeat(9000), title: "摘要",
+      partial: { start: "甲", end: "乙", startindex: 0, endindex: 0, quotemd5: "" }, expected: "甲乙 | 摘要" },
+    { name: "unicode cache boundary", original: "图".repeat(7998) + "甲😀" + "后".repeat(100), title: "摘要",
+      partial: { start: "甲", end: "😀", startindex: 0, endindex: 0,
+        quotemd5: createHash("md5").update("甲😀").digest("hex") }, expected: "甲😀 | 摘要" },
+    { name: "long summary", original: "必须保留的原文", title: "摘".repeat(8000), partial: undefined,
+      expected: "必须保留的原文" },
+    { name: "long summary with selection", original: "前甲乙后", title: "摘".repeat(8000),
+      partial: { start: "甲", end: "乙", startindex: 0, endindex: 0, quotemd5: "" }, expected: "甲乙" },
+    { name: "long summary with unavailable selection", original: "原始用户消息", title: "摘".repeat(8000),
+      partial: { start: "甲", end: "乙", startindex: 0, endindex: 0, quotemd5: "" },
+      expected: "[局部引用无法还原，请重新发送所选文字]" },
+  ])("preserves quote content across the full input pipeline: $name", async ({ original, title, partial, expected }) => {
     let delivered = false;
     const client: WeixinProtocolClient = {
       getUpdates: vi.fn(async (_cursor, signal) => {
@@ -311,11 +329,13 @@ describe("WeixinInputAdapter", () => {
           delivered = true;
           const raw = JSON.stringify({
             ret: 0, get_updates_buf: "cursor-quote",
-            msgs: ["原始用户消息", "引用测试"].map((text, index) => ({
+            msgs: [original, "引用测试"].map((text, index) => ({
               message_id: index === 0 ? "9007199254740993123" : "101",
               message_type: 1, message_state: 2, from_user_id: actorId, to_user_id: accountId,
               context_token: "context-fixture", item_list: [{ type: 1, text_item: { text },
-                ...(index === 0 ? {} : { ref_msg: { svr_id: "9007199254740993123", title: "摘要" } }),
+                ...(index === 0 ? {} : { ref_msg: { svr_id: "9007199254740993123", title,
+                  ...(partial === undefined ? {} : { partial_text: partial }),
+                } }),
               }],
             })),
           }).replace(/"(message_id|svr_id)":"(\d+)"/gu, '"$1":$2');
@@ -350,13 +370,16 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenNthCalledWith(
       1,
       target,
-      "原始用户消息",
+      original,
     );
     expect(service.submit).toHaveBeenNthCalledWith(
       2,
       target,
-      "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：\n> 摘要 | 原始用户消息\n\n当前消息：\n引用测试",
+      expect.stringContaining(`\n> ${expected}`),
     );
+    const submitted = vi.mocked(service.submit).mock.calls[1]?.[1];
+    expect(submitted).toEqual(expect.stringContaining("\n\n当前消息：\n引用测试"));
+    expect(submitted).not.toEqual(expect.stringContaining("甲…"));
   });
 
   it("marks a missing quote without inventing its contents", async () => {

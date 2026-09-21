@@ -12,8 +12,8 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
-import { truncateQuotedText } from "../quoted-input.js";
-import { resolveWeixinQuotedText } from "./quoted-reference.js";
+import { maximumQuotedTextCharacters } from "../quoted-input.js";
+import { resolveWeixinQuotedText, type WeixinCachedQuote } from "./quoted-reference.js";
 import {
   WeixinProtocolError,
   type WeixinInboundMessage,
@@ -102,7 +102,7 @@ export class WeixinInputAdapter {
   private runTask: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
   private readonly replyContextWrites = new Map<string, Promise<void>>();
-  private readonly quotedTexts = new Map<string, string>();
+  private readonly quotedTexts = new Map<string, WeixinCachedQuote>();
   private stopping = false;
 
   constructor(private readonly options: WeixinInputAdapterOptions) {
@@ -288,7 +288,11 @@ export class WeixinInputAdapter {
   ): void {
     const key = quotedTextCacheKey(target, messageId);
     this.quotedTexts.delete(key);
-    this.quotedTexts.set(key, truncateQuotedText(text));
+    const characters = Array.from(text);
+    this.quotedTexts.set(key, {
+      text: characters.slice(0, maximumQuotedTextCharacters).join(""),
+      truncated: characters.length > maximumQuotedTextCharacters,
+    });
     while (this.quotedTexts.size > maximumQuotedTextCacheEntries) {
       const oldest = this.quotedTexts.keys().next().value;
       if (oldest === undefined) {

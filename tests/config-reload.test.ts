@@ -15,6 +15,15 @@ import { MemoryBindingStore } from "../src/storage/index.js";
 const mainWorkspace = { id: "main", name: "Main", cwd: "/workspace" };
 
 describe("Gateway config reload", () => {
+  it("restarts for changed secure Weixin credentials even when config values are unchanged", () => {
+    const current = config({ weixin: {
+      accountId: "bot@im.bot", allowedUserIds: new Set(["actor@im.wechat"]),
+    } });
+    expect(classifyConfigReload(current, current, true)).toEqual({
+      action: "restart", changes: [{ code: "surface.weixin.credentials", scope: "weixin" }],
+    });
+    expect(classifyConfigReload(current, current, false)).toEqual({ action: "reload", changes: [] });
+  });
   it.each(["Asia/Shanghai", undefined])(
     "recreates startup cards when the App Server timezone becomes %s with an independent gateway timezone",
     (codexTimezone) => {

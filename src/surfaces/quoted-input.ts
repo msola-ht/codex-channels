@@ -1,4 +1,4 @@
-const maximumQuotedTextCharacters = 8_000;
+export const maximumQuotedTextCharacters = 8_000;
 
 export function formatQuotedInput(
   currentText: string,

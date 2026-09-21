@@ -149,6 +149,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "surface.feishu.allowed-users": "飞书允许用户",
     "surface.weixin.enabled": "微信启用状态",
     "surface.weixin.account": "微信账号",
+    "surface.weixin.credentials": "微信连接凭据",
     "surface.weixin.allowed-users": "微信允许用户",
   };
   return labels[code];

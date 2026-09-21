@@ -12,6 +12,8 @@ export {
 } from "./telegram/index.js";
 export {
   createWeixinSurface,
+  createWeixinCredentialStore,
+  createWeixinCredentialChangeCheck,
   renderWeixinStartupNotification,
   type CreateWeixinSurfaceOptions,
   type WeixinAudioPort,

@@ -1,5 +1,5 @@
 import { unwatchFile, watchFile } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 
@@ -15,6 +15,7 @@ import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
+import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication } from "./app.js";
 import { NetworkProxyWatcher } from "./network-proxy-watcher.js";
 import {
@@ -48,7 +49,15 @@ export async function runGatewayProcess(): Promise<void> {
   const watchedPaths = [runtime.configPath, eventQueuePath];
   const logger = createLogger(config);
   let application: GatewayApplication;
+  let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
+    if (config.weixin) {
+      weixinCredentialChange = await createWeixinCredentialChangeCheck(
+        createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
+        config.weixin.accountId,
+        () => logger.warn({ surface: "weixin" }, "微信凭据检查失败；其他渠道继续运行，下次配置重载重新检查"),
+      );
+    }
     application = new GatewayApplication(
       config,
       logger,
@@ -136,9 +145,14 @@ export async function runGatewayProcess(): Promise<void> {
         pendingEvents,
         next.config.workspaces,
       );
+      const credentialsChanged = next.config.weixin?.accountId === config.weixin?.accountId
+        && weixinCredentialChange !== undefined
+        && await weixinCredentialChange() === "changed";
+      if (stopping) return;
       const result = application.reloadConfig(
         next.config,
         applicableEvents.map((event) => event.workspace),
+        credentialsChanged,
       );
       if (result.action === "reinstall") {
         logger.error(
@@ -180,6 +194,7 @@ export async function runGatewayProcess(): Promise<void> {
         }
       }
     } catch (error) {
+      if (stopping) return;
       application.notifyConfigReloadFailure();
       logger.error({ err: error }, "Gateway 配置热加载失败，继续使用现有配置");
     } finally {

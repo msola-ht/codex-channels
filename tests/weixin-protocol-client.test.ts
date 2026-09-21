@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createCredentialBackedWeixinClient,
+  createWeixinCredentialChangeCheck,
   createWeixinProtocolClient,
   type StoredWeixinCredential,
   type WeixinCredentialStore,
@@ -19,6 +20,42 @@ const actorId = "actor-fixture@im.wechat";
 const botAgent = `CodexConnect/${gatewayMetadata.version}`;
 
 describe("WeixinProtocolClient", () => {
+  it("detects replaced or removed secure credentials without exposing them to config", async () => {
+    const initial: StoredWeixinCredential = { version: 1, accountId,
+      baseUrl: "https://ilinkai.weixin.qq.com", botToken: "old-fixture", grantedAt: 1 };
+    let current: StoredWeixinCredential | null = initial;
+    const changed = await createWeixinCredentialChangeCheck({
+      get: async () => current, set: async () => {}, remove: async () => {},
+    }, accountId, vi.fn());
+    expect(await changed()).toBe("unchanged");
+    current = { ...initial, botToken: "new-fixture" };
+    expect(await changed()).toBe("changed");
+    current = { ...initial, grantedAt: 2 };
+    expect(await changed()).toBe("changed");
+    current = null;
+    expect(await changed()).toBe("changed");
+  });
+  it.each([false, true])("reports unavailable reads and detects recovery (initially failed: %s)", async (initiallyFailed) => {
+    const credential: StoredWeixinCredential = { version: 1, accountId,
+      baseUrl: "https://ilinkai.weixin.qq.com", botToken: "old-fixture", grantedAt: 1 };
+    let fail = initiallyFailed;
+    let current = credential;
+    const onFailure = vi.fn();
+    const check = await createWeixinCredentialChangeCheck({
+      get: async () => {
+        if (fail) throw new Error("private store error");
+        return current;
+      }, set: async () => {}, remove: async () => {},
+    }, accountId, onFailure);
+    expect(onFailure).toHaveBeenCalledTimes(initiallyFailed ? 1 : 0);
+    fail = true;
+    expect(await check()).toBe("unavailable");
+    expect(onFailure).toHaveBeenLastCalledWith();
+    fail = false;
+    expect(await check()).toBe(initiallyFailed ? "changed" : "unchanged");
+    current = { ...credential, botToken: "new-fixture" };
+    expect(await check()).toBe("changed");
+  });
   it("loads the secure credential once and keeps it out of runtime config", async () => {
     const credential: StoredWeixinCredential = {
       version: 1,

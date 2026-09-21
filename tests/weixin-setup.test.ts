@@ -43,10 +43,11 @@ describe("Weixin setup", () => {
     expect(output).toContain("未请求微信二维码");
   });
 
-  it("atomically stores a confirmed credential and disabled runtime config", async () => {
+  it.each([true, false])("saves and enables only after final confirmation: %s", async (confirmed) => {
     const fixture = createFixture();
     const store = memoryStore();
-    const prompt = prompter([], [true, true]);
+    const prompt = prompter([], [true, confirmed]);
+    const originalConfig = readFileSync(fixture.configPath, "utf8");
     let output = "";
 
     const result = await runWeixinSetup({
@@ -86,6 +87,16 @@ describe("Weixin setup", () => {
       now: () => 1_000,
     });
 
+    expect(prompt.confirm).toHaveBeenLastCalledWith(
+      "确认安全保存并启用以上连接？", true, expect.any(Object),
+    );
+    if (!confirmed) {
+      expect(result).toBeUndefined();
+      expect(store.set).not.toHaveBeenCalled();
+      expect(readFileSync(fixture.configPath, "utf8")).toBe(originalConfig);
+      expect(output).toContain("未保存微信连接");
+      return;
+    }
     expect(result).toEqual({
       accountId: "bot-fixture@im.bot",
       allowedUserIds: ["actor-fixture@im.wechat"],
@@ -106,13 +117,13 @@ describe("Weixin setup", () => {
     });
     expect(parseToml(readFileSync(fixture.configPath, "utf8")).weixin)
       .toEqual({
-        enabled: false,
+        enabled: true,
         account_id: "bot-fixture@im.bot",
         allowed_user_ids: ["actor-fixture@im.wechat"],
       });
     expect(output).not.toContain("bot-secret");
-    expect(output).toContain("weixin.enabled");
-    expect(output).toContain("codexc service reload");
+    expect(output).toContain("消息接收已设为启用");
+    expect(output).not.toContain("weixin.enabled");
     expect(output).not.toContain("下一步实现");
   });
 

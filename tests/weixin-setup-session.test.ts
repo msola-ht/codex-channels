@@ -29,6 +29,44 @@ afterEach(() => {
 });
 
 describe("Weixin setup session", () => {
+  it.each(["open", "read", "write", "config"])("does not accept existing enabled config as proof of a successful save: %s", async (stage) => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.weixin = { enabled: true, account_id: "bot-fixture@im.bot",
+      allowed_user_ids: ["actor-fixture@im.wechat"] };
+    writeGatewayConfig(fixture.configPath, document);
+    const previous = { version: 1 as const, accountId: "bot-fixture@im.bot",
+      botToken: "old-fixture", baseUrl: "https://ilinkai.weixin.qq.com", grantedAt: 1 };
+    const next = { ...previous, botToken: "new-fixture", grantedAt: 2 };
+    const store = {
+      get: vi.fn(async () => {
+        if (stage === "read") throw new Error("credential failed");
+        return previous;
+      }),
+      set: vi.fn(async (credential: unknown) => {
+        if (stage === "write" && credential === next) throw new Error("save failed");
+      }),
+      remove: vi.fn(async () => {}),
+    };
+    const writeConfig = vi.fn(() => { throw new Error("save failed"); });
+    const session = createWeixinSetupSession({ ownerId: "owner-1" }, {
+      environment: fixture.environment,
+      createCredentialStore: async () => {
+        if (stage === "open") throw new Error("credential failed");
+        return store;
+      },
+      validateCredential: async () => next,
+      runLogin: async () => ({ kind: "confirmed", ...next, userId: "actor-fixture@im.wechat" }),
+      writeConfig,
+    });
+    session.start("owner-1");
+    await session.waitForLogin("owner-1");
+    await expect(session.confirm("owner-1")).rejects.toThrow(/(?:credential|save) failed/u);
+    expect(session.status("owner-1").state).toBe("failed");
+    expect(writeConfig).toHaveBeenCalledTimes(stage === "config" ? 1 : 0);
+    if (stage === "write" || stage === "config") expect(store.set).toHaveBeenLastCalledWith(previous);
+  });
+
   it("binds lifecycle operations to one owner and never exposes credentials", async () => {
     const fixture = createFixture();
     const store = memoryStore();
@@ -90,7 +128,7 @@ describe("Weixin setup session", () => {
         scannerId: "actor-fixture@im.wechat",
         credentialConfigured: true,
         existingAllowedUserCount: 0,
-        enabled: false,
+        enabled: true,
       },
     });
     expect(JSON.stringify(session.status("owner-1")))
@@ -108,7 +146,7 @@ describe("Weixin setup session", () => {
     }));
     expect(parseToml(readFileSync(fixture.configPath, "utf8")).weixin)
       .toEqual({
-        enabled: false,
+        enabled: true,
         account_id: "bot-fixture@im.bot",
         allowed_user_ids: ["actor-fixture@im.wechat"],
       });
@@ -297,8 +335,14 @@ describe("Weixin setup session", () => {
     expect(session.status("owner-1")).not.toHaveProperty("preview");
   });
 
-  it("keeps the credential when config committed before reporting an error", async () => {
+  it.each([false, true])("keeps the credential when config committed before reporting an error (previously enabled: %s)", async (enabled) => {
     const fixture = createFixture();
+    if (enabled) {
+      const document = readGatewayConfig(fixture.configPath);
+      document.weixin = { enabled: true, account_id: "bot-fixture@im.bot",
+        allowed_user_ids: ["actor-fixture@im.wechat"] };
+      writeGatewayConfig(fixture.configPath, document);
+    }
     const store = memoryStore();
     const session = createWeixinSetupSession({ ownerId: "owner-1" }, {
       environment: fixture.environment,
@@ -332,7 +376,7 @@ describe("Weixin setup session", () => {
     });
     expect(store.remove).not.toHaveBeenCalledWith("bot-fixture@im.bot");
     expect(readGatewayConfig(fixture.configPath).weixin).toEqual({
-      enabled: false,
+      enabled: true,
       account_id: "bot-fixture@im.bot",
       allowed_user_ids: ["actor-fixture@im.wechat"],
     });

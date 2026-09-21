@@ -400,12 +400,12 @@
   警告供终端提示通过 `codexc doctor` 和重新扫码恢复。
 - `weixin-setup.mjs`：从统一 Setup 菜单执行连接替换风险确认、微信扫码和严格结果裁剪，把
   终端输入输出适配到 `weixin-setup-session.mjs` 的结构化会话，把 Bot Token 原子写入微信独立安全凭据后端，
-  并只向 TOML 写入禁用态账号与允许用户元数据；
-  Setup 不直接启动消息 Surface，操作者显式启用配置并重载 Gateway 后生效。
+  最终确认后向 TOML 写入启用态账号与允许用户元数据；
+  Setup 不直接启动消息 Surface，由 Gateway 配置变更处理或下次启动生效。
 - `weixin-setup-session.mjs` / `weixin-setup-session.d.mts`：提供所有者绑定的微信 Setup 开始、状态、
   配对码提交、确认与取消接口；二维码和凭据只保存在有期限的进程内会话中，状态与保存预览不返回
   Bot Token，取消和超时会中止底层请求并丢弃临时状态，确认时检查微信配置未被并发改动后复用原子
-  凭据/配置回滚事务。
+  凭据/配置回滚事务；写入异常时同时核对原子替换的文件身份和目标配置，不能用旧配置值相同判定提交成功。
 - `feishu-application.mjs`：为 Setup 与 Doctor 提供带有限超时的飞书凭据/Bot 身份、应用权限、
   消息事件和待审核版本只读探测，不建立消息长连接，并把 SDK 错误和残缺响应收敛为不含敏感详情的
   稳定错误。

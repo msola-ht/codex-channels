@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GatewayConfig } from "../src/config/index.js";
 
 const mocks = vi.hoisted(() => ({
   watchFile: vi.fn(),
   unwatchFile: vi.fn(),
   loadRuntimeConfig: vi.fn(),
+  createWeixinCredentialStore: vi.fn(),
+  createWeixinCredentialChangeCheck: vi.fn(),
+  weixinCredentialsChanged: vi.fn(),
   configEventQueuePath: vi.fn(() => "/tmp/config-events.jsonl"),
   readConfigEvents: vi.fn(),
   matchingWorkspaceConfigEvents: vi.fn(),
@@ -89,6 +93,10 @@ vi.mock("../src/config/index.js", () => ({
 vi.mock("../src/observability/index.js", () => ({
   createLogger: mocks.createLogger,
 }));
+vi.mock("../src/surfaces/index.js", () => ({
+  createWeixinCredentialStore: mocks.createWeixinCredentialStore,
+  createWeixinCredentialChangeCheck: mocks.createWeixinCredentialChangeCheck,
+}));
 vi.mock("../src/bootstrap/app.js", () => ({
   GatewayApplication: class {
     constructor(...args: unknown[]) {
@@ -136,6 +144,8 @@ beforeEach(() => {
   delete process.env.CODEX_CONNECT_SERVICE_ROLE;
   mocks.providerSettingsOptions = undefined;
   mocks.loadRuntimeConfig.mockReturnValue(runtime);
+  mocks.createWeixinCredentialChangeCheck.mockResolvedValue(mocks.weixinCredentialsChanged);
+  mocks.weixinCredentialsChanged.mockResolvedValue("unchanged");
   mocks.readConfigEvents.mockReturnValue([]);
   mocks.matchingWorkspaceConfigEvents.mockReturnValue([]);
   mocks.createLogger.mockReturnValue(mocks.logger);
@@ -213,6 +223,7 @@ describe("runGatewayProcess", () => {
     expect(mocks.application.reloadConfig).toHaveBeenCalledWith(
       runtime.config,
       ["docs"],
+      false,
     );
     expect(mocks.application.deliverAddedWorkspaceNotifications)
       .toHaveBeenCalledWith(["docs"]);
@@ -261,7 +272,7 @@ describe("runGatewayProcess", () => {
 
     await expect(runGatewayProcess()).resolves.toBeUndefined();
 
-    expect(mocks.application.reloadConfig).toHaveBeenCalledWith(runtime.config, []);
+    expect(mocks.application.reloadConfig).toHaveBeenCalledWith(runtime.config, [], false);
     expect(mocks.acknowledgeConfigEvents).not.toHaveBeenCalled();
     expect(mocks.logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
@@ -318,6 +329,97 @@ describe("runGatewayProcess", () => {
     expect(mocks.application.stop).toHaveBeenCalledOnce();
     expect(mocks.owner.close).toHaveBeenCalledOnce();
     expect(process.exit).toHaveBeenCalledWith(75);
+  });
+
+  it("checks same-account credentials on config reload and restarts the supervised Gateway", async () => {
+    vi.useFakeTimers();
+    process.env.CODEX_CONNECT_GATEWAY_SUPERVISED = "1";
+    const processHandlers = isolateProcessLifecycle();
+    const config = { ...runtime.config, credentialsDirectory: "/tmp/credentials",
+      weixin: { accountId: "bot@im.bot" } };
+    mocks.loadRuntimeConfig.mockReturnValue({ ...runtime, config });
+    mocks.application.reloadConfig.mockImplementation((_next, _events, changed) => ({
+      action: changed ? "restart" : "reload", changes: [],
+    }));
+    await runGatewayProcess();
+    expect(mocks.application.reloadConfig).toHaveBeenLastCalledWith(config, [], false);
+    mocks.weixinCredentialsChanged.mockResolvedValue("changed");
+    processHandlers.get("SIGHUP")?.();
+    await vi.advanceTimersByTimeAsync(150);
+    await settlePromises();
+    expect(mocks.application.reloadConfig).toHaveBeenLastCalledWith(config, [], true);
+    expect(mocks.application.stop).toHaveBeenCalledOnce();
+    expect(process.exit).toHaveBeenCalledWith(75);
+  });
+
+  it.each([false, true])("isolates secure-store failures and still applies config before credential recovery (startup failure: %s)", async (startupFailure) => {
+    vi.useFakeTimers();
+    process.env.CODEX_CONNECT_GATEWAY_SUPERVISED = "1";
+    const handlers = isolateProcessLifecycle();
+    const { createWeixinCredentialChangeCheck } = await vi.importActual<
+      typeof import("../src/surfaces/weixin/credential-client.js")
+    >("../src/surfaces/weixin/credential-client.js");
+    const { classifyConfigReload } = await vi.importActual<
+      typeof import("../src/config/reload-classifier.js")
+    >("../src/config/reload-classifier.js");
+    let failed = startupFailure;
+    let botToken = "old-fixture";
+    mocks.createWeixinCredentialStore.mockReturnValue({ get: async () => {
+      if (failed) throw new Error("private credential error");
+      return { version: 1, accountId: "bot@im.bot", botToken,
+        baseUrl: "https://ilinkai.weixin.qq.com", grantedAt: 1 };
+    } });
+    mocks.createWeixinCredentialChangeCheck.mockImplementationOnce(createWeixinCredentialChangeCheck);
+    const config = { ...runtime.config, credentialsDirectory: "/tmp/credentials",
+      telegramEnabled: true, telegramAllowedUserIds: new Set([123]),
+      weixin: { accountId: "bot@im.bot", allowedUserIds: new Set(["actor@im.wechat"]) } } as unknown as GatewayConfig;
+    mocks.loadRuntimeConfig.mockReturnValue({ ...runtime, config });
+    // Use the real credential comparison and reload decision while isolating processes and platform I/O.
+    mocks.application.reloadConfig.mockImplementation((next, _events, changed) =>
+      classifyConfigReload(config, next, changed));
+    await runGatewayProcess();
+    expect(mocks.application.start).toHaveBeenCalledOnce();
+    expect(mocks.owner.markReady).toHaveBeenCalledOnce();
+    failed = true;
+    const next = { ...config, telegramAllowedUserIds: new Set([123, 456]) };
+    mocks.loadRuntimeConfig.mockReturnValue({ ...runtime, config: next });
+    handlers.get("SIGHUP")?.();
+    await vi.advanceTimersByTimeAsync(150);
+    expect(mocks.application.reloadConfig).toHaveBeenLastCalledWith(next, [], false);
+    expect(mocks.application.reloadConfig.mock.results.at(-1)?.value).toEqual({
+      action: "reload", changes: [{ code: "surface.telegram.allowed-users", scope: "telegram" }],
+    });
+    expect(mocks.application.stop).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).toHaveBeenCalledWith({ surface: "weixin" }, expect.stringContaining("凭据检查失败"));
+    expect(JSON.stringify(mocks.logger.warn.mock.calls)).not.toContain("private credential error");
+    failed = false;
+    botToken = "new-fixture";
+    handlers.get("SIGHUP")?.();
+    await vi.advanceTimersByTimeAsync(150);
+    await settlePromises();
+    expect(mocks.application.reloadConfig).toHaveBeenLastCalledWith(next, [], true);
+    expect(process.exit).toHaveBeenCalledWith(75);
+  });
+
+  it.each([false, true])("does not apply a credential reload after shutdown starts (read fails: %s)", async (readFails) => {
+    vi.useFakeTimers();
+    const processHandlers = isolateProcessLifecycle();
+    mocks.loadRuntimeConfig.mockReturnValue({ ...runtime, config: {
+      ...runtime.config, credentialsDirectory: "/tmp/credentials", weixin: { accountId: "bot@im.bot" },
+    } });
+    await runGatewayProcess();
+    let finishRead!: (changed: string) => void;
+    mocks.weixinCredentialsChanged.mockImplementationOnce(() => new Promise<string>((resolve, reject) => {
+      finishRead = (changed) => readFails ? reject(new Error("read failed")) : resolve(changed);
+    }));
+    processHandlers.get("SIGHUP")?.();
+    await vi.advanceTimersByTimeAsync(150);
+    processHandlers.get("SIGTERM")?.();
+    finishRead("changed");
+    await settlePromises();
+    expect(mocks.application.reloadConfig).toHaveBeenCalledOnce();
+    expect(mocks.application.notifyConfigReloadFailure).not.toHaveBeenCalled();
+    expect(process.exit).toHaveBeenCalledWith(0);
   });
 
   it("keeps the current process running when a debounced reload fails", async () => {

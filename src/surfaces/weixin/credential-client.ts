@@ -1,4 +1,4 @@
-import type { WeixinCredentialStore } from "./credential-store.js";
+import type { StoredWeixinCredential, WeixinCredentialStore } from "./credential-store.js";
 import {
   createWeixinProtocolClient,
   type WeixinRuntimeProtocolClient,
@@ -9,6 +9,35 @@ export interface CreateCredentialBackedWeixinClientOptions {
   credentialStore: WeixinCredentialStore;
   fetchImpl?: typeof fetch;
   createClient?: typeof createWeixinProtocolClient;
+}
+
+/** Compare against the credentials present before this Gateway started. */
+export async function createWeixinCredentialChangeCheck(
+  store: WeixinCredentialStore,
+  accountId: string,
+  onReadFailure: () => void,
+): Promise<() => Promise<"changed" | "unchanged" | "unavailable">> {
+  const read = async (): Promise<
+    | { kind: "available"; credential: StoredWeixinCredential | null }
+    | { kind: "unavailable" }
+  > => {
+    try {
+      return { kind: "available", credential: await store.get(accountId) };
+    } catch {
+      onReadFailure();
+      return { kind: "unavailable" };
+    }
+  };
+  const initial = await read();
+  return async () => {
+    const current = await read();
+    if (current.kind === "unavailable") return "unavailable";
+    if (initial.kind === "unavailable") return "changed";
+    return current.credential?.botToken !== initial.credential?.botToken
+      || current.credential?.baseUrl !== initial.credential?.baseUrl
+      || current.credential?.grantedAt !== initial.credential?.grantedAt
+      ? "changed" : "unchanged";
+  };
 }
 
 export function createCredentialBackedWeixinClient(
