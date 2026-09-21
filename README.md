@@ -68,6 +68,8 @@ codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置�
 
 计划清单工具在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
 
+Codex 执行中发出的异步问题可直接在渠道中选择或填写答案，操作方式见[异步问题](docs/display.md#异步问题)。
+
 符合 OpenAI 后端权益的账户在普通用量耗尽后，会把当前 Session 自动切换到 Luna Reserve；当前 Gateway 进程持续运行、账户和 Thread 未切换且原模型仍可用时，会在普通用量恢复后切回。失败的消息需要重新发送，细节见[渠道展示与本地指标](docs/display.md#luna-reserve-自动回退)。
 
 模型请求指标保存在本机 `request-metrics.sqlite3`，由 `codexc metrics` 和本地 WebUI 读取；当前部署不包含远程指标中心或云端同步服务。

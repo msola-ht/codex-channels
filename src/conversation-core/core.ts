@@ -336,6 +336,11 @@ export class ConversationCore {
       case "item.agentMessage.completed": {
         const key = this.itemKey(event.threadId, event.turnId, event.itemId);
         const phase = event.phase ?? this.phaseByItem.get(key) ?? null;
+        if (event.delivery === "async" && event.questions) {
+          this.clearReasoning(event.threadId, event.turnId);
+          this.phaseByItem.delete(key);
+          return;
+        }
         if (phase !== "commentary" && event.text.trim().length > 0) {
           this.turnsWithFinalResponse.add(this.turnKey(event.threadId, event.turnId));
         }

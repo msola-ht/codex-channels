@@ -15,6 +15,26 @@ import {
 } from "./conversation-core-test-fixture.js";
 
 describe("ConversationCore lifecycle", () => {
+  it("leaves async questions to their coordinator and keeps the Turn active without recording a final response", async () => {
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const events: OutputEvent[] = [];
+    output.subscribe("test", (event) => { events.push(event); });
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const core = new ConversationCore({
+      allBindings: () => [], foregroundThreadId: () => "thread-1", targetForThread: () => target,
+      modelSettingsForThread: () => undefined, contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    core.handle({ type: "item.userMessage", threadId: "thread-1", turnId: "turn-1", itemId: "user-1", clientId: null, text: "work" });
+    handleNotification(core, { method: "item/completed", params: {
+      threadId: "thread-1", turnId: "turn-1", item: { type: "agentMessage", id: "async-1", text: "Question", phase: "final_answer",
+        delivery: "async", questions: [{ title: "Question", options: null }] },
+    } });
+    expect(core.activeTurn(target)?.turnId).toBe("turn-1");
+    core.handle({ type: "turn.completed", threadId: "thread-1", turnId: "turn-1", status: "completed", error: null });
+    await output.close();
+    expect(events.some((event) => event.type === "text.completed")).toBe(false);
+    expect(events.find((event) => event.type === "turn.completed")).toMatchObject({ missingFinalResponse: true });
+  });
   afterEach(() => {
     vi.useRealTimers();
   });

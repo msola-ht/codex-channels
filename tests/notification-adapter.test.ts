@@ -7,6 +7,29 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it("preserves async questions without treating the tool message as a final answer", () => {
+    const notification = {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1", turnId: "turn-1",
+        item: { type: "agentMessage", id: "question-1", phase: "final_answer", text: "Pick",
+          delivery: "async", questions: [{ title: "Pick", options: ["A", "B"] }, { title: "Details", options: null }] },
+      },
+    };
+    expect(toConversationInputEvent(notification)).toEqual({
+      type: "item.agentMessage.completed", threadId: "thread-1", turnId: "turn-1", itemId: "question-1",
+      phase: "commentary", text: "Pick", delivery: "async",
+      questions: [{ title: "Pick", options: ["A", "B"] }, { title: "Details", options: [] }],
+    });
+    for (const questions of [[], [{ title: " " }], [{ title: "Pick", options: [] }], [{ title: "Pick", options: [1] }]]) {
+      expect(toConversationInputEvent({ ...notification, params: {
+        ...notification.params, item: { ...notification.params.item, questions },
+      } })).toBeUndefined();
+    }
+    expect(toConversationInputEvent({ ...notification, params: {
+      ...notification.params, item: { ...notification.params.item, delivery: "unknown", questions: null },
+    } })).toBeUndefined();
+  });
   it("maps App Server Session name updates for both core output and routing state", () => {
     const notification = {
       method: "thread/name/updated",

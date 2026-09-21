@@ -387,7 +387,12 @@ function toItemEvent(
     return undefined;
   }
   if (item.type === "agentMessage") {
-    const messagePhase = parseMessagePhase(item.phase);
+    if (item.delivery != null && item.delivery !== "async") return undefined;
+    const messagePhase = item.delivery === "async" ? "commentary" : parseMessagePhase(item.phase);
+    const questions = parseAsyncQuestions(item.questions);
+    if (questions === false || (questions !== undefined && item.delivery !== "async")) {
+      return undefined;
+    }
     if (phase === "started") {
       return {
         type: "item.agentMessage.started",
@@ -407,6 +412,8 @@ function toItemEvent(
           itemId,
           text,
           phase: messagePhase,
+          ...(item.delivery === "async" ? { delivery: "async" as const } : {}),
+          ...(questions ? { questions } : {}),
         };
   }
   if (item.type === "userMessage") {
@@ -446,6 +453,23 @@ function toItemEvent(
   return operation
     ? { type: "item.operation.updated", threadId, turnId, operation }
     : undefined;
+}
+
+function parseAsyncQuestions(value: unknown): Array<{ title: string; options: string[] }> | undefined | false {
+  if (value == null) return undefined;
+  if (!Array.isArray(value) || value.length === 0) return false;
+  const questions: Array<{ title: string; options: string[] }> = [];
+  for (const entry of value) {
+    const question = asRecord(entry);
+    const title = nonEmptyString(question?.title);
+    const options: unknown = question?.options;
+    if (!title?.trim() || (options != null && (!Array.isArray(options) || options.length === 0
+      || !options.every((option: unknown) => typeof option === "string" && option.trim().length > 0)))) {
+      return false;
+    }
+    questions.push({ title, options: options == null ? [] : options as string[] });
+  }
+  return questions;
 }
 
 function parseSubagentActivityKind(

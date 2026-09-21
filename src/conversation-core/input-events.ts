@@ -1,5 +1,6 @@
 import type {
   AccountStatus,
+  AsyncUserQuestion,
   McpServerStatus,
   MessagePhase,
   OperationUpdate,
@@ -51,6 +52,8 @@ export type ConversationInputEvent =
       itemId: string;
       text: string;
       phase: MessagePhase | null;
+      delivery?: "async";
+      questions?: AsyncUserQuestion[];
     }
   | {
       type: "item.reasoning.delta";

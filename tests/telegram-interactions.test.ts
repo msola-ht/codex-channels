@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InteractionRequest } from "../src/approval/types.js";
+import { AsyncQuestionCoordinator } from "../src/bootstrap/async-question-coordinator.js";
 import {
   TelegramInteractionPort,
   type TelegramInteractionQueue,
@@ -12,6 +13,98 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it("submits an async answer before a delayed card update crosses the question deadline", async () => {
+    vi.useFakeTimers();
+    let releaseUpdate!: () => void;
+    const update = new Promise<void>((resolve) => { releaseUpdate = resolve; });
+    const editMessageText = vi.fn(async () => { await update; return true as const; });
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage: vi.fn(async () => ({ message_id: 9 })), editMessageText },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const submit = vi.fn(async () => undefined);
+    const warn = vi.fn();
+    const coordinator = new AsyncQuestionCoordinator({
+      interactions, timeoutMs: 100,
+      targetForThread: () => target, currentThread: () => "thread-1",
+      submit, warn,
+    });
+    try {
+      coordinator.handleInput({
+        type: "item.agentMessage.completed", threadId: "thread-1", turnId: "turn-1",
+        itemId: "question-1", delivery: "async", phase: "commentary", text: "Choose",
+        questions: [{ title: "Choose", options: [] }],
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await interactions.handleText(textContext("my answer", 9))).toBe(true);
+      await vi.advanceTimersByTimeAsync(150);
+      expect(editMessageText).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledExactlyOnceWith(
+        target, "thread-1", "异步问题回答：\n\nChoose\n回答：my answer", expect.any(Function),
+      );
+      releaseUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(submit).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      releaseUpdate();
+      await coordinator.close();
+      await interactions.close();
+      vi.useRealTimers();
+    }
+  });
+  it("keeps the async title on the reply target when a long question is split", async () => {
+    let id = 0;
+    const sendMessage = vi.fn(async (_chatId: string, _text: string) => {
+      void _chatId;
+      void _text;
+      return { message_id: ++id };
+    });
+    const bot = { callbackQuery: vi.fn(), api: { sendMessage, editMessageText: vi.fn(async () => true) } } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const request = userInputRequest();
+    if (request.type !== "user-input") throw new Error("Expected user input fixture");
+    request.asynchronous = true;
+    request.title = "异步问题（任务继续执行）";
+    request.questions[0]!.question = "long question ".repeat(500);
+    const decision = interactions.request(target, request);
+    await settle();
+    expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
+    expect(sendMessage.mock.calls.at(-1)?.[1]).toMatch(/^<b>异步问题（任务继续执行）<\/b>/);
+    interactions.resolved(request.requestId);
+    await decision;
+    await interactions.close();
+  });
+  it("rejects replies to its own old async question after restart without capturing another sender's text", async () => {
+    const bot = { callbackQuery: vi.fn(), api: { sendMessage: vi.fn(async () => ({ message_id: 99 })) } } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const context = {
+      me: { id: 7 }, chat: { id: 100 },
+      message: { text: "late", reply_to_message: { message_id: 9, text: "异步问题（任务继续执行）\nChoose", from: { id: 7, is_bot: true } } },
+    };
+    expect(await interactions.handleText(context as unknown as Context)).toBe(true);
+    context.message.reply_to_message.from.id = 8;
+    expect(await interactions.handleText(context as unknown as Context)).toBe(false);
+  });
+  it("routes replies to both async and blocking questions by the original message", async () => {
+    let id = 8;
+    const bot = {
+      callbackQuery: vi.fn(),
+      api: { sendMessage: vi.fn(async () => ({ message_id: ++id })), editMessageText: vi.fn(async () => true) },
+    } as unknown as Bot;
+    const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const first = interactions.request(target, { ...userInputRequest(), requestId: "async", asynchronous: true } as InteractionRequest);
+    await settle();
+    const second = interactions.request(target, { ...userInputRequest(), requestId: "blocking" });
+    await settle();
+    expect(await interactions.handleText(textContext("first", 9))).toBe(true);
+    expect(await interactions.handleText(textContext("second", 10))).toBe(true);
+    await expect(first).resolves.toEqual({ type: "user-input", answers: { answer: ["first"] } });
+    await expect(second).resolves.toEqual({ type: "user-input", answers: { answer: ["second"] } });
+    expect(await interactions.handleText(textContext("duplicate", 9))).toBe(true);
+    expect(bot.api.sendMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("已失效"), {}, expect.any(AbortSignal));
+  });
   it("renders and resolves an MCP tool approval without ForceReply", async () => {
     const sendMessage = vi.fn(async (
       _chatId: string,

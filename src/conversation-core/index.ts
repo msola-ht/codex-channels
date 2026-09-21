@@ -2,6 +2,7 @@ export { ConversationCore } from "./core.js";
 export type { ConversationInputEvent } from "./input-events.js";
 export type {
   AccountStatus,
+  AsyncUserQuestion,
   AuthMode,
   GoalStatus,
   McpServerStartupFailureReason,

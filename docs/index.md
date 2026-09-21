@@ -129,6 +129,16 @@
 
 ## 当前支持矩阵
 
+异步问题消费固定版 `item/completed` 的 `agentMessage.delivery = "async"` 与 `questions`，
+回答复用 `turn/steer` / `turn/start`，不新增 Server Request 或实验 RPC。官方依据为固定版本
+[`request_user_input_async.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)、
+[`spec_plan.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/spec_plan.rs) 和
+[`questions.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/chatwidget/questions.rs)。
+工具由模型目录决定是否开放，Gateway 不注入工具、不重放历史问题、不推断其他客户端已经回答。
+组合根在同一入站通知处理链路调用异步问题协调器的 `handleInput`，统一登记问题和处理失效，
+不通过输出队列延迟登记；Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告，
+由协调器测试覆盖输出积压、生命周期失效和提交期间断线的组合场景。
+
 Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/completed` 和
 `ThreadItem.mcpToolCall.arguments`：[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)
 只对 `cua_repl.js` / `js_reset` 标记操作类别，并提取 `js` 的 `title`；飞书
@@ -173,6 +183,7 @@ CLI 参数，未显式覆盖时失败关闭。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |
+| 异步用户问题 | `item/started`、`item/completed` 的 `agentMessage.delivery` / `questions`；回答复用 `turn/steer`、`turn/start` | [`async-question-coordinator.ts`](../src/bootstrap/async-question-coordinator.ts) 复用三个 Surface 的输入交互，独立于阻塞审批；[`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内验证原 Thread 和有效期；[`async-question-coordinator.test.ts`](../tests/async-question-coordinator.test.ts)、[`conversation-service-input-control.test.ts`](../tests/conversation-service-input-control.test.ts)、[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) |
 | Luna Reserve 自动回退 | `error.codexErrorInfo = usageLimitExceeded`、`account/rateLimits/read` 的 `supportsLunaReserve` / `excludeResetCreditDetails` 与账户、普通用量、后端 Banner 字段，`model/list.includeHidden`、`thread/settings/update` 及实验 `thread/settings/update.collaborationMode` | [`luna-reserve-port.ts`](../src/application/luna-reserve-port.ts) 与 [`luna-reserve-service.ts`](../src/application/luna-reserve-service.ts) 只把最终用量错误与同一 Turn 的完成事件配对，再验证同一 OpenAI 账户、受限模型和精确隐藏 `gpt-reserve`，以不重试的写请求切换当前 Thread；观察到活动 Turn 时延后写入，同一账户的 Reserve Thread 每轮共享一次轻量额度读取，失效期间的新触发在旧操作结束后续跑。只有权威普通额度明确恢复且无未知 Banner、消费控制或限额阻断时切回仍可用的原模型。待生效设置、手工改模、账户切换、Thread 关闭、归档、删除或 Gateway 关闭会取消状态；不可取消的设置写入若在账户失效后完成，只发出确认当前模型的告警，不执行可能覆盖后续选择的补偿写入。原模型仅保存在进程内，Gateway 不保存或重放失败消息，也不建立第二套 Queue；回退完成前由 App Server 自动开始的 Queue 消息仍可能失败并需重发。三个渠道复用稳定 warning 通知，并区分普通用量与 Reserve 自身用量耗尽；[`account-adapter.ts`](../src/codex-client/account-adapter.ts)、[`model-adapter.ts`](../src/codex-client/model-adapter.ts)、[`client.ts`](../src/codex-client/client.ts)、[`gateway-component-graph.ts`](../src/bootstrap/gateway-component-graph.ts)、[`luna-reserve-service.test.ts`](../tests/luna-reserve-service.test.ts)、[`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)、[`json-rpc-models.test.ts`](../tests/json-rpc-models.test.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、真实 Thread 设置合同 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 与条件式真实账户/模型合同 [`real-app-server-websocket.test.ts`](../tests/real-app-server-websocket.test.ts) |
 | 结构化 Turn 策略错误 | `error`、`turn/completed` 中的 `TurnError.codexErrorInfo = misalignmentPolicyViolation` | Client 只识别该精确枚举并传递窄分类；Core 将错误文本与代码作为整体归约并保留 `willRetry=false` 与 `failed` 终态，三个 Surface 的完成卡片使用固定脱敏中文提示，Turn 指标保存独立分类与协议代码；[`notification-adapter.ts`](../src/codex-client/notification-adapter.ts)、[`core.ts`](../src/conversation-core/core.ts)、[`turn-error-metrics.ts`](../src/bootstrap/turn-error-metrics.ts)、[`lifecycle-presentation.ts`](../src/surfaces/lifecycle-presentation.ts)、[`notification-adapter.test.ts`](../tests/notification-adapter.test.ts)、[`conversation-core-lifecycle.test.ts`](../tests/conversation-core-lifecycle.test.ts)、[`turn-error-metrics.test.ts`](../tests/turn-error-metrics.test.ts)、[`lifecycle-presentation.test.ts`](../tests/lifecycle-presentation.test.ts)、条件式真实策略错误合同 [`real-app-server.test.ts`](../tests/real-app-server.test.ts) |
 | MCP Plugin 来源 | `mcpServerStatus/list` 的 `McpServerStatus.pluginId` | Client 只保留可空、长度受限且符合固定上游 `<plugin>@<marketplace>` 字符规则的 ID；仅 `/mcp` 详情显示来源 Plugin，不用于授权、审批、命令/脚本来源推断或 OAuth 参数；[`mcp-adapter.ts`](../src/codex-client/mcp-adapter.ts)、[`mcp-port.ts`](../src/application/mcp-port.ts)、[`conversation-extension-command-format.ts`](../src/surfaces/conversation-extension-command-format.ts)、[`json-rpc.test.ts`](../tests/json-rpc.test.ts)、[`conversation-extension-command-format.test.ts`](../tests/conversation-extension-command-format.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts) |

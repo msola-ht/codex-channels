@@ -726,9 +726,10 @@ describe("Feishu interaction port", () => {
       .not.toContain("secret-value");
   });
 
-  it("prefers bounded custom text over a selected option when other input is allowed", async () => {
+  it.each([false, true])("prefers custom text over selected options (async=%s)", async (asynchronous) => {
     const fixture = createConfiguredFixture();
     const request = userInputRequest();
+    if (asynchronous) request.asynchronous = true;
     request.questions = [{
       ...request.questions[0]!,
       allowOther: true,

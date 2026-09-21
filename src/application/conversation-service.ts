@@ -563,6 +563,22 @@ export class ConversationService implements
     return this.submitInput(target, input);
   }
 
+  submitAsyncAnswer(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<Submission> {
+    return this.locked(target, () => {
+      const assertCurrent = () => {
+        if (!isCurrent() || this.router.current(target)?.threadId !== threadId) {
+          throw new UserFacingError("conversation.missing", "问题已失效或所属会话已切换，回答未发送。");
+        }
+      };
+      assertCurrent();
+      const input = normalizeInput(text);
+      if (input.length === 0) {
+        throw new UserFacingError("message.empty", "回答不能为空");
+      }
+      return this.submitInputLocked(target, input, undefined, assertCurrent);
+    });
+  }
+
   async invokeSkill(
     target: ConversationTarget,
     selector: string,
@@ -723,6 +739,7 @@ export class ConversationService implements
     target: ConversationTarget,
     input: TurnInput[],
     identity?: TurnStartIdentity,
+    assertCurrent?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
@@ -734,6 +751,7 @@ export class ConversationService implements
     const active = this.core.activeTurn(target);
     const clientUserMessageId = `${gatewayUserMessageClientIdPrefix}${randomUUID()}`;
     if (active) {
+      assertCurrent?.();
       this.invalidateSessionDisplayTurnCount(active.threadId);
       try {
         await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
@@ -743,7 +761,7 @@ export class ConversationService implements
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent);
   }
 
   queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
@@ -1661,6 +1679,7 @@ export class ConversationService implements
     input: TurnInput[],
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
+    assertCurrent?: () => void,
   ): Promise<Submission> {
     this.touchActivity(target);
     const threadStartOptions = this.models.threadStartOptions?.(target) ?? {};
@@ -1686,6 +1705,7 @@ export class ConversationService implements
     }
     let result;
     try {
+      assertCurrent?.();
       result = await this.codex.startTurn(
         binding.threadId,
         input,

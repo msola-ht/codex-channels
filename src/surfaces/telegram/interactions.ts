@@ -52,7 +52,7 @@ const directInteractionQueue: TelegramInteractionQueue = {
 
 export class TelegramInteractionPort implements InteractionPort {
   private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
-  private readonly textTokenByChat = new Map<string, string>();
+  private readonly asyncQuestionMessages = new Set<string>();
   private readonly latestTokenByChat = new Map<string, string>();
   private readonly preparations = new Set<Promise<
     Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined
@@ -84,7 +84,7 @@ export class TelegramInteractionPort implements InteractionPort {
     const keyboard = this.keyboard(request, token, 0);
     const chunks = request.type === "approval"
       ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
-      : formatTelegramPanelChunks(formatInteraction(request, 0), 3_600);
+      : formatInputChunks(request, 0);
     this.queue.prepareInteraction(target.conversationId, request);
     const preparation = this.prepareInteraction(
       target,
@@ -151,9 +151,7 @@ export class TelegramInteractionPort implements InteractionPort {
         awaitingOther: false,
       });
       this.latestTokenByChat.set(target.conversationId, token);
-      if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
-        this.textTokenByChat.set(target.conversationId, token);
-      }
+      this.rememberAsyncMessage(target, request, message.message_id);
       if (activation === "missing") {
         clearTimeout(timer);
         resolve(safeInteractionDecision(request));
@@ -161,7 +159,7 @@ export class TelegramInteractionPort implements InteractionPort {
         this.finish(
           token,
           safeInteractionDecision(request),
-          interactionOutcome.resolvedElsewhere,
+          request.type === "user-input" && request.asynchronous ? "问题已失效" : interactionOutcome.resolvedElsewhere,
         );
       }
     });
@@ -253,7 +251,8 @@ export class TelegramInteractionPort implements InteractionPort {
       this.finish(
         resolution.token,
         safeInteractionDecision(resolution.pending.request),
-        interactionOutcome.resolvedElsewhere,
+        resolution.pending.request.type === "user-input" && resolution.pending.request.asynchronous
+          ? "问题已失效" : interactionOutcome.resolvedElsewhere,
       );
     }
   }
@@ -264,9 +263,24 @@ export class TelegramInteractionPort implements InteractionPort {
     if (chatId === undefined || !text || text.startsWith("/")) {
       return false;
     }
-    const token = this.textTokenByChat.get(String(chatId));
-    const pending = token ? this.pending.get(token) : undefined;
+    const entry = [...this.pending.entries()].find(([, value]) =>
+      value.target.conversationId === String(chatId)
+      && value.messageId === context.message?.reply_to_message?.message_id);
+    const [token, pending] = entry ?? [];
     if (!pending) {
+      const reply = context.message?.reply_to_message;
+      const isOwnQuestion = reply?.from?.is_bot === true
+        && reply.from.id === context.me?.id
+        && reply.text?.startsWith("异步问题（任务继续执行）") === true;
+      if (reply && (this.asyncQuestionMessages.has(`${chatId}:${reply.message_id}`) || isOwnQuestion)) {
+        await this.queue.runOrdered(String(chatId), (signal) => this.executor.call(
+          { chatId: String(chatId), operation: "sendMessage", critical: true },
+          (requestSignal) => this.bot.api.sendMessage(
+            chatId, "该问题已处理或已失效，回答未发送。请核对当前会话后重新发送消息。", {}, requestSignal as never,
+          ), signal,
+        ));
+        return true;
+      }
       return false;
     }
     if (context.message?.reply_to_message?.message_id !== pending.messageId) {
@@ -640,6 +654,7 @@ export class TelegramInteractionPort implements InteractionPort {
       awaitingOther,
     );
     pending.messageId = message.message_id;
+    this.rememberAsyncMessage(pending.target, pending.request, message.message_id);
     pending.messageText = messageText;
     pending.questionIndex = questionIndex;
     pending.awaitingOther = awaitingOther;
@@ -655,10 +670,7 @@ export class TelegramInteractionPort implements InteractionPort {
     message: Awaited<ReturnType<Bot["api"]["sendMessage"]>>;
     messageText: string;
   }> {
-    const chunks = formatTelegramPanelChunks(
-      formatInteraction(request, questionIndex, awaitingOther),
-      3_600,
-    );
+    const chunks = formatInputChunks(request, questionIndex, awaitingOther);
     const keyboard = this.keyboard(
       request,
       token,
@@ -701,6 +713,14 @@ export class TelegramInteractionPort implements InteractionPort {
     };
   }
 
+  private rememberAsyncMessage(target: ConversationTarget, request: InteractionRequest, messageId: number): void {
+    if (request.type !== "user-input" || !request.asynchronous) return;
+    this.asyncQuestionMessages.add(`${target.conversationId}:${messageId}`);
+    if (this.asyncQuestionMessages.size > 1_000) {
+      this.asyncQuestionMessages.delete(this.asyncQuestionMessages.values().next().value!);
+    }
+  }
+
   private finish(
     token: string,
     decision: InteractionDecision,
@@ -710,18 +730,6 @@ export class TelegramInteractionPort implements InteractionPort {
     if (!pending) {
       return;
     }
-    if (this.textTokenByChat.get(pending.target.conversationId) === token) {
-      const previousText = this.previousPendingToken(
-        pending.target.conversationId,
-        (candidate) => candidate.request.type === "user-input" ||
-          (candidate.request.type === "elicitation" && candidate.request.mode === "form"),
-      );
-      if (previousText) {
-        this.textTokenByChat.set(pending.target.conversationId, previousText);
-      } else {
-        this.textTokenByChat.delete(pending.target.conversationId);
-      }
-    }
     if (this.latestTokenByChat.get(pending.target.conversationId) === token) {
       const previous = this.previousPendingToken(pending.target.conversationId);
       if (previous) {
@@ -730,6 +738,11 @@ export class TelegramInteractionPort implements InteractionPort {
         this.latestTokenByChat.delete(pending.target.conversationId);
       }
     }
+    const finishDecision = () => {
+      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
+      pending.resolve(decision);
+    };
+    const asynchronous = pending.request.type === "user-input" && pending.request.asynchronous;
     const statusUpdate = this.updateInteractionMessage(
       pending.target,
       pending.requestId,
@@ -737,9 +750,10 @@ export class TelegramInteractionPort implements InteractionPort {
       pending.messageText,
       outcome,
     ).then(() => {
-      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
-      pending.resolve(decision);
+      if (!asynchronous) finishDecision();
     });
+    // Optional answers must reach the coordinator before their deadline, even when card edits are slow.
+    if (asynchronous) finishDecision();
     this.statusUpdates.add(statusUpdate);
     void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
   }
@@ -780,13 +794,23 @@ export class TelegramInteractionPort implements InteractionPort {
 
   private previousPendingToken(
     conversationId: string,
-    predicate: (pending: PendingInteraction) => boolean = () => true,
   ): string | undefined {
     return this.pending.newest(
-      (candidate) =>
-        candidate.target.conversationId === conversationId && predicate(candidate),
+      (candidate) => candidate.target.conversationId === conversationId,
     )?.[0];
   }
+}
+
+function formatInputChunks(
+  request: Exclude<InteractionRequest, { type: "approval" }>,
+  questionIndex: number,
+  awaitingOther = false,
+): string[] {
+  const chunks = formatTelegramPanelChunks(formatInteraction(request, questionIndex, awaitingOther), 3_600);
+  // Keep the reply target identifiable after restart, including split long questions.
+  return request.type === "user-input" && request.asynchronous
+    ? chunks.map((chunk, index) => index === 0 ? chunk : `<b>异步问题（任务继续执行）</b>\n\n${chunk}`)
+    : chunks;
 }
 
 function telegramApprovalChoice(

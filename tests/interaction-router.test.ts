@@ -45,6 +45,21 @@ class ControlledInteraction implements InteractionPort {
 }
 
 describe("InteractionRouter", () => {
+  it("does not queue blocking approvals behind optional async questions", async () => {
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    const question: InteractionRequest = {
+      type: "user-input", asynchronous: true, requestId: "async-1", threadId: "thread-1",
+      turnId: "turn-1", itemId: "item-1", title: "Question", expiresInMs: 1_000,
+      questions: [{ id: "q1", header: "Question", question: "Pick", options: [], allowOther: true, secret: false }],
+    };
+    const optional = router.request(target, question);
+    const approval = router.request(target, approvalInteractionRequest());
+    expect(port.requests.map((request) => request.type)).toEqual(["user-input", "approval"]);
+    port.cancelAll();
+    await Promise.all([optional, approval]);
+  });
   it("reports pending interactions for the exact Thread until they resolve", async () => {
     const interaction = new ControlledInteraction();
     const router = new InteractionRouter();

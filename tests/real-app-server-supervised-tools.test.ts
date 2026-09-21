@@ -20,6 +20,105 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server tools", () => {
+    it("delivers async questions without a Server Request and accepts ordinary steer and next-Turn answers", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "codex-async-contract-"));
+      const codexHome = join(directory, "home");
+      let count = 0;
+      let completeCount = 0;
+      let serverRequestCount = 0;
+      let releaseResponse: (() => void) | undefined;
+      const notifications: ReturnType<typeof toConversationInputEvent>[] = [];
+      const bodies: string[] = [];
+      const apiServer = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end();
+            return;
+          }
+          bodies.push(Buffer.concat(chunks).toString());
+          const number = ++count;
+          const id = `async-response-${number}`;
+          const send = () => {
+            const item = number === 1
+              ? { type: "function_call", call_id: "async-question-call", namespace: "functions", name: "request_user_input_async",
+                  arguments: JSON.stringify({ questions: [{ title: "Choose a scope", options: ["Small", "Full"] }, { title: "Any details?" }] }) }
+              : { type: "message", role: "assistant", id: `answer-${number}`, content: [{ type: "output_text", text: "done" }] };
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            for (const event of [{ type: "response.created", response: { id } }, { type: "response.output_item.done", item }, completedResponseEvent(id)]) {
+              response.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            response.end();
+          };
+          if (number === 2) releaseResponse = send;
+          else send();
+        });
+      });
+      let client: CodexAppServerClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
+        const address = apiServer.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        const catalog = join(codexHome, "models.json");
+        writeFileSync(catalog, JSON.stringify({ models: [{
+          slug: "async-contract", display_name: "Async fixture", description: "Async fixture",
+          context_window: 200_000, default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+          shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+          availability_nux: null, upgrade: null, base_instructions: "You are a coding agent.",
+          support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true,
+          experimental_supported_tools: ["request_user_input_async"],
+        }] }));
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "async-contract"', 'model_provider = "async-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
+          'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"));
+        const rpc = new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { ...process.env, CODEX_HOME: codexHome },
+        }));
+        rpc.setServerRequestHandler(async () => {
+          serverRequestCount++;
+          throw new Error("Unexpected Server Request in async question contract");
+        });
+        client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+        await client.connect();
+        const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "never" });
+        removeNotification = client.onNotification((notification) => {
+          const event = toConversationInputEvent(notification);
+          notifications.push(event);
+          if (event?.type === "turn.completed") completeCount++;
+        });
+        const turn = await client.startTurn(thread.id, [{ type: "text", text: "Ask while working" }], "codex_connect:async-start", directory);
+        await waitFor(() => releaseResponse !== undefined, 15_000);
+        expect(completeCount).toBe(0);
+        expect(notifications).toContainEqual(expect.objectContaining({
+          type: "item.agentMessage.completed", itemId: "async-question-call", delivery: "async",
+          questions: [{ title: "Choose a scope", options: ["Small", "Full"] }, { title: "Any details?", options: [] }],
+        }));
+        await client.steerTurn(thread.id, turn.turnId, [{ type: "text", text: "Active answer: Small" }], "codex_connect:async-steer");
+        releaseResponse!();
+        releaseResponse = undefined;
+        await waitFor(() => completeCount === 1, 15_000);
+        await client.startTurn(thread.id, [{ type: "text", text: "Idle answer: with details" }], "codex_connect:async-next", directory);
+        await waitFor(() => completeCount === 2, 15_000);
+        expect(bodies.join("\n")).toContain("Active answer: Small");
+        expect(bodies.join("\n")).toContain("Idle answer: with details");
+        expect(serverRequestCount).toBe(0);
+      } finally {
+        releaseResponse?.();
+        removeNotification?.();
+        await client?.close();
+        await new Promise<void>((resolve) => apiServer.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }, 45_000);
+
     it("preserves CUA titles through real MCP Item lifecycle notifications", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-cua-contract-"));
       const codexHome = join(testRuntime, "home");

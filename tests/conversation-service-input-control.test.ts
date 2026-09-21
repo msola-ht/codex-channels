@@ -54,6 +54,45 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService conversation service input control", () => {
+  it("answers on the original Thread using steer while active and start after completion", async () => {
+    let active = true;
+    let current = "thread-1";
+    const steerTurn = vi.fn(async () => ({ turnId: "turn-1" }));
+    const startTurn = vi.fn(async () => ({ turnId: "turn-2" }));
+    const ensure = vi.fn(async () => ({ threadId: current }));
+    const service = new ConversationService(
+      turnPort({ steerTurn, startTurn }),
+      { current: () => ({ threadId: current }), ensure, workspace: () => main } as unknown as SessionRouter,
+      { activeTurn: () => active ? { threadId: "thread-1", turnId: "turn-1" } : undefined, markTurnStarted: vi.fn() } as unknown as ConversationCore,
+      { turnOverrides: () => ({}), markApplied: vi.fn() } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+    await expect(service.submitAsyncAnswer(target, "thread-1", "answer", () => true)).resolves.toMatchObject({ steered: true });
+    expect(steerTurn).toHaveBeenCalledWith("thread-1", "turn-1", [{ type: "text", text: "answer" }], expect.any(String));
+    active = false;
+    await expect(service.submitAsyncAnswer(target, "thread-1", "next", () => true)).resolves.toMatchObject({ steered: false });
+    expect(startTurn).toHaveBeenCalledWith("thread-1", [{ type: "text", text: "next" }], expect.any(String), main.cwd, {});
+    current = "thread-2";
+    await expect(service.submitAsyncAnswer(target, "thread-1", "stale", () => true)).rejects.toMatchObject({ code: "conversation.missing" });
+    current = "thread-1";
+    await expect(service.submitAsyncAnswer(target, "thread-1", "expired", () => false)).rejects.toMatchObject({ code: "conversation.missing" });
+    expect(steerTurn).toHaveBeenCalledTimes(1);
+    expect(startTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks expiry after asynchronous Thread preparation, before the start write", async () => {
+    let valid = true;
+    const startTurn = vi.fn(async () => ({ turnId: "unexpected" }));
+    const service = new ConversationService(
+      turnPort({ startTurn }),
+      { current: () => ({ threadId: "thread-1" }), ensure: async () => { valid = false; return { threadId: "thread-1" }; }, workspace: () => main } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { turnOverrides: () => ({}), status: () => ({}) } as unknown as ModelSelectionService,
+      queryPort(),
+    );
+    await expect(service.submitAsyncAnswer(target, "thread-1", "answer", () => valid)).rejects.toMatchObject({ code: "conversation.missing" });
+    expect(startTurn).not.toHaveBeenCalled();
+  });
   it("lists stable Permission Profiles for the authorized Workspace", async () => {
     const listPermissionProfiles = vi.fn(async () => [
       { id: ":read-only", description: null, allowed: true },
