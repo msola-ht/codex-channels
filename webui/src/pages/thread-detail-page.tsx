@@ -1,6 +1,7 @@
 import { Link, useParams } from "react-router"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { TruncatedText } from "@/components/metrics/data-table"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { QuerySummary } from "@/components/metrics/query-summary"
@@ -24,7 +25,7 @@ export function ThreadDetailPage() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold" title={id}>会话 · {shortThreadId(id)}</h1>
+        <h1 className="text-xl font-semibold" title={shortThreadId(id) === id ? undefined : id}>会话 · {shortThreadId(id)}</h1>
         <div className="flex gap-2">
           <Button variant="outline" asChild><Link to={metricsLink("/requests", query, { threadId: id })}>查看请求</Link></Button>
           <Button variant="outline" asChild><Link to={metricsLink("/errors", query, { threadId: id })}>查看错误</Link></Button>
@@ -40,7 +41,7 @@ export function ThreadDetailPage() {
           {run.data?.agentPath ? (
             <div className={cn("flex shrink-0 flex-wrap items-center gap-2 text-sm", (turns.loading || run.loading) && "invisible")} inert={turns.loading || run.loading} aria-hidden={turns.loading || run.loading || undefined}>
               <Badge variant="secondary">子代理</Badge>
-              <span className="max-w-96 truncate" title={run.data.agentPath}>{run.data.agentPath}</span>
+              <TruncatedText text={run.data.agentPath} className="max-w-96" />
               {run.data.parentThreadId !== null ? <Link to={metricsLink(`/threads/${encodeURIComponent(run.data.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}>父会话：{shortThreadId(run.data.parentThreadId)}</Link> : null}
             </div>
           ) : null}

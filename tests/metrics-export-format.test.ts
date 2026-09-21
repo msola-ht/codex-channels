@@ -26,6 +26,7 @@ describe("metrics export display helpers", () => {
       generatedAt: "2026-09-19T00:00:00Z", range: { name: "all" }, weeklyQuota: null,
       records: [{ recordedAtMs: 0, weeklyQuota: null, firstContentMs: 12.5, totalDurationMs: 1234.5, tokensPerSecond: 100.125, upstreamTtftMs: 672,
         requestModel: "requested", responseModel: "echoed", operation: "response",
+        requestServiceTier: "priority", serviceTier: "default",
         traffic: { label: "openai", session: "session-2", interaction: 23 } }],
     };
     const render = (format: string) => execFileSync(process.execPath, ["--input-type=module", "-e",
@@ -36,6 +37,7 @@ describe("metrics export display helpers", () => {
     const headings = headingLine!.split(",");
     const values = valueLine!.split(",");
     for (const [field, value] of Object.entries({ tokensPerSecond: "100.125", firstContentMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
+      requestServiceTier: "priority", serviceTier: "default",
       trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);
     }

@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { TableHint } from "@/components/metrics/data-table"
+import { TableHint, TruncatedText } from "@/components/metrics/data-table"
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -82,18 +82,18 @@ export function TrafficTable({
                 {exchange.hasError ? <Badge className="ml-2" variant="destructive">异常</Badge> : null}
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                <TableHint hint="调用索引记录的总耗时；详细阶段及计时来源见调用明细。">{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</TableHint>
+                {exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}
               </TableCell>
               <TableCell className="text-right whitespace-nowrap tabular-nums">
-                <TableHint hint={turnStatesError ?? (lengths === undefined ? "正在读取字符数，不影响查看调用" : lengths.length === 0 ? "未记录 X-Codex-Turn-State" : lengths.map((entry) => `${entry.characters.toLocaleString("zh-CN")} 字符 · ${entry.source}`).join("；"))}>
+                <TableHint hint={turnStatesError ?? (!lengths?.length ? null : lengths.map((entry) => `${entry.characters.toLocaleString("zh-CN")} 字符 · ${entry.source}`).join("；"))}>
                   <span className="block max-w-40 truncate">{turnStatesError !== null ? "加载失败" : lengths === undefined ? "加载中…" : lengths.length === 0 ? "—" : [...new Set(lengths.map((entry) => entry.characters))].map((count) => count.toLocaleString("zh-CN")).join(" / ")}</span>
                 </TableHint>
               </TableCell>
               <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
                 : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
-              <TableCell><TableHint hint={requestLabel(exchange)}><span className="block max-w-72 truncate font-mono text-xs">{requestLabel(exchange)}</span></TableHint></TableCell>
-              <TableCell><TableHint hint={exchange.threadId ?? "未提供线程"}><span className="block max-w-40 truncate font-mono text-xs">{exchange.threadId ?? "—"}</span></TableHint></TableCell>
-              <TableCell><TableHint hint={exchange.turnId ?? "未提供轮次"}><span className="block max-w-32 truncate font-mono text-xs">{exchange.turnId ?? "—"}</span></TableHint></TableCell>
+              <TableCell><TruncatedText text={requestLabel(exchange)} className="max-w-72 font-mono text-xs" /></TableCell>
+              <TableCell><TruncatedText text={exchange.threadId} className="max-w-40 font-mono text-xs" /></TableCell>
+              <TableCell><TruncatedText text={exchange.turnId} className="max-w-32 font-mono text-xs" /></TableCell>
             </TableRow>
           )})}
           {!loading && exchanges.length === 0 ? (

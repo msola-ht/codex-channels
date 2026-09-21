@@ -304,6 +304,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.traffic?.session ?? null,
       sample.traffic?.interaction ?? null,
       sample.totalDurationMs ?? null,
+      sample.requestServiceTier ?? null,
     );
     return recordedAtMs;
   }

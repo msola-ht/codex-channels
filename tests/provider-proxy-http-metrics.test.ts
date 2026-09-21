@@ -415,7 +415,8 @@ it("forwards requests with a rewritten host and records terminal usage", async (
         response.on("error", rejectBody);
       });
       request.on("error", rejectBody);
-      request.write(JSON.stringify({ model: "deepseek-v4-flash", stream: true }));
+      request.write('{"service_tier":"prio');
+      request.write('rity","model":"deepseek-v4-flash","stream":true}');
       request.end();
     });
 
@@ -431,6 +432,7 @@ it("forwards requests with a rewritten host and records terminal usage", async (
       turnId: "turn-1",
       model: "deepseek-v4-flash",
       serviceTier: "default",
+      requestServiceTier: "priority",
       status: "completed",
       httpStatus: 200,
       inputTokens: 120,

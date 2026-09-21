@@ -12,6 +12,7 @@ export function InputTokenTooltip({
   inputTokens: number | null
   cachedInputTokens: number | null
 }) {
+  if (cachedInputTokens === null) return <span className="tabular-nums">{formatTokens(inputTokens)}</span>
   const uncached =
     inputTokens === null || cachedInputTokens === null
       ? null
@@ -25,7 +26,7 @@ export function InputTokenTooltip({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+        <span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
           {formatTokens(inputTokens)}
         </span>
       </TooltipTrigger>
@@ -54,6 +55,7 @@ export function OutputTokenTooltip({
   outputTokens: number | null
   reasoningOutputTokens: number | null
 }) {
+  if (reasoningOutputTokens === null) return <span className="tabular-nums">{formatTokens(outputTokens)}</span>
   const nonReasoning =
     outputTokens === null || reasoningOutputTokens === null
       ? null
@@ -61,7 +63,7 @@ export function OutputTokenTooltip({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2">
+        <span tabIndex={0} className="tabular-nums cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
           {formatTokens(outputTokens)}
         </span>
       </TooltipTrigger>

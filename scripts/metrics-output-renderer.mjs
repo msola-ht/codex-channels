@@ -584,6 +584,7 @@ function csvColumns() {
     ["provider", (record) => record.provider],
     ["model", (record) => record.model],
     ["serviceTier", (record) => record.serviceTier],
+    ["requestServiceTier", (record) => record.requestServiceTier],
     ["reasoningEffort", (record) => record.reasoningEffort],
     ["status", (record) => record.status],
     ["errorType", (record) => record.errorType],

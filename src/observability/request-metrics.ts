@@ -11,6 +11,8 @@ export interface ModelRequestMetricSample {
   turnId: string | null;
   model: string | null;
   serviceTier: string | null;
+  /** 出站请求层级；历史未采集时为空，不从响应推断。 */
+  requestServiceTier?: string | null;
   reasoningEffort: string | null;
   status: ModelRequestStatus;
   httpStatus: number | null;

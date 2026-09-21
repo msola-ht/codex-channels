@@ -54,6 +54,7 @@ describe("ProviderProxy WebSocket metrics", () => {
         socket.send(JSON.stringify({
           response: {
             id: "r1",
+            service_tier: "default",
             output: [{ type: "message" }],
             usage: {
               input_tokens: 120,
@@ -101,6 +102,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       client.on("open", () => {
         client.send(JSON.stringify({
           type: "response.create",
+          service_tier: "priority",
           reasoning: { effort: "medium" },
           client_metadata: {
             "x-codex-turn-metadata": JSON.stringify({
@@ -124,6 +126,7 @@ describe("ProviderProxy WebSocket metrics", () => {
 
     expect(upstreamMessage).toEqual({
       type: "response.create",
+      service_tier: "priority",
       reasoning: { effort: "medium" },
       client_metadata: {
         "x-codex-turn-metadata": JSON.stringify({
@@ -140,6 +143,8 @@ describe("ProviderProxy WebSocket metrics", () => {
     expect(metrics).toHaveLength(1);
     expect(metrics[0]).toMatchObject({
       operation: "compact",
+      requestServiceTier: "priority",
+      serviceTier: "default",
       upstreamTtftMs: 569,
       threadId: "thread-ws",
       turnId: "turn-ws",

@@ -224,6 +224,7 @@ export interface RequestRecord {
   transport: string
   responseFormat: string
   serviceTier: string | null
+  requestServiceTier: string | null
   reasoningEffort: string | null
   userAgent: string | null
   threadId: string | null
