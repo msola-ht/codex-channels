@@ -65,6 +65,13 @@ function mkdtempSync(prefix: string): string {
   return root;
 }
 
+function authenticatedRemoteCodexHome(root: string): string {
+  const codexHome = join(root, ".codex");
+  mkdirSync(codexHome);
+  writeFileSync(join(codexHome, "auth.json"), "{}\n");
+  return codexHome;
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
@@ -1114,6 +1121,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1287,6 +1295,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
       CODEX_TEST_CAPTURE: capture,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
     execFileSync(process.execPath, [cli, "work", "add", "--cwd", workspace], {
@@ -1329,6 +1338,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     mkdirSync(workspace);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1362,6 +1372,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
@@ -1392,6 +1403,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     const environment = {
       ...process.env,
+      CODEX_HOME: authenticatedRemoteCodexHome(root),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
     };
