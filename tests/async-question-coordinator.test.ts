@@ -143,11 +143,25 @@ describe("AsyncQuestionCoordinator", () => {
     const f = fixture();
     f.coordinator.handleInput({ ...event, questions: Array.from({ length: 4 }, (_, index) => ({ title: `Q${index + 1}`, options: [] })) });
     expect(f.request.mock.calls[0]?.[1]).toMatchObject({ questions: [{ id: "q1" }, { id: "q2" }, { id: "q3" }] });
+    f.coordinator.handleInput({
+      type: "turn.completed", threadId: event.threadId, turnId: event.turnId,
+      status: "completed", error: null,
+    });
+    expect(f.resolved).not.toHaveBeenCalled();
+    expect(f.submit).not.toHaveBeenCalled();
     f.answer({ type: "user-input", answers: { q1: ["a"], q2: ["b"], q3: ["c"] } });
     await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(2));
     expect(f.request.mock.calls[1]?.[1]).toMatchObject({ questions: [{ id: "q4" }] });
     f.answer({ type: "user-input", answers: { q4: ["d"] } });
     await vi.waitFor(() => expect(f.submit).toHaveBeenCalledTimes(2));
+    expect(f.submit).toHaveBeenNthCalledWith(
+      1, target, event.threadId, "异步问题回答：\n\nQ1\n回答：a\n\nQ2\n回答：b\n\nQ3\n回答：c", expect.any(Function),
+    );
+    expect(f.submit).toHaveBeenNthCalledWith(
+      2, target, event.threadId, "异步问题回答：\n\nQ4\n回答：d", expect.any(Function),
+    );
+    expect(f.resolved).not.toHaveBeenCalled();
+    expect(f.warn).not.toHaveBeenCalled();
     await f.coordinator.close();
   });
 
