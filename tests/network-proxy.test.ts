@@ -12,6 +12,13 @@ import {
 import { NetworkProxyWatcher } from "../src/bootstrap/network-proxy-watcher.js";
 
 describe("network proxy discovery", async () => {
+  it("lets an explicitly empty dotenv field clear both inherited variable spellings", () => {
+    expect(resolveProxyEnvironment(
+      { https_proxy: "" },
+      { HTTPS_PROXY: "http://old:7897", https_proxy: "http://old-lower:7897" },
+      { readSystemProxy: () => ({ https_proxy: "http://system:7897" }) },
+    )).toEqual({ HTTPS_PROXY: "", https_proxy: "" });
+  });
   it("keeps a single asynchronous discovery in flight and cancels it on stop", async () => {
     let signal: AbortSignal | undefined;
     let resolveRead!: (proxy: { https?: string }) => void;
@@ -107,15 +114,17 @@ describe("network proxy discovery", async () => {
 
   it("does not warn for an explicitly configured proxy", async () => {
     const warn = vi.fn();
+    const readSystemProxy = vi.fn(async () => ({ https: "http://127.0.0.1:7890" }));
     const watcher = new NetworkProxyWatcher({
       environment: {},
       logger: { warn } as unknown as Logger,
       configured: { https_proxy: "http://configured.example:8080" },
       initialProxy: { https: "http://configured.example:8080" },
-      readSystemProxy: async () => ({ https: "http://127.0.0.1:7890" }),
+      readSystemProxy,
     });
     await watcher.checkNow();
     expect(warn).not.toHaveBeenCalled();
+    expect(readSystemProxy).not.toHaveBeenCalled();
   });
 
   it("refreshes system proxy selection only after the caller invalidates a failed route", async () => {
@@ -232,7 +241,7 @@ describe("network proxy discovery", async () => {
     )).toBeUndefined();
   });
 
-  it("prefers explicit config, then inherited environment, then the system proxy", () => {
+  it("prefers explicit config over environment without filling missing fields from the system", () => {
     const readSystemProxy = vi.fn(() => ({
       http_proxy: "http://system-http:8080",
       https_proxy: "http://system-https:8443",
@@ -254,15 +263,34 @@ describe("network proxy discovery", async () => {
     expect(resolved).toEqual({
       HTTP_PROXY: "http://environment-http:9080",
       HTTPS_PROXY: "http://configured-https:9443",
-      ALL_PROXY: "socks5h://system-socks:1080",
       NO_PROXY: "configured.local",
       http_proxy: "http://environment-http:9080",
       https_proxy: "http://configured-https:9443",
-      all_proxy: "socks5h://system-socks:1080",
       no_proxy: "configured.local",
     });
-    expect(readSystemProxy).toHaveBeenCalledWith("linux");
+    expect(readSystemProxy).not.toHaveBeenCalled();
   });
+
+  it.each(["http_proxy", "https_proxy", "all_proxy"])(
+    "skips system discovery when the shell exports only %s",
+    async (field) => {
+      const readSystemProxy = vi.fn();
+      const warn = vi.fn();
+      const environment = { [field]: "http://127.0.0.1:7897" };
+      expect(resolveProxyEnvironment({}, environment, { readSystemProxy })).toEqual({
+        [field]: "http://127.0.0.1:7897",
+        [field.toUpperCase()]: "http://127.0.0.1:7897",
+      });
+      const watcher = new NetworkProxyWatcher({
+        environment, logger: { warn } as unknown as Logger,
+        configured: {}, initialProxy: {}, readSystemProxy,
+      });
+      await watcher.checkNow();
+      await watcher.stop();
+      expect(readSystemProxy).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not inspect system settings when config and environment resolve every field", () => {
     const readSystemProxy = vi.fn(() => ({ http_proxy: "http://system:8080" }));

@@ -1,3 +1,4 @@
+import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -817,13 +818,13 @@ function readCodexContextManagementSetting(environment) {
   }
 }
 
-function checkOpenAiProxy(document) {
+function checkOpenAiProxy() {
   try {
     if (loadPrimaryModelProvider(process.env) !== "openai") {
       note("OpenAI 代理", "当前主提供商不是 OpenAI，跳过检查");
       return;
     }
-    const network = table(document.network);
+    const network = readCodexProxySettings(process.env);
     const proxyEnvironment = resolveProxyEnvironment(network, process.env);
     const configuredBaseUrl = loadOpenAiBaseUrl(process.env);
     const targets = configuredBaseUrl
@@ -842,10 +843,9 @@ function checkOpenAiProxy(document) {
       || proxyEnvironment.HTTPS_PROXY
       || proxyEnvironment.ALL_PROXY,
     );
-    const remediation = "在 config.toml 的 [network] 中设置 https_proxy，"
-      + "或为服务设置 HTTPS_PROXY；然后运行 codexc service restart all";
+    const remediation = "运行 codexc config 在 Codex .env 中设置 HTTPS_PROXY，然后运行 codexc service restart all";
     const windowsDiscoveryNote = process.platform === "win32"
-      ? "；Windows 系统代理未自动读取，仅使用 TOML 或标准代理环境变量"
+      ? "；Windows 系统代理未自动读取，使用 Codex .env 或标准代理环境变量"
       : "";
 
     if (proxiedTargets.length === targets.length) {

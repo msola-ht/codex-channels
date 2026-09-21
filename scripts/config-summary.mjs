@@ -1,5 +1,7 @@
-export function writeGatewayConfigSummary(output, document, configPath) {
-  const summary = gatewayConfigSummary(document, configPath);
+import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
+
+export function writeGatewayConfigSummary(output, document, configPath, environment = process.env) {
+  const summary = gatewayConfigSummary(document, configPath, environment);
   output.write([
     "Gateway 配置总览",
     `- 配置来源：${summary.configPath}`,
@@ -16,16 +18,16 @@ export function writeGatewayConfigSummary(output, document, configPath) {
     `- 调用记录自动保留：${summary.modelTrafficRetentionDays === 0 ? "关闭" : `${summary.modelTrafficRetentionDays} 天`}`,
     `- Plugin API：${enabledLabel(summary.pluginApi)}（开发中）`,
     `- 日志等级：${summary.logLevel}`,
-    `- 显式网络代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
+    `- Codex .env 代理：${summary.networkFields.join("、") || "未配置（使用环境变量或系统发现）"}`,
     `- WebUI：${summary.webui}`,
     `- 本地指标保留：${summary.metricsRetentionDays} 天 / ${summary.metricsMaxRows} 行`,
-    "- 作用范围：以上均为 Gateway 配置；Codex 用户偏好由当前 Config 菜单管理，Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
+    "- 作用范围：代理统一保存在 Codex .env；其他项目为 Gateway 配置。Codex 用户偏好由当前 Config 菜单管理，Codex 官方与第三方 Provider 配置由 codexc setup 管理。",
     "",
   ].join("\n"));
   return summary;
 }
 
-export function gatewayConfigSummary(document, configPath) {
+export function gatewayConfigSummary(document, configPath, environment = process.env) {
   const codex = table(document.codex);
   const display = table(document.display);
   const conversation = table(document.conversation);
@@ -33,7 +35,7 @@ export function gatewayConfigSummary(document, configPath) {
   const experimental = table(document.experimental);
   const scheduledTasks = table(document.scheduled_tasks);
   const logging = table(document.logging);
-  const network = table(document.network);
+  const network = readCodexProxySettings(environment);
   const metrics = table(document.metrics);
   const metricsStorage = table(metrics.storage);
   const webui = table(document.webui);

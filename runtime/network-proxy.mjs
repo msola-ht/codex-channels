@@ -19,17 +19,21 @@ export function resolveProxyEnvironment(
     field,
     stringValue(environment[upper]) || stringValue(environment[field]),
   ]));
-  const needsSystemProxy = PROXY_FIELDS.some(
-    ([field]) => !stringValue(configured[field]) && !inherited[field],
+  const explicit = Object.fromEntries(PROXY_FIELDS.map(([field]) => [
+    field,
+    Object.hasOwn(configured, field) ? stringValue(configured[field]) : inherited[field],
+  ]));
+  const needsSystemProxy = !PROXY_FIELDS.some(
+    ([field]) => field !== "no_proxy" && explicit[field],
   );
   const system = needsSystemProxy ? readSystemProxy(platform) : {};
   const resolved = Object.fromEntries(PROXY_FIELDS.map(([field]) => [
     field,
-    stringValue(configured[field]) || inherited[field] || stringValue(system[field]),
+    Object.hasOwn(configured, field) ? explicit[field] : explicit[field] || stringValue(system[field]),
   ]));
 
   return Object.fromEntries(PROXY_FIELDS.flatMap(([field, upper]) => (
-    resolved[field]
+    resolved[field] || Object.hasOwn(configured, field)
       ? [
           [upper, resolved[field]],
           [field, resolved[field]],

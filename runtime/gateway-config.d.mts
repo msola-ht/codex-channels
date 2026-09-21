@@ -25,12 +25,6 @@ export interface GatewayConfigDocument {
     account_id: string;
     allowed_user_ids: string[];
   };
-  network?: {
-    http_proxy?: string;
-    https_proxy?: string;
-    all_proxy?: string;
-    no_proxy?: string;
-  };
   codex: {
     binary: string;
     socket_path: string;

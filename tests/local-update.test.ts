@@ -19,6 +19,7 @@ import {
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
+import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
   deepseekProviderDefinition,
@@ -52,6 +53,120 @@ afterEach(() => {
 });
 
 describe("local update", () => {
+  it("validates the merged proxy combination during preview and migration", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { http_proxy: "http://localhost:7897" };
+    writeGatewayConfig(configPath, document);
+    mkdirSync(environment.CODEX_HOME!, { recursive: true });
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    const original = 'ALL_PROXY="socks5://localhost:7897"\n';
+    writeFileSync(dotenvPath, original, { mode: 0o600 });
+    expect(() => readCodexProxySettings(environment)).toThrow("必须同时配置 HTTP_PROXY");
+    expect(inspectGatewayConfiguration(environment).removedPaths).toContain("network");
+    expect(readFileSync(dotenvPath, "utf8")).toBe(original);
+    updateGatewayConfiguration(environment);
+    expect(readCodexProxySettings(environment)).toEqual({
+      all_proxy: "socks5://localhost:7897", http_proxy: "http://localhost:7897",
+    });
+    expect(readGatewayConfig(configPath)).not.toHaveProperty("network");
+  });
+
+  it("rejects proxy changes after the migration snapshot without overwriting them", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { http_proxy: "http://localhost:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    writeCodexProxySettings({ no_proxy: "original.example" }, environment);
+    let clockReads = 0;
+    expect(() => updateGatewayConfiguration(environment, {
+      now: () => {
+        if (++clockReads === 2) {
+          writeCodexProxySettings({ no_proxy: "new.example" }, environment);
+        }
+        return new Date("2026-09-21T01:00:00Z");
+      },
+    })).toThrow("Codex .env 在写入期间已发生变化");
+    expect(readCodexProxySettings(environment)).toEqual({ no_proxy: "new.example" });
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it.each([false, true])("preserves a concurrent proxy change and backups on rollback with existing dotenv=%s", (existing) => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { http_proxy: "http://localhost:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    if (existing) writeCodexProxySettings({ no_proxy: "original.example" }, environment);
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    const concurrent = 'NO_PROXY="new.example"\n';
+    expect(() => updateGatewayConfiguration(environment, {
+      loadConfig: () => {
+        writeFileSync(dotenvPath, concurrent);
+        throw new Error("validation failed");
+      },
+    })).toThrow("Codex .env 无法安全回滚");
+    expect(readFileSync(dotenvPath, "utf8")).toBe(concurrent);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readdirSync(dirname(configPath)).some((name) => name.startsWith("config.toml.pre-update."))).toBe(true);
+    expect(readdirSync(environment.CODEX_HOME!).some((name) => name.startsWith(".env.pre-update."))).toBe(existing);
+    expect(existsSync(`${dotenvPath}.lock`)).toBe(false);
+  });
+
+  it("migrates legacy network settings to Codex dotenv and removes the TOML section", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { http_proxy: "http://127.0.0.1:7897", https_proxy: "http://127.0.0.1:7897", no_proxy: "localhost" };
+    writeGatewayConfig(configPath, document);
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    mkdirSync(environment.CODEX_HOME!, { recursive: true });
+    writeFileSync(dotenvPath, '# preserved\nOTHER="value"\n', { mode: 0o600 });
+    expect(inspectGatewayConfiguration(environment).removedPaths).toContain("network");
+    expect(readFileSync(dotenvPath, "utf8")).toBe('# preserved\nOTHER="value"\n');
+    const result = updateGatewayConfiguration(environment);
+    expect(result.removedPaths).toContain("network");
+    expect(readGatewayConfig(configPath)).not.toHaveProperty("network");
+    expect(readFileSync(dotenvPath, "utf8")).toBe('# preserved\nOTHER="value"\nHTTP_PROXY="http://127.0.0.1:7897"\nHTTPS_PROXY="http://127.0.0.1:7897"\nNO_PROXY="localhost"\n');
+    expect(result.backupPath).not.toBeNull();
+    expect(updateGatewayConfiguration(environment).changed).toBe(false);
+  });
+
+  it("rejects conflicting legacy proxies without changing either file", () => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { https_proxy: "http://old:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    mkdirSync(environment.CODEX_HOME!, { recursive: true });
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    const dotenv = 'HTTPS_PROXY="http://current:7897"\n';
+    writeFileSync(dotenvPath, dotenv, { mode: 0o600 });
+    expect(() => inspectGatewayConfiguration(environment)).toThrow("冲突");
+    expect(() => updateGatewayConfiguration(environment)).toThrow("冲突");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readFileSync(dotenvPath, "utf8")).toBe(dotenv);
+  });
+
+  it.each([false, true])("restores both proxy files on failed migration with existing dotenv=%s", (existing) => {
+    const { environment, configPath } = fixture();
+    const document = readGatewayConfig(configPath);
+    document.network = { https_proxy: "http://localhost:7897" };
+    writeGatewayConfig(configPath, document);
+    const before = readFileSync(configPath, "utf8");
+    const dotenvPath = join(environment.CODEX_HOME!, ".env");
+    if (existing) {
+      mkdirSync(environment.CODEX_HOME!, { recursive: true });
+      writeFileSync(dotenvPath, "OTHER=value\n", { mode: 0o600 });
+    }
+    expect(() => updateGatewayConfiguration(environment, {
+      loadConfig: () => { throw new Error("validation failed"); },
+    })).toThrow("validation failed");
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    if (existing) expect(readFileSync(dotenvPath, "utf8")).toBe("OTHER=value\n");
+    else expect(existsSync(dotenvPath)).toBe(false);
+  });
+
   it.each([undefined, "auto", "concise", "detailed", "none"])(
     "sets reasoning summary %s to none once and preserves subsequent choices",
     async (summary) => {
@@ -1127,6 +1242,7 @@ function fixture() {
   const environment = {
     ...process.env,
     CODEX_CONNECT_HOME: home,
+    CODEX_HOME: join(home, ".codex"),
     CODEX_CONNECT_CONFIG_FILE: "",
   };
   const { configPath, dataDir } = initializeUserData({ environment, cwd: home });

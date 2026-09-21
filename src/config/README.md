@@ -9,6 +9,7 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 ## 文件
 
 - `index.ts`：读取统一 TOML 配置，调用 `runtime/gateway-config.mjs` 的共享 Zod Schema 完成结构校验，再校验 Workspace 和 URL 等运行语义、合并自动发现的有效代理，并相对配置目录规范化路径；全部校验成功后，原子补入当前 Schema 缺失的安全默认字段。
+  `loadConfigDocument` 的 `proxySettings` 参数供更新预检传入已经校验的合并代理设置，避免预检重新读取尚未迁移的文件；正常启动仍读取 Codex `.env`。
 - `config-change.ts`：定义结构化配置变更、作用域与优先级。
 - `reload-classifier.ts`：比较两份已验证配置，完整列出变化，并按热加载、Gateway 重启或服务重装
   的最高要求分类。
@@ -28,8 +29,8 @@ Telegram、飞书和微信至少需要启用一个。Telegram 表可缺失；`bo
 将其视为未启用，不创建 Telegram Surface，也不要求允许用户列表。Token 非空时
 `allowed_user_ids` 必须至少包含一个正整数。飞书和微信继续以各自的 `enabled` 字段决定是否启用。
 
-`network` 表由 Telegram、飞书和微信共用，按显式 TOML、标准代理环境变量、受支持系统代理的
-顺序合并；系统自动发现当前只支持 macOS 和 GNOME，Windows 不读取 WinINET/WinHTTP，需使用 TOML
+共享代理由 Codex Home 的 `.env` 统一保存，供 Telegram、飞书、微信和模型统计代理共用，按 `.env`、标准代理环境变量、受支持系统代理的
+顺序合并；系统自动发现当前只支持 macOS 和 GNOME，Windows 不读取 WinINET/WinHTTP，需使用 `.env`
 或标准代理环境变量。Bootstrap 再按每个请求的目标协议和 `NO_PROXY` 选择直连或 HTTP(S) 代理。Telegram
 私有 `proxy_url` 只覆盖 Telegram，并优先于共享代理和 `NO_PROXY`。项目不修改系统代理，也不
 安装、配置或重启 sing-box；仅 SOCKS `ALL_PROXY` 仍不受 HTTP(S) 客户端支持。

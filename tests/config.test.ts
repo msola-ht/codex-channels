@@ -979,17 +979,16 @@ cwd = "/tmp/workspace"
         proxy_url: "http://127.0.0.1:7897",
         message_format: "html",
       },
-      network: { https_proxy: "http://127.0.0.1:7890" },
     });
-    const fallback = createFixture({
-      network: { https_proxy: "http://127.0.0.1:7890" },
-    });
+    const fallback = createFixture();
+    writeFileSync(join(fallback.root, ".env"), 'HTTPS_PROXY="http://127.0.0.1:7890"\n');
 
     expect(loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: explicit.configPath,
     }).config.telegramProxyUrl).toBe("http://127.0.0.1:7897/");
     const fallbackConfig = loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fallback.configPath,
+      CODEX_HOME: fallback.root,
     }).config;
     expect(fallbackConfig.telegramProxyUrl).toBeUndefined();
     expect(fallbackConfig.networkProxy.https).toBe("http://127.0.0.1:7890");
@@ -999,6 +998,7 @@ cwd = "/tmp/workspace"
     const fixture = createFixture();
     const config = loadRuntimeConfig({
       CODEX_CONNECT_CONFIG_FILE: fixture.configPath,
+      CODEX_HOME: fixture.root,
       HTTPS_PROXY: "http://127.0.0.1:8899",
       NO_PROXY: "localhost",
     }).config;
@@ -1082,7 +1082,6 @@ function createFixture(overrides: Record<string, unknown> = {}) {
       allowed_user_ids: [123],
       message_format: "html",
     },
-    network: {},
     codex: {
       binary: "codex",
       socket_path: "runtime/app-server.sock",

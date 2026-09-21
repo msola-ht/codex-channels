@@ -1,3 +1,4 @@
+import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import {
   chmodSync,
   mkdirSync,
@@ -39,12 +40,34 @@ function startServer(
 }
 
 describe("webui server settings and task management", () => {
+  it("keeps shared proxy previews read-only and writes dotenv only after confirmation", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const url = `${origin}/api/v1/management/settings`;
+    const current = await (await fetch(url)).json() as { revision: string };
+    const headers = { origin: managementOrigin, "content-type": "application/json" };
+    const body = { revision: current.revision, setting: { kind: "network.proxy", field: "https_proxy", action: "set", value: "http://localhost:7897" } };
+    const before = readCodexProxySettings(fixture.environment);
+    const denied = await fetch(url, { method: "PATCH", headers, body: JSON.stringify(body) });
+    expect(denied.status).not.toBe(200);
+    expect(readCodexProxySettings(fixture.environment)).toEqual(before);
+    const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(body) });
+    expect(preview.status).toBe(200);
+    const confirmation = await preview.json() as { confirmationToken: string };
+    expect(readCodexProxySettings(fixture.environment)).toEqual(before);
+    const saved = await fetch(url, { method: "PATCH", headers, body: JSON.stringify({ ...body, confirmationToken: confirmation.confirmationToken }) });
+    expect(saved.status).toBe(200);
+    expect(readCodexProxySettings(fixture.environment)).toEqual({ https_proxy: "http://localhost:7897" });
+    expect(readGatewayConfig(join(fixture.home, "config.toml"))).not.toHaveProperty("network");
+  });
+
   it("returns a redacted settings summary", async () => {
     const fixture = createFixture();
     const configPath = join(fixture.home, "config.toml");
     const document = readGatewayConfig(configPath);
     document.webui = { token: "webui-secret" };
-    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    writeCodexProxySettings({ https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" }, fixture.environment);
     writeGatewayConfig(configPath, document);
     const { origin } = await startServer(fixture.environment);
 
@@ -351,7 +374,7 @@ describe("webui server settings and task management", () => {
     const configPath = join(fixture.home, "config.toml");
     const document = readGatewayConfig(configPath);
     document.webui = { host: "127.0.0.1", port: 8787, token: "webui-secret" };
-    document.network = { https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" };
+    writeCodexProxySettings({ https_proxy: "http://proxy-user:proxy-secret@proxy.invalid" }, fixture.environment);
     writeGatewayConfig(configPath, document);
     const { origin } = await startServer(fixture.environment, undefined, { token: "webui-secret" });
 

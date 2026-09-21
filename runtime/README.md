@@ -14,14 +14,18 @@
   拒绝并发覆盖，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
-- `network-proxy.mjs`：按 TOML、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
+- `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
-  `NO_PROXY`。系统自动发现只覆盖 macOS 和 GNOME；Windows 明确不读取 WinINET/WinHTTP，使用 TOML
+  `NO_PROXY`。Codex `.env` 或环境变量提供任一 HTTP、HTTPS 或 ALL 代理地址时跳过系统读取，不补齐其他字段；
+  仅有 `NO_PROXY` 时仍允许系统发现。该判断由启动、请求路径和后台观察共用。
+  系统自动发现只覆盖 macOS 和 GNOME；Windows 明确不读取 WinINET/WinHTTP，使用 Codex `.env`
   或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。App Server 服务持有的刷新选择器
   会在启动时先校验当前目标的代理 URL，再缓存一次选择；Provider 上游连接失败后使缓存失效，让
   下一次请求异步重新读取系统代理，并发请求共享在途查询；服务停止时取消查询，关闭后不再选择路由。
   请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
   观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
+- `codex-proxy-env.mjs` / `codex-proxy-env.d.mts`：共享代理文件的读取、字面值校验和原子更新，
+  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI、WebUI 和更新迁移的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖。迁移快照先校验字段，合并旧配置后再校验代理组合；正常读取仍校验完整组合。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
@@ -87,7 +91,7 @@
   特性，也不改写上游私有请求头。Provider Proxy 在每次出站请求时使用当前缓存的代理路由；
   上游连接失败会使系统代理发现结果失效，下一次请求可采用代理软件启动后才写入的系统代理，无需重启
   模型代理。App Server 自身发出的账户额度请求不经过 Provider Proxy；Gateway 的系统代理观察器仅
-  提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。TOML 和标准代理环境
+  提示操作者在所有客户端任务结束后重新启动 Gateway 与 App Server，不自动刷新子进程环境。Codex `.env` 和标准代理环境
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。

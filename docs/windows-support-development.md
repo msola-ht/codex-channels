@@ -40,7 +40,7 @@ App Server 合同与发布候选的渠道/Provider 验收仍未闭环。公开�
 - 不为每个 Surface 启动独立 stdio App Server；Windows 与 Unix 必须保留共享 Thread、Provider
   隔离和 `codexc remote` 的同一架构。
 - 不为兼容 Windows 放宽 Unix Socket、凭据、审批、Workspace、进程或服务安全检查。
-- Windows 系统代理不从 WinINET/WinHTTP 自动发现；只使用 TOML 明确配置或受支持的标准代理
+- Windows 系统代理不从 WinINET/WinHTTP 自动发现；只使用 Codex `.env` 明确配置或受支持的标准代理
   环境变量。
 - 安装、更新和卸载只处理受管程序与服务；配置、数据库、凭据、日志和输出默认保留。
 

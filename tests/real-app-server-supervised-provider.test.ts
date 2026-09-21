@@ -164,7 +164,6 @@ contractSuite("real supervised App Server provider", () => {
           allowed_user_ids: [123],
           message_format: "html",
         },
-        network: {},
         codex: {
           binary: process.env.CODEX_BINARY ?? "codex",
           socket_path: socketPath,
@@ -365,7 +364,6 @@ contractSuite("real supervised App Server provider", () => {
           allowed_user_ids: [123],
           message_format: "html",
         },
-        network: {},
         codex: {
           binary: process.env.CODEX_BINARY ?? "codex",
           socket_path: socketPath,
@@ -572,7 +570,6 @@ contractSuite("real supervised App Server provider", () => {
           allowed_user_ids: [123],
           message_format: "html",
         },
-        network: {},
         codex: {
           binary: process.env.CODEX_BINARY ?? "codex",
           socket_path: socketPath,

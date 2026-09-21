@@ -1472,6 +1472,9 @@ export abstract class GatewayComponentGraph {
   private async probeOpenAiConnectivity(
     signal?: AbortSignal,
   ): Promise<OpenAiConnectivityStatus> {
+    if (!hasCodexAuthFile(process.env)) {
+      return "not-applicable";
+    }
     const openAiBaseUrl = loadOpenAiBaseUrl();
     const deadlineMs = 12_000;
     const deadlineAt = Date.now() + deadlineMs;

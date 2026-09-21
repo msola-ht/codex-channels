@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   createAccountRefresh: vi.fn(),
   createProviderSettingsWatcher: vi.fn(),
   createNetworkProxyWatcher: vi.fn(),
-  readGatewayConfig: vi.fn(),
+  readCodexProxySettings: vi.fn(),
   restartAppServerService: vi.fn(),
   logger: {
     info: vi.fn(),
@@ -78,8 +78,8 @@ vi.mock("../runtime/gateway-owner.mjs", () => ({
     }
   },
 }));
-vi.mock("../runtime/gateway-config.mjs", () => ({
-  readGatewayConfig: mocks.readGatewayConfig,
+vi.mock("../runtime/codex-proxy-env.mjs", () => ({
+  readCodexProxySettings: mocks.readCodexProxySettings,
 }));
 vi.mock("../src/config/index.js", () => ({
   loadRuntimeConfig: mocks.loadRuntimeConfig,
@@ -142,7 +142,7 @@ beforeEach(() => {
   mocks.createAccountRefresh.mockReturnValue(mocks.accountRefresh);
   mocks.createProviderSettingsWatcher.mockReturnValue(mocks.providerSettingsWatcher);
   mocks.createNetworkProxyWatcher.mockReturnValue(mocks.networkProxyWatcher);
-  mocks.readGatewayConfig.mockReturnValue({ network: {} });
+  mocks.readCodexProxySettings.mockReturnValue({});
   mocks.owner.start.mockResolvedValue(undefined);
   mocks.owner.close.mockResolvedValue(undefined);
   mocks.application.start.mockResolvedValue(undefined);

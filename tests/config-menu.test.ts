@@ -1,7 +1,11 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +18,9 @@ import {
 } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { runConfig } from "../scripts/config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { runNetworkSettings } from "../scripts/config-advanced-menu.mjs";
+import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { configActivationResult } from "../scripts/config-activation-result.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
@@ -123,7 +130,7 @@ describe("Codex Connect config menu", () => {
       allowed_user_ids: [123],
       message_format: "html",
     };
-    document.network = { https_proxy: "http://proxy-user:proxy-secret@127.0.0.1:7890" };
+    writeCodexProxySettings({ https_proxy: "http://proxy-user:proxy-secret@127.0.0.1:7890" }, fixture.environment);
     document.scheduled_tasks = { enabled: true };
     document.display = { operation_updates: "compact", plan_updates: true };
     writeGatewayConfig(fixture.configPath, document);
@@ -149,7 +156,7 @@ describe("Codex Connect config menu", () => {
     expect(rendered).toContain("计划任务：开启");
     expect(rendered).toContain("思考状态：关闭");
     expect(rendered).toContain("调用详情记录：关闭");
-    expect(rendered).toContain("显式网络代理：https_proxy");
+    expect(rendered).toContain("Codex .env 代理：https_proxy");
     expect(rendered).toContain("Codex 官方与第三方 Provider 配置由 codexc setup 管理");
     expect(rendered).not.toContain("telegram-secret");
     expect(rendered).not.toContain("proxy-secret");
@@ -257,7 +264,7 @@ describe("Codex Connect config menu", () => {
     });
   });
 
-  it("updates a proxy without echoing credentials and requires service reinstall", async () => {
+  it("updates the shared dotenv proxy without echoing credentials and requires restart", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const proxy = "http://proxy-user:proxy-secret@127.0.0.1:7890";
@@ -269,16 +276,16 @@ describe("Codex Connect config menu", () => {
         select: vi.fn()
           .mockResolvedValueOnce("network")
           .mockResolvedValueOnce("https_proxy")
-          .mockResolvedValueOnce("set"),
+          .mockResolvedValueOnce("set").mockResolvedValue("custom"),
         text: vi.fn(async () => proxy),
         isCancel: () => false,
         cancel: vi.fn(),
       },
     });
 
-    expect(result).toEqual({ field: "https_proxy", configured: true, configPath: fixture.configPath, activation: "reinstall-services", activationResult: configActivationResult("reinstall-services") });
-    expect(readGatewayConfig(fixture.configPath).network).toMatchObject({ https_proxy: proxy });
-    expect(output.join("")).toContain("codexc service install");
+    expect(result).toEqual({ field: "https_proxy", configured: true, configPath: join(fixture.environment.CODEX_HOME!, ".env"), activation: "restart-all", activationResult: configActivationResult("restart-all") });
+    expect(readCodexProxySettings(fixture.environment)).toMatchObject({ https_proxy: proxy });
+    expect(output.join("")).toContain("codexc service restart all");
     expect(output.join("")).not.toContain("proxy-secret");
   });
 
@@ -294,7 +301,7 @@ describe("Codex Connect config menu", () => {
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
         intro: vi.fn(),
-        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch"),
+        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch").mockResolvedValue("custom"),
         text,
         isCancel: () => false,
         cancel: vi.fn(),
@@ -303,18 +310,98 @@ describe("Codex Connect config menu", () => {
 
     expect(result).toEqual({
       fields: ["http_proxy", "https_proxy", "all_proxy"],
-      configPath: fixture.configPath,
-      activation: "reinstall-services",
-      activationResult: configActivationResult("reinstall-services"),
+      configPath: join(fixture.environment.CODEX_HOME!, ".env"),
+      activation: "restart-all",
+      activationResult: configActivationResult("restart-all"),
     });
-    expect(readGatewayConfig(fixture.configPath).network).toEqual({
+    expect(readCodexProxySettings(fixture.environment)).toEqual({
       http_proxy: "http://127.0.0.1:7890",
       https_proxy: "http://127.0.0.1:7891",
       all_proxy: "http://127.0.0.1:7892",
-      no_proxy: "localhost,127.0.0.1",
     });
     expect(output.join("")).toContain("一次性更新");
     expect(text).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["http_proxy", 7890], ["http_proxy", 7897],
+    ["https_proxy", 7890], ["https_proxy", 7897],
+    ["all_proxy", 7890], ["all_proxy", 7897],
+  ] as const)("selects %s port %s without requesting text", async (field, port) => {
+    const fixture = createFixture();
+    const text = vi.fn();
+    await runNetworkSettings({
+      environment: fixture.environment, output: { write: vi.fn() },
+      prompts: {
+        select: vi.fn().mockResolvedValueOnce(field).mockResolvedValueOnce("set")
+          .mockResolvedValueOnce(`http://127.0.0.1:${port}`),
+        text, isCancel: () => false,
+      },
+    });
+    expect(readCodexProxySettings(fixture.environment)[field]).toBe(`http://127.0.0.1:${port}`);
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it("writes Codex proxy settings to its own home without changing Gateway config", async () => {
+    const fixture = createFixture();
+    const codexHome = join(fixture.dataDir, "codex");
+    const configPath = join(codexHome, ".env");
+    const gatewayBefore = readFileSync(fixture.configPath, "utf8");
+    const output: string[] = [];
+    const result = await runConfig({
+      environment: { ...fixture.environment, CODEX_HOME: codexHome },
+      output: { write: (value: string) => output.push(value), isTTY: true },
+      prompts: {
+        intro: vi.fn(),
+        select: vi.fn().mockResolvedValueOnce("network").mockResolvedValueOnce("batch").mockResolvedValue("custom"),
+        text: vi.fn().mockResolvedValueOnce("http://127.0.0.1:7897")
+          .mockResolvedValueOnce("http://user:proxy-secret@127.0.0.1:7897")
+          .mockResolvedValueOnce("socks5://127.0.0.1:7897"),
+        isCancel: () => false,
+      },
+    });
+    expect(result).toEqual({ configPath, fields: ["http_proxy", "https_proxy", "all_proxy"], activation: "restart-all", activationResult: configActivationResult("restart-all") });
+    expect(readFileSync(configPath, "utf8")).toBe(
+      'HTTP_PROXY="http://127.0.0.1:7897"\nHTTPS_PROXY="http://user:proxy-secret@127.0.0.1:7897"\nALL_PROXY="socks5://127.0.0.1:7897"\n',
+    );
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(gatewayBefore);
+    if (process.platform !== "win32") expect(statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(output.join("")).toContain("codexc service restart all");
+    expect(output.join("")).not.toContain("proxy-secret");
+  });
+
+  it("preserves unrelated dotenv content and blank fields when replacing duplicate proxies", async () => {
+    const fixture = createFixture();
+    const configPath = join(fixture.dataDir, ".env");
+    const preserved = '# keep\r\nOTHER="line one\r\nHTTP_PROXY=inside-value\r\nline three"\r\nHTTPS_PROXY="http://keep:80"\r\n';
+    writeFileSync(configPath, `${preserved}export HTTP_PROXY='http://old:80'\r\nHTTP_PROXY=http://duplicate:80\r\n`, { mode: 0o600 });
+    await runNetworkSettings({
+      environment: { ...fixture.environment, CODEX_HOME: fixture.dataDir }, output: { write: vi.fn() },
+      prompts: {
+        select: vi.fn().mockResolvedValueOnce("batch").mockResolvedValue("custom"),
+        text: vi.fn().mockResolvedValueOnce("http://user:pa$word@localhost:7897")
+          .mockResolvedValueOnce("").mockResolvedValueOnce("socks5h://localhost:7897"),
+        isCancel: () => false,
+      },
+    });
+    const written = readFileSync(configPath, "utf8");
+    expect(written).toBe(`${preserved}HTTP_PROXY="http://user:pa\\$word@localhost:7897"\r\nHTTP_PROXY="http://user:pa\\$word@localhost:7897"\r\nALL_PROXY="socks5h://localhost:7897"\r\n`);
+  });
+
+  it.each(["cancel", "blank", "invalid"])("does not write Codex dotenv on %s input", async (action) => {
+    const fixture = createFixture();
+    const configPath = join(fixture.dataDir, ".env");
+    const cancelled = Symbol("cancelled");
+    const text = action === "cancel"
+      ? vi.fn().mockResolvedValueOnce("http://localhost:7897").mockResolvedValueOnce(cancelled)
+      : vi.fn().mockResolvedValue(action === "blank" ? "" : "socks5://localhost:7897");
+    const pending = runNetworkSettings({
+      environment: { ...fixture.environment, CODEX_HOME: fixture.dataDir }, output: { write: vi.fn() },
+      prompts: { select: vi.fn().mockResolvedValueOnce("batch").mockResolvedValue("custom"), text, isCancel: (value: unknown) => value === cancelled },
+    });
+    if (action === "invalid") await expect(pending).rejects.toThrow("HTTP_PROXY 不支持");
+    else await expect(pending).resolves.toEqual({ action: "back" });
+    expect(existsSync(configPath)).toBe(false);
   });
 
   it("labels the network action back button with its actual Config destination", async () => {
@@ -1027,6 +1114,7 @@ function createFixture(): {
   mkdirSync(workspace);
   const environment = {
     ...process.env,
+    CODEX_HOME: join(root, ".codex"),
     CODEX_CONNECT_HOME: home,
     CODEX_CONNECT_CONFIG_FILE: "",
   };

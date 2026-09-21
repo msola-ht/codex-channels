@@ -10,7 +10,7 @@ import {
   validateGatewayProcessConfigDocument,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
-import { resolveHttpProxyUrl } from "../runtime/network-proxy.mjs";
+import { readCodexProxySnapshot, renderCodexProxySettings, validateCodexProxyValue, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { invalidSetting } from "./config-management-error.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -52,7 +52,7 @@ export function normalizeGatewayActivation(activation) {
 
 export function loadGatewaySettings(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
-  const snapshot = readConfigSnapshot(configPath);
+  const snapshot = readConfigSnapshot(configPath, readFileSync, environment);
   const document = snapshot.document;
   const display = table(document.display);
   const codex = table(document.codex);
@@ -64,7 +64,7 @@ export function loadGatewaySettings(environment = process.env) {
   const logging = table(document.logging);
   const debug = table(document.debug);
   const experimental = table(document.experimental);
-  const network = table(document.network);
+  const network = snapshot.proxy.settings;
   const telegram = table(document.telegram);
   const workspaces = workspaceOptions(document);
   return {
@@ -140,16 +140,47 @@ export function updateGatewaySetting(
     expectedRevision,
     readConfig = readFileSync,
     writeConfig = writeGatewayConfig,
+    writeProxyConfig = (_path, content, snapshot) => writeCodexProxySnapshot(snapshot, content),
     skipBackup = false,
   } = {},
 ) {
   const { configPath } = requireUserConfig(environment);
   assertExpectedRevision(expectedRevision);
-  const snapshot = readConfigSnapshot(configPath, readConfig);
+  const snapshot = readConfigSnapshot(configPath, readConfig, environment);
   if (snapshot.revision !== expectedRevision) {
     throw invalid("revision", "stale-revision", "Gateway 配置已变化，请重新读取设置");
   }
   const document = snapshot.document;
+  if (input?.kind === "network.proxy" || input?.kind === "network.proxy-batch") {
+    const proxySnapshot = snapshot.proxy;
+    const network = proxySnapshot.settings;
+    const proxyDocument = { network: { ...network } };
+    const result = input.kind === "network.proxy"
+      ? applyNetworkProxy(proxyDocument, input) : applyNetworkProxyBatch(proxyDocument, input);
+    const values = {};
+    for (const field of proxyFields) {
+      if (network[field] !== proxyDocument.network?.[field]) {
+        values[field] = proxyDocument.network?.[field] ?? null;
+      }
+    }
+    const content = renderCodexProxySettings(proxySnapshot, values);
+    const modified = content !== (proxySnapshot.content ?? "");
+    if (modified) {
+      try {
+        writeProxyConfig(proxySnapshot.path, content, proxySnapshot);
+      } catch (error) {
+        if (error instanceof GatewayConfigConflictError) {
+          throw invalid("revision", "stale-revision", "Codex .env 已变化或正在写入，请重新读取设置");
+        }
+        throw error;
+      }
+    }
+    const activation = modified ? "restart-all" : "none";
+    return {
+      kind: input.kind, configPath: proxySnapshot.path, previousRevision: snapshot.revision,
+      value: result.value, activation, activationResult: configActivationResult(activation),
+    };
+  }
   const originalDocument = structuredClone(document);
   const result = applySetting(document, input);
   if (JSON.stringify(document) === JSON.stringify(originalDocument)) {
@@ -226,7 +257,7 @@ export function validateNetworkProxyValue(field, value) {
   if (!proxyFields.includes(field)) return `未知网络代理字段：${String(field)}`;
   const normalized = stringValue(value);
   if (!normalized) return undefined;
-  return field === "no_proxy" ? validateNoProxy(normalized) : validateProxyUrl(normalized);
+  return field === "no_proxy" ? validateNoProxy(normalized) : validateCodexProxyValue(field, normalized);
 }
 
 function applySetting(document, input) {
@@ -405,10 +436,6 @@ function applySetting(document, input) {
       document.experimental = { ...table(document.experimental), plugin_api: value };
       return changed(value, "restart-gateway");
     }
-    case "network.proxy":
-      return applyNetworkProxy(document, input);
-    case "network.proxy-batch":
-      return applyNetworkProxyBatch(document, input);
     default:
       throw invalid("kind", "unknown-setting", `未知 Gateway 设置：${String(input.kind)}`);
   }
@@ -470,12 +497,14 @@ function changed(value, activation) {
   return { value, activation };
 }
 
-function readConfigSnapshot(configPath, readConfig = readFileSync) {
+function readConfigSnapshot(configPath, readConfig = readFileSync, environment = process.env) {
   const content = readConfig(configPath, "utf8");
+  const proxy = readCodexProxySnapshot(environment);
   return {
     content,
+    proxy,
     document: parseGatewayConfig(content, configPath),
-    revision: createHash("sha256").update(content).digest("hex"),
+    revision: createHash("sha256").update(JSON.stringify([content, proxy.content])).digest("hex"),
   };
 }
 
@@ -511,16 +540,6 @@ function officialTuiIdentityDefaults() {
     name: "codex-tui",
     version: String(protocolMetadata.codexCli).replace(/^codex-cli\s+/u, ""),
   };
-}
-
-function validateProxyUrl(value) {
-  if (value.length > 2_048 || /[\0\r\n]/u.test(value)) return "代理 URL 无效或过长";
-  try {
-    resolveHttpProxyUrl(value, {});
-    return undefined;
-  } catch (error) {
-    return error instanceof Error ? error.message : "代理 URL 无效";
-  }
 }
 
 function validateNoProxy(value) {

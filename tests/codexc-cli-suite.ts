@@ -1,3 +1,4 @@
+import { writeCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync as rawMkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -1664,7 +1665,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const configPath = join(home, "config.toml");
     updateGatewayConfig(configPath, (document) => {
       table(document.codex).binary = fakeCodex;
-      table(document.network).https_proxy = "http://127.0.0.1:8899";
+      writeCodexProxySettings({ https_proxy: "http://127.0.0.1:8899" }, environment);
     });
 
     execFileSync(process.execPath, [cli, "service-app-server"], {
@@ -3697,8 +3698,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       CODEX_CONNECT_CONFIG_FILE: "",
     };
     execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
+    Object.assign(environment, { CODEX_HOME: join(root, ".codex") });
     updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.network).https_proxy = "http://127.0.0.1:7890";
+      writeCodexProxySettings({ https_proxy: "http://127.0.0.1:7890" }, environment);
       document.weixin = {
         enabled: true,
         account_id: "bot-fixture@im.bot",
@@ -3870,7 +3872,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "[提示] OpenAI 代理：未检测到代理，官方模型请求将尝试直连；受限网络中可能无法连接",
     );
     expect(diagnosed.stdout).toContain(
-      "[处理] OpenAI 代理：在 config.toml 的 [network] 中设置 https_proxy",
+      "[处理] OpenAI 代理：运行 codexc config 在 Codex .env 中设置 HTTPS_PROXY",
     );
   });
 

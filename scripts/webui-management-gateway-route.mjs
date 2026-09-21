@@ -34,6 +34,7 @@ export async function routeGatewaySettingsManagement({
       environment,
       expectedRevision: body.revision,
       writeConfig: () => undefined,
+      writeProxyConfig: () => undefined,
       skipBackup: true,
     });
     const payload = {
@@ -69,6 +70,7 @@ export async function routeGatewaySettingsManagement({
         environment,
         expectedRevision: body.revision,
         writeConfig: () => undefined,
+        writeProxyConfig: () => undefined,
         skipBackup: true,
       });
       const preview = {

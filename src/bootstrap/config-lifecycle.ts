@@ -11,8 +11,7 @@ import {
   type WorkspaceAddedConfigEvent,
 } from "../../runtime/config-event-queue.mjs";
 import { GatewayAccountRefreshServer } from "../../runtime/gateway-account-refresh.mjs";
-import { readGatewayConfig } from "../../runtime/gateway-config.mjs";
-import type { ProxySettings } from "../../runtime/network-proxy.mjs";
+import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { createLogger } from "../observability/index.js";
@@ -80,9 +79,7 @@ export async function runGatewayProcess(): Promise<void> {
       ),
     environment: process.env,
   });
-  const configuredNetwork = proxySettings(
-    readGatewayConfig(runtime.configPath).network,
-  );
+  const configuredNetwork = readCodexProxySettings(process.env);
   const networkProxyWatcher = new NetworkProxyWatcher({
     logger,
     configured: configuredNetwork,
@@ -257,17 +254,6 @@ export async function runGatewayProcess(): Promise<void> {
     reloadPending = false;
     await reload();
   }
-}
-
-function proxySettings(value: unknown): ProxySettings {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
-  const table = value as Record<string, unknown>;
-  return {
-    ...(typeof table.http_proxy === "string" ? { http_proxy: table.http_proxy } : {}),
-    ...(typeof table.https_proxy === "string" ? { https_proxy: table.https_proxy } : {}),
-    ...(typeof table.all_proxy === "string" ? { all_proxy: table.all_proxy } : {}),
-    ...(typeof table.no_proxy === "string" ? { no_proxy: table.no_proxy } : {}),
-  };
 }
 
 function readPendingConfigEvents(

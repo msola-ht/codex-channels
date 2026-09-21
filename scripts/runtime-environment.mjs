@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
 import { migrateLegacyOpencodeGoAccount } from "../runtime/opencode-go-accounts.mjs";
 import { requireUserConfig, userDataDir } from "./runtime-config.mjs";
@@ -14,7 +15,7 @@ export function configuredEnvironment(sourceEnvironment = process.env) {
   };
   migrateLegacyOpencodeGoAccount(environment);
   const document = readGatewayConfig(configPath);
-  const network = table(document.network);
+  const network = readCodexProxySettings(environment);
   const codex = table(document.codex);
   const proxyEnvironment = resolveProxyEnvironment(network, environment);
   const unresolvedProxyEnvironment = {
