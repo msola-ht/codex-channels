@@ -240,6 +240,7 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.responseModel !== undefined && !nullableString(record.responseModel))
     || (record.traffic !== undefined && !validTrafficReference(record.traffic))
     || !nullableString(record.serviceTier)
+    || (record.requestServiceTier !== undefined && !nullableString(record.requestServiceTier))
     || !oneOf(record.status, ["completed", "failed", "incomplete", "unknown"])
     || !nullableHttpStatus(record.httpStatus)
     || (record.userAgent !== undefined && !nullableUserAgent(record.userAgent))

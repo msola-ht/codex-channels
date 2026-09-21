@@ -96,8 +96,8 @@
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v17
-  检查点回写、私有备份后，在单一事务中重建为 v18；模型请求记录只复制当前保留字段，新增字段为 NULL，保留已有耗时与模型名称，转储关联不按历史时间猜配，删除旧价格、
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v18
+  检查点回写、私有备份后，在单一事务中重建为 v19；模型请求记录只复制当前保留字段，新增字段为 NULL，保留已有耗时与模型名称，转储关联不按历史时间猜配，删除旧价格、
   成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
   `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
   `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游

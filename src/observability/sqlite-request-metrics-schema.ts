@@ -15,6 +15,7 @@ export const metricStorageColumns = [
   "first_content_ms", "request_model", "response_model",
   "traffic_label", "traffic_session", "traffic_interaction",
   "total_duration_ms",
+  "request_service_tier",
 ] as const;
 
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
@@ -68,6 +69,7 @@ export const modelRequestMetricsTableSql = `
     traffic_session TEXT,
     traffic_interaction INTEGER,
     total_duration_ms REAL CHECK (total_duration_ms IS NULL OR total_duration_ms >= 0),
+    request_service_tier TEXT,
     CHECK (
       (traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
       OR (traffic_label IS NOT NULL AND length(traffic_label) > 0

@@ -4,6 +4,7 @@ import { TrafficParameterComparison, TrafficRequestContent } from "@/components/
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { TrafficContent, TrafficDisclosure } from "@/components/traffic/traffic-content"
 import { TableHint } from "@/components/metrics/data-table"
+import { FastBadge } from "@/components/metrics/service-tier"
 import { Skeleton } from "@/components/ui/skeleton"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -56,7 +57,7 @@ export function TrafficDetail({
       </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <span className="text-muted-foreground">{formatTime(detail.startedAtMs)}</span>
-        <TableHint hint="上游转发开始至首个符合条件的语义事件，不是响应头到达或客户端显示时间；与上游 logical_turn 统计分开。"><span className="whitespace-nowrap tabular-nums">单请求首字：{detail.response?.firstContentMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstContentMs)}</span></TableHint>
+        <TableHint hint={detail.response?.firstContentMs === undefined ? null : "上游转发开始至首个符合条件的语义事件，不是响应头到达或客户端显示时间；与上游 logical_turn 统计分开。"}><span className="whitespace-nowrap tabular-nums">单请求首字：{detail.response?.firstContentMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstContentMs)}</span></TableHint>
         <span className="whitespace-nowrap tabular-nums">总耗时：{detail.response?.callTiming?.totalMs === undefined ? "未提供" : formatElapsedDuration(detail.response.callTiming.totalMs)}</span>
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
@@ -87,7 +88,7 @@ export function TrafficDetail({
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3 text-sm">
             <span>思考等级：{detail.request.parameters.reasoningEffort ?? "未提供"}</span>
-            <span>请求服务层级：{detail.request.parameters.serviceTier ?? "未提供"}</span>
+            <span className="inline-flex items-center gap-2">请求服务层级：{detail.request.parameters.serviceTier ?? "未提供"}<FastBadge tier={detail.request.parameters.serviceTier} source="request" /></span>
             {detail.request.parameters.generate === false ? <Badge variant="outline">不生成输出</Badge> : null}
           </div>
           {detail.request.parameters.previousResponseId === undefined ? null : (
@@ -124,7 +125,7 @@ export function TrafficDetail({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            <p className="text-sm">实际服务层级：{detail.response.serviceTier ?? "未提供"}</p>
+            <p className="flex items-center gap-2 text-sm">响应服务层级：{detail.response.serviceTier ?? "未提供"}<FastBadge tier={detail.response.serviceTier} source="response" /></p>
             {detail.response.responseId === undefined ? null : (
               <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
             )}

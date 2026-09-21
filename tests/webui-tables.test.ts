@@ -21,6 +21,7 @@ describe("WebUI metrics table presentation", () => {
       });
       try {
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
+        const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
         const { TurnTable } = await server.ssrLoadModule("/src/components/threads/turn-table.tsx");
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
@@ -30,6 +31,8 @@ describe("WebUI metrics table presentation", () => {
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
+        const { TableHint, TruncatedText } = await server.ssrLoadModule("/src/components/metrics/data-table.tsx");
+        const { InputTokenTooltip, OutputTokenTooltip } = await server.ssrLoadModule("/src/components/metrics/token-tooltip.tsx");
         const { setServerTimeZone } = await server.ssrLoadModule("/src/lib/format.ts");
         setServerTimeZone("UTC");
         const noop = () => {};
@@ -54,6 +57,17 @@ describe("WebUI metrics table presentation", () => {
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
         const result = {
+          emptyHint: render(TableHint, { hint: null, children: "—" }),
+          shortText: render(TruncatedText, { text: "short" }),
+          shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
+          inputWithoutBreakdown: render(InputTokenTooltip, { inputTokens: 10, cachedInputTokens: null }),
+          outputWithoutBreakdown: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: null }),
+          matchingFast: render(FastBadge, { tier: "priority", source: "request", responseTier: "fast" }),
+          mismatchedFast: render(FastBadge, { tier: "priority", source: "request", responseTier: "default" }),
+          responseFast: render(FastBadge, { tier: "fast", source: "response" }),
+          emptyToken: render(InputTokenTooltip, { inputTokens: null, cachedInputTokens: null }),
+          inputToken: render(InputTokenTooltip, { inputTokens: 10, cachedInputTokens: 5 }),
+          outputToken: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: 5 }),
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
           traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]) }),
           trafficCountsLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
@@ -74,6 +88,20 @@ describe("WebUI metrics table presentation", () => {
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
         };
         globalThis.fixtureDisclosureOpen = true;
+        for (const tier of ["fast", "priority", "default", "flex", "auto", null, undefined]) {
+          result['tier-' + tier] = render(FastBadge, { tier, source: "request" });
+        }
+        result.fastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, requestServiceTier: "priority", serviceTier: "default",
+          traffic: { label: "ocg", session: "batch-fast", interaction: 23 } }] });
+        result.responseFastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, serviceTier: "priority", requestServiceTier: null }] });
+        const response = { state: "completed", status: 200, usage: null, headers: {}, body: "", output: [] };
+        result.fastRequestOnly = render(TrafficDetail, { detail: { ...detail,
+          request: { ...detail.request, parameters: { serviceTier: "priority" } },
+          response: { ...response, serviceTier: "default" },
+        }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
+        result.fastResponseOnly = render(TrafficDetail, { detail: { ...detail,
+          response: { ...response, serviceTier: "fast" },
+        }, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop });
         result.traceLoading = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceLoading: true });
         result.traceFailure = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceError: true });
         const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
@@ -90,6 +118,9 @@ describe("WebUI metrics table presentation", () => {
           nextOffset: 50, records: Array.from({ length: 50 }, (_, id) => ({ ...record, id, threadId: null })) };
         globalThis.fixtureApiState = { data: { queryKey: JSON.stringify(globalThis.fixtureQuery), data: errorsData }, loading: false, error: null };
         result.errors = render(ErrorsPage, {});
+        errorsData.records[0].requestServiceTier = "priority";
+        errorsData.records[0].serviceTier = "default";
+        result.fastErrors = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
@@ -177,6 +208,26 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.requests).toContain("名称不一致");
   });
 
+  it("shows only Fast tiers and preserves the exact call link", () => {
+    for (const tier of ["fast", "priority"]) expect(markup['tier-' + tier]).toContain(">Fast</span>");
+    for (const tier of ["default", "flex", "auto", "null", "undefined"]) expect(markup['tier-' + tier]).toBe("");
+    expect(markup.fastRequests).toContain(">Fast</span>");
+    expect(markup.fastRequests).toContain('/traffic?label=ocg&amp;exchangeSession=batch-fast&amp;id=23');
+    expect(markup.fastErrors).toContain(">Fast</span>");
+    expect(markup.requests).not.toContain(">Fast</span>");
+    expect(markup.responseFastRequests).not.toContain(">Fast</span>");
+  });
+
+  it("keeps request and response Fast badges on their own side", () => {
+    const requestOnly = markup.fastRequestOnly!;
+    const responseOnly = markup.fastResponseOnly!;
+    expect(requestOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
+    expect(responseOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
+    expect(requestOnly.indexOf(">Fast</span>")).toBeLessThan(requestOnly.indexOf("响应服务层级"));
+    expect(responseOnly.indexOf(">Fast</span>")).toBeGreaterThan(responseOnly.indexOf("响应服务层级"));
+    expect(markup.traceClosed).not.toContain(">Fast</span>");
+  });
+
   it("reserves intrinsic toolbar and pagination space around the bounded table viewport", () => {
     for (const key of ["requests", "threads", "turns", "loading"]) {
       expect(markup[key]).toMatch(/data-slot="card"[^>]*class="[^"]*min-h-min/);
@@ -217,6 +268,30 @@ describe("WebUI metrics table presentation", () => {
     const statusCell = cells[statusIndex];
     expect(statusCell).toContain("失败");
     expect(statusCell).toMatch(/^<span\b[^>]*tabindex="0"[^>]*>/);
+  });
+
+  it("avoids empty and repeated cell hints while keeping detailed values accessible", () => {
+    expect(markup.emptyHint).toBe("—");
+    expect(markup.shortText).not.toContain('tabindex="0"');
+    expect(markup.emptyToken).not.toContain('data-slot="tooltip-trigger"');
+    expect(markup.inputToken).toContain('tabindex="0"');
+    expect(markup.outputToken).toContain('tabindex="0"');
+    const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
+    for (const label of ["首字耗时", "总耗时", "Token/s", "调用详情"]) {
+      expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
+    }
+    expect(markup['tier-fast']).toContain("h-4");
+  });
+
+  it("only offers supplemental token and Fast information and preserves link semantics", () => {
+    for (const key of ["inputWithoutBreakdown", "outputWithoutBreakdown", "matchingFast", "responseFast", "tier-fast"]) {
+      expect(markup[key]).not.toContain('data-slot="tooltip-trigger"');
+    }
+    expect(markup.mismatchedFast).toContain('data-slot="tooltip-trigger"');
+    expect(markup.shortLink).toMatch(/^<a\b/);
+    expect(markup.shortLink).toContain('href="/test"');
+    expect(markup.shortLink).not.toContain('tabindex=');
+    expect(markup.shortLink).not.toContain('title=');
   });
 
   it("preserves explicit existing column visibility preferences", () => {

@@ -340,6 +340,7 @@ export class ProviderProxy {
     exchange?.callTiming?.forwarding(forwardingStartedAtMonotonicMs);
     exchange?.observeRequestMetrics(metrics);
     const requestModelScanner = createTopLevelStringFieldScanner("model");
+    const requestTierScanner = createTopLevelStringFieldScanner("service_tier");
     const requestModelDecoder = new StringDecoder("utf8");
     if (route.externalRole) {
       metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
@@ -467,14 +468,20 @@ export class ProviderProxy {
       }
     });
     request.on("data", (chunk: Buffer) => {
-      scanTopLevelStringField(requestModelScanner, requestModelDecoder.write(chunk));
+      const text = requestModelDecoder.write(chunk);
+      scanTopLevelStringField(requestModelScanner, text);
+      scanTopLevelStringField(requestTierScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
+      metrics.requestServiceTier = boundedString(requestTierScanner.value);
       exchange?.requestChunk(chunk);
     });
     request.on("end", () => {
       exchange?.callTiming?.requestBodyEnd(performance.now());
-      scanTopLevelStringField(requestModelScanner, requestModelDecoder.end());
+      const text = requestModelDecoder.end();
+      scanTopLevelStringField(requestModelScanner, text);
+      scanTopLevelStringField(requestTierScanner, text);
       metrics.requestModel = boundedString(requestModelScanner.value);
+      metrics.requestServiceTier = boundedString(requestTierScanner.value);
       exchange?.requestEnd();
     });
     request.pipe(upstream);
@@ -621,6 +628,7 @@ export class ProviderProxy {
           activeMetrics.requestModel = inspected.model ?? null;
           exchange?.observeRequestMetrics(activeMetrics);
           activeMetrics.serviceTier = inspected.serviceTier ?? null;
+          activeMetrics.requestServiceTier = inspected.serviceTier ?? null;
           activeMetrics.reasoningEffort = inspected.reasoningEffort
             ?? (route.externalRole
               ? this.externalRoleReasoningEffort ?? null

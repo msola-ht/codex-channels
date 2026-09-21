@@ -65,6 +65,7 @@
   HTTP 排除 created/in_progress/failed/metadata，其余合法 response.* 语义事件计入；WS 计入 response.*.delta、output_text.done 与 function_call_arguments.done。
   纯错误、旁路额度/timing/metadata 与畸形报文不计入；完整展示口径见[WebUI 文档](../../docs/webui.md)。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
+  两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
   首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
 - `traffic-call-timing.ts`：记录单次调用的单调时钟偏移，区分入口、转发、请求体收齐、响应头、WS 提交发送与结束；只写调用响应索引，不进入指标 IPC 或数据库。

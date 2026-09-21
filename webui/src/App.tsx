@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { TruncatedText } from "@/components/metrics/data-table"
 import { Button } from "@/components/ui/button"
 import {
   Breadcrumb,
@@ -70,8 +71,8 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden md:block" />
         <BreadcrumbItem>
-          <BreadcrumbPage className="max-w-56 truncate" title={threadId}>
-            {threadId}
+          <BreadcrumbPage>
+            <TruncatedText text={threadId} className="max-w-56" />
           </BreadcrumbPage>
         </BreadcrumbItem>
       </>
@@ -147,7 +148,7 @@ function Layout() {
 
 export default function App() {
   return (
-    <TooltipProvider>
+    <TooltipProvider delayDuration={400} skipDelayDuration={0}>
       <LanguageProvider>
         <AuthGate>
           <HashRouter>

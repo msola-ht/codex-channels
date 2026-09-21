@@ -4,10 +4,11 @@ import { Link } from "react-router"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { FastBadge } from "@/components/metrics/service-tier"
 import { QueryFilters } from "@/components/metrics/query-filters"
 import { StatCard } from "@/components/metrics/stat-card"
 import { StatusBadge } from "@/components/metrics/status-badge"
-import { TableHint } from "@/components/metrics/data-table"
+import { TableHint, TruncatedText } from "@/components/metrics/data-table"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import {
@@ -111,15 +112,15 @@ export function ErrorsPage() {
                         <TableRow key={record.id}>
                           <ErrorCell loading={loading} className="whitespace-nowrap tabular-nums text-muted-foreground">{formatTime(record.recordedAtMs)}</ErrorCell>
                           <ErrorCell loading={loading}><ProviderBadge provider={record.provider} /></ErrorCell>
-                          <ErrorCell loading={loading}><TableHint hint={record.model ?? "未提供模型"}><span className="block max-w-48 truncate">{record.model ?? "—"}</span></TableHint></ErrorCell>
+                          <ErrorCell loading={loading}><span className="flex items-center gap-2 whitespace-nowrap"><TruncatedText text={record.model} className="max-w-48" /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></ErrorCell>
                           <ErrorCell loading={loading}><StatusBadge status={record.status} /></ErrorCell>
                           <ErrorCell loading={loading} className="text-right tabular-nums">{record.httpStatus ?? "—"}</ErrorCell>
                           <ErrorCell loading={loading} className="max-w-md">
-                            <TableHint hint={`${message}${record.errorCode ? ` · 错误码：${record.errorCode}` : ""}`}>
+                            {record.errorCode ? <TableHint hint={`${message} · 错误码：${record.errorCode}`}>
                               <span className="block max-w-md truncate text-xs text-muted-foreground">{message}</span>
-                            </TableHint>
+                            </TableHint> : <TruncatedText text={message} className="max-w-md text-xs text-muted-foreground" />}
                           </ErrorCell>
-                          <ErrorCell loading={loading}>{record.threadId === null ? "—" : <Link className="block max-w-40 truncate underline-offset-4 hover:underline" title={record.turnId ?? record.threadId} to={metricsLink("/requests", query, { threadId: record.threadId, turnId: record.turnId ?? undefined, status: undefined })}>{record.turnId ?? record.threadId}</Link>}</ErrorCell>
+                          <ErrorCell loading={loading}>{record.threadId === null ? "—" : <TruncatedText asChild text={record.turnId ?? record.threadId} className="max-w-40"><Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId: record.threadId, turnId: record.turnId ?? undefined, status: undefined })}>{record.turnId ?? record.threadId}</Link></TruncatedText>}</ErrorCell>
                         </TableRow>
                       )
                     })}

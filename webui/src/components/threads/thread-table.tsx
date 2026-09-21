@@ -5,7 +5,7 @@ import { Link } from "react-router"
 import {
   DataTable,
   SortableHeader,
-  TableHint,
+  TruncatedText,
   type DataTableColumn,
   type DataTableProps,
 } from "@/components/metrics/data-table"
@@ -67,7 +67,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <Link
           to={metricsLink(`/threads/${encodeURIComponent(row.original.threadId)}`, query, { threadId: undefined })}
           className="font-medium underline-offset-4 hover:underline"
-          title={row.original.threadId}
+          title={shortThreadId(row.original.threadId) === row.original.threadId ? undefined : row.original.threadId}
         >
           {shortThreadId(row.original.threadId)}
         </Link>
@@ -88,7 +88,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <TableHint hint={row.original.model ?? "未提供模型名称"}><span className="block max-w-40 truncate">{row.original.model ?? "—"}</span></TableHint>
+        <TruncatedText text={row.original.model} className="max-w-40" />
       ),
     },
     {
@@ -104,9 +104,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
           <Badge
             variant="secondary"
             className="max-w-64 justify-start"
-            title={row.original.agentPath}
           >
-            <span className="truncate">子代理 · {row.original.agentPath}</span>
+            <TruncatedText text={`子代理 · ${row.original.agentPath}`} />
           </Badge>
         ),
     },
@@ -157,8 +156,8 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     {
       id: "tokensPerSecond",
       accessorFn: (thread) => thread.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <TableHint hint="当前筛选范围内，各有效请求 Token/s 的算术平均；仅统计该会话自身。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
+      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内，该会话自身有效请求速率的算术平均。">平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "last",
@@ -184,7 +183,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
           <Link
             to={metricsLink(`/threads/${encodeURIComponent(row.original.parentThreadId)}`, query, { threadId: undefined, turnId: undefined })}
             className="underline-offset-4 hover:underline"
-            title={row.original.parentThreadId}
+            title={shortThreadId(row.original.parentThreadId) === row.original.parentThreadId ? undefined : row.original.parentThreadId}
           >
             {shortThreadId(row.original.parentThreadId)}
           </Link>

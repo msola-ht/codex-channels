@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Slot } from "radix-ui"
 import {
   columnFilteringFeature,
   columnVisibilityFeature,
@@ -67,7 +68,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
-export function TableHint({ hint, children }: { hint: string; children: React.ReactNode }) {
+export function TableHint({ hint, children }: { hint: string | null; children: React.ReactNode }) {
+  if (hint === null) return <>{children}</>
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -78,6 +80,32 @@ export function TableHint({ hint, children }: { hint: string; children: React.Re
       <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="min-w-0 break-all whitespace-normal">{hint}</p></TooltipContent>
     </Tooltip>
   )
+}
+
+export function TruncatedText({ text, className, asChild = false, children }: { text: string | null | undefined; className?: string; asChild?: boolean; children?: React.ReactElement }) {
+  const ref = React.useRef<HTMLSpanElement>(null)
+  const [truncated, setTruncated] = React.useState(false)
+  const [open, setOpen] = React.useState(false)
+  const Component = asChild ? Slot.Root : "span"
+  React.useEffect(() => {
+    const element = ref.current!
+    setOpen(false)
+    const measure = () => {
+      const nextTruncated = Boolean(text) && element.scrollWidth > element.clientWidth
+      setTruncated(nextTruncated)
+      if (!nextTruncated) setOpen(false)
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    measure()
+    return () => observer.disconnect()
+  }, [text])
+  return <Tooltip open={truncated && open} onOpenChange={(nextOpen) => setOpen(truncated && nextOpen)}>
+    <TooltipTrigger asChild>
+      <Component ref={ref} tabIndex={truncated && !asChild ? 0 : undefined} className={cn("block min-w-0 truncate", truncated && "cursor-help focus-visible:outline-2 focus-visible:outline-ring", className)}>{asChild ? children : text ?? "—"}</Component>
+    </TooltipTrigger>
+    {truncated ? <TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="break-all whitespace-normal">{text}</p></TooltipContent> : null}
+  </Tooltip>
 }
 
 const dataTableFeatures = tableFeatures({
@@ -132,12 +160,14 @@ function usePersistentTableState<T>(
 function SortableHeader<TData extends RowData>({
   column,
   children,
+  hint,
 }: {
   column: Column<typeof dataTableFeatures, TData>
   children: React.ReactNode
+  hint?: string
 }) {
   const sorted = column.getIsSorted()
-  return (
+  const button = (
     <Button
       variant="ghost"
       size="sm"
@@ -154,6 +184,7 @@ function SortableHeader<TData extends RowData>({
       )}
     </Button>
   )
+  return hint === undefined ? button : <Tooltip><TooltipTrigger asChild>{button}</TooltipTrigger><TooltipContent className="max-w-[min(28rem,calc(100vw-2rem))]"><p className="break-all whitespace-normal">{hint}</p></TooltipContent></Tooltip>
 }
 
 export { SortableHeader }

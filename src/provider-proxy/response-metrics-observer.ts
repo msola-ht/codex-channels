@@ -28,6 +28,8 @@ export interface ProviderProxyMetrics {
   turnId: string | null;
   model: string | null;
   serviceTier: string | null;
+  /** 出站请求层级；响应不得覆盖。 */
+  requestServiceTier?: string | null;
   reasoningEffort: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   httpStatus: number | null;

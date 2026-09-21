@@ -12,11 +12,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
+import { FastBadge } from "@/components/metrics/service-tier"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import {
   DataTable,
   SortableHeader,
   TableHint,
+  TruncatedText,
   type DataTableColumn,
 } from "@/components/metrics/data-table"
 import { useLanguage } from "@/hooks/language-context"
@@ -121,15 +123,20 @@ export function RequestsTable({
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
-          <span className="min-w-0 truncate">
-          {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-            ? `${row.original.requestModel} → ${row.original.responseModel}`
-            : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
-          </span>
-          {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-            ? <Badge variant="outline">名称不一致</Badge> : null}
-        </span></TableHint>
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          {modelNameComparison(row.original.requestModel, row.original.responseModel) !== "名称不一致"
+            ? <TruncatedText text={row.original.requestModel ?? row.original.responseModel ?? row.original.model} className="max-w-64" />
+            : <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
+            <span className="min-w-0 truncate">
+              {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
+                ? `${row.original.requestModel} → ${row.original.responseModel}`
+                : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
+            </span>
+            {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
+              ? <Badge variant="outline">名称不一致</Badge> : null}
+          </span></TableHint>}
+          <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
+        </span>
       ),
     },
     {
@@ -158,6 +165,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
+        if (record.cachedInputTokens === null && record.cacheHitRate === null) return <span className="tabular-nums">{formatTokens(record.inputTokens)}</span>
         const uncached =
           record.inputTokens === null || record.cachedInputTokens === null
             ? null
@@ -197,6 +205,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
+        if (record.reasoningOutputTokens === null) return <span className="tabular-nums">{formatTokens(record.outputTokens)}</span>
         const nonReasoning =
           record.outputTokens === null || record.reasoningOutputTokens === null
             ? null
@@ -226,9 +235,9 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: "首字耗时",
+      header: () => <TableHint hint="从开始转发到收到首个有效响应事件；不代表页面显示时间。">首字耗时</TableHint>,
       cell: ({ row }) => (
-        <TableHint hint={`上游转发开始至首个符合条件的事件：HTTP 为跳过 created/in_progress 的首个 Responses 语义事件；WS 为 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误或旁路元数据；不是客户端显示时间。上游轮次首 Token：${row.original.upstreamTtftMs == null ? "未提供" : formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
+        <TableHint hint={row.original.upstreamTtftMs == null ? null : `上游轮次首 Token：${formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
           {row.original.firstContentMs == null ? "—"
             : formatElapsedDuration(row.original.firstContentMs)}
         </span></TableHint>
@@ -237,21 +246,21 @@ export function RequestsTable({
     {
       id: "totalDuration",
       accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column}>总耗时</SortableHeader>,
-      cell: ({ row }) => <TableHint hint="代理收到本次请求至模型终态；无终态则到结束或失败。使用单调时钟，不含终态后的指标投递或客户端显示时间。"><span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span></TableHint>,
+      header: ({ column }) => <SortableHeader column={column} hint="从代理收到请求到模型完成或请求结束；不包含页面显示时间。">总耗时</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "tokensPerSecond",
       accessorFn: (record) => record.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>Token/s</SortableHeader>,
-      cell: ({ row }) => <TableHint hint="输出 Token ÷ 本次请求总耗时，不扣除首字等待；不是纯生成速度。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
+      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 请求总耗时，包含首字等待。">Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "traffic",
       header: "调用详情",
       enableSorting: false,
       cell: ({ row }) => row.original.traffic === null ? (
-        <TableHint hint="没有采集到调用记录关联；可能是历史记录、未开启调用记录，或失败发生在模型请求创建之前。"><span className="text-muted-foreground">未关联</span></TableHint>
+        <span className="text-muted-foreground">未关联</span>
       ) : (
         <Button variant="link" size="sm" asChild>
           <Link to={trafficDetailPath(row.original.traffic)}>查看调用详情</Link>
@@ -270,16 +279,7 @@ export function RequestsTable({
       cell: ({ row }) => {
         const userAgent = row.original.userAgent
         if (!userAgent) return <span className="text-muted-foreground">—</span>
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0} className="focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 block max-w-40 truncate font-mono text-xs">{userAgent}</span>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="max-w-md">
-              <p className="break-all text-xs">{userAgent}</p>
-            </TooltipContent>
-          </Tooltip>
-        )
+        return <TruncatedText text={userAgent} className="max-w-40 font-mono text-xs" />
       },
     },
     {
@@ -314,7 +314,7 @@ export function RequestsTable({
         )
         const message = row.original.errorMessage
         if (!message) {
-          return <span className="block max-w-40 truncate">{label}</span>
+          return <TruncatedText text={label} className="max-w-40" />
         }
         return (
           <Tooltip>

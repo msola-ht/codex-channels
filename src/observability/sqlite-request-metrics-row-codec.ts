@@ -17,6 +17,7 @@ export interface MetricRow {
   turn_id: string | null;
   model: string | null;
   service_tier: string | null;
+  request_service_tier: string | null;
   reasoning_effort: string | null;
   status: "completed" | "failed" | "incomplete" | "unknown";
   http_status: number | null;
@@ -132,6 +133,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     },
     model: row.model,
     serviceTier: row.service_tier,
+    requestServiceTier: row.request_service_tier,
     reasoningEffort: row.reasoning_effort,
     status: responseNotObserved ? "incomplete" : row.status,
     httpStatus: row.http_status,

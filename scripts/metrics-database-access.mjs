@@ -21,7 +21,7 @@ import {
 } from "./metrics-command-options.mjs";
 
 export { metricsRange } from "./metrics-command-options.mjs";
-export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+export const upgradeableMetricsSchemaVersions = Object.freeze([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
 const legacyMetricsColumns = Object.freeze([
   "id", "provider", "billing_mode", "pricing_currency", "pricing_source",
   "pricing_effective_at_ms", "uncached_input_price_per_million_nanos",
@@ -91,10 +91,11 @@ export function validateMetricsDatabaseStructure(
   try {
     if (status.compatible) {
       requireCurrentModelRequestMetricsSchema(database);
-    } else if (status.schemaVersion >= 14 && status.schemaVersion <= 17) {
+    } else if (status.schemaVersion >= 14 && status.schemaVersion <= 18) {
       requireColumns(database, "model_request_metrics", [
         "id", ...metricStorageColumns.filter((column) =>
-          column !== "total_duration_ms"
+          column !== "request_service_tier"
+          && (status.schemaVersion >= 18 || column !== "total_duration_ms")
           && (status.schemaVersion >= 17 || !["traffic_label", "traffic_session", "traffic_interaction"].includes(column))
           && (status.schemaVersion >= 16 || !["first_content_ms", "request_model", "response_model"].includes(column))
           && (status.schemaVersion !== 14 || column !== "upstream_ttft_ms")),

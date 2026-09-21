@@ -10,7 +10,7 @@ import { ProviderBadge } from "@/components/metrics/provider-badge"
 import {
   DataTable,
   SortableHeader,
-  TableHint,
+  TruncatedText,
   type DataTableColumn,
   type DataTableProps,
 } from "@/components/metrics/data-table"
@@ -57,7 +57,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       id: "turn",
       accessorFn: (turn) => turn.turnId,
       header: ({ column }) => <SortableHeader column={column}>Turn</SortableHeader>,
-      cell: ({ row }) => <Link className="block max-w-48 truncate underline-offset-4 hover:underline" title={row.original.turnId} to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link>,
+      cell: ({ row }) => <TruncatedText asChild text={row.original.turnId} className="max-w-48"><Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link></TruncatedText>,
     },
     {
       id: "provider",
@@ -74,7 +74,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <TableHint hint={row.original.model ?? "未提供模型名称"}><span className="block max-w-48 truncate">{row.original.model ?? "—"}</span></TableHint>
+        <TruncatedText text={row.original.model} className="max-w-48" />
       ),
     },
     {
@@ -107,6 +107,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       ),
       cell: ({ row }) => {
         const turn = row.original
+        if (turn.cachedInputTokens === null) return <span className="tabular-nums">{formatTokens(turn.inputTokens)}</span>
         const uncached =
           turn.cachedInputTokens === null
             ? null
@@ -176,8 +177,8 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     {
       id: "tokensPerSecond",
       accessorFn: (turn) => turn.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column}>平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <TableHint hint="该轮有效请求速率的算术平均，不含工具等待时间。"><span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span></TableHint>,
+      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求速率的算术平均；按各次请求总耗时计算。">平均 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "compact",

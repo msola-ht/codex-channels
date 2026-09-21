@@ -54,6 +54,7 @@ describe("webui server data API", () => {
     const traffic = { label: "openai", session: "2026-09-19T00-00-00-000Z-2", interaction: 4 };
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
+      requestServiceTier: "priority", serviceTier: "default",
       firstContentMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
@@ -66,10 +67,12 @@ describe("webui server data API", () => {
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
         firstContentMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         tokensPerSecond: 1_000_000 / 1234.5,
+        requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
         firstContentMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
         tokensPerSecond: null,
+        requestServiceTier: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
     }
