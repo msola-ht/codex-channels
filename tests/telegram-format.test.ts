@@ -374,8 +374,8 @@ describe("formatLimits", () => {
     });
 
     expect(text).toContain("套餐：Pro");
-    expect(text).toContain("主窗口：已使用 31% · 周期 5 小时");
-    expect(text).toContain("次窗口：已使用 42% · 周期 7 天");
+    expect(text).toContain("主窗口：已使用 31%\n  - 周期 5 小时\n  - 重置 ");
+    expect(text).toContain("次窗口：已使用 42%\n  - 周期 7 天\n  - 重置 ");
     expect(text).toContain("Credits：无限");
     expect(text).toContain("消费控制：正常");
     expect(text).toContain("限流状态：正常");

@@ -421,8 +421,12 @@ function formatResetCreditLines(
     if (right === null) return -1;
     return left - right;
   });
-  const detailLines = entries.map(([timestamp, count]) =>
-    `  - ${timestamp === null ? "无到期时间" : formatResetTime(timestamp)}：${count} 张`);
+  const now = Date.now();
+  const detailLines = entries.map(([timestamp, count]) => {
+    const expiry = timestamp === null ? "无到期时间" : formatResetTime(timestamp);
+    const remaining = timestamp === null ? "" : ` · ${formatTimeRemaining(timestamp, now)}`;
+    return `  - ${expiry}：${count} 张${remaining}`;
+  });
   const availableCount = accountMetricToBigInt(available);
   const undisclosedCount = availableCount === null
     ? 0n
@@ -431,6 +435,14 @@ function formatResetCreditLines(
     detailLines.push(`  - 其余 ${undisclosedCount} 张：服务端未提供明细`);
   }
   return [...lines, "重置券到期时间：", ...detailLines];
+}
+
+function formatTimeRemaining(timestamp: number, now: number): string {
+  const remainingMs = timestamp * 1_000 - now;
+  if (remainingMs <= 0) return "已到期";
+  const hours = Math.floor(remainingMs / 3_600_000);
+  if (hours === 0) return "剩余不足 1 H";
+  return `剩余 ${Math.floor(hours / 24)} D ${hours % 24} H`;
 }
 
 function accountMetricToBigInt(value: AccountMetric): bigint | null {
@@ -443,7 +455,11 @@ function accountMetricToBigInt(value: AccountMetric): bigint | null {
 function formatAccountLimitWindow(
   window: Parameters<typeof formatRateLimitWindow>[0],
 ): string {
-  return formatRateLimitWindow(window);
+  const [summary, ...details] = formatRateLimitWindow(window).split(" · ");
+  if (window?.resetsAt != null) {
+    details.push(formatTimeRemaining(window.resetsAt, Date.now()));
+  }
+  return [summary, ...details.map((detail) => `  - ${detail}`)].join("\n");
 }
 
 function formatMetric(value: bigint | number | null): string {
