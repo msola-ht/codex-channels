@@ -25,7 +25,7 @@
   请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
   观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
 - `codex-proxy-env.mjs` / `codex-proxy-env.d.mts`：共享代理文件的读取、字面值校验和原子更新，
-  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI 与 WebUI 的保存复用共享文件锁并在锁内比较原文，拒绝并发覆盖。CLI、WebUI、启动与更新迁移共用读取与渲染。
+  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI、WebUI 和更新迁移的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖。迁移快照先校验字段，合并旧配置后再校验代理组合；正常读取仍校验完整组合。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime

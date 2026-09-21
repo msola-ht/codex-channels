@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import { codexHomePath } from "./codex-home.mjs";
@@ -9,6 +9,12 @@ export const codexProxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_p
 const assignment = /^[\t ]*(?:export[\t ]+)?([A-Za-z_][A-Za-z0-9_]*)[\t ]*=[\t ]*('(?:[^']*)'|"(?:\\[\s\S]|[^"\\])*"|[^\r\n]*)([^\r\n]*)/gm;
 
 export function readCodexProxySnapshot(environment = process.env) {
+  const snapshot = readCodexProxyMigrationSnapshot(environment);
+  validateProxyCombination(snapshot.settings);
+  return snapshot;
+}
+
+export function readCodexProxyMigrationSnapshot(environment = process.env) {
   const path = join(codexHomePath(environment), ".env");
   let content;
   try {
@@ -36,7 +42,6 @@ export function readCodexProxySnapshot(environment = process.env) {
       settings[field] = value;
     }
   }
-  validateProxyCombination(settings);
   return { path, content, settings };
 }
 
@@ -95,7 +100,8 @@ export function writeCodexProxySnapshot(snapshot, content) {
     if (current !== snapshot.content) {
       throw new GatewayConfigConflictError("Codex .env 在写入期间已发生变化，请重新读取设置");
     }
-    writePrivateFileAtomicSync(snapshot.path, content);
+    if (content === null) unlinkSync(snapshot.path);
+    else writePrivateFileAtomicSync(snapshot.path, content);
   });
 }
 

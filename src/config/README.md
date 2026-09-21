@@ -9,6 +9,7 @@ Gateway，以刷新进程时区或渠道启动卡配置。
 ## 文件
 
 - `index.ts`：读取统一 TOML 配置，调用 `runtime/gateway-config.mjs` 的共享 Zod Schema 完成结构校验，再校验 Workspace 和 URL 等运行语义、合并自动发现的有效代理，并相对配置目录规范化路径；全部校验成功后，原子补入当前 Schema 缺失的安全默认字段。
+  `loadConfigDocument` 的 `proxySettings` 参数供更新预检传入已经校验的合并代理设置，避免预检重新读取尚未迁移的文件；正常启动仍读取 Codex `.env`。
 - `config-change.ts`：定义结构化配置变更、作用域与优先级。
 - `reload-classifier.ts`：比较两份已验证配置，完整列出变化，并按热加载、Gateway 重启或服务重装
   的最高要求分类。

@@ -15,6 +15,7 @@ import {
   parseGatewayConfig,
   readGatewayConfig,
   validateGatewayConfigDocument,
+  withGatewayConfigLock,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
 import { applyTerminalIdentityFromEnvironment } from "./config-management.mjs";
@@ -35,7 +36,7 @@ import {
   writePrivateFileAtomicSync,
 } from "../runtime/private-file.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { codexProxyFields, readCodexProxySnapshot, renderCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
+import { codexProxyFields, readCodexProxyMigrationSnapshot, renderCodexProxySettings, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
 import { updateCodexUserConfig } from "./codex-user-config.mjs";
 import {
   assertManagedModelProviderCapabilities,
@@ -150,6 +151,11 @@ export function updateSessionDisplayCache(environment = process.env) {
 }
 
 export function updateGatewayConfiguration(environment = process.env, options = {}) {
+  return withGatewayConfigLock(join(codexHomePath(environment), ".env"), () =>
+    updateGatewayConfigurationLocked(environment, options));
+}
+
+function updateGatewayConfigurationLocked(environment, options) {
   const { configPath } = requireUserConfig(environment);
   const before = readFileSync(configPath, "utf8");
   const now = options.now ?? (() => new Date());
@@ -174,7 +180,7 @@ export function updateGatewayConfiguration(environment = process.env, options = 
         writePrivateFileAtomicSync(candidate, proxyMigration.content);
         proxyBackupPath = candidate;
       }
-      writePrivateFileAtomicSync(proxyMigration.path, proxyMigration.nextContent);
+      writeCodexProxySnapshot(proxyMigration, proxyMigration.nextContent);
       proxyWritten = true;
     }
     if (removedPaths.length > 0) writeGatewayConfig(configPath, document);
@@ -195,15 +201,29 @@ export function updateGatewayConfiguration(environment = process.env, options = 
       removedPaths,
     };
   } catch (error) {
+    let rollbackError;
     if (proxyWritten) {
-      if (proxyMigration.content === null) unlinkSync(proxyMigration.path);
-      else writePrivateFileAtomicSync(proxyMigration.path, proxyMigration.content);
+      try {
+        writeCodexProxySnapshot(
+          { ...proxyMigration, content: proxyMigration.nextContent },
+          proxyMigration.content,
+        );
+      } catch (restoreError) {
+        rollbackError = restoreError;
+      }
     }
-    if (proxyBackupPath && existsSync(proxyBackupPath)) unlinkSync(proxyBackupPath);
     if (readFileSync(configPath, "utf8") !== before) {
       copyFileSync(backupPath, configPath);
       securePrivateFileSync(configPath);
     }
+    if (rollbackError) {
+      throw new AggregateError(
+        [error, rollbackError],
+        "配置迁移失败，Codex .env 无法安全回滚；已保留当前内容和迁移备份，请核对后重试",
+        { cause: error },
+      );
+    }
+    if (proxyBackupPath && existsSync(proxyBackupPath)) unlinkSync(proxyBackupPath);
     unlinkSync(backupPath);
     throw error;
   }
@@ -213,12 +233,13 @@ export function inspectGatewayConfiguration(environment = process.env) {
   const { configPath } = requireUserConfig(environment);
   const content = readFileSync(configPath, "utf8");
   const source = parseGatewayConfig(content, configPath);
-  planProxyMigration(source, environment);
+  const proxyMigration = planProxyMigration(source, environment);
   const removedPaths = removeObsoleteGatewayConfig(source);
   const defaults = validateGatewayConfigDocument(source);
   loadConfigDocument(stringify(source), dirname(configPath), {
     environment,
     detectSystemProxy: true,
+    ...(proxyMigration ? { proxySettings: proxyMigration.settings } : {}),
   });
   return {
     configPath,
@@ -551,7 +572,7 @@ function planProxyMigration(document, environment) {
     || Object.keys(legacy).some((field) => !codexProxyFields.includes(field))) {
     throw new Error("旧 network 代理配置无效，无法迁移");
   }
-  const snapshot = readCodexProxySnapshot(environment);
+  const snapshot = readCodexProxyMigrationSnapshot(environment);
   const changes = {};
   for (const [field, value] of Object.entries(legacy)) {
     if (typeof value !== "string") throw new Error("旧 network 代理值必须是文本");
@@ -563,7 +584,7 @@ function planProxyMigration(document, environment) {
     if (current === undefined) changes[field] = value.trim();
   }
   const nextContent = renderCodexProxySettings(snapshot, changes);
-  return { ...snapshot, nextContent, changed: nextContent !== (snapshot.content ?? "") };
+  return { ...snapshot, settings: { ...snapshot.settings, ...changes }, nextContent, changed: nextContent !== (snapshot.content ?? "") };
 }
 
 export function inspectCoreServiceInstallation(

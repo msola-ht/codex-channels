@@ -169,6 +169,8 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
 `codexc update` 会备份并迁移旧 TOML `[network]` 到 `.env`，成功后删除 `[network]`；
 若待迁移值与 `.env` 已配置的值冲突则明确报错，不覆盖现有值。正常启动不再接受旧 `[network]`。
+迁移按合并后的设置校验代理组合；写入和失败回滚都检查文件是否被其他操作改动。若回滚冲突，
+保留当前 `.env` 与迁移备份并报错，核对后再重试更新。
 
 Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
 

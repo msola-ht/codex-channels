@@ -55,7 +55,7 @@
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
 - `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  检查旧 `[network]` 与 Codex `.env` 的冲突，备份迁移代理后删除旧表，失败时恢复两个文件；同时
+  检查旧 `[network]` 与 Codex `.env` 的冲突和合并后的代理组合，持有共享代理文件锁完成备份、迁移与失败回滚；回滚时原文变化则保留当前代理文件与备份并报错；同时
   校验 `config.toml`、状态库、指标库、计划任务库、会话展示缓存及核心服务定义的完整状态，并返回不含凭据的修订
   计划、是否需要中断服务及按需阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
   App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
