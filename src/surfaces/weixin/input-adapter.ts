@@ -13,6 +13,7 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import { truncateQuotedText } from "../quoted-input.js";
+import { resolveWeixinQuotedText } from "./quoted-reference.js";
 import {
   WeixinProtocolError,
   type WeixinInboundMessage,
@@ -206,8 +207,8 @@ export class WeixinInputAdapter {
       return;
     }
     this.options.service.touchActivity?.(target);
-    const quotedText = message.quotedText
-      ?? (message.quotedMessageId === undefined
+    const quotedText = resolveWeixinQuotedText(message,
+      message.quotedMessageId === undefined
         ? undefined
         : this.quotedTexts.get(
           quotedTextCacheKey(target, message.quotedMessageId),

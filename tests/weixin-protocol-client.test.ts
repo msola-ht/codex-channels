@@ -301,9 +301,56 @@ describe("WeixinProtocolClient", () => {
       messages: [{
         kind: "text",
         text: "这句话是什么意思？",
-        quotedText: "小马 | 原始消息",
+        quotedTitle: "小马",
+        quotedText: "原始消息",
       }],
     });
+  });
+
+  it.each([
+    { svr_id: "9007199254740993123" },
+    { svr_id: "9007199254740993123", message_item: { type: 0, msg_id: "42" } },
+  ])("reads the current server quote identifier: %j", async (reference) => {
+    const client = createClient({ fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+      ret: 0,
+      msgs: [message("8", { item_list: [{ type: 1, text_item: { text: "引用测试" }, ref_msg: reference }] })],
+    }))) });
+    await expect(client.getUpdates("")).resolves.toMatchObject({
+      messages: [{ quotedMessageId: "9007199254740993123" }],
+    });
+  });
+
+  it.each(["svr_id", "msg_id"])("preserves numeric uint64 quote identifiers: %s", async (field) => {
+    const reference = field === "svr_id"
+      ? { svr_id: "9007199254740993123" }
+      : { message_item: { type: 0, msg_id: "9007199254740993123" } };
+    const raw = exactMessageIds({ ret: 0, msgs: [message("8", {
+      item_list: [{ type: 1, text_item: { text: 'literal "svr_id":123' }, ref_msg: reference }],
+    })] }).replace(`"${field}":"9007199254740993123"`, `"${field}":9007199254740993123`);
+    const client = createClient({ fetchImpl: vi.fn(async () => new Response(raw)) });
+    await expect(client.getUpdates("")).resolves.toMatchObject({ messages: [{
+      messageId: "8", text: 'literal "svr_id":123', quotedMessageId: "9007199254740993123",
+    }] });
+  });
+
+  it("keeps summary and partial selection separate from quoted content", async () => {
+    const partial = { start: "甲", end: "乙", startindex: 0, endindex: 1, quotemd5: "a".repeat(32) };
+    const client = createClient({ fetchImpl: vi.fn(async () => new Response(exactMessageIds({
+      ret: 0, msgs: [message("8", { item_list: [{ type: 1, text_item: { text: "解释选中文字" },
+        ref_msg: { svr_id: "9", title: "摘要", partial_text: partial },
+      }] })],
+    }))) });
+    await expect(client.getUpdates("")).resolves.toMatchObject({ messages: [{
+      quotedMessageId: "9", quotedTitle: "摘要", quotedPartial: partial,
+    }] });
+  });
+
+  it.each(["1e3", "1.5", "-1", '"invalid"'])("rejects malformed quote identifiers %s", async (id) => {
+    const raw = exactMessageIds({ ret: 0, msgs: [message("8", {
+      item_list: [{ type: 1, text_item: { text: "引用" }, ref_msg: { svr_id: "9" } }],
+    })] }).replace('"svr_id":"9"', `"svr_id":${id}`);
+    const client = createClient({ fetchImpl: vi.fn(async () => new Response(raw)) });
+    await expect(client.getUpdates("")).rejects.toMatchObject({ code: "invalid-response" });
   });
 
   it("preserves the exact referenced message ID from a Weixin ref_msg", async () => {

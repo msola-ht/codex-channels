@@ -16,6 +16,8 @@ import {
   type WeixinFileReference,
   type WeixinImageReference,
   type WeixinInboundMessage,
+  type WeixinQuotedReference,
+  type WeixinPartialQuote,
   type WeixinUpdatesBatch,
 } from "./protocol-types.js";
 
@@ -29,13 +31,12 @@ export function parseUpdatesResponse(
   raw: string,
   accountId: string,
 ): WeixinUpdatesBatch {
-  const messageIds = extractMessageIdLexemes(raw);
-  const value = parseJsonRecord(raw, "微信长轮询响应");
+  const value = parseJsonRecord(preserveMessageIds(raw), "微信长轮询响应");
   throwForApiError(value, "微信长轮询");
   const messages = value.msgs === undefined
     ? []
     : requiredArray(value.msgs, "微信长轮询消息列表无效");
-  if (messages.length > 100 || messageIds.length !== messages.length) {
+  if (messages.length > 100) {
     throw new WeixinProtocolError(
       "invalid-response",
       "微信长轮询消息列表无效",
@@ -54,24 +55,23 @@ export function parseUpdatesResponse(
   );
   return {
     cursor,
-    messages: messages.map((message, index) =>
-      parseInboundMessage(message, messageIds[index]!, accountId)),
+    messages: messages.map((message) => parseInboundMessage(message, accountId)),
     ...(suggestedTimeoutMs === undefined ? {} : { suggestedTimeoutMs }),
   };
 }
 
 function parseInboundMessage(
   value: unknown,
-  messageId: string,
   accountId: string,
 ): WeixinInboundMessage {
-  if (!/^\d{1,64}$/u.test(messageId)) {
+  const record = requiredRecord(value, "微信消息格式无效");
+  const messageId = record.message_id;
+  if (typeof messageId !== "string" || !/^\d{1,64}$/u.test(messageId)) {
     throw new WeixinProtocolError(
       "invalid-response",
       "微信消息 ID 无效",
     );
   }
-  const record = requiredRecord(value, "微信消息格式无效");
   const messageType = optionalSafeInteger(
     record.message_type,
     "微信消息类型无效",
@@ -130,24 +130,23 @@ function parseInboundContent(
   items: readonly unknown[],
 ): Pick<
     Extract<WeixinInboundMessage, { kind: "text" }>,
-    "kind" | "text" | "quotedText" | "quotedMessageId"
+    "kind" | "text" | keyof WeixinQuotedReference
   >
   | Pick<
       Extract<WeixinInboundMessage, { kind: "image" }>,
-      "kind" | "text" | "quotedText" | "quotedMessageId" | "images"
+      "kind" | "text" | keyof WeixinQuotedReference | "images"
     >
   | Pick<
       Extract<WeixinInboundMessage, { kind: "file" }>,
-      "kind" | "text" | "quotedText" | "quotedMessageId" | "file"
+      "kind" | "text" | keyof WeixinQuotedReference | "file"
     >
   | Pick<
       Extract<WeixinInboundMessage, { kind: "audio" }>,
-      "kind" | "quotedText" | "quotedMessageId" | "audio"
+      "kind" | keyof WeixinQuotedReference | "audio"
     >
   | null {
   let text: string | undefined;
-  let quotedText: string | undefined;
-  let quotedMessageId: string | undefined;
+  let quoted: WeixinQuotedReference = {};
   const images: WeixinImageReference[] = [];
   let file: WeixinFileReference | undefined;
   let audio: WeixinAudioReference | undefined;
@@ -173,9 +172,7 @@ function parseInboundContent(
         return null;
       }
       text = textItem.text;
-      const quoted = parseQuotedReference(record.ref_msg);
-      quotedText = quoted.text;
-      quotedMessageId = quoted.messageId;
+      quoted = parseQuotedReference(record.ref_msg);
       continue;
     }
     if (type === 2) {
@@ -199,9 +196,7 @@ function parseInboundContent(
         return null;
       }
       audio = parseAudioReference(record);
-      const quoted = parseQuotedReference(record.ref_msg);
-      quotedText = quoted.text;
-      quotedMessageId = quoted.messageId;
+      quoted = parseQuotedReference(record.ref_msg);
       continue;
     }
     if (type === 4) {
@@ -216,8 +211,7 @@ function parseInboundContent(
   if (audio !== undefined) {
     return {
       kind: "audio",
-      ...(quotedText === undefined ? {} : { quotedText }),
-      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      ...quoted,
       audio,
     };
   }
@@ -225,8 +219,7 @@ function parseInboundContent(
     return {
       kind: "file",
       ...(text === undefined ? {} : { text }),
-      ...(quotedText === undefined ? {} : { quotedText }),
-      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      ...quoted,
       file,
     };
   }
@@ -234,8 +227,7 @@ function parseInboundContent(
     return {
       kind: "image",
       ...(text === undefined ? {} : { text }),
-      ...(quotedText === undefined ? {} : { quotedText }),
-      ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+      ...quoted,
       images,
     };
   }
@@ -244,8 +236,7 @@ function parseInboundContent(
     : {
         kind: "text",
         text,
-        ...(quotedText === undefined ? {} : { quotedText }),
-        ...(quotedMessageId === undefined ? {} : { quotedMessageId }),
+        ...quoted,
       };
 }
 
@@ -326,10 +317,7 @@ function parseAudioReference(value: unknown): WeixinAudioReference {
   };
 }
 
-function parseQuotedReference(value: unknown): {
-  text?: string;
-  messageId?: string;
-} {
+function parseQuotedReference(value: unknown): WeixinQuotedReference {
   if (value === undefined) {
     return {};
   }
@@ -341,7 +329,7 @@ function parseQuotedReference(value: unknown): {
   )?.trim();
   const messageItemValue = reference.message_item;
   let messageText: string | undefined;
-  let messageId: string | undefined;
+  let messageId = optionalBoundedString(reference.svr_id, "微信引用消息 ID 无效", 64);
   if (messageItemValue !== undefined) {
     const messageItem = requiredRecord(
       messageItemValue,
@@ -359,27 +347,40 @@ function parseQuotedReference(value: unknown): {
         textItem.text,
         "微信引用文本无效",
         100_000,
-      )?.trim();
+      );
     }
-    messageId = optionalBoundedString(
+    const itemMessageId = optionalBoundedString(
       messageItem.msg_id,
       "微信引用消息 ID 无效",
       64,
     );
-    if (messageId !== undefined && !/^\d{1,64}$/u.test(messageId)) {
-      throw new WeixinProtocolError(
-        "invalid-response",
-        "微信引用消息 ID 无效",
-      );
-    }
+    messageId ??= itemMessageId;
   }
-  const parts = [title, messageText].filter(
-    (part): part is string => part !== undefined && part.length > 0,
-  );
+  if (messageId !== undefined && !/^\d{1,64}$/u.test(messageId)) {
+    throw new WeixinProtocolError("invalid-response", "微信引用消息 ID 无效");
+  }
   return {
-    ...(parts.length === 0 ? {} : { text: parts.join(" | ") }),
-    ...(messageId === undefined ? {} : { messageId }),
+    ...(title ? { quotedTitle: title } : {}),
+    ...(messageText ? { quotedText: messageText } : {}),
+    ...(messageId === undefined ? {} : { quotedMessageId: messageId }),
+    ...(reference.partial_text === undefined ? {} : {
+      quotedPartial: parsePartialQuote(reference.partial_text),
+    }),
   };
+}
+
+function parsePartialQuote(value: unknown): WeixinPartialQuote {
+  const record = requiredRecord(value, "微信局部引用无效");
+  const start = optionalBoundedString(record.start, "微信局部引用起点无效", 8_000);
+  const end = optionalBoundedString(record.end, "微信局部引用终点无效", 8_000);
+  const startindex = optionalNonNegativeInteger(record.startindex, "微信局部引用起点序号无效");
+  const endindex = optionalNonNegativeInteger(record.endindex, "微信局部引用终点序号无效");
+  const quotemd5 = record.quotemd5;
+  if (!start || !end || startindex === undefined || endindex === undefined
+    || typeof quotemd5 !== "string" || !/^(?:[a-fA-F0-9]{32})?$/u.test(quotemd5)) {
+    throw new WeixinProtocolError("invalid-response", "微信局部引用无效");
+  }
+  return { start, end, startindex, endindex, quotemd5 };
 }
 
 function parseImageReference(value: unknown): WeixinImageReference {
@@ -503,8 +504,9 @@ function validateResponseActorId(value: unknown): string {
   }
 }
 
-function extractMessageIdLexemes(raw: string): string[] {
-  const values: string[] = [];
+function preserveMessageIds(raw: string): string {
+  let result = "";
+  let copied = 0;
   for (let index = 0; index < raw.length;) {
     if (raw[index] !== '"') {
       index += 1;
@@ -512,9 +514,10 @@ function extractMessageIdLexemes(raw: string): string[] {
     }
     const end = jsonStringEnd(raw, index);
     if (end === -1) {
-      return values;
+      return raw;
     }
-    if (raw.slice(index, end + 1) === '"message_id"') {
+    const key = raw.slice(index, end + 1);
+    if (key === '"message_id"' || key === '"msg_id"' || key === '"svr_id"') {
       let cursor = skipWhitespace(raw, end + 1);
       if (raw[cursor] === ":") {
         cursor = skipWhitespace(raw, cursor + 1);
@@ -522,13 +525,14 @@ function extractMessageIdLexemes(raw: string): string[] {
           /^(?:0|[1-9]\d*)(?=\s*[,}\]])/u,
         );
         if (match) {
-          values.push(match[0]);
+          result += raw.slice(copied, cursor) + '"' + match[0] + '"';
+          copied = cursor + match[0].length;
         }
       }
     }
     index = end + 1;
   }
-  return values;
+  return result + raw.slice(copied);
 }
 
 function jsonStringEnd(value: string, start: number): number {
