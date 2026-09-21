@@ -86,7 +86,9 @@ function lifecycle(): ThreadLifecyclePort {
     listThreads: unsupported,
     readThread: unsupported,
     startThread: async () => session("new"),
-    resumeThread: async (id) => session(id),
+    resumeThread: async (id) => ({ ...session(id), settingsMatch: true, effectiveSettings: {
+      cwd: "/workspace", approvalPolicy: "on-request", sandbox: "read-only", permissions: null,
+    } }),
     forkThread: unsupported,
     archiveThread: unsupported,
     unarchiveThread: unsupported,

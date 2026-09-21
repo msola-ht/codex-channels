@@ -318,6 +318,16 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 
 会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。
 
+历史恢复限定当前工作区，复用 `thread/list`、元数据 `thread/read` 和 `thread/resume`：
+[`router.ts`](../src/session-routing/router.ts) 在恢复和重连前核对历史目录，恢复后校验实际目录、权限和活动状态；
+显式恢复、重连与接管校验明确不匹配时统一移除对应绑定；Core 活动查询排除已解绑 Thread，
+下一条前台消息强制新建 Thread，避免普通发送或 steer 绕过恢复校验。
+共享订阅的生命周期按 Thread 串行，后台恢复在 RPC 前后复核原绑定，避免过期结果覆盖用户切换。
+[`conversation-service.ts`](../src/application/conversation-service.ts) 在锁内复核选择上下文，并恢复活动 Turn。
+跨工作区拒绝与显式切换后的目录归属由 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)
+的 `rejects cross-workspace history` 合同验证；失败清理与并发选择由
+[`session-router.test.ts`](../tests/session-router.test.ts) 和 [`conversation-service-session.test.ts`](../tests/conversation-service-session.test.ts) 验证。
+
 ## 本项目实现映射
 
 | 要查的问题 | 本项目入口 | 验证入口 |

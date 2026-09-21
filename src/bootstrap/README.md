@@ -160,6 +160,7 @@ Provider 账户能力同样通过编译期显式注册：OpenAI 复用 Codex Cli
 只取消该侧 Thread 的待处理交互，`thread/resume` 返回的活动 Turn 会重新归约到 Core。停止会中断启动中的 Codex 请求、取消并限时等待重连任务，且不会把主动关闭误判为永久
 Thread 恢复失败。单个 Thread 被另一个 Codex 进程持有写锁时，组合根保留绑定并让 Gateway 与
 其他 Thread 正常启动，按有界退避间隔只重试未恢复 Thread；占用与解除各投递一次结构化渠道通知。
+重试只保留仍匹配原 Conversation、Workspace 与 Session 的绑定；绑定被删除或切换后移除旧恢复任务。
 停止会取消等待计时器并限时等待在途恢复，不删除官方写锁或绕过 App Server 单写约束。
 启动失败、启动中停止和正常停止共享同一个组件关闭任务；除中断未完成连接所需
 的 Client 关闭外，Surface、事件总线、Client 收尾和存储不会被组合根重复关闭。组合根有界持有

@@ -1,3 +1,4 @@
+import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,11 +13,17 @@ import {
   ConversationCore,
 } from "../src/conversation-core/index.js";
 import type { SessionDisplayCachePort } from "../src/conversation-core/index.js";
-import type { SessionRouter } from "../src/session-routing/router.js";
+import { SessionRouter } from "../src/session-routing/router.js";
+import type { ThreadLifecyclePort, ThreadResumeSession } from "../src/session-routing/index.js";
+import { MemoryBindingStore } from "../src/storage/index.js";
+import { WorkspaceRegistry } from "../src/policy/index.js";
+import { EventBus } from "../src/event-bus/index.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const main = { id: "main", name: "Main", cwd: "/workspace/main" };
 const other = { id: "other", name: "Other", cwd: "/workspace/other" };
+const trackThreadActivity = () => ({ restore: vi.fn(), stop: vi.fn() });
 
 function turnPort(overrides: Partial<TurnExecutionPort> = {}): TurnExecutionPort {
   const unsupported = async (): Promise<never> => {
@@ -60,6 +67,126 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService conversation service session", () => {
+  it.each(["reconnect", "explicit"].flatMap((entry) =>
+    ["directory", "permissions", "cleanup"].map((mismatch) => ({ entry, mismatch }))))("does not route input to invalid history after $entry rejects $mismatch", async ({ entry, mismatch }) => {
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: main.id, threadId: "old", sessionId: "old" });
+    const session: ThreadResumeSession = {
+      thread: { id: "old", sessionId: "old", cwd: main.cwd, source: "cli", modelProvider: "openai",
+        preview: "", name: null, isPinned: false, historyMode: "paginated", status: { type: "idle" }, activeTurnId: null },
+      model: "gpt-main", reasoningEffort: null, serviceTier: null, contextCompactionItemIds: [],
+      settingsMatch: false,
+      effectiveSettings: { cwd: main.cwd, approvalPolicy: "never", sandbox: "read-only", permissions: null },
+    };
+    const listThreads = vi.fn(async () => [session.thread]);
+    const router = new SessionRouter({
+      readThread: async () => {
+        core.handle({ type: "turn.started", threadId: "old", turnId: "turn-old" });
+        return { ...session.thread, cwd: mismatch === "directory" ? other.cwd : main.cwd };
+      },
+      resumeThread: async () => session,
+      unsubscribeThread: async () => { if (mismatch === "cleanup") throw new Error("unsubscribe failed"); },
+      startThread: async () => ({ ...session, thread: { ...session.thread, id: "fresh", sessionId: "fresh" } }),
+      listThreads,
+    } as unknown as ThreadLifecyclePort, store, new WorkspaceRegistry([main, other], main.id));
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const core = new ConversationCore(router, output);
+    const startTurn = vi.fn(async () => ({ threadId: "fresh", turnId: "turn-fresh" }));
+    const service = new ConversationService(turnPort({ startTurn }), router, core, {
+      turnOverrides: () => ({}), markApplied: vi.fn(),
+    } as unknown as ModelSelectionService, queryPort());
+    if (entry === "reconnect") await router.restoreSubscriptions();
+    else await expect(router.resume(target, "old", false, main.cwd)).rejects.toThrow();
+    expect(core.activeTurn(target)).toBeUndefined();
+    expect(core.activeTurnForThread("old")).toBeUndefined();
+    expect(core.hasActiveTurns()).toBe(false);
+    expect(await service.stop(target)).toBe(false);
+    expect(await service.submit(target, "继续")).toMatchObject({ threadId: "fresh" });
+    expect(startTurn).toHaveBeenCalledExactlyOnceWith("fresh", [{ type: "text", text: "继续" }], expect.any(String), main.cwd, {});
+    expect(listThreads).not.toHaveBeenCalled();
+    await output.close();
+  });
+
+  it.each(["active", "completed", "next-turn"])("restores authoritative %s activity and makes stop target the live Turn", async (state) => {
+    const threadId = "historical";
+    let bound = false;
+    const output = new EventBus<OutputEvent>(pino({ level: "silent" }));
+    const core = new ConversationCore({
+      allBindings: () => [],
+      foregroundThreadId: () => bound ? threadId : undefined,
+      targetForThread: () => bound ? target : undefined,
+      modelSettingsForThread: () => undefined,
+      contextCompactionItemIdsForThread: () => undefined,
+    }, output);
+    const snapshot = {
+      id: threadId, sessionId: threadId, cwd: main.cwd, source: "cli" as const,
+      modelProvider: "openai", preview: "", name: null, isPinned: false,
+      historyMode: "paginated" as const, status: { type: "active" as const }, activeTurnId: "turn-1",
+    };
+    const binding = { target, workspaceId: main.id, threadId, sessionId: threadId };
+    const resume: SessionRouter["resume"] = async (_target, _id, _preserve, _cwd, transition) => {
+      if (state !== "active") core.handle({ type: "turn.completed", threadId, turnId: "turn-1", status: "completed", error: null });
+      if (state === "next-turn") core.handle({ type: "turn.started", threadId, turnId: "turn-2" });
+      transition?.assertCurrent();
+      bound = true;
+      transition?.restored(binding, snapshot);
+      return binding;
+    };
+    const interruptTurn = vi.fn(async () => undefined);
+    const service = new ConversationService(turnPort({ interruptTurn }), {
+      workspace: () => main, list: async () => [snapshot], resume,
+      targetForThread: () => undefined, current: () => bound ? binding : undefined,
+      modelSettingsForThread: () => undefined,
+    } as unknown as SessionRouter, core, { clear: vi.fn() } as unknown as ModelSelectionService, queryPort());
+    await service.resume(target, threadId);
+    expect(await service.stop(target)).toBe(state !== "completed");
+    if (state === "completed") expect(interruptTurn).not.toHaveBeenCalled();
+    else expect(interruptTurn).toHaveBeenCalledExactlyOnceWith(threadId, state === "next-turn" ? "turn-2" : "turn-1");
+    await output.close();
+  });
+
+  it.each(["01a0c390-cde6-7992-b12a-f44a7732ee1c", "01a0c390", "history", "1"])("limits selector %s to the current workspace list", async (selector) => {
+    const list = vi.fn(async () => []);
+    const resume = vi.fn();
+    const service = new ConversationService(turnPort(), {
+      workspace: () => main,
+      list,
+      resume,
+    } as unknown as SessionRouter, {} as ConversationCore, {} as ModelSelectionService, queryPort());
+    await expect(service.resume(target, selector)).rejects.toMatchObject({ code: "session.selector.not-found" });
+    expect(list).toHaveBeenCalledExactlyOnceWith(target);
+    expect(resume).not.toHaveBeenCalled();
+  });
+
+  it("rejects a short selection when a queued workspace switch changes its context", async () => {
+    let workspace = main;
+    let releaseList!: () => void;
+    let listStarted!: () => void;
+    const started = new Promise<void>((resolve) => { listStarted = resolve; });
+    const waiting = new Promise<void>((resolve) => { releaseList = resolve; });
+    const resume = vi.fn();
+    const service = new ConversationService(turnPort(), {
+      workspace: () => workspace,
+      list: async () => {
+        listStarted();
+        await waiting;
+        return [{ id: "historical", cwd: main.cwd }];
+      },
+      resolveWorkspace: () => other,
+      selectWorkspace: async () => { workspace = other; return other; },
+      targetForThread: () => undefined,
+      resume,
+    } as unknown as SessionRouter, { activeTurn: () => undefined } as unknown as ConversationCore,
+    { clear: vi.fn() } as unknown as ModelSelectionService, queryPort());
+    const recovering = service.resume(target, "1");
+    await started;
+    const switching = service.selectWorkspace(target, "other");
+    releaseList();
+    await switching;
+    await expect(recovering).rejects.toMatchObject({ code: "thread.takeover.changed" });
+    expect(resume).not.toHaveBeenCalled();
+  });
+
   it("takes over an idle Thread and notifies the previous channel", async () => {
     const previousTarget = {
       surface: "feishu" as const,
@@ -103,6 +230,7 @@ describe("ConversationService conversation service session", () => {
         activeTurnId: null,
       }],
       targetForThread: () => previousTarget,
+      workspace: () => main,
       current: (candidate: typeof target | typeof previousTarget) =>
         candidate.surface === "telegram" ? destinationBinding : previousOwner,
       transferBinding,
@@ -159,6 +287,7 @@ describe("ConversationService conversation service session", () => {
           activeTurnId: null,
         }],
         targetForThread: () => previousTarget,
+        workspace: () => main,
         current: () => undefined,
         transferBinding,
       } as unknown as SessionRouter,
@@ -212,6 +341,7 @@ describe("ConversationService conversation service session", () => {
           activeTurnId: null,
         }],
         targetForThread: () => previousTarget,
+        workspace: () => main,
         current: () => undefined,
         transferBinding,
       } as unknown as SessionRouter,
@@ -266,6 +396,7 @@ describe("ConversationService conversation service session", () => {
           activeTurnId: null,
         }],
         targetForThread: () => sameSurfaceOwner,
+        workspace: () => main,
         transferBinding,
       } as unknown as SessionRouter,
       { activeTurn: () => undefined } as unknown as ConversationCore,
@@ -336,9 +467,10 @@ describe("ConversationService conversation service session", () => {
         ],
         resume,
         targetForThread: () => undefined,
+        workspace: () => main,
         modelSettingsForThread: () => undefined,
       } as unknown as SessionRouter,
-      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { activeTurn: () => undefined, trackThreadActivity } as unknown as ConversationCore,
       { capturePreference, restorePreference } as unknown as ModelSelectionService,
       queryPort(),
     );
@@ -351,7 +483,7 @@ describe("ConversationService conversation service session", () => {
     await expect(service.resume(target, "1")).resolves.toEqual({
       threadId: "pinned-old",
     });
-    expect(resume).toHaveBeenCalledWith(target, "pinned-old");
+    expect(resume).toHaveBeenCalledWith(target, "pinned-old", false, main.cwd, expect.objectContaining({ restored: expect.any(Function) }));
     expect(restorePreference).toHaveBeenCalledWith(target, preference);
   });
 
@@ -384,6 +516,7 @@ describe("ConversationService conversation service session", () => {
           sessionId: "session-running",
         }),
         targetForThread: () => undefined,
+        workspace: () => main,
         backgroundBindings: () => [],
         isBackgroundThread: () => false,
         modelSettingsForThread: () => undefined,
@@ -391,6 +524,7 @@ describe("ConversationService conversation service session", () => {
       } as unknown as SessionRouter,
       {
         activeTurn: () => ({ target, threadId: "running", turnId: "turn-running" }),
+        trackThreadActivity,
       } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
       queryPort(),
@@ -400,7 +534,7 @@ describe("ConversationService conversation service session", () => {
       threadId: "selected",
       backgroundedThreadId: "running",
     });
-    expect(resume).toHaveBeenCalledWith(target, "selected", true);
+    expect(resume).toHaveBeenCalledWith(target, "selected", true, main.cwd, expect.objectContaining({ restored: expect.any(Function) }));
   });
 
   it("annotates sessions with the model and effort the router knows", async () => {

@@ -98,6 +98,7 @@ import type {
   ThreadQueryOptions,
   ThreadDynamicToolSpec,
   ThreadSession,
+  ThreadResumeSession,
   ThreadStartOptions,
   ThreadSnapshot,
 } from "../session-routing/index.js";
@@ -105,6 +106,7 @@ import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
+  toThreadResumeSession,
   toThreadSnapshot,
 } from "./thread-adapter.js";
 import {
@@ -356,19 +358,22 @@ export class CodexAppServerClient implements
     threadId: string,
     cwd: string,
     options: ThreadStartOptions = {},
-  ): Promise<ThreadSession> {
+  ): Promise<ThreadResumeSession> {
+    const settings = {
+      cwd,
+      approvalPolicy: options.approvalPolicy ?? "on-request",
+      ...(options.permissions !== undefined
+        ? { permissions: options.permissions }
+        : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+    };
     const response = await this.rpc.request<ThreadResumeResponse>({
       method: "thread/resume",
       params: {
         threadId,
-        cwd,
-        approvalPolicy: options.approvalPolicy ?? "on-request",
-        ...(options.permissions !== undefined
-          ? { permissions: options.permissions }
-          : { sandbox: options.sandbox ?? this.defaults.sandbox }),
+        ...settings,
       },
     }, { retryOverload: false });
-    return toThreadSession(response);
+    return toThreadResumeSession(response, settings);
   }
 
   async unsubscribeThread(threadId: string): Promise<void> {

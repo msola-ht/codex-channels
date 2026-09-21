@@ -14,7 +14,7 @@
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
   Workspace 的稳定 ID 与名称；动态工具不会触发既有前台 Thread 的替换或解绑；切换目标恢复成功后才解除当前绑定，启动恢复只有在 Thread 明确不存在、
-  已删除或已归档时才移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
+  已删除、已归档或恢复校验明确不匹配时移除持久化绑定；订阅恢复时把稳定 Thread 快照交回组合根。跨渠道接管只允许
   当前 Thread 与目标 Conversation 原 Thread 都由 App Server 报告为空闲时执行；保留被接管
   Thread 的现有订阅，只取消目标 Conversation 被替换 Thread 的订阅。跨 Provider 模型切换通过
   `newSession` 解除当前绑定并保留原 Thread，下一 Turn 由对应 App Server 以精确 Provider 和模型新建 Thread；
@@ -42,6 +42,14 @@ Thread 已在离线期间结束，只提示通过 `/resume` 查看，不伪造�
   App Server 内存卸载，保留可恢复的持久化绑定。官方通知的校验和转换由 `codex-client` 完成。
 
 自动接续前必须检查来源、Workspace、活动状态和是否被其他 Conversation 占用。App Server 响应是事实来源，Router 的缓存只用于路由和界面加速。
+显式恢复只接受当前工作区历史；`resume` 在写请求前读取 Thread 元数据，核对选择时的目录
+和允许来源。恢复与重连统一检查历史目录及响应中的实际目录、权限和活动状态，避免用旧绑定
+覆盖历史目录；普通切换失败时取消新订阅并保留原绑定。显式恢复、重连、接管或恢复旧订阅时，
+若确认目录、权限或活动状态不匹配，统一先移除对应绑定，再取消已有订阅；前台绑定移除后，
+下一条普通消息在当前工作区新建 Thread，不自动接续旧历史，也不改变其他有效的前后台绑定。
+恢复、解绑、前后台切换、接管、归档与取消归档按 Thread 串行执行；涉及新旧两个 Thread 时按固定
+顺序获取执行权，其他 Thread 不受阻塞。后台恢复在执行前及 RPC 返回后复核原绑定，官方通知已
+移除的绑定不再写回；过期恢复不发布成功回调，也不取消后来恢复成功的订阅。
 Gateway 重连或重启后，Client 必须从 `thread/resume` 返回的 `status` 与 `turns` 映射
 `activeTurnId`，组合根再恢复仍在运行的 Turn，不能只恢复绑定，否则 steer、停止和下一 Turn
 队列会误判为空闲。Provider 路由必须根据 Thread 的官方 `modelProvider` 选择已用对应启动配置

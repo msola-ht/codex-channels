@@ -181,6 +181,7 @@ function serviceWithQueue(
     ...options.router,
   } as unknown as SessionRouter;
   const core = {
+    trackThreadActivity: () => ({ restore: vi.fn(), stop: vi.fn() }),
     activeTurn: () => options.active ? {
       target,
       threadId: options.activeThreadId ?? binding.threadId,
@@ -560,7 +561,7 @@ describe("ConversationService native Thread Queue", () => {
       threadId: "cold-thread",
       queuePending: true,
     });
-    expect(resume).toHaveBeenCalledWith(target, "cold-thread");
+    expect(resume).toHaveBeenCalledWith(target, "cold-thread", false, "/workspace/main", expect.objectContaining({ restored: expect.any(Function) }));
     expect(clear).toHaveBeenCalledWith(target);
     expect(restorePreference).not.toHaveBeenCalled();
   });

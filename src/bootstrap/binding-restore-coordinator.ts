@@ -2,6 +2,7 @@ import type { Logger } from "pino";
 
 import type { ProviderRoutingClient } from "../codex-client/index.js";
 import {
+  conversationTargetKey,
   surfaceAccountKey,
   type OutputEvent,
 } from "../conversation-core/index.js";
@@ -127,6 +128,7 @@ export class BindingRestoreCoordinator {
     provider?: string,
     requestedThreadIds?: ReadonlySet<string>,
   ): Promise<void> {
+    this.prunePendingRestores();
     const enabledSurfaces = new Set(
       this.options.enabledSurfaces().map((surface) =>
         surfaceAccountKey(surface.surface, surface.accountId)),
@@ -228,6 +230,7 @@ export class BindingRestoreCoordinator {
     }
     await scheduledRecovery?.recoverRunning(restoredThreadIds);
     for (const failure of failures) {
+      if (!failure.bindingRemoved && !this.isCurrentBinding(failure.binding)) continue;
       this.options.logger.warn(
         {
           err: failure.error,
@@ -279,6 +282,7 @@ export class BindingRestoreCoordinator {
   }
 
   schedule(): void {
+    this.prunePendingRestores();
     if (
       this.stopped
       || this.pendingBindingRestores.size === 0
@@ -315,6 +319,19 @@ export class BindingRestoreCoordinator {
     }
     if (this.restoreTasks.size === 0) return undefined;
     return Promise.allSettled([...this.restoreTasks]).then(() => undefined);
+  }
+
+  private isCurrentBinding(binding: ConversationBinding): boolean {
+    return this.options.router.allBindings().some((current) =>
+      current.threadId === binding.threadId && current.sessionId === binding.sessionId
+      && current.workspaceId === binding.workspaceId
+      && conversationTargetKey(current.target) === conversationTargetKey(binding.target));
+  }
+
+  private prunePendingRestores(): void {
+    for (const [threadId, pending] of this.pendingBindingRestores) {
+      if (!this.isCurrentBinding(pending.binding)) this.pendingBindingRestores.delete(threadId);
+    }
   }
 
   private publishAvailability(

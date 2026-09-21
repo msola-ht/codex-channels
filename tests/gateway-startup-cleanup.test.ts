@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
+import { BindingRestoreCoordinator, type BindingRestoreCoordinatorOptions } from "../src/bootstrap/binding-restore-coordinator.js";
 import {
   inspectThreadWriterLock,
   terminateThreadWriterHolder,
@@ -18,6 +19,21 @@ import {
 const unixSocketTmpdir = process.platform === "darwin" ? "/tmp" : tmpdir();
 
 type GatewayApplicationFixture = GatewayApplication & Record<string, unknown>;
+
+it.each(["removed", "moved"])("drops pending recovery when its original binding was %s", async (change) => {
+  const target = { surface: "feishu" as const, accountId: "default", conversationId: "review" };
+  const binding = { target, workspaceId: "old", threadId: "history", sessionId: "history" };
+  const pending = new Map([[binding.threadId, { binding, occupiedNotified: true, failureCount: 3 }]]);
+  const coordinator = new BindingRestoreCoordinator({
+    router: { allBindings: () => change === "removed" ? [] : [{ ...binding, workspaceId: "new" }] },
+  } as unknown as BindingRestoreCoordinatorOptions, {
+    disconnectedProviders: new Set(), disconnectedBindingsByProvider: new Map(),
+    pendingBindingRestores: pending, restoringThreadIds: new Set(), restoreAttempt: 1,
+  });
+  coordinator.schedule();
+  expect(pending.size).toBe(0);
+  await coordinator.close();
+});
 
 function createGatewayApplicationFixture(
   properties: Record<string, unknown>,

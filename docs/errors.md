@@ -88,13 +88,13 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | --- | --- | --- |
 | `session.selector.required` | /resume 用法提示 | 未提供会话选择参数 |
 | `session.selector.ambiguous` | 会话选择不唯一 | 选择器匹配多个会话 |
-| `session.selector.not-found` | 找不到指定会话 | 选择器无匹配 |
+| `session.selector.not-found` | 在当前工作区找不到指定会话；跨工作区恢复不受支持，请先使用 /work 切换到会话所属工作区 | 当前工作区内选择器无匹配 |
 | `sessions.usage` | /sessions 用法提示 | 参数格式错误 |
 | `archived-sessions.usage` | /archived 用法提示 | 参数格式错误 |
 | `thread.bound` | 该 Codex Thread 已绑定到其他会话 | 跨会话接管已绑定 Thread |
 | `thread.takeover.busy` | 原渠道或当前渠道仍有任务，暂不能接管 | 接管运行中的 Thread |
-| `thread.takeover.workspace` | 只能接管当前 Workspace 中的 Thread | 跨 Workspace 接管 |
-| `thread.takeover.changed` | 会话绑定刚刚发生变化，请重新打开会话列表后再试 | 接管期间绑定变更 |
+| `thread.takeover.workspace` | 只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区 | 跨工作区恢复或接管 |
+| `thread.takeover.changed` | 会话绑定或工作区已发生变化，请重新打开会话列表后再试 | 恢复或接管期间绑定、工作区或 Thread 目录变更 |
 | `workspace.missing` | Workspace 不存在或未获授权 | 配置的 Workspace 缺失 |
 | `workspace.selector.required` | /workspace 用法提示 | 未提供 Workspace 选择参数 |
 | `workspace.selector.ambiguous` | Workspace 选择不唯一 | 选择器匹配多个 Workspace |

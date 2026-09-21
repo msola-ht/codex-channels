@@ -200,7 +200,7 @@ describe("SqliteBindingStore", () => {
 
     const second = new SqliteBindingStore(path);
     const client = threadPort({
-      resumeThread: async () => {
+      readThread: async () => {
         throw new Error("thread not found");
       },
     });

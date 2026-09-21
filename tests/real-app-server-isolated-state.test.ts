@@ -21,7 +21,9 @@ import {
 } from "../scripts/codex-user-settings-management.mjs";
 import type { ApprovalRequest } from "../src/approval/index.js";
 import { ModelSelectionService, type McpRuntimeStatus } from "../src/application/index.js";
-import type { SessionRouter } from "../src/session-routing/index.js";
+import { SessionRouter, type ThreadLifecyclePort } from "../src/session-routing/index.js";
+import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
+import { WorkspaceRegistry } from "../src/policy/index.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import {
   handleApprovalServerRequest,
@@ -273,6 +275,101 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(skills.every((skill) =>
       typeof skill.name === "string" && typeof skill.description === "string")).toBe(true);
   });
+
+  it("rejects cross-workspace history and preserves its directory after an explicit workspace switch", async () => {
+    const historicalCwd = join(testRuntime, "historical-workspace");
+    const otherCwd = join(testRuntime, "other-workspace");
+    mkdirSync(historicalCwd);
+    mkdirSync(otherCwd);
+    const started = await ownerClient.startThread(historicalCwd);
+    const id = started.thread.id;
+    let completed = false;
+    let activeTurnId: string | undefined;
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "turn.started" && event.threadId === id) activeTurnId = event.turnId;
+      if (event?.type === "turn.completed" && event.threadId === id) completed = true;
+    });
+    const target = { surface: "feishu" as const, accountId: "contract", conversationId: "cross-workspace" };
+    const registry = new WorkspaceRegistry([
+      { id: "historical", name: "Historical", cwd: historicalCwd, sandbox: "read-only" },
+      { id: "other", name: "Other", cwd: otherCwd, sandbox: "workspace-write" },
+    ], "other");
+    const router = new SessionRouter(peerClient, new MemoryBindingStore(), registry);
+    try {
+      await ownerClient.startTurn(id, [{ type: "text", text: "workspace recovery contract" }],
+        "codex_connect:workspace-recovery-contract", historicalCwd);
+      await waitFor(() => activeTurnId !== undefined, 10_000);
+      const incompatibleStore = new MemoryBindingStore();
+      const incompatible = new SessionRouter(peerClient, incompatibleStore, new WorkspaceRegistry([
+        { id: "historical", name: "Historical", cwd: historicalCwd, sandbox: "workspace-write" },
+      ], "historical"));
+      await expect(incompatible.resume(target, id)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+      expect(incompatible.current(target)).toBeUndefined();
+      incompatibleStore.bind({ target, workspaceId: "historical", threadId: id, sessionId: id });
+      await expect(incompatible.resume(target, id)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+      expect(incompatible.current(target)).toBeUndefined();
+      incompatibleStore.bind({ target, workspaceId: "historical", threadId: id, sessionId: id });
+      expect(await incompatible.restoreSubscriptions()).toMatchObject([{ bindingRemoved: true, reason: "unavailable" }]);
+      expect(incompatible.current(target)).toBeUndefined();
+      expect(incompatible.idleState(target).forceNew).toBe(true);
+      expect((await ownerClient.readThread(id)).status.type).toBe("active");
+      await ownerClient.interruptTurn(id, activeTurnId!);
+      await waitFor(() => completed, 2_000);
+      await ownerClient.unsubscribeThread(id);
+      await expect(router.resume(target, id, false, historicalCwd)).rejects.toMatchObject({ code: "thread.takeover.workspace" });
+      expect((await peerClient.readThread(id)).cwd).toBe(historicalCwd);
+      await router.selectWorkspace(target, "historical");
+      await router.resume(target, id, false, historicalCwd);
+      expect(router.workspace(target).id).toBe("historical");
+      expect((await peerClient.readThread(id)).cwd).toBe(historicalCwd);
+      expect((await peerClient.listThreads(otherCwd)).some((thread) => thread.id === id)).toBe(false);
+      expect((await peerClient.listThreads(historicalCwd)).some((thread) => thread.id === id)).toBe(true);
+      await router.selectWorkspace(target, "other");
+      await expect(router.resume(target, id, false, historicalCwd)).rejects.toMatchObject({ code: "thread.takeover.workspace" });
+      const staleStore = new MemoryBindingStore();
+      staleStore.bind({ target, workspaceId: "other", threadId: id, sessionId: id });
+      const staleRouter = new SessionRouter(peerClient, staleStore, registry);
+      await expect(staleRouter.resume(target, id)).rejects.toMatchObject({ code: "thread.takeover.changed" });
+      expect(staleRouter.current(target)).toBeUndefined();
+      staleStore.bind({ target, workspaceId: "other", threadId: id, sessionId: id });
+      expect(await staleRouter.restoreSubscriptions()).toMatchObject([{ bindingRemoved: true, reason: "unavailable" }]);
+      expect(staleRouter.current(target)).toBeUndefined();
+      expect(staleRouter.idleState(target).forceNew).toBe(true);
+      expect((await peerClient.readThread(id)).cwd).toBe(historicalCwd);
+      let releaseRead!: () => void;
+      let readStarted!: () => void;
+      const blockedRead = new Promise<void>((resolveRead) => { releaseRead = resolveRead; });
+      const enteredRead = new Promise<void>((resolveRead) => { readStarted = resolveRead; });
+      let firstRead = true;
+      staleStore.bind({ target, workspaceId: "other", threadId: id, sessionId: id });
+      const serializedRouter = new SessionRouter({
+        readThread: async (threadId: string) => {
+          const history = await peerClient.readThread(threadId);
+          if (firstRead) { firstRead = false; readStarted(); await blockedRead; }
+          return history;
+        },
+        resumeThread: peerClient.resumeThread.bind(peerClient),
+        unsubscribeThread: peerClient.unsubscribeThread.bind(peerClient),
+      } as unknown as ThreadLifecyclePort, staleStore, registry);
+      const recovering = serializedRouter.restoreSubscriptions();
+      await enteredRead;
+      const switching = (async () => {
+        await serializedRouter.selectWorkspace(target, "historical");
+        return serializedRouter.resume(target, id);
+      })();
+      releaseRead();
+      await recovering;
+      expect(await switching).toMatchObject({ threadId: id, workspaceId: "historical" });
+      expect((await peerClient.readThread(id)).cwd).toBe(historicalCwd);
+      await serializedRouter.detach(target);
+    } finally {
+      removeNotification();
+      await router.detach(target);
+      await ownerClient.unsubscribeThread(id).catch(() => undefined);
+      await ownerClient.deleteThread(id);
+    }
+  }, 20_000);
 
   it("accepts the official Skill marker and structured input together", async () => {
     const skill = await ownerClient.resolveSkill(workdir, "contract-skill");

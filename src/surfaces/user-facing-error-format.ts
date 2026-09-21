@@ -56,7 +56,7 @@ export function formatSurfaceUserFacingError(
     case "session.selector.ambiguous":
       return "会话选择不唯一";
     case "session.selector.not-found":
-      return "找不到指定会话";
+      return "在当前工作区找不到指定会话；跨工作区恢复不受支持，请先使用 /work 切换到会话所属工作区";
     case "sessions.usage":
       return sessionCommandUsageText;
     case "archived-sessions.usage":
@@ -66,9 +66,9 @@ export function formatSurfaceUserFacingError(
     case "thread.takeover.busy":
       return "原渠道或当前渠道仍有任务或待处理交互，暂不能接管";
     case "thread.takeover.workspace":
-      return "只能接管当前 Workspace 中的 Codex Session";
+      return "只能恢复或接管当前工作区中的会话，请先使用 /work 切换到会话所属工作区";
     case "thread.takeover.changed":
-      return "会话绑定刚刚发生变化，请重新打开会话列表后再试";
+      return "会话绑定或工作区已发生变化，请重新打开会话列表后再试";
     case "goal.empty":
       return "目标不能为空";
     case "goal.usage":
