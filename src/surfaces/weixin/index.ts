@@ -10,6 +10,7 @@ export {
 } from "./credential-store.js";
 export {
   createCredentialBackedWeixinClient,
+  createWeixinCredentialChangeCheck,
   type CreateCredentialBackedWeixinClientOptions,
 } from "./credential-client.js";
 export {

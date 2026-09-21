@@ -15,9 +15,9 @@
 ## 官方参考基线
 
 微信协议研究基线固定为腾讯官方
-[`Tencent/openclaw-weixin v2.4.6`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.6)，
+[`Tencent/openclaw-weixin v2.4.9`](https://github.com/Tencent/openclaw-weixin/tree/v2.4.9)，
 对应提交
-[`cef0bfc`](https://github.com/Tencent/openclaw-weixin/commit/cef0bfc390393f716903e16d50408118047f87e0)。
+[`43675b6`](https://github.com/Tencent/openclaw-weixin/commit/43675b66551d12d6853155a7869a50fb12a18a1e)。
 
 本项目只参考固定标签中的扫码、HTTP JSON、长轮询、媒体、输入状态和消息发送合同：
 
@@ -25,6 +25,11 @@
 - 不采用 OpenClaw 的 Channel、会话、授权或路由实现；
 - MIT 许可证不自动证明线上后端允许任意第三方客户端；API 使用约束变化时必须停止并重新评审；
 - 上游基线变化时先更新 [`upstream-sources.md`](upstream-sources.md)，再修改实现与测试。
+
+`v2.4.9` 的适配范围是无损消息 ID、`svr_id` 文本引用和可校验的局部引用。引用只在授权后
+查询现有进程内缓存；标题保留为摘要，不能遮盖可用正文。缓存每条最多保留 8000 字符，选取
+超出缓存或校验不通过时明确提示无法还原，不把完整消息当作局部选中文字。
+不采用上游 SQLite 引用库、跨重启正文和附件缓存、OpenClaw 模型运行时或 CLI 注册逻辑。
 
 ## 当前范围
 

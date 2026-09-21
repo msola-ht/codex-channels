@@ -36,6 +36,7 @@ export type FeishuConfigChangeCode =
 export type WeixinConfigChangeCode =
   | "surface.weixin.enabled"
   | "surface.weixin.account"
+  | "surface.weixin.credentials"
   | "surface.weixin.allowed-users";
 
 export type ConfigChangeCode =

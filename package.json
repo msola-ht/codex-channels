@@ -204,7 +204,7 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "@larksuiteoapi/node-sdk": "1.73.3",
+    "@larksuiteoapi/node-sdk": "1.74.0",
     "grammy": "^1.45.1",
     "https-proxy-agent": "^9.1.0",
     "pino": "^10.3.1",

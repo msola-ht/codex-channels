@@ -88,8 +88,9 @@ export class GatewayApplication extends GatewayComponentGraph {
   reloadConfig(
     next: GatewayConfig,
     pendingAddedWorkspaces: readonly GatewayConfig["workspaces"][number][] = [],
+    weixinCredentialsChanged = false,
   ): ConfigReloadResult {
-    const result = classifyConfigReload(this.config, next);
+    const result = classifyConfigReload(this.config, next, weixinCredentialsChanged);
     if (result.action === "reinstall") {
       this.surfaceManager.configurationChanged({
         action: "reinstall-required",

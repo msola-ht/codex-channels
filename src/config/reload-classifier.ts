@@ -12,9 +12,13 @@ export type ConfigReloadResult =
 export function classifyConfigReload(
   current: GatewayConfig,
   next: GatewayConfig,
+  weixinCredentialsChanged = false,
 ): ConfigReloadResult {
   const reinstallReasons = serviceReinstallReasons(current, next);
   const restartReasons = restartRequiredReasons(current, next);
+  if (weixinCredentialsChanged) {
+    restartReasons.push(configChange("surface.weixin.credentials", "weixin"));
+  }
   const reloadReasons = hotReloadReasons(current, next);
   if (reinstallReasons.length > 0) {
     return {

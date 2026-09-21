@@ -51,7 +51,22 @@ export interface WeixinAudioReference {
   transcript?: string;
 }
 
-export type WeixinInboundMessage =
+export interface WeixinPartialQuote {
+  start: string;
+  end: string;
+  startindex: number;
+  endindex: number;
+  quotemd5: string;
+}
+
+export interface WeixinQuotedReference {
+  quotedText?: string;
+  quotedTitle?: string;
+  quotedMessageId?: string;
+  quotedPartial?: WeixinPartialQuote;
+}
+
+export type WeixinInboundMessage = WeixinQuotedReference & (
   | {
       kind: "text";
       messageId: string;
@@ -59,8 +74,6 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text: string;
-      quotedText?: string;
-      quotedMessageId?: string;
       createdAt?: number;
     }
   | {
@@ -70,8 +83,6 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text?: string;
-      quotedText?: string;
-      quotedMessageId?: string;
       images: readonly WeixinImageReference[];
       createdAt?: number;
     }
@@ -82,8 +93,6 @@ export type WeixinInboundMessage =
       conversationId: string;
       contextToken: string;
       text?: string;
-      quotedText?: string;
-      quotedMessageId?: string;
       file: WeixinFileReference;
       createdAt?: number;
     }
@@ -93,8 +102,6 @@ export type WeixinInboundMessage =
       actorId: string;
       conversationId: string;
       contextToken: string;
-      quotedText?: string;
-      quotedMessageId?: string;
       audio: WeixinAudioReference;
       createdAt?: number;
     }
@@ -102,7 +109,7 @@ export type WeixinInboundMessage =
       kind: "ignored";
       messageId: string;
       reason: WeixinIgnoredMessageReason;
-    };
+    });
 
 export interface WeixinUpdatesBatch {
   cursor: string;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -187,6 +188,8 @@ class WeixinSetupSession {
     let store;
     let previous;
     let credentialWriteAttempted = false;
+    let configWriteAttempted = false;
+    let configBeforeWrite;
     try {
       store = await this.#createCredentialStore(
         join(this.#dataDir, "credentials", "weixin"),
@@ -195,17 +198,20 @@ class WeixinSetupSession {
       credentialWriteAttempted = true;
       await store.set(credential);
       currentDocument.weixin = {
-        enabled: false,
+        enabled: true,
         account_id: credential.accountId,
         allowed_user_ids: allowedUserIds,
       };
+      configBeforeWrite = statSync(this.#configPath, { bigint: true });
+      configWriteAttempted = true;
       this.#writeConfig(this.#configPath, currentDocument);
     } catch (error) {
-      const confirmation = confirmWeixinConfig(
+      const confirmation = configWriteAttempted ? confirmWeixinConfig(
         this.#configPath,
         credential.accountId,
         allowedUserIds,
-      );
+        configBeforeWrite,
+      ) : { applied: false };
       if (confirmation.applied) {
         // The atomic config write committed; only its caller response failed.
       } else if (confirmation.error !== undefined) {
@@ -311,7 +317,7 @@ class WeixinSetupSession {
         scannerId,
         credentialConfigured: true,
         existingAllowedUserCount: this.#existingAllowedUserIds.length,
-        enabled: false,
+        enabled: true,
       };
       this.#qrCode = undefined;
       this.#setState("ready");
@@ -405,14 +411,16 @@ class WeixinSetupSession {
   }
 }
 
-function confirmWeixinConfig(configPath, accountId, allowedUserIds) {
+function confirmWeixinConfig(configPath, accountId, allowedUserIds, beforeWrite) {
   try {
     const configured = table(readGatewayConfig(configPath).weixin);
+    const afterWrite = statSync(configPath, { bigint: true });
     const configuredAllowedUserIds = Array.isArray(configured.allowed_user_ids)
       ? configured.allowed_user_ids
       : [];
     return {
-      applied: configured.enabled === false
+      applied: (afterWrite.dev !== beforeWrite.dev || afterWrite.ino !== beforeWrite.ino)
+        && configured.enabled === true
         && configured.account_id === accountId
         && configuredAllowedUserIds.length === allowedUserIds.length
         && configuredAllowedUserIds.every(

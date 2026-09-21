@@ -63,7 +63,7 @@ export async function runWeixinSetup({
 
   try {
     output.write("\nCodex Connect 微信 Setup\n\n");
-    output.write("扫码成功后默认安全保存为未启用；确认配置后可启用微信消息接收。\n");
+    output.write("扫码成功后，最终确认将安全保存连接并启用微信消息接收。\n");
     output.write("警告：微信可能用新连接替换并删除该账号已有的机器人连接。\n");
     if (!await prompt.confirm("确认继续扫码连接微信？", false)) {
       output.write("已取消，未请求微信二维码。\n");
@@ -135,9 +135,9 @@ export async function runWeixinSetup({
     output.write(`- 账号 ID：${status.preview.accountId}\n`);
     output.write(`- 扫码用户：${status.preview.scannerId}\n`);
     output.write("- Bot Token：已获取（不显示）\n");
-    output.write("- 运行状态：已配置，默认未启用\n");
+    output.write("- 运行状态：确认保存后启用\n");
     if (!await promptWithinSession((signal) =>
-      prompt.confirm("确认安全保存以上连接？", true, { signal }))) {
+      prompt.confirm("确认安全保存并启用以上连接？", true, { signal }))) {
       session.cancel(ownerId);
       output.write("未保存微信连接；本次 Token 已丢弃。\n");
       return undefined;
@@ -151,11 +151,8 @@ export async function runWeixinSetup({
       output.write("微信新连接已保存，但旧账号本地凭据清理失败；请运行 codexc doctor 检查。\n");
     }
 
-    output.write(`\n微信连接已安全保存：${result.configPath}\n`);
+    output.write(`\n微信连接已安全保存，消息接收已设为启用：${result.configPath}\n`);
     writeGatewayConfigActivationNotice(output);
-    output.write(
-      "如需启用消息接收，请将 weixin.enabled 改为 true，然后运行 codexc service reload。\n",
-    );
     return {
       accountId: result.accountId,
       allowedUserIds: result.allowedUserIds,

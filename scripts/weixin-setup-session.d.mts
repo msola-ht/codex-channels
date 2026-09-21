@@ -27,7 +27,7 @@ export interface WeixinSetupSessionStatus {
     scannerId: string;
     credentialConfigured: true;
     existingAllowedUserCount: number;
-    enabled: false;
+    enabled: true;
   };
   error?: { code: string };
 }
