@@ -360,7 +360,21 @@ contractSuite("isolated Codex App Server state contract", () => {
   it("reports thread MCP runtime failure and reconnect after an explicit reload", async () => {
     const started = await ownerClient.startThread(workdir);
     const threadId = started.thread.id;
+    const healthyStartupEvents: string[] = [];
+    let observeHealthyStartup = false;
+    const removeNotification = ownerClient.onNotification((notification) => {
+      const event = toConversationInputEvent(notification);
+      if (observeHealthyStartup && event?.type === "mcp.status.updated"
+        && event.threadId === threadId && event.name === "approval_probe" && event.status === "starting") {
+        healthyStartupEvents.push(event.status);
+      }
+    });
     try {
+      // Empty Threads have no persisted rollout and cannot be resumed by another client.
+      const turn = await ownerClient.startTurn(threadId, [{ type: "text", text: "contract-only" }],
+        "codex_connect:mcp-resume-contract", workdir);
+      await ownerClient.interruptTurn(threadId, turn.turnId).catch(() => undefined);
+      await waitForMcpRuntimeStatus(ownerClient, threadId, "approval_probe", "connected");
       await waitForMcpRuntimeStatus(
         ownerClient,
         threadId,
@@ -375,16 +389,26 @@ contractSuite("isolated Codex App Server state contract", () => {
         "failed",
       );
 
+      // A later client must discover an existing failure from the current snapshot.
+      await peerClient.resumeThread(threadId, workdir);
+      const restoredServers = await peerClient.listMcpServers(threadId, new AbortController().signal);
+      expect(restoredServers.find((server) => server.name === "runtime_probe")?.runtimeStatus).toBe("failed");
+
       rmSync(runtimeProbeExitFile, { force: true });
-      await ownerClient.reloadMcpServers();
+      observeHealthyStartup = true;
+      await ownerClient.reloadMcpServers(new AbortController().signal);
       await waitForMcpRuntimeStatus(
         ownerClient,
         threadId,
         "runtime_probe",
         "connected",
       );
+      await waitForMcpRuntimeStatus(peerClient, threadId, "approval_probe", "connected");
+      expect(healthyStartupEvents).toEqual([]);
     } finally {
+      removeNotification();
       rmSync(runtimeProbeExitFile, { force: true });
+      await peerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId).catch(() => undefined);
     }

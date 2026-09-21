@@ -115,6 +115,7 @@
 | MCP 状态测试 | [`mcp_server_status.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/tests/suite/v2/mcp_server_status.rs) | 工具原名、工具发现失败、项目级配置、实时元数据、当前 Thread 连接状态、断线失败与精简清单合同 |
 | MCP 资源测试 | [`mcp_resource.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/tests/suite/v2/mcp_resource.rs) | Thread 可选上下文、文本/二进制资源读取与错误合同 |
 | MCP 配置刷新测试 | [`executor_mcp.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/tests/suite/v2/executor_mcp.rs) | 从磁盘重载配置并刷新已加载 Thread 的 MCP 运行时；请求成功不等于远端握手已经完成 |
+| MCP 启动恢复 | [`mcp_refresh.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/src/mcp_refresh.rs)、[`connection_manager.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/codex-mcp/src/connection_manager.rs)、[`rmcp_client.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/codex-mcp/src/rmcp_client.rs)、[`connection_manager_tests.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/codex-mcp/src/connection_manager_tests.rs) | 普通刷新复用配置相同的健康连接、重建失败连接；`codex_apps` 工具发现可触发带退避的原生启动重连 |
 | Plugin 列表测试 | [`plugin_list.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/tests/suite/v2/plugin_list.rs) | Marketplace、已安装项、启用状态与 CWD 发现合同 |
 | Catalog 请求处理 | [`catalog_processor.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/src/request_processors/catalog_processor.rs) | Permission Profile 的 CWD 配置归并、allowed 状态和分页 |
 | Permission Profile 测试 | [`permission_profile_list.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/app-server/tests/suite/v2/permission_profile_list.rs) | 内置、自定义、项目级 Profile 与分页合同 |
@@ -180,6 +181,19 @@ CLI 参数，未显式覆盖时失败关闭。
 `codexc update` 在每次本地更新及候选源码切换前，用实际 CLI 校验同一快照、本地审批允许值和
 实际 `CODEX_HOME/config.toml` 的根级和所有 Profile 审批设置；目标版本不同时使用临时候选 CLI
 先完成真实校验，通过后才修改全局安装。不兼容设置只给出精确修复提示，不静默迁移审批语义。
+
+启动恢复由 [`startup-network-recovery.ts`](../src/bootstrap/startup-network-recovery.ts) 协调：首次网络检查
+结束后，在 [`startup-network-policy.json`](../startup-network-policy.json) 定义的五分钟窗口内有限复检，
+HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错误不重试。接续后的 OpenAI 绑定会话在后台
+通过稳定 `mcpServerStatus/list` 补读一次当前快照，单次与整体都有截止时间，读取期间的实时通知与关闭事件优先；
+首次快照失败时，在网络确认可达后仅对尚无更新通知的会话再补读一次，仍失败则明确提示状态未确认。
+网络恢复后重新读取 `account/rateLimits/read`；仅观察到非重新授权类 `codex_apps` 失败才对主 OpenAI
+实例调用一次稳定 `config/mcpServer/reload`，该方法影响此实例的所有已加载 Thread，不支持指定 Server。
+健康连接由官方实现复用，恢复仍以 `mcpServer/startupStatus/updated` 为准，不重启共享进程或重放 Turn。
+正常网络启动只观察窗口内迟到的失败通知；Gateway 停止会取消探测、额度读取与刷新请求的等待。
+验证见 [`startup-network-recovery.test.ts`](../tests/startup-network-recovery.test.ts)、
+[`json-rpc-account.test.ts`](../tests/json-rpc-account.test.ts)、[`json-rpc-mcp.test.ts`](../tests/json-rpc-mcp.test.ts)
+和包含失败连接重建、健康连接复用的真实合同 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts)。
 
 | 能力 | 当前使用的官方方法或通知 | 本项目入口与验证 |
 | --- | --- | --- |

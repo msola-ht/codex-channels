@@ -92,7 +92,7 @@ describe("shared Surface lifecycle presentation", () => {
         label: "版本",
         value: `Codex Connect ${gatewayMetadata.version} · Codex 0.147.0`,
       },
-      { label: "OpenAI 网络", value: "连接失败；请检查代理设置" },
+      { label: "OpenAI 网络", value: "暂不可达；请检查网络或代理状态" },
     ]);
   });
 
@@ -150,6 +150,7 @@ describe("shared Surface lifecycle presentation", () => {
   });
 
   it.each([
+    ["recovering", "暂不可达；正在后台复检"],
     ["invalid-base-url", "Base URL 路径无效；请检查配置"],
     ["indeterminate", "检测失败；请检查 App Server 连接与 Gateway 日志"],
   ] as const)("renders the %s startup connectivity result", (openAiConnectivity, value) => {

@@ -1,10 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { appServerMcpStatus, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient MCP", () => {
+    it("cancels a pending startup MCP snapshot", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
+      await client.connect();
+      vi.spyOn(transport, "send").mockResolvedValue(undefined);
+      const controller = new AbortController();
+      const request = client.listMcpServers("thread-1", controller.signal);
+      controller.abort(new Error("startup stopped"));
+      await expect(request).rejects.toThrow("startup stopped");
+      await client.close();
+    });
+
+    it("cancels a pending reload without resending the write", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
+      await client.connect();
+      const send = vi.spyOn(transport, "send").mockResolvedValue(undefined);
+      const controller = new AbortController();
+      const request = client.reloadMcpServers(controller.signal);
+      controller.abort(new Error("startup stopped"));
+      await expect(request).rejects.toThrow("startup stopped");
+      expect(send).toHaveBeenCalledOnce();
+      await client.close();
+    });
+
     it("maps and paginates MCP status into stable summaries", async () => {
       const transport = new FakeTransport();
       transport.mcpPages = [

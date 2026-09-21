@@ -4,7 +4,7 @@ import { checkOpenAiConnectivity } from "../src/bootstrap/openai-connectivity.js
 
 describe("OpenAI startup connectivity", () => {
   it.each(["api", "chatgpt"] as const)("rejects missing and unexpected inference routes for %s", async (route) => {
-    for (const status of [302, 404, 429, 500]) {
+    for (const status of [302, 404]) {
       const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
         new Response(null, { status: init?.method === "HEAD" ? status : 200 }));
       await expect(checkOpenAiConnectivity({ proxy: {}, route, fetchImpl }))
@@ -16,7 +16,13 @@ describe("OpenAI startup connectivity", () => {
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
       new Response(null, { status: init?.method === "HEAD" ? 503 : 200 }));
     await expect(checkOpenAiConnectivity({ proxy: {}, route, fetchImpl }))
-      .resolves.toBe("route-warning");
+      .resolves.toBe("temporarily-unavailable");
+  });
+
+  it.each([429, 500, 502, 503, 504])("classifies HTTP %s as transient", async (status) => {
+    await expect(checkOpenAiConnectivity({ proxy: {}, route: "chatgpt",
+      fetchImpl: async () => new Response(null, { status }),
+    })).resolves.toBe("temporarily-unavailable");
   });
 
   it.each([401, 403, 405])("accepts an unauthenticated HEAD response with status %s", async (status) => {
@@ -111,7 +117,7 @@ describe("OpenAI startup connectivity", () => {
       proxy: {},
       route: "api",
       fetchImpl,
-    })).resolves.toBe("route-warning");
+    })).resolves.toBe("temporarily-unavailable");
   });
 
   it("retries transport failures so a late proxy listener can recover", async () => {

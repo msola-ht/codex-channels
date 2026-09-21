@@ -91,6 +91,7 @@ Codex 用户配置：
 ```
 
 共享代理通过 `codexc config → 网络代理` 写入 `~/.codex/.env`；`codexc update` 会迁移并清理旧 TOML 代理配置，见[代理设置](docs/user-guide.md#代理与权限)。
+开机时网络或代理尚未就绪，Gateway 会在五分钟启动恢复窗口内有限复检，并在恢复后处理已观察到的 `codex_apps` 启动失败；详细边界见[启动连通性说明](docs/display.md)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
 旧版自动补入的空 `api_providers = []` 会由更新器备份后移除；非空旧配置需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工处理。

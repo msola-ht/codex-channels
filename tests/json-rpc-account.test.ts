@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { toAccountThreadUsage } from "../src/codex-client/account-adapter.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
@@ -7,6 +7,18 @@ import type { GetAccountTokenUsageResponse } from "../src/codex-protocol/index.j
 import { appServerRateLimit, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient account", () => {
+    it("cancels a pending background rate-limit read at the caller deadline", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
+      await client.connect();
+      vi.spyOn(transport, "send").mockResolvedValue(undefined);
+      const controller = new AbortController();
+      const request = client.accountRateLimits({ background: true, signal: controller.signal });
+      controller.abort(new Error("startup stopped"));
+      await expect(request).rejects.toThrow("startup stopped");
+      await client.close();
+    });
+
     it.each([
       [{ account: null, requiresOpenaiAuth: true }, "chatgpt"],
       [{ account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true }, "chatgpt"],

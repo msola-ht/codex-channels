@@ -86,6 +86,11 @@
   App Server/Gateway 就绪的情况。推理端点 HEAD 返回 5xx 时报告线路异常，不被 `/models` 成功掩盖。
   失败和路径异常形成脱敏状态
   供渠道上线通知使用，但不阻断 Gateway；停止过程会取消仍在进行的探测。
+- `startup-network-recovery.ts`：拥有启动后的有限网络复检、额度重读和主 OpenAI 实例的单次 MCP 刷新；
+  接续会话后有界补读 MCP 快照，并保留读取期间更新的实时状态；429/5xx 继续有限复检。
+  首次快照失败在网络可达后仅补读一次，实时通知或关闭会取消待补读项，失败不等于健康。
+  只跟踪启动窗口内非授权类 `codex_apps` 失败，以真实状态通知确认恢复，停止时取消并有界等待。
+  与首次探测共用根目录 `startup-network-policy.json` 的截止时间和退避参数。
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文

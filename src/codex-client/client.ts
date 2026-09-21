@@ -807,7 +807,7 @@ export class CodexAppServerClient implements
     return resolveInvocableSkill(await this.readSkills(cwd), cwd, name);
   }
 
-  async listMcpServers(threadId?: string): Promise<McpServerSummary[]> {
+  async listMcpServers(threadId?: string, signal?: AbortSignal): Promise<McpServerSummary[]> {
     const servers: McpServerSummary[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -821,7 +821,7 @@ export class CodexAppServerClient implements
             ...(threadId ? { threadId } : {}),
             ...(cursor ? { cursor } : {}),
           },
-        }, { retryOverload: true });
+        }, { retryOverload: true, ...(signal ? { signal } : {}) });
       const page = toMcpServerSummaryPage(response);
       servers.push(...page.servers);
       cursor = page.nextCursor;
@@ -852,11 +852,11 @@ export class CodexAppServerClient implements
     return servers;
   }
 
-  async reloadMcpServers(): Promise<void> {
+  async reloadMcpServers(signal?: AbortSignal): Promise<void> {
     await this.rpc.request<Record<string, never>>({
       method: "config/mcpServer/reload",
       params: undefined,
-    }, { retryOverload: false });
+    }, { retryOverload: false, ...(signal ? { signal } : {}) });
   }
 
   async startMcpOAuthLogin(
@@ -937,7 +937,7 @@ export class CodexAppServerClient implements
   }
 
   async accountRateLimits(
-    options: { background?: boolean } = {},
+    options: { background?: boolean; signal?: AbortSignal } = {},
   ): Promise<AccountRateLimits> {
     const params = {
       supportsLunaReserve: true,
@@ -946,7 +946,7 @@ export class CodexAppServerClient implements
     const response = await this.rpc.request<GetAccountRateLimitsResponse>({
       method: "account/rateLimits/read",
       params,
-    }, { retryOverload: true });
+    }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
     return toAccountRateLimits(response);
   }
 

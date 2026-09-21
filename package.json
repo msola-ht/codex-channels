@@ -167,6 +167,7 @@
     ".codex/skills/channel-image/",
     "webui/dist/",
     "config.example.toml",
+    "startup-network-policy.json",
     "index.md",
     "LICENSE",
     "README.md"

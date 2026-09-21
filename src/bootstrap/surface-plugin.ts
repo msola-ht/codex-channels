@@ -29,7 +29,7 @@ export interface SurfacePluginContext {
   logger: Logger;
   gatewayVersion: string;
   codexUpstreamUserAgent: () => string | undefined;
-  openAiConnectivity: () => OpenAiConnectivityStatus;
+  openAiConnectivity: () => OpenAiConnectivityStatus | "recovering";
   onFatal(surface: string, accountId: string, error: Error): void;
   autoCompactPercent: (
     provider: string | null | undefined,
