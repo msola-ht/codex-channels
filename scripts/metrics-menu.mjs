@@ -62,55 +62,8 @@ export async function runMetricsMenu({
     runDatabaseCommand(["status"]);
     return;
   }
-  if (action === "reset") {
-    const confirmed = await prompts.confirm({
-      message: "重置会先备份现有指标库，确认继续？",
-      initialValue: false,
-    });
-    if (prompts.isCancel(confirmed) || confirmed !== true) {
-      prompts.cancel("已取消");
-      return;
-    }
-    runDatabaseCommand(["reset"]);
-    return;
-  }
-  if (action === "cleanup") {
-    const storage = readStorage();
-    const keepDays = await prompts.text({
-      message: "保留最近多少天",
-      initialValue: String(storage.retention_days ?? 365),
-      validate: positiveIntegerPrompt,
-    });
-    if (prompts.isCancel(keepDays)) {
-      prompts.cancel("已取消");
-      return;
-    }
-    const maxRows = await prompts.text({
-      message: "最多保留多少行",
-      initialValue: String(storage.max_rows ?? 1_000_000),
-      validate: positiveIntegerPrompt,
-    });
-    if (prompts.isCancel(maxRows)) {
-      prompts.cancel("已取消");
-      return;
-    }
-    const vacuum = await prompts.confirm({
-      message: "清理后立即压缩 SQLite 文件？",
-      initialValue: false,
-    });
-    if (prompts.isCancel(vacuum)) {
-      prompts.cancel("已取消");
-      return;
-    }
-    runDatabaseCommand([
-      "cleanup-restart",
-      "--keep-days",
-      String(keepDays),
-      "--max-rows",
-      String(maxRows),
-      ...(vacuum ? ["--vacuum"] : []),
-    ]);
-    return;
+  if (action === "reset" || action === "cleanup") {
+    return runMetricsMaintenanceMenu(action, { prompts, readStorage, runDatabaseCommand });
   }
   if (action === "run") {
     const threadId = await prompts.text({
@@ -230,6 +183,64 @@ export async function runMetricsMenu({
     return;
   }
   throw new Error(`未知指标操作：${String(action)}`);
+}
+
+export async function runMetricsMaintenanceMenu(action, {
+  prompts = clackPrompts,
+  readStorage = defaultReadStorage,
+  runDatabaseCommand,
+}) {
+  if (action === "reset") {
+    const confirmed = await prompts.confirm({
+      message: "重置会先备份现有指标库，确认继续？",
+      initialValue: false,
+    });
+    if (prompts.isCancel(confirmed) || confirmed !== true) {
+      prompts.cancel("已取消");
+      return;
+    }
+    runDatabaseCommand(["reset"]);
+    return;
+  }
+  if (action === "cleanup") {
+    const storage = readStorage();
+    const keepDays = await prompts.text({
+      message: "保留最近多少天",
+      initialValue: String(storage.retention_days ?? 365),
+      validate: positiveIntegerPrompt,
+    });
+    if (prompts.isCancel(keepDays)) {
+      prompts.cancel("已取消");
+      return;
+    }
+    const maxRows = await prompts.text({
+      message: "最多保留多少行",
+      initialValue: String(storage.max_rows ?? 1_000_000),
+      validate: positiveIntegerPrompt,
+    });
+    if (prompts.isCancel(maxRows)) {
+      prompts.cancel("已取消");
+      return;
+    }
+    const vacuum = await prompts.confirm({
+      message: "清理后立即压缩 SQLite 文件？",
+      initialValue: false,
+    });
+    if (prompts.isCancel(vacuum)) {
+      prompts.cancel("已取消");
+      return;
+    }
+    runDatabaseCommand([
+      "cleanup-restart",
+      "--keep-days",
+      String(keepDays),
+      "--max-rows",
+      String(maxRows),
+      ...(vacuum ? ["--vacuum"] : []),
+    ]);
+    return;
+  }
+  throw new Error(`未知指标维护操作：${String(action)}`);
 }
 
 function defaultReadStorage() {

@@ -51,6 +51,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```bash
 codexc setup                 # Provider、渠道和项目技能接入
 codexc config                # Codex 新会话偏好与 Gateway 日常设置
+codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server

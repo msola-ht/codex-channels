@@ -36,6 +36,7 @@
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
+- `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。

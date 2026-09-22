@@ -68,6 +68,7 @@ import {
 } from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
 import { runSessionMenu } from "../scripts/session-menu.mjs";
+import { cleanupUsage, runCleanupMenu } from "../scripts/cleanup-menu.mjs";
 import { configuredEnvironment } from "../scripts/runtime-environment.mjs";
 import {
   runAppServerServiceCommand,
@@ -108,6 +109,7 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
+  cleanup                      统一交互清理会话、转储和指标
   traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
   sessions                     管理会话（包括按 Turn 清理旧会话）
   channel                      发送渠道图片
@@ -282,6 +284,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
+  cleanup: cleanupUsage,
   sessions: "用法：codexc sessions [cleanup <最大轮数> [--idle-days <天数>] [--confirm]]\n\n无子命令时进入交互菜单；清理默认只预览，交互终端确认后才归档。执行前必须停止 Gateway。",
   "sessions.cleanup": "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]",
   "metrics.report": `${metricsCommandUsage.report}
@@ -461,6 +464,19 @@ try {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "cleanup":
+      if (showRequestedHelp(args, "cleanup")) break;
+      requireNoArguments(args, cleanupUsage);
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        console.log(cleanupUsage);
+        break;
+      }
+      await runCleanupMenu({
+        runSessionCleanup: (values) => runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true }),
+        runTrafficCleanup: (values) => runStandaloneScript("scripts/traffic-cleanup.mjs", values),
+        runDatabaseCommand: (values) => runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true }),
+      });
       break;
     case "traffic":
       if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup")) break;

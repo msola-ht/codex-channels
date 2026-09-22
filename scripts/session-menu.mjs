@@ -26,6 +26,11 @@ export async function runSessionMenu({
   }
   if (action !== "cleanup") throw new Error(`未知会话操作：${String(action)}`);
 
+  return runSessionCleanupMenu({ prompts, runCleanup });
+}
+
+export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup }) {
+
   const maxTurns = await prompts.text({
     message: "归档主会话的最大轮数（超过此数跳过整组）",
     placeholder: "3",

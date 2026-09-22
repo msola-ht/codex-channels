@@ -40,6 +40,7 @@
     "scripts/channel-send-image.mjs",
     "scripts/ccg-setup.mjs",
     "scripts/cli-status.mjs",
+    "scripts/cleanup-menu.mjs",
     "scripts/codex-defaults-setup.mjs",
     "scripts/codex-public-cli-contract.mjs",
     "scripts/codex-remote-options.mjs",

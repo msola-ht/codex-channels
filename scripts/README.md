@@ -64,6 +64,7 @@
   会话发送并归档，详见 `docs/channel-image.md`。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
   App Server 枚举多 Provider/Workspace，按主会话真实轮数和整组可查询成员的空闲条件预览；所属 Provider 读取状态，后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档并核验结果。
+- `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
