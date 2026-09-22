@@ -5,9 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
-import { deepseekAccountDefinition, loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
+import { ccgAccountDefinition, deepseekAccountDefinition, loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { defaultCodexRemoteProfile, parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
-import { configuredHome, configureOpenCodeGo, testEnvironment } from "./model-provider-runtime-test-fixture.js";
+import {
+  configuredHome,
+  configureCcgAccounts,
+  configureOpenCodeGo,
+  testEnvironment,
+} from "./model-provider-runtime-test-fixture.js";
 
 const isolatedEnvironment = {
   CODEX_HOME: join(tmpdir(), "codexc-remote-options-empty-codex"),
@@ -30,6 +35,16 @@ describe("Codex Remote options", () => {
     }).selectedProfile).toBe("sf-ds-test");
     configureOpenCodeGo(environment.CODEX_HOME!);
     expect(() => defaultCodexRemoteProfile(environment)).toThrow("请指定 --profile");
+  });
+
+  it("selects the registered default when every switching Provider is a CCG account", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-remote-ccg-default-"));
+    try {
+      configureCcgAccounts(home, "work");
+      expect(defaultCodexRemoteProfile(testEnvironment(home))).toBe("sf-ccg-work");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("preserves explicit profiles without resolving the unauthenticated default", () => {
@@ -178,9 +193,29 @@ describe("Codex Remote options", () => {
     }
   });
 
+  it("uses one canonical Profile name for a configured CCG account", () => {
+    const definitions = [ccgAccountDefinition("work")];
+    expect(parseCodexRemoteOptions(["--profile", "sf-ccg-work"], {
+      managedProfileDefinitions: definitions,
+      customSwitchingProfiles: [],
+    })).toEqual({
+      passthrough: [],
+      selectedProfile: "sf-ccg-work",
+      workspaceId: undefined,
+    });
+    expect(() => parseCodexRemoteOptions(["--profile", "ccg-work"], {
+      managedProfileDefinitions: definitions,
+      customSwitchingProfiles: [],
+    })).toThrow(
+      "Profile ccg-work 不是该 Provider 的规范名称；请使用 --profile sf-ccg-work",
+    );
+  });
+
   it.each([
     ["sf-ocg-missing", "OpenCode Go Profile sf-ocg-missing 尚未配置"],
     ["sf-opencode-go-missing", "OpenCode Go Profile sf-opencode-go-missing 已废弃"],
+    ["sf-ccg-missing", "CCG Profile sf-ccg-missing 尚未配置"],
+    ["sf-ccg", "旧 CCG 单账户 Profile 已停用"],
   ])("rejects an unconfigured project-owned Profile namespace %s", (profileName, message) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],

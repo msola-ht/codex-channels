@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -28,11 +36,18 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 });
 
 import {
-  applyCcgConfiguration, ccgSetupPaths, removeCcgConfiguration, runCcgSetup, refreshCcgCatalogForUpdate,
+  applyCcgConfiguration,
+  ccgSetupPaths,
+  migrateCcgAccount,
+  refreshCcgCatalogForUpdate,
+  removeCcgConfiguration,
+  runCcgSetup,
+  setCcgDefaultAccount,
 } from "../scripts/ccg-setup.mjs";
 import { createCcgCatalog } from "../scripts/provider-model-catalog.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { commandCodeProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { loadCcgAccounts } from "../runtime/ccg-accounts.mjs";
 import { JsonRpcClient, loadManagedModelOptions, StdioTransport } from "../src/codex-client/index.js";
 import {
   loadManagedModelProviderSettings,
@@ -50,7 +65,7 @@ function fixture() {
     ...process.env, CODEX_HOME: join(home, "codex"), CODEX_CONNECT_HOME: join(home, "connect"),
     ...(process.env.RUN_CODEX_CONTRACT === "1" ? {} : { CODEX_BINARY: process.execPath }),
   };
-  const paths = ccgSetupPaths(environment);
+  const paths = ccgSetupPaths(environment, "main");
   writePrivateFileAtomicSync(paths.config, 'model = "gpt-5.5"\n');
   const source = { models: ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"].map((slug) => ({
     slug, display_name: slug, context_window: 1048576, max_context_window: 1048576,
@@ -62,7 +77,12 @@ function fixture() {
     input_modalities: ["text"], default_reasoning_level: "high",
     supported_reasoning_levels: [{ effort: "high", description: "High" }, { effort: "max", description: "Max" }],
   })) };
-  const input = { apiKey: "cmd_test-key", catalog: source, model: "deepseek/deepseek-v4-flash" };
+  const input = {
+    accountId: "main",
+    apiKey: "cmd_test-key",
+    catalog: source,
+    model: "deepseek/deepseek-v4-flash",
+  };
   return { environment, paths, source, input };
 }
 
@@ -89,6 +109,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     const select = vi.fn().mockResolvedValueOnce("switching").mockResolvedValueOnce(model);
     await expect(runCcgSetup({
       environment: options.environment, downloadCatalog, output: { write: vi.fn() },
+      action: "add", accountId: "main",
       prompts: { select, password: async () => "cmd_test-key", isCancel: () => false },
     })).resolves.toMatchObject({ action: "configured", model });
     expect(downloadCatalog).toHaveBeenCalledOnce();
@@ -110,7 +131,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     source.models[0]!.model_messages = { instructions_template: "Updated Flash instructions" };
     await expect(refreshCcgCatalogForUpdate(options.environment, {
       downloadCatalog: async () => ({ catalog: source }),
-    })).resolves.toEqual({ status: "updated", provider: "ccg" });
+    })).resolves.toEqual({ status: "updated", providers: ["ccg-main"] });
     const catalog = JSON.parse(readFileSync(options.paths.catalog, "utf8"));
     expect(catalog.models).toHaveLength(3);
     expect(catalog.models[2]).toMatchObject({
@@ -128,15 +149,15 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     const before = Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined);
     const cancelled = Symbol("cancelled");
     const answers = step === "model"
-      ? ["settings", cancelled]
-      : ["settings", options.input.model, cancelled];
+      ? [cancelled]
+      : [options.input.model, cancelled];
     const output = { write: vi.fn() };
     const select = vi.fn(async () => answers.shift());
     await expect(runCcgSetup({
-      environment: options.environment, output,
+      environment: options.environment, output, action: "settings", accountId: "main",
       prompts: { select, isCancel: (value: unknown) => value === cancelled },
     })).resolves.toEqual({ action: "back" });
-    expect(select).toHaveBeenCalledTimes(step === "model" ? 2 : 3);
+    expect(select).toHaveBeenCalledTimes(step === "model" ? 1 : 2);
     expect(output.write).not.toHaveBeenCalled();
     expect(Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined)).toEqual(before);
   });
@@ -157,7 +178,8 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     await applyCcgConfiguration(options.input, options);
     const before = Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined);
     failure.validation = true;
-    await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow("Codex CLI 校验");
+    await expect(applyCcgConfiguration({ ...options.input, reconfigure: true }, options))
+      .rejects.toThrow("Codex CLI 校验");
     expect(Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined)).toEqual(before);
   });
 
@@ -167,9 +189,22 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     await applyCcgConfiguration(input, options);
     const before = readFileSync(options.paths.config);
     rmSync(options.paths.backup);
-    await expect(applyCcgConfiguration(input, options)).rejects.toThrow("初始配置备份缺失");
+    await expect(applyCcgConfiguration({ ...input, reconfigure: true }, options))
+      .rejects.toThrow("初始配置备份缺失");
     expect(existsSync(options.paths.backup)).toBe(false);
     expect(readFileSync(options.paths.config)).toEqual(before);
+  });
+
+  it("does not refresh the shared catalog when a registered account is incomplete", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    const before = readFileSync(options.paths.catalog);
+    rmSync(options.paths.marker);
+
+    await expect(refreshCcgCatalogForUpdate(options.environment, {
+      downloadCatalog: async () => ({ catalog: deepseekSource(options.source) }),
+    })).rejects.toThrow("账户配置不完整");
+    expect(readFileSync(options.paths.catalog)).toEqual(before);
   });
 
   it("captures a fresh baseline after removal and keeps the previous backup", async () => {
@@ -177,13 +212,13 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     const input = { ...options.input, mode: "exclusive" as const, confirmExclusiveConfigChange: true };
     await applyCcgConfiguration(input, options);
     const oldBackup = readFileSync(options.paths.backup, "utf8");
-    await removeCcgConfiguration({ confirmRemove: true }, options);
+    await removeCcgConfiguration({ accountId: "main", confirmRemove: true }, options);
     writePrivateFileAtomicSync(options.paths.config, 'model = "new-user-model"\nmodel_reasoning_effort = "low"\n');
     await applyCcgConfiguration(input, options);
     const archive = readdirSync(dirname(options.paths.backup)).filter((name) => name !== "config.json");
     expect(archive).toHaveLength(1);
     expect(readFileSync(join(dirname(options.paths.backup), archive[0]!), "utf8")).toBe(oldBackup);
-    await removeCcgConfiguration({ confirmRemove: true }, options);
+    await removeCcgConfiguration({ accountId: "main", confirmRemove: true }, options);
     expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({
       model: "new-user-model", model_reasoning_effort: "low",
     });
@@ -192,7 +227,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
   it("rolls back a reinstallation baseline and archive when installation fails", async () => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
-    await removeCcgConfiguration({ confirmRemove: true }, options);
+    await removeCcgConfiguration({ accountId: "main", confirmRemove: true }, options);
     const oldBackup = readFileSync(options.paths.backup);
     writePrivateFileAtomicSync(options.paths.config, 'model = "new-user-model"\n');
     failure.path = options.paths.marker;
@@ -209,30 +244,55 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     options.source.models[0]!.description = "new catalog content";
     chmodSync(options.environment.CODEX_HOME, 0o500);
     try {
-      await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow();
+      await expect(applyCcgConfiguration({ ...options.input, reconfigure: true }, options))
+        .rejects.toThrow();
       expect(Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined)).toEqual(before);
     } finally {
       chmodSync(options.environment.CODEX_HOME, 0o700);
     }
   });
 
-  it.each(["model", "reasoning"])("rejects removing the shared role's %s from the catalog", async (removed) => {
+  it("rejects removing the shared role's model from the catalog", async () => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
-    writeManagedModelProviderRoleConfig(options.environment, { provider: "ccg", model: options.input.model });
+    writeManagedModelProviderRoleConfig(options.environment, {
+      provider: "ccg-main", model: "deepseek/deepseek-v4-pro",
+    });
     const rolePath = managedModelProviderRoleConfigPath(options.environment);
     writePrivateFileAtomicSync(options.paths.config, stringify({
       model: "gpt-5.5", agents: { external: { config_file: rolePath } },
     }));
     const before = readFileSync(options.paths.catalog);
-    if (removed === "model") options.source.models.shift();
-    else {
-      options.source.models[0]!.default_reasoning_level = "max";
-      options.source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
-    }
-    await expect(applyCcgConfiguration({ ...options.input, model: "deepseek/deepseek-v4-pro" }, options))
-      .rejects.toThrow("共享第三方子代理当前的模型或思考等级");
+    const source = deepseekSource(options.source);
+    source.models.pop();
+    await expect(refreshCcgCatalogForUpdate(options.environment, {
+      downloadCatalog: async () => ({ catalog: source }),
+    })).rejects.toThrow("共享第三方子代理当前模型");
     expect(readFileSync(options.paths.catalog)).toEqual(before);
+  });
+
+  it("synchronizes the shared role when its model reasoning changes", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    writeManagedModelProviderRoleConfig(options.environment, {
+      provider: "ccg-main", model: options.input.model,
+    });
+    const rolePath = managedModelProviderRoleConfigPath(options.environment);
+    writePrivateFileAtomicSync(options.paths.config, stringify({
+      model: "gpt-5.5", agents: { external: { config_file: rolePath } },
+    }));
+    const source = deepseekSource(options.source);
+    source.models[0]!.default_reasoning_level = "max";
+    source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
+
+    await refreshCcgCatalogForUpdate(options.environment, {
+      downloadCatalog: async () => ({ catalog: source }),
+    });
+
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model_provider: "ccg-main",
+      model_reasoning_effort: "max",
+    });
   });
 
   it.skipIf(process.env.RUN_CODEX_CONTRACT !== "1")("loads the configured file through real App Server model/list", async () => {
@@ -279,12 +339,12 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     await applyCcgConfiguration(options.input, options);
     expect(readFileSync(options.paths.config, "utf8")).toBe('model = "gpt-5.5"\n');
     expect(loadManagedModelProviderSettings(options.environment)).toEqual([
-      expect.objectContaining({ provider: "ccg", mode: "switching", model: "deepseek/deepseek-v4-flash" }),
+      expect.objectContaining({ provider: "ccg-main", mode: "switching", model: "deepseek/deepseek-v4-flash" }),
     ]);
     expect(loadManagedProviderAppServers(options.environment)).toEqual([
       expect.objectContaining({
-        provider: "ccg", childEnvironment: { CODEX_CONNECT_CCG_API_KEY: "cmd_test-key" },
-        arguments: expect.arrayContaining(["model_providers.ccg.supports_websockets=false"]),
+        provider: "ccg-main", childEnvironment: { CODEX_CONNECT_CCG_MAIN_API_KEY: "cmd_test-key" },
+        arguments: expect.arrayContaining(["model_providers.ccg-main.supports_websockets=false"]),
       }),
     ]);
     expect(readFileSync(options.paths.manifest, "utf8")).not.toContain("cmd_test-key");
@@ -294,6 +354,122 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
         { provider: "ccg", model: "deepseek/deepseek-v4-pro", inputModalities: ["text"] },
       ]);
     expect(existsSync(join(options.environment.CODEX_HOME, "sf-agent.config.toml"))).toBe(false);
+  });
+
+  it("isolates CCG account keys and App Servers while sharing one model catalog", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    await applyCcgConfiguration({
+      ...options.input,
+      accountId: "work",
+      apiKey: "cmd_work-key",
+      model: "deepseek/deepseek-v4-pro",
+    }, options);
+
+    expect(loadCcgAccounts(options.environment)).toEqual([
+      { id: "main", default: true },
+      { id: "work", default: false },
+    ]);
+    expect(loadManagedModelProviderSettings(options.environment).map(({ provider, model }) => ({
+      provider, model,
+    }))).toEqual([
+      { provider: "ccg-main", model: "deepseek/deepseek-v4-flash" },
+      { provider: "ccg-work", model: "deepseek/deepseek-v4-pro" },
+    ]);
+    expect(loadManagedProviderAppServers(options.environment).map(({ provider, childEnvironment }) => ({
+      provider, childEnvironment,
+    }))).toEqual([
+      { provider: "ccg-main", childEnvironment: { CODEX_CONNECT_CCG_MAIN_API_KEY: "cmd_test-key" } },
+      { provider: "ccg-work", childEnvironment: { CODEX_CONNECT_CCG_WORK_API_KEY: "cmd_work-key" } },
+    ]);
+    expect(ccgSetupPaths(options.environment, "work").catalog).toBe(options.paths.catalog);
+
+    await setCcgDefaultAccount("work", options);
+    expect(loadCcgAccounts(options.environment)).toEqual([
+      { id: "main", default: false },
+      { id: "work", default: true },
+    ]);
+
+    const source = deepseekSource(options.source);
+    source.models[0]!.default_reasoning_level = "max";
+    source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
+    await refreshCcgCatalogForUpdate(options.environment, {
+      downloadCatalog: async () => ({ catalog: source }),
+    });
+    expect(parse(readFileSync(options.paths.profile, "utf8"))).toMatchObject({
+      model: "deepseek/deepseek-v4-flash",
+      model_reasoning_effort: "max",
+    });
+    expect(parse(readFileSync(ccgSetupPaths(options.environment, "work").profile, "utf8")))
+      .toMatchObject({
+        model: "deepseek/deepseek-v4-pro",
+        model_reasoning_effort: "high",
+      });
+  });
+
+  it("captures a fresh restore baseline when another account enters fixed mode", async () => {
+    const options = fixture();
+    await applyCcgConfiguration({
+      ...options.input,
+      mode: "exclusive",
+      confirmExclusiveConfigChange: true,
+    }, options);
+    await applyCcgConfiguration({
+      ...options.input,
+      accountId: "work",
+      apiKey: "cmd_work-key",
+    }, options);
+    await applyCcgConfiguration({
+      ...options.input,
+      mode: "switching",
+      reconfigure: true,
+    }, options);
+    await applyCcgConfiguration({
+      ...options.input,
+      accountId: "work",
+      apiKey: "cmd_work-key",
+      mode: "exclusive",
+      reconfigure: true,
+      confirmExclusiveConfigChange: true,
+    }, options);
+
+    await removeCcgConfiguration({ accountId: "work", confirmRemove: true }, options);
+
+    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "gpt-5.5" });
+    expect(loadManagedModelProviderSettings(options.environment)).toEqual([
+      expect.objectContaining({ provider: "ccg-main", mode: "switching" }),
+    ]);
+  });
+
+  it("migrates the legacy single CCG provider only after an explicit account ID", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    const providerDirectory = dirname(options.paths.catalog);
+    const legacyBackup = join(providerDirectory, "backup", "config.json");
+    const legacyProfile = join(options.environment.CODEX_HOME, "sf-ccg.config.toml");
+    const legacyMarker = join(providerDirectory, "managed.toml");
+    const profile = readFileSync(options.paths.profile, "utf8").replaceAll("ccg-main", "ccg");
+    const backup = readFileSync(options.paths.backup);
+    rmSync(options.paths.profile);
+    rmSync(options.paths.marker);
+    rmSync(options.paths.registry);
+    mkdirSync(dirname(legacyBackup), { recursive: true });
+    writePrivateFileAtomicSync(legacyProfile, profile);
+    writePrivateFileAtomicSync(legacyMarker, 'version = 1\nprovider = "ccg"\nmode = "switching"\n');
+    writePrivateFileAtomicSync(legacyBackup, backup);
+
+    await expect(migrateCcgAccount({
+      accountId: "main", confirmMigration: false,
+    }, options)).rejects.toThrow("明确确认");
+    await migrateCcgAccount({ accountId: "main", confirmMigration: true }, options);
+
+    expect(loadCcgAccounts(options.environment)).toEqual([{ id: "main", default: true }]);
+    expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({
+      provider: "ccg-main",
+      model: options.input.model,
+    });
+    expect(existsSync(legacyProfile)).toBe(false);
+    expect(existsSync(legacyMarker)).toBe(false);
   });
 
   it("uses an independent file's model defaults and capabilities without DS defaults", async () => {
@@ -327,10 +503,27 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
   it("preserves model choices when refreshing the catalog and credential", async () => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
-    writeManagedModelProviderProfileDefault("ccg", {
+    writeManagedModelProviderRoleConfig(options.environment, {
+      provider: "ccg-main", model: "deepseek/deepseek-v4-pro",
+    });
+    const rolePath = managedModelProviderRoleConfigPath(options.environment);
+    writePrivateFileAtomicSync(options.paths.config, stringify({
+      model: "gpt-5.5", agents: { external: { config_file: rolePath } },
+    }));
+    writeManagedModelProviderProfileDefault("ccg-main", {
       model: "deepseek/deepseek-v4-pro", reasoningEffort: "max",
     }, options.environment);
-    await applyCcgConfiguration({ ...options.input, apiKey: "cmd_new-key", model: "deepseek/deepseek-v4-pro" }, options);
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model_provider: "ccg-main",
+      model: "deepseek/deepseek-v4-pro",
+      model_reasoning_effort: "max",
+    });
+    await applyCcgConfiguration({
+      ...options.input,
+      apiKey: "cmd_new-key",
+      model: "deepseek/deepseek-v4-pro",
+      reconfigure: true,
+    }, options);
     expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({
       model: "deepseek/deepseek-v4-pro", reasoningEffort: "max",
     });
@@ -343,9 +536,9 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     await applyCcgConfiguration({ ...options.input, mode: "exclusive", confirmExclusiveConfigChange: true }, options);
     expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ mode: "exclusive" });
     writePrivateFileAtomicSync(options.paths.config, `${readFileSync(options.paths.config, "utf8")}\n`);
-    await applyCcgConfiguration({ ...options.input, mode: "switching" }, options);
+    await applyCcgConfiguration({ ...options.input, mode: "switching", reconfigure: true }, options);
     expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "gpt-5.5" });
-    await removeCcgConfiguration({ confirmRemove: true }, options);
+    await removeCcgConfiguration({ accountId: "main", confirmRemove: true }, options);
     expect(loadManagedModelProviderSettings(options.environment)).toEqual([]);
     expect(existsSync(options.paths.backup)).toBe(true);
     expect(existsSync(options.paths.catalog)).toBe(false);

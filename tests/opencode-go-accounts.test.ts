@@ -51,6 +51,9 @@ describe("OpenCode Go account registry", () => {
   it("reuses the shared statistics proxy for every OpenCode Go account", () => {
     expect(sharedProviderProxyKey("ocg-main")).toBe("ocg");
     expect(sharedProviderProxyKey("ocg-lunare")).toBe("ocg");
+    expect(sharedProviderProxyKey("ds-main")).toBe("deepseek");
+    expect(sharedProviderProxyKey("ccg-main")).toBe("ccg");
+    expect(sharedProviderProxyKey("ccg-work")).toBe("ccg");
     expect(sharedProviderProxyKey("deepseek")).toBe("deepseek");
     expect(sharedProviderProxyKey("openai")).toBe("openai");
   });

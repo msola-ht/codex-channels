@@ -251,7 +251,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       {
         args: ["remote", "--help"],
-        includes: ["sf-ocg-<账户>", "sf-custom-<Provider ID>"],
+        includes: ["sf-ocg-<账户>", "sf-ccg-<账户>", "sf-custom-<Provider ID>"],
       },
       {
         args: ["channel", "--help"],

@@ -108,6 +108,52 @@ export function configureOpenCodeGo(
   ].join("\n"));
 }
 
+export function configureCcgAccounts(codexHome: string, defaultAccountId = "work"): void {
+  const providerDirectory = join(connectHomeFor(codexHome), "providers", "ccg");
+  secureTestDirectory(providerDirectory);
+  const accounts = ["main", "work"];
+  secureTestFile(
+    join(providerDirectory, "accounts.json"),
+    `${JSON.stringify(accounts.map((id) => ({ id, default: id === defaultAccountId })), null, 2)}\n`,
+  );
+  const catalogPath = join(providerDirectory, "models.json");
+  secureTestFile(catalogPath, `${JSON.stringify({
+    models: [{
+      slug: "deepseek/deepseek-v4-flash",
+      display_name: "DeepSeek V4 Flash",
+      context_window: 1_048_576,
+      max_context_window: 1_048_576,
+      auto_compact_token_limit: 629_146,
+      input_modalities: ["text"],
+      default_reasoning_level: "high",
+      supported_reasoning_levels: [{ effort: "high", description: "High" }],
+    }],
+  })}\n`);
+  for (const id of accounts) {
+    const provider = `ccg-${id}`;
+    const accountDirectory = join(providerDirectory, "accounts", id);
+    secureTestDirectory(accountDirectory);
+    secureTestFile(
+      join(accountDirectory, "managed.toml"),
+      `version = 1\nprovider = "${provider}"\nmode = "switching"\n`,
+    );
+    secureTestFile(join(codexHome, `sf-${provider}.config.toml`), [
+      'model = "deepseek/deepseek-v4-flash"',
+      `model_provider = "${provider}"`,
+      'model_reasoning_effort = "high"',
+      `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+      `[model_providers.${provider}]`,
+      `name = "${provider}"`,
+      'base_url = "https://api.commandcode.ai/provider/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      "supports_websockets = false",
+      `experimental_bearer_token = "cmd_${id}-secret"`,
+      "",
+    ].join("\n"));
+  }
+}
+
 export function configureLegacyOpenCodeGo(
   codexHome: string,
   mode: "switching" | "exclusive" = "switching",

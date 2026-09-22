@@ -56,7 +56,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 `agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
-重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 多账户实例继承基础定义的能力
+重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 与 CCG 多账户实例继承基础定义的能力
 元数据；watcher 另保留未配置的共享模型目录，并按 Provider 合并重复定义与路径。
 
 ### 3.2 模型目录与 manifest
@@ -85,7 +85,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   usage URL、凭据读取和指标库 Provider 过滤；
 - 余额形态：通过 `deepseek-account-adapter.ts` 受控创建；该适配器只接受 DeepSeek Provider，
   不会把未知 Provider 当作余额账户。
-- 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
+- 无账户接口：`/usage` 明确显示不支持，不回退 OpenAI；仍可使用显式账户 ID 隔离多个凭据和运行实例；
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
@@ -222,13 +222,15 @@ stream_max_retries = 0
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
-多个第三方 Provider 可选时不按目录顺序决定默认值，先通过 `/model` 选择提供商和模型，再发送消息；
+多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于 CCG 时使用 CCG 注册表
+标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
 选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
 目标 Thread 建立后该提示消失。
-`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；
-配置了多个第三方时明确提示指定 `--profile`。显式 Profile 和固定模式仍按原配置执行。
+`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个 CCG 实例且
+没有混合其他 Provider 时连接 CCG 默认账户，其他多 Provider 配置明确提示指定 `--profile`。
+显式 Profile 和固定模式仍按原配置执行。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
@@ -292,7 +294,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
-- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、单实例且无账户接口的参考实现；
+- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离且无余额接口的参考实现；
 - [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；

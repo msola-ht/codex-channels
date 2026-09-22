@@ -5,11 +5,12 @@ import {
   opencodeGoAccountDisplayName,
 } from "./opencode-go-accounts.mjs";
 import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey } from "./deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
   catalogSources: new Set(["none", "deepseek-official"]),
   accountAdapters: new Set(["none", "deepseek", "opencode-go"]),
-  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts"]),
+  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts"]),
   catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
 });
 
@@ -83,7 +84,7 @@ export const commandCodeProviderDefinition = Object.freeze({
   capabilities: Object.freeze({
     catalogSource: "deepseek-official",
     accountAdapter: "none",
-    instanceAdapter: "single",
+    instanceAdapter: "ccg-accounts",
     catalogUpdateAdapter: "ccg",
   }),
 });
@@ -91,13 +92,13 @@ export const commandCodeProviderDefinition = Object.freeze({
 export function isManagedProviderApiKeyValid(definition, apiKey) {
   return typeof apiKey === "string"
     && apiKey.length <= 4_096
-    && (definition.id === "ccg"
+    && ((definition.storageId ?? definition.id) === "ccg"
       ? /^[A-Za-z0-9._~+/-]+=*$/u.test(apiKey)
       : /^sk-[^\s"]+$/u.test(apiKey));
 }
 
 export function isManagedProviderModelValid(definition, model) {
-  return typeof model === "string" && (definition.id === "ccg"
+  return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
 }
@@ -144,6 +145,8 @@ export function expandManagedModelProviderDefinitions(
         return loadOpencodeGoAccountDefinitions(environment);
       case "deepseek-accounts":
         return loadDeepseekAccounts(environment).map((account) => deepseekAccountDefinition(account.id));
+      case "ccg-accounts":
+        return loadCcgAccounts(environment).map((account) => ccgAccountDefinition(account.id));
       default:
         throw new Error(
           `未知受管 Provider 实例适配器：${String(capabilities.instanceAdapter)}`,
@@ -160,6 +163,17 @@ export function deepseekAccountDefinition(accountId) {
     id, accountId, storageId: "deepseek", displayName: `DS ${accountId}`,
     profileName, profileFileName: `${profileName}.config.toml`,
     apiKeyEnvironmentKey: deepseekApiKeyEnvironmentKey(accountId),
+  });
+}
+
+export function ccgAccountDefinition(accountId) {
+  const id = ccgProviderId(accountId);
+  const profileName = `sf-${id}`;
+  return Object.freeze({
+    ...commandCodeProviderDefinition,
+    id, accountId, storageId: "ccg", displayName: `CCG ${accountId}`,
+    profileName, profileFileName: `${profileName}.config.toml`,
+    apiKeyEnvironmentKey: ccgApiKeyEnvironmentKey(accountId),
   });
 }
 

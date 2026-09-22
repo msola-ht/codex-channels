@@ -1,5 +1,6 @@
 export type ManagedModelProviderId =
   | "ccg"
+  | `ccg-${string}`
   | "deepseek"
   | `ds-${string}`
   | "ocg"
@@ -10,7 +11,7 @@ export type ManagedModelProviderId =
 
 export type ManagedModelProviderCatalogSource = "none" | "deepseek-official";
 export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go";
-export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts";
+export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
 export type ManagedModelProviderCatalogUpdateAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 
 export interface ModelProviderCapabilities {
@@ -49,8 +50,12 @@ export interface ModelProviderDefinition {
 export const deepseekProviderDefinition: ModelProviderDefinition;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;
 export const commandCodeProviderDefinition: ModelProviderDefinition;
+export function ccgAccountDefinition(accountId: string): ModelProviderDefinition;
 export function isManagedProviderApiKeyValid(definition: ModelProviderDefinition, apiKey: unknown): boolean;
-export function isManagedProviderModelValid(definition: { id: string }, model: unknown): boolean;
+export function isManagedProviderModelValid(
+  definition: Pick<ModelProviderDefinition, "id" | "storageId">,
+  model: unknown,
+): boolean;
 export const opencodeGoProviderDefinition: ModelProviderDefinition;
 export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
 

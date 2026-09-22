@@ -19,10 +19,13 @@ import {
 } from "./model-provider-definitions.mjs";
 import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
 import { deepseekAccountMarkerPath } from "./deepseek-accounts.mjs";
+import { ccgAccountMarkerPath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
+const managedThirdPartyRoleName = "external";
+const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
@@ -30,9 +33,13 @@ export function managedProviderDirectory(environment, definition) {
 
 export function managedProviderMarkerPath(environment, definition) {
   if (definition.accountId !== undefined) {
-    return definition.storageId === "deepseek"
-      ? deepseekAccountMarkerPath(environment, definition.accountId)
-      : opencodeGoAccountMarkerPath(environment, definition.accountId);
+    if (definition.storageId === "deepseek") {
+      return deepseekAccountMarkerPath(environment, definition.accountId);
+    }
+    if (definition.storageId === "ccg") {
+      return ccgAccountMarkerPath(environment, definition.accountId);
+    }
+    return opencodeGoAccountMarkerPath(environment, definition.accountId);
   }
   return join(
     managedProviderDirectory(environment, definition),
@@ -233,20 +240,20 @@ export function restoreManagedModelProviderCatalogContent(
 }
 
 function writeCatalogWithProfileMirrors(environment, definition, catalogPath, content, updates = new Map()) {
-  // DS 账户共用目录；目录思考等级变化时同步其他账户的 Profile 镜像。
-  if (definition.storageId === "deepseek") {
-    const catalog = JSON.parse(content);
-    for (const sibling of managedProviderDefinitions(environment)) {
-      if (sibling.storageId !== "deepseek" || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
-      const path = join(codexHomePath(environment), sibling.profileFileName);
-      if (updates.has(path)) continue;
-      const document = record(parse(readPrivateFile(path)));
-      const model = catalog.models.find((entry) => entry.slug === document.model);
-      if (!model) throw new Error(`DeepSeek 目录不支持账户 ${sibling.accountId} 当前模型`);
-      document.model_reasoning_effort = model.default_reasoning_level;
-      updates.set(path, stringify(document));
-    }
+  // 同一目录的模型设置由所有引用方共享；Profile 与共享角色只保存所选模型的镜像。
+  const catalog = JSON.parse(content);
+  for (const sibling of managedProviderDefinitions(environment)) {
+    if (join(managedProviderDirectory(environment, sibling), sibling.catalogFileName) !== catalogPath
+      || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
+    const path = join(codexHomePath(environment), sibling.profileFileName);
+    if (updates.has(path)) continue;
+    const document = record(parse(readPrivateFile(path)));
+    const model = catalog.models.find((entry) => entry.slug === document.model);
+    if (!model) throw new Error(`${sibling.displayName} 目录不支持当前模型`);
+    document.model_reasoning_effort = model.default_reasoning_level;
+    updates.set(path, stringify(document));
   }
+  addManagedRoleMirrorUpdate(environment, catalogPath, catalog, updates);
   updates = new Map([[catalogPath, content], ...updates]);
   const originals = new Map([...updates.keys()].map((path) => [path, readPrivateFile(path, maximumCatalogBytes)]));
   const written = [];
@@ -261,9 +268,34 @@ function writeCatalogWithProfileMirrors(environment, definition, catalogPath, co
       try { writePrivateFileAtomicSync(path, originals.get(path)); }
       catch (rollbackError) { errors.push(rollbackError); }
     }
-    if (errors.length > 1) throw new AggregateError(errors, "模型目录与 Profile 回滚未完成", { cause: error });
+    if (errors.length > 1) throw new AggregateError(errors, "模型目录与引用配置回滚未完成", { cause: error });
     throw error;
   }
+}
+
+function addManagedRoleMirrorUpdate(environment, catalogPath, catalog, updates) {
+  const rolePath = join(codexHomePath(environment), managedThirdPartyRoleConfigFileName);
+  let config;
+  let role;
+  try {
+    config = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))));
+    if (record(record(config.agents)[managedThirdPartyRoleName]).config_file !== rolePath) return;
+    role = record(parse(readPrivateFile(rolePath)));
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    // TOML 解析错误可能包含用户配置或角色文件原文，不能作为 cause 暴露。
+    // eslint-disable-next-line preserve-caught-error
+    throw new Error("第三方子代理角色配置无法安全读取");
+  }
+  const roleDefinition = findManagedProviderDefinition(environment, role.model_provider);
+  if (roleDefinition === undefined
+    || join(managedProviderDirectory(environment, roleDefinition), roleDefinition.catalogFileName) !== catalogPath) {
+    return;
+  }
+  const model = catalog.models.find((entry) => entry.slug === role.model);
+  if (!model) throw new Error(`${roleDefinition.displayName} 目录不支持共享第三方子代理当前模型`);
+  role.model_reasoning_effort = model.default_reasoning_level;
+  updates.set(rolePath, stringify(role));
 }
 
 function managedProviderCatalogPath(provider, environment) {

@@ -8,7 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parse } from "smol-toml";
+import { parse, stringify } from "smol-toml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const privateFileFailure = vi.hoisted(() => ({ path: undefined as string | undefined }));
@@ -17,6 +17,13 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../runtime/private-file.mjs")>();
   return {
     ...actual,
+    writePrivateFileAtomicSync: (
+      ...args: Parameters<typeof actual.writePrivateFileAtomicSync>
+    ) => {
+      const [path] = args;
+      if (path === privateFileFailure.path) throw new Error("injected private write failure");
+      return actual.writePrivateFileAtomicSync(...args);
+    },
     writePrivateFileAtomic: async (
       ...args: Parameters<typeof actual.writePrivateFileAtomic>
     ) => {
@@ -36,12 +43,86 @@ import {
 } from "../scripts/opencode-go-setup.mjs";
 import {
   loadManagedModelWindow,
+  loadManagedModelProviderSettings,
+  managedModelProviderRoleConfigPath,
+  writeManagedModelProviderRoleConfig,
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
 
 describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
   afterEach(() => {
     privateFileFailure.path = undefined;
+  });
+
+  it("mirrors model reasoning to every account sharing that model without changing other models", () => {
+    const codexHome = opencodeFixture();
+    const environment = { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") };
+    const directory = join(environment.CODEX_CONNECT_HOME, "providers/opencode-go");
+    const source = readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")
+      .replace('model = "deepseek-v4-flash"', 'model = "deepseek-flash"');
+    for (const id of ["second", "pro"]) {
+      mkdirSync(join(directory, "accounts", id), { recursive: true, mode: 0o700 });
+      writeFileSync(join(directory, "accounts", id, "managed.toml"), `version = 1\nprovider = "ocg-${id}"\nmode = "switching"\n`, { mode: 0o600 });
+      let profile = source.replaceAll("ocg-main", `ocg-${id}`);
+      if (id === "pro") profile = profile.replace('model = "deepseek-flash"', 'model = "deepseek-v4-pro"');
+      writeFileSync(join(codexHome, `sf-ocg-${id}.config.toml`), profile, { mode: 0o600 });
+    }
+    writeFileSync(join(directory, "accounts.json"), JSON.stringify(["main", "second", "pro"].map((id) => ({ id, default: id === "main", email: `${id}@example.com` }))), { mode: 0o600 });
+    writeManagedModelProviderProfileDefault("ocg-main", {
+      model: "deepseek-flash", reasoningEffort: "high",
+    }, environment);
+    writeManagedModelProviderRoleConfig(environment, {
+      provider: "ocg-main", model: "deepseek-flash",
+    });
+    const rolePath = managedModelProviderRoleConfigPath(environment);
+    writeFileSync(join(codexHome, "config.toml"), stringify({
+      model: "gpt-5.6-sol", agents: { external: { config_file: rolePath } },
+    }), { mode: 0o600 });
+    writeManagedModelProviderProfileDefault("ocg-main", {
+      model: "deepseek-flash", reasoningEffort: "max",
+    }, environment);
+    expect(loadManagedModelProviderSettings(environment).map(({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort }))).toEqual([
+      { provider: "ocg-main", model: "deepseek-flash", reasoningEffort: "max" },
+      { provider: "ocg-second", model: "deepseek-flash", reasoningEffort: "max" },
+      { provider: "ocg-pro", model: "deepseek-v4-pro", reasoningEffort: "high" },
+    ]);
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model_provider: "ocg-main",
+      model: "deepseek-flash",
+      model_reasoning_effort: "max",
+    });
+  });
+
+  it.each(["none", "profile", "role"] as const)(
+    "synchronizes refreshed reasoning and rolls back on reference failure (%s)",
+    async (failureTarget) => {
+    const codexHome = opencodeFixture();
+    const environment = { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") };
+    writeManagedModelProviderProfileDefault("ocg-main", { model: "deepseek-flash", reasoningEffort: "max" }, environment);
+    const profile = join(codexHome, "sf-ocg-main.config.toml");
+    writeManagedModelProviderRoleConfig(environment, {
+      provider: "ocg-main", model: "deepseek-flash",
+    });
+    const role = managedModelProviderRoleConfigPath(environment);
+    writeFileSync(join(codexHome, "config.toml"), stringify({
+      model: "gpt-5.6-sol", agents: { external: { config_file: role } },
+    }), { mode: 0o600 });
+    const catalog = join(environment.CODEX_CONNECT_HOME, "providers/opencode-go/models.json");
+    const before = [profile, role, catalog].map((path) => readFileSync(path, "utf8"));
+    const downloaded = updatedCatalog(2_000_000);
+    for (const model of downloaded.catalog.models) model.supported_reasoning_levels = [{ effort: "high", description: "High" }];
+    if (failureTarget !== "none") {
+      privateFileFailure.path = failureTarget === "profile" ? profile : role;
+    }
+    const refresh = refreshOpencodeGoCatalogForUpdate(environment, { downloadCatalog: async () => downloaded });
+    if (failureTarget !== "none") {
+      await expect(refresh).rejects.toThrow("injected");
+      expect([profile, role, catalog].map((path) => readFileSync(path, "utf8"))).toEqual(before);
+    } else {
+      await expect(refresh).resolves.toMatchObject({ status: "updated", migratedProviders: [] });
+      expect(loadManagedModelProviderSettings(environment)[0]).toMatchObject({ model: "deepseek-flash", reasoningEffort: "high" });
+      expect(parse(readFileSync(role, "utf8"))).toMatchObject({ model_reasoning_effort: "high" });
+    }
   });
 
   it("shows that first-time setup requires an explicit account id", async () => {

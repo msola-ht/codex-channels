@@ -301,6 +301,42 @@ describe("ModelSelectionService", () => {
     expect(service.threadStartOptions(target)).toEqual({ model: "gpt-deep", modelProvider: "custom-b" });
   });
 
+  it("uses the configured CCG default account when all unauthenticated choices are CCG accounts", async () => {
+    const codex = {
+      listModels: async () => models,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      newSession: async () => undefined, workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(
+      codex,
+      router,
+      undefined,
+      [
+        { ...model("deepseek/deepseek-v4-flash", ["high"], "high", true), provider: "ccg-main" },
+        { ...model("deepseek/deepseek-v4-pro", ["high"], "high", true), provider: "ccg-work" },
+      ],
+      "openai",
+      [],
+      () => false,
+      () => new Set(),
+      "ccg-work",
+    );
+
+    expect(await service.state(target)).toMatchObject({
+      model: "deepseek/deepseek-v4-pro",
+      modelProvider: "ccg-work",
+    });
+    expect(service.threadStartOptions(target)).toEqual({
+      model: "deepseek/deepseek-v4-pro",
+      modelProvider: "ccg-work",
+    });
+  });
+
   it("rejects model state when official OpenAI is unauthenticated and no third-party model exists", async () => {
     const codex = {
       listModels: async () => models,

@@ -32,19 +32,21 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  CCG 采用单实例与 DS 来源目录，使用独立目录更新适配器且无账户适配器；模型 ID 支持上游命名空间，凭据按 Bearer 格式校验。
-  `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
-  Go 账户注册表动态生成 `ocg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
+  CCG 采用显式多账户实例与 DS 来源目录，使用独立目录更新适配器且无余额/配额账户适配器；模型 ID
+  支持上游命名空间，凭据按 Bearer 格式校验。
+  `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
+  Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
   更新、账户能力，允许显式无更新/无账户能力。账户实例继承共享定义；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
+- `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
   `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
-  config 编辑映射；DeepSeek、OpenCode Go 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
+  config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
@@ -65,7 +67,7 @@
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
-  OpenCode Go 与共享第三方子代理的凭据和角色配置读取。全部第三方 Provider 沿用一次 HTTP 重试、
+  OpenCode Go、CCG 与共享第三方子代理的凭据和角色配置读取。全部第三方 Provider 沿用一次 HTTP 重试、
   零次流重连的固定边界。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
@@ -115,8 +117,8 @@
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按共享代理键合并并发
-  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 OpenCode Go
-  多账户同时启动时重复创建或过早关闭共享代理。
+  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 DS、OpenCode Go
+  与 CCG 多账户同时启动时重复创建或过早关闭共享代理。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权

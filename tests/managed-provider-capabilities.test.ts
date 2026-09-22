@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertManagedModelProviderCapabilities,
+  ccgAccountDefinition,
+  commandCodeProviderDefinition,
   deepseekProviderDefinition,
   deepseekAccountDefinition,
   expandManagedModelProviderDefinitions,
@@ -15,6 +17,8 @@ import {
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import {
   createManagedProviderAccountAdapters,
 } from "../src/bootstrap/managed-provider-capabilities.js";
@@ -23,6 +27,7 @@ describe("managed Provider capability registry", () => {
   it("uses one canonical Profile name for CLI selection and the profile file", () => {
     for (const definition of [
       ...managedModelProviderDefinitions,
+      ccgAccountDefinition("main"),
       opencodeGoAccountDefinition("lunare"),
     ]) {
       expect(definition.profileName).toMatch(/^sf-/u);
@@ -31,6 +36,10 @@ describe("managed Provider capability registry", () => {
     expect(opencodeGoAccountDefinition("work")).toMatchObject({
       profileName: "sf-ocg-work",
       profileFileName: "sf-ocg-work.config.toml",
+    });
+    expect(ccgAccountDefinition("work")).toMatchObject({
+      profileName: "sf-ccg-work",
+      profileFileName: "sf-ccg-work.config.toml",
     });
   });
 
@@ -54,9 +63,16 @@ describe("managed Provider capability registry", () => {
     });
     expect(opencodeGoAccountDefinition("lunare").capabilities)
       .toBe(opencodeGoProviderDefinition.capabilities);
+    expect(commandCodeProviderDefinition.capabilities).toEqual({
+      catalogSource: "deepseek-official",
+      accountAdapter: "none",
+      instanceAdapter: "ccg-accounts",
+      catalogUpdateAdapter: "ccg",
+    });
   });
 
   it("expands every single-instance base definition into the runtime registry", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-empty-provider-definitions-"));
     const futureProvider = {
       ...deepseekProviderDefinition,
       id: "future-provider",
@@ -66,10 +82,14 @@ describe("managed Provider capability registry", () => {
       },
     } as unknown as typeof deepseekProviderDefinition;
 
-    expect(expandManagedModelProviderDefinitions(
-      [deepseekProviderDefinition, futureProvider],
-      process.env,
-    ).map(({ id }) => id)).toEqual(["future-provider"]);
+    try {
+      expect(expandManagedModelProviderDefinitions(
+        [deepseekProviderDefinition, futureProvider],
+        { CODEX_CONNECT_HOME: join(home, ".codex-connect") },
+      ).map(({ id }) => id)).toEqual(["future-provider"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("supports a managed Provider without account or catalog update adapters", () => {
@@ -94,7 +114,7 @@ describe("managed Provider capability registry", () => {
     })).toEqual([]);
   });
 
-  it("keeps the shared Go definition and configured account definitions in one watcher set", () => {
+  it("keeps shared definitions and configured OCG/CCG accounts in one watcher set", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-provider-definitions-"));
     try {
       const environment = {
@@ -109,8 +129,14 @@ describe("managed Provider capability registry", () => {
         { id: "main", default: true },
         { id: "lunare", default: false },
       ]);
+      writePrivateFileAtomicSync(ccgAccountsFilePath(environment), `${JSON.stringify([
+        { id: "main", default: true },
+        { id: "work", default: false },
+      ])}\n`);
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
-        .toEqual(["deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg"]);
+        .toEqual([
+          "deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg", "ccg-main", "ccg-work",
+        ]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -120,6 +146,7 @@ describe("managed Provider capability registry", () => {
     const definitions = [
       deepseekAccountDefinition("test"),
       opencodeGoAccountDefinition("lunare"),
+      ccgAccountDefinition("main"),
     ];
     const accounts = createManagedProviderAccountAdapters(definitions, {
       environment: process.env,

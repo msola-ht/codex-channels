@@ -59,6 +59,7 @@ export class ModelSelectionService {
     private readonly officialCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
     private readonly openaiAuthenticated: () => boolean = () => true,
     private readonly providersWithoutSubscription: () => ReadonlySet<string> = () => new Set(),
+    private readonly defaultThirdPartyProvider?: string,
   ) {}
 
   updateSupplementaryModels(models: readonly ModelOption[]): void {
@@ -510,8 +511,11 @@ export class ModelSelectionService {
 
   private defaultThirdPartySelection(): ModelSelectionIdentity | undefined {
     const providers = this.thirdPartyProviders();
-    if (providers.length !== 1) return undefined;
-    const provider = providers[0]!;
+    const provider = this.defaultThirdPartyProvider !== undefined
+      && providers.includes(this.defaultThirdPartyProvider)
+      ? this.defaultThirdPartyProvider
+      : providers.length === 1 ? providers[0] : undefined;
+    if (provider === undefined) return undefined;
     const model = this.officialCatalogProviders.find((entry) => entry.provider === provider)?.defaultModel
       ?? this.supplementaryModels.find((entry) => entry.provider === provider && entry.isDefault)?.model;
     if (!model) {

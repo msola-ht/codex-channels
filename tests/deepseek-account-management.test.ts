@@ -15,7 +15,14 @@ vi.mock("../runtime/private-file.mjs", async (original) => {
 
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { loadDeepseekAccounts, validateDeepseekAccounts } from "../runtime/deepseek-accounts.mjs";
-import { loadManagedModelProviderSettings, loadDeepseekAccountCredential, loadManagedProviderAppServers, writeManagedModelProviderProfileDefault } from "../runtime/model-provider-runtime.mjs";
+import {
+  loadDeepseekAccountCredential,
+  loadManagedModelProviderSettings,
+  loadManagedProviderAppServers,
+  managedModelProviderRoleConfigPath,
+  writeManagedModelProviderProfileDefault,
+  writeManagedModelProviderRoleConfig,
+} from "../runtime/model-provider-runtime.mjs";
 import { JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
 import { updateLocalInstallation, prepareDeepseekUpdateMigration } from "../scripts/local-update.mjs";
 import { applyDeepseekAccountConfiguration, deepseekAccountPaths, migrateDeepseekAccount, refreshDeepseekAccountsCatalog, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
@@ -169,8 +176,19 @@ describe("DeepSeek managed accounts", () => {
     const options = fixture();
     await applyDeepseekAccountConfiguration(input, options);
     await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
+    writeManagedModelProviderRoleConfig(options.environment, {
+      provider: "ds-personal", model: "deepseek-flash",
+    });
+    const rolePath = managedModelProviderRoleConfigPath(options.environment);
+    writePrivateFileAtomicSync(options.paths.config, stringify({
+      model: "original", agents: { external: { config_file: rolePath } },
+    }));
     writeManagedModelProviderProfileDefault("ds-personal", { model: "deepseek-flash", reasoningEffort: "max" }, options.environment);
     expect(loadManagedModelProviderSettings(options.environment).map((provider) => provider.reasoningEffort)).toEqual(["max", "max"]);
+    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
+      model_provider: "ds-personal",
+      model_reasoning_effort: "max",
+    });
   });
 
   it.skipIf(process.env.RUN_CODEX_CONTRACT !== "1")("loads both isolated DS catalogs through real App Servers", async () => {

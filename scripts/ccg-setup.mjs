@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,11 +8,21 @@ import { dirname, join } from "node:path";
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
 
+import {
+  ccgAccountDirectory,
+  ccgAccountMarkerPath,
+  ccgAccountsFilePath,
+  ccgProviderId,
+  isCcgAccountProvider,
+  loadCcgAccounts,
+  validateCcgAccountId,
+  validateCcgAccounts,
+} from "../runtime/ccg-accounts.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
-import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import {
-  commandCodeProviderDefinition as definition,
+  ccgAccountDefinition,
+  commandCodeProviderDefinition as baseDefinition,
   isManagedProviderApiKeyValid,
   isManagedProviderModelValid,
 } from "../runtime/model-provider-definitions.mjs";
@@ -25,21 +36,22 @@ import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
+import { readPrivateFileSync, writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import { configActivationResult } from "./config-activation-result.mjs";
+import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
   createManagedProviderConfiguration,
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
-import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
   applyProviderFileUpdates,
   readOptionalProviderFile,
   snapshotProviderFiles,
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { configActivationResult } from "./config-activation-result.mjs";
-import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
-import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { createCcgCatalog } from "./provider-model-catalog.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
@@ -60,7 +72,6 @@ async function validateCcgCatalog(catalog, environment) {
       ["-c", `model_catalog_json=${JSON.stringify(path)}`, "debug", "models"],
       validationEnvironment,
     );
-    // 配置目录与工作目录均隔离；显式目录使用 Codex StaticModelsManager，不请求远端模型。
     const result = spawnSync(invocation.file, invocation.args, {
       cwd: directory, env: validationEnvironment,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
@@ -81,14 +92,14 @@ function checkCcgCatalog(catalog) {
   }
   const slugs = new Set();
   for (const entry of catalog.models) {
-    if (!isManagedProviderModelValid(definition, entry?.slug) || slugs.has(entry.slug)
+    if (!isManagedProviderModelValid(baseDefinition, entry?.slug) || slugs.has(entry.slug)
       || typeof entry.display_name !== "string" || entry.display_name.length === 0
       || !Array.isArray(entry.input_modalities) || !entry.input_modalities.includes("text")
       || new Set(entry.input_modalities).size !== entry.input_modalities.length
       || entry.input_modalities.some((value) => !["text", "image", "audio"].includes(value))) {
       throw new Error("CCG 模型目录包含无效模型名称或输入能力");
     }
-    withManagedModelCatalogSettings(catalog, definition, {
+    withManagedModelCatalogSettings(catalog, baseDefinition, {
       model: entry.slug, reasoningEffort: entry.default_reasoning_level,
     });
     slugs.add(entry.slug);
@@ -96,37 +107,63 @@ function checkCcgCatalog(catalog) {
   return catalog;
 }
 
-export function ccgSetupPaths(environment = process.env) {
+export function ccgSetupPaths(environment = process.env, accountId) {
+  const definition = ccgAccountDefinition(accountId);
   const directory = managedProviderDirectory(environment, definition);
+  const accountDirectory = ccgAccountDirectory(environment, accountId);
   return {
     config: join(codexHomePath(environment), "config.toml"),
     profile: join(codexHomePath(environment), definition.profileFileName),
-    marker: join(directory, definition.managedMarkerFileName),
+    marker: ccgAccountMarkerPath(environment, accountId),
     catalog: join(directory, definition.catalogFileName),
     manifest: join(directory, definition.catalogManifestFileName),
-    backup: join(directory, definition.backupDirectoryName, "config.json"),
+    backup: join(accountDirectory, definition.backupDirectoryName, "config.json"),
+    registry: ccgAccountsFilePath(environment),
+    role: managedModelProviderRoleConfigPath(environment),
   };
 }
 
+function legacyCcgPaths(environment) {
+  const directory = managedProviderDirectory(environment, baseDefinition);
+  return {
+    profile: join(codexHomePath(environment), baseDefinition.profileFileName),
+    marker: join(directory, baseDefinition.managedMarkerFileName),
+    backup: join(directory, baseDefinition.backupDirectoryName, "config.json"),
+  };
+}
+
+export function hasLegacyCcgConfiguration(environment = process.env) {
+  const paths = legacyCcgPaths(environment);
+  return existsSync(paths.marker) || existsSync(paths.profile);
+}
+
 export async function applyCcgConfiguration({
+  accountId,
   apiKey,
   catalog: source,
   model,
   mode = "switching",
+  reconfigure = false,
   confirmExclusiveConfigChange = false,
 }, {
   environment = process.env,
 } = {}) {
+  validateCcgAccountId(accountId);
+  if (hasLegacyCcgConfiguration(environment)) throw new Error("请先迁移旧 CCG 单账户配置并填写账户 ID");
   if (!["switching", "exclusive"].includes(mode)) throw new Error("CCG 模式无效");
+  const definition = ccgAccountDefinition(accountId);
   if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new Error("CCG API Key 无效");
   if (mode === "exclusive" && confirmExclusiveConfigChange !== true) {
     throw new Error("固定模式会修改 Codex 主配置，必须先明确确认");
   }
   return withModelProviderManagementTransaction(environment, async () => {
-    const paths = ccgSetupPaths(environment);
-    const snapshots = snapshotProviderFiles([
-      ...Object.values(paths), managedModelProviderRoleConfigPath(environment),
-    ]);
+    const accounts = loadCcgAccounts(environment);
+    const existing = accounts.find((account) => account.id === accountId);
+    if (Boolean(existing) !== (reconfigure === true)) {
+      throw new Error(existing ? "CCG 账户已存在，请选择重新配置" : "CCG 账户不存在");
+    }
+    const paths = ccgSetupPaths(environment, accountId);
+    const snapshots = snapshotProviderFiles(Object.values(paths));
     const primary = loadPrimaryModelProvider(environment);
     if (mode === "exclusive" && !["openai", definition.id].includes(primary)) {
       throw new Error(`请先恢复当前固定 Provider：${primary}`);
@@ -137,121 +174,241 @@ export async function applyCcgConfiguration({
     if (!previous && (hasProviderBaseConfig(current, definition)
       || await readOptionalProviderFile(paths.profile) !== undefined
       || await readOptionalProviderFile(paths.marker) !== undefined)) {
-      throw new Error("CCG 配置路径已被占用，请先处理现有配置");
+      throw new Error("CCG 账户配置路径已被占用，请先处理现有配置");
     }
     const backup = await readInitialConfig(paths.backup);
-    if (previous && !backup) throw new Error("CCG 初始配置备份缺失，请先恢复原始备份");
-    const initial = previous ? backup : { config: current };
-    checkCcgCatalog(source);
-    if (!source.models.some((entry) => entry.slug === model)) {
+    if (previous && !backup) throw new Error("CCG 账户初始配置备份缺失，请先恢复原始备份");
+    const entersExclusiveMode = previous?.mode === "switching" && mode === "exclusive";
+    const initial = previous && !entersExclusiveMode ? backup : { config: current };
+    let catalog;
+    let writesCatalog = false;
+    if (existsSync(paths.catalog)) {
+      catalog = JSON.parse(readPrivateFileSync(paths.catalog, maximumCatalogBytes));
+    } else {
+      checkCcgCatalog(source);
+      catalog = withPreservedManagedModelCatalogSettings(source, definition, []);
+      writesCatalog = true;
+    }
+    checkCcgCatalog(catalog);
+    const selectedModel = model ?? previous?.model;
+    if (!catalog.models.some((entry) => entry.slug === selectedModel)) {
       throw new Error("请选择 CCG 模型目录中的模型");
     }
-    const catalog = withPreservedManagedModelCatalogSettings(source, definition, previous?.models ?? []);
-    checkCcgRole(catalog, environment);
     await validateCcgCatalog(catalog, environment);
     const { config: nextConfig, profile } = createManagedProviderConfiguration(
       current, initial.config, definition, {
         mode, previousMode: previous?.mode,
-        apiKey, catalogPath: paths.catalog, catalog, model,
+        apiKey, catalogPath: paths.catalog, catalog, model: selectedModel,
       },
     );
     const updates = new Map();
-    if (!previous && backup) {
+    if ((!previous || entersExclusiveMode) && backup) {
       const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
       const [snapshot] = snapshotProviderFiles([archive]);
       if (snapshot.content !== undefined) throw new Error("CCG 备份归档路径已被占用");
       snapshots.push(snapshot);
       updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
     }
-    for (const [path, content] of [
-      [paths.backup, `${JSON.stringify(initial)}\n`],
-      [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
-      [paths.manifest, `${JSON.stringify({
+    updates.set(paths.backup, `${JSON.stringify(initial)}\n`);
+    if (writesCatalog) {
+      updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
+      updates.set(paths.manifest, `${JSON.stringify({
         source: deepseekSetupScriptUrl,
         downloadedAt: new Date().toISOString(),
-      }, null, 2)}\n`],
-      [paths.profile, profile === undefined ? undefined : stringify(profile)],
-      [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
-    ]) updates.set(path, content);
+      }, null, 2)}\n`);
+    }
+    updates.set(paths.profile, profile === undefined ? undefined : stringify(profile));
+    updates.set(paths.marker, stringify(createManagedProviderMarker(definition, mode)));
     if (mode === "exclusive" || previous?.mode === "exclusive") {
       updates.set(paths.config, stringify(nextConfig));
     }
+    const nextAccounts = existing
+      ? accounts
+      : [...accounts, { id: accountId, default: accounts.length === 0 }];
+    updates.set(paths.registry, `${JSON.stringify(validateCcgAccounts(nextAccounts), null, 2)}\n`);
     await applyProviderFileUpdates(updates, snapshots);
-    return { action: "configured", mode, model, activation: "restart-all" };
+    return {
+      action: "configured",
+      account: { id: accountId, provider: definition.id, default: existing?.default ?? accounts.length === 0 },
+      mode,
+      model: selectedModel,
+      activation: "restart-all",
+    };
   });
 }
 
-function checkCcgRole(catalog, environment) {
-  const role = loadThirdPartyModelProviderRole(environment);
-  if (role?.provider === definition.id) {
-    const roleModel = catalog.models.find((entry) => entry.slug === role.model);
-    if (!roleModel?.supported_reasoning_levels.some((entry) => entry.effort === role.reasoningEffort)) {
-      throw new Error("新 CCG 目录不支持共享第三方子代理当前的模型或思考等级，请先切换或停用该角色");
+export async function migrateCcgAccount({ accountId, confirmMigration = false }, {
+  environment = process.env,
+} = {}) {
+  validateCcgAccountId(accountId);
+  if (confirmMigration !== true) throw new Error("迁移 CCG 账户必须明确确认");
+  return withModelProviderManagementTransaction(environment, async () => {
+    if (!hasLegacyCcgConfiguration(environment)) throw new Error("没有待迁移的 CCG 单账户配置");
+    if (loadCcgAccounts(environment).length > 0) throw new Error("CCG 多账户配置已经存在");
+    const definition = ccgAccountDefinition(accountId);
+    const paths = ccgSetupPaths(environment, accountId);
+    const legacy = legacyCcgPaths(environment);
+    const marker = await readConfig(legacy.marker);
+    if (marker.version !== 1 || marker.provider !== "ccg"
+      || !["switching", "exclusive"].includes(marker.mode)) {
+      throw new Error("旧 CCG 管理标记无效");
     }
+    const sourcePath = marker.mode === "exclusive" ? paths.config : legacy.profile;
+    const source = await readConfig(sourcePath);
+    if (source.model_provider !== "ccg" || source.model_providers?.ccg === undefined) {
+      throw new Error("旧 CCG 配置与管理标记不一致");
+    }
+    const backup = await readOptionalProviderFile(legacy.backup);
+    if (backup === undefined) throw new Error("旧 CCG 初始配置备份缺失");
+    const snapshots = snapshotProviderFiles([
+      ...Object.values(paths), ...Object.values(legacy), sourcePath,
+    ]);
+    const rewrite = (document) => {
+      const provider = document.model_providers?.ccg;
+      if (provider === undefined) throw new Error("旧 CCG 配置缺少 Provider");
+      document.model_provider = definition.id;
+      document.model_providers[definition.id] = { ...provider, name: definition.id };
+      if (provider.env_key !== undefined) {
+        document.model_providers[definition.id].env_key = definition.apiKeyEnvironmentKey;
+      }
+      delete document.model_providers.ccg;
+      return stringify(document);
+    };
+    const updates = new Map([
+      [marker.mode === "exclusive" ? paths.config : paths.profile, rewrite(source)],
+      [paths.marker, stringify(createManagedProviderMarker(definition, marker.mode))],
+      [paths.backup, backup],
+      [paths.registry, `${JSON.stringify([{ id: accountId, default: true }], null, 2)}\n`],
+      [legacy.marker, undefined],
+      [legacy.profile, undefined],
+      [legacy.backup, undefined],
+    ]);
+    const roleDocument = await readConfig(paths.role);
+    if (roleDocument.model_provider === "ccg") {
+      updates.set(paths.role, rewrite(roleDocument));
+    }
+    await applyProviderFileUpdates(updates, snapshots);
+    return {
+      action: "migrated",
+      account: { id: accountId, provider: definition.id, default: true },
+      mode: marker.mode,
+      activation: "restart-all",
+    };
+  });
+}
+
+function ccgRoleUpdate(catalog, environment) {
+  const role = loadThirdPartyModelProviderRole(environment);
+  if (role === undefined || !isCcgAccountProvider(role.provider)) return undefined;
+  const model = catalog.models.find((entry) => entry.slug === role.model);
+  if (model === undefined) {
+    throw new Error("新 CCG 目录不支持共享第三方子代理当前模型，请先切换或停用该角色");
   }
+  const path = managedModelProviderRoleConfigPath(environment);
+  const document = parse(readPrivateFileSync(path, maximumCatalogBytes));
+  document.model_reasoning_effort = model.default_reasoning_level;
+  return { path, content: stringify(document) };
 }
 
 export async function refreshCcgCatalogForUpdate(environment = process.env, options = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
-    const paths = ccgSetupPaths(environment);
-    const snapshots = snapshotProviderFiles([
-      ...Object.values(paths), managedModelProviderRoleConfigPath(environment),
-    ]);
-    const previous = loadManagedModelProviderSettings(environment)
-      .find((item) => item.provider === definition.id);
-    if (!previous) return { status: "not-configured" };
+    if (hasLegacyCcgConfiguration(environment)) throw new Error("请先迁移旧 CCG 单账户配置并填写账户 ID");
+    const accounts = loadCcgAccounts(environment);
+    if (accounts.length === 0) return { status: "not-configured" };
+    const providers = loadManagedModelProviderSettings(environment)
+      .filter((provider) => accounts.some((account) => ccgProviderId(account.id) === provider.provider));
+    if (providers.length !== accounts.length) {
+      throw new Error("CCG 账户配置不完整，请先恢复缺失文件");
+    }
+    const paths = ccgSetupPaths(environment, accounts[0].id);
+    const accountPaths = accounts.map((account) => ccgSetupPaths(environment, account.id));
+    const snapshots = snapshotProviderFiles(accountPaths.flatMap((entry) => Object.values(entry)));
     const downloaded = options.downloadCatalog
       ? await options.downloadCatalog()
       : await downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch);
     const catalog = withPreservedManagedModelCatalogSettings(
-      createCcgCatalog(downloaded.catalog), definition, previous.models,
+      createCcgCatalog(downloaded.catalog), baseDefinition, providers[0]?.models ?? [],
     );
-    const selected = catalog.models.find((entry) => entry.slug === previous.model);
-    if (!selected) throw new Error("新 CCG 目录不支持当前默认模型，请先选择受支持的模型");
-    checkCcgRole(catalog, environment);
     await validateCcgCatalog(catalog, environment);
     const updates = new Map([
       [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
       [paths.manifest, `${JSON.stringify({
-        source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString(),
+        source: deepseekSetupScriptUrl,
+        downloadedAt: (options.now?.() ?? new Date()).toISOString(),
       }, null, 2)}\n`],
     ]);
-    if (previous.mode === "switching") {
-      const profile = await readConfig(paths.profile);
-      profile.model_reasoning_effort = selected.default_reasoning_level;
-      updates.set(paths.profile, stringify(profile));
+    for (const provider of providers) {
+      const account = accounts.find((candidate) => ccgProviderId(candidate.id) === provider.provider);
+      const selected = catalog.models.find((entry) => entry.slug === provider.model);
+      if (selected === undefined) {
+        throw new Error(`新 CCG 目录不支持账户 ${account.id} 当前默认模型，请先选择受支持的模型`);
+      }
+      if (provider.mode === "switching") {
+        const accountPathsForProvider = ccgSetupPaths(environment, account.id);
+        const profile = await readConfig(accountPathsForProvider.profile);
+        profile.model_reasoning_effort = selected.default_reasoning_level;
+        updates.set(accountPathsForProvider.profile, stringify(profile));
+      }
     }
+    const roleUpdate = ccgRoleUpdate(catalog, environment);
+    if (roleUpdate !== undefined) updates.set(roleUpdate.path, roleUpdate.content);
     await applyProviderFileUpdates(updates, snapshots);
-    return { status: "updated", provider: definition.id };
+    return { status: "updated", providers: providers.map((provider) => provider.provider) };
   });
 }
 
-export async function removeCcgConfiguration({ confirmRemove = false } = {}, {
+export async function setCcgDefaultAccount(accountId, { environment = process.env } = {}) {
+  validateCcgAccountId(accountId);
+  return withModelProviderManagementTransaction(environment, async () => {
+    const accounts = loadCcgAccounts(environment);
+    if (!accounts.some((account) => account.id === accountId)) throw new Error("CCG 账户不存在");
+    const path = ccgAccountsFilePath(environment);
+    const updates = new Map([[path, `${JSON.stringify(
+      accounts.map((account) => ({ ...account, default: account.id === accountId })), null, 2,
+    )}\n`]]);
+    await applyProviderFileUpdates(updates, snapshotProviderFiles([path]));
+    return { action: "default-set", accountId, activation: "restart-all" };
+  });
+}
+
+export async function removeCcgConfiguration({ accountId, confirmRemove = false } = {}, {
   environment = process.env,
 } = {}) {
-  if (confirmRemove !== true) throw new Error("删除 CCG 前必须明确确认");
+  validateCcgAccountId(accountId);
+  if (confirmRemove !== true) throw new Error("删除 CCG 账户前必须明确确认");
   return withModelProviderManagementTransaction(environment, async () => {
-    const paths = ccgSetupPaths(environment);
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const accounts = loadCcgAccounts(environment);
+    const currentAccount = accounts.find((account) => account.id === accountId);
+    if (currentAccount === undefined) throw new Error("CCG 账户不存在");
+    const definition = ccgAccountDefinition(accountId);
+    if (loadThirdPartyModelProviderRole(environment)?.provider === definition.id) {
+      throw new Error("请先切换或停用该 CCG 账户的共享第三方子代理");
+    }
+    const remaining = accounts.filter((account) => account.id !== accountId);
+    if (remaining.length > 0 && currentAccount.default) throw new Error("请先选择其他 CCG 默认账户");
+    const paths = ccgSetupPaths(environment, accountId);
     const current = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
-    if (!current) throw new Error("CCG 尚未配置");
-    if (loadThirdPartyModelProviderRole(environment)?.provider === definition.id) {
-      throw new Error("请先切换或停用 CCG 共享第三方子代理");
-    }
+    if (current === undefined) throw new Error("CCG 账户配置不完整");
     const initial = await readInitialConfig(paths.backup);
-    if (!initial) throw new Error("CCG 初始配置备份缺失");
+    if (!initial) throw new Error("CCG 账户初始配置备份缺失");
+    const snapshots = snapshotProviderFiles(Object.values(paths));
     const updates = new Map([
-      [paths.profile, undefined], [paths.marker, undefined],
-      [paths.catalog, undefined], [paths.manifest, undefined],
+      [paths.profile, undefined],
+      [paths.marker, undefined],
+      [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining, null, 2)}\n`],
     ]);
+    if (remaining.length === 0) {
+      updates.set(paths.catalog, undefined);
+      updates.set(paths.manifest, undefined);
+    }
     if (current.mode === "exclusive") {
       updates.set(paths.config, stringify(restoreProviderBaseConfig(
         await readConfig(paths.config), initial.config, definition,
       )));
     }
     await applyProviderFileUpdates(updates, snapshots);
-    return { action: "removed", activation: "restart-all" };
+    return { action: "removed", accountId, activation: "restart-all" };
   });
 }
 
@@ -261,34 +418,72 @@ export async function runCcgSetup({
   prompts = clackPrompts,
   downloadCatalog = downloadDeepseekCatalog,
   fetchImpl = globalThis.fetch,
+  action: requestedAction,
+  accountId: requestedAccountId,
 } = {}) {
-  const action = await prompts.select({
-    message: "CCG（CommandCode）设置",
+  const accounts = loadCcgAccounts(environment);
+  const legacy = hasLegacyCcgConfiguration(environment);
+  const action = requestedAction ?? await prompts.select({
+    message: "CCG（CommandCode）账户管理",
     options: [
-      { value: "switching", label: "配置切换模式" },
-      { value: "exclusive", label: "配置固定模式" },
-      { value: "settings", label: "修改默认模型与思考等级" },
-      { value: "remove", label: "删除 CCG" },
+      ...(legacy ? [{ value: "migrate", label: "迁移旧单账户（保留 Key 与设置）" }] : [{ value: "add", label: "新增账户" }]),
+      ...(accounts.length === 0 ? [] : [
+        { value: "reconfigure", label: "重新配置账户" },
+        { value: "settings", label: "修改默认模型与思考等级" },
+        { value: "default", label: "设置默认账户" },
+        { value: "remove", label: "删除账户" },
+      ]),
       { value: "back", label: "返回" },
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  if (action === "settings") {
-    return runModelProviderDefaultSetup({
-      allowBack: true, provider: definition.id, environment, output, prompts,
-    });
-  }
+  const accountId = requestedAccountId ?? (["add", "migrate"].includes(action)
+    ? await prompts.text({
+        message: "账户 ID",
+        validate: (value) => {
+          try { validateCcgAccountId(value); } catch (error) { return error.message; }
+        },
+      })
+    : await prompts.select({
+        message: "选择 CCG 账户",
+        options: accounts.map((account) => ({
+          value: account.id,
+          label: `${account.id}${account.default ? "（默认）" : ""}`,
+        })),
+      }));
+  if (prompts.isCancel(accountId)) return { action: "back" };
+  validateCcgAccountId(accountId);
   let result;
-  if (action === "remove") {
+  if (action === "migrate") {
     const confirmed = await prompts.confirm({
-      message: "删除 CCG 配置？固定模式将恢复本次安装前的 Provider 设置，备份保留。",
+      message: `将旧 CCG 配置迁移为 ${ccgProviderId(accountId)}？旧 Provider 会停止接续历史会话。`,
       initialValue: false,
     });
     if (confirmed !== true) return { action: "back" };
-    result = await removeCcgConfiguration({ confirmRemove: true }, { environment });
-  } else {
-    if (!["switching", "exclusive"].includes(action)) throw new Error("未知 CCG 设置操作");
-    if (action === "exclusive") {
+    result = await migrateCcgAccount({ accountId, confirmMigration: true }, { environment });
+  } else if (action === "remove") {
+    const confirmed = await prompts.confirm({
+      message: `删除 CCG 账户 ${accountId}？保留安装前备份。`,
+      initialValue: false,
+    });
+    if (confirmed !== true) return { action: "back" };
+    result = await removeCcgConfiguration({ accountId, confirmRemove: true }, { environment });
+  } else if (action === "default") {
+    result = await setCcgDefaultAccount(accountId, { environment });
+  } else if (action === "settings") {
+    return runModelProviderDefaultSetup({
+      allowBack: true, provider: ccgProviderId(accountId), environment, output, prompts,
+    });
+  } else if (["add", "reconfigure"].includes(action)) {
+    const mode = await prompts.select({
+      message: "运行模式",
+      options: [
+        { value: "switching", label: "切换模式" },
+        { value: "exclusive", label: "固定主 Provider" },
+      ],
+    });
+    if (prompts.isCancel(mode)) return { action: "back" };
+    if (mode === "exclusive") {
       const confirmed = await prompts.confirm({
         message: "固定模式会备份并修改 Codex 主配置，确认继续？",
         initialValue: false,
@@ -297,21 +492,34 @@ export async function runCcgSetup({
     }
     const apiKey = await prompts.password({
       message: "CommandCode API Key（保存到本机 0600 私有配置）",
-      validate: (value) => isManagedProviderApiKeyValid(definition, value)
+      validate: (value) => isManagedProviderApiKeyValid(ccgAccountDefinition(accountId), value)
         ? undefined : "CCG API Key 无效",
     });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    const downloaded = await downloadCatalog(fetchImpl);
-    const catalog = createCcgCatalog(downloaded.catalog);
+    let catalog;
+    const paths = ccgSetupPaths(environment, accountId);
+    if (existsSync(paths.catalog)) {
+      catalog = JSON.parse(readPrivateFileSync(paths.catalog, maximumCatalogBytes));
+    } else {
+      const downloaded = await downloadCatalog(fetchImpl);
+      catalog = createCcgCatalog(downloaded.catalog);
+    }
+    const current = loadManagedModelProviderSettings(environment)
+      .find((provider) => provider.provider === ccgProviderId(accountId));
     const model = await prompts.select({
       message: "选择 CCG 默认模型（来自目录文件）",
       options: catalog.models.map((entry) => ({ value: entry.slug, label: entry.display_name })),
+      initialValue: current?.model,
     });
     if (prompts.isCancel(model)) return { action: "back" };
     result = await applyCcgConfiguration({
-      apiKey, catalog, model, mode: action, confirmExclusiveConfigChange: action === "exclusive",
+      accountId, apiKey, catalog, model, mode,
+      reconfigure: action === "reconfigure",
+      confirmExclusiveConfigChange: mode === "exclusive",
     }, { environment });
-    output.write("CCG 已配置；通过 /model 选择模型，或在切换模式使用 codexc remote --profile sf-ccg。\n");
+    output.write(`CCG 账户 ${accountId} 已配置；切换模式可使用 codexc remote --profile sf-ccg-${accountId}。\n`);
+  } else {
+    throw new Error("未知 CCG 账户操作");
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return result;

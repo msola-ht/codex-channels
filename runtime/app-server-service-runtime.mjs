@@ -28,6 +28,7 @@ import {
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
+  loadManagedModelProviderSettings,
   loadOpenAiBaseUrl,
   loadThirdPartyModelProviderRole,
   loadThirdPartyProviderCredential,
@@ -46,6 +47,7 @@ import {
   sharedProviderProxyKey,
 } from "./opencode-go-accounts.mjs";
 import { loadDeepseekAccounts, deepseekAccountIdFromProvider, deepseekProviderId } from "./deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgAccountIdFromProvider, ccgProviderId } from "./ccg-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
@@ -193,6 +195,13 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               if (accountId === undefined) throw new Error("DS 统计缺少账户 ID");
               return sendProviderProxyMetrics(providerMetricsSocketPath(socketPath, deepseekProviderId(accountId)), metrics);
             },
+          } : provider === "ccg" ? {
+            accountIds: ccgAccounts.map((account) => account.id),
+            defaultAccountId: ccgRoleAccountId ?? ccgAccounts.find((account) => account.default)?.id,
+            onMetrics: (metrics, accountId) => {
+              if (accountId === undefined) throw new Error("CCG 统计缺少账户 ID");
+              return sendProviderProxyMetrics(providerMetricsSocketPath(socketPath, ccgProviderId(accountId)), metrics);
+            },
           } : {
             onMetrics: (metrics) => sendProviderProxyMetrics(
               providerMetricsSocketPath(socketPath, provider),
@@ -228,6 +237,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       .map((definition) => [definition.id, definition]),
   );
   const thirdPartyRole = loadThirdPartyModelProviderRole(runtime.environment);
+  const externalRoleReasoningEffort = resolveExternalRoleReasoningEffort(
+    thirdPartyRole,
+    loadManagedModelProviderSettings(runtime.environment),
+  );
   const externalRoleBaseUrl = (baseUrl) =>
     `${baseUrl.replace(/\/+$/u, "")}/role/external`;
   const withExternalRoleMetrics = (provider, options) =>
@@ -235,13 +248,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       && sharedProviderProxyKey(thirdPartyRole.provider) === sharedProviderProxyKey(provider)
       ? {
           ...options,
-          externalRoleReasoningEffort: thirdPartyRole.reasoningEffort,
+          externalRoleReasoningEffort,
         }
       : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
   const dsAccounts = loadDeepseekAccounts(runtime.environment);
   const dsRoleAccountId = thirdPartyRole ? deepseekAccountIdFromProvider(thirdPartyRole.provider) : undefined;
-  const proxyAccountId = (provider) => opencodeGoAccountIdFromProvider(provider) ?? deepseekAccountIdFromProvider(provider);
+  const ccgAccounts = loadCcgAccounts(runtime.environment);
+  const ccgRoleAccountId = thirdPartyRole ? ccgAccountIdFromProvider(thirdPartyRole.provider) : undefined;
+  const proxyAccountId = (provider) => opencodeGoAccountIdFromProvider(provider)
+    ?? deepseekAccountIdFromProvider(provider)
+    ?? ccgAccountIdFromProvider(provider);
   const goAccountIds = goAccounts.map((account) => account.id);
   const goDefaultAccount = thirdPartyRole
     && opencodeGoAccountIdFromProvider(thirdPartyRole.provider)
@@ -739,6 +756,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     for (const agent of upstreamAgents) agent.destroy();
     throw error;
   }
+}
+
+export function resolveExternalRoleReasoningEffort(role, managedSettings) {
+  if (role === undefined) return undefined;
+  if (role.providerType !== "managed") return role.reasoningEffort;
+  const provider = managedSettings.find((candidate) => candidate.provider === role.provider);
+  const model = provider?.models.find((candidate) => candidate.model === role.model);
+  if (model === undefined) {
+    throw new Error(`第三方子代理模型不在 ${role.provider} 当前模型目录中：${role.model}`);
+  }
+  return model.reasoningEffort;
 }
 
 function applyAppServerTerminalIdentity(environment, terminalIdentity) {

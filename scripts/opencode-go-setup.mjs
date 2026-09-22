@@ -417,10 +417,6 @@ export async function refreshOpencodeGoCatalogForUpdate(
     modelWindowPercentByModel: configuredWindowPercentByModel(environment),
   });
   const defaultModel = resolveManagedCatalogModel(managedCatalog, definition);
-  const catalogSlugs = new Set(
-    managedCatalog.models.flatMap((model) =>
-      typeof model?.slug === "string" ? [model.slug] : []),
-  );
   const managedDefault = managedCatalog.models.find(
     (model) => model?.slug === defaultModel,
   );
@@ -445,17 +441,20 @@ export async function refreshOpencodeGoCatalogForUpdate(
   for (const account of accounts) {
     const provider = opencodeGoProviderId(account.id);
     const settings = settingsByProvider.get(provider);
-    if (!settings || catalogSlugs.has(settings.model)) continue;
-    migrationFrom ??= settings.model;
+    if (!settings) continue;
+    const selected = managedCatalog.models.find((model) => model.slug === settings.model) ?? managedDefault;
+    const modelChanged = selected.slug !== settings.model;
+    if (!modelChanged && settings.mode !== "switching") continue;
+    if (modelChanged) migrationFrom ??= settings.model;
     const paths = opencodeGoAccountPaths(environment, account.id);
     const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
     const document = await readTomlFile(documentPath);
     if (document.model !== settings.model || document.model_provider !== provider) {
       throw new Error(`OpenCode Go 账户 ${account.id} 默认模型配置不一致`);
     }
-    document.model = defaultModel;
+    document.model = selected.slug;
     if (settings.mode === "switching") {
-      document.model_reasoning_effort = reasoningEffort;
+      document.model_reasoning_effort = selected.default_reasoning_level;
     } else {
       delete document.model_reasoning_effort;
       delete document.model_context_window;
@@ -463,22 +462,25 @@ export async function refreshOpencodeGoCatalogForUpdate(
       delete document.model_auto_compact_token_limit_scope;
     }
     updates.push({ path: documentPath, content: stringify(document) });
-    migratedProviders.push(provider);
+    if (modelChanged) migratedProviders.push(provider);
   }
   const role = loadManagedModelProviderRole(environment);
-  const roleModel = role !== undefined
-    && isOpencodeGoProvider(role.provider)
-    && !catalogSlugs.has(role.model)
+  const roleSelection = role !== undefined && isOpencodeGoProvider(role.provider)
+    ? managedCatalog.models.find((model) => model.slug === role.model) ?? managedDefault
+    : undefined;
+  const roleModel = roleSelection !== undefined && roleSelection.slug !== role.model
     ? role.model
     : undefined;
   const migrateRole = roleModel !== undefined;
+  const updateRole = roleSelection !== undefined
+    && (migrateRole || role.reasoningEffort !== roleSelection.default_reasoning_level);
   migrationFrom ??= roleModel;
   const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const transactionPaths = [
     catalogPath,
     manifestPath,
     ...updates.map(({ path }) => path),
-    ...(migrateRole ? [roleConfigPath] : []),
+    ...(updateRole ? [roleConfigPath] : []),
   ];
   const snapshots = snapshotProviderFiles(transactionPaths);
   let guards = snapshots;
@@ -505,10 +507,10 @@ export async function refreshOpencodeGoCatalogForUpdate(
       await writePrivateFileAtomic(update.path, update.content);
       guards = snapshotProviderFiles(transactionPaths);
     }
-    if (migrateRole) {
+    if (updateRole) {
       writeManagedModelProviderRoleConfig(environment, {
         provider: role.provider,
-        model: defaultModel,
+        model: roleSelection.slug,
       });
       guards = snapshotProviderFiles(transactionPaths);
     }

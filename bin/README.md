@@ -23,8 +23,8 @@
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
-- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-deepseek`、
-  `--profile sf-ocg-<账户>` 或 `--profile sf-custom-<Provider ID>`
+- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-ds-<账户>`、
+  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>` 或 `--profile sf-custom-<Provider ID>`
   选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   在 TUI 生命周期内持有对应实例的 Supervisor 租约，直接运行的 `codex --remote` 不具备该保护；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
@@ -68,7 +68,7 @@
   管理员权限，登录当前用户后启动。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
-Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常
+Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部账户共享一个）；任一非主动释放的受监管组件异常
 退出都会共同重建。主 App Server 与 Provider App Server 都支持按需启动和释放；Gateway 全局空闲
 释放会停止未被租约占用的实例，`agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的
 隔离实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，并按实例串行

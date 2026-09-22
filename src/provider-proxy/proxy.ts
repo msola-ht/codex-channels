@@ -75,7 +75,7 @@ export interface ProviderProxyOptions {
   upstreamBasePath?: string;
   /** 仅官方 OpenAI 主代理启用的当前锁定 Codex 0.155.1 API 路径。 */
   allowOpenAiApiPaths?: boolean;
-  /** 共享代理按 `/go/<account>/...` 前缀区分的账户 id（OpenCode Go 共享代理） */
+  /** 多账户共享代理按 `/go/<account>/...` 前缀区分的账户 id。 */
   accountIds?: readonly string[];
   /** 共享代理无账户前缀请求归属的默认账户。 */
   defaultAccountId?: string;

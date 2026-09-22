@@ -60,7 +60,8 @@ DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `
 
 通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”按模型名设置窗口比例。
 账户分别选择默认模型；思考等级、上下文和能力字段存放在共享目录，同一模型的这些设置会影响
-所有 DS 账户。切换 Profile 的思考等级镜像同步更新，避免其他账户因目录变化而失效。
+所有 DS 账户。切换 Profile 和引用该模型的共享第三方子代理会同步思考等级镜像，避免目录变化后
+账户配置、角色配置与请求指标使用不同等级。
 压缩使用上游默认，不写入独立自动压缩阈值。
 
 切换账户的共享终端入口：
@@ -154,13 +155,14 @@ Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此
 
 ## 共享第三方子代理
 
-DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复角色。配置 Provider 不会
+DeepSeek、OpenCode Go 与 CCG 共用 `agents.external`，不按 Provider 注册重复角色。配置 Provider 不会
 自动创建或切换该角色；只有明确进入“模型与提供商 → 第三方 Provider → 共享第三方子代理”并选择
 Provider 与模型，或运行下面的显式命令，才会注册或更新角色：
 
 ```bash
 codexc agents configure ds-<账户> deepseek-v4-pro
 codexc agents configure ocg-<accountId> deepseek-flash
+codexc agents configure ccg-<accountId> deepseek/deepseek-v4-pro
 codexc agents status
 codexc agents disable
 ```
@@ -168,8 +170,8 @@ codexc agents disable
 配置或停用共享子代理后只需运行 `codexc service restart app-server`；Gateway 会自动重连，
 无需重启 Gateway。
 
-修改 DeepSeek 的默认模型、OpenCode Go 默认账户或重新运行 Provider Setup 也不会自动刷新该角色；
-需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
+修改默认账户或重新运行 Provider Setup 不会自动切换该角色的 Provider 或模型；模型目录中的默认
+思考等级变化会同步到仍引用该模型的角色。需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
 `codexc agents configure ...`。
 
 角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`

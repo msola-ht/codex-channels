@@ -135,18 +135,18 @@ const helpText = {
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / 受管 Provider 模型设置 / 共享第三方子代理
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / 受管 Provider 模型设置 / 共享第三方子代理
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 
-DeepSeek 与 OpenCode Go 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
+DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开同一受管 Provider 设置，并预选当前 Provider。`,
   start: `用法：codexc start
 
 在前台启动 Codex App Server 与 Gateway。`,
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg 或
+切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   desktop_app: desktopAppCommandUsage,
   service: `用法：codexc service <命令>

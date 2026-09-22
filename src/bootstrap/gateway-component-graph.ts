@@ -48,6 +48,11 @@ import {
 import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
+import {
+  ccgProviderId,
+  isCcgAccountProvider,
+  loadCcgDefaultAccount,
+} from "../../runtime/ccg-accounts.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -204,6 +209,16 @@ export abstract class GatewayComponentGraph {
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
     const managedProviders = loadManagedModelProviders();
+    const switchingProviderIds = [
+      ...managedProviders.map(({ provider }) => provider),
+      ...customSwitchingProviders.map(({ provider }) => provider),
+    ];
+    const defaultCcgAccount = loadCcgDefaultAccount();
+    const defaultThirdPartyProvider = defaultCcgAccount !== undefined
+      && switchingProviderIds.length > 1
+      && switchingProviderIds.every((provider) => isCcgAccountProvider(provider))
+      ? ccgProviderId(defaultCcgAccount.id)
+      : undefined;
     const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
       primaryProvider,
@@ -491,6 +506,7 @@ export abstract class GatewayComponentGraph {
           && snapshot.usage !== null && typeof snapshot.usage === "object"
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
+      defaultThirdPartyProvider,
     );
     this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
     const collaborationModes = new CollaborationModeSelectionService(

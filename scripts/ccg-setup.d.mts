@@ -2,35 +2,54 @@ export interface CcgCatalog {
   models: Array<Record<string, unknown>>;
 }
 
-export function ccgSetupPaths(environment?: NodeJS.ProcessEnv): {
+export function ccgSetupPaths(environment: NodeJS.ProcessEnv | undefined, accountId: string): {
   config: string; profile: string; marker: string;
-  catalog: string; manifest: string; backup: string;
+  catalog: string; manifest: string; backup: string; registry: string; role: string;
 };
 export function applyCcgConfiguration(input: {
+  accountId: string;
   apiKey: string;
   catalog: CcgCatalog;
   model: string;
   mode?: "switching" | "exclusive";
+  reconfigure?: boolean;
   confirmExclusiveConfigChange?: boolean;
 }, options?: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<{
   action: "configured";
+  account: { id: string; provider: `ccg-${string}`; default: boolean };
   mode: "switching" | "exclusive";
   model: string;
   activation: "restart-all";
 }>;
-export function removeCcgConfiguration(input?: { confirmRemove?: boolean }, options?: {
+export function hasLegacyCcgConfiguration(environment?: NodeJS.ProcessEnv): boolean;
+export function migrateCcgAccount(input: {
+  accountId: string;
+  confirmMigration?: boolean;
+}, options?: { environment?: NodeJS.ProcessEnv }): Promise<{
+  action: "migrated";
+  account: { id: string; provider: `ccg-${string}`; default: true };
+  mode: "switching" | "exclusive";
+  activation: "restart-all";
+}>;
+export function setCcgDefaultAccount(accountId: string, options?: {
   environment?: NodeJS.ProcessEnv;
-}): Promise<{ action: "removed"; activation: "restart-all" }>;
+}): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
+export function removeCcgConfiguration(input: { accountId: string; confirmRemove?: boolean }, options?: {
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ action: "removed"; accountId: string; activation: "restart-all" }>;
 export function runCcgSetup(options?: {
   environment?: NodeJS.ProcessEnv;
   output?: { write(value: string): unknown };
   prompts?: unknown;
   fetchImpl?: typeof fetch;
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: CcgCatalog }>;
+  action?: "add" | "migrate" | "reconfigure" | "settings" | "default" | "remove";
+  accountId?: string;
 }): Promise<unknown>;
 export function refreshCcgCatalogForUpdate(environment?: NodeJS.ProcessEnv, options?: {
   fetchImpl?: typeof fetch;
   downloadCatalog?: () => Promise<{ catalog: CcgCatalog }>;
-}): Promise<{ status: "not-configured" } | { status: "updated"; provider: "ccg" }>;
+  now?: () => Date;
+}): Promise<{ status: "not-configured" } | { status: "updated"; providers: string[] }>;
