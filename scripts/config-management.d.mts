@@ -8,11 +8,7 @@ export type GatewaySettingActivation =
   | "restart-all"
   | "reinstall-services";
 
-export type StableGatewayActivation = "none" | "reload" | "restart" | "reinstall-required" | "failed";
-
 import type { ConfigActivationResult } from "./config-activation-result.mjs";
-
-export function normalizeGatewayActivation(activation: GatewaySettingActivation | string): StableGatewayActivation;
 
 export class ConfigManagementError extends Error {
   readonly code: string;

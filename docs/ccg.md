@@ -33,7 +33,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 使用 `codexc ccg legacy remove`，或进入 CCG Setup 选择“移除旧单账户，然后重新添加”，
 确认后移除旧 Key 和运行配置，保留安装前备份及历史统计，再填写明确账户 ID 重新添加。
 固定模式恢复原有主配置字段；Remote TUI 正在使用时须先退出。
-更新命令检测到旧配置会在停止服务前报错。旧 Provider 的历史 Thread 不再接续。
+更新器不检查或清理 Provider 旧账户配置。旧 Provider 的历史 Thread 不再接续。
 
 ## 文件与运行模式
 

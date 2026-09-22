@@ -706,7 +706,7 @@ function withoutManagedProviderApiKeys(environment) {
     loadManagedModelProviderDefinitions(environment)
       .map(({ apiKeyEnvironmentKey }) => apiKeyEnvironmentKey),
   );
-  // 旧版单账户环境变量在迁移后不再属于动态定义，仍必须从子进程环境剥离。
+  // 旧版单账户环境变量不属于当前动态定义，仍必须从子进程环境剥离。
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
   for (const key of managedKeys) {
     delete childEnvironment[key];

@@ -13,7 +13,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ConfigManagementError,
   loadGatewaySettings,
-  normalizeGatewayActivation,
   updateGatewaySetting,
 } from "../scripts/config-management.mjs";
 import { readCodexProxySettings, readCodexProxySnapshot, renderCodexProxySettings, writeCodexProxySettings, writeCodexProxySnapshot } from "../runtime/codex-proxy-env.mjs";
@@ -92,13 +91,6 @@ describe("Gateway Config management", () => {
     expect(() => readCodexProxySettings(fixture.environment)).toThrow("引号后存在无效内容");
     writeFileSync(path, 'HTTPS_PROXY="http://localhost:7897" # comment\n');
     expect(readCodexProxySettings(fixture.environment).https_proxy).toBe("http://localhost:7897");
-  });
-
-  it("normalizes activation scopes for machine consumers", () => {
-    expect(normalizeGatewayActivation("none")).toBe("none");
-    expect(normalizeGatewayActivation("reinstall-services")).toBe("reinstall-required");
-    expect(normalizeGatewayActivation("reload")).toBe("reload");
-    expect(normalizeGatewayActivation("unexpected")).toBe("failed");
   });
 
   it("projects activation scopes to stable targets and commands", () => {

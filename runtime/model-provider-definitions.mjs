@@ -23,7 +23,7 @@ const opencodeGoProviderCapabilities = Object.freeze({
 });
 
 const deepseekProfileName = "sf-deepseek";
-// 仅用于识别迁移前的单账户 Profile；实际账户 Profile 一律由账户 ID 派生。
+// 仅用于识别待移除的旧单账户 Profile；实际账户 Profile 一律由账户 ID 派生。
 const opencodeGoLegacyProfileName = "sf-opencode-go";
 
 export const deepseekProviderDefinition = Object.freeze({
