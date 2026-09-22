@@ -975,8 +975,9 @@ export async function updateInstalledPackage(environment = process.env, options 
   assertSourceUpdateCaller(environment);
   const checkout = options.projectDir ?? packageDir;
   const expected = codexVersion(checkout);
-  const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   const writeMessage = options.writeMessage ?? writeCliMessage;
+  writeMessageSafely(writeMessage, "note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。");
+  const inspection = await (options.inspectStaged ?? inspectStagedInstallation)(checkout, environment);
   let temporaryDirectory;
   let servicesStopped = false;
   let serviceStopCompleted = false;
@@ -1013,6 +1014,13 @@ export async function updateInstalledPackage(environment = process.env, options 
       await (options.startServices ?? startCoreServices)(checkout, environment, options);
       servicesStopped = false;
     }
+    writeMessageSafely(
+      writeMessage,
+      "success",
+      prepared.installRequired || inspection.databaseUpdatesRequired
+        ? `配套 Codex CLI ${expected} 与数据库更新已完成。`
+        : `检查完成：配套 Codex CLI ${expected} 与数据库均无需更新。`,
+    );
   } catch (error) {
     if (!databasesReady && (servicesStopped || packageStage === "upgrade-databases")) {
       throw annotateSourceUpdateFailure(error, {
