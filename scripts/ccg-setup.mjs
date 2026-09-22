@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
@@ -38,10 +38,13 @@ import {
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { createCcgCatalog } from "./provider-model-catalog.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
 
 async function validateCcgCatalog(catalog, environment) {
+  checkCcgCatalog(catalog);
   const content = `${JSON.stringify(catalog, null, 2)}\n`;
   if (Buffer.byteLength(content) > maximumCatalogBytes) {
     throw new Error("CCG 模型目录不能超过 2 MiB");
@@ -71,14 +74,7 @@ async function validateCcgCatalog(catalog, environment) {
   }
 }
 
-export async function readCcgCatalog(path) {
-  if (typeof path !== "string" || path.trim().length === 0) {
-    throw new Error("请指定 CCG 模型目录 JSON 文件");
-  }
-  let catalog;
-  try { catalog = JSON.parse(await readFile(path, "utf8")); } catch {
-    throw new Error("CCG 模型目录文件无法读取或解析");
-  }
+function checkCcgCatalog(catalog) {
   if (!Array.isArray(catalog?.models) || catalog.models.length === 0) {
     throw new Error("CCG 模型目录缺少 models");
   }
@@ -113,7 +109,7 @@ export function ccgSetupPaths(environment = process.env) {
 
 export async function applyCcgConfiguration({
   apiKey,
-  catalogPath,
+  catalog: source,
   model,
   mode = "switching",
   confirmExclusiveConfigChange = false,
@@ -145,18 +141,12 @@ export async function applyCcgConfiguration({
     const backup = await readInitialConfig(paths.backup);
     if (previous && !backup) throw new Error("CCG 初始配置备份缺失，请先恢复原始备份");
     const initial = backup ?? { config: current };
-    const source = await readCcgCatalog(catalogPath);
+    checkCcgCatalog(source);
     if (!source.models.some((entry) => entry.slug === model)) {
       throw new Error("请选择 CCG 模型目录中的模型");
     }
     const catalog = withPreservedManagedModelCatalogSettings(source, definition, previous?.models ?? []);
-    const role = loadThirdPartyModelProviderRole(environment);
-    if (role?.provider === definition.id) {
-      const roleModel = catalog.models.find((entry) => entry.slug === role.model);
-      if (!roleModel?.supported_reasoning_levels.some((entry) => entry.effort === role.reasoningEffort)) {
-        throw new Error("新 CCG 目录不支持共享第三方子代理当前的模型或思考等级，请先切换或停用该角色");
-      }
-    }
+    checkCcgRole(catalog, environment);
     await validateCcgCatalog(catalog, environment);
     const { config: nextConfig, profile } = createManagedProviderConfiguration(
       current, initial.config, definition, {
@@ -168,8 +158,8 @@ export async function applyCcgConfiguration({
       [paths.backup, `${JSON.stringify(initial)}\n`],
       [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
       [paths.manifest, `${JSON.stringify({
-        source: resolve(catalogPath),
-        importedAt: new Date().toISOString(),
+        source: deepseekSetupScriptUrl,
+        downloadedAt: new Date().toISOString(),
       }, null, 2)}\n`],
       [paths.profile, profile === undefined ? undefined : stringify(profile)],
       [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
@@ -179,6 +169,51 @@ export async function applyCcgConfiguration({
     }
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "configured", mode, model, activation: "restart-all" };
+  });
+}
+
+function checkCcgRole(catalog, environment) {
+  const role = loadThirdPartyModelProviderRole(environment);
+  if (role?.provider === definition.id) {
+    const roleModel = catalog.models.find((entry) => entry.slug === role.model);
+    if (!roleModel?.supported_reasoning_levels.some((entry) => entry.effort === role.reasoningEffort)) {
+      throw new Error("新 CCG 目录不支持共享第三方子代理当前的模型或思考等级，请先切换或停用该角色");
+    }
+  }
+}
+
+export async function refreshCcgCatalogForUpdate(environment = process.env, options = {}) {
+  return withModelProviderManagementTransaction(environment, async () => {
+    const paths = ccgSetupPaths(environment);
+    const snapshots = snapshotProviderFiles([
+      ...Object.values(paths), managedModelProviderRoleConfigPath(environment),
+    ]);
+    const previous = loadManagedModelProviderSettings(environment)
+      .find((item) => item.provider === definition.id);
+    if (!previous) return { status: "not-configured" };
+    const downloaded = options.downloadCatalog
+      ? await options.downloadCatalog()
+      : await downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch);
+    const catalog = withPreservedManagedModelCatalogSettings(
+      createCcgCatalog(downloaded.catalog), definition, previous.models,
+    );
+    const selected = catalog.models.find((entry) => entry.slug === previous.model);
+    if (!selected) throw new Error("新 CCG 目录不支持当前默认模型，请先选择受支持的模型");
+    checkCcgRole(catalog, environment);
+    await validateCcgCatalog(catalog, environment);
+    const updates = new Map([
+      [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
+      [paths.manifest, `${JSON.stringify({
+        source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString(),
+      }, null, 2)}\n`],
+    ]);
+    if (previous.mode === "switching") {
+      const profile = await readConfig(paths.profile);
+      profile.model_reasoning_effort = selected.default_reasoning_level;
+      updates.set(paths.profile, stringify(profile));
+    }
+    await applyProviderFileUpdates(updates, snapshots);
+    return { status: "updated", provider: definition.id };
   });
 }
 
@@ -215,6 +250,8 @@ export async function runCcgSetup({
   environment = process.env,
   output = process.stdout,
   prompts = clackPrompts,
+  downloadCatalog = downloadDeepseekCatalog,
+  fetchImpl = globalThis.fetch,
 } = {}) {
   const action = await prompts.select({
     message: "CCG（CommandCode）设置",
@@ -255,19 +292,15 @@ export async function runCcgSetup({
         ? undefined : "CCG API Key 无效",
     });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    const catalogPath = await prompts.text({
-      message: "Codex 模型目录 JSON 文件路径",
-      initialValue: ccgSetupPaths(environment).catalog,
-    });
-    if (prompts.isCancel(catalogPath)) return { action: "back" };
-    const catalog = await readCcgCatalog(catalogPath);
+    const downloaded = await downloadCatalog(fetchImpl);
+    const catalog = createCcgCatalog(downloaded.catalog);
     const model = await prompts.select({
       message: "选择 CCG 默认模型（来自目录文件）",
       options: catalog.models.map((entry) => ({ value: entry.slug, label: entry.display_name })),
     });
     if (prompts.isCancel(model)) return { action: "back" };
     result = await applyCcgConfiguration({
-      apiKey, catalogPath, model, mode: action, confirmExclusiveConfigChange: action === "exclusive",
+      apiKey, catalog, model, mode: action, confirmExclusiveConfigChange: action === "exclusive",
     }, { environment });
     output.write("CCG 已配置；通过 /model 选择模型，或在切换模式使用 codexc remote --profile sf-ccg。\n");
   }

@@ -617,8 +617,7 @@ async function successfulCatalog() {
   return {
     catalog: {
       models: [
-        "deepseek-v4-flash",
-        "deepseek-v4-flash-vision-exp",
+        "deepseek-flash",
         "deepseek-v4-pro",
       ].map((slug) => ({
         slug,

@@ -332,7 +332,7 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 
 CCG（CommandCode）复用已有 Responses Provider、模型设置和路由，不新增 App Server RPC。
 接口来源为 [CommandCode Provider 文档](https://commandcode.ai/docs/provider)，接入入口为
-[`ccg-setup.mjs`](../scripts/ccg-setup.mjs)，模型以独立本地文件为准，导入前通过锁定 CLI 的 `debug models` 及其 `model_catalog_json` 解析验证完整格式；实现边界见
+[`ccg-setup.mjs`](../scripts/ccg-setup.mjs)，模型由 [`provider-model-catalog.mjs`](../scripts/provider-model-catalog.mjs) 从 DS 完整目录生成，保留原模型并复用 Flash 内容增加 V4.1；写入前通过锁定 CLI 的 `debug models` 及其 `model_catalog_json` 解析验证完整格式；实现边界见
 [`CCG`](ccg.md)，配置与失败回滚验证见 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts)。
 
 | 要查的问题 | 本项目入口 | 验证入口 |

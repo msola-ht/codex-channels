@@ -23,6 +23,7 @@ import { readCodexProxySettings, writeCodexProxySettings } from "../runtime/code
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import {
   deepseekProviderDefinition,
+  commandCodeProviderDefinition,
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
@@ -266,12 +267,18 @@ describe("local update", () => {
       definitions: [
         deepseekProviderDefinition,
         opencodeGoProviderDefinition,
+        commandCodeProviderDefinition,
         noUpdateProvider,
       ],
       catalogDownloaders: {
         "deepseek-official": download,
       },
       updateAdapters: {
+        ccg: async (_environment, options) => {
+          calls.push("ccg");
+          await options.downloadCatalog();
+          return { status: "updated", provider: "ccg" };
+        },
         deepseek: async (_environment, options) => {
           calls.push("deepseek");
           await options.downloadCatalog();
@@ -285,11 +292,12 @@ describe("local update", () => {
       },
     });
 
-    expect(calls).toEqual(["deepseek", "opencode-go"]);
+    expect(calls).toEqual(["deepseek", "opencode-go", "ccg"]);
     expect(download).toHaveBeenCalledOnce();
     expect(result).toEqual({
       deepseek: { status: "updated", provider: "deepseek" },
       ocg: { status: "updated", provider: "opencode-go" },
+      ccg: { status: "updated", provider: "ccg" },
       "future-provider": { status: "not-applicable" },
     });
   });

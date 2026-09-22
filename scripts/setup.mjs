@@ -266,7 +266,7 @@ async function runThirdPartyModelSetup({
         {
           value: "ccg",
           label: "CCG（CommandCode）",
-          hint: "导入模型目录文件，配置固定/切换模式或删除",
+          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
         },
         {
           value: "model_window",

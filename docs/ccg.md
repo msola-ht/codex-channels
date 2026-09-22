@@ -11,21 +11,21 @@ CCG 是 CommandCode 的受管 Responses Provider，Provider ID 为 `ccg`。
 
 1. 选择切换模式或固定模式。
 2. 输入 CommandCode API Key。
-3. 指定本地 Codex 模型目录 JSON 文件，从文件中的模型选择默认模型。
+3. 从 DS 官方下载完整模型目录，生成 CCG 目录后选择默认模型。
 4. 运行 `codexc service restart all`，之后通过渠道 `/model` 选择 CCG 模型。
 
-模型由文件决定，不请求 CommandCode `/models`，不在代码中维护可选模型列表或改写模型 ID。
-文件采用现有 Codex `models.json` 格式，顶层为 `models` 数组；每项需要 `slug`、
-`display_name`、`context_window`、`default_reasoning_level`、非空
-`supported_reasoning_levels` 与 `input_modalities`，并保留 Codex 所需的其余完整能力字段。
-模型 ID、思考等级、上下文与输入能力均按文件配置；模型必须实际支持上游 Responses 接口。
-官方文档中的 Claude 模型仅支持 Messages，不能放入此 Responses Provider 目录。
-导入前会在临时目录调用本机 Codex CLI 校验完整模型格式，不联网查询模型；
-目录上限为 2 MiB，校验失败不会写入受管配置。CCG 不使用 DS 的目录或内置模型默认值。
+目录以 DS 官方 `models.json` 完整内容为基础，保留 Flash、Pro，并复制 Flash 的全部字段，
+仅修改 `slug` 和 `display_name`，增加 `DeepSeek V4.1 Flash`。DS 自身的目录保持原样。
+CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.json) 映射为
+`deepseek/deepseek-v4-flash`、`deepseek/deepseek-v4-pro` 与 `deepseek/deepseek-v4.1-flash`。
+4.1 的提供商前缀见 [CommandCode 官方模型页](https://commandcode.ai/models/deepseek-v4-1-flash)。
+思考等级、工具、提示词、上下文与输入能力均复用 DS Flash 内容；这不代表已通过 4.1 的真实 API 联调。
+不请求 CommandCode `/models` 生成能力配置。写入前会在临时目录调用本机 Codex CLI 校验完整格式；
+生成目录上限为 2 MiB，校验失败不会写入受管配置。
 
 后续通过 CCG 菜单的“修改默认模型与思考等级”或“受管 Provider 模型设置”调整默认值，
-通过“模型上下文窗口”调整窗口占比。更换目录文件时重新执行 CCG 配置；保留仍有效的逐模型设置。
-`codexc update` 不联网刷新 CCG 目录。
+通过“模型上下文窗口”调整窗口占比。重新配置及 `codexc update` 会从 DS 获取最新基础目录，
+重新生成 CCG 文件并保留仍有效的逐模型设置；更新不会自动切换到新增的 4.1。
 新目录必须仍支持共享第三方子代理当前的模型和思考等级，否则先切换或停用该角色再导入。
 
 ## 文件与运行模式
@@ -45,7 +45,7 @@ CCG 是 CommandCode 的受管 Responses Provider，Provider ID 为 `ccg`。
 
 CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指标；当前为单个受管实例。
 配置生成与 OCG 共用 `managed-model-provider-setup.mjs`，文件事务共用
-`managed-provider-files.mjs`；账户和模型目录来源保留各自实现。
+`managed-provider-files.mjs`；账户行为与目录适配保留各自实现。
 不自动创建 `agents.external`；可通过现有共享第三方子代理入口显式选择 CCG。
 没有接入官方余额或配额接口，账户查询明确显示不支持；本地 Token 与请求指标仍按 `ccg` 隔离。
 

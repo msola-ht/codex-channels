@@ -75,6 +75,7 @@ import {
   refreshDeepseekCatalogForUpdate,
 } from "./deepseek-setup.mjs";
 import { refreshOpencodeGoCatalogForUpdate } from "./opencode-go-setup.mjs";
+import { refreshCcgCatalogForUpdate } from "./ccg-setup.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
 const sessionDisplayCacheSchemaVersion = 1;
@@ -488,6 +489,8 @@ export async function refreshManagedProviderCatalogsForUpdate(
 ) {
   const definitions = options.definitions ?? managedModelProviderDefinitions;
   const updateAdapters = options.updateAdapters ?? {
+    ccg: (targetEnvironment, adapterOptions) =>
+      refreshCcgCatalogForUpdate(targetEnvironment, adapterOptions),
     deepseek: (targetEnvironment, adapterOptions) =>
       refreshDeepseekCatalogForUpdate(targetEnvironment, adapterOptions),
     "opencode-go": (targetEnvironment, adapterOptions) =>

@@ -9,7 +9,7 @@ const managedProviderCapabilityKinds = Object.freeze({
   catalogSources: new Set(["none", "deepseek-official"]),
   accountAdapters: new Set(["none", "deepseek", "opencode-go"]),
   instanceAdapters: new Set(["single", "opencode-go-accounts"]),
-  catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go"]),
+  catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
 });
 
 const deepseekProviderCapabilities = Object.freeze({
@@ -80,10 +80,10 @@ export const commandCodeProviderDefinition = Object.freeze({
   apiKeyEnvironmentKey: "CODEX_CONNECT_CCG_API_KEY",
   supportsWebsockets: false,
   capabilities: Object.freeze({
-    catalogSource: "none",
+    catalogSource: "deepseek-official",
     accountAdapter: "none",
     instanceAdapter: "single",
-    catalogUpdateAdapter: "none",
+    catalogUpdateAdapter: "ccg",
   }),
 });
 

@@ -62,6 +62,7 @@ import {
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
 import {
   ManagedModelProviderSetupError,
   createManagedProviderCatalog,
@@ -411,7 +412,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const downloaded = await (options.downloadCatalog
     ? options.downloadCatalog()
     : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
-  const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
+  const managedCatalog = createManagedProviderCatalog(createOpencodeGoCatalog(downloaded.catalog), definition, {
     previousModels: previousSettings[0]?.models,
     modelWindowPercentByModel: configuredWindowPercentByModel(environment),
   });

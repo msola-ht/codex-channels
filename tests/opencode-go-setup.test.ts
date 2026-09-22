@@ -246,6 +246,10 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       slug: "deepseek-flash",
       context_window: 400_000,
     }));
+    expect(catalog.models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4.1-flash", display_name: "DeepSeek V4.1 Flash",
+      input_modalities: ["text", "image"],
+    }));
     expect(catalog.models.find((model: { slug?: string }) =>
       model.slug === "deepseek-flash"
     ).auto_compact_token_limit).toBeUndefined();
@@ -500,11 +504,16 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
 
     expect(result).toMatchObject({
       status: "updated",
-      modelCount: 2,
+      modelCount: 3,
       migratedProviders: ["ocg-main"],
       roleMigrated: true,
       defaultModelMigrationApplied: true,
     });
+    expect(JSON.parse(readFileSync(
+      join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"), "utf8",
+    )).models).toContainEqual(expect.objectContaining({
+      slug: "deepseek-v4.1-flash", display_name: "DeepSeek V4.1 Flash",
+    }));
     expect(parse(readFileSync(join(codexHome, "sf-ocg-main.config.toml"), "utf8")))
       .toMatchObject({
         model: "deepseek-flash",

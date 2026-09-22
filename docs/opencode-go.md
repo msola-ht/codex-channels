@@ -3,8 +3,11 @@
 Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用，并支持在同一 Gateway 内配置多个
 OpenCode Go 账户（各自 Key、各自套餐额度）。当前官方目录中的模型为 `deepseek-flash` 和
 `deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是独立选项，分别使用各自的
-API Key、上游地址与 Thread 路由。可选模型同样以下载的官方目录为准，DeepSeek 下线的
-旧模型名不会出现在 `/model` 与 Setup 选项中。
+API Key、上游地址与 Thread 路由。目录保留 DS 原有模型，并复制 Flash 的完整内容增加
+`DeepSeek V4.1 Flash`（`deepseek-v4.1-flash`），仅修改模型 ID 与显示名。
+映射参数位于 [`provider-model-catalog.json`](../provider-model-catalog.json)，DS 自身的目录不增加该条目。
+ID 已由 [OCG 公开模型目录](https://opencode.ai/zen/go/v1/models) 确认；能力字段按 Flash 复用，
+尚未完成 4.1 的真实 API 联调。DeepSeek 下线的旧模型名不会出现在 `/model` 与 Setup 选项中。
 
 ## 配置与使用
 
@@ -80,10 +83,10 @@ Supervisor 会按需重新启动实例。
 ## 协议与模型范围
 
 OpenCode Go 的基础地址为 `https://opencode.ai/zen/go/v1`。本项目使用 Codex App Server 的
-Responses Provider 配置；当前 V4.1 Flash 与 Pro 已通过 `/responses` 流式文本和工具调用实测，
-其中 `deepseek-flash` 声明文字和图片输入。官方 Go
+Responses Provider 配置；`deepseek-flash` 声明文字和图片输入，新增的
+`deepseek-v4.1-flash` 复制其完整能力字段，本次未验证该独立模型 ID 的真实流式请求和工具调用。官方 Go
 页面列出的其他模型使用多种端点协议，不能只因为出现在官方页面或 `/models` 中就自动开放；可选模型
-仍以下载的官方目录为准：目录里声明什么就出现在选项中，官方页面新增但未写入该目录的模型不开放。
+以 DS 基础内容和显式 V4.1 扩展生成的目录为准；官方页面新增但未写入该目录的模型不开放。
 
 OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go 时，`/usage` 会实时通过官方
 `GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与

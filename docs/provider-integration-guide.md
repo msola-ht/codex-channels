@@ -70,8 +70,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；
-- 可选模型以各 Provider 下载的官方模型目录为准：目录里声明什么就开放什么，目录不再声明的
-  旧模型名不会出现在 `/model` 与 Setup 选项中；
+- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；目录不再声明的旧模型名不会出现在 `/model` 与 Setup 选项中；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
@@ -293,7 +292,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
-- [`docs/ccg.md`](ccg.md)：本地文件模型目录、单实例且无账户接口的参考实现；
+- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、单实例且无账户接口的参考实现；
 - [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；

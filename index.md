@@ -5,6 +5,7 @@
 - [`README.md`](README.md)：最短安装入口、常用命令和专题导航。
 - [`docs/user-guide.md`](docs/user-guide.md)：完整安装、配置、渠道使用、服务管理、升级、排障和开发指导。
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
+- [`provider-model-catalog.json`](provider-model-catalog.json)：OCG/CCG 基于 DS 目录扩展 V4.1 的模型 ID 与显示名映射。
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。

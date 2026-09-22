@@ -28,8 +28,9 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 });
 
 import {
-  applyCcgConfiguration, ccgSetupPaths, readCcgCatalog, removeCcgConfiguration, runCcgSetup,
+  applyCcgConfiguration, ccgSetupPaths, removeCcgConfiguration, runCcgSetup, refreshCcgCatalogForUpdate,
 } from "../scripts/ccg-setup.mjs";
+import { createCcgCatalog } from "../scripts/provider-model-catalog.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { commandCodeProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { JsonRpcClient, loadManagedModelOptions, StdioTransport } from "../src/codex-client/index.js";
@@ -61,10 +62,16 @@ function fixture() {
     input_modalities: ["text"], default_reasoning_level: "high",
     supported_reasoning_levels: [{ effort: "high", description: "High" }, { effort: "max", description: "Max" }],
   })) };
-  const catalogPath = join(home, "source-models.json");
-  writePrivateFileAtomicSync(catalogPath, JSON.stringify(source));
-  const input = { apiKey: "cmd_test-key", catalogPath, model: "deepseek/deepseek-v4-flash" };
+  const input = { apiKey: "cmd_test-key", catalog: source, model: "deepseek/deepseek-v4-flash" };
   return { environment, paths, source, input };
+}
+
+function deepseekSource(source: ReturnType<typeof fixture>["source"]) {
+  return {
+    models: source.models.map((entry, index) => ({
+      ...entry, slug: index === 0 ? "deepseek-flash" : "deepseek-v4-pro",
+    })),
+  };
 }
 
 afterEach(() => {
@@ -74,6 +81,47 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
+  it("downloads the DS directory for setup and offers the added V4.1 model", async () => {
+    const options = fixture();
+    const source = deepseekSource(options.source);
+    const downloadCatalog = vi.fn(async () => ({ catalog: source }));
+    const model = "deepseek/deepseek-v4.1-flash";
+    const select = vi.fn().mockResolvedValueOnce("switching").mockResolvedValueOnce(model);
+    await expect(runCcgSetup({
+      environment: options.environment, downloadCatalog, output: { write: vi.fn() },
+      prompts: { select, password: async () => "cmd_test-key", isCancel: () => false },
+    })).resolves.toMatchObject({ action: "configured", model });
+    expect(downloadCatalog).toHaveBeenCalledOnce();
+    expect(select.mock.calls[1]![0].options).toHaveLength(3);
+    expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ model });
+  });
+
+  it.each(["switching", "exclusive"] as const)("refreshes DS-based V4.1 capabilities while preserving %s settings", async (mode) => {
+    const options = fixture();
+    const source = deepseekSource(options.source);
+    const model = "deepseek/deepseek-v4.1-flash";
+    await applyCcgConfiguration({
+      ...options.input, catalog: createCcgCatalog(source), model, mode, confirmExclusiveConfigChange: true,
+    }, options);
+    const beforeConfig = readFileSync(options.paths.config);
+    const beforeBackup = readFileSync(options.paths.backup);
+    source.models[0]!.context_window = 2_097_152;
+    source.models[0]!.max_context_window = 2_097_152;
+    source.models[0]!.model_messages = { instructions_template: "Updated Flash instructions" };
+    await expect(refreshCcgCatalogForUpdate(options.environment, {
+      downloadCatalog: async () => ({ catalog: source }),
+    })).resolves.toEqual({ status: "updated", provider: "ccg" });
+    const catalog = JSON.parse(readFileSync(options.paths.catalog, "utf8"));
+    expect(catalog.models).toHaveLength(3);
+    expect(catalog.models[2]).toMatchObject({
+      slug: model, context_window: 2_097_152,
+      model_messages: { instructions_template: "Updated Flash instructions" },
+    });
+    expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ model, mode });
+    expect(readFileSync(options.paths.config)).toEqual(beforeConfig);
+    expect(readFileSync(options.paths.backup)).toEqual(beforeBackup);
+  });
+
   it.each(["model", "reasoning"])("returns to the parent menu when cancelling %s selection", async (step) => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
@@ -98,8 +146,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       const options = fixture();
       const catalog = JSON.parse(JSON.stringify(options.source)) as { models: Array<Record<string, unknown>> };
       delete catalog.models[0]![field];
-      writePrivateFileAtomicSync(options.input.catalogPath, JSON.stringify(catalog));
-      await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow("Codex CLI 校验");
+      await expect(applyCcgConfiguration({ ...options.input, catalog }, options)).rejects.toThrow("Codex CLI 校验");
       expect(existsSync(options.paths.catalog)).toBe(false);
       expect(existsSync(options.paths.backup)).toBe(false);
     },
@@ -139,7 +186,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       options.source.models[0]!.default_reasoning_level = "max";
       options.source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
     }
-    writePrivateFileAtomicSync(options.input.catalogPath, JSON.stringify(options.source));
     await expect(applyCcgConfiguration({ ...options.input, model: "deepseek/deepseek-v4-pro" }, options))
       .rejects.toThrow("共享第三方子代理当前的模型或思考等级");
     expect(readFileSync(options.paths.catalog)).toEqual(before);
@@ -147,7 +193,9 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
 
   it.skipIf(process.env.RUN_CODEX_CONTRACT !== "1")("loads the configured file through real App Server model/list", async () => {
     const options = fixture();
-    await applyCcgConfiguration(options.input, options);
+    await applyCcgConfiguration({
+      ...options.input, catalog: createCcgCatalog(deepseekSource(options.source)),
+    }, options);
     const [runtime] = loadManagedProviderAppServers(options.environment);
     if (!runtime) throw new Error("missing CCG runtime");
     let diagnostics = "";
@@ -167,7 +215,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
         method: "model/list", params: { limit: 100, cursor: null, includeHidden: false },
       }, { retryOverload: false });
       expect(result.data.map(({ model }) => model)).toEqual([
-        "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
+        "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4.1-flash",
       ]);
     } catch (error) {
       throw new Error(`CCG App Server contract failed: ${diagnostics}`, { cause: error });
@@ -176,15 +224,10 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     }
   });
 
-  it("preserves the file model names and capabilities and rejects malformed catalogs", async () => {
-    const { source, input } = fixture();
-    expect(await readCcgCatalog(input.catalogPath)).toEqual(source);
-    source.models[0]!.slug = "other/Model-1";
-    writePrivateFileAtomicSync(input.catalogPath, JSON.stringify(source));
-    expect((await readCcgCatalog(input.catalogPath)).models[0]).toMatchObject({ slug: "other/Model-1" });
-    source.models[0]!.input_modalities = [];
-    writePrivateFileAtomicSync(input.catalogPath, JSON.stringify(source));
-    await expect(readCcgCatalog(input.catalogPath)).rejects.toThrow("输入能力");
+  it("rejects malformed catalog capabilities", async () => {
+    const options = fixture();
+    options.source.models[0]!.input_modalities = [];
+    await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow("输入能力");
   });
 
   it("preserves the primary config and exposes isolated CCG runtime credentials", async () => {
@@ -216,7 +259,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       context_window: 65536, max_context_window: 65536, input_modalities: ["text", "image"],
       default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low", description: "Low" }],
     }];
-    writePrivateFileAtomicSync(options.input.catalogPath, JSON.stringify(options.source));
     await applyCcgConfiguration({ ...options.input, model: "other/Model-1" }, options);
     expect(JSON.parse(readFileSync(options.paths.catalog, "utf8"))).toEqual(options.source);
     expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({
@@ -234,7 +276,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
   it("rejects catalogs larger than the runtime limit before writing files", async () => {
     const options = fixture();
     options.source.models[0]!.model_messages.instructions_template = "x".repeat(2 * 1024 * 1024);
-    writePrivateFileAtomicSync(options.input.catalogPath, JSON.stringify(options.source));
     await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow("2 MiB");
     expect(existsSync(options.paths.catalog)).toBe(false);
   });

@@ -32,7 +32,7 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  CCG 采用单实例与文件目录，显式无在线目录更新或账户适配器；模型 ID 支持上游命名空间，凭据按 Bearer 格式校验。
+  CCG 采用单实例与 DS 来源目录，使用独立目录更新适配器且无账户适配器；模型 ID 支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
   Go 账户注册表动态生成 `ocg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
   更新、账户能力，允许显式无更新/无账户能力。账户实例继承共享定义；

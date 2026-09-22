@@ -30,6 +30,7 @@ import {
   writePrivateFileAtomic,
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
 import {
   createManagedProviderConfiguration,
   createManagedProviderCatalog,
@@ -379,7 +380,7 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
   );
   const migration = readOpencodeGoDefaultModelMigration(previousManifest);
   return {
-    catalog: downloaded.catalog,
+    catalog: createOpencodeGoCatalog(downloaded.catalog),
     manifest: {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
