@@ -293,7 +293,7 @@
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`legacy remove` 移除旧单账户，旧注册账户复用 `account remove`；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
-  生成共享模型目录；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
+  生成共享模型目录；恢复只接受字段完整的当前备份状态，重复配置时保留仍受支持的
   默认模型与逐模型设置。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
   长流程通过 `AbortSignal` 中止尚未完成的问题。

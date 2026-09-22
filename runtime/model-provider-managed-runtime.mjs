@@ -670,7 +670,7 @@ export function readModelCatalogSetting(path, definition, model) {
   }
 }
 
-// 迁移路径允许选中模型已从官方目录消失；目录本身不可读或条目无效仍然失败关闭。
+// 目录刷新允许原选中模型已下架；目录本身不可读或条目无效仍然失败关闭。
 function readOptionalModelCatalogSetting(path, definition, model) {
   const content = readPrivateFile(path, maximumCatalogBytes);
   let catalog;
@@ -696,7 +696,7 @@ function modelCatalogSetting(content, definition, model) {
   const document = record(candidate);
   const contextWindow = document.context_window;
   const maxContextWindow = document.max_context_window;
-  const legacyThreshold = document.auto_compact_token_limit;
+  const compactThreshold = document.auto_compact_token_limit;
   const levels = Array.isArray(document.supported_reasoning_levels)
     ? document.supported_reasoning_levels
     : [];
@@ -715,26 +715,22 @@ function modelCatalogSetting(content, definition, model) {
     || !reasoningEfforts.some(({ effort }) => effort === reasoningEffort)
     || (maxContextWindow !== null && maxContextWindow !== undefined
       && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow <= 0))
-    || (legacyThreshold !== null && legacyThreshold !== undefined
-      && (!Number.isSafeInteger(legacyThreshold) || legacyThreshold <= 0))
+    || (compactThreshold !== null && compactThreshold !== undefined
+      && (!Number.isSafeInteger(compactThreshold) || compactThreshold <= 0))
   ) {
     throw new Error(`Codex ${definition.displayName} 模型目录无效`);
   }
   const windowBase = maxContextWindow === null || maxContextWindow === undefined
     ? contextWindow
     : maxContextWindow;
-  // v2 之前的目录把百分比写成自动压缩阈值；阈值按同一基准折算为窗口。
-  const window = legacyThreshold === null || legacyThreshold === undefined
-    ? contextWindow
-    : Math.min(legacyThreshold, windowBase);
   return {
     model,
     displayName: typeof document.display_name === "string" ? document.display_name : model,
-    contextWindow: window,
+    contextWindow,
     maxContextWindow: windowBase,
     reasoningEffort,
     reasoningEfforts,
-    windowPercent: Math.round(window * 100 / windowBase),
+    windowPercent: Math.round(contextWindow * 100 / windowBase),
   };
 }
 
@@ -769,13 +765,8 @@ function updateModelCatalogSettings(content, definition, settings) {
       ? {}
       : {
           context_window: settings.contextWindow,
-          // 缺少最大窗口的旧目录必须保留原始基准，避免下次按缩小后的窗口计算。
+          // 最大窗口是可选字段；首次修改时保存基准，避免后续按缩小后的窗口计算。
           max_context_window: current.maxContextWindow,
-          // 旧版本写在目录里的压缩阈值会卡住新窗口，随窗口一并清掉。
-          ...(entry.auto_compact_token_limit === undefined
-            || entry.auto_compact_token_limit === null
-            ? {}
-            : { auto_compact_token_limit: null }),
         }),
   };
   return `${JSON.stringify({ ...catalog, models }, null, 2)}\n`;

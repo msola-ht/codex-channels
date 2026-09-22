@@ -31,7 +31,9 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
 `~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他
 OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会以当时主配置更新该账户的恢复基线，旧基线
-按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
+按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。账户基线缺失时明确报错，不读取共享旧备份代替。
+Setup 恢复首次配置前状态只接受字段完整的当前备份，缺少目录归属字段的旧备份会在恢复前报错。
+如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
 启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。

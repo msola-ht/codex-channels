@@ -30,6 +30,23 @@ import {
 import { secureTestDirectory, secureTestFile } from "./support/windows-fixtures.js";
 
 describe("managed model provider runtime", () => {
+  it("keeps context windows separate from upstream compression thresholds", async () => {
+    const codexHome = await configuredHome("switching");
+    const environment = testEnvironment(codexHome);
+    expect(loadManagedModelProviderSettings(environment)[0]?.models[0]).toMatchObject({
+      contextWindow: 1_048_576,
+      maxContextWindow: 1_048_576,
+      windowPercent: 100,
+    });
+    writeManagedModelWindowGlobal({ model: "deepseek-v4-flash", windowPercent: 75, environment });
+    const catalog = JSON.parse(readFileSync(providerCatalogPath(codexHome), "utf8"));
+    expect(catalog.models[0]).toMatchObject({
+      context_window: 786_432,
+      auto_compact_token_limit: 629_146,
+    });
+    expect(loadManagedModelProviderSettings(environment)[0]?.models[0]?.windowPercent).toBe(75);
+  });
+
   it("reads the official model context window and auto compact override", async () => {
     const codexHome = await mkdtemp(resolve(tmpdir(), "codexc-model-override-"));
     await secureTestDirectory(codexHome);

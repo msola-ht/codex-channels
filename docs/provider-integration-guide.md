@@ -62,9 +62,9 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
   `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
-  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样，压缩使用上游默认；
-- 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
-  默认模型迁移记录；Profile（切换模式）与固定
+  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样；`auto_compact_token_limit`
+  是独立的上游压缩阈值，不换算为上下文窗口，修改窗口时也不清空该字段；
+- 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；

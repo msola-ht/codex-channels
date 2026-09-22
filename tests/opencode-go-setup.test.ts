@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,6 +42,7 @@ import {
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
 import { applyOpencodeGoAccountConfiguration } from "../scripts/opencode-go-account-provisioning.mjs";
+import { opencodeGoAccountPaths } from "../scripts/opencode-go-account-files.mjs";
 import {
   loadManagedModelWindow,
   loadManagedModelProviderSettings,
@@ -114,6 +116,30 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       model: "gpt-5.6-sol",
       model_provider: "openai",
     });
+  });
+
+  it("rejects a missing fixed-account baseline instead of using the shared backup", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-baseline-"));
+    const environment = { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") };
+    const options = {
+      accountId: "main", contact: "user@example.com", mode: "exclusive" as const,
+      apiKey: "sk-test-secret", confirmExclusiveConfigChange: true,
+    };
+    await applyOpencodeGoAccountConfiguration(options, { environment, downloadCatalog: successfulCatalog });
+    const paths = opencodeGoAccountPaths(environment, "main");
+    expect(existsSync(join(paths.providerDirectory, "backup", "state.json"))).toBe(true);
+    rmSync(join(paths.backupDirectory, "config.toml"));
+    const files = [paths.configPath, paths.markerPath, paths.catalogPath, paths.manifestPath,
+      join(paths.providerDirectory, "accounts.json")];
+    const before = files.map((path) => readFileSync(path, "utf8"));
+
+    await expect(applyOpencodeGoAccountConfiguration({
+      ...options, mode: "switching", reconfigure: true,
+    }, { environment, downloadCatalog: successfulCatalog })).rejects.toThrow("固定账户恢复基线缺失");
+
+    expect(files.map((path) => readFileSync(path, "utf8"))).toEqual(before);
+    expect(existsSync(paths.profilePath)).toBe(false);
+    expect(existsSync(join(paths.backupDirectory, "config.toml"))).toBe(false);
   });
 
   it("allows one fixed account while sibling accounts remain switchable", async () => {
@@ -489,7 +515,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     }));
   });
 
-  it("restores a legacy backup state created before catalog files were provider-owned", async () => {
+  it("rejects a backup missing catalog ownership fields without restoring files", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codexc-opencode-legacy-restore-"));
     await runOpenCodeGoSetup({
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
@@ -507,10 +533,10 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       environment: { CODEX_HOME: codexHome, CODEX_CONNECT_HOME: join(codexHome, ".codex-connect") },
       output: { write: () => undefined },
       prompter: prompt("restore"),
-    })).resolves.toMatchObject({ action: "restored" });
+    })).rejects.toMatchObject({ code: "backup-invalid", field: "restore" });
 
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(false);
-    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(false);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.json"))).toBe(true);
+    expect(existsSync(join(codexHome, ".codex-connect", "providers", "opencode-go", "models.manifest.json"))).toBe(true);
   });
 
   it("validates the complete backup state before restoring any file", async () => {
@@ -757,7 +783,7 @@ function deepseekFixture(): string {
       ],
       ...(slug === "deepseek-v4-pro"
         ? {}
-        : { auto_compact_token_limit: 400_000 }),
+        : { context_window: 400_000, max_context_window: 1_000_000 }),
     })),
   }), { mode: 0o600 });
   writeFileSync(

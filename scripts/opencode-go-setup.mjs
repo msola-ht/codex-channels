@@ -523,12 +523,12 @@ async function restoreOpencodeGoSetup(environment) {
   await restoreBackup(
     accountPathsValue.catalogPath,
     join(legacyBackup, definition.catalogFileName),
-    state.catalog === undefined ? false : state.catalog,
+    state.catalog,
   );
   await restoreBackup(
     accountPathsValue.manifestPath,
     join(legacyBackup, definition.catalogManifestFileName),
-    state.manifest === undefined ? false : state.manifest,
+    state.manifest,
   );
   try {
     unlinkSync(opencodeGoAccountsFilePath(environment));
@@ -606,13 +606,12 @@ function readOpencodeGoRestoreState(environment) {
       error,
     );
   }
-  const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
   const restoredState = {
     config: state.config,
     profile: state.profile,
     marker: state.marker,
-    catalog: legacyCatalogState ? false : state.catalog,
-    manifest: legacyCatalogState ? false : state.manifest,
+    catalog: state.catalog,
+    manifest: state.manifest,
   };
   if (Object.values(restoredState).some((value) => typeof value !== "boolean")) {
     throw managedSetupInvalid(

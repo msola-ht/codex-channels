@@ -199,15 +199,12 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     const accountBaseline = existsSync(exclusiveBaselinePath)
       ? await readTomlFile(exclusiveBaselinePath)
       : undefined;
-    const legacyBaseline = accountBaseline === undefined && previousMode === "exclusive"
-      ? await readLegacyBackupToml(plan.paths)
-      : undefined;
-    if (previousMode === "exclusive" && accountBaseline === undefined && legacyBaseline === undefined) {
+    if (previousMode === "exclusive" && accountBaseline === undefined) {
       throw new Error("OpenCode Go 固定账户恢复基线缺失");
     }
     const initialConfig = capturesExclusiveBaseline
       ? currentConfig
-      : accountBaseline ?? legacyBaseline ?? currentConfig;
+      : accountBaseline ?? currentConfig;
     const { config: nextConfig, profile } = createManagedProviderConfiguration(
       currentConfig,
       initialConfig,
@@ -226,7 +223,7 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await writePrivateFileAtomic(archivedBaselinePath, previousBaseline);
       guards = refreshProviderFileSnapshot(guards, archivedBaselinePath);
     }
-    if (capturesExclusiveBaseline || (previousMode === "exclusive" && accountBaseline === undefined)) {
+    if (capturesExclusiveBaseline) {
       await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
       guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
     }
@@ -454,19 +451,6 @@ function publicPaths(paths) {
     markerPath: paths.markerPath,
     catalogPath: paths.catalogPath,
   };
-}
-
-async function readLegacyBackupToml(paths) {
-  const statePath = join(
-    paths.providerDirectory,
-    definition.backupDirectoryName,
-    "state.json",
-  );
-  if (!existsSync(statePath)) return undefined;
-  const state = JSON.parse(readPrivateFileSync(statePath));
-  return state.config
-    ? readTomlFile(join(paths.providerDirectory, definition.backupDirectoryName, "config.toml"))
-    : {};
 }
 
 async function preserveInitialFiles(paths, accountId) {

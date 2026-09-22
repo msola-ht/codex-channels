@@ -272,7 +272,7 @@ function reservedManagedProfileMessage(profile) {
     return `OpenCode Go Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
   }
   if (profile === "sf-ccg") {
-    return "旧 CCG 单账户 Profile 已停用，请先迁移账户并使用 --profile sf-ccg-<账户>";
+    return "旧 CCG 单账户 Profile 已停用，请先运行 codexc ccg legacy remove 并重新添加账户，再使用 --profile sf-ccg-<账户>";
   }
   if (profile.startsWith("sf-ccg-")) {
     return `CCG Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;

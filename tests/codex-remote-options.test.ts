@@ -215,7 +215,7 @@ describe("Codex Remote options", () => {
     ["sf-ocg-missing", "OpenCode Go Profile sf-ocg-missing 尚未配置"],
     ["sf-opencode-go-missing", "OpenCode Go Profile sf-opencode-go-missing 已废弃"],
     ["sf-ccg-missing", "CCG Profile sf-ccg-missing 尚未配置"],
-    ["sf-ccg", "旧 CCG 单账户 Profile 已停用"],
+    ["sf-ccg", "旧 CCG 单账户 Profile 已停用，请先运行 codexc ccg legacy remove 并重新添加账户"],
   ])("rejects an unconfigured project-owned Profile namespace %s", (profileName, message) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
