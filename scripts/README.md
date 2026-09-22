@@ -90,7 +90,7 @@
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
-- `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和原生子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
+- `webui-provider-settings-management.mjs`：复用主 Provider、受管 Provider 默认值与模型窗口、自定义 Provider 管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
 - `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
@@ -494,7 +494,7 @@
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
   新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
-  原生子代理使用 `restart / app-server`，App Server 时区使用
+  App Server 重启动作使用 `restart / app-server`，App Server 时区使用
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`

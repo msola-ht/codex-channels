@@ -71,7 +71,7 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `model.provider.mismatch` | 当前线程运行在 X 账户，不能使用 Y Provider 的模型 | 继续/恢复旧 Thread 时暂存了跨 Provider 模型 |
 | `model.official.not-logged-in` | OpenAI 官方未登录，当前没有可用模型 | 未检测到 Codex 官方鉴权文件 |
 | `model.provider.selection-required` | 请先通过 /model 选择提供商和模型 | 官方未登录且存在多个没有统一默认账户的可选第三方 |
-| `model.provider.default-missing` | 提供商的默认模型未配置 | 自动选择的唯一第三方或 CCG 默认账户没有有效默认模型；通过 codexc setup 设置 |
+| `model.provider.default-missing` | 提供商的默认模型未配置 | 自动选择的唯一第三方或 DS/OCG/CCG 默认账户没有有效默认模型；通过 codexc setup 设置 |
 | `model.selector.required` | /model 用法提示 | 未提供模型选择参数 |
 | `model.selector.ambiguous` | 模型选择不唯一 | 选择器匹配多个模型 |
 | `model.selector.not-found` | 找不到指定模型 | 选择器无匹配 |

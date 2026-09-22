@@ -297,6 +297,47 @@ Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时�
 
 更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。当前数据库基线只校验、不写库；后续 Schema 变化随版本提供具体迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
+### 本机清理与归档
+
+统一交互入口：
+
+```bash
+codexc cleanup
+```
+
+菜单包含以下五项，完成或取消单项后返回菜单，现有直接命令继续可用：
+
+| 菜单项目 | 直接命令 | 执行条件与结果 |
+| --- | --- | --- |
+| 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
+| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server；永久删除当前配置目录下全部转储 |
+| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
+| 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
+| 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
+
+`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并退出。
+
+会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
+
+```bash
+codexc service stop gateway
+codexc sessions cleanup 3 --idle-days 7
+```
+
+核对后在交互终端执行，命令会重新扫描并再次询问确认：
+
+```bash
+codexc sessions cleanup 3 --idle-days 7 --confirm
+codexc service start gateway
+```
+
+也可运行 `codexc sessions` 进入专门的会话归档菜单。不指定 `--idle-days` 就没有会话年龄限制。
+轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
+活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
+官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。
+
+### 卸载
+
 卸载但保留用户数据：
 
 ```bash
@@ -326,19 +367,6 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 `/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
 重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。
-可使用 `codexc sessions cleanup <最大轮数>` 预览并按主会话真实轮数批量归档短会话及派生子孙；追加 `--idle-days <天数>` 要求整组可查询成员均达到空闲天数。在交互终端追加 `--confirm` 后再次展示候选并询问确认。执行前需停止 Gateway，保留 App Server；命令覆盖配置中的全部 Workspace 和 Provider，不使用展示缓存决定资格，归档不会永久删除会话。保护条件与部分成功处理见[展示说明](display.md)。
-
-本机数据维护可统一运行 `codexc cleanup`，像 `codexc config` 一样交互选择项目；完成或取消单项后返回菜单。它包含以下五项，现有直接命令继续可用：
-
-| 菜单项目 | 直接命令 | 执行条件与结果 |
-| --- | --- | --- |
-| 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
-| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server；永久删除当前配置目录下全部转储 |
-| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
-| 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
-
-`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并退出。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
 

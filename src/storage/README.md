@@ -30,7 +30,7 @@ Schema v5 保留原 `conversation_bindings` 前台表，并新增
 事务中原子写入，常规活动以一分钟粒度写库，
 强制新建标记会立即写库，确保 Gateway 重启后普通消息仍不会自动接续已释放的旧 Thread。
 撤权导致所有绑定时也会原子写入强制新建标记，重新授权后的普通消息仍从新会话开始。
-只接受 Schema v5；旧库需停止服务、备份后重新初始化，不提供历史升级，不删除 App Server Thread。
+当前只接受 Schema v5，初始化只创建新库；本模块不提供旧版本迁移，也不删除 App Server Thread。版本更新时的预检与显式升级由 `scripts/local-installation.mjs` 协调。
 
 存储实现必须保持可替换。新增字段应只服务于绑定恢复或必要偏好；持久化格式变化必须明确当前数据的重建或升级方式，不能静默兼容未知 Schema，也不能读取或复制 `~/.codex/sessions`。
 

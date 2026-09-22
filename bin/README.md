@@ -44,16 +44,14 @@
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
-- `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
-  配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
+- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。当前数据库入口只校验版本与结构；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
-- `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 JSON Lines 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
-  记录；参数在读取用户配置前完成校验，命令只读转储目录，不访问网络或凭据。
+  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。
