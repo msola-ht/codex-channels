@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   readFileSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -9,9 +10,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
 import { deepseekAccountsFilePath } from "../runtime/deepseek-accounts.mjs";
-import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { opencodeGoAccountsFilePath, writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { ProviderAccountService } from "../src/application/index.js";
+import { createManagedProviderAccountAdapters } from "../src/bootstrap/managed-provider-capabilities.js";
+import { ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
+import { configureCcgAccounts } from "./model-provider-runtime-test-fixture.js";
+import type { OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -40,6 +46,77 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("isolates same-name accounts through CCG refresh, persistence, failure, recovery and OCG removal", async () => {
+    const fixture = createFixture();
+    configureCcgAccounts(fixture.home);
+    const environment = { ...fixture.environment,
+      CODEX_CONNECT_HOME: join(fixture.home, ".codex-connect"),
+      CODEX_CONNECT_CONFIG_FILE: join(fixture.home, "config.toml"),
+    };
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(environment), JSON.stringify([{ id: "main", default: true }]));
+    writeOpencodeGoAccounts(environment, [{ id: "main", default: true }]);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    for (const provider of ["ds-main", "ocg-main"]) {
+      store.upsertAccountSnapshot({
+        sourceId: `${provider}:main`, provider, accountId: "main", displayName: provider,
+        enabled: true, observedAtMs: Date.now(), available: true,
+        usage: { kind: provider === "ds-main" ? "balance" : "quota-windows", provider, available: true },
+        limits: { kind: "unsupported", provider },
+      });
+    }
+    store.close();
+    let failMain = false;
+    const upstreamFetch: typeof fetch = async (input, init) => {
+      const key = new Headers(init?.headers).get("authorization");
+      expect(["Bearer cmd_main-secret", "Bearer cmd_work-secret"]).toContain(key);
+      const account = key === "Bearer cmd_main-secret" ? "main" : "work";
+      const url = String(input);
+      if (url.endsWith("/alpha/whoami?limits=1")) {
+        return Response.json({ success: true, user: {}, org: { id: account } });
+      }
+      expect(url).toBe(`https://api.commandcode.ai/alpha/billing/credits?orgId=${account}`);
+      return Response.json(failMain && account === "main" ? { error: "invalid credits" }
+        : { credits: { monthlyCredits: account === "main" ? 10 : 20 } });
+    };
+    const adapters = createManagedProviderAccountAdapters([ccgAccountDefinition("main"), ccgAccountDefinition("work")], {
+      environment, fetchImpl: upstreamFetch, metricsDatabasePath: fixture.databasePath,
+    });
+    const service = new ProviderAccountService(adapters, {
+      writeOfficialAccountSnapshot: (snapshot) => {
+        const writer = new SqliteModelRequestMetricsStore(fixture.databasePath);
+        try {
+          const accountId = snapshot.provider.slice("ccg-".length);
+          writer.upsertAccountSnapshot({ ...snapshot, accountId,
+            sourceId: `${snapshot.provider}:${accountId}`, displayName: snapshot.provider, enabled: true });
+        } finally { writer.close(); }
+      },
+    });
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(environment, undefined, {
+      managementOrigin,
+      refreshGatewayAccount: async (_path, provider) => service.refreshAccountSnapshot(provider),
+    });
+    const refresh = (provider: string) => fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
+    expect((await refresh("ccg-main")).status).toBe(200);
+    expect((await refresh("ccg-work")).status).toBe(200);
+    const before = await read();
+    expect(before.snapshots.find((snapshot) => snapshot.provider === "ccg-main")?.usage).toMatchObject({ totalRemaining: "10.00" });
+    expect(before.snapshots.find((snapshot) => snapshot.provider === "ccg-work")?.usage).toMatchObject({ totalRemaining: "20.00" });
+    failMain = true;
+    expect((await refresh("ccg-main")).status).toBe(503);
+    expect(await read()).toEqual(before);
+    failMain = false;
+    expect((await refresh("ccg-main")).status).toBe(200);
+    unlinkSync(opencodeGoAccountsFilePath(environment));
+    const after = await read();
+    expect(after.snapshots.map((snapshot) => snapshot.provider).sort()).toEqual(["ccg-main", "ccg-work", "ds-main"]);
+    expect(after.snapshots.find((snapshot) => snapshot.provider === "ds-main"))
+      .toEqual(before.snapshots.find((snapshot) => snapshot.provider === "ds-main"));
+  });
   it("returns persisted subscription facts from Gateway refresh and subsequent reads", async () => {
     const fixture = createFixture();
     writeOpencodeGoAccounts(fixture.environment, [{ id: "main", default: true }]);

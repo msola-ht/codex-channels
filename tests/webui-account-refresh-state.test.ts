@@ -8,6 +8,7 @@ import {
   ccgAccountFromSnapshot,
   deepseekAccountFromSnapshot,
   refreshableAccounts,
+  remainingRemovedAccountProviders,
   opencodeAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
 import type { ManagementProvidersResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
@@ -39,8 +40,26 @@ describe("WebUI per-account refresh state", () => {
   it("does not resurrect a confirmed deletion from old snapshots or missing-provider placeholders", () => {
     const response = { observedAtMs: 0, warnings: [], snapshots: [] };
     const stale = accountSnapshotsWithMissingProviders(response, [{ id: "ocg-old", displayName: "Old" }, { id: "deepseek", displayName: "DS" }]);
-    expect(accountSnapshotsWithoutRemoved(stale, ["old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
-    expect(accountSnapshotsWithoutRemoved({ ...stale, snapshots: stale.snapshots.map((item) => ({ ...item, accountId: item.provider === "ocg-old" ? "old" : null })) }, ["old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+    expect(accountSnapshotsWithoutRemoved(stale, ["ocg-old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+    expect(accountSnapshotsWithoutRemoved({ ...stale, snapshots: stale.snapshots.map((item) => ({ ...item, accountId: item.provider === "ocg-old" ? "old" : null })) }, ["ocg-old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+  });
+  it("removes only the exact provider when DS, OCG and CCG share an account id", () => {
+    const response = { observedAtMs: 1, warnings: [], snapshots: ["ds-main", "ocg-main", "ccg-main"].map((provider) => ({
+      provider, accountId: "main", displayName: provider, default: true,
+      observedAtMs: 1, available: true, usage: null, limits: null,
+    })) };
+    expect(accountSnapshotsWithoutRemoved(response, ["ocg-main"]).snapshots.map((item) => item.provider))
+      .toEqual(["ds-main", "ccg-main"]);
+    const placeholders = accountSnapshotsWithMissingProviders({ ...response, snapshots: [] },
+      response.snapshots.map((snapshot) => ({ id: snapshot.provider, displayName: snapshot.displayName })));
+    expect(accountSnapshotsWithoutRemoved(placeholders, ["ocg-main"]).snapshots.map((item) => item.provider))
+      .toEqual(["ds-main", "ccg-main"]);
+    const confirmed = accountSnapshotsWithoutRemoved(response, ["ocg-main"]);
+    const providers = confirmed.snapshots.map((snapshot) => ({ id: snapshot.provider, displayName: snapshot.displayName }));
+    expect(remainingRemovedAccountProviders(confirmed, providers, ["ocg-main"])).toEqual([]);
+    expect(remainingRemovedAccountProviders(response, providers, ["ocg-main"])).toEqual(["ocg-main"]);
+    expect(remainingRemovedAccountProviders(confirmed, [...providers, { id: "ocg-main", displayName: "OCG" }], ["ocg-main"]))
+      .toEqual(["ocg-main"]);
   });
   it("keeps missing account identity null instead of turning a provider label into a deletion target", () => {
     const snapshot = {

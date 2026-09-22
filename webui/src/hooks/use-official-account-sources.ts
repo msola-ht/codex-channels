@@ -9,7 +9,7 @@ import {
 import {
   accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
-  opencodeAccountFromSnapshot, refreshableAccounts,
+  opencodeAccountFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
   type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
 } from "@/lib/account-refresh-state"
 
@@ -20,7 +20,7 @@ export function useOfficialAccountSources() {
   const [providers, setProviders] = useState<RefreshableAccount[]>([])
   const [providerErrors, setProviderErrors] = useState<Record<string, AccountRefreshError | null>>({})
   const [refreshingProviders, setRefreshingProviders] = useState<string[]>([])
-  const [removedAccountIds, setRemovedAccountIds] = useState<string[]>([])
+  const [removedProviders, setRemovedProviders] = useState<string[]>([])
   const [removalNotice, setRemovalNotice] = useState<string | null>(null)
   const initialRefreshStarted = useRef(false)
   const refreshOperation = useRef<Promise<void> | null>(null)
@@ -56,7 +56,7 @@ export function useOfficialAccountSources() {
         const result = await fetchOfficialAccountSnapshots(controller.signal)
         if (controller.signal.aborted) return
         replaceData(result)
-        setRemovedAccountIds((removed) => removed.filter((id) => result.snapshots.some((snapshot) => snapshot.accountId === id)))
+        setRemovedProviders((removed) => remainingRemovedAccountProviders(result, accounts, removed))
       } catch (error) {
         if (!controller.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error)
@@ -76,10 +76,12 @@ export function useOfficialAccountSources() {
   }, [replaceData, snapshots.data])
 
   const accountRemoved = useCallback((accountId: string, activation?: string) => {
+    const removedProvider = `ocg-${accountId}`
     refreshController.current?.abort()
     refreshOperation.current = null
-    setRemovedAccountIds((previous) => [...previous, accountId])
-    setProviderErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([provider]) => provider !== `ocg-${accountId}`)))
+    setRemovedProviders((previous) => [...previous, removedProvider])
+    setProviders((previous) => previous.filter((provider) => provider.id !== removedProvider))
+    setProviderErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([provider]) => provider !== removedProvider)))
     setRemovalNotice(`本地账户 ${accountId} 已删除。${activation === "restart-all" ? "请运行 codexc service restart all，使运行中的服务应用配置。" : ""}此操作不会取消官方订阅。`)
     void refresh(undefined, true)
   }, [refresh])
@@ -101,7 +103,7 @@ export function useOfficialAccountSources() {
   return {
     ...snapshots,
     data: snapshots.data === null ? null
-      : accountSources(accountSnapshotsWithoutRemoved(accountSnapshotsWithMissingProviders(snapshots.data, providers), removedAccountIds)),
+      : accountSources(accountSnapshotsWithoutRemoved(accountSnapshotsWithMissingProviders(snapshots.data, providers), removedProviders)),
     refreshing, refreshError, refresh, refreshControls, accountRemoved, removalNotice,
   }
 }

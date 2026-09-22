@@ -65,7 +65,9 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 `/alpha/whoami` 校验，不需要额外保存账户查询凭据。WebUI 控制台按账户分别展示 Credits 与窗口，
 并支持与 DS、OCG 相同的逐账户刷新。
 请求与其他账户适配器一样经过统一代理、10 秒超时、64 KiB 响应上限和严格 Schema 校验；失败只返回
-稳定的“CCG 账户查询失败”，不传播 Key、响应正文或解析错误。
+稳定的“CCG 账户查询失败”，不传播 Key、响应正文或解析错误。身份响应必须确认成功，组织信息无效时
+不继续查询个人额度；Credits 对象缺失或窗口结构无效时保留上次有效快照，不写入零余额。
+有效 Credits 对象内缺失或为 `null` 的余额项按官方 CLI 视为零，总余额先求和再保留两位小数。
 
 这些账户端点未列在公开的 [CommandCode Provider 文档](https://commandcode.ai/docs/provider) 中；本次
 实现按官方 `command-code` CLI 1.62.1 的调用方式适配。当前没有可用 API Key，尚未执行真实账户请求，

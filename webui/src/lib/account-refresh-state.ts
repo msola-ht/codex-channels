@@ -92,11 +92,19 @@ export function accountSnapshotsAfterRefresh(
 
 export function accountSnapshotsWithoutRemoved(
   result: OfficialAccountSnapshotsResponse,
-  removedAccountIds: readonly string[],
+  removedProviders: readonly string[],
 ): OfficialAccountSnapshotsResponse {
   return { ...result, snapshots: result.snapshots.filter((snapshot) =>
-    !removedAccountIds.includes(snapshot.accountId ?? "")
-      && !removedAccountIds.some((id) => snapshot.provider === `ocg-${id}`)) }
+    !removedProviders.includes(snapshot.provider)) }
+}
+
+export function remainingRemovedAccountProviders(
+  result: OfficialAccountSnapshotsResponse,
+  providers: readonly RefreshableAccount[],
+  removedProviders: readonly string[],
+): string[] {
+  return removedProviders.filter((provider) => providers.some((account) => account.id === provider)
+    || result.snapshots.some((snapshot) => snapshot.provider === provider))
 }
 
 export function opencodeAccountFromSnapshot(

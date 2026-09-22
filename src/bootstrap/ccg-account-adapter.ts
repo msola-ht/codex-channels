@@ -34,7 +34,7 @@ export function createCcgAccountAdapter(
       try {
         const apiKey = loadConfiguredProviderCredential(options.provider, environment).apiKey;
         const whoami = await getJson(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey);
-        const orgId = optionalIdentifier(record(whoami).org, "id");
+        const orgId = parseOrganizationId(whoami);
         const query = orgId === null ? "" : `?orgId=${encodeURIComponent(orgId)}`;
         const credits = await getJson(
           fetchImpl,
@@ -87,19 +87,19 @@ function parseCreditUsage(
     provider,
     available: true,
     planId,
-    monthlyRemaining,
-    purchasedRemaining,
-    freeRemaining,
-    totalRemaining: credit(
-      Number(monthlyRemaining) + Number(purchasedRemaining) + Number(freeRemaining),
-    ),
+    monthlyRemaining: credit(monthlyRemaining),
+    purchasedRemaining: credit(purchasedRemaining),
+    freeRemaining: credit(freeRemaining),
+    totalRemaining: credit(monthlyRemaining + purchasedRemaining + freeRemaining),
     windows,
   };
 }
 
 function parseWindows(value: unknown): ProviderQuotaWindow[] {
+  if (value === undefined || value === null) return [];
   const limits = record(value);
-  if (limits.limited !== true) return [];
+  if (typeof limits.limited !== "boolean") throw new Error("CCG account response limit flag is invalid");
+  if (!limits.limited) return [];
   return [
     parseWindow(limits.fiveHour, "five-hour", "5小时"),
     parseWindow(limits.weekly, "weekly", "7天"),
@@ -125,9 +125,13 @@ function parseWindow(
   };
 }
 
-function optionalIdentifier(value: unknown, key: string): string | null {
-  const candidate = record(value)[key];
-  return candidate === undefined || candidate === null ? null : requiredString(candidate);
+function parseOrganizationId(value: unknown): string | null {
+  const response = record(value);
+  if (response.success !== true) throw new Error("CCG account identity is unavailable");
+  record(response.user);
+  return response.org === undefined || response.org === null
+    ? null
+    : requiredString(record(response.org).id);
 }
 
 function optionalString(value: unknown): string | null {
@@ -146,8 +150,8 @@ function credit(value: unknown): string {
   return amount.toFixed(2);
 }
 
-function optionalCredit(value: unknown): string {
-  return value === undefined || value === null ? "0.00" : credit(value);
+function optionalCredit(value: unknown): number {
+  return value === undefined || value === null ? 0 : nonNegativeNumber(value);
 }
 
 function nonNegativeNumber(value: unknown): number {
@@ -164,7 +168,8 @@ function positiveNumber(value: unknown): number {
 }
 
 function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("CCG account response object is invalid");
+  }
+  return value as Record<string, unknown>;
 }
