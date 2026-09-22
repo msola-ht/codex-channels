@@ -153,8 +153,8 @@ function legacyDeepseekRemovalPlan(environment) {
   const marker = readToml(markers[0]);
   if (marker.version !== 1 || marker.provider !== "deepseek" || !["switching", "exclusive"].includes(marker.mode)) throw new Error("DeepSeek 旧管理标记无效");
   const config = readToml(configPath);
-  for (const roleName of ["external", "ds"]) {
-    const rolePath = config.agents?.[roleName]?.config_file;
+  for (const role of Object.values(config.agents ?? {})) {
+    const rolePath = role?.config_file;
     if (typeof rolePath === "string" && readToml(resolve(home, rolePath)).model_provider === "deepseek") {
       throw new Error("请先停用或改配引用旧 DeepSeek 账户的共享子代理，再移除旧账户");
     }
@@ -233,6 +233,10 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   if (remaining.length > 0 && !remaining.some((account) => account.default)) throw new Error("请先选择其他默认账户");
   const snapshots = snapshotProviderFiles(Object.values(paths));
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`]]);
+  if (remaining.length === 0) {
+    updates.set(paths.catalog, undefined);
+    updates.set(paths.manifest, undefined);
+  }
   if (configured.mode === "exclusive") {
     const initial = readBackup(paths.backup);
     if (!initial) throw new Error("DeepSeek 账户初始备份缺失");

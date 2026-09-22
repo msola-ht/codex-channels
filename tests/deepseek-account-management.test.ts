@@ -109,6 +109,21 @@ describe("DeepSeek managed accounts", () => {
     expect(existsSync(options.paths.backup)).toBe(true);
   });
 
+  it.each(["switching", "exclusive"] as const)("clears the final %s account catalog and downloads it again on re-add", async (mode) => {
+    const options = fixture();
+    await applyDeepseekAccountConfiguration({ ...input, mode, confirmExclusiveConfigChange: true }, options);
+    const backup = readFileSync(options.paths.backup);
+    await removeDeepseekAccount({ accountId: input.accountId, confirmRemove: true }, options);
+    expect(existsSync(options.paths.catalog)).toBe(false);
+    expect(existsSync(options.paths.manifest)).toBe(false);
+    expect(existsSync(options.paths.registry)).toBe(false);
+    expect(readFileSync(options.paths.backup)).toEqual(backup);
+    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "original" });
+    await applyDeepseekAccountConfiguration(input, options);
+    expect(options.downloadCatalog).toHaveBeenCalledTimes(2);
+    expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
+  });
+
   it.each(["switching", "exclusive"] as const)("removes a legacy %s account only after confirmation", async (mode) => {
     const options = await legacyFixture(mode);
     const preview = await previewLegacyDeepseekRemoval(options);
@@ -153,13 +168,19 @@ describe("DeepSeek managed accounts", () => {
     expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
   });
 
-  it.each(["absolute", "relative"])("rejects a legacy account referenced by a %s shared role without deleting files", async (kind) => {
+  it.each([
+    ["external", "absolute"], ["external", "relative"],
+    ["ds", "absolute"], ["ds", "relative"],
+    ["reviewer", "absolute"], ["reviewer", "relative"],
+  ] as const)("rejects a legacy account referenced by %s with a %s role path without deleting files", async (roleName, kind) => {
     const options = await legacyFixture("switching");
     const role = managedModelProviderRoleConfigPath(options.environment);
     writePrivateFileAtomicSync(role, 'model_provider = "deepseek"\n');
-    writePrivateFileAtomicSync(options.paths.config, stringify({ agents: { external: { config_file: kind === "absolute" ? role : "sf-agent.config.toml" } } }));
+    writePrivateFileAtomicSync(options.paths.config, stringify({ agents: { [roleName]: { config_file: kind === "absolute" ? role : "sf-agent.config.toml" } } }));
+    const paths = [options.legacyMarker, options.legacyProfile, options.paths.catalog, options.paths.config, role];
+    const before = paths.map((path) => readFileSync(path));
     await expect(removeLegacyDeepseekAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
-    expect(existsSync(options.legacyMarker)).toBe(true);
+    expect(paths.map((path) => readFileSync(path))).toEqual(before);
   });
 
   it("rolls back deleted files if restoring the fixed config fails", async () => {
