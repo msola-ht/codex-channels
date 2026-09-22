@@ -82,8 +82,10 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     const paths = writeDatabaseUpgradeFixture(fixture, fixture.checkout, fail);
     let stops = 0;
     let starts = 0;
+    const messages: Array<[string, string]> = [];
     const update = updateInstalledPackage(fixture.environment, {
       projectDir: fixture.checkout,
+      writeMessage: (kind, message) => { messages.push([kind, message]); },
       stopServices: () => { stops += 1; writeFileSync(paths.stopped, "stopped"); },
       startServices: () => { starts += 1; expect(databaseVersion(paths.database)).toBe(6); },
       installCodexCli: () => { throw new Error("CLI must not be reinstalled"); },
@@ -101,6 +103,9 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(starts).toBe(fail ? 0 : 1);
     expect(databaseVersion(paths.database)).toBe(fail ? 5 : 6);
     expect(databaseVersion(paths.backup)).toBe(5);
+    expect(messages.filter(([kind]) => kind === "success")).toEqual(fail ? [] : [
+      ["success", "配套 Codex CLI 0.147.0 与数据库更新已完成。"],
+    ]);
   });
 
   it("synchronizes Codex for a locally built global package with one service stop/start cycle", async () => {
@@ -165,17 +170,26 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     },
   );
 
-  it("validates a matching package CLI without reinstalling it", async () => {
+  it.each([false, true])("validates a matching package CLI without reinstalling it, display failure=%s", async (displayFailure) => {
     const fixture = createInstalledFixture("codexc-package-current-");
     const calls: string[] = [];
+    const messages: Array<[string, string]> = [];
     await updateInstalledPackage(fixture.environment, {
       projectDir: fixture.checkout,
+      writeMessage: (kind, message) => {
+        messages.push([kind, message]);
+        if (displayFailure) throw new Error("display failed");
+      },
       inspectStaged: async () => ({ services: { installed: false }, databaseUpdatesRequired: false }),
       confirmCodexCliInstall: () => { throw new Error("unexpected confirmation"); },
       installCodexCli: () => { throw new Error("unexpected install"); },
       validateCodexContract: () => { calls.push("validate"); },
     });
     expect(calls).toEqual(["validate"]);
+    expect(messages).toEqual([
+      ["note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。"],
+      ["success", "检查完成：配套 Codex CLI 0.147.0 与数据库均无需更新。"],
+    ]);
   });
 
   it("returns a redacted revisioned plan before changing a managed checkout", () => {
