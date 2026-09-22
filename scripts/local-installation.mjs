@@ -7,12 +7,12 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
+import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
 import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import { validateStateDatabaseStructure } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
-const sessionDisplayCacheSchemaVersion = 1;
 
 export function inspectGatewayConfiguration(environment = process.env) {
   const { configPath } = requireUserConfig(environment);

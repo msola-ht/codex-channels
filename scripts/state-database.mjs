@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { stateDatabaseSchemaVersion as currentSchemaVersion } from "../dist/storage/index.js";
 
 import {
   inspectScheduledTaskDatabaseFile,
@@ -11,7 +12,6 @@ import {
   resolveConfiguredPath,
 } from "./runtime-config.mjs";
 
-const currentSchemaVersion = 5;
 const requiredStateColumns = Object.freeze({
   conversation_actors: ["surface", "account_id", "conversation_id", "actor_id", "created_at"],
   conversation_background_bindings: [

@@ -12,6 +12,7 @@ import type {
 } from "../conversation-core/index.js";
 
 const schemaVersion = 1;
+export { schemaVersion as sessionDisplayCacheSchemaVersion };
 
 interface CacheRow {
   thread_id: string;

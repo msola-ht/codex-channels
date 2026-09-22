@@ -6,5 +6,5 @@ export type {
   ConversationIdleState,
 } from "./binding-store.js";
 export { MemoryBindingStore } from "./memory-binding-store.js";
-export { SqliteBindingStore } from "./sqlite-binding-store.js";
-export { SqliteSessionDisplayCache } from "./sqlite-session-display-cache.js";
+export { SqliteBindingStore, stateDatabaseSchemaVersion } from "./sqlite-binding-store.js";
+export { SqliteSessionDisplayCache, sessionDisplayCacheSchemaVersion } from "./sqlite-session-display-cache.js";

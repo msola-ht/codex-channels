@@ -418,18 +418,12 @@ async function loadCatalog(plan, { fetchImpl, downloadCatalog }) {
     };
   }
   const downloaded = await downloadCatalog(fetchImpl);
-  const previousManifest = await readOpencodeGoOptionalJson(
-    plan.paths.manifestPath,
-    "OpenCode Go 模型目录清单",
-  );
-  const migration = readOpencodeGoDefaultModelMigration(previousManifest);
   return {
     catalog: createOpencodeGoCatalog(downloaded.catalog),
     manifest: {
       source: deepseekSetupScriptUrl,
       sha256: downloaded.sha256,
       downloadedAt: new Date().toISOString(),
-      ...(migration === undefined ? {} : { defaultModelMigration: migration }),
     },
   };
 }
@@ -527,33 +521,6 @@ async function assertProfileOwnership(paths, accountId, environment) {
       `OpenCode Go 账户管理标记不存在，拒绝覆盖现有 Profile：${paths.profilePath}`,
     );
   }
-}
-
-export async function readOpencodeGoOptionalJson(path, label) {
-  const content = await readOptionalProviderFile(path);
-  if (content === undefined) return undefined;
-  try {
-    const value = JSON.parse(content.toString("utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    return value;
-  } catch {
-    throw new Error(`${label}无法安全读取或解析`);
-  }
-}
-
-export function readOpencodeGoDefaultModelMigration(manifest) {
-  const migration = manifest?.defaultModelMigration;
-  if (migration === undefined) return undefined;
-  if (!migration
-    || typeof migration !== "object"
-    || Array.isArray(migration)
-    || typeof migration.from !== "string"
-    || typeof migration.to !== "string"
-    || typeof migration.appliedAt !== "string"
-    || !Number.isFinite(Date.parse(migration.appliedAt))) {
-    throw new Error("OpenCode Go 默认模型迁移标记无效");
-  }
-  return migration;
 }
 
 function normalize(code, field, error) {

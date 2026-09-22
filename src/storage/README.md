@@ -4,7 +4,7 @@
 
 ## 文件
 
-- `index.ts`：本模块的公开导出入口。
+- `index.ts`：本模块的公开导出入口；导出状态库与会话展示缓存的 Schema 版本常量，供运行时与更新预检共用。
 - `binding-store.ts`：定义 Conversation、Workspace、Thread 和必要偏好的存储接口。
 - `memory-binding-store.ts`：用于测试和临时运行的内存实现。
 - `sqlite-binding-store.ts`：单机 Gateway 使用的 SQLite 实现，负责当前 Schema、Unix owner-only 权限、

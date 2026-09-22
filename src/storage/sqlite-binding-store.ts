@@ -53,6 +53,7 @@ interface IdleStateRow {
 }
 
 const schemaVersion = 5;
+export { schemaVersion as stateDatabaseSchemaVersion };
 const idleStatePersistenceIntervalMs = 60_000;
 
 export class SqliteBindingStore implements BindingStore {

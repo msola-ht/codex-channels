@@ -9,12 +9,6 @@ export const codexProxyFields = ["http_proxy", "https_proxy", "all_proxy", "no_p
 const assignment = /^[\t ]*(?:export[\t ]+)?([A-Za-z_][A-Za-z0-9_]*)[\t ]*=[\t ]*('(?:[^']*)'|"(?:\\[\s\S]|[^"\\])*"|[^\r\n]*)([^\r\n]*)/gm;
 
 export function readCodexProxySnapshot(environment = process.env) {
-  const snapshot = readCodexProxyMigrationSnapshot(environment);
-  validateProxyCombination(snapshot.settings);
-  return snapshot;
-}
-
-export function readCodexProxyMigrationSnapshot(environment = process.env) {
   const path = join(codexHomePath(environment), ".env");
   let content;
   try {
@@ -42,6 +36,7 @@ export function readCodexProxyMigrationSnapshot(environment = process.env) {
       settings[field] = value;
     }
   }
+  validateProxyCombination(settings);
   return { path, content, settings };
 }
 
