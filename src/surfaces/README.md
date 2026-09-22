@@ -98,7 +98,9 @@ Turn、Thread 或 Surface 关闭时清理。
 完整计划是原地更新还是追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
 开始/继续/完成通知和 Turn 结束汇报；OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
-不显示目标地址或底层错误；飞书和微信仍只通知已有安全会话。Turn 完成在正式与调试模式都显示当前
+官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或
+底层错误；飞书和微信仍只通知已有安全会话。完成卡片对 `unauthorized` 按 OpenAI 官方与其他
+Provider 分别生成固定凭据提示，不展示上游原文。Turn 完成在正式与调试模式都显示当前
 工作区、Session 名称和 Session ID，并在官方 `Turn.durationMs` 可用时显示本轮总耗时，把本次运行、
 当前会话累计和账户状态依次分区；按 Turn
 聚合统计代理捕获的全部模型请求与实际产生推理输出的思考次数，并保留 Provider

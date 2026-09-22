@@ -96,6 +96,48 @@ describe("shared Surface lifecycle presentation", () => {
     ]);
   });
 
+  it("warns in the startup notice when the official OpenAI login is absent", () => {
+    const status = {
+      workspaceId: "main",
+      model: "deepseek-v4-flash",
+      modelProvider: "deepseek",
+      effort: null,
+      serviceTier: null,
+      modelPending: false,
+      effortPending: false,
+      fastModePending: false,
+      collaborationMode: "default" as const,
+      collaborationModePending: false,
+    };
+    const runtime = {
+      platform: "linux" as const,
+      architecture: "x64",
+      gatewayVersion: "0.147.0",
+      nodeVersion: "v24.0.0",
+      transport: "Unix WebSocket",
+      codexUpstreamUserAgent: null,
+    };
+
+    const presentation = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      status,
+      { ...runtime, officialOpenAiAuthenticated: false },
+    );
+    expect(presentation.fields).toContainEqual({
+      label: "OpenAI 官方",
+      value: "未登录；请运行 codex login，或发送 /model 选择第三方提供商",
+    });
+
+    const authenticated = createStartupPresentation(
+      [{ id: "main", name: "Main", cwd: "/workspace/main" }],
+      { ...status, model: "gpt-test", modelProvider: "openai" },
+      { ...runtime, officialOpenAiAuthenticated: true },
+    );
+    expect(authenticated.fields).not.toContainEqual(
+      expect.objectContaining({ label: "OpenAI 官方" }),
+    );
+  });
+
   it("formats the thinking status with elapsed time", () => {
     const rendered = renderPlainLifecyclePresentation(
       createTurnReasoningPresentation("thread-1234567890", 15_000),
@@ -258,6 +300,50 @@ describe("shared Surface lifecycle presentation", () => {
 
     expect(rendered).toContain("错误：请求因安全策略不一致而终止，请调整请求内容或目标后重试。");
     expect(rendered).not.toContain("untrusted upstream policy text");
+  });
+
+  it("uses a fixed actionable message for expired provider authentication", () => {
+    const openai = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "telegram",
+          accountId: "default",
+          conversationId: "100",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "failed",
+        error: "untrusted auth text",
+        errorCode: "unauthorized",
+        modelProvider: "openai",
+      }),
+    );
+
+    expect(openai).toContain(
+      "错误：OpenAI 官方登录已失效，请运行 codex login；或发送 /model 选择第三方提供商后重试。",
+    );
+    expect(openai).not.toContain("untrusted auth text");
+
+    const thirdParty = renderPlainLifecyclePresentation(
+      createTurnCompletedPresentation({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "app-1",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-2",
+        turnId: "turn-2",
+        status: "failed",
+        error: "untrusted key text",
+        errorCode: "unauthorized",
+        modelProvider: "deepseek",
+      }),
+    );
+
+    expect(thirdParty).toContain("当前提供商凭据已失效");
+    expect(thirdParty).not.toContain("untrusted key text");
   });
 
   it("uses a fixed message for the Luna Reserve usage-limit trigger", () => {

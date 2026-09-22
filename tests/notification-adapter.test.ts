@@ -629,6 +629,26 @@ describe("Notification adapter", () => {
       errorCode: "usageLimitExceeded",
     });
     expect(toConversationInputEvent({
+      method: "error",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-auth",
+        willRetry: false,
+        error: {
+          message: "refresh failed",
+          codexErrorInfo: "unauthorized",
+          additionalDetails: null,
+        },
+      },
+    })).toEqual({
+      type: "turn.error",
+      threadId: "thread-1",
+      turnId: "turn-auth",
+      message: "refresh failed",
+      willRetry: false,
+      errorCode: "unauthorized",
+    });
+    expect(toConversationInputEvent({
       method: "turn/completed",
       params: {
         threadId: "thread-1",
