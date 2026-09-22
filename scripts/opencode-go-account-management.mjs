@@ -1,12 +1,15 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
+import { parse, stringify } from "smol-toml";
+
 import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   inspectAppServerSupervisorState,
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { opencodeGoAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
 } from "../runtime/model-provider-runtime.mjs";
@@ -31,6 +34,7 @@ import {
   restoreProviderFileSnapshots,
   snapshotProviderFiles,
 } from "./managed-provider-files.mjs";
+import { restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 
@@ -159,6 +163,7 @@ export async function previewOpencodeGoAccountRemoval(
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadRole = loadManagedModelProviderRole,
+    readMarker = readOpencodeGoAccountMarker,
     resolvePrimarySocket = defaultPrimarySocket,
     inspectSupervisor = inspectAppServerSupervisorState,
   } = {},
@@ -167,6 +172,7 @@ export async function previewOpencodeGoAccountRemoval(
     environment,
     loadAccounts,
     loadRole,
+    readMarker,
     resolvePrimarySocket,
     inspectSupervisor,
   }));
@@ -192,6 +198,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
     loadRole = loadManagedModelProviderRole,
+    readMarker = readOpencodeGoAccountMarker,
     writeAccounts = writeOpencodeGoAccounts,
     removeAccounts = removeOptionalProviderFile,
     resolvePrimarySocket = defaultPrimarySocket,
@@ -204,6 +211,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
     environment,
     loadAccounts,
     loadRole,
+    readMarker,
     resolvePrimarySocket,
     inspectSupervisor,
   });
@@ -265,10 +273,20 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       paths.profilePath,
       paths.markerPath,
     ];
+    if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
     const snapshots = snapshotProviderFiles(transactionPaths);
     let guards = snapshots;
     try {
       await assertProviderFileSnapshots(guards);
+      if (plan.restoresInitialConfig) {
+        const initialConfig = await readOpencodeGoRestoreBaseline(paths);
+        if (initialConfig === undefined) {
+          throw new Error("OpenCode Go 固定账户恢复基线缺失");
+        }
+        await restoreOpencodeGoBaseConfig(plan, initialConfig);
+        guards = refreshProviderFileSnapshot(guards, paths.configPath);
+        await assertProviderFileSnapshots(guards);
+      }
       writeAccounts(environment, plan.remainingAccounts);
       guards = refreshProviderFileSnapshot(
         guards,
@@ -310,7 +328,9 @@ async function applyOpencodeGoAccountRemovalUnlocked(
 
 function buildDefaultPlan(accountId, { environment, loadAccounts }) {
   const normalizedId = validAccountId(accountId);
-  const accounts = loadAccountsSafely(loadAccounts, environment);
+  const accounts = loadAccountsSafely(loadAccounts, environment, {
+    allowMissingDefault: true,
+  });
   const account = accounts.find((candidate) => candidate.id === normalizedId);
   if (account === undefined) {
     throw invalid(
@@ -375,7 +395,7 @@ async function buildStopPlan(
 
 async function buildRemovalPlan(
   accountId,
-  { environment, loadAccounts, loadRole, resolvePrimarySocket, inspectSupervisor },
+  { environment, loadAccounts, loadRole, readMarker, resolvePrimarySocket, inspectSupervisor },
 ) {
   const normalizedId = validAccountId(accountId);
   const accounts = loadAccountsSafely(loadAccounts, environment);
@@ -389,38 +409,40 @@ async function buildRemovalPlan(
   }
   const paths = opencodeGoAccountPaths(environment, normalizedId);
   const removesLastAccount = accounts.length === 1;
-  let mode = null;
-  if (removesLastAccount) {
-    let marker;
-    try {
-      marker = readOpencodeGoAccountMarker(environment, normalizedId);
-    } catch (error) {
+  if (!removesLastAccount && account.default) {
+    throw invalid(
+      "default-account-conflict",
+      "accountId",
+      "请先选择其他 OpenCode Go 默认账户",
+    );
+  }
+  let marker;
+  try {
+    marker = readMarker(environment, normalizedId);
+  } catch (error) {
+    throw invalid(
+      "provider-state-unavailable",
+      "accountId",
+      error instanceof Error ? error.message : String(error),
+      error,
+    );
+  }
+  if (marker === undefined) {
+    throw invalid(
+      "provider-state-unavailable",
+      "accountId",
+      `OpenCode Go 账户 ${normalizedId} 的管理标记缺失，无法确认运行模式；请先运行 codexc doctor`,
+    );
+  }
+  const mode = marker.mode;
+  if (mode === "exclusive") {
+    const initialConfig = await readOpencodeGoRestoreBaseline(paths);
+    if (initialConfig === undefined) {
       throw invalid(
-        "provider-state-unavailable",
+        "backup-unavailable",
         "accountId",
-        error instanceof Error ? error.message : String(error),
-        error,
+        "删除 OpenCode Go 固定账户需要进入固定模式前的配置备份；未找到备份，无法安全恢复主配置",
       );
-    }
-    if (marker === undefined) {
-      throw invalid(
-        "provider-state-unavailable",
-        "accountId",
-        `OpenCode Go 账户 ${normalizedId} 的管理标记缺失，无法确认运行模式；请先运行 codexc doctor`,
-      );
-    }
-    mode = marker.mode;
-    if (mode === "exclusive") {
-      const initialConfig = await readOptionalProviderFile(
-        join(paths.providerDirectory, "backup", "config.toml"),
-      );
-      if (initialConfig === undefined) {
-        throw invalid(
-          "backup-unavailable",
-          "accountId",
-          "删除最后一个 OpenCode Go 固定账户需要安装前配置备份；未找到备份，无法安全恢复官方主配置",
-        );
-      }
     }
   }
   let role;
@@ -450,19 +472,14 @@ async function buildRemovalPlan(
     inspectSupervisor,
   });
   const remainingAccounts = accounts.filter((candidate) => candidate.id !== normalizedId);
-  let promotedDefaultAccountId = null;
-  if (!removesLastAccount && account.default && remainingAccounts.length > 0) {
-    remainingAccounts[0] = { ...remainingAccounts[0], default: true };
-    promotedDefaultAccountId = remainingAccounts[0].id;
-  }
   return {
     account,
     accounts,
     remainingAccounts,
-    promotedDefaultAccountId,
+    promotedDefaultAccountId: null,
     removesLastAccount,
     mode,
-    restoresInitialConfig: removesLastAccount && mode === "exclusive",
+    restoresInitialConfig: mode === "exclusive",
     removesManagedCatalog: removesLastAccount,
     stop,
     paths,
@@ -475,9 +492,7 @@ async function applyLastAccountRemovalFiles(
 ) {
   const { paths } = plan;
   const initialConfig = plan.restoresInitialConfig
-    ? await readOptionalProviderFile(
-      join(paths.providerDirectory, "backup", "config.toml"),
-    )
+    ? await readOpencodeGoRestoreBaseline(paths)
     : undefined;
   const initialRoleConfig = plan.restoresInitialConfig
     ? await readOptionalProviderFile(
@@ -514,7 +529,7 @@ async function applyLastAccountRemovalFiles(
   try {
     await assertProviderFileSnapshots(guards);
     if (plan.restoresInitialConfig) {
-      await writePrivateFileAtomic(paths.configPath, initialConfig);
+      await restoreOpencodeGoBaseConfig(plan, initialConfig);
       guards = refreshProviderFileSnapshot(guards, paths.configPath);
       await assertProviderFileSnapshots(guards);
     }
@@ -579,6 +594,40 @@ async function applyLastAccountRemovalFiles(
   };
 }
 
+async function readOpencodeGoRestoreBaseline(paths) {
+  return await readOptionalProviderFile(join(paths.backupDirectory, "config.toml"))
+    ?? await readOptionalProviderFile(join(paths.providerDirectory, "backup", "config.toml"));
+}
+
+async function restoreOpencodeGoBaseConfig(plan, initialConfig) {
+  const currentConfig = await readOptionalProviderFile(plan.paths.configPath);
+  const restored = restoreProviderBaseConfig(
+    parseConfig(currentConfig),
+    parseConfig(initialConfig),
+    opencodeGoAccountDefinition(
+      plan.account.id,
+      plan.account.email,
+      plan.account.phone,
+    ),
+  );
+  if (Object.keys(restored).length === 0) {
+    if (existsSync(plan.paths.configPath)) {
+      await removeOptionalProviderFile(plan.paths.configPath);
+    }
+  } else {
+    await writePrivateFileAtomic(plan.paths.configPath, stringify(restored));
+  }
+}
+
+function parseConfig(content) {
+  if (content === undefined) return {};
+  try {
+    return parse(content.toString("utf8"));
+  } catch {
+    throw new Error("OpenCode Go 固定账户恢复基线无法安全读取");
+  }
+}
+
 function publicDefaultPreview(plan) {
   return {
     operation: "set-default",
@@ -618,8 +667,8 @@ function publicRemovalPreview(plan) {
   if (plan.removesLastAccount) {
     effects.removesLastAccount = true;
     effects.removesManagedCatalog = true;
-    if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
   }
+  if (plan.restoresInitialConfig) effects.restoresInitialConfig = true;
   return {
     operation: "remove",
     account: {
@@ -654,9 +703,9 @@ function validAccountId(value) {
   }
 }
 
-function loadAccountsSafely(loadAccounts, environment) {
+function loadAccountsSafely(loadAccounts, environment, options) {
   try {
-    return loadAccounts(environment);
+    return loadAccounts(environment, options);
   } catch (error) {
     throw invalid(
       "account-state-unavailable",

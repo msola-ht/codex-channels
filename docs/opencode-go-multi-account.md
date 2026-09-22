@@ -35,7 +35,7 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
   accounts.json                            账户注册表（id、default、email 或 phone）
   models.json / models.manifest.json       共享模型目录
   accounts/<account>/managed.toml          管理标记（version、provider、mode）
-  accounts/<account>/backup/               删除前的私有 Profile 与管理标记备份
+  accounts/<account>/backup/               固定恢复基线及删除前的私有文件备份
 ```
 
 切换模式下，每个账户使用独立的 0600 Profile：
@@ -74,6 +74,15 @@ codexc opencode-go account stop <id>
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
+
+注册表非空时必须有且只有一个默认账户。删除默认账户且仍有其他账户时必须先运行 `default`，删除
+流程不会按目录顺序自动提升。旧版注册表若没有默认标记，正常运行会失败关闭，但 `default` 命令可
+读取该状态并写回一个明确默认账户。
+
+同一时刻只允许一个固定主 Provider，一个固定 OCG 账户可以与其他切换账户共存。账户从切换模式进入
+固定模式时，以当时 `config.toml` 建立账户级恢复基线并归档旧基线；固定模式内重新配置不覆盖该基线。
+删除固定账户或把它改回切换模式时，仅恢复该 Provider 管理的主配置字段，保留之后产生的
+其他用户设置。
 
 已注册的旧账户升级时会改为 `sf-ocg-<accountId>.config.toml`，并把配置和角色中的 Provider
 引用迁移到 `ocg-<accountId>`。没有账户 ID 的旧单账户配置不会被擅自命名为 `main`，需使用明确 ID

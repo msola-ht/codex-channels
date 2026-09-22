@@ -41,6 +41,7 @@ import {
   refreshOpencodeGoCatalogForUpdate,
   runOpenCodeGoSetup,
 } from "../scripts/opencode-go-setup.mjs";
+import { applyOpencodeGoAccountConfiguration } from "../scripts/opencode-go-account-provisioning.mjs";
 import {
   loadManagedModelWindow,
   loadManagedModelProviderSettings,
@@ -91,6 +92,91 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       model: "deepseek-flash",
       model_reasoning_effort: "max",
     });
+  });
+
+  it("captures the current main config whenever an account enters fixed mode", async () => {
+    const codexHome = opencodeFixture();
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+    await applyOpencodeGoAccountConfiguration({
+      accountId: "main",
+      contact: "user@example.com",
+      mode: "exclusive",
+      reconfigure: true,
+      apiKey: "sk-test-secret",
+      confirmExclusiveConfigChange: true,
+    }, { environment, downloadCatalog: successfulCatalog });
+    await applyOpencodeGoAccountConfiguration({
+      accountId: "main",
+      contact: "user@example.com",
+      mode: "switching",
+      reconfigure: true,
+      apiKey: "sk-test-secret",
+    }, { environment, downloadCatalog: successfulCatalog });
+
+    expect(parse(readFileSync(join(codexHome, "config.toml"), "utf8"))).toEqual({
+      model: "gpt-5.6-sol",
+      model_provider: "openai",
+    });
+  });
+
+  it("allows one fixed account while sibling accounts remain switchable", async () => {
+    const codexHome = opencodeFixture();
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+    await applyOpencodeGoAccountConfiguration({
+      accountId: "work",
+      contact: "work@example.com",
+      mode: "switching",
+      apiKey: "sk-work-secret",
+    }, { environment, downloadCatalog: successfulCatalog });
+
+    await expect(applyOpencodeGoAccountConfiguration({
+      accountId: "main",
+      contact: "user@example.com",
+      mode: "exclusive",
+      reconfigure: true,
+      apiKey: "sk-test-secret",
+      confirmExclusiveConfigChange: true,
+    }, { environment, downloadCatalog: successfulCatalog })).resolves.toMatchObject({
+      action: "configured",
+      account: { id: "main" },
+      mode: "exclusive",
+    });
+    expect(loadManagedModelProviderSettings(environment)).toEqual([
+      expect.objectContaining({ provider: "ocg-main", mode: "exclusive" }),
+      expect.objectContaining({ provider: "ocg-work", mode: "switching" }),
+    ]);
+  });
+
+  it("does not refresh the shared catalog when a registered account is incomplete", async () => {
+    const codexHome = opencodeFixture();
+    const environment = {
+      CODEX_HOME: codexHome,
+      CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
+    };
+    const accountsPath = join(
+      environment.CODEX_CONNECT_HOME,
+      "providers/opencode-go/accounts.json",
+    );
+    writeFileSync(accountsPath, JSON.stringify([
+      { id: "main", default: true, email: "user@example.com" },
+      { id: "missing", default: false, email: "missing@example.com" },
+    ]), { mode: 0o600 });
+    const catalogPath = join(
+      environment.CODEX_CONNECT_HOME,
+      "providers/opencode-go/models.json",
+    );
+    const before = readFileSync(catalogPath);
+
+    await expect(refreshOpencodeGoCatalogForUpdate(environment, {
+      downloadCatalog: successfulCatalog,
+    })).rejects.toThrow("账户配置不完整");
+    expect(readFileSync(catalogPath)).toEqual(before);
   });
 
   it.each(["none", "profile", "role"] as const)(

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -161,6 +162,14 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     definition,
     previous?.model,
   );
+  const previousMode = readOpencodeGoAccountMarker(environment, accountId)?.mode;
+  const entersExclusiveMode = previousMode === "switching" && mode === "exclusive";
+  const capturesExclusiveBaseline = mode === "exclusive"
+    && (previous === undefined || entersExclusiveMode);
+  const exclusiveBaselinePath = join(plan.paths.backupDirectory, "config.toml");
+  const archivedBaselinePath = capturesExclusiveBaseline && existsSync(exclusiveBaselinePath)
+    ? join(plan.paths.backupDirectory, `config-${randomUUID()}.toml`)
+    : undefined;
   const transactionPaths = [
     plan.paths.configPath,
     plan.paths.profilePath,
@@ -168,6 +177,8 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     plan.paths.roleConfigPath,
     plan.paths.catalogPath,
     plan.paths.manifestPath,
+    exclusiveBaselinePath,
+    ...(archivedBaselinePath === undefined ? [] : [archivedBaselinePath]),
     opencodeGoAccountsFilePath(environment),
   ];
   let snapshots;
@@ -185,19 +196,40 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
       await preserveInitialFiles(plan.paths, plan.account.id);
     }
     const currentConfig = await readTomlFile(plan.paths.configPath);
-    const initialConfig = await readBackupToml(plan.paths);
+    const accountBaseline = existsSync(exclusiveBaselinePath)
+      ? await readTomlFile(exclusiveBaselinePath)
+      : undefined;
+    const legacyBaseline = accountBaseline === undefined && previousMode === "exclusive"
+      ? await readLegacyBackupToml(plan.paths)
+      : undefined;
+    if (previousMode === "exclusive" && accountBaseline === undefined && legacyBaseline === undefined) {
+      throw new Error("OpenCode Go 固定账户恢复基线缺失");
+    }
+    const initialConfig = capturesExclusiveBaseline
+      ? currentConfig
+      : accountBaseline ?? legacyBaseline ?? currentConfig;
     const { config: nextConfig, profile } = createManagedProviderConfiguration(
       currentConfig,
       initialConfig,
       opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
       {
         mode,
-        previousMode: readOpencodeGoAccountMarker(environment, accountId)?.mode,
+        previousMode,
         apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
       },
     );
     const profileContent = profile === undefined ? undefined : stringify(profile);
     const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
+    if (archivedBaselinePath !== undefined) {
+      const previousBaseline = await readOptionalProviderFile(exclusiveBaselinePath);
+      if (previousBaseline === undefined) throw new Error("OpenCode Go 固定账户恢复基线缺失");
+      await writePrivateFileAtomic(archivedBaselinePath, previousBaseline);
+      guards = refreshProviderFileSnapshot(guards, archivedBaselinePath);
+    }
+    if (capturesExclusiveBaseline || (previousMode === "exclusive" && accountBaseline === undefined)) {
+      await writePrivateFileAtomic(exclusiveBaselinePath, stringify(initialConfig));
+      guards = refreshProviderFileSnapshot(guards, exclusiveBaselinePath);
+    }
     await assertProviderFileSnapshots(guards);
     await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
     guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
@@ -308,13 +340,6 @@ async function buildPlan(
     if (primary !== "openai" && primary !== opencodeGoProviderId(accountId)) {
       throw invalid("primary-provider-conflict", "mode", `请先恢复当前固定 Provider：${primary}`);
     }
-    if (accounts.length > 1) {
-      throw invalid(
-        "exclusive-account-conflict",
-        "mode",
-        "固定模式只允许一个 OpenCode Go 账户，其余账户必须使用切换模式",
-      );
-    }
   }
   const paths = opencodeGoAccountPaths(environment, accountId);
   try {
@@ -418,13 +443,13 @@ function publicPaths(paths) {
   };
 }
 
-async function readBackupToml(paths) {
+async function readLegacyBackupToml(paths) {
   const statePath = join(
     paths.providerDirectory,
     definition.backupDirectoryName,
     "state.json",
   );
-  if (!existsSync(statePath)) return {};
+  if (!existsSync(statePath)) return undefined;
   const state = JSON.parse(readPrivateFileSync(statePath));
   return state.config
     ? readTomlFile(join(paths.providerDirectory, definition.backupDirectoryName, "config.toml"))

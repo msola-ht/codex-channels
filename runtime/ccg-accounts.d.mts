@@ -9,4 +9,3 @@ export function ccgAccountMarkerPath(environment: NodeJS.ProcessEnv, id: string)
 export function ccgApiKeyEnvironmentKey(id: string): string;
 export function validateCcgAccounts(value: unknown): CcgAccount[];
 export function loadCcgAccounts(environment?: NodeJS.ProcessEnv): CcgAccount[];
-export function loadCcgDefaultAccount(environment?: NodeJS.ProcessEnv): CcgAccount | undefined;

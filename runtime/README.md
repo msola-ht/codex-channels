@@ -32,7 +32,8 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  CCG 采用显式多账户实例与 DS 来源目录，使用独立目录更新适配器且无余额/配额账户适配器；模型 ID
+  CCG 采用显式多账户实例与 DS 来源目录，使用独立目录更新适配器，并通过 Command Code 账户接口
+  查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
   Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
@@ -44,6 +45,10 @@
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
   `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
+- `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
+  CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
+- `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中三家账户
+  Provider 的账户 ID、共享统计代理键和同一家多账户默认选择；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
   config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的

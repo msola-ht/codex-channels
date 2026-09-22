@@ -760,6 +760,14 @@ export interface DeepseekBalance {
 }
 
 export interface DeepseekBalanceResponse {
+  accounts: DeepseekAccountBalance[]
+}
+
+export interface DeepseekAccountBalance {
+  provider: string
+  account: string | null
+  displayName: string
+  default: boolean
   available: boolean
   observedAtMs: number
   balances: DeepseekBalance[]
@@ -789,6 +797,25 @@ export interface OpencodeGoUsageResponse {
   accounts: OpencodeGoAccountUsage[]
 }
 
+export interface CcgCreditAccountUsage {
+  provider: string
+  account: string | null
+  displayName: string
+  default: boolean
+  available: boolean
+  observedAtMs: number
+  planId: string | null
+  monthlyRemaining: string
+  purchasedRemaining: string
+  freeRemaining: string
+  totalRemaining: string
+  windows: OpencodeGoQuotaWindow[]
+}
+
+export interface CcgCreditUsageResponse {
+  accounts: CcgCreditAccountUsage[]
+}
+
 export interface OfficialAccountSnapshot {
   provider: string
   accountId: string | null
@@ -804,7 +831,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "opencode-go"
+    source: "deepseek" | "opencode-go" | "ccg"
     code: "registry_unavailable"
     message: string
   }>

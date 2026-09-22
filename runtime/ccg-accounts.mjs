@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { providerStorageRoot } from "./connect-home.mjs";
+import { validateBasicManagedProviderAccounts } from "./managed-provider-account-registry.mjs";
 import { readPrivateFileSync } from "./private-file.mjs";
 
 export function validateCcgAccountId(id) {
@@ -40,24 +41,11 @@ export function ccgApiKeyEnvironmentKey(id) {
 }
 
 export function validateCcgAccounts(value) {
-  if (!Array.isArray(value)) throw new Error("CCG 账户注册表无效");
-  const ids = new Set();
-  const keys = new Set();
-  let defaults = 0;
-  const accounts = value.map((account) => {
-    if (!account || typeof account !== "object" || Array.isArray(account)
-      || Object.keys(account).some((key) => !["id", "default"].includes(key))
-      || typeof account.default !== "boolean") throw new Error("CCG 账户记录无效");
-    const id = validateCcgAccountId(account.id);
-    const key = ccgApiKeyEnvironmentKey(id);
-    if (ids.has(id) || keys.has(key)) throw new Error("CCG 账户 ID 或凭据变量名重复");
-    ids.add(id);
-    keys.add(key);
-    if (account.default) defaults += 1;
-    return { id, default: account.default };
+  return validateBasicManagedProviderAccounts(value, {
+    providerLabel: "CCG",
+    validateAccountId: validateCcgAccountId,
+    credentialEnvironmentKey: ccgApiKeyEnvironmentKey,
   });
-  if (accounts.length > 0 && defaults !== 1) throw new Error("CCG 必须有一个默认账户");
-  return accounts;
 }
 
 export function loadCcgAccounts(environment = process.env) {
@@ -70,8 +58,4 @@ export function loadCcgAccounts(environment = process.env) {
     throw new Error("CCG 账户注册表无法安全读取");
   }
   return validateCcgAccounts(value);
-}
-
-export function loadCcgDefaultAccount(environment = process.env) {
-  return loadCcgAccounts(environment).find((account) => account.default);
 }

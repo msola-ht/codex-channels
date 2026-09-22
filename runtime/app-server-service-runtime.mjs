@@ -40,14 +40,16 @@ import {
   writeThirdPartyModelProviderRoleConfig,
 } from "./model-provider-runtime.mjs";
 import {
-  loadOpencodeGoDefaultAccount,
   loadOpencodeGoAccounts,
   opencodeGoAccountIdFromProvider,
   opencodeGoProviderId,
-  sharedProviderProxyKey,
 } from "./opencode-go-accounts.mjs";
-import { loadDeepseekAccounts, deepseekAccountIdFromProvider, deepseekProviderId } from "./deepseek-accounts.mjs";
-import { loadCcgAccounts, ccgAccountIdFromProvider, ccgProviderId } from "./ccg-accounts.mjs";
+import {
+  managedProviderAccountIdFromProvider,
+  sharedProviderProxyKey,
+} from "./managed-provider-account-routing.mjs";
+import { loadDeepseekAccounts, deepseekProviderId } from "./deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgProviderId } from "./ccg-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
@@ -164,6 +166,18 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           }),
     };
     const opencodeGo = provider === "ocg";
+    const managedAccountProxyOptions = (accounts, proxyKey, providerId, label) => ({
+      accountIds: accounts.map((account) => account.id),
+      defaultAccountId: roleAccountIdFor(proxyKey)
+        ?? accounts.find((account) => account.default)?.id,
+      onMetrics: (metrics, accountId) => {
+        if (accountId === undefined) throw new Error(`${label} 统计缺少账户 ID`);
+        return sendProviderProxyMetrics(
+          providerMetricsSocketPath(socketPath, providerId(accountId)),
+          metrics,
+        );
+      },
+    });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       ...(opencodeGo
@@ -188,26 +202,16 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               );
             },
           }
-        : provider === "deepseek" ? {
-            accountIds: dsAccounts.map((account) => account.id),
-            defaultAccountId: dsRoleAccountId ?? dsAccounts.find((account) => account.default)?.id,
-            onMetrics: (metrics, accountId) => {
-              if (accountId === undefined) throw new Error("DS 统计缺少账户 ID");
-              return sendProviderProxyMetrics(providerMetricsSocketPath(socketPath, deepseekProviderId(accountId)), metrics);
-            },
-          } : provider === "ccg" ? {
-            accountIds: ccgAccounts.map((account) => account.id),
-            defaultAccountId: ccgRoleAccountId ?? ccgAccounts.find((account) => account.default)?.id,
-            onMetrics: (metrics, accountId) => {
-              if (accountId === undefined) throw new Error("CCG 统计缺少账户 ID");
-              return sendProviderProxyMetrics(providerMetricsSocketPath(socketPath, ccgProviderId(accountId)), metrics);
-            },
-          } : {
-            onMetrics: (metrics) => sendProviderProxyMetrics(
-              providerMetricsSocketPath(socketPath, provider),
-              metrics,
-            ),
-          }),
+        : provider === "deepseek"
+          ? managedAccountProxyOptions(dsAccounts, "deepseek", deepseekProviderId, "DS")
+          : provider === "ccg"
+            ? managedAccountProxyOptions(ccgAccounts, "ccg", ccgProviderId, "CCG")
+            : {
+                onMetrics: (metrics) => sendProviderProxyMetrics(
+                  providerMetricsSocketPath(socketPath, provider),
+                  metrics,
+                ),
+              }),
       onError: (error) => {
         proxySelector.invalidate();
         console.error(
@@ -253,18 +257,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
   const dsAccounts = loadDeepseekAccounts(runtime.environment);
-  const dsRoleAccountId = thirdPartyRole ? deepseekAccountIdFromProvider(thirdPartyRole.provider) : undefined;
   const ccgAccounts = loadCcgAccounts(runtime.environment);
-  const ccgRoleAccountId = thirdPartyRole ? ccgAccountIdFromProvider(thirdPartyRole.provider) : undefined;
-  const proxyAccountId = (provider) => opencodeGoAccountIdFromProvider(provider)
-    ?? deepseekAccountIdFromProvider(provider)
-    ?? ccgAccountIdFromProvider(provider);
+  const proxyAccountId = managedProviderAccountIdFromProvider;
+  const roleAccountIdFor = (proxyKey) => thirdPartyRole
+    && sharedProviderProxyKey(thirdPartyRole.provider) === proxyKey
+    ? managedProviderAccountIdFromProvider(thirdPartyRole.provider)
+    : undefined;
   const goAccountIds = goAccounts.map((account) => account.id);
-  const goDefaultAccount = thirdPartyRole
-    && opencodeGoAccountIdFromProvider(thirdPartyRole.provider)
-    ? goAccounts.find((account) =>
-        account.id === opencodeGoAccountIdFromProvider(thirdPartyRole.provider))
-    : loadOpencodeGoDefaultAccount(runtime.environment);
+  const goRoleAccountId = roleAccountIdFor("ocg");
+  const goDefaultAccount = goRoleAccountId === undefined
+    ? goAccounts.find((account) => account.default)
+    : goAccounts.find((account) => account.id === goRoleAccountId);
   const goDefaultAccountId = goDefaultAccount?.id;
   const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
     account.id,

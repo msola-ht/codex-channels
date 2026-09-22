@@ -8,6 +8,7 @@ import type {
 } from "../application/index.js";
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
+import { createCcgAccountAdapter } from "./ccg-account-adapter.js";
 
 export interface ManagedProviderAccountFactoryOptions {
   environment?: NodeJS.ProcessEnv;
@@ -39,6 +40,13 @@ export function createManagedProviderAccountAdapters(
           environment,
           fetchImpl,
           metricsDatabasePath: options.metricsDatabasePath,
+          provider: definition.id,
+        }));
+        break;
+      case "ccg":
+        adapters.push(createCcgAccountAdapter({
+          environment,
+          fetchImpl,
           provider: definition.id,
         }));
         break;

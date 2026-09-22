@@ -9,8 +9,7 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
-import { isDeepseekAccountProvider } from "./deepseek-accounts.mjs";
-import { isCcgAccountProvider } from "./ccg-accounts.mjs";
+import { assertManagedProviderDefaultAccount } from "./managed-provider-account-registry.mjs";
 import {
   readPrivateFileSync,
   writePrivateFileAtomicSync,
@@ -36,16 +35,6 @@ export function isOpencodeGoProvider(provider) {
   } catch {
     return false;
   }
-}
-
-export function sharedProviderProxyKey(provider) {
-  return isOpencodeGoProvider(provider)
-    ? "ocg"
-    : isDeepseekAccountProvider(provider)
-      ? "deepseek"
-      : isCcgAccountProvider(provider)
-        ? "ccg"
-        : provider;
 }
 
 export function opencodeGoAccountIdFromProvider(provider) {
@@ -155,7 +144,10 @@ export function opencodeGoAccountBackupDirectory(environment, accountId) {
   return join(opencodeGoAccountDirectory(environment, accountId), "backup");
 }
 
-export function loadOpencodeGoAccounts(environment = process.env) {
+export function loadOpencodeGoAccounts(
+  environment = process.env,
+  { allowMissingDefault = false } = {},
+) {
   const path = opencodeGoAccountsFilePath(environment);
   if (!existsSync(path)) return [];
   let parsed;
@@ -169,7 +161,6 @@ export function loadOpencodeGoAccounts(environment = process.env) {
   }
   const accounts = [];
   const seen = new Set();
-  let defaultCount = 0;
   for (const entry of parsed) {
     const record = table(entry);
     const id = record.id;
@@ -178,7 +169,6 @@ export function loadOpencodeGoAccounts(environment = process.env) {
     }
     validateOpencodeGoAccountId(id);
     const isDefault = record.default === true;
-    if (isDefault) defaultCount += 1;
     seen.add(id);
     const email = record.email === undefined ? undefined : validateOpencodeGoEmail(record.email);
     const phone = record.phone === undefined ? undefined : validateOpencodeGoPhone(record.phone);
@@ -192,9 +182,7 @@ export function loadOpencodeGoAccounts(environment = process.env) {
       ...(phone === undefined ? {} : { phone }),
     });
   }
-  if (defaultCount > 1) {
-    throw new Error("OpenCode Go 账户注册表包含多个默认账户");
-  }
+  assertManagedProviderDefaultAccount(accounts, "OpenCode Go", { allowMissingDefault });
   assertUniqueOpencodeGoApiKeyEnvironmentKeys(accounts);
   return accounts;
 }
@@ -221,9 +209,7 @@ export function writeOpencodeGoAccounts(environment, accounts) {
   ) {
     throw new Error("OpenCode Go 账户注册表无效");
   }
-  if (normalized.filter((account) => account.default).length > 1) {
-    throw new Error("OpenCode Go 账户注册表只能有一个默认账户");
-  }
+  assertManagedProviderDefaultAccount(normalized, "OpenCode Go");
   assertUniqueOpencodeGoApiKeyEnvironmentKeys(normalized);
   writePrivateFileAtomicSync(
     opencodeGoAccountsFilePath(environment),

@@ -48,11 +48,7 @@ import {
 import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
-import {
-  ccgProviderId,
-  isCcgAccountProvider,
-  loadCcgDefaultAccount,
-} from "../../runtime/ccg-accounts.mjs";
+import { resolveDefaultManagedProvider } from "../../runtime/managed-provider-account-routing.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -213,12 +209,7 @@ export abstract class GatewayComponentGraph {
       ...managedProviders.map(({ provider }) => provider),
       ...customSwitchingProviders.map(({ provider }) => provider),
     ];
-    const defaultCcgAccount = loadCcgDefaultAccount();
-    const defaultThirdPartyProvider = defaultCcgAccount !== undefined
-      && switchingProviderIds.length > 1
-      && switchingProviderIds.every((provider) => isCcgAccountProvider(provider))
-      ? ccgProviderId(defaultCcgAccount.id)
-      : undefined;
+    const defaultThirdPartyProvider = resolveDefaultManagedProvider(switchingProviderIds);
     const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
       primaryProvider,

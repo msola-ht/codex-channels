@@ -20,7 +20,8 @@ export function createOfficialAccountSnapshot(input: {
     accountId: input.accountId ?? null,
     observedAtMs: input.observedAtMs,
     available: input.usage.kind === "token-usage"
-      || ((input.usage.kind === "balance" || input.usage.kind === "quota-windows")
+      || ((input.usage.kind === "balance" || input.usage.kind === "credit-usage"
+        || input.usage.kind === "quota-windows")
         && input.usage.available),
     usage: input.usage,
     limits: input.limits,

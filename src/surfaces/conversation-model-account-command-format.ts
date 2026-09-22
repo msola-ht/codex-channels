@@ -197,6 +197,25 @@ export function formatConversationUsage(
         ])),
     ].join("\n"));
   }
+  if (result.result.kind === "credit-usage") {
+    return toStructuredMarkdownList([
+      `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      `API 可用：${result.result.available ? "是" : "否"}`,
+      `计划：${result.result.planId ?? "未知"}`,
+      `剩余额度：$${result.result.totalRemaining}`,
+      `月度额度：$${result.result.monthlyRemaining}`,
+      `额外充值：$${result.result.purchasedRemaining}`,
+      `赠送额度：$${result.result.freeRemaining}`,
+      ...(result.result.windows.length === 0
+        ? []
+        : result.result.windows.map((window) => {
+            const reset = window.resetsAt === null
+              ? "未知"
+              : formatResetTime(window.resetsAt);
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
+          })),
+    ].join("\n"));
+  }
   if (result.result.kind === "quota-windows") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,

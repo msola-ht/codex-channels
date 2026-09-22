@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -51,6 +59,27 @@ describe("OpenCode Go account management", () => {
       account: { id: "b", default: true },
       activation: "restart-all",
     });
+    expect(writeAccounts).toHaveBeenCalledWith({}, [
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "b", default: true },
+    ]);
+  });
+
+  it("repairs an existing registry whose default account is missing", async () => {
+    const legacyAccounts = accounts.map((account) => ({ ...account, default: false }));
+    const loadAccounts = vi.fn(() => legacyAccounts);
+    const writeAccounts = vi.fn();
+
+    await expect(applyOpencodeGoDefaultAccountChange("b", {
+      environment: {},
+      loadAccounts,
+      writeAccounts,
+    })).resolves.toMatchObject({
+      action: "default-set",
+      currentDefaultAccountId: null,
+      willChange: true,
+    });
+    expect(loadAccounts).toHaveBeenCalledWith({}, { allowMissingDefault: true });
     expect(writeAccounts).toHaveBeenCalledWith({}, [
       { id: "main", default: false, email: "user@example.com" },
       { id: "b", default: true },
@@ -143,11 +172,12 @@ describe("OpenCode Go account management", () => {
     expect(releaseProvider).not.toHaveBeenCalled();
   });
 
-  it("previews account removal without exposing credentials", async () => {
-    const preview = await previewOpencodeGoAccountRemoval("main", {
+  it("previews non-default account removal without exposing credentials", async () => {
+    const preview = await previewOpencodeGoAccountRemoval("b", {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => undefined,
+      readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
     });
@@ -155,14 +185,13 @@ describe("OpenCode Go account management", () => {
     expect(preview).toEqual({
       operation: "remove",
       account: {
-        id: "main",
-        provider: "ocg-main",
-        email: "user@example.com",
-        default: true,
+        id: "b",
+        provider: "ocg-b",
+        default: false,
       },
       effects: {
         stopsRunningAppServer: false,
-        promotesDefaultAccountId: "b",
+        promotesDefaultAccountId: null,
         preservesPrivateBackup: true,
         historyThreadsBecomeUnavailable: true,
       },
@@ -170,6 +199,20 @@ describe("OpenCode Go account management", () => {
       activation: "restart-all",
     });
     expect(JSON.stringify(preview)).not.toContain("apiKey");
+  });
+
+  it("requires another default before removing the current default account", async () => {
+    await expect(previewOpencodeGoAccountRemoval("main", {
+      environment: {},
+      loadAccounts: () => accounts,
+      loadRole: () => undefined,
+      readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
+      resolvePrimarySocket: () => "/tmp/app-server.sock",
+      inspectSupervisor: async () => ({ status: "missing" as const }),
+    })).rejects.toMatchObject({
+      code: "default-account-conflict",
+      field: "accountId",
+    });
   });
 
   it("previews removal of the final switching account without restoring main config", async () => {
@@ -275,6 +318,7 @@ describe("OpenCode Go account management", () => {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => undefined,
+      readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
     })).rejects.toMatchObject({
@@ -291,6 +335,7 @@ describe("OpenCode Go account management", () => {
       environment: {},
       loadAccounts: () => accounts,
       loadRole: () => undefined,
+      readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
       stopAccount: async () => ({ action: "in-use" as const }),
@@ -298,5 +343,66 @@ describe("OpenCode Go account management", () => {
       code: "account-runtime-in-use",
       field: "accountId",
     });
+  });
+
+  it("restores the managed base config when removing a fixed account with switching siblings", async () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-ocg-management-"));
+    const environment = {
+      CODEX_HOME: join(home, ".codex"),
+      CODEX_CONNECT_HOME: join(home, ".codex-connect"),
+    };
+    const paths = opencodeGoAccountPaths(environment, "fixed");
+    mkdirSync(join(paths.markerPath, ".."), { recursive: true, mode: 0o700 });
+    mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(join(paths.configPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      paths.markerPath,
+      'version = 1\nprovider = "ocg-fixed"\nmode = "exclusive"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      join(paths.backupDirectory, "config.toml"),
+      'model = "gpt-test"\nmodel_provider = "openai"\napproval_policy = "on-request"\n',
+      { mode: 0o600 },
+    );
+    writeFileSync(paths.configPath, [
+      'model = "deepseek-flash"',
+      'model_provider = "ocg-fixed"',
+      'model_catalog_json = "/private/models.json"',
+      'approval_policy = "never"',
+      "[model_providers.ocg-fixed]",
+      'name = "ocg-fixed"',
+      'base_url = "https://opencode.ai/zen/go/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = false",
+      'experimental_bearer_token = "secret"',
+      "",
+    ].join("\n"), { mode: 0o600 });
+    try {
+      await expect(applyOpencodeGoAccountRemoval({
+        accountId: "fixed",
+        confirmHistoryLoss: true,
+      }, {
+        environment,
+        loadAccounts: () => [
+          { id: "switch", default: true, email: "switch@example.com" },
+          { id: "fixed", default: false, email: "fixed@example.com" },
+        ],
+        loadRole: () => undefined,
+        resolvePrimarySocket: () => "/tmp/app-server.sock",
+        inspectSupervisor: async () => ({ status: "missing" as const }),
+        stopAccount: async () => ({ action: "not-running" as const }),
+      })).resolves.toMatchObject({
+        action: "removed",
+        effects: { restoresInitialConfig: true },
+      });
+      const restored = readFileSync(paths.configPath, "utf8");
+      expect(restored).toContain('model = "gpt-test"');
+      expect(restored).toContain('model_provider = "openai"');
+      expect(restored).toContain('approval_policy = "never"');
+      expect(restored).not.toContain("ocg-fixed");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

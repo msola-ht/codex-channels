@@ -9,11 +9,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
-import {
-  ccgProviderId,
-  isCcgAccountProvider,
-  loadCcgDefaultAccount,
-} from "../runtime/ccg-accounts.mjs";
+import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
@@ -121,11 +117,11 @@ export function defaultCodexRemoteProfile(environment = process.env) {
     throw new Error("OpenAI 官方未登录，请先运行 codex login 或通过 codexc setup 配置第三方提供商");
   }
   if (profiles.length > 1) {
-    const defaultCcgAccount = loadCcgDefaultAccount(environment);
-    if (customProfiles.length === 0
-      && managedProfiles.every(({ id }) => isCcgAccountProvider(id))
-      && defaultCcgAccount !== undefined) {
-      const defaultProvider = ccgProviderId(defaultCcgAccount.id);
+    if (customProfiles.length === 0) {
+      const defaultProvider = resolveDefaultManagedProvider(
+        managedProfiles.map(({ id }) => id),
+        environment,
+      );
       const defaultProfile = managedProfiles.find(({ id }) => id === defaultProvider)?.profileName;
       if (defaultProfile !== undefined) return defaultProfile;
     }

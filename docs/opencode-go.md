@@ -29,7 +29,9 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 不进入注册表、配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。模型目录与管理标记共享
 `~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
-`~/.codex/config.toml`。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
+`~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他
+OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会以当时主配置更新该账户的恢复基线，旧基线
+按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
 已注册的旧账户会迁移到相同账户 ID 的 `ocg-<accountId>` 与
@@ -134,7 +136,8 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   查看错误分类。
 - 所有账户 id 都由添加时明确输入，使用小写字母/数字/`-`/`_`（1–32 位），不允许与现有
   Provider id 冲突；CLI 和 Thread 一律使用 `ocg-<accountId>`，默认账户只使用注册表标记；删除账户前
-  会备份 Profile 与账户目录，删除后该账户历史 Thread 不可恢复；删除最后一个账户时账户命令会
+  会备份 Profile 与账户目录；存在其他账户时必须先把默认标记切换到其他账户，不能由删除操作自动提升；
+  删除后该账户历史 Thread 不可恢复；删除最后一个账户时账户命令会
   直接清理共享模型目录，固定模式还会恢复安装前的 Codex 主配置。删除后重启 Gateway 会自动解绑已删除账户的
   外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：完成卡片展示请求结果、Token、缓存与压缩摘要，并在官方

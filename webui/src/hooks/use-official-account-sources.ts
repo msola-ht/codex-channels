@@ -6,9 +6,10 @@ import {
   fetchOfficialAccountSnapshots,
   refreshOfficialAccountSnapshot,
 } from "@/lib/api"
-import type { DeepseekBalance } from "@/lib/types"
 import {
-  accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh, accountSnapshotsWithoutRemoved, opencodeAccountFromSnapshot, refreshableAccounts,
+  accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh,
+  accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
+  opencodeAccountFromSnapshot, refreshableAccounts,
   type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
 } from "@/lib/account-refresh-state"
 
@@ -106,25 +107,26 @@ export function useOfficialAccountSources() {
 }
 
 function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSnapshots>>) {
-  const deepseekSnapshot = result.snapshots.find((snapshot) => snapshot.provider === "deepseek")
+  const deepseekSnapshots = result.snapshots.filter((snapshot) =>
+    snapshot.provider === "deepseek" || snapshot.provider.startsWith("ds-"))
   const opencodeSnapshots = result.snapshots.filter((snapshot) => snapshot.provider === "ocg" || snapshot.provider.startsWith("ocg-"))
-  const deepseek = deepseekSnapshot && isDeepseekUsage(deepseekSnapshot.usage)
-    ? {
-        available: deepseekSnapshot.available,
-        observedAtMs: deepseekSnapshot.observedAtMs,
-        balances: deepseekSnapshot.usage.balances,
-      }
+  const ccgSnapshots = result.snapshots.filter((snapshot) =>
+    snapshot.provider === "ccg" || snapshot.provider.startsWith("ccg-"))
+  const deepseek = deepseekSnapshots.length > 0
+    ? { accounts: deepseekSnapshots.map(deepseekAccountFromSnapshot) }
     : null
   const opencodeGo = opencodeSnapshots.length > 0
     ? { accounts: opencodeSnapshots.map(opencodeAccountFromSnapshot) }
     : null
+  const ccg = ccgSnapshots.length > 0
+    ? { accounts: ccgSnapshots.map(ccgAccountFromSnapshot) }
+    : null
   return {
     deepseek,
     opencodeGo,
-    warning: result.warnings[0]?.message ?? null,
+    ccg,
+    warning: result.warnings.length === 0
+      ? null
+      : result.warnings.map((warning) => warning.message).join("；"),
   }
-}
-
-function isDeepseekUsage(value: unknown): value is { balances: DeepseekBalance[] } {
-  return !!value && typeof value === "object" && Array.isArray((value as { balances?: unknown }).balances)
 }

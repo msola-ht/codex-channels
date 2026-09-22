@@ -76,7 +76,7 @@
   Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、账户 ID、普通用量权限、
-  Luna Reserve 后端授权摘要、第三方余额和未支持状态的可辨识结果，
+  Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用

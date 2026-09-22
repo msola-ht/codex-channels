@@ -106,9 +106,10 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     if (!previous && (hasProviderBaseConfig(current, definition) || existsSync(paths.profile) || existsSync(paths.marker))) throw new Error("DeepSeek 账户配置路径已被占用");
     const backup = readBackup(paths.backup);
     if (previous && !backup) throw new Error("DeepSeek 账户初始备份缺失");
-    const initial = previous ? backup : { config: current };
+    const entersExclusiveMode = previous?.mode === "switching" && preview.mode === "exclusive";
+    const initial = previous && !entersExclusiveMode ? backup : { config: current };
     const updates = new Map();
-    if (!previous && backup) {
+    if ((!previous || entersExclusiveMode) && backup) {
       const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
       const [snapshot] = snapshotProviderFiles([archive]);
       if (snapshot.content !== undefined) throw new Error("DeepSeek 备份归档路径已被占用");
@@ -237,6 +238,9 @@ export async function refreshDeepseekAccountsCatalog(environment = process.env, 
     const accounts = loadDeepseekAccounts(environment);
     if (accounts.length === 0) return { status: "not-configured" };
     const providers = loadManagedModelProviderSettings(environment).filter((provider) => accounts.some((account) => deepseekProviderId(account.id) === provider.provider));
+    if (providers.length !== accounts.length) {
+      throw new Error("DeepSeek 账户配置不完整，请先恢复缺失文件");
+    }
     const paths = deepseekAccountPaths(environment, accounts[0].id);
     const accountPaths = accounts.map((account) => deepseekAccountPaths(environment, account.id));
     const snapshots = snapshotProviderFiles(accountPaths.flatMap((entry) => Object.values(entry)));

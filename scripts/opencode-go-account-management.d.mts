@@ -3,6 +3,7 @@ import type {
   AppServerSupervisorInspection,
 } from "../runtime/app-server-supervisor.mjs";
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
+import type { OpencodeGoAccountMarker } from "../runtime/opencode-go-accounts.mjs";
 
 export class OpenCodeGoAccountManagementError extends Error {
   code: string;
@@ -98,6 +99,10 @@ interface RemovalOptions extends StopOptions {
   loadRole?: (environment: NodeJS.ProcessEnv) =>
     | { provider: ManagedModelProviderId; model: string }
     | undefined;
+  readMarker?: (
+    environment: NodeJS.ProcessEnv,
+    accountId: string,
+  ) => OpencodeGoAccountMarker | undefined;
 }
 
 export function previewOpencodeGoAccountRemoval(

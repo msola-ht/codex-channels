@@ -50,6 +50,8 @@ App Server 子进程，不进入账户注册表、命令行或日志。
 删除账户保留共享模型目录、历史统计和备份。删除默认账户前需先选择其他默认账户；删除最后
 一个账户无需选择。共享子代理正在使用该账户时需先切换或停用。固定账户删除或改为切换模式时
 仅恢复受管 Provider 字段，保留其他主配置修改。删除后重新添加会建立新的恢复基线，旧备份归档保留。
+切换账户每次进入固定模式时都会以当时主配置更新该账户的恢复基线，并把旧基线归档；固定模式内
+重新配置继续使用本次进入时的基线。同一时刻仍只允许一个固定主 Provider，其他 DS 账户可保持切换模式。
 
 ## 模型与设置
 
@@ -127,6 +129,7 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - 官方返回的推理 Token 计数仍与所有 Provider 一样展示；Gateway 不读取或保存推理内容。
 - OpenAI Fast 和周限不会显示在 DeepSeek Thread 上。
 - `/usage` 在 OpenAI Thread 中显示 Codex Token 汇总，在 DeepSeek Thread 中调用官方余额接口。
+- WebUI 控制台按 `ds-<账户>` 分别展示余额并逐账户刷新；默认标记来自 DS 注册表。
 - `/metrics` 从独立指标库读取当前 Thread 最近 Turn 和整个 Thread 的请求累计；输入量是多次请求的
   累计值，不表示当前上下文占用。`/metrics providers|models|errors 24h|7d|30d|90d|all` 按统一口径聚合，
   不为 DeepSeek 建立专属统计表。Gateway 不在本地计算或估算 DeepSeek 价格与费用，`/metrics` 只展示

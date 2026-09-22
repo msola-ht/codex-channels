@@ -216,6 +216,37 @@ describe("conversation model and account command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
+  it("renders CCG credits and quota windows", () => {
+    const rendered = formatConversationUsage({
+      kind: "usage",
+      result: {
+        kind: "credit-usage",
+        provider: "ccg-work",
+        available: true,
+        planId: "individual-pro",
+        monthlyRemaining: "40.00",
+        purchasedRemaining: "5.00",
+        freeRemaining: "1.00",
+        totalRemaining: "46.00",
+        windows: [{
+          windowId: "five-hour",
+          label: "5小时",
+          usedPercent: 25,
+          resetsAt: 1_784_800_000,
+          status: null,
+        }],
+      },
+    });
+
+    expect(rendered).toContain("ccg-work 账户用量");
+    expect(rendered).toContain("计划：individual-pro");
+    expect(rendered).toContain("剩余额度：$46.00");
+    expect(rendered).toContain("月度额度：$40.00");
+    expect(rendered).toContain("额外充值：$5.00");
+    expect(rendered).toContain("赠送额度：$1.00");
+    expect(rendered).toContain("5小时：已用 25%");
+  });
+
   it("renders OpenAI Thread official estimates after the account summary", () => {
     const groups = Array.from({ length: 9 }, (_, index) => ({
       model: index === 0 ? "gpt-5.4" : null,

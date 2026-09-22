@@ -406,8 +406,11 @@ export async function refreshOpencodeGoCatalogForUpdate(
   const accounts = loadOpencodeGoAccounts(environment);
   const previousSettings = loadManagedModelProviderSettings(environment)
     .filter(({ provider }) => isOpencodeGoProvider(provider));
-  if (accounts.length === 0 || previousSettings.length === 0) {
+  if (accounts.length === 0) {
     return { status: "not-configured" };
+  }
+  if (previousSettings.length !== accounts.length) {
+    throw new Error("OpenCode Go 账户配置不完整，请先恢复缺失文件");
   }
   const downloaded = await (options.downloadCatalog
     ? options.downloadCatalog()
@@ -441,7 +444,7 @@ export async function refreshOpencodeGoCatalogForUpdate(
   for (const account of accounts) {
     const provider = opencodeGoProviderId(account.id);
     const settings = settingsByProvider.get(provider);
-    if (!settings) continue;
+    if (!settings) throw new Error(`OpenCode Go 账户配置不完整：${account.id}`);
     const selected = managedCatalog.models.find((model) => model.slug === settings.model) ?? managedDefault;
     const modelChanged = selected.slug !== settings.model;
     if (!modelChanged && settings.mode !== "switching") continue;

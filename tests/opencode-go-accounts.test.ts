@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,13 +14,12 @@ import { describe, expect, it } from "vitest";
 import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
-  loadOpencodeGoDefaultAccount,
   opencodeGoAccountIdFromProvider,
   opencodeGoAccountMarkerPath,
+  opencodeGoAccountsFilePath,
   opencodeGoApiKeyEnvironmentKey,
   opencodeGoProviderId,
   readOpencodeGoAccountMarker,
-  sharedProviderProxyKey,
   validateOpencodeGoAccountId,
   writeOpencodeGoAccountMarker,
   writeOpencodeGoAccounts,
@@ -21,6 +27,7 @@ import {
   loadOpencodeGoProviderIdentities,
   validateOpencodeGoContact,
 } from "../runtime/opencode-go-accounts.mjs";
+import { sharedProviderProxyKey } from "../runtime/managed-provider-account-routing.mjs";
 
 describe("OpenCode Go account registry", () => {
   it("validates account ids and derives provider ids", () => {
@@ -82,14 +89,30 @@ describe("OpenCode Go account registry", () => {
       .toThrow("必须提供邮箱或手机号码");
   });
 
-  it("does not infer a default account from registry order", () => {
+  it("requires one explicit default account", () => {
     const home = fixture();
     const environment = testEnvironment(home);
-    writeOpencodeGoAccounts(environment, [
+    expect(() => writeOpencodeGoAccounts(environment, [
       { id: "work", default: false, email: "user@example.com" },
-    ]);
+    ])).toThrow("必须有一个默认账户");
+  });
 
-    expect(loadOpencodeGoDefaultAccount(environment)).toBeUndefined();
+  it("allows only the default-repair path to read a legacy registry without a default", () => {
+    const home = fixture();
+    const environment = testEnvironment(home);
+    const path = opencodeGoAccountsFilePath(environment);
+    mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
+    chmodSync(join(path, ".."), 0o700);
+    writeFileSync(path, `${JSON.stringify([
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "work", default: false, email: "work@example.com" },
+    ])}\n`, { mode: 0o600 });
+
+    expect(() => loadOpencodeGoAccounts(environment)).toThrow("必须有一个默认账户");
+    expect(loadOpencodeGoAccounts(environment, { allowMissingDefault: true })).toEqual([
+      { id: "main", default: false, email: "user@example.com" },
+      { id: "work", default: false, email: "work@example.com" },
+    ]);
   });
 
   it("rejects multiple defaults and duplicate ids", () => {

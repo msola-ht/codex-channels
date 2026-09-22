@@ -236,7 +236,7 @@ describe("OpenCode Go account CLI", () => {
     expect(existsSync(opencodeGoAccountsFilePath(environment))).toBe(false);
   });
 
-  it("promotes the remaining account when the default is removed", async () => {
+  it("requires another default before removing the current default account", async () => {
     const home = fixture();
     const environment = testEnvironment(home);
     await addOpencodeGoAccount("main", {
@@ -253,6 +253,12 @@ describe("OpenCode Go account CLI", () => {
     });
 
     await setOpencodeGoDefaultAccount("b", { environment });
+    await expect(removeOpencodeGoAccount("b", {
+      environment,
+      output: { write: () => undefined },
+      prompts: { confirm: async () => true, isCancel: () => false },
+    })).rejects.toThrow("请先选择其他 OpenCode Go 默认账户");
+    await setOpencodeGoDefaultAccount("main", { environment });
     await removeOpencodeGoAccount("b", {
       environment,
       output: { write: () => undefined },

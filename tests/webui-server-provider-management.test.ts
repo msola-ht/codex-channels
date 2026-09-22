@@ -7,7 +7,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
+import { deepseekAccountsFilePath } from "../runtime/deepseek-accounts.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import {
   cleanupWebuiTestFixtures,
@@ -464,6 +467,37 @@ describe("webui server Provider and account management", () => {
         available: false,
       }],
     });
+  });
+
+  it("returns account metadata and empty snapshots for every managed account family", async () => {
+    const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([
+      { id: "work", default: true },
+    ])}\n`);
+    writeOpencodeGoAccounts(fixture.environment, [{ id: "main", default: true, email: "main@example.com" }]);
+    writePrivateFileAtomicSync(ccgAccountsFilePath(fixture.environment), `${JSON.stringify([
+      { id: "team", default: true },
+    ])}\n`);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.upsertAccountSnapshot({
+      sourceId: "ccg:default", provider: "ccg", accountId: null, displayName: "CCG",
+      enabled: true, observedAtMs: 1, available: true,
+      usage: { kind: "unsupported", provider: "ccg" },
+      limits: { kind: "unsupported", provider: "ccg" },
+    });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/accounts`);
+
+    expect(response.status).toBe(200);
+    const snapshots = (await response.json()).snapshots;
+    expect(snapshots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "ds-work", accountId: "work", displayName: "DS work", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ocg-main", accountId: "main", displayName: "ocg-main@example.com", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CCG team", default: true, observedAtMs: 0 }),
+    ]));
+    expect(snapshots).not.toContainEqual(expect.objectContaining({ provider: "ccg" }));
   });
 
   it("refreshes one account through Gateway and returns the updated snapshot", async () => {

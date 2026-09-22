@@ -222,14 +222,14 @@ stream_max_retries = 0
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
-多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于 CCG 时使用 CCG 注册表
-标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
+多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于同一家 DS、OCG
+或 CCG 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
 选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
 目标 Thread 建立后该提示消失。
-`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个 CCG 实例且
-没有混合其他 Provider 时连接 CCG 默认账户，其他多 Provider 配置明确提示指定 `--profile`。
+`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个同一家 DS、
+OCG 或 CCG 实例且没有混合其他 Provider 时连接该家默认账户，其他多 Provider 配置明确提示指定 `--profile`。
 显式 Profile 和固定模式仍按原配置执行。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
@@ -294,7 +294,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
-- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离且无余额接口的参考实现；
+- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离与 Command Code Credits 查询的参考实现；
 - [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；

@@ -5,6 +5,8 @@ import {
   accountSnapshotsWithMissingProviders,
   accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved,
+  ccgAccountFromSnapshot,
+  deepseekAccountFromSnapshot,
   refreshableAccounts,
   opencodeAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
@@ -88,12 +90,36 @@ describe("WebUI per-account refresh state", () => {
     expect(accountSnapshotIsStale(99_999, 1_000_000)).toBe(true);
   });
 
-  it("refreshes only managed DS and OCG accounts", () => {
+  it("refreshes all managed DS, OCG, and CCG accounts", () => {
     const providers = [
       { id: "openai", kind: "managed" }, { id: "deepseek", kind: "managed" },
+      { id: "ds-work", kind: "managed" },
       { id: "ocg-one", kind: "managed" }, { id: "ocg-custom", kind: "custom" },
+      { id: "ccg-main", kind: "managed" }, { id: "ccg-custom", kind: "custom" },
     ].map((provider) => ({ ...provider, displayName: provider.id }));
     expect(refreshableAccounts({ providers } as ManagementProvidersResponse).map((provider) => provider.id))
-      .toEqual(["deepseek", "ocg-one"]);
+      .toEqual(["deepseek", "ds-work", "ocg-one", "ccg-main"]);
+  });
+
+  it("projects DS balances and CCG credits from account snapshots", () => {
+    const base = {
+      accountId: "main", displayName: "Account", default: true,
+      observedAtMs: 123, available: true, limits: null,
+    };
+    expect(deepseekAccountFromSnapshot({
+      ...base, provider: "ds-main",
+      usage: { kind: "balance", balances: [{ currency: "USD", totalBalance: "2", grantedBalance: "1", toppedUpBalance: "1" }] },
+    })).toMatchObject({ provider: "ds-main", account: "main", default: true, balances: [{ totalBalance: "2" }] });
+    expect(ccgAccountFromSnapshot({
+      ...base, provider: "ccg-main",
+      usage: {
+        kind: "credit-usage", planId: "individual-pro", monthlyRemaining: "4.00",
+        purchasedRemaining: "2.00", freeRemaining: "1.00", totalRemaining: "7.00",
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 25, resetsAt: 456, status: null }],
+      },
+    })).toMatchObject({
+      provider: "ccg-main", totalRemaining: "7.00",
+      windows: [{ windowId: "weekly", resetsAt: 456000 }],
+    });
   });
 });

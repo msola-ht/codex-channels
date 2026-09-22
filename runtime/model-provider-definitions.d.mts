@@ -10,7 +10,7 @@ export type ManagedModelProviderId =
   | `opencode-go-${string}`;
 
 export type ManagedModelProviderCatalogSource = "none" | "deepseek-official";
-export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go";
+export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
 export type ManagedModelProviderCatalogUpdateAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 

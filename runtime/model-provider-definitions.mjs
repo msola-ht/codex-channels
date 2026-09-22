@@ -9,7 +9,7 @@ import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-a
 
 const managedProviderCapabilityKinds = Object.freeze({
   catalogSources: new Set(["none", "deepseek-official"]),
-  accountAdapters: new Set(["none", "deepseek", "opencode-go"]),
+  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
   instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts"]),
   catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
 });
@@ -83,7 +83,7 @@ export const commandCodeProviderDefinition = Object.freeze({
   supportsWebsockets: false,
   capabilities: Object.freeze({
     catalogSource: "deepseek-official",
-    accountAdapter: "none",
+    accountAdapter: "ccg",
     instanceAdapter: "ccg-accounts",
     catalogUpdateAdapter: "ccg",
   }),

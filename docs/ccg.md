@@ -56,12 +56,29 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，新 Conversation 与未显式指定 Profile 的
 `codexc remote` 使用注册表标记的默认账户；混合配置其他 Provider 时仍需显式选择。
 
+## 账户额度
+
+当前 Thread 使用 CCG 时，`/usage` 使用该 `ccg-<账户>` 的私有 Key 查询 Command Code 官方 CLI
+当前使用的 `GET /alpha/whoami?limits=1` 与 `GET /alpha/billing/credits`。前一个接口只用于取得组织 ID，
+后一个接口归约计划 ID、月度 Credits、额外充值、赠送余额，以及可用的 5 小时和 7 天窗口。
+两个接口与 Provider 模型请求复用同一个账户 API Key；官方 CLI 的手动 Key 登录同样先用
+`/alpha/whoami` 校验，不需要额外保存账户查询凭据。WebUI 控制台按账户分别展示 Credits 与窗口，
+并支持与 DS、OCG 相同的逐账户刷新。
+请求与其他账户适配器一样经过统一代理、10 秒超时、64 KiB 响应上限和严格 Schema 校验；失败只返回
+稳定的“CCG 账户查询失败”，不传播 Key、响应正文或解析错误。
+
+这些账户端点未列在公开的 [CommandCode Provider 文档](https://commandcode.ai/docs/provider) 中；本次
+实现按官方 `command-code` CLI 1.62.1 的调用方式适配。当前没有可用 API Key，尚未执行真实账户请求，
+只完成了凭据选择、组织与个人账户分支、Credits 和窗口响应的本地合同测试。上游调整 Alpha 接口后，
+查询会明确失败，不影响模型请求和本地 `/metrics`。
+
 CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指标。每个账户拥有独立 App Server、
 凭据和指标 Provider；全部账户共享一个统计代理，内部账户路径负责把请求归入对应 `ccg-<账户>`。
 配置生成与 OCG 共用 `managed-model-provider-setup.mjs`，文件事务共用
 `managed-provider-files.mjs`；账户行为与目录适配保留各自实现。
 不自动创建 `agents.external`；可通过现有共享第三方子代理入口显式选择 CCG。
-没有接入官方余额或配额接口，账户查询明确显示不支持；本地 Token 与请求指标按 `ccg-<账户>` 隔离。
+账户 Credits 与额度窗口按账户查询；本地 Token 与请求指标按 `ccg-<账户>` 隔离。
 
-本地配置、模型目录、运行参数和回滚由 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts) 验证。
+本地配置、模型目录、运行参数和回滚由 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts) 验证，账户响应
+归约由 [`ccg-account-adapter.test.ts`](../tests/ccg-account-adapter.test.ts) 验证。
 实际付费请求、上游工具调用与压缩仍需使用账户 Key 完成联调，文件能力声明不代表这些合同已通过。

@@ -63,9 +63,9 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   指标库与异常报告中。
 - Gateway 不在本地计算或估算模型价格与费用，完成卡片不展示总价、均价、单价或峰谷档位，也不
   保存价格快照或刷新价格目录。账户与额度仍展示官方来源的数据：OpenAI 周限、
-  DeepSeek 账户余额、OpenCode Go 官方配额窗口；这些数据不是本地价格估算。
+  DeepSeek 账户余额、OpenCode Go 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。
 - 完成卡片正式模式在本次运行和会话信息之外，保留精简的“账户状态”：OpenAI 优先显示
-  OpenAI 官方周限；OpenCode Go 与 DeepSeek 的完整账户信息可通过 `/usage` 查看，也可在本机
+  OpenAI 官方周限；DeepSeek、OpenCode Go 与 CCG 的完整账户信息可通过 `/usage` 查看，也可在本机
   WebUI 控制台首次打开时自动刷新，或通过汇总范围旁的刷新按钮手动更新。
   官方用量接口或本地指标不可用时，对应字段不显示。
 
@@ -80,7 +80,7 @@ OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation
 - 仅对所有分组都提供的 Token 字段求和，缺失字段不按零累计；分组最多显示 8 组，缺失分组名称显示“其他”。
 - `threadUsage` 不可用时保留账户摘要，并说明该官方计费能力仅向部分 Business/Enterprise 工作区开放；
   查询失败时显示稳定重试提示。账户摘要失败仍沿用既有失败行为。
-- 没有当前 Thread 时不发起官方 Thread 查询；DeepSeek、OpenCode Go 和其他第三方 Provider 保持自身账户余额或额度口径。
+- 没有当前 Thread 时不发起官方 Thread 查询；DeepSeek、OpenCode Go、CCG 和其他第三方 Provider 保持自身账户余额或额度口径。
 - 官方估算可能在 Turn 完成后延迟结算；本地请求明细与子代理累计继续使用 `/metrics`，两类金额不得相减或合并为真实账单。
 
 ## Luna Reserve 自动回退

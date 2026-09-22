@@ -1,4 +1,5 @@
-import { loadDeepseekAccounts, deepseekAccountIdFromProvider } from "../runtime/deepseek-accounts.mjs";
+import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
 import {
   GatewayAccountRefreshError,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -235,53 +236,84 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
     const storedSnapshots = typeof store.latestAccountSnapshots === "function"
       ? store.latestAccountSnapshots()
       : [];
-    let accounts = null;
     const warnings = [];
-    try {
-      accounts = loadOpencodeGoAccounts(environment);
-    } catch {
-      warnings.push({
-        source: "opencode-go",
-        code: "registry_unavailable",
-        message: "OpenCode Go 账户元数据暂不可用",
-      });
-    }
-    const configuredAccounts = accounts ?? [];
-    const dsAccounts = loadDeepseekAccounts(environment);
-    const accountById = new Map(configuredAccounts.map((account) => [account.id, account]));
+    const dsAccounts = loadAccountRegistry(
+      () => loadDeepseekAccounts(environment),
+      warnings,
+      "deepseek",
+      "DeepSeek 账户元数据暂不可用",
+    );
+    const ocgAccounts = loadAccountRegistry(
+      () => loadOpencodeGoAccounts(environment),
+      warnings,
+      "opencode-go",
+      "OpenCode Go 账户元数据暂不可用",
+    );
+    const ccgAccounts = loadAccountRegistry(
+      () => loadCcgAccounts(environment),
+      warnings,
+      "ccg",
+      "CCG 账户元数据暂不可用",
+    );
+    const accountMetadata = [
+      ...(dsAccounts ?? []).map((account) => ({
+        provider: deepseekProviderId(account.id),
+        accountId: account.id,
+        displayName: `DS ${account.id}`,
+        default: account.default,
+      })),
+      ...(ocgAccounts ?? []).map((account) => ({
+        provider: opencodeGoProviderId(account.id),
+        accountId: account.id,
+        displayName: opencodeGoAccountDisplayName(account),
+        default: account.default,
+      })),
+      ...(ccgAccounts ?? []).map((account) => ({
+        provider: ccgProviderId(account.id),
+        accountId: account.id,
+        displayName: `CCG ${account.id}`,
+        default: account.default,
+      })),
+    ];
+    const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
-        if (accounts === null) return true;
-        const opencodeGo = snapshot.provider === "ocg"
-          || snapshot.provider.startsWith("ocg-");
-        return !opencodeGo
-          || (snapshot.accountId !== null && accountById.has(snapshot.accountId));
+        const legacyRegistry = snapshot.provider === "deepseek"
+          ? dsAccounts
+          : snapshot.provider === "ocg"
+            ? ocgAccounts
+            : snapshot.provider === "ccg"
+              ? ccgAccounts
+              : null;
+        if (legacyRegistry !== null) return legacyRegistry.length === 0;
+        const registry = snapshot.provider.startsWith("ds-")
+          ? dsAccounts
+          : snapshot.provider.startsWith("ocg-")
+            ? ocgAccounts
+            : snapshot.provider.startsWith("ccg-")
+              ? ccgAccounts
+              : null;
+        return registry === null || metadataByProvider.has(snapshot.provider);
       })
       .map((snapshot) => {
-        const dsAccountId = deepseekAccountIdFromProvider(snapshot.provider);
-        const dsAccount = dsAccounts.find((entry) => entry.id === dsAccountId);
-        const account = !snapshot.provider.startsWith("ocg-") || snapshot.accountId === null
-          ? undefined
-          : accountById.get(snapshot.accountId);
+        const account = metadataByProvider.get(snapshot.provider);
         return {
           ...snapshot,
-          displayName: dsAccount ? `DS ${dsAccount.id}` : account === undefined
-            ? snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider
-            : opencodeGoAccountDisplayName(account),
-          default: dsAccount?.default ?? account?.default ?? false,
+          displayName: account?.displayName
+            ?? (snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider),
+          default: account?.default ?? false,
         };
       });
-    for (const account of configuredAccounts) {
-      const provider = opencodeGoProviderId(account.id);
-      if (snapshots.some((snapshot) => snapshot.provider === provider)) continue;
+    for (const account of accountMetadata) {
+      if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
       snapshots.push({
-        provider,
-        accountId: account.id,
+        provider: account.provider,
+        accountId: account.accountId,
         observedAtMs: 0,
         available: false,
-        usage: { kind: "unsupported", provider },
-        limits: { kind: "unsupported", provider },
-        displayName: opencodeGoAccountDisplayName(account),
+        usage: { kind: "unsupported", provider: account.provider },
+        limits: { kind: "unsupported", provider: account.provider },
+        displayName: account.displayName,
         default: account.default,
       });
     }
@@ -292,6 +324,15 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
     });
   } finally {
     store.close();
+  }
+}
+
+function loadAccountRegistry(load, warnings, source, message) {
+  try {
+    return load();
+  } catch {
+    warnings.push({ source, code: "registry_unavailable", message });
+    return null;
   }
 }
 

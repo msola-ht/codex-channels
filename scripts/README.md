@@ -135,7 +135,8 @@
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
   Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；状态
-  路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
+  快照按 DS、OCG、CCG 三家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
+  5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
@@ -345,9 +346,9 @@
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
   默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换只更新注册表，不修改共享子代理，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
-  删除最后一个账户会清理共享模型目录，固定模式账户还会恢复安装前 Codex 主配置。
+  删除默认账户前必须先指定其他默认账户；删除最后一个账户会清理共享模型目录，固定模式账户还会恢复安装前 Codex 主配置。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
-  账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
+  账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
   生成模型目录时继承已配置 Provider 的同名模型全局窗口占比，避免新账户回落到 OCG 默认值。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
   （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
@@ -419,7 +420,7 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
-  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为 CCG 账户时使用注册表默认账户，
+  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG 或 CCG 账户时使用注册表默认账户，
   其他多个候选要求明确选择，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI

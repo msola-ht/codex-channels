@@ -163,6 +163,48 @@ describe("DeepSeek managed accounts", () => {
     expect(readFileSync(options.paths.config, "utf8")).toBe('model = "original"\n');
   });
 
+  it("captures a fresh restore baseline when another account enters fixed mode", async () => {
+    const options = fixture();
+    await applyDeepseekAccountConfiguration({
+      ...input,
+      mode: "exclusive",
+      confirmExclusiveConfigChange: true,
+    }, options);
+    await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
+    await applyDeepseekAccountConfiguration({
+      ...input,
+      mode: "switching",
+      reconfigure: true,
+    }, options);
+    await applyDeepseekAccountConfiguration({
+      accountId: "work",
+      apiKey: "sk-work",
+      mode: "exclusive",
+      reconfigure: true,
+      confirmExclusiveConfigChange: true,
+    }, options);
+
+    await removeDeepseekAccount({ accountId: "work", confirmRemove: true }, options);
+
+    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "original" });
+    expect(loadManagedModelProviderSettings(options.environment)).toEqual([
+      expect.objectContaining({ provider: "ds-personal", mode: "switching" }),
+    ]);
+  });
+
+  it("does not refresh the shared catalog when a registered account is incomplete", async () => {
+    const options = fixture();
+    await applyDeepseekAccountConfiguration(input, options);
+    await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
+    const before = readFileSync(options.paths.catalog);
+    rmSync(deepseekAccountPaths(options.environment, "work").marker);
+
+    await expect(refreshDeepseekAccountsCatalog(options.environment, {
+      downloadCatalog: options.downloadCatalog,
+    })).rejects.toThrow("账户配置不完整");
+    expect(readFileSync(options.paths.catalog)).toEqual(before);
+  });
+
   it("refreshes the shared directory and all account defaults in one transaction", async () => {
     const options = fixture();
     await applyDeepseekAccountConfiguration(input, options);
