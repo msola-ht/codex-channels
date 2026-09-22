@@ -85,6 +85,7 @@
     "scripts/local-update.mjs",
     "scripts/managed-model-provider-setup.mjs",
     "scripts/managed-provider-files.mjs",
+    "scripts/managed-provider-account-runtime.mjs",
     "scripts/provider-model-catalog.mjs",
     "scripts/management-access.mjs",
     "scripts/management-audit.mjs",

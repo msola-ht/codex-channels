@@ -230,7 +230,7 @@ export async function runOpenCodeGoSetup({
         ?? (typeof prompt.contact === "function" ? await prompt.contact() : undefined);
       return addOpencodeGoAccount(accountId, {
         mode: action,
-        reconfigure: true,
+        reconfigure: defaultAccount !== undefined,
         contact,
         environment,
         output,

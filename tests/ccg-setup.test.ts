@@ -46,6 +46,7 @@ import {
 } from "../scripts/ccg-setup.mjs";
 import { createCcgCatalog } from "../scripts/provider-model-catalog.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { commandCodeProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { loadCcgAccounts } from "../runtime/ccg-accounts.mjs";
 import { JsonRpcClient, loadManagedModelOptions, StdioTransport } from "../src/codex-client/index.js";
@@ -66,6 +67,7 @@ function fixture() {
     ...(process.env.RUN_CODEX_CONTRACT === "1" ? {} : { CODEX_BINARY: process.execPath }),
   };
   const paths = ccgSetupPaths(environment, "main");
+  initializeUserData({ environment, cwd: home });
   writePrivateFileAtomicSync(paths.config, 'model = "gpt-5.5"\n');
   const source = { models: ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"].map((slug) => ({
     slug, display_name: slug, context_window: 1048576, max_context_window: 1048576,

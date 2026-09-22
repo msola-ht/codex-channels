@@ -46,6 +46,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 共享 TUI 入口为 `codexc remote --profile sf-ccg-<账户>`。API Key 保存在对应账户的 0600 私有配置，
 只注入目标 App Server 子进程，不进入命令行参数或 Gateway TOML。
 删除账户会移除其 Profile 和管理标记；固定模式仅恢复相关 Provider 设置，保留备份和其他设置。
+删除前检查并停止对应 App Server；Remote TUI 正在占用、监管状态异常或停止失败时，不删除账户文件。删除后该账户历史 Thread 将不可恢复，历史统计保留。
 删除最后一个账户时清理共享模型目录。删除默认账户前需先选择其他默认账户。
 删除后重新安装会以当时的主配置建立新备份，旧备份保留为 `backup/config-<UUID>.json`；
 切换模式账户每次进入固定模式时，都会以当时的主配置更新恢复基线并归档旧备份，避免恢复其他账户

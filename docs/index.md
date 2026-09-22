@@ -240,7 +240,9 @@ Provider 生命周期补充：私有 [`app-server-supervisor.mjs`](../runtime/ap
 Codex App Server RPC。它负责主实例与受管实例的按需启动和显式管理操作；`codexc remote` 连接实例
 期间通过同一私有 Socket 持有生命周期租约，Supervisor 在租约存在时拒绝显式释放，并在连接正常退出
 或异常断开后自动撤销租约。同一实例的启动、释放与租约获取串行执行，释放响应区分已释放、
-租约占用与实例未运行；账户删除遇到旧版或无效监管响应时失败关闭。主 App Server 与受管 Provider
+租约占用与实例未运行；DS、OCG、CCG 通过共享 [`managed-provider-account-runtime.mjs`](../scripts/managed-provider-account-runtime.mjs)
+在删除账户文件前检查并释放对应实例，遇到租约占用、释放失败或无效监管响应时保留文件；
+跨提供商回归见 [`managed-provider-account-lifecycle.test.ts`](../tests/managed-provider-account-lifecycle.test.ts)。主 App Server 与受管 Provider
 实例共用同一套监管协议，`codexc remote` 连接主实例时同样持有生命周期租约。Gateway 全局空闲策略
 在关闭已连接 Client 后调用 Supervisor 停止 App Server 进程（含主实例）；会话解除后等待 60 秒，
 期间可恢复或创建新会话，之后每 60 秒复检一次。宽限期结束仍无任何绑定和活动时，先向所有已知授权

@@ -3,12 +3,10 @@ import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
-import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime.mjs";
 import {
   inspectAppServerSupervisorState,
   releaseAppServerProvider,
 } from "../runtime/app-server-supervisor.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { opencodeGoAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   loadManagedModelProviderRole,
@@ -36,7 +34,11 @@ import {
 } from "./managed-provider-files.mjs";
 import { restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
-import { runtimeConfig } from "./runtime-config.mjs";
+import {
+  managedAccountPrimarySocket as defaultPrimarySocket,
+  inspectManagedAccountRuntime,
+  releaseManagedAccountRuntime,
+} from "./managed-provider-account-runtime.mjs";
 
 export class OpenCodeGoAccountManagementError extends Error {
   constructor(code, field, message, options) {
@@ -133,9 +135,9 @@ export async function applyOpencodeGoAccountStop(
   if (!plan.running) {
     return { action: "not-running", ...publicStopPreview(plan) };
   }
-  let release;
+  let action;
   try {
-    release = await releaseProvider(plan.primarySocketPath, plan.provider);
+    action = await releaseManagedAccountRuntime(plan, { releaseProvider });
   } catch (error) {
     throw invalid(
       "operation-failed",
@@ -144,11 +146,6 @@ export async function applyOpencodeGoAccountStop(
       error,
     );
   }
-  const action = release.reason === "released"
-    ? "stopped"
-    : release.reason === "leased"
-      ? "in-use"
-      : "not-running";
   return {
     action,
     ...publicStopPreview(plan),
@@ -367,30 +364,18 @@ async function buildStopPlan(
       `OpenCode Go 账户不存在：${normalizedId}`,
     );
   }
-  let primarySocketPath;
-  let inspection;
   try {
-    primarySocketPath = resolvePrimarySocket(environment);
-    inspection = await inspectSupervisor(primarySocketPath);
+    return { accountId: normalizedId, ...await inspectManagedAccountRuntime(opencodeGoProviderId(normalizedId), {
+      environment, resolvePrimarySocket, inspectSupervisor,
+    }) };
   } catch (error) {
     throw invalid(
-      "supervisor-unavailable",
+      error?.code === "supervisor-incompatible" ? error.code : "supervisor-unavailable",
       "action",
       error instanceof Error ? error.message : String(error),
       error,
     );
   }
-  if (inspection.status === "incompatible") {
-    throw invalid(
-      "supervisor-incompatible",
-      "action",
-      "App Server 监管协议不兼容或响应无效；请先运行 codexc service restart app-server",
-    );
-  }
-  const provider = opencodeGoProviderId(normalizedId);
-  const running = inspection.status === "ready"
-    && inspection.topology.runningProviders.includes(provider);
-  return { accountId: normalizedId, provider, primarySocketPath, running };
 }
 
 async function buildRemovalPlan(
@@ -682,11 +667,6 @@ function publicRemovalPreview(plan) {
     confirmation: { required: true, field: "confirmHistoryLoss" },
     activation: "restart-all",
   };
-}
-
-function defaultPrimarySocket(environment) {
-  const { configPath, dataDir } = runtimeConfig(environment);
-  return resolvePrimaryAppServerSocketPath(readGatewayConfig(configPath), dataDir);
 }
 
 function validAccountId(value) {

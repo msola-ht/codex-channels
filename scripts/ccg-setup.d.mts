@@ -1,3 +1,4 @@
+import type { ManagedAccountRuntimeOptions } from "./managed-provider-account-runtime.mjs";
 export interface CcgCatalog {
   models: Array<Record<string, unknown>>;
 }
@@ -36,9 +37,7 @@ export function migrateCcgAccount(input: {
 export function setCcgDefaultAccount(accountId: string, options?: {
   environment?: NodeJS.ProcessEnv;
 }): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
-export function removeCcgConfiguration(input: { accountId: string; confirmRemove?: boolean }, options?: {
-  environment?: NodeJS.ProcessEnv;
-}): Promise<{ action: "removed"; accountId: string; activation: "restart-all" }>;
+export function removeCcgConfiguration(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
 export function runCcgSetup(options?: {
   environment?: NodeJS.ProcessEnv;
   output?: { write(value: string): unknown };

@@ -301,6 +301,20 @@ async function buildPlan(
   if (existing !== undefined && reconfigure !== true) {
     throw invalid("account-exists", "accountId", `OpenCode Go 账户已存在：${accountId}`);
   }
+  if (existing === undefined && reconfigure === true) {
+    throw invalid("account-not-found", "accountId", `OpenCode Go 账户不存在：${accountId}`);
+  }
+  let previousMode;
+  if (existing !== undefined) {
+    try {
+      const configured = loadManagedModelProviderSettings(environment)
+        .find((provider) => provider.provider === opencodeGoProviderId(accountId));
+      if (configured === undefined) throw new Error("OpenCode Go 账户配置不完整，请先恢复缺失文件");
+      previousMode = configured.mode;
+    } catch (error) {
+      throw normalize("provider-state-unavailable", "accountId", error);
+    }
+  }
   if ([contact, email, phone].filter((value) => value !== undefined).length > 1) {
     throw invalid(
       "invalid-contact",
@@ -380,6 +394,7 @@ async function buildPlan(
           : account),
     mode,
     reconfigure,
+    previousMode,
     paths,
     downloadsCatalog: existing !== undefined || !existsSync(paths.catalogPath),
     updatesExternalAgent: false,
@@ -421,7 +436,7 @@ function publicPreview(plan) {
     account: plan.account,
     mode: plan.mode,
     effects: {
-      writesMainConfig: plan.mode === "exclusive",
+      writesMainConfig: plan.mode === "exclusive" || plan.previousMode === "exclusive",
       writesIsolatedProfile: plan.mode === "switching",
       downloadsCatalog: plan.downloadsCatalog,
       updatesExternalAgent: plan.updatesExternalAgent,

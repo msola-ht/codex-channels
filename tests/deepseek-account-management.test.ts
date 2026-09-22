@@ -14,6 +14,7 @@ vi.mock("../runtime/private-file.mjs", async (original) => {
 });
 
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { loadDeepseekAccounts, validateDeepseekAccounts } from "../runtime/deepseek-accounts.mjs";
 import {
   loadDeepseekAccountCredential,
@@ -34,6 +35,7 @@ function fixture() {
   homes.push(home);
   const environment = { CODEX_HOME: join(home, "codex"), CODEX_CONNECT_HOME: join(home, "connect") };
   const paths = deepseekAccountPaths(environment, "personal");
+  initializeUserData({ environment, cwd: home });
   writePrivateFileAtomicSync(paths.config, 'model = "original"\n');
   const catalog = { models: ["deepseek-flash", "deepseek-v4-pro"].map((slug) => ({
     slug, display_name: slug, context_window: 1048576, max_context_window: 1048576,

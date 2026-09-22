@@ -37,7 +37,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
     if (await prompts.confirm({ message: `将旧 DS 配置迁移为 ${deepseekProviderId(accountId)}？历史统计保留，旧会话不再接续。`, initialValue: false }) !== true) return { action: "back" };
     result = await migrateDeepseekAccount({ accountId, confirmMigration: true }, { environment });
   } else if (action === "remove") {
-    if (await prompts.confirm({ message: `删除 DS 账户 ${accountId}？保留历史统计和安装前备份。`, initialValue: false }) !== true) return { action: "back" };
+    if (await prompts.confirm({ message: `删除 DS 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`, initialValue: false }) !== true) return { action: "back" };
     result = await removeDeepseekAccount({ accountId, confirmRemove: true }, { environment });
   } else if (action === "default") {
     result = await setDeepseekDefaultAccount(accountId, { environment });
@@ -51,7 +51,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
     if (prompts.isCancel(apiKey)) return { action: "back" };
     result = await applyDeepseekAccountConfiguration({ accountId, apiKey, mode, reconfigure: action === "reconfigure", confirmExclusiveConfigChange: mode === "exclusive" }, { environment });
   } else throw new Error("未知 DeepSeek 账户操作");
-  writeGatewayConfigActivationNotice(output, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 

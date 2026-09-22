@@ -73,6 +73,14 @@ describe("OpenCode Go account provisioning", () => {
     })).rejects.toMatchObject({ code: "account-exists", field: "accountId" });
   });
 
+  it("does not turn a stale reconfiguration request into a new account", async () => {
+    await expect(previewOpencodeGoAccountConfiguration({
+      accountId: "missing", reconfigure: true, contact: "user@example.com",
+    }, { environment: previewEnvironment() })).rejects.toMatchObject({
+      code: "account-not-found", field: "accountId",
+    });
+  });
+
   it("rejects multiple contact fields instead of silently choosing one", async () => {
     await expect(previewOpencodeGoAccountConfiguration({
       accountId: "work",

@@ -17,6 +17,7 @@ import {
   sameAppServerTopology,
 } from "../runtime/app-server-supervisor.mjs";
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { stopManagedAccountForRemoval } from "../scripts/managed-provider-account-runtime.mjs";
 import { providerAppServerSocketPath, writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { toConversationInputEvent } from "../src/codex-client/index.js";
@@ -662,13 +663,17 @@ contractSuite("real supervised App Server provider", () => {
           expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
             leasedProviders: ["ocg-main"],
           });
-          await expect(releaseAppServerProvider(socketPath, "ocg-main"))
-            .resolves.toEqual({ released: false, reason: "leased" });
+          await expect(stopManagedAccountForRemoval("ocg-main", { resolvePrimarySocket: () => socketPath }))
+            .rejects.toMatchObject({ code: "account-runtime-in-use" });
         } finally {
           await providerLease.close();
         }
         const models = await openCodeClient.listModels();
         expect(models.some(({ model }) => model === "deepseek-v4-flash")).toBe(true);
+        await openCodeClient.close();
+        openCodeClient = undefined;
+        await expect(stopManagedAccountForRemoval("ocg-main", { resolvePrimarySocket: () => socketPath }))
+          .resolves.toBe("stopped");
 
         const primaryLease = await acquireAppServerProviderLease(socketPath, "openai");
         try {
@@ -682,7 +687,7 @@ contractSuite("real supervised App Server provider", () => {
         await expect(releaseAppServerProvider(socketPath, "openai"))
           .resolves.toEqual({ released: true, reason: "released" });
         expect(await inspectAppServerSupervisor(socketPath)).toMatchObject({
-          releasedProviders: ["openai"],
+          releasedProviders: ["ocg-main", "openai"],
         });
         await expect(ensureAppServerProvider(socketPath, "openai")).resolves.toBeUndefined();
         client = new CodexAppServerClient(

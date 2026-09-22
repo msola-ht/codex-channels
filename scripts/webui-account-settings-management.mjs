@@ -5,6 +5,7 @@ import {
   previewDeepseekAccountMigration,
   migrateDeepseekAccount,
   removeDeepseekAccount,
+  previewDeepseekAccountRemoval,
   setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
@@ -131,8 +132,9 @@ export async function previewAccountSettingsMutation(input, environment) {
         return previewDeepseekAccountConfiguration(input, { environment });
       case "deepseek.migrate":
         return previewDeepseekAccountMigration(input.accountId, { environment });
-      case "deepseek.default":
-      case "deepseek.remove": {
+      case "deepseek.remove":
+        return await previewDeepseekAccountRemoval(input.accountId, { environment });
+      case "deepseek.default": {
         const account = loadDeepseekAccounts(environment).find((entry) => entry.id === input.accountId);
         if (!account) throw new Error("DeepSeek 账户不存在");
         return { operation: input.operation, account: { ...account, provider: deepseekProviderId(account.id) }, activation: "restart-all" };

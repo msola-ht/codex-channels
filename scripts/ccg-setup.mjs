@@ -52,6 +52,7 @@ import {
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
+import { stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createCcgCatalog } from "./provider-model-catalog.mjs";
 
 const maximumCatalogBytes = 2 * 1024 * 1024;
@@ -170,6 +171,7 @@ export async function applyCcgConfiguration({
     }
     const previous = loadManagedModelProviderSettings(environment)
       .find((item) => item.provider === definition.id);
+    if (existing && previous === undefined) throw new Error("CCG 账户配置不完整，请先恢复缺失文件");
     const current = await readConfig(paths.config);
     if (!previous && (hasProviderBaseConfig(current, definition)
       || await readOptionalProviderFile(paths.profile) !== undefined
@@ -371,9 +373,8 @@ export async function setCcgDefaultAccount(accountId, { environment = process.en
   });
 }
 
-export async function removeCcgConfiguration({ accountId, confirmRemove = false } = {}, {
-  environment = process.env,
-} = {}) {
+export async function removeCcgConfiguration({ accountId, confirmRemove = false } = {}, options = {}) {
+  const environment = options.environment ?? process.env;
   validateCcgAccountId(accountId);
   if (confirmRemove !== true) throw new Error("删除 CCG 账户前必须明确确认");
   return withModelProviderManagementTransaction(environment, async () => {
@@ -407,8 +408,9 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
         await readConfig(paths.config), initial.config, definition,
       )));
     }
+    const runtime = await stopManagedAccountForRemoval(definition.id, options);
     await applyProviderFileUpdates(updates, snapshots);
-    return { action: "removed", accountId, activation: "restart-all" };
+    return { action: "removed", accountId, runtime, activation: "restart-all" };
   });
 }
 
@@ -463,7 +465,7 @@ export async function runCcgSetup({
     result = await migrateCcgAccount({ accountId, confirmMigration: true }, { environment });
   } else if (action === "remove") {
     const confirmed = await prompts.confirm({
-      message: `删除 CCG 账户 ${accountId}？保留安装前备份。`,
+      message: `删除 CCG 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`,
       initialValue: false,
     });
     if (confirmed !== true) return { action: "back" };
@@ -521,7 +523,7 @@ export async function runCcgSetup({
   } else {
     throw new Error("未知 CCG 账户操作");
   }
-  writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;
 }
 

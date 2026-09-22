@@ -128,11 +128,13 @@ export function AccountSettingsConfirmationDialog({
     const effects = Object.entries(preview.effects).filter(([, value]) => value !== false && value !== null && value !== undefined).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : String(value)}`)
     if (effects.length > 0) lines.push(`影响：${effects.join("；")}`)
   }
-  const destructive = pending.input.operation === "opencode.account.stop"
-    || pending.input.operation === "opencode.account.remove"
+  const removing = pending.input.operation === "opencode.account.remove"
     || pending.input.operation === "deepseek.remove"
-  return <ManagementConfirmationDialog open saving={saving} title="确认账户配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={destructive ? "destructive" : "default"} confirmLabel={pending.input.operation === "opencode.account.remove" ? "确认删除" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
-    {pending.input.operation === "opencode.account.remove" ? <p>删除本地账户配置后，该账户历史 Thread 将不可恢复；此操作不会取消或续订官方订阅。</p> : null}
+  const stopping = pending.input.operation === "opencode.account.stop"
+  const destructive = stopping || removing
+  return <ManagementConfirmationDialog open saving={saving} title={removing ? "确认删除账户" : "确认账户配置修改"} description={removing ? "确认后停止对应 App Server 并删除账户配置；完成后按操作结果重启服务。" : stopping ? "确认后停止对应账户的 App Server。" : "确认后写入对应配置，不会自动执行生效目标。"} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? "确认删除" : stopping ? "确认停止" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
+    {removing ? <p>删除本地账户配置后，该账户历史 Thread 将不可恢复。</p> : null}
+    {pending.input.operation === "opencode.account.remove" ? <p>此操作不会取消或续订官方订阅。</p> : null}
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     <p className="text-muted-foreground">生效目标：{preview.activation ?? "按操作结果"}</p>
   </ManagementConfirmationDialog>

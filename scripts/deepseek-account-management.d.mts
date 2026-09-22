@@ -1,3 +1,4 @@
+import type { ManagedAccountRuntimeOptions } from "./managed-provider-account-runtime.mjs";
 type Options = { environment?: NodeJS.ProcessEnv };
 type Catalog = { models: Array<Record<string, unknown>> };
 export function deepseekAccountPaths(environment: NodeJS.ProcessEnv, accountId: string): {
@@ -28,7 +29,12 @@ export function previewDeepseekAccountMigration(accountId: string, options?: Opt
 };
 export function migrateDeepseekAccount(input: { accountId: string; confirmMigration?: boolean }, options?: Options): Promise<ReturnType<typeof previewDeepseekAccountMigration> & { action: "migrated" }>;
 export function setDeepseekDefaultAccount(accountId: string, options?: Options): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
-export function removeDeepseekAccount(input: { accountId: string; confirmRemove?: boolean }, options?: Options): Promise<{ action: "removed"; accountId: string; activation: "restart-all" }>;
+export function previewDeepseekAccountRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{
+  operation: "remove"; account: { id: string; provider: string };
+  effects: { stopsRunningAppServer: boolean; historyThreadsBecomeUnavailable: true; preservesPrivateBackup: true; restoresInitialConfig: boolean };
+  activation: "restart-all";
+}>;
+export function removeDeepseekAccount(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
 export function refreshDeepseekAccountsCatalog(environment?: NodeJS.ProcessEnv, options?: {
   downloadCatalog?: () => Promise<{ catalog: Catalog }>;
   fetchImpl?: typeof fetch;
