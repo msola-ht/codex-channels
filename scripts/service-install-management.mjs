@@ -370,7 +370,7 @@ function defaultActivateCore(plan, environment, options) {
 }
 
 async function defaultWaitForCore(target, environment, options) {
-  const { waitForCoreServiceTarget } = await import("./local-update.mjs");
+  const { waitForCoreServiceTarget } = await import("./local-installation.mjs");
   return waitForCoreServiceTarget(target, environment, options);
 }
 

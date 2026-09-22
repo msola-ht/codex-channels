@@ -86,18 +86,14 @@ describe("managed Provider capability registry", () => {
 
   it("declares the reviewed capability kinds and preserves them for Go accounts", () => {
     expect(deepseekProviderDefinition.capabilities).toEqual({
-      catalogSource: "deepseek-official",
       accountAdapter: "deepseek",
       instanceAdapter: "deepseek-accounts",
-      catalogUpdateAdapter: "deepseek",
     });
     expect(opencodeGoAccountDefinition("lunare").capabilities)
       .toBe(opencodeGoProviderDefinition.capabilities);
     expect(commandCodeProviderDefinition.capabilities).toEqual({
-      catalogSource: "deepseek-official",
       accountAdapter: "ccg",
       instanceAdapter: "ccg-accounts",
-      catalogUpdateAdapter: "ccg",
     });
   });
 
@@ -128,16 +124,12 @@ describe("managed Provider capability registry", () => {
       id: "future-provider",
       capabilities: {
         ...deepseekProviderDefinition.capabilities,
-        catalogSource: "none",
         accountAdapter: "none",
-        catalogUpdateAdapter: "none",
       },
     } as unknown as typeof deepseekProviderDefinition;
 
     expect(assertManagedModelProviderCapabilities(futureProvider)).toMatchObject({
-      catalogSource: "none",
       accountAdapter: "none",
-      catalogUpdateAdapter: "none",
     });
     expect(createManagedProviderAccountAdapters([futureProvider], {
       metricsDatabasePath: join(tmpdir(), "codexc-future-provider.sqlite3"),

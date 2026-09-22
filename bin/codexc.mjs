@@ -116,9 +116,8 @@ const helpText = {
 服务与维护：
   start                        前台启动核心服务
   service                      管理后台服务
-  update                       更新程序、配置与数据库
+  update                       更新程序与配套 Codex CLI
   uninstall                    卸载受管源码与全局命令并保留用户数据
-  state                        单独维护状态数据库
 
 信息：
   version, -v, --version       显示版本
@@ -215,24 +214,15 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 使用当前 Codex CLI 检查项目规则；--json 输出结构化校验结果。`,
   update: `用法：codexc update
 
-Git 源码安装会先检查并构建官方 main 的最新提交；随后只读审查 config.toml 与数据库结构，自动停止
-App Server 与 Gateway，在停机窗口内更新程序、配置和数据库，最后恢复并确认核心服务就绪。
-候选源码要求更高版本的 Codex CLI 时，交互终端会询问是否全局安装；直接回车默认为确认，安装成功后
-先在临时候选目录准备目标 CLI，核对公开合同及 CODEX_HOME/config.toml 的根级和 Profile 用户设置；
-通过后才全局安装并继续更新。合同或设置不兼容、非交互终端或拒绝安装时不修改全局 CLI、当前源码
-和服务，并显示原因或手动安装命令；审批策略不会被静默改写。
-npm 安装不会修改程序包。更新失败也会尝试恢复已停止的核心服务。必须从本机终端执行。`,
+Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
+在一个停机窗口更新程序与所需 CLI，执行目标版本的数据库升级入口，再恢复核心服务。
+CLI 版本不匹配时询问是否安装精确版本。npm 安装同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 程序包。
+当前数据库基线无迁移写入；配置与模型目录不改写。数据库升级未完成时不启动服务，其他失败报告阶段并尝试恢复服务。必须从本机终端执行。`,
   uninstall: `用法：codexc uninstall
 
 卸载后台服务、受管 Git 源码仓库与对应 npm 全局命令，并清理旧安装写入的 Shell PATH 配置；保留
 config.toml、数据库、凭据、日志和输出。直接从 npm Registry 安装的版本使用
 codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
-  state: `用法：codexc state upgrade
-
-停止 Gateway 后，备份并显式升级状态数据库。`,
-  "state.upgrade": `用法：codexc state upgrade
-
-停止 Gateway 后，备份并显式升级状态数据库。`,
   metrics: `用法：codexc metrics
 
 无参数时进入交互菜单。查询、导出与维护模型请求指标：
@@ -243,7 +233,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
   ${metricsCommandUsage.quota.slice("用法：".length)}   历史额度周期
   codexc metrics status [--json]   指标数据库状态
-  codexc metrics upgrade  备份并升级指标库（需 Gateway 停止）
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
@@ -284,9 +273,6 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
-  "metrics.upgrade": `用法：codexc metrics upgrade [--restart-gateway]
-
-默认要求 Gateway 已停止；加 --restart-gateway 时自动停止 Gateway、备份升级并重新启动。`,
   "metrics.prune": `用法：codexc metrics prune <provider>
 
 provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以及当前或已备份的自定义主 Provider ID。备份并删除本地指标库中该提供商全部请求行，随后
@@ -472,9 +458,6 @@ try {
       }
       requireNoArguments(args, "用法：codexc uninstall");
       runScript("scripts/source-uninstall.mjs", [], { failureReportedByChild: true });
-      break;
-    case "state":
-      state(args);
       break;
     case "metrics":
       await metrics(args);
@@ -875,29 +858,12 @@ function processGroupIsRunning(processGroupId) {
   }
 }
 
-function state(args) {
-  if (showRequestedHelp(args, "state") ||
-    showSubcommandHelp(args, "upgrade", "state.upgrade")) {
-    return;
-  }
-  const [subcommand, ...rest] = args;
-  if (subcommand === undefined) {
-    console.log(helpText.state);
-    return;
-  }
-  if (subcommand !== "upgrade" || rest.length > 0) {
-    throw new Error("用法：codexc state upgrade");
-  }
-  runScript("scripts/upgrade-state.mjs", [], { failureReportedByChild: true });
-}
-
 async function metrics(args) {
   if (showRequestedHelp(args, "metrics") ||
     showSubcommandHelp(args, "run", "metrics.run") ||
     showSubcommandHelp(args, "turns", "metrics.turns") ||
     showSubcommandHelp(args, "threads", "metrics.threads") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
-    showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
@@ -912,7 +878,6 @@ async function metrics(args) {
       turns: "metrics.turns",
       threads: "metrics.threads",
       status: "metrics.status",
-      upgrade: "metrics.upgrade",
       reset: "metrics.reset",
       cleanup: "metrics.cleanup",
       prune: "metrics.prune",
@@ -947,10 +912,10 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "upgrade", "reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
-    throw new Error("用法：codexc metrics <run|turns|threads|status|upgrade|reset|cleanup|prune|report|export|quota>");
+    throw new Error("用法：codexc metrics <run|turns|threads|status|reset|cleanup|prune|report|export|quota>");
   }
   validateMetricsCommandArgs(subcommand, rest);
   if (
@@ -966,10 +931,6 @@ async function metrics(args) {
     );
     return;
   }
-  if (subcommand === "upgrade" && rest.length === 1 && rest[0] === "--restart-gateway") {
-    runScript("scripts/metrics-database.mjs", ["upgrade-restart"], { failureReportedByChild: true });
-    return;
-  }
   if (subcommand === "cleanup") {
     const restart = rest.includes("--restart-gateway");
     const cleanupArgs = rest.filter((argument) => argument !== "--restart-gateway");
@@ -983,7 +944,7 @@ async function metrics(args) {
   if (subcommand === "prune" && rest.length !== 1) {
     throw new Error("用法：codexc metrics prune <provider>");
   }
-  if (new Set(["upgrade", "reset"]).has(subcommand) && rest.length > 0) {
+  if (subcommand === "reset" && rest.length > 0) {
     throw new Error(`用法：codexc metrics ${subcommand}`);
   }
   if (new Set(["run", "turns", "threads", "report", "export"]).has(subcommand)) {

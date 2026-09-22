@@ -8,24 +8,18 @@ import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey 
 import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
-  catalogSources: new Set(["none", "deepseek-official"]),
   accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
   instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts"]),
-  catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
 });
 
 const deepseekProviderCapabilities = Object.freeze({
-  catalogSource: "deepseek-official",
   accountAdapter: "deepseek",
   instanceAdapter: "deepseek-accounts",
-  catalogUpdateAdapter: "deepseek",
 });
 
 const opencodeGoProviderCapabilities = Object.freeze({
-  catalogSource: "deepseek-official",
   accountAdapter: "opencode-go",
   instanceAdapter: "opencode-go-accounts",
-  catalogUpdateAdapter: "opencode-go",
 });
 
 const deepseekProfileName = "sf-deepseek";
@@ -82,10 +76,8 @@ export const commandCodeProviderDefinition = Object.freeze({
   apiKeyEnvironmentKey: "CODEX_CONNECT_CCG_API_KEY",
   supportsWebsockets: false,
   capabilities: Object.freeze({
-    catalogSource: "deepseek-official",
     accountAdapter: "ccg",
     instanceAdapter: "ccg-accounts",
-    catalogUpdateAdapter: "ccg",
   }),
 });
 
@@ -220,16 +212,8 @@ export function assertManagedModelProviderCapabilities(definition) {
     capabilities === null
     || typeof capabilities !== "object"
     || Array.isArray(capabilities)
-    || !managedProviderCapabilityKinds.catalogSources.has(capabilities.catalogSource)
     || !managedProviderCapabilityKinds.accountAdapters.has(capabilities.accountAdapter)
     || !managedProviderCapabilityKinds.instanceAdapters.has(capabilities.instanceAdapter)
-    || !managedProviderCapabilityKinds.catalogUpdateAdapters.has(
-      capabilities.catalogUpdateAdapter,
-    )
-    || (
-      capabilities.catalogUpdateAdapter !== "none"
-      && capabilities.catalogSource === "none"
-    )
   ) {
     const provider = typeof definition?.id === "string" ? definition.id : "unknown";
     throw new Error(`受管 Provider 能力定义无效：${provider}`);

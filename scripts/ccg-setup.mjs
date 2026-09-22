@@ -282,51 +282,6 @@ export async function removeLegacyCcgAccount({ confirmRemove = false } = {}, opt
   });
 }
 
-export async function refreshCcgCatalogForUpdate(environment = process.env, options = {}) {
-  return withModelProviderManagementTransaction(environment, async () => {
-    if (hasLegacyCcgConfiguration(environment)) throw new Error("请先通过 CCG Setup 移除旧单账户，再重新添加账户");
-    const accounts = loadCcgAccounts(environment);
-    if (accounts.length === 0) return { status: "not-configured" };
-    const providers = loadManagedModelProviderSettings(environment)
-      .filter((provider) => accounts.some((account) => ccgProviderId(account.id) === provider.provider));
-    if (providers.length !== accounts.length) {
-      throw new Error("CCG 账户配置不完整，请先恢复缺失文件");
-    }
-    const paths = ccgSetupPaths(environment, accounts[0].id);
-    const accountPaths = accounts.map((account) => ccgSetupPaths(environment, account.id));
-    const snapshots = snapshotProviderFiles(accountPaths.flatMap((entry) => Object.values(entry)));
-    const downloaded = options.downloadCatalog
-      ? await options.downloadCatalog()
-      : await downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch);
-    const catalog = withPreservedManagedModelCatalogSettings(
-      createCcgCatalog(downloaded.catalog), baseDefinition, providers[0]?.models ?? [],
-    );
-    await validateCcgCatalog(catalog, environment);
-    const updates = new Map([
-      [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
-      [paths.manifest, `${JSON.stringify({
-        source: deepseekSetupScriptUrl,
-        downloadedAt: (options.now?.() ?? new Date()).toISOString(),
-      }, null, 2)}\n`],
-    ]);
-    for (const provider of providers) {
-      const account = accounts.find((candidate) => ccgProviderId(candidate.id) === provider.provider);
-      const selected = catalog.models.find((entry) => entry.slug === provider.model);
-      if (selected === undefined) {
-        throw new Error(`新 CCG 目录不支持账户 ${account.id} 当前默认模型，请先选择受支持的模型`);
-      }
-      if (provider.mode === "switching") {
-        const accountPathsForProvider = ccgSetupPaths(environment, account.id);
-        const profile = await readConfig(accountPathsForProvider.profile);
-        profile.model_reasoning_effort = selected.default_reasoning_level;
-        updates.set(accountPathsForProvider.profile, stringify(profile));
-      }
-    }
-    await applyProviderFileUpdates(updates, snapshots);
-    return { status: "updated", providers: providers.map((provider) => provider.provider) };
-  });
-}
-
 export async function setCcgDefaultAccount(accountId, { environment = process.env } = {}) {
   validateCcgAccountId(accountId);
   return withModelProviderManagementTransaction(environment, async () => {

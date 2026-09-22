@@ -142,7 +142,7 @@ Surface -> Application/Core <- Codex Client
 - SQLite StateStore 只保存 Conversation 身份、已授权 Actor、Workspace、Thread 和 Session 的最小绑定。
 - 一个 Conversation 由 `surface + accountId + conversationId` 唯一标识。
 - 不持久化消息正文、Turn/Item 历史、Diff、Plan、审批内容或 Codex 会话文件副本。
-- 数据库只接受当前 Schema；不支持的版本必须失败关闭，不执行隐式迁移。
+- 运行时只接受当前 Schema，不执行隐式迁移；不支持的版本必须失败关闭。数据库结构变更时，须随版本提供明确支持范围的显式升级流程及备份、失败处理和验证，不以清空数据库代替升级。
 - StateStore 保持可替换，业务模块只能依赖其公开接口。
 - 用户配置、数据库、Socket、日志和临时上传不得写入会被 npm 升级替换的包目录。
 - Surface 用户 OAuth Token 不得写入配置文件或 StateStore；macOS 使用系统 Keychain，Linux
@@ -150,8 +150,7 @@ Surface -> Application/Core <- Codex Client
   日志、平台消息或 Application/Core，必须提供按当前 Surface Actor 撤销和进程停止取消路径。
 - 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
   `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；共享代理单独统一保存在 Codex Home 的 `.env`，
-  只读取四个代理变量，不读取旧 Gateway `.env`。`codexc update` 负责备份并迁移旧 `[network]`，
-  与 Codex `.env` 冲突时明确报错，迁移成功后删除旧表；正常运行不兼容旧表。
+  只读取四个代理变量，不读取旧 Gateway `.env`。不支持旧 `[network]` 表，更新器不迁移代理配置。
 - Gateway 只可在当前配置版本完成结构与运行语义校验后，原子补入严格 Schema 明确定义的缺失安全
   默认值；不得覆盖已有值，不得补渠道凭据、身份或允许名单，不得借此兼容未知字段或迁移不受支持版本。
 - 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；Codex `.env` 明确值优先，

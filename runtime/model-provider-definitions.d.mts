@@ -9,16 +9,12 @@ export type ManagedModelProviderId =
   | "opencode-go"
   | `opencode-go-${string}`;
 
-export type ManagedModelProviderCatalogSource = "none" | "deepseek-official";
 export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
-export type ManagedModelProviderCatalogUpdateAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 
 export interface ModelProviderCapabilities {
-  readonly catalogSource: ManagedModelProviderCatalogSource;
   readonly accountAdapter: ManagedModelProviderAccountAdapter;
   readonly instanceAdapter: ManagedModelProviderInstanceAdapter;
-  readonly catalogUpdateAdapter: ManagedModelProviderCatalogUpdateAdapter;
 }
 
 export interface ModelProviderDefinition {

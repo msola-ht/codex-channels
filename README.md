@@ -44,8 +44,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
-本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI 和本地配置。
-首次执行 0.155.1 的 `codexc update` 会将用户主配置的推理摘要设为关闭，后续更新保留重新选择的值，见[推理摘要设置](docs/user-guide.md#推理摘要)。
+本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI。
 
 ## 常用入口
 
@@ -90,7 +89,7 @@ Codex 用户配置：
 ~/.codex/config.toml
 ```
 
-共享代理通过 `codexc config → 网络代理` 写入 `~/.codex/.env`；`codexc update` 会迁移并清理旧 TOML 代理配置，见[代理设置](docs/user-guide.md#代理与权限)。
+共享代理通过 `codexc config → 网络代理` 写入 `~/.codex/.env`；更新不会迁移旧 TOML 代理配置，见[代理设置](docs/user-guide.md#代理与权限)。
 开机时网络或代理尚未就绪，Gateway 会在五分钟启动恢复窗口内有限复检，并在恢复后处理已观察到的 `codex_apps` 启动失败；详细边界见[启动连通性说明](docs/display.md)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
@@ -98,7 +97,6 @@ Codex 用户配置：
 DS、OCG 或 CCG 账户且没有混合其他 Provider 时使用该家注册表的默认账户，混合 Provider 配置需先选择，见
 [Provider 默认选择](docs/provider-integration-guide.md)。
 三家账户均通过 `codexc <deepseek|opencode-go|ccg> account remove <id>` 确认移除；没有 ID 的旧单账户使用 `legacy remove`，之后重新添加。
-旧版自动补入的空 `api_providers = []` 会由更新器备份后移除；非空旧配置需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工处理。
 
 ## 专题文档
 

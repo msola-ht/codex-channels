@@ -12,9 +12,7 @@ export class ScheduledTaskSchemaError extends Error {
   constructor(foundVersion: number, expectedVersion = schemaVersion, cause?: unknown) {
     const message = cause !== undefined && foundVersion === expectedVersion
       ? `计划任务数据库 Schema ${expectedVersion} 结构不完整`
-      : foundVersion === 1 && expectedVersion === schemaVersion
-        ? `计划任务数据库需要显式升级：当前 Schema 1，请停止 Gateway 后运行 codexc update 或 codexc state upgrade`
-        : `计划任务数据库 Schema 不受支持：当前 ${foundVersion}，需要 ${expectedVersion}`;
+      : `计划任务数据库 Schema 不受支持：当前 ${foundVersion}，需要 ${expectedVersion}`;
     super(
       message,
       cause === undefined ? undefined : { cause },

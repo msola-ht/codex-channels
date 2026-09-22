@@ -159,12 +159,6 @@ export function validateMetricsCommandArgs(subcommand, args) {
     }
     return;
   }
-  if (subcommand === "upgrade") {
-    if (args.length > 1 || (args.length === 1 && args[0] !== "--restart-gateway")) {
-      throw new Error(`用法：codexc metrics ${subcommand} [--restart-gateway]`);
-    }
-    return;
-  }
   if (
     subcommand === "status"
     && !(args.length === 0 || (args.length === 1 && args[0] === "--json"))

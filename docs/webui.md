@@ -67,7 +67,7 @@ codexc service stop webui        # 停止
 - Linux 使用 systemd 用户服务 `codex-connect-webui.service`，macOS 使用 launchd
   `com.hegenai.codex-webui`；`codexc service uninstall` 会一并卸载；
 - 服务单元固定运行 `codexc webui`，host/port/token 全部来自 `config.toml` 的 `[webui]` 段；
-- 指标库升级到新 Schema 后运行 `codexc update` 统一预检和迁移，否则 API 会因版本不兼容报错。
+- 指标库只接受当前 Schema；不兼容时 API 明确报错。数据库升级统一由 `codexc update` 调用目标版本入口，当前基线不包含旧版本迁移，见[源码安装与更新](source-install.md#更新)。
 
 ## 页面与 API
 
@@ -138,9 +138,9 @@ WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.fu
 请求明细的模型列保持单行，只在名称不一致时显示名称对照标签；一致或信息不足不显示名称标签，长名称截断，悬浮查看完整请求与响应名称。
 请求明细和错误记录的模型旁，出站请求的 `requestServiceTier` 为 `fast` 或 `priority` 时显示 `Fast`，即使响应返回 `default` 也保留标识。
 Schema v19 新增可空 `request_service_tier`，HTTP 与 WebSocket 独立采集，不依赖调用转储；JSON/CSV 导出为 `requestServiceTier`。
-升级保留现有记录、耗时和精确调用关联，历史请求层级为 NULL，不从响应 `serviceTier`、当前 Fast 设置或耗时反推，因此旧记录不显示请求 Fast 标签。
-部署当前开发分支（含未提交改动）时，先在该仓库根目录运行 `npm run install:global`，构建并安装当前 Gateway 与 WebUI，再按下方 v19 步骤升级数据库并重启采集端；仅重启服务不会安装工作区代码。
-正式更新按[源码安装与更新](source-install.md#更新)执行：托管源码的 `codexc update` 更新官方 `main`；npm 安装模式需先安装目标版本，再运行 `codexc update` 完成配套 CLI 与本地配置、数据库更新。`codexc update` 不用于安装任意开发分支的未提交改动。
+请求层级缺失时为 NULL，不从响应 `serviceTier`、当前 Fast 设置或耗时反推，因此缺少该字段的记录不显示请求 Fast 标签。
+部署当前开发分支（含未提交改动）时，先在该仓库根目录运行 `npm run install:global`，构建并安装当前 Gateway 与 WebUI，确认数据库为当前结构后重启采集端；仅重启服务不会安装工作区代码。
+正式更新按[源码安装与更新](source-install.md#更新)执行：托管源码的 `codexc update` 更新官方 `main`；npm 安装模式需先安装目标版本，再运行 `codexc update` 同步配套 CLI 并执行必要的数据库升级。`codexc update` 不用于安装任意开发分支的未提交改动。
 调用详情在原有请求与响应服务层级旁分别显示 `Fast`，只使用各自字段；其他值或缺失均不显示标签。
 沿用精确调用关联，不把同一 Thread、Turn 或连接中的其他请求层级带入当前调用。调用列表摘要及会话/轮次聚合未提供逐次服务层级，不推断整组为 FAST。
 采集不依赖转储开关；开启转储时，同一次观测值同时进入转储响应索引与指标库，精简模式也保留它。
@@ -150,12 +150,8 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 历史记录、未开启转储或逻辑调用创建前失败显示“未关联”，不按时间、Thread 或 Turn 猜配；关联批次尚未落盘、写入失败或已被清理时明确报错，不改为打开其他请求。
 转储失败详情与 `codexc traffic` 根据已记录的传输阶段、HTTP 状态或上游终态显示失败阶段；该分类不推断代理、账户或模型的根因。
 “请求明细”另有可排序的“总耗时”列，Schema v18 新增可空 `total_duration_ms`，JSON/CSV 导出为 `totalDurationMs`。由采集端单调时钟计算代理请求入口至首次模型终态，无终态则到结束或失败；不含终态后的指标投递、客户端显示或下一次重试，不是整个 Turn 耗时。不依赖调用记录开关；无实际模型请求的失败不伪造值，历史为空时显示 `—`，不从旧墙钟差补算。
-手动部署 v19 时，安装当前源码前先运行 `codexc service stop all` 并关闭独立 WebUI 数据库读取进程；安装成功后运行 `codexc metrics upgrade`，命令会创建旧库私有备份并事务升级。升级成功后运行 `codexc service start all`，再重新启动独立 WebUI 并刷新页面；升级失败时先处理错误，不启动依赖 v19 的服务。
-v18 已有总耗时保留，更早记录的总耗时保持 NULL；v17 已有调用关联保留，更早版本未记录的关联保持 NULL，已有首内容、上游 TTFT 和请求/响应模型名称保留。
-升级后需加载新版本的 App Server 服务（采集端）与 Gateway（消费端）。不在普通启动时隐式迁移。
+指标库只接受当前 Schema v19；旧库不迁移，可停止相关进程后使用 `codexc metrics reset` 归档，再启动 Gateway 创建当前结构。
 请求明细的可排序 `Token/s` 为 `outputTokens × 1000 / totalDurationMs`；会话列表与每轮表格的可排序“平均 Token/s”是当前筛选范围内自身有效请求速率的算术平均，会话详情顶部累计沿用递归纳入子代理的范围。仅输出与耗时都大于零的样本参与计算，不扣首字等待、不减推理 Token，不是纯生成速度或会话墙钟吞吐量。页面显示两位小数，未知为 `—`；API 与 JSON/CSV 使用可空派生字段 `tokensPerSecond`，不新增数据库列，不补算历史耗时。CLI 请求、会话和每轮导出及完成卡片使用同一查询口径。
-回滚时停止 Gateway 并关闭独立 WebUI 数据库读取进程，先用 `codexc metrics reset` 归档新库，再将
-升级命令输出的备份复制回原数据库路径，恢复旧版程序后启动；升级后新增数据保留在归档中，不自动合并。
 调用详情顶部优先显示单请求首字；上游轮次首 Token 保留在独立的上游统计区，取自 `first_sampled_message_ttft_ms`。两者均按毫秒来源自适应展示，不代表客户端显示时间，缺失时显示“未提供”，不反推历史值。
 调用列表将模型、状态与独立总耗时列放在请求地址和线程标识之前；模型名称仅在已提供的请求与响应名称不一致时强调。长标识支持聚焦提示，原始正文限制显示高度并可内部滚动。
 同一提供商、批次与调用编号的原始事件翻页保留已展开的详情区域，加载或失败时不展示旧页事件；切换调用不沿用旧摘要。首次进入读取完整明细；已结束且已有终态响应的调用翻页使用 `GET /api/v1/traffic/trace?id=&label=&session=&traceOffset=`，只返回调用编号、事件页与分页信息，不重读正文或重新提取输出、模型证据，仍扫描轨迹以计算事件总数。进行中的调用翻页继续读取完整明细，使终态、输出、用量与耗时一同更新。列表和详情查询错误均可按当前条件重试，详情手动刷新及失败重试会重新读取完整明细。

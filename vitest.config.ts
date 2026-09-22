@@ -6,7 +6,7 @@ export default defineConfig({
     testTimeout: process.platform === "win32" ? 120_000 : 5_000,
     include: ["tests/**/*.test.ts"],
     ...(process.platform === "win32"
-      ? { exclude: ["tests/local-update.test.ts", "tests/provider-migration-backup.test.ts"] }
+      ? { exclude: ["tests/local-installation.test.ts", "tests/provider-migration-backup.test.ts"] }
       : {}),
     coverage: {
       provider: "v8",

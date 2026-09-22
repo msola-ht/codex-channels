@@ -39,7 +39,6 @@ import {
   applyCcgConfiguration,
   ccgSetupPaths,
   removeLegacyCcgAccount,
-  refreshCcgCatalogForUpdate,
   removeCcgConfiguration,
   runCcgSetup, runCcgAccountCli,
   setCcgDefaultAccount,
@@ -117,32 +116,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ model });
   });
 
-  it.each(["switching", "exclusive"] as const)("refreshes DS-based V4.1 capabilities while preserving %s settings", async (mode) => {
-    const options = fixture();
-    const source = deepseekSource(options.source);
-    const model = "deepseek/deepseek-v4.1-flash";
-    await applyCcgConfiguration({
-      ...options.input, catalog: createCcgCatalog(source), model, mode, confirmExclusiveConfigChange: true,
-    }, options);
-    const beforeConfig = readFileSync(options.paths.config);
-    const beforeBackup = readFileSync(options.paths.backup);
-    source.models[0]!.context_window = 2_097_152;
-    source.models[0]!.max_context_window = 2_097_152;
-    source.models[0]!.model_messages = { instructions_template: "Updated Flash instructions" };
-    await expect(refreshCcgCatalogForUpdate(options.environment, {
-      downloadCatalog: async () => ({ catalog: source }),
-    })).resolves.toEqual({ status: "updated", providers: ["ccg-main"] });
-    const catalog = JSON.parse(readFileSync(options.paths.catalog, "utf8"));
-    expect(catalog.models).toHaveLength(3);
-    expect(catalog.models[2]).toMatchObject({
-      slug: model, context_window: 2_097_152,
-      model_messages: { instructions_template: "Updated Flash instructions" },
-    });
-    expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ model, mode });
-    expect(readFileSync(options.paths.config)).toEqual(beforeConfig);
-    expect(readFileSync(options.paths.backup)).toEqual(beforeBackup);
-  });
-
   it.each(["model", "reasoning"])("returns to the parent menu when cancelling %s selection", async (step) => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
@@ -193,18 +166,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       .rejects.toThrow("初始配置备份缺失");
     expect(existsSync(options.paths.backup)).toBe(false);
     expect(readFileSync(options.paths.config)).toEqual(before);
-  });
-
-  it("does not refresh the shared catalog when a registered account is incomplete", async () => {
-    const options = fixture();
-    await applyCcgConfiguration(options.input, options);
-    const before = readFileSync(options.paths.catalog);
-    rmSync(options.paths.marker);
-
-    await expect(refreshCcgCatalogForUpdate(options.environment, {
-      downloadCatalog: async () => ({ catalog: deepseekSource(options.source) }),
-    })).rejects.toThrow("账户配置不完整");
-    expect(readFileSync(options.paths.catalog)).toEqual(before);
   });
 
   it("captures a fresh baseline after removal and keeps the previous backup", async () => {
@@ -347,21 +308,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       { id: "work", default: true },
     ]);
 
-    const source = deepseekSource(options.source);
-    source.models[0]!.default_reasoning_level = "max";
-    source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
-    await refreshCcgCatalogForUpdate(options.environment, {
-      downloadCatalog: async () => ({ catalog: source }),
-    });
-    expect(parse(readFileSync(options.paths.profile, "utf8"))).toMatchObject({
-      model: "deepseek/deepseek-v4-flash",
-      model_reasoning_effort: "max",
-    });
-    expect(parse(readFileSync(ccgSetupPaths(options.environment, "work").profile, "utf8")))
-      .toMatchObject({
-        model: "deepseek/deepseek-v4-pro",
-        model_reasoning_effort: "high",
-      });
+
   });
 
   it("captures a fresh restore baseline when another account enters fixed mode", async () => {

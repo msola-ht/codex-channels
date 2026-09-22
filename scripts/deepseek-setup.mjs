@@ -3,7 +3,6 @@ import { deepseekProviderDefinition } from "../runtime/model-provider-definition
 import { createManagedProviderCatalog } from "./managed-model-provider-setup.mjs";
 
 export { runDeepseekSetup } from "./deepseek-account-setup.mjs";
-export { refreshDeepseekAccountsCatalog as refreshDeepseekCatalogForUpdate } from "./deepseek-account-management.mjs";
 
 export const deepseekSetupScriptUrl = "https://cdn.deepseek.com/api-docs/codex-deepseek-setup.sh";
 const maximumScriptBytes = 2 * 1024 * 1024;

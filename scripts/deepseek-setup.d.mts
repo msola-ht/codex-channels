@@ -1,6 +1,5 @@
 export const deepseekSetupScriptUrl: string;
 export { runDeepseekSetup } from "./deepseek-account-setup.mjs";
-export { refreshDeepseekAccountsCatalog as refreshDeepseekCatalogForUpdate } from "./deepseek-account-management.mjs";
 export function downloadDeepseekCatalog(
   fetchImplementation: typeof fetch,
   options?: {

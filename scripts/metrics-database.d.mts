@@ -22,10 +22,6 @@ export interface MetricsDatabaseResetResult {
   previousSchemaVersion: number | null;
 }
 
-export interface MetricsDatabaseUpgradeResult extends MetricsDatabaseResetResult {
-  schemaVersion: number | null;
-}
-
 export interface MetricsCompactSummary {
   model: string | null;
   hasMixedModels: boolean;
@@ -110,7 +106,6 @@ export function inspectMetricsDatabase(
 
 export function validateMetricsDatabaseStructure(
   environment?: NodeJS.ProcessEnv,
-  options?: { allowUpgradeable?: boolean },
 ): MetricsDatabaseStatus;
 
 export function metricsRange(
@@ -125,23 +120,6 @@ export function resetMetricsDatabase(
     now?: () => Date;
   },
 ): MetricsDatabaseResetResult;
-
-export function upgradeMetricsDatabase(
-  environment?: NodeJS.ProcessEnv,
-  options?: {
-    gatewayRunning?: () => boolean;
-    now?: () => Date;
-  },
-): MetricsDatabaseUpgradeResult;
-
-export function upgradeMetricsDatabaseWithGatewayRestart(
-  environment?: NodeJS.ProcessEnv,
-  options?: {
-    stopGateway?: () => void;
-    startGateway?: () => void;
-    upgrade?: () => MetricsDatabaseUpgradeResult;
-  },
-): MetricsDatabaseUpgradeResult;
 
 export interface MetricsProviderPruneResult {
   provider: string;

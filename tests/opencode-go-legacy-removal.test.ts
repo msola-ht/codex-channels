@@ -17,7 +17,6 @@ import { writePrivateFileAtomicSync as write } from "../runtime/private-file.mjs
 import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "../scripts/opencode-go-account-management.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { runOpencodeGoAccountCli } from "../scripts/opencode-go-setup.mjs";
-import { assertProviderUpdateReady } from "../scripts/local-update.mjs";
 
 const homes: string[] = [];
 function fixture(mode: "switching" | "exclusive", accountId?: string) {
@@ -65,7 +64,6 @@ describe("explicit legacy OCG removal", () => {
   ] as const)("removes a %s account (%s) after confirmation and preserves the baseline", async (mode, accountId) => {
     const options = fixture(mode, accountId);
     expect(hasLegacyOpencodeGoConfiguration(options.environment, accountId)).toBe(true);
-    expect(() => assertProviderUpdateReady(options.environment)).toThrow(accountId === undefined ? "legacy remove" : "account remove");
     const preview = await previewLegacyOpencodeGoRemoval(accountId, options);
     expect(JSON.stringify(preview)).not.toContain("sk-fixture");
     const input = accountId === undefined ? {} : { accountId };

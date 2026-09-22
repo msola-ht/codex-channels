@@ -9,7 +9,6 @@ import {
   ScheduledTaskSchemaError,
   ScheduledTaskStateError,
   SqliteScheduledTaskStore,
-  upgradeScheduledTaskDatabaseFile,
 } from "../src/scheduled-tasks/index.js";
 import { securePrivateFileSync } from "../runtime/private-file.mjs";
 import {
@@ -56,55 +55,15 @@ describe("SqliteScheduledTaskStore", () => {
     reopened.close();
   });
 
-  it("fails closed on a v1 database until the explicit upgrade and keeps runs immutable", () => {
-    const { path, directory } = databasePath();
-    const anchor = base;
-    createV1Database(path, anchor, true);
-    expect(() => new SqliteScheduledTaskStore(path)).toThrow(
-      /需要显式升级.*codexc update/u,
-    );
-
-    const backupPath = join(directory, "scheduled-tasks.v1.bak.sqlite3");
-    const upgrade = upgradeScheduledTaskDatabaseFile(path, { backupPath });
-    expect(upgrade).toMatchObject({
-      changed: true,
-      databasePath: path,
-      version: 2,
-      backupPath,
-    });
-    if (process.platform !== "win32") expect(statSync(backupPath).mode & 0o777).toBe(0o600);
-    const backupDb = new DatabaseSync(backupPath, { readOnly: true });
-    expect(backupDb.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
-    expect(backupDb.prepare("SELECT schedule_type FROM tasks WHERE task_id = 'v1-task'").get())
+  it("rejects a v1 database without migrating its tasks", () => {
+    const { path } = databasePath();
+    createV1Database(path, base, true);
+    expect(() => new SqliteScheduledTaskStore(path)).toThrow(/Schema 不受支持/u);
+    const database = new DatabaseSync(path, { readOnly: true });
+    expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    expect(database.prepare("SELECT schedule_type FROM tasks WHERE task_id = 'v1-task'").get())
       .toEqual({ schedule_type: "hourly" });
-    backupDb.close();
-
-    const store = new SqliteScheduledTaskStore(path);
-    const task = store.getTask("v1-task")!;
-    expect(task.schedule).toEqual({ type: "interval", intervalMinutes: 60, anchorAt: anchor });
-    expect(task.status).toBe("active");
-    expect(task.nextRunAt).toBe(anchor + 60 * 60_000);
-    const claim = store.claimDue(task.taskId, task.nextRunAt!, "claimed", task.nextRunAt!);
-    expect(claim.kind).toBe("claimed");
-    const migrated = store.listTasks({ includeDeleted: false });
-    expect(migrated).toHaveLength(1);
-    const schemaDb = new DatabaseSync(path);
-    const foreignKeys = schemaDb.prepare("PRAGMA foreign_key_list(runs)").all() as Array<{ table: string }>;
-    expect(foreignKeys.some((entry) => entry.table === "tasks")).toBe(true);
-    schemaDb.close();
-    store.close();
-  });
-
-  it("refuses to migrate a v1 hourly interval beyond the v2 cap and leaves v1 intact", () => {
-    const { path, directory } = databasePath();
-    createV1Database(path, base, false, 10_000);
-    expect(() => new SqliteScheduledTaskStore(path)).toThrow(/需要显式升级/u);
-    expect(() => upgradeScheduledTaskDatabaseFile(path, {
-      backupPath: join(directory, "unsupported.bak"),
-    })).toThrow(/不被 v2 支持/u);
-    const stillV1 = new DatabaseSync(path, { readOnly: true });
-    expect(stillV1.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
-    stillV1.close();
+    database.close();
   });
 
   it("finishes a once task after its single occurrence is claimed", () => {

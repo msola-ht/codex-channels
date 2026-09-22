@@ -178,11 +178,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["opencode-go", "account", "stop", "-h"], "用法：codexc opencode-go account stop"],
       [["update", "--help"], "用法：codexc update"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
-      [["state", "-h"], "用法：codexc state upgrade"],
-      [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],
       [["metrics", "status", "--help"], "用法：codexc metrics status"],
-      [["metrics", "upgrade", "--help"], "用法：codexc metrics upgrade"],
       [["metrics", "run", "--help"], "用法：codexc metrics run"],
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
@@ -247,7 +244,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       {
         args: ["update", "--help"],
-        includes: ["更新失败也会尝试恢复已停止的核心服务"],
+        includes: ["数据库升级未完成时不启动服务", "当前数据库基线无迁移写入", "执行目标版本的数据库升级入口"],
       },
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
@@ -283,7 +280,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "start",
       "service",
       "update",
-      "state",
       "version",
     ]) {
       expect(result.stdout).toContain(`\n  ${command}`);
@@ -2398,6 +2394,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["work", "add", "--id", "--prune-missing"], "--id 缺少值"],
       [["work", "add", "--name", "-Project", "--unknown"], "未知参数：--unknown"],
       [["work", "unknown"], "用法：codexc work"],
+      [["state", "upgrade"], "未知命令：state"],
+      [["metrics", "upgrade"], "用法：codexc metrics"],
       [["remote", "--workspace"], "用法：codexc remote"],
       [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
       [["rules", "check", "--json", "unexpected"], "用法：codexc rules"],

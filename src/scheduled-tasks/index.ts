@@ -46,8 +46,6 @@ export {
   ScheduledTaskStoreClosedError,
   SqliteScheduledTaskStore,
   type ScheduledTaskDatabaseInspection,
-  type ScheduledTaskDatabaseUpgradeResult,
-  upgradeScheduledTaskDatabaseFile,
 } from "./sqlite-store.js";
 export {
   ScheduledTaskScheduler,

@@ -471,7 +471,7 @@ export type ManagementTaskInput =
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
   | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
-  | { operation: "metrics"; action: "upgrade" | "cleanup" | "reset" }
+  | { operation: "metrics"; action: "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
   | { operation: "traffic"; action: "cleanup" }
 

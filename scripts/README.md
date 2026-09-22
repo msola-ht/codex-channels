@@ -25,27 +25,7 @@
   自身退出时只释放租约和 Proxy，不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
-- `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
-  源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，确认
-  后先安装到随候选清理的临时目录完成真实合同检查，通过后才执行独立全局安装阶段并继续原更新
-  事务；拒绝、临时或全局安装失败、合同失败及非交互调用均在停服和切换源码前失败，并显示精确
-  错误或安装与重试命令。接受与候选协议
-  基础版本一致的 `-rc.N` Gateway 候选版或 `-fixN` 修复版，Codex CLI 校验仍使用候选协议元数据中的
-  正式版本；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
-  精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
-  候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，并用临时候选 CLI
-  校验包含 `--config` 的候选公开合同、本地审批允许值及 Codex 根级和所有 Profile 用户配置；无新提交与
-  Registry 安装也执行同一只读检查。不一致时在全局安装、停服和切换前失败，不自动迁移审批策略；
-  合同通过后先停止已安装的核心服务，再安装全局 CLI 并原子切换源码，
-  最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
-  明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
-  `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
-  观察者或 CLI 展示异常不改变更新事务。本地 `install:global` 构建安装与 Registry 安装也先按
-  已安装包锁定版本确认、临时校验并同步配套 Codex CLI，再委派本地更新；不修改 Gateway 程序包。
-  这两种安装的 CLI 临时候选目录在成功或失败后清理，合同通过前不安装全局 CLI、不停止服务。
-  受管源码没有新提交时同样复用该流程，在一个 `local-update` 阶段内完成 CLI 同步、按需刷新旧命令
-  和本地更新；CLI 主入口不再重复执行本地更新。
+- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -54,52 +34,19 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；预检发现旧 DS/OCG/CCG 账户时在停止服务前报错，提示先移除再重新添加。
-  先只读严格检查旧 `[network]` 与 Codex `.env` 的冲突和合并后的代理组合，持有共享代理文件锁完成备份、迁移与失败回滚；回滚时原文变化则保留当前代理文件与备份并报错；同时
-  校验 `config.toml`、状态库、指标库、计划任务库、会话展示缓存及核心服务定义的完整状态，并返回不含凭据的修订
-  计划、是否需要中断服务及按需阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
-  App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
-  后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
-  更新，不擅自安装或启动，检测到
-  `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。真正重启核心服务前，
-  若 `[codex].terminal_identity` 未配置且运行更新命令的终端可探测，则按该终端补入该配置并提示
-  一次，使值随下一次 App Server 启动生效；其余服务命令不改写该配置。公开服务命令复用同一按
-  目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
-  首次本地更新通过带修订检查的官方配置事务将根级 `model_reasoning_summary` 统一写为 `none`，
-  成功后在当前 Codex Home 保存 `.codexc-reasoning-summary-0.155.1` 完成标记；不修改独立 Profile，
-  后续更新保留用户重新选择的值。标记不含配置正文，写入失败不记录完成；可通过 Setup 重新选择摘要。
-  源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
-  服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
-  和修复建议，不要求调用方解析异常文案。
-  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；不迁移 Provider 文件布局和账户身份。
-  遍历编译期 Provider 定义，按目录更新
-  适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
-  的受管模型目录并保留逐模型设置；所选模型已不在新目录中时（例如旧默认 Flash Vision Exp），
-  把 OpenCode Go 账户切到目录默认模型，角色文件保持原样，并把迁移记录写入目录清单；
-  更新过程中自动停止并注销已废弃的本机指标中心服务，在私有备份后移除旧 Schema 自动补入的空
-  `api_providers`、`[vision]`、`[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 配置段；
-  非空直接 API Provider 注册表仍失败关闭，历史 Provider 凭据、中心数据库、同步水位和外部
-  Cloudflare 资源均保留。
-- `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
-  或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
-  提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和
-  SqliteScheduledTaskStore 保持失败关闭。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前基线返回无需迁移，执行入口仅复核、不写库；未来具体迁移须在执行入口完成备份、事务及目标结构校验，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `state-database.mjs`：只读检查当前状态库和计划任务库的版本与结构，不提供升级或写入入口。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
-  组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
+  组合只读访问、输出渲染以及 `reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v18
-  检查点回写、私有备份后，在单一事务中重建为 v19；模型请求记录只复制当前保留字段，新增字段为 NULL，保留已有耗时与模型名称，转储关联不按历史时间猜配，删除旧价格、
-  成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
-  `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
-  `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
-  `User-Agent` 的 `user_agent` 列；历史运行归属不猜测），
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态。
   reset 要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库，不迁移或覆盖原指标记录。
   服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
@@ -320,12 +267,12 @@
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 系统设置中的调试快捷开关使用 `debug` / `info`，
   高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
-- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、`codexc ccg account remove` / `legacy remove` 确认移除入口、默认账户、删除及 DS 目录更新入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
+- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、`codexc ccg account remove` / `legacy remove` 确认移除入口、默认账户及删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，保留目录字段和窗口设置；导出账户菜单与目录刷新入口。
-- `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户、删除与共享目录刷新事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
+- `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户与删除事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
 - `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc deepseek account` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
   上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
@@ -347,8 +294,7 @@
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
   生成共享模型目录；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
-  默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
-  Pro 的账户保持不变。
+  默认模型与逐模型设置。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
   长流程通过 `AbortSignal` 中止尚未完成的问题。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到

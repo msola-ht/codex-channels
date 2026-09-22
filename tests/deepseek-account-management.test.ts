@@ -23,8 +23,7 @@ import {
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
 import { JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
-import { updateLocalInstallation } from "../scripts/local-update.mjs";
-import { applyDeepseekAccountConfiguration, deepseekAccountPaths, previewLegacyDeepseekRemoval, removeLegacyDeepseekAccount, refreshDeepseekAccountsCatalog, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
+import { applyDeepseekAccountConfiguration, deepseekAccountPaths, previewLegacyDeepseekRemoval, removeLegacyDeepseekAccount, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
 
 const homes: string[] = [];
 afterEach(() => { failure.path = ""; for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -187,18 +186,6 @@ describe("DeepSeek managed accounts", () => {
     expect(existsSync(options.legacyMarker)).toBe(true);
   });
 
-  it("rejects updates with legacy accounts before stopping services", async () => {
-    const options = await legacyFixture("switching");
-    const stopServices = vi.fn();
-    await expect(updateLocalInstallation(options.environment, {
-      inspectConfig: () => ({ configPath: options.paths.config }),
-      inspectDatabases: () => ({ state: {}, metrics: {} }),
-      inspectServices: () => ({ installed: true }), stopServices,
-    })).rejects.toThrow("codexc deepseek legacy remove");
-    expect(stopServices).not.toHaveBeenCalled();
-    expect(existsSync(options.legacyMarker)).toBe(true);
-  });
-
   it("rolls back a failed account installation", async () => {
     const options = fixture();
     failure.path = options.paths.registry;
@@ -236,28 +223,6 @@ describe("DeepSeek managed accounts", () => {
     expect(loadManagedModelProviderSettings(options.environment)).toEqual([
       expect.objectContaining({ provider: "ds-personal", mode: "switching" }),
     ]);
-  });
-
-  it("does not refresh the shared catalog when a registered account is incomplete", async () => {
-    const options = fixture();
-    await applyDeepseekAccountConfiguration(input, options);
-    await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
-    const before = readFileSync(options.paths.catalog);
-    rmSync(deepseekAccountPaths(options.environment, "work").marker);
-
-    await expect(refreshDeepseekAccountsCatalog(options.environment, {
-      downloadCatalog: options.downloadCatalog,
-    })).rejects.toThrow("账户配置不完整");
-    expect(readFileSync(options.paths.catalog)).toEqual(before);
-  });
-
-  it("refreshes the shared directory and all account defaults in one transaction", async () => {
-    const options = fixture();
-    await applyDeepseekAccountConfiguration(input, options);
-    await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
-    const catalog = { models: [options.catalog.models[1]!] };
-    await refreshDeepseekAccountsCatalog(options.environment, { downloadCatalog: async () => ({ catalog }) });
-    expect(loadManagedModelProviderSettings(options.environment).map((provider) => provider.model)).toEqual(["deepseek-v4-pro", "deepseek-v4-pro"]);
   });
 
   it("keeps sibling Profile reasoning mirrors valid when shared model settings change", async () => {

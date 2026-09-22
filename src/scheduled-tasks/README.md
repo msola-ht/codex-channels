@@ -10,7 +10,7 @@
 - `schedule.ts`：IANA 时区校验、Schedule 规范化和下一次 occurrence 计算。
 - `sqlite-row-codec.ts`：数据库 Task/Run Row 的严格领域映射、持久化枚举和时间戳校验。
 - `sqlite-schema.ts`：Schema v2 SQL、版本读取和数据库严格结构校验。
-- `sqlite-store.ts`：数据库文件与事务、原子领取、清理、崩溃收敛和显式 v1→v2 升级入口。
+- `sqlite-store.ts`：数据库文件与事务、原子领取、清理、崩溃收敛及当前结构检查。
 - `scheduler.ts`：注入 Clock 与执行端口的有限调度循环。
 
 Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或
@@ -21,8 +21,7 @@ Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间�
 
 SQLite 只保存任务定义和最小 Run 元数据，目录、文件与备份在 Unix 使用 owner-only 权限、在 Windows
 使用当前 SID 私有 ACL；运行时从不隐式迁移 Schema，
-v1 或未知版本在打开时失败关闭。`codexc update` 与 `codexc state upgrade` 在 Gateway 停止后预检、
-备份并显式执行唯一的 v1→v2 迁移（`hourly`→`interval`），迁移在同一事务中保留 `runs` 外键。
+v1 或未知版本在打开时失败关闭，不提供历史迁移；新安装直接创建当前结构。
 调度器只通过执行端口请求运行，不建立第二套 App Server Thread/Turn 状态，也不自动重试结果未知的
 写请求；`uncertain` Run 会阻塞同一任务后续 occurrence，只有显式 `resolveUncertain` 或权威恢复路径
 才会解除。停止调度

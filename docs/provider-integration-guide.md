@@ -5,7 +5,7 @@
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
 当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go 与 CCG 共用同一套受管管道，
-Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、账户和 Setup。
+Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账户和 Setup。
 新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
 ## 1. 接入前决策清单
@@ -46,9 +46,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
-- `capabilities`：只允许声明已实现的实例展开、模型目录来源与更新适配器、账户适配器；
-  无自动目录更新或无账户能力时显式使用 `none`，静态或人工审查目录可把来源也设为 `none`，
-  不得把任意 URL、脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
+- `capabilities`：只声明已实现的实例展开与账户适配器；无账户能力时显式使用 `none`。模型目录由 Setup 管理，程序更新器不刷新目录。
 
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。

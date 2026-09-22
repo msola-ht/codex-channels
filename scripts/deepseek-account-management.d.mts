@@ -38,11 +38,3 @@ export function previewDeepseekAccountRemoval(accountId: string, options?: Manag
   activation: "restart-all";
 }>;
 export function removeDeepseekAccount(input: { accountId: string; confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{ action: "removed"; accountId: string; runtime: "stopped" | "not-running"; activation: "restart-all" }>;
-export function refreshDeepseekAccountsCatalog(environment?: NodeJS.ProcessEnv, options?: {
-  downloadCatalog?: () => Promise<{ catalog: Catalog }>;
-  fetchImpl?: typeof fetch;
-  now?: () => Date;
-}): Promise<{ status: "not-configured" } | {
-  status: "updated"; catalogPath: string; manifestPath: string; modelCount: number;
-  modelMigrated: boolean; migratedProviders: string[];
-}>;

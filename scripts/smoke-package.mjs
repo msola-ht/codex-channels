@@ -71,7 +71,6 @@ try {
     "service",
     "update",
     "uninstall",
-    "state",
     "version",
   ];
   if (publicCommands.some((publicCommand) => !help.includes(`\n  ${publicCommand}`))) {

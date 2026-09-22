@@ -36,8 +36,6 @@ import {
   requireScheduledTaskDatabaseStructure,
   ScheduledTaskSchemaError,
   scheduledTaskInitialSchemaSql,
-  scheduledTaskTasksDueIndexSql,
-  scheduledTaskTasksTableSql,
 } from "./sqlite-schema.js";
 import {
   activeScheduledRunStates,
@@ -790,20 +788,12 @@ export interface ScheduledTaskDatabaseInspection {
   readonly exists: boolean;
   readonly schemaVersion: number | null;
   readonly targetSchemaVersion: number;
-  readonly updateable: boolean;
-}
-
-export interface ScheduledTaskDatabaseUpgradeResult {
-  readonly changed: boolean;
-  readonly databasePath: string;
-  readonly version: number;
-  readonly backupPath: string | null;
 }
 
 export function inspectScheduledTaskDatabaseFile(
   databasePath: string,
 ): ScheduledTaskDatabaseInspection {
-  if (databasePath === ":memory:") throw new Error("内存计划任务数据库不能检查或升级");
+  if (databasePath === ":memory:") throw new Error("内存计划任务数据库不能检查");
   const source = tryLstat(databasePath);
   if (source === undefined) {
     return {
@@ -812,7 +802,6 @@ export function inspectScheduledTaskDatabaseFile(
       exists: false,
       schemaVersion: null,
       targetSchemaVersion: schemaVersion,
-      updateable: false,
     };
   }
   if (source.isSymbolicLink() || !source.isFile()) throw new Error("计划任务数据库源路径无效");
@@ -833,11 +822,7 @@ export function inspectScheduledTaskDatabaseFile(
         exists: true,
         schemaVersion: foundVersion,
         targetSchemaVersion: schemaVersion,
-        updateable: true,
       };
-    }
-    if (foundVersion === 1) {
-      requireScheduledTaskV1Migratable(database);
     }
     return {
       compatible: false,
@@ -845,68 +830,10 @@ export function inspectScheduledTaskDatabaseFile(
       exists: true,
       schemaVersion: foundVersion,
       targetSchemaVersion: schemaVersion,
-      updateable: foundVersion === 1,
     };
   } finally {
     database.close();
   }
-}
-
-function requireScheduledTaskV1Migratable(database: DatabaseSync): void {
-  const tableNames = (database
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
-    .all() as Array<{ name: string }>)
-    .map((table) => table.name)
-    .sort();
-  if (tableNames.join(",") !== "runs,schema_metadata,tasks") {
-    throw new Error("v1 计划任务数据库结构不完整，无法迁移");
-  }
-  const metadata = database
-    .prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'")
-    .get() as { value: number } | undefined;
-  if (metadata?.value !== 1) {
-    throw new Error("v1 计划任务数据库 schema_metadata 无效，无法迁移");
-  }
-  const rows = database
-    .prepare("SELECT * FROM tasks ORDER BY task_id ASC")
-    .all() as unknown as TaskRow[];
-  for (const row of rows) {
-    migrateV1TaskRow(row);
-  }
-}
-
-export function upgradeScheduledTaskDatabaseFile(
-  databasePath: string,
-  options: { readonly allowMissing?: boolean; readonly backupPath?: string } = {},
-): ScheduledTaskDatabaseUpgradeResult {
-  const noChange: ScheduledTaskDatabaseUpgradeResult = {
-    changed: false,
-    databasePath,
-    version: schemaVersion,
-    backupPath: null,
-  };
-  const inspection = inspectScheduledTaskDatabaseFile(databasePath);
-  if (!inspection.exists) {
-    if (options.allowMissing === true) return noChange;
-    throw new Error("计划任务数据库尚未创建，请先启动一次 Gateway");
-  }
-  if (inspection.compatible) return noChange;
-  if (!inspection.updateable) {
-    throw new Error(
-      `计划任务数据库版本不支持升级：当前 ${inspection.schemaVersion ?? "unknown"}，只支持 1 → ${schemaVersion}`,
-    );
-  }
-  const backupPath = options.backupPath
-    ?? `${databasePath}.v1.${backupTimestamp()}.bak`;
-  copyScheduledTaskDatabaseFile(databasePath, backupPath);
-  const database = new DatabaseSync(databasePath);
-  try {
-    database.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = DELETE; PRAGMA foreign_keys = ON;");
-    migrateScheduledTaskDatabaseV1ToV2(database);
-  } finally {
-    database.close();
-  }
-  return { changed: true, databasePath, version: schemaVersion, backupPath };
 }
 
 function copyScheduledTaskDatabaseFile(sourcePath: string, destinationPath: string): string {
@@ -925,53 +852,6 @@ function copyScheduledTaskDatabaseFile(sourcePath: string, destinationPath: stri
   copyFileSync(sourcePath, destinationPath, fsConstants.COPYFILE_EXCL);
   securePrivateFileSync(destinationPath);
   return destinationPath;
-}
-
-function migrateScheduledTaskDatabaseV1ToV2(database: DatabaseSync): void {
-  database.exec("PRAGMA foreign_keys = OFF");
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    database.exec(scheduledTaskTasksTableSql("tasks_v2"));
-    const rows = database
-      .prepare("SELECT * FROM tasks ORDER BY task_id ASC")
-      .all() as unknown as TaskRow[];
-    const insert = database.prepare(`
-      INSERT INTO tasks_v2 (
-        task_id, name, status, created_at, updated_at,
-        surface, account_id, conversation_id, actor_id, workspace_id, prompt,
-        schedule_type, schedule_json, timezone, anchor_at, next_run_at,
-        model_provider, model, reasoning_effort, service_tier,
-        sandbox, approval_policy, permissions
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const row of rows) {
-      const migrated = migrateV1TaskRow(row);
-      insert.run(
-        migrated.task_id, migrated.name, migrated.status, migrated.created_at, migrated.updated_at,
-        migrated.surface, migrated.account_id, migrated.conversation_id, migrated.actor_id,
-        migrated.workspace_id, migrated.prompt,
-        migrated.schedule_type, migrated.schedule_json, migrated.timezone, migrated.anchor_at,
-        migrated.next_run_at, migrated.model_provider, migrated.model, migrated.reasoning_effort,
-        migrated.service_tier, migrated.sandbox, migrated.approval_policy, migrated.permissions,
-      );
-    }
-    database.exec("DROP TABLE tasks;");
-    database.exec("ALTER TABLE tasks_v2 RENAME TO tasks;");
-    database.exec(scheduledTaskTasksDueIndexSql);
-    database.exec(`UPDATE schema_metadata SET value = ${schemaVersion} WHERE name = 'schema_version';`);
-    database.exec(`PRAGMA user_version = ${schemaVersion};`);
-    requireScheduledTaskDatabaseStructure(database);
-    database.exec("COMMIT");
-  } catch (error) {
-    try {
-      database.exec("ROLLBACK");
-    } catch {
-      // 迁移失败后 SQLite 可能已经自动回滚。
-    }
-    throw error;
-  } finally {
-    database.exec("PRAGMA foreign_keys = ON");
-  }
 }
 
 function backupTimestamp(): string {
@@ -1036,54 +916,6 @@ function normalizePermission(input: CreateScheduledTaskInput): ScheduledTaskPerm
     approvalPolicy: "never",
     permissions: normalizeNullableText(input.permissions),
   });
-}
-
-function migrateV1TaskRow(row: TaskRow): TaskRow {
-  if (row.schedule_type !== "hourly") return row;
-  if (row.schedule_json === null) {
-    throw new Error(`计划任务 ${row.task_id} 缺少 hourly Schedule 数据，无法迁移`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(row.schedule_json);
-  } catch (error) {
-    throw new Error(`计划任务 ${row.task_id} 的 hourly Schedule 数据无效，无法迁移`, { cause: error });
-  }
-  if (!isRecord(parsed) || parsed.type !== "hourly") {
-    throw new Error(`计划任务 ${row.task_id} 的 hourly Schedule 类型无效，无法迁移`);
-  }
-  if (!Number.isSafeInteger(parsed.intervalHours) || (parsed.intervalHours as number) < 1) {
-    throw new Error(`计划任务 ${row.task_id} 的 hourly 间隔无效，无法迁移`);
-  }
-  const intervalMinutes = (parsed.intervalHours as number) * 60;
-  const anchorAt = Number.isSafeInteger(parsed.anchorAt)
-    ? (parsed.anchorAt as number)
-    : row.anchor_at;
-  if (anchorAt === null || !Number.isSafeInteger(anchorAt)) {
-    throw new Error(`计划任务 ${row.task_id} 的 hourly anchor 无效，无法迁移`);
-  }
-  try {
-    normalizeSchedule({ type: "interval", intervalMinutes, anchorAt });
-  } catch (error) {
-    throw new Error(
-      `计划任务 ${row.task_id} 的 hourly 间隔换算后不被 v2 支持，请先调整后再升级`,
-      { cause: error },
-    );
-  }
-  return {
-    ...row,
-    schedule_type: "interval",
-    schedule_json: JSON.stringify({
-      type: "interval",
-      intervalMinutes,
-      anchorAt,
-    }),
-    anchor_at: anchorAt,
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function errorCategoryForState(state: ScheduledRunState): ScheduledRunErrorCategory | null {

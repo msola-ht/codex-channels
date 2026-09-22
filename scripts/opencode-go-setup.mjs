@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
-import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
@@ -19,10 +18,7 @@ import {
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration,
-  configuredWindowPercentByModel,
   previewOpencodeGoAccountConfiguration,
-  readOpencodeGoDefaultModelMigration,
-  readOpencodeGoOptionalJson,
 } from "./opencode-go-account-provisioning.mjs";
 import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -52,19 +48,13 @@ import {
   opencodeGoProfileFileName,
 } from "./opencode-go-account-files.mjs";
 import {
-  readOptionalProviderFile,
   removeOptionalProviderFile,
-  restoreProviderFileSnapshots,
-  snapshotProviderFiles,
 } from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
-import { createOpencodeGoCatalog } from "./provider-model-catalog.mjs";
+import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
   ManagedModelProviderSetupError,
-  createManagedProviderCatalog,
   createManagedProviderRestorePreview,
-  resolveManagedCatalogModel,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
@@ -402,126 +392,6 @@ export async function setOpencodeGoDefaultAccount(accountId, {
   return { action: result.action, accountId };
 }
 
-export async function refreshOpencodeGoCatalogForUpdate(
-  environment = process.env,
-  options = {},
-) {
-  const accounts = loadOpencodeGoAccounts(environment);
-  const previousSettings = loadManagedModelProviderSettings(environment)
-    .filter(({ provider }) => isOpencodeGoProvider(provider));
-  if (accounts.length === 0) {
-    return { status: "not-configured" };
-  }
-  if (previousSettings.length !== accounts.length) {
-    throw new Error("OpenCode Go 账户配置不完整，请先恢复缺失文件");
-  }
-  const downloaded = await (options.downloadCatalog
-    ? options.downloadCatalog()
-    : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
-  const managedCatalog = createManagedProviderCatalog(createOpencodeGoCatalog(downloaded.catalog), definition, {
-    previousModels: previousSettings[0]?.models,
-    modelWindowPercentByModel: configuredWindowPercentByModel(environment),
-  });
-  const defaultModel = resolveManagedCatalogModel(managedCatalog, definition);
-  const managedDefault = managedCatalog.models.find(
-    (model) => model?.slug === defaultModel,
-  );
-  const reasoningEffort = managedDefault?.default_reasoning_level;
-  if (typeof reasoningEffort !== "string") {
-    throw new Error("OpenCode Go 模型目录缺少默认思考等级");
-  }
-  const providerDirectory = managedProviderDirectory(environment, definition);
-  const catalogPath = join(providerDirectory, definition.catalogFileName);
-  const manifestPath = join(providerDirectory, definition.catalogManifestFileName);
-  const previousManifest = await readOpencodeGoOptionalJson(
-    manifestPath,
-    "OpenCode Go 模型目录清单",
-  );
-  const previousMigration = readOpencodeGoDefaultModelMigration(previousManifest);
-  const settingsByProvider = new Map(
-    previousSettings.map((settings) => [settings.provider, settings]),
-  );
-  const updates = [];
-  const migratedProviders = [];
-  let migrationFrom;
-  for (const account of accounts) {
-    const provider = opencodeGoProviderId(account.id);
-    const settings = settingsByProvider.get(provider);
-    if (!settings) throw new Error(`OpenCode Go 账户配置不完整：${account.id}`);
-    const selected = managedCatalog.models.find((model) => model.slug === settings.model) ?? managedDefault;
-    const modelChanged = selected.slug !== settings.model;
-    if (!modelChanged && settings.mode !== "switching") continue;
-    if (modelChanged) migrationFrom ??= settings.model;
-    const paths = opencodeGoAccountPaths(environment, account.id);
-    const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
-    const document = await readTomlFile(documentPath);
-    if (document.model !== settings.model || document.model_provider !== provider) {
-      throw new Error(`OpenCode Go 账户 ${account.id} 默认模型配置不一致`);
-    }
-    document.model = selected.slug;
-    if (settings.mode === "switching") {
-      document.model_reasoning_effort = selected.default_reasoning_level;
-    } else {
-      delete document.model_reasoning_effort;
-      delete document.model_context_window;
-      delete document.model_auto_compact_token_limit;
-      delete document.model_auto_compact_token_limit_scope;
-    }
-    updates.push({ path: documentPath, content: stringify(document) });
-    if (modelChanged) migratedProviders.push(provider);
-  }
-  const transactionPaths = [
-    catalogPath,
-    manifestPath,
-    ...updates.map(({ path }) => path),
-  ];
-  const snapshots = snapshotProviderFiles(transactionPaths);
-  let guards = snapshots;
-  try {
-    await writePrivateFileAtomic(catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
-    guards = snapshotProviderFiles(transactionPaths);
-    const updatedAt = (options.now ?? (() => new Date()))().toISOString();
-    await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
-      source: deepseekSetupScriptUrl,
-      sha256: downloaded.sha256,
-      downloadedAt: updatedAt,
-      ...(migrationFrom === undefined
-        ? (previousMigration === undefined
-            ? {}
-            : { defaultModelMigration: previousMigration })
-        : { defaultModelMigration: {
-            from: migrationFrom,
-            to: defaultModel,
-            appliedAt: updatedAt,
-          } }),
-    }, null, 2)}\n`);
-    guards = snapshotProviderFiles(transactionPaths);
-    for (const update of updates) {
-      await writePrivateFileAtomic(update.path, update.content);
-      guards = snapshotProviderFiles(transactionPaths);
-    }
-  } catch (error) {
-    try {
-      await restoreProviderFileSnapshots(snapshots, guards);
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        "OpenCode Go 模型目录更新失败，且未能完整恢复更新前文件",
-        { cause: rollbackError },
-      );
-    }
-    throw error;
-  }
-  return {
-    status: "updated",
-    catalogPath,
-    manifestPath,
-    modelCount: managedCatalog.models.length,
-    migratedProviders,
-    defaultModelMigrationApplied: migrationFrom !== undefined,
-  };
-}
-
 export async function stopOpencodeGoAccount(accountId, {
   environment = process.env,
   output = process.stdout,
@@ -770,16 +640,6 @@ async function restoreBackup(target, backup, existed) {
     await removeOptionalProviderFile(target);
   } else {
     throw new Error("OpenCode Go 初始配置备份状态无效");
-  }
-}
-
-async function readTomlFile(path) {
-  const content = await readOptionalProviderFile(path);
-  if (content === undefined) return {};
-  try {
-    return parse(content.toString("utf8"));
-  } catch {
-    throw new Error("Codex config.toml 无法安全读取或解析");
   }
 }
 

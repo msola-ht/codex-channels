@@ -7,7 +7,7 @@ import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   deepseekAccountDirectory, deepseekAccountMarkerPath, deepseekAccountsFilePath,
-  deepseekProviderId, loadDeepseekAccounts, validateDeepseekAccounts,
+  loadDeepseekAccounts, validateDeepseekAccounts,
 } from "../runtime/deepseek-accounts.mjs";
 import { deepseekAccountDefinition, deepseekProviderDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
@@ -258,40 +258,5 @@ export async function removeDeepseekAccount({ accountId, confirmRemove = false }
     const runtime = await stopManagedAccountForRemoval(definition.id, options);
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "removed", accountId, runtime, activation: "restart-all" };
-  });
-}
-
-export async function refreshDeepseekAccountsCatalog(environment = process.env, options = {}) {
-  return withModelProviderManagementTransaction(environment, async () => {
-    if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先运行 codexc deepseek legacy remove 移除旧账户，再重新添加");
-    const accounts = loadDeepseekAccounts(environment);
-    if (accounts.length === 0) return { status: "not-configured" };
-    const providers = loadManagedModelProviderSettings(environment).filter((provider) => accounts.some((account) => deepseekProviderId(account.id) === provider.provider));
-    if (providers.length !== accounts.length) {
-      throw new Error("DeepSeek 账户配置不完整，请先恢复缺失文件");
-    }
-    const paths = deepseekAccountPaths(environment, accounts[0].id);
-    const accountPaths = accounts.map((account) => deepseekAccountPaths(environment, account.id));
-    const snapshots = snapshotProviderFiles(accountPaths.flatMap((entry) => Object.values(entry)));
-    const downloaded = await (options.downloadCatalog ? options.downloadCatalog() : downloadDeepseekCatalog(options.fetchImpl ?? fetch));
-    const catalog = createManagedDeepseekCatalog(downloaded.catalog, providers[0]?.models ?? []);
-    const updates = new Map([
-      [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
-      [paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: (options.now?.() ?? new Date()).toISOString() })}\n`],
-    ]);
-    const migrated = [];
-    for (const provider of providers) {
-      const account = accounts.find((entry) => deepseekProviderId(entry.id) === provider.provider);
-      const definition = deepseekAccountDefinition(account.id);
-      const path = provider.mode === "exclusive" ? paths.config : deepseekAccountPaths(environment, account.id).profile;
-      const document = readToml(path);
-      const model = resolveManagedCatalogModel(catalog, definition, provider.model);
-      document.model = model;
-      if (provider.mode === "switching") document.model_reasoning_effort = catalog.models.find((entry) => entry.slug === model).default_reasoning_level;
-      updates.set(path, stringify(document));
-      if (model !== provider.model) migrated.push(provider.provider);
-    }
-    await applyProviderFileUpdates(updates, snapshots);
-    return { status: "updated", catalogPath: paths.catalog, manifestPath: paths.manifest, modelCount: catalog.models.length, modelMigrated: migrated.length > 0, migratedProviders: migrated };
   });
 }

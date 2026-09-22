@@ -25,19 +25,18 @@
   请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
   观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
 - `codex-proxy-env.mjs` / `codex-proxy-env.d.mts`：共享代理文件的读取、字面值校验和原子更新，
-  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI、WebUI 和更新迁移的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖。迁移快照先校验字段，合并旧配置后再校验代理组合；正常读取仍校验完整组合。
+  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI 与 WebUI 的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖；读取和保存均校验完整代理组合。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  CCG 采用显式多账户实例与 DS 来源目录，使用独立目录更新适配器，并通过 Command Code 账户接口
+  CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
-  更新、账户能力，允许显式无更新/无账户能力。账户实例继承共享定义；
+  Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据声明实例展开与账户能力。账户实例继承共享定义；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
@@ -90,7 +89,7 @@
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
   身份”的 UA 文本使用，`detectTerminalIdentity` 只在结果可作为 `[codex].terminal_identity`
-  记录时返回，供安装、更新服务的命令与 `codexc config` 复用。
+  记录时返回，供服务安装命令与 `codexc config` 复用。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
