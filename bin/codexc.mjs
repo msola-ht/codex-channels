@@ -145,7 +145,7 @@ DeepSeek 与 OpenCode Go 子菜单中的“修改模型设置”会打开同一�
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-deepseek、sf-ocg-<账户> 或
+切换模式可用 --profile sf-deepseek、sf-ocg-<账户>、sf-ccg 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   desktop_app: desktopAppCommandUsage,
   service: `用法：codexc service <命令>

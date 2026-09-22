@@ -20,15 +20,17 @@ import {
 } from "../runtime/opencode-go-accounts.mjs";
 import { writePrivateFileAtomic } from "../runtime/private-file.mjs";
 import {
-  assertOpencodeGoFileSnapshots,
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
-  readOptionalOpencodeGoFile,
-  removeOptionalOpencodeGoFile,
-  refreshOpencodeGoFileSnapshot,
-  restoreOpencodeGoFileSnapshots,
-  snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
+import {
+  assertProviderFileSnapshots,
+  readOptionalProviderFile,
+  removeOptionalProviderFile,
+  refreshProviderFileSnapshot,
+  restoreProviderFileSnapshots,
+  snapshotProviderFiles,
+} from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 
@@ -191,7 +193,7 @@ async function applyOpencodeGoAccountRemovalUnlocked(
     loadAccounts = loadOpencodeGoAccounts,
     loadRole = loadManagedModelProviderRole,
     writeAccounts = writeOpencodeGoAccounts,
-    removeAccounts = removeOptionalOpencodeGoFile,
+    removeAccounts = removeOptionalProviderFile,
     resolvePrimarySocket = defaultPrimarySocket,
     inspectSupervisor = inspectAppServerSupervisorState,
     releaseProvider = releaseAppServerProvider,
@@ -240,14 +242,14 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   const paths = plan.paths;
   try {
     mkdirSync(paths.backupDirectory, { recursive: true, mode: 0o700 });
-    const profile = await readOptionalOpencodeGoFile(paths.profilePath);
+    const profile = await readOptionalProviderFile(paths.profilePath);
     if (profile !== undefined) {
       await writePrivateFileAtomic(
         join(paths.backupDirectory, opencodeGoProfileFileName(plan.account.id)),
         profile,
       );
     }
-    const marker = await readOptionalOpencodeGoFile(paths.markerPath);
+    const marker = await readOptionalProviderFile(paths.markerPath);
     if (marker !== undefined) {
       await writePrivateFileAtomic(join(paths.backupDirectory, "managed.toml"), marker);
     }
@@ -263,23 +265,23 @@ async function applyOpencodeGoAccountRemovalUnlocked(
       paths.profilePath,
       paths.markerPath,
     ];
-    const snapshots = snapshotOpencodeGoFiles(transactionPaths);
+    const snapshots = snapshotProviderFiles(transactionPaths);
     let guards = snapshots;
     try {
-      await assertOpencodeGoFileSnapshots(guards);
+      await assertProviderFileSnapshots(guards);
       writeAccounts(environment, plan.remainingAccounts);
-      guards = refreshOpencodeGoFileSnapshot(
+      guards = refreshProviderFileSnapshot(
         guards,
         opencodeGoAccountsFilePath(environment),
       );
-      await assertOpencodeGoFileSnapshots(guards);
+      await assertProviderFileSnapshots(guards);
       if (existsSync(paths.profilePath)) unlinkSync(paths.profilePath);
-      guards = refreshOpencodeGoFileSnapshot(guards, paths.profilePath);
-      await assertOpencodeGoFileSnapshots(guards);
+      guards = refreshProviderFileSnapshot(guards, paths.profilePath);
+      await assertProviderFileSnapshots(guards);
       if (existsSync(paths.markerPath)) unlinkSync(paths.markerPath);
     } catch (error) {
       try {
-        await restoreOpencodeGoFileSnapshots(snapshots, guards);
+        await restoreProviderFileSnapshots(snapshots, guards);
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
@@ -409,7 +411,7 @@ async function buildRemovalPlan(
     }
     mode = marker.mode;
     if (mode === "exclusive") {
-      const initialConfig = await readOptionalOpencodeGoFile(
+      const initialConfig = await readOptionalProviderFile(
         join(paths.providerDirectory, "backup", "config.toml"),
       );
       if (initialConfig === undefined) {
@@ -473,22 +475,22 @@ async function applyLastAccountRemovalFiles(
 ) {
   const { paths } = plan;
   const initialConfig = plan.restoresInitialConfig
-    ? await readOptionalOpencodeGoFile(
+    ? await readOptionalProviderFile(
       join(paths.providerDirectory, "backup", "config.toml"),
     )
     : undefined;
   const initialRoleConfig = plan.restoresInitialConfig
-    ? await readOptionalOpencodeGoFile(
+    ? await readOptionalProviderFile(
       join(paths.providerDirectory, "backup", "sf-agent.config.toml"),
     )
     : undefined;
   const initialCatalog = plan.restoresInitialConfig
-    ? await readOptionalOpencodeGoFile(
+    ? await readOptionalProviderFile(
       join(paths.providerDirectory, "backup", "models.json"),
     )
     : undefined;
   const initialManifest = plan.restoresInitialConfig
-    ? await readOptionalOpencodeGoFile(
+    ? await readOptionalProviderFile(
       join(paths.providerDirectory, "backup", "models.manifest.json"),
     )
     : undefined;
@@ -507,59 +509,59 @@ async function applyLastAccountRemovalFiles(
   if (plan.restoresInitialConfig) transactionPaths.push(paths.configPath);
   if (plan.restoresInitialConfig) transactionPaths.push(paths.roleConfigPath);
   if (plan.removesManagedCatalog) transactionPaths.push(paths.catalogPath, paths.manifestPath);
-  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
+  const snapshots = snapshotProviderFiles(transactionPaths);
   let guards = snapshots;
   try {
-    await assertOpencodeGoFileSnapshots(guards);
+    await assertProviderFileSnapshots(guards);
     if (plan.restoresInitialConfig) {
       await writePrivateFileAtomic(paths.configPath, initialConfig);
-      guards = refreshOpencodeGoFileSnapshot(guards, paths.configPath);
-      await assertOpencodeGoFileSnapshots(guards);
+      guards = refreshProviderFileSnapshot(guards, paths.configPath);
+      await assertProviderFileSnapshots(guards);
     }
     if (plan.restoresInitialConfig) {
       if (initialRoleConfig !== undefined) {
         await writePrivateFileAtomic(paths.roleConfigPath, initialRoleConfig);
       } else if (existsSync(paths.roleConfigPath)) {
-        await removeOptionalOpencodeGoFile(paths.roleConfigPath);
+        await removeOptionalProviderFile(paths.roleConfigPath);
       }
-      guards = refreshOpencodeGoFileSnapshot(guards, paths.roleConfigPath);
-      await assertOpencodeGoFileSnapshots(guards);
+      guards = refreshProviderFileSnapshot(guards, paths.roleConfigPath);
+      await assertProviderFileSnapshots(guards);
     }
     await removeAccounts(opencodeGoAccountsFilePath(environment));
-    guards = refreshOpencodeGoFileSnapshot(
+    guards = refreshProviderFileSnapshot(
       guards,
       opencodeGoAccountsFilePath(environment),
     );
-    await assertOpencodeGoFileSnapshots(guards);
+    await assertProviderFileSnapshots(guards);
     if (existsSync(paths.profilePath)) {
-      await removeOptionalOpencodeGoFile(paths.profilePath);
+      await removeOptionalProviderFile(paths.profilePath);
     }
-    guards = refreshOpencodeGoFileSnapshot(guards, paths.profilePath);
-    await assertOpencodeGoFileSnapshots(guards);
+    guards = refreshProviderFileSnapshot(guards, paths.profilePath);
+    await assertProviderFileSnapshots(guards);
     if (existsSync(paths.markerPath)) {
-      await removeOptionalOpencodeGoFile(paths.markerPath);
+      await removeOptionalProviderFile(paths.markerPath);
     }
-    guards = refreshOpencodeGoFileSnapshot(guards, paths.markerPath);
-    await assertOpencodeGoFileSnapshots(guards);
+    guards = refreshProviderFileSnapshot(guards, paths.markerPath);
+    await assertProviderFileSnapshots(guards);
     if (plan.removesManagedCatalog) {
       if (initialCatalog !== undefined) {
         await writePrivateFileAtomic(paths.catalogPath, initialCatalog);
       } else if (existsSync(paths.catalogPath)) {
-        await removeOptionalOpencodeGoFile(paths.catalogPath);
+        await removeOptionalProviderFile(paths.catalogPath);
       }
-      guards = refreshOpencodeGoFileSnapshot(guards, paths.catalogPath);
-      await assertOpencodeGoFileSnapshots(guards);
+      guards = refreshProviderFileSnapshot(guards, paths.catalogPath);
+      await assertProviderFileSnapshots(guards);
       if (initialManifest !== undefined) {
         await writePrivateFileAtomic(paths.manifestPath, initialManifest);
       } else if (existsSync(paths.manifestPath)) {
-        await removeOptionalOpencodeGoFile(paths.manifestPath);
+        await removeOptionalProviderFile(paths.manifestPath);
       }
-      guards = refreshOpencodeGoFileSnapshot(guards, paths.manifestPath);
-      await assertOpencodeGoFileSnapshots(guards);
+      guards = refreshProviderFileSnapshot(guards, paths.manifestPath);
+      await assertProviderFileSnapshots(guards);
     }
   } catch (error) {
     try {
-      await restoreOpencodeGoFileSnapshots(snapshots, guards);
+      await restoreProviderFileSnapshots(snapshots, guards);
     } catch (rollbackError) {
       throw new AggregateError(
         [error, rollbackError],

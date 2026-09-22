@@ -4,7 +4,7 @@
 服务商）的标准流程、决策点、实现清单、安全边界与验收要求。新增通讯渠道（飞书、Telegram、
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
-当前受管第三方 Provider 是编译期注册的：DeepSeek 与 OpenCode Go 共用同一套受管管道，
+当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go 与 CCG 共用同一套受管管道，
 Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、账户和 Setup。
 新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
@@ -293,6 +293,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
+- [`docs/ccg.md`](ccg.md)：本地文件模型目录、单实例且无账户接口的参考实现；
 - [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；

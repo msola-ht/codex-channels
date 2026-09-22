@@ -5,6 +5,7 @@ import * as clackPrompts from "@clack/prompts";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
+import { runCcgSetup } from "./ccg-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
@@ -23,6 +24,7 @@ export async function runSetup({
   prompts = clackPrompts,
   feishuSetup = runFeishuSetup,
   deepseekSetup = runDeepseekSetup,
+  ccgSetup = runCcgSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   skillSetup = runSkillSetup,
@@ -99,6 +101,7 @@ export async function runSetup({
           output,
           prompts,
           deepseekSetup,
+          ccgSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
           modelWindowSetup,
@@ -135,6 +138,7 @@ async function runModelSetup({
   output,
   prompts,
   deepseekSetup,
+  ccgSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -177,6 +181,7 @@ async function runModelSetup({
         output,
         prompts,
         deepseekSetup,
+        ccgSetup,
         openCodeGoSetup,
         modelProviderDefaultSetup,
         modelWindowSetup,
@@ -226,6 +231,7 @@ async function runThirdPartyModelSetup({
   output,
   prompts,
   deepseekSetup,
+  ccgSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -255,12 +261,17 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 模型设置",
-          hint: "设置 DeepSeek 与 OpenCode Go 各 Provider 的默认模型与思考等级",
+          hint: "设置各受管 Provider 的默认模型与思考等级",
+        },
+        {
+          value: "ccg",
+          label: "CCG（CommandCode）",
+          hint: "导入模型目录文件，配置固定/切换模式或删除",
         },
         {
           value: "model_window",
           label: "模型上下文窗口",
-          hint: "按模型名统一设置 DeepSeek 与 OpenCode Go 的上下文窗口占比",
+          hint: "按模型名统一设置受管 Provider 的上下文窗口占比",
         },
         {
           value: "agents",
@@ -276,6 +287,8 @@ async function runThirdPartyModelSetup({
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
     } else if (module === "opencode-go") {
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "ccg") {
+      result = await ccgSetup({ input, output, prompts, allowBack: true });
     } else if (module === "custom_primary") {
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {
@@ -380,6 +393,7 @@ function setupFallbackActivation(module, result) {
   return {
     custom_primary: "restart-all",
     deepseek: "restart-all",
+    ccg: "restart-all",
     "opencode-go": "restart-all",
     provider_default: "restart-app-server",
     agents: "restart-app-server",

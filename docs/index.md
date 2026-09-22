@@ -330,6 +330,11 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 
 ## 本项目实现映射
 
+CCG（CommandCode）复用已有 Responses Provider、模型设置和路由，不新增 App Server RPC。
+接口来源为 [CommandCode Provider 文档](https://commandcode.ai/docs/provider)，接入入口为
+[`ccg-setup.mjs`](../scripts/ccg-setup.mjs)，模型以独立本地文件为准，导入前通过锁定 CLI 的 `debug models` 及其 `model_catalog_json` 解析验证完整格式；实现边界见
+[`CCG`](ccg.md)，配置与失败回滚验证见 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts)。
+
 | 要查的问题 | 本项目入口 | 验证入口 |
 | --- | --- | --- |
 | CLI、运行中 App Server 和生成协议是否一致 | [`codex-protocol/`](../src/codex-protocol/README.md)、[`protocol-info.ts`](../src/codex-client/protocol-info.ts)、[`doctor.mjs`](../scripts/doctor.mjs) | `npm run protocol:check`、`codexc doctor`、[`codexc-cli.test.ts`](../tests/codexc-cli.test.ts) |

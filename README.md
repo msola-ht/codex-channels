@@ -106,6 +106,7 @@ Codex 用户配置：
 - [本地指标 WebUI](docs/webui.md)
 - [DeepSeek](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
+- [CCG（CommandCode）](docs/ccg.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

@@ -12,13 +12,16 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
-import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
+import {
+  isManagedProviderModelValid,
+  isManagedProviderApiKeyValid,
+  loadManagedModelProviderDefinitions,
+} from "./model-provider-definitions.mjs";
 import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedCatalogModelPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
 
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
@@ -520,10 +523,7 @@ export function readProviderProfile(
   }
   const apiKey = provider.experimental_bearer_token;
   if (
-    typeof apiKey !== "string"
-    || !/^sk-[^\s"]+$/u.test(apiKey)
-    || apiKey.length > 4_096
-    || /[\r\n]/u.test(apiKey)
+    !isManagedProviderApiKeyValid(descriptor.definition, apiKey)
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
@@ -610,8 +610,7 @@ export function catalogHasModel(path, definition, model) {
 function catalogSlugSet(catalog, definition) {
   if (Array.isArray(catalog?.models)
     && catalog.models.some((entry) =>
-      typeof record(entry).slug !== "string"
-      || !managedCatalogModelPattern.test(record(entry).slug))) {
+      !isManagedProviderModelValid(definition, record(entry).slug))) {
     throw new Error(`Codex ${definition.displayName} 模型目录包含无效模型名`);
   }
   return new Set(

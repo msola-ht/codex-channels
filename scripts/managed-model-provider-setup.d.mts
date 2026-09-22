@@ -43,6 +43,20 @@ export function createManagedProviderCatalog(
   },
 ): { models: Array<Record<string, unknown>> };
 
+export function createManagedProviderConfiguration(
+  current: Record<string, unknown>,
+  initial: Record<string, unknown>,
+  definition: ModelProviderDefinition,
+  options: {
+    mode: "switching" | "exclusive";
+    previousMode?: "switching" | "exclusive";
+    apiKey: string;
+    catalogPath: string;
+    catalog: { models: Array<Record<string, unknown>> };
+    model: string;
+  },
+): { config: Record<string, unknown>; profile: Record<string, unknown> | undefined };
+
 export function resolveManagedCatalogModel(
   catalog: { models?: Array<Record<string, unknown>> },
   definition: ModelProviderDefinition,

@@ -31,24 +31,23 @@ import {
 } from "../runtime/private-file.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
-  applyExclusiveProviderConfig,
+  createManagedProviderConfiguration,
   createManagedProviderCatalog,
-  createSwitchingProviderProfile,
-  hasProviderBaseConfig,
   resolveManagedCatalogModel,
-  restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
-  assertOpencodeGoFileSnapshots,
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
-  readOptionalOpencodeGoFile,
-  refreshOpencodeGoFileSnapshot,
-  replaceOptionalOpencodeGoFile,
-  restoreOpencodeGoFileSnapshots,
-  snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
+import {
+  assertProviderFileSnapshots,
+  readOptionalProviderFile,
+  refreshProviderFileSnapshot,
+  replaceOptionalProviderFile,
+  restoreProviderFileSnapshots,
+  snapshotProviderFiles,
+} from "./managed-provider-files.mjs";
 
 const definition = opencodeGoProviderDefinition;
 const maximumPrivateConfigBytes = 2_097_152;
@@ -172,13 +171,13 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
   ];
   let snapshots;
   try {
-    snapshots = snapshotOpencodeGoFiles(transactionPaths);
+    snapshots = snapshotProviderFiles(transactionPaths);
   } catch (error) {
     throw normalize("operation-failed", "action", error);
   }
   let guards = snapshots;
   try {
-    await assertOpencodeGoFileSnapshots(guards);
+    await assertProviderFileSnapshots(guards);
     mkdirSync(plan.paths.accountDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(plan.paths.backupDirectory, { recursive: true, mode: 0o700 });
     if (plan.accounts.length === 0) {
@@ -186,77 +185,50 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     }
     const currentConfig = await readTomlFile(plan.paths.configPath);
     const initialConfig = await readBackupToml(plan.paths);
-    let nextConfig = currentConfig;
-    let profileContent;
-    if (mode === "switching") {
-      if (readOpencodeGoAccountMarker(environment, accountId)?.mode === "exclusive") {
-        nextConfig = restoreProviderBaseConfig(
-          currentConfig,
-          initialConfig,
-          opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
-        );
-      }
-      if (hasProviderBaseConfig(nextConfig, opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone))) {
-        throw new Error(
-          `安装前的 Codex config.toml 已占用 ${plan.account.provider} Provider 或 Profile；请先手工移除或改名`,
-        );
-      }
-      const selectedModelEntry = managedCatalog.models?.find(
-        (entry) => entry?.slug === selectedModel,
-      );
-      const reasoningEffort = selectedModelEntry?.default_reasoning_level;
-      if (typeof reasoningEffort !== "string") {
-        throw new Error("OpenCode Go 模型目录缺少默认思考等级");
-      }
-      profileContent = stringify(createSwitchingProviderProfile(
-        opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
-        {
-          apiKey,
-          catalogPath: plan.paths.catalogPath,
-          model: selectedModel,
-          reasoningEffort,
-        },
-      ));
-    } else {
-      nextConfig = applyExclusiveProviderConfig(
-        currentConfig,
-        opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
-        { apiKey, catalogPath: plan.paths.catalogPath, model: selectedModel },
-      );
-    }
+    const { config: nextConfig, profile } = createManagedProviderConfiguration(
+      currentConfig,
+      initialConfig,
+      opencodeGoAccountDefinition(accountId, plan.account.email, plan.account.phone),
+      {
+        mode,
+        previousMode: readOpencodeGoAccountMarker(environment, accountId)?.mode,
+        apiKey, catalogPath: plan.paths.catalogPath, catalog: managedCatalog, model: selectedModel,
+      },
+    );
+    const profileContent = profile === undefined ? undefined : stringify(profile);
     const catalogContent = `${JSON.stringify(managedCatalog, null, 2)}\n`;
-    await assertOpencodeGoFileSnapshots(guards);
+    await assertProviderFileSnapshots(guards);
     await writePrivateFileAtomic(plan.paths.catalogPath, catalogContent);
-    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.catalogPath);
-    await assertOpencodeGoFileSnapshots(guards);
-    await replaceOptionalOpencodeGoFile(
+    guards = refreshProviderFileSnapshot(guards, plan.paths.catalogPath);
+    await assertProviderFileSnapshots(guards);
+    await replaceOptionalProviderFile(
       plan.paths.manifestPath,
       catalogState.manifest === undefined
         ? undefined
         : `${JSON.stringify(catalogState.manifest, null, 2)}\n`,
     );
-    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.manifestPath);
-    await assertOpencodeGoFileSnapshots(guards);
-    await replaceOptionalOpencodeGoFile(
+    guards = refreshProviderFileSnapshot(guards, plan.paths.manifestPath);
+    await assertProviderFileSnapshots(guards);
+    await replaceOptionalProviderFile(
       plan.paths.configPath,
       Object.keys(nextConfig).length === 0 ? undefined : stringify(nextConfig),
     );
-    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.configPath);
-    await assertOpencodeGoFileSnapshots(guards);
-    await replaceOptionalOpencodeGoFile(plan.paths.profilePath, profileContent);
-    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.profilePath);
-    await assertOpencodeGoFileSnapshots(guards);
+    guards = refreshProviderFileSnapshot(guards, plan.paths.configPath);
+    await assertProviderFileSnapshots(guards);
+    await replaceOptionalProviderFile(plan.paths.profilePath, profileContent);
+    guards = refreshProviderFileSnapshot(guards, plan.paths.profilePath);
+    await assertProviderFileSnapshots(guards);
     writeOpencodeGoAccountMarker(environment, accountId, mode);
-    guards = refreshOpencodeGoFileSnapshot(guards, plan.paths.markerPath);
-    await assertOpencodeGoFileSnapshots(guards);
+    guards = refreshProviderFileSnapshot(guards, plan.paths.markerPath);
+    await assertProviderFileSnapshots(guards);
     writeOpencodeGoAccounts(environment, plan.nextAccounts);
-    guards = refreshOpencodeGoFileSnapshot(
+    guards = refreshProviderFileSnapshot(
       guards,
       opencodeGoAccountsFilePath(environment),
     );
   } catch (error) {
     try {
-      await restoreOpencodeGoFileSnapshots(snapshots, guards);
+      await restoreProviderFileSnapshots(snapshots, guards);
     } catch (rollbackError) {
       throw normalize("rollback-failed", "action", new AggregateError(
         [error, rollbackError],
@@ -489,14 +461,14 @@ async function preserveInitialFiles(paths, accountId) {
 }
 
 async function backupOptional(source, target) {
-  const content = await readOptionalOpencodeGoFile(source);
+  const content = await readOptionalProviderFile(source);
   if (content === undefined) return false;
   await writePrivateFileAtomic(target, content);
   return true;
 }
 
 async function readTomlFile(path) {
-  const content = await readOptionalOpencodeGoFile(path);
+  const content = await readOptionalProviderFile(path);
   if (content === undefined) return {};
   try {
     return parse(content.toString("utf8"));
@@ -506,7 +478,7 @@ async function readTomlFile(path) {
 }
 
 async function assertProfileOwnership(paths, accountId, environment) {
-  const profile = await readOptionalOpencodeGoFile(paths.profilePath);
+  const profile = await readOptionalProviderFile(paths.profilePath);
   const marker = readOpencodeGoAccountMarker(environment, accountId);
   if (profile === undefined && marker === undefined) return;
   if (marker === undefined) {
@@ -517,7 +489,7 @@ async function assertProfileOwnership(paths, accountId, environment) {
 }
 
 export async function readOpencodeGoOptionalJson(path, label) {
-  const content = await readOptionalOpencodeGoFile(path);
+  const content = await readOptionalProviderFile(path);
   if (content === undefined) return undefined;
   try {
     const value = JSON.parse(content.toString("utf8"));

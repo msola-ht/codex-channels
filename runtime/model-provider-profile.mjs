@@ -1,3 +1,5 @@
+import { isManagedProviderApiKeyValid } from "./model-provider-definitions.mjs";
+
 export const thirdPartyProviderRequestMaxRetries = 1;
 export const thirdPartyProviderStreamMaxRetries = 0;
 
@@ -11,7 +13,7 @@ export function createManagedProviderProfile(definition, {
   if (typeof model !== "string" || model.length === 0) {
     throw new Error(`${definition.displayName} 默认模型无效`);
   }
-  if (typeof apiKey !== "string" || !/^sk-[^\s"]+$/u.test(apiKey) || apiKey.length > 4_096) {
+  if (!isManagedProviderApiKeyValid(definition, apiKey)) {
     throw new Error(`${definition.displayName} API Key 无效`);
   }
   if (typeof catalogPath !== "string" || catalogPath.length === 0) {
@@ -119,8 +121,8 @@ function assertDefinition(definition) {
     || typeof definition.baseUrl !== "string"
     || typeof definition.wireApi !== "string"
     || typeof definition.apiKeyEnvironmentKey !== "string"
-    || typeof definition.defaultModel !== "string"
-    || typeof definition.defaultReasoningEffort !== "string"
+    || (definition.defaultModel !== undefined && typeof definition.defaultModel !== "string")
+    || (definition.defaultReasoningEffort !== undefined && typeof definition.defaultReasoningEffort !== "string")
   ) {
     throw new Error("模型 Provider 定义无效");
   }

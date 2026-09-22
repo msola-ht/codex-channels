@@ -66,9 +66,45 @@ export const opencodeGoProviderDefinition = Object.freeze({
   capabilities: opencodeGoProviderCapabilities,
 });
 
+export const commandCodeProviderDefinition = Object.freeze({
+  id: "ccg",
+  displayName: "CCG",
+  profileName: "sf-ccg",
+  profileFileName: "sf-ccg.config.toml",
+  catalogFileName: "models.json",
+  catalogManifestFileName: "models.manifest.json",
+  managedMarkerFileName: "managed.toml",
+  backupDirectoryName: "backup",
+  baseUrl: "https://api.commandcode.ai/provider/v1",
+  wireApi: "responses",
+  apiKeyEnvironmentKey: "CODEX_CONNECT_CCG_API_KEY",
+  supportsWebsockets: false,
+  capabilities: Object.freeze({
+    catalogSource: "none",
+    accountAdapter: "none",
+    instanceAdapter: "single",
+    catalogUpdateAdapter: "none",
+  }),
+});
+
+export function isManagedProviderApiKeyValid(definition, apiKey) {
+  return typeof apiKey === "string"
+    && apiKey.length <= 4_096
+    && (definition.id === "ccg"
+      ? /^[A-Za-z0-9._~+/-]+=*$/u.test(apiKey)
+      : /^sk-[^\s"]+$/u.test(apiKey));
+}
+
+export function isManagedProviderModelValid(definition, model) {
+  return typeof model === "string" && (definition.id === "ccg"
+    ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
+    : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
+}
+
 export const managedModelProviderDefinitions = Object.freeze([
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
+  commandCodeProviderDefinition,
 ]);
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {

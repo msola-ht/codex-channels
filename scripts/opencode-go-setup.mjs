@@ -53,11 +53,13 @@ import {
 import {
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
-  readOptionalOpencodeGoFile,
-  removeOptionalOpencodeGoFile,
-  restoreOpencodeGoFileSnapshots,
-  snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
+import {
+  readOptionalProviderFile,
+  removeOptionalProviderFile,
+  restoreProviderFileSnapshots,
+  snapshotProviderFiles,
+} from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
@@ -477,11 +479,11 @@ export async function refreshOpencodeGoCatalogForUpdate(
     ...updates.map(({ path }) => path),
     ...(migrateRole ? [roleConfigPath] : []),
   ];
-  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
+  const snapshots = snapshotProviderFiles(transactionPaths);
   let guards = snapshots;
   try {
     await writePrivateFileAtomic(catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = snapshotProviderFiles(transactionPaths);
     const updatedAt = (options.now ?? (() => new Date()))().toISOString();
     await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
       source: deepseekSetupScriptUrl,
@@ -497,21 +499,21 @@ export async function refreshOpencodeGoCatalogForUpdate(
             appliedAt: updatedAt,
           } }),
     }, null, 2)}\n`);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
+    guards = snapshotProviderFiles(transactionPaths);
     for (const update of updates) {
       await writePrivateFileAtomic(update.path, update.content);
-      guards = snapshotOpencodeGoFiles(transactionPaths);
+      guards = snapshotProviderFiles(transactionPaths);
     }
     if (migrateRole) {
       writeManagedModelProviderRoleConfig(environment, {
         provider: role.provider,
         model: defaultModel,
       });
-      guards = snapshotOpencodeGoFiles(transactionPaths);
+      guards = snapshotProviderFiles(transactionPaths);
     }
   } catch (error) {
     try {
-      await restoreOpencodeGoFileSnapshots(snapshots, guards);
+      await restoreProviderFileSnapshots(snapshots, guards);
     } catch (rollbackError) {
       throw new AggregateError(
         [error, rollbackError],
@@ -764,14 +766,14 @@ async function restoreBackup(target, backup, existed) {
       readPrivateFileSync(backup, maximumPrivateConfigBytes),
     );
   } else if (existed === false) {
-    await removeOptionalOpencodeGoFile(target);
+    await removeOptionalProviderFile(target);
   } else {
     throw new Error("OpenCode Go 初始配置备份状态无效");
   }
 }
 
 async function readTomlFile(path) {
-  const content = await readOptionalOpencodeGoFile(path);
+  const content = await readOptionalProviderFile(path);
   if (content === undefined) return {};
   try {
     return parse(content.toString("utf8"));

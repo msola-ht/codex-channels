@@ -422,12 +422,12 @@ describe("Codex Connect setup", () => {
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
       label: "受管 Provider 模型设置",
-      hint: "设置 DeepSeek 与 OpenCode Go 各 Provider 的默认模型与思考等级",
+      hint: "设置各受管 Provider 的默认模型与思考等级",
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "model_window",
       label: "模型上下文窗口",
-      hint: "按模型名统一设置 DeepSeek 与 OpenCode Go 的上下文窗口占比",
+      hint: "按模型名统一设置受管 Provider 的上下文窗口占比",
     });
   });
 

@@ -1,4 +1,5 @@
 export type ManagedModelProviderId =
+  | "ccg"
   | "deepseek"
   | "ocg"
   | `ocg-${string}`
@@ -37,14 +38,17 @@ export interface ModelProviderDefinition {
   readonly baseUrl: string;
   readonly wireApi: "responses";
   readonly apiKeyEnvironmentKey: string;
-  /** 写入新模型目录时使用的默认模型；可选模型以目录文件为准 */
-  readonly defaultModel: string;
-  readonly defaultReasoningEffort: string;
+  /** 自动生成目录的 Provider 默认值；CCG 必须由文件和用户选择提供。 */
+  readonly defaultModel?: string;
+  readonly defaultReasoningEffort?: string;
   readonly supportsWebsockets?: boolean;
   readonly capabilities: ModelProviderCapabilities;
 }
 
 export const deepseekProviderDefinition: ModelProviderDefinition;
+export const commandCodeProviderDefinition: ModelProviderDefinition;
+export function isManagedProviderApiKeyValid(definition: ModelProviderDefinition, apiKey: unknown): boolean;
+export function isManagedProviderModelValid(definition: { id: string }, model: unknown): boolean;
 export const opencodeGoProviderDefinition: ModelProviderDefinition;
 export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
 

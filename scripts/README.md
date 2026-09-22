@@ -328,6 +328,8 @@
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 系统设置中的调试快捷开关使用 `debug` / `info`，
   高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
+- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 独立的本地模型目录导入与设置入口，写入前使用 Codex CLI 校验完整目录并检查共享子代理引用；配置生成和文件事务复用 OCG 共用的受管模块，模型由文件决定。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
 - `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
   仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
   DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入
@@ -352,10 +354,10 @@
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
 - `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
-  受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；DeepSeek 与
-  OpenCode Go 共同复用，账户注册和历史备份格式仍由各自适配层负责。
+  受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；OCG 与
+  CCG 共用完整模式配置生成，DeepSeek 复用配置原语，账户注册和历史备份格式仍由各自适配层负责。
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
-  路径、受限读取、快照和并发保护回滚原语，供账户新增、删除、目录刷新与恢复事务复用。
+  路径与 Profile 文件名；私有文件事务使用 `managed-provider-files.mjs`。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
   默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换只更新注册表，不修改共享子代理，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
