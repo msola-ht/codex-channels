@@ -203,7 +203,7 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 ```bash
 codexc remote
 codexc remote resume
-codexc remote --profile sf-deepseek resume
+codexc remote --profile sf-ds-<账户> resume
 ```
 
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。

@@ -54,8 +54,8 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  检查旧 `[network]` 与 Codex `.env` 的冲突和合并后的代理组合，持有共享代理文件锁完成备份、迁移与失败回滚；回滚时原文变化则保留当前代理文件与备份并报错；同时
+- `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；预检旧 DS 配置并收集显式账户 ID，取消或缺少 ID 时不停止服务；账户迁移在 Provider 文件升级后、目录刷新前执行。
+  先只读严格检查旧 `[network]` 与 Codex `.env` 的冲突和合并后的代理组合，持有共享代理文件锁完成备份、迁移与失败回滚；回滚时原文变化则保留当前代理文件与备份并报错；同时
   校验 `config.toml`、状态库、指标库、计划任务库、会话展示缓存及核心服务定义的完整状态，并返回不含凭据的修订
   计划、是否需要中断服务及按需阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
   App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
@@ -144,7 +144,7 @@
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
-- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek 多账户管理接口，为 WebUI 提供账户资源投影、迁移与配置预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
@@ -331,29 +331,12 @@
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 的 DS 目录获取、设置与更新入口，写入前使用 Codex CLI 校验完整目录并检查共享子代理引用；配置生成和文件事务复用受管模块。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
-- `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
-  仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入
-  `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
-  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
-  `~/.codex-connect/providers/deepseek/`，不自动创建或切换共享 `agents.external`；
-  共享角色只由 `codexc agents configure` 或设置菜单中的“共享第三方子代理”显式修改；
-  首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
-  确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
-  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
-  逐模型思考等级和上下文窗口占比；目录上下文更新时按原占比在新基准上重算窗口。退出固定模式时只还原 Setup
-  管理的字段（含模型目录里的上下文窗口与压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
-  安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装时为初始模型设置上下文窗口；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
-  模型设置”按模型维护 10–100% 窗口占比，只有明确改窗口时才写入模型目录的 `context_window`，
-  未请求窗口变更时目录条目保持原样，让压缩使用上游默认，不再使用会覆盖
-  全部模型的 Profile 顶层字段。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
-  Flash Vision Exp），会把 Profile 与同 Provider 共享子代理切到目录默认模型，并把
-  `from`/`to`/`appliedAt` 迁移记录写入模型目录清单；仍在目录中的模型保留用户选择。
+- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，保留目录字段和窗口设置；导出账户菜单与目录刷新入口。
+- `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、显式 ID 迁移、默认账户、删除与共享目录刷新事务；迁移保留 Key 与设置，旧统计不改写，不保留单账户运行入口。
+- `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc deepseek account` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
   上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
-- `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；OCG 与
   CCG 共用完整模式配置生成，DeepSeek 复用配置原语，账户注册和历史备份格式仍由各自适配层负责。

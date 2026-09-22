@@ -9,6 +9,7 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
+import { isDeepseekAccountProvider } from "./deepseek-accounts.mjs";
 import {
   readPrivateFileSync,
   writePrivateFileAtomicSync,
@@ -37,7 +38,7 @@ export function isOpencodeGoProvider(provider) {
 }
 
 export function sharedProviderProxyKey(provider) {
-  return isOpencodeGoProvider(provider) ? "ocg" : provider;
+  return isOpencodeGoProvider(provider) ? "ocg" : isDeepseekAccountProvider(provider) ? "deepseek" : provider;
 }
 
 export function opencodeGoAccountIdFromProvider(provider) {

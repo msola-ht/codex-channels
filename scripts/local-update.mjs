@@ -10,6 +10,8 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { stringify } from "smol-toml";
+import * as prompts from "@clack/prompts";
+import { hasLegacyDeepseekConfiguration, previewDeepseekAccountMigration, migrateDeepseekAccount } from "./deepseek-account-management.mjs";
 
 import {
   parseGatewayConfig,
@@ -266,7 +268,33 @@ export async function updateReasoningSummaryOnce(environment = process.env, opti
   return { changed };
 }
 
+export async function prepareDeepseekUpdateMigration(environment = process.env, {
+  deepseekMigrationId, requestDeepseekMigrationId,
+} = {}) {
+  if (!hasLegacyDeepseekConfiguration(environment)) return undefined;
+  const accountId = deepseekMigrationId ?? await requestDeepseekMigrationId?.();
+  if (accountId === undefined) {
+    throw new Error("旧 DS 账户需要迁移；请在交互终端运行 codexc update 并填写账户 ID，或先运行 codexc deepseek account migrate <ID>。尚未停止服务。");
+  }
+  previewDeepseekAccountMigration(accountId, { environment });
+  return accountId;
+}
+
+export async function requestDeepseekMigrationId(environment = process.env) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
+  const accountId = await prompts.text({
+    message: "旧 DS 账户迁移：填写账户 ID（保留 Key、模型设置和历史统计，旧对话不再接续）",
+    validate: (value) => {
+      try { previewDeepseekAccountMigration(value, { environment }); }
+      catch (error) { return error.message; }
+    },
+  });
+  if (prompts.isCancel(accountId)) throw new Error("已取消 DS 账户迁移，尚未停止服务");
+  return accountId;
+}
+
 export async function updateLocalInstallation(environment = process.env, options = {}) {
+  let deepseekMigrationId;
   const completedStages = [];
   let activeStage = "inspect";
   const runStage = async (stage, operation) => {
@@ -287,6 +315,7 @@ export async function updateLocalInstallation(environment = process.env, options
     inspection = await runStage("inspect", async () => {
       const current = await inspectLocalUpdatePlan(environment, options);
       assertLocalUpdateRevision(options.expectedRevision, current.revision);
+      deepseekMigrationId = await prepareDeepseekUpdateMigration(environment, options);
       return current;
     });
   } catch (error) {
@@ -344,9 +373,13 @@ export async function updateLocalInstallation(environment = process.env, options
         (options.removeObsoleteServices
           ?? (() => removeObsoleteServiceInstallations(environment)))());
     }
-    await runStage("provider-files", () =>
-      (options.updateProviderFiles
-        ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))());
+    await runStage("provider-files", async () => {
+      await (options.updateProviderFiles
+        ?? (() => backupAndMigrateProviderFiles(environment, { apply: true })))();
+      if (deepseekMigrationId !== undefined) {
+        await migrateDeepseekAccount({ accountId: deepseekMigrationId, confirmMigration: true }, { environment });
+      }
+    });
     providerCatalogs = await runStage("provider-catalogs", () =>
       (options.updateProviderCatalogs
         ?? (() => refreshManagedProviderCatalogsForUpdate(environment)))());
@@ -1199,6 +1232,8 @@ if (
 ) {
   try {
     const result = await updateLocalInstallation(process.env, {
+      deepseekMigrationId: process.argv[2],
+      requestDeepseekMigrationId,
       onInspected: ({ config, services }) => {
         writeCliMessage("note", "本地更新预检通过。");
         console.log(`配置：${config.configPath}`);
@@ -1277,8 +1312,8 @@ if (
             );
             if (definition.id === "deepseek") {
               console.log(result.modelMigrated
-                ? `已切换旧默认模型：deepseek → ${result.selectedModel}`
-                : `当前默认选择保持：${result.selectedModel}`);
+                ? `已切换旧默认模型：${result.migratedProviders.join("、")}`
+                : "DeepSeek 各账户的默认模型均已保留。");
               return;
             }
             if (definition.id === opencodeGoProviderDefinition.id) {

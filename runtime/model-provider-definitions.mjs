@@ -4,18 +4,19 @@ import {
   opencodeGoProviderId,
   opencodeGoAccountDisplayName,
 } from "./opencode-go-accounts.mjs";
+import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey } from "./deepseek-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
   catalogSources: new Set(["none", "deepseek-official"]),
   accountAdapters: new Set(["none", "deepseek", "opencode-go"]),
-  instanceAdapters: new Set(["single", "opencode-go-accounts"]),
+  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts"]),
   catalogUpdateAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
 });
 
 const deepseekProviderCapabilities = Object.freeze({
   catalogSource: "deepseek-official",
   accountAdapter: "deepseek",
-  instanceAdapter: "single",
+  instanceAdapter: "deepseek-accounts",
   catalogUpdateAdapter: "deepseek",
 });
 
@@ -141,12 +142,25 @@ export function expandManagedModelProviderDefinitions(
         return [definition];
       case "opencode-go-accounts":
         return loadOpencodeGoAccountDefinitions(environment);
+      case "deepseek-accounts":
+        return loadDeepseekAccounts(environment).map((account) => deepseekAccountDefinition(account.id));
       default:
         throw new Error(
           `未知受管 Provider 实例适配器：${String(capabilities.instanceAdapter)}`,
         );
     }
   }));
+}
+
+export function deepseekAccountDefinition(accountId) {
+  const id = deepseekProviderId(accountId);
+  const profileName = `sf-${id}`;
+  return Object.freeze({
+    ...deepseekProviderDefinition,
+    id, accountId, storageId: "deepseek", displayName: `DS ${accountId}`,
+    profileName, profileFileName: `${profileName}.config.toml`,
+    apiKeyEnvironmentKey: deepseekApiKeyEnvironmentKey(accountId),
+  });
 }
 
 function assertManagedModelProviderProfile(definition) {

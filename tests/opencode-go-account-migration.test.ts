@@ -41,7 +41,7 @@ describe("OpenCode Go account migration", () => {
     expect(readFileSync(join(codexHome, "sf-opencode-go.config.toml"), "utf8"))
       .toContain('model_provider = "opencode-go"');
     expect(existsSync(opencodeGoAccountMarkerPath(environment, "main"))).toBe(false);
-    expect(loadManagedModelProviders(environment)).toEqual([{ provider: "deepseek" }]);
+    expect(loadManagedModelProviders(environment)).toEqual([{ provider: "ds-test" }]);
   });
 
   it("migrates a registered legacy account without renaming its account id", async () => {
@@ -66,8 +66,8 @@ describe("OpenCode Go account migration", () => {
 
   it("migrates a legacy exclusive layout without touching the base config", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "managed.toml"));
-    rmSync(join(codexHome, "sf-deepseek.config.toml"));
+    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "accounts", "test", "managed.toml"));
+    rmSync(join(codexHome, "sf-ds-test.config.toml"));
     configureLegacyOpenCodeGo(codexHome, "exclusive");
     const environment = testEnvironment(codexHome);
 
@@ -123,7 +123,7 @@ describe("OpenCode Go account migration", () => {
     expect(readOpencodeGoAccountMarker(environment, "lunare"))
       .toMatchObject({ provider: "ocg-lunare", mode: "switching" });
     expect(loadManagedModelProviders(environment)).toEqual([
-      { provider: "deepseek" },
+      { provider: "ds-test" },
       { provider: "ocg-main" },
       { provider: "ocg-lunare" },
     ]);

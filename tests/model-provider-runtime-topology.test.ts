@@ -54,14 +54,14 @@ describe("model provider App Server topology", () => {
     );
 
     expect(descriptor.primaryProvider).toBe("openai");
-    expect(descriptor.managedProviders[0]?.provider).toBe("deepseek");
+    expect(descriptor.managedProviders[0]?.provider).toBe("ds-test");
     expect(descriptor.socketPaths).toEqual([
       resolve("/private/codexc/runtime/codex.sock"),
-      resolve("/private/codexc/runtime/codex-deepseek.sock"),
+      resolve("/private/codexc/runtime/codex-ds-test.sock"),
     ]);
     expect(descriptor.topology).toEqual({
       primaryProvider: "openai",
-      managedProviders: ["deepseek"],
+      managedProviders: ["ds-test"],
       socketPaths: descriptor.socketPaths,
     });
   });
@@ -72,7 +72,7 @@ describe("model provider App Server topology", () => {
     const environment = testEnvironment(codexHome);
 
     expect(loadManagedModelProviders(environment)).toEqual([
-      { provider: "deepseek" },
+      { provider: "ds-test" },
       { provider: "ocg-main" },
     ]);
     expect(loadManagedProviderAppServers(environment).map((provider) => ({
@@ -81,11 +81,11 @@ describe("model provider App Server topology", () => {
       retryPolicy: provider.arguments.filter((argument) =>
         argument.includes("_max_retries=")),
     }))).toEqual([{
-      provider: "deepseek",
-      environmentKeys: ["CODEX_CONNECT_DEEPSEEK_API_KEY"],
+      provider: "ds-test",
+      environmentKeys: ["CODEX_CONNECT_DEEPSEEK_TEST_API_KEY"],
       retryPolicy: [
-        "model_providers.deepseek.request_max_retries=1",
-        "model_providers.deepseek.stream_max_retries=0",
+        "model_providers.ds-test.request_max_retries=1",
+        "model_providers.ds-test.stream_max_retries=0",
       ],
     }, {
       provider: "ocg-main",
@@ -96,13 +96,13 @@ describe("model provider App Server topology", () => {
       ],
     }]);
     expect(validateConfiguredModelProviders(environment)).toEqual([
-      { provider: "deepseek", mode: "switching" },
+      { provider: "ds-test", mode: "switching" },
       { provider: "ocg-main", mode: "switching" },
     ]);
 
-    writeManagedModelProviderRoleConfig(environment, { provider: "deepseek" });
+    writeManagedModelProviderRoleConfig(environment, { provider: "ds-test" });
     expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
-      .toContain('model_provider = "deepseek"');
+      .toContain('model_provider = "ds-test"');
     expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
       .toContain("request_max_retries = 1");
   });
@@ -112,7 +112,7 @@ describe("model provider App Server topology", () => {
     const environment = testEnvironment(codexHome);
 
     expect(loadPrimaryModelProvider(environment)).toBe("openai");
-    expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
+    expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "ds-test" });
   });
 
   it("keeps an inactive custom Provider on the stable OpenAI primary topology", async () => {
@@ -146,14 +146,14 @@ describe("model provider App Server topology", () => {
     const codexHome = await configuredHome("exclusive");
     const environment = testEnvironment(codexHome);
 
-    expect(loadPrimaryModelProvider(environment)).toBe("deepseek");
+    expect(loadPrimaryModelProvider(environment)).toBe("ds-test");
     expect(loadManagedModelProvider(environment)).toBeUndefined();
   });
 
   it("uses OpenCode Go as the primary server in exclusive mode", async () => {
     const codexHome = await configuredHome("switching");
-    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "managed.toml"));
-    rmSync(join(codexHome, "sf-deepseek.config.toml"));
+    rmSync(join(connectHomeFor(codexHome), "providers", "deepseek", "accounts", "test", "managed.toml"));
+    rmSync(join(codexHome, "sf-ds-test.config.toml"));
     configureOpenCodeGo(codexHome, "exclusive");
     const environment = testEnvironment(codexHome);
 
@@ -177,15 +177,15 @@ describe("model provider App Server topology", () => {
   it("derives a private sibling socket without changing the configured primary socket", () => {
     expect(providerAppServerSocketPath(
       "/private/runtime/codex-app-server.sock",
-      "deepseek",
-    )).toBe(resolve("/private/runtime/codex-app-server-deepseek.sock"));
+      "ds-test",
+    )).toBe(resolve("/private/runtime/codex-app-server-ds-test.sock"));
   });
 
   it("derives a private metrics socket beside the provider App Server socket", () => {
     expect(providerMetricsSocketPath(
       "/private/runtime/codex-app-server.sock",
-      "deepseek",
-    )).toBe(resolve("/private/runtime/codex-app-server-deepseek-metrics.sock"));
+      "ds-test",
+    )).toBe(resolve("/private/runtime/codex-app-server-ds-test-metrics.sock"));
   });
 
   it("preserves a configured OpenAI base URL behind the local metrics proxy", async () => {
@@ -219,7 +219,7 @@ describe("model provider App Server topology", () => {
       throw new Error("测试环境缺少 DeepSeek 托管配置");
     }
     expect(managed.arguments).toContain(
-      "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
+      "model_providers.ds-test.base_url=\"https://api.deepseek.com/\"",
     );
     expect(managed.arguments).toContain('model_reasoning_effort="high"');
     expect(managed.arguments).not.toContain("model_auto_compact_token_limit=629146");
@@ -231,13 +231,13 @@ describe("model provider App Server topology", () => {
     );
 
     expect(overridden).not.toContain(
-      "model_providers.deepseek.base_url=\"https://api.deepseek.com/\"",
+      "model_providers.ds-test.base_url=\"https://api.deepseek.com/\"",
     );
     expect(overridden).toContain(
-      "model_providers.deepseek.base_url=\"http://127.0.0.1:38473/\"",
+      "model_providers.ds-test.base_url=\"http://127.0.0.1:38473/\"",
     );
-    expect(overridden).toContain("model_providers.deepseek.request_max_retries=1");
-    expect(overridden).toContain("model_providers.deepseek.stream_max_retries=0");
+    expect(overridden).toContain("model_providers.ds-test.request_max_retries=1");
+    expect(overridden).toContain("model_providers.ds-test.stream_max_retries=0");
     expect(overridden.at(-2)).toBe("-c");
     expect(overridden.some((value, index) =>
       value === "-c" && overridden[index + 1] === "-c"

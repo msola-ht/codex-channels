@@ -104,7 +104,7 @@ Codex 用户配置：
 - [渠道展示与本地指标](docs/display.md)
 - [错误字典](docs/errors.md)
 - [本地指标 WebUI](docs/webui.md)
-- [DeepSeek](docs/deepseek.md)
+- [DeepSeek 多账户与旧配置迁移](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)

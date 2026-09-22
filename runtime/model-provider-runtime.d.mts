@@ -190,6 +190,7 @@ export function withPreservedManagedModelCatalogSettings(
 
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,
+  provider?: string,
 ): string;
 
 export function loadOpencodeGoAccountCredential(

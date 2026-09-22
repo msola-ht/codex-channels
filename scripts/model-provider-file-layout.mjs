@@ -24,7 +24,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 const layoutVersion = 1;
 const profileManagedProviderDefinitions = managedModelProviderDefinitions.filter(
-  ({ capabilities }) => capabilities.instanceAdapter === "single",
+  ({ id, capabilities }) => id === "deepseek" || capabilities.instanceAdapter === "single",
 );
 
 export function migrateManagedModelProviderFiles(environment = process.env) {
@@ -92,7 +92,7 @@ export function migrateManagedModelProviderFiles(environment = process.env) {
 export function migrateManagedModelProviderModelSettings(environment = process.env) {
   migrateLegacyOpencodeGoAccount(environment);
   const codexHome = codexHomePath(environment);
-  const configured = loadManagedModelProviderDefinitions(environment).flatMap((definition) => {
+  const configured = [deepseekProviderDefinition, ...loadManagedModelProviderDefinitions(environment)].flatMap((definition) => {
     const markerPath = managedProviderMarkerPath(environment, definition);
     if (!existsSync(markerPath)) return [];
     assertPrivateRegularFile(markerPath);
@@ -234,7 +234,7 @@ function migrateProviderModelSettings(environment, { definition, mode }) {
 function migrateRoleModelSettings(environment, rolePath) {
   assertPrivateRegularFile(rolePath);
   const document = parseManagedToml(rolePath);
-  const definition = loadManagedModelProviderDefinitions(environment).find(
+  const definition = [deepseekProviderDefinition, ...loadManagedModelProviderDefinitions(environment)].find(
     (candidate) => candidate.id === document.model_provider,
   );
   if (!definition || typeof document.model !== "string") {

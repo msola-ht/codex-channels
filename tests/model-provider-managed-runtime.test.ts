@@ -74,16 +74,16 @@ describe("managed model provider runtime", () => {
   it("rejects a switching profile with a root context override", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
-      join(codexHome, "sf-deepseek.config.toml"),
+      join(codexHome, "sf-ds-test.config.toml"),
       providerProfile("switching", providerCatalogPath(codexHome)).replace(
-        'model_provider = "deepseek"\n',
-        'model_provider = "deepseek"\nmodel_context_window = 1048576\n',
+        'model_provider = "ds-test"\n',
+        'model_provider = "ds-test"\nmodel_context_window = 1048576\n',
       ),
       { mode: 0o600 },
     );
     const environment = testEnvironment(codexHome);
 
-    expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "deepseek" });
+    expect(loadManagedModelProvider(environment)).toMatchObject({ provider: "ds-test" });
     expect(() => loadManagedProviderAppServer(environment))
       .toThrow("模型目录或思考等级无效");
   });
@@ -91,7 +91,7 @@ describe("managed model provider runtime", () => {
   it("rejects a switching profile without the reasoning mirror", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
-      join(codexHome, "sf-deepseek.config.toml"),
+      join(codexHome, "sf-ds-test.config.toml"),
       providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         "",
@@ -107,7 +107,7 @@ describe("managed model provider runtime", () => {
   it("rejects a switching profile whose reasoning mirror differs from the catalog default", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
-      join(codexHome, "sf-deepseek.config.toml"),
+      join(codexHome, "sf-ds-test.config.toml"),
       providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         'model_reasoning_effort = "low"\n',
@@ -123,7 +123,7 @@ describe("managed model provider runtime", () => {
   it("repairs a switching profile missing the reasoning mirror when writing defaults", async () => {
     const codexHome = await configuredHome("switching");
     writeFileSync(
-      join(codexHome, "sf-deepseek.config.toml"),
+      join(codexHome, "sf-ds-test.config.toml"),
       providerProfile("switching", providerCatalogPath(codexHome)).replace(
         'model_reasoning_effort = "high"\n',
         "",
@@ -132,20 +132,20 @@ describe("managed model provider runtime", () => {
     );
     const environment = testEnvironment(codexHome);
 
-    expect(writeManagedModelProviderProfileDefault("deepseek", {
+    expect(writeManagedModelProviderProfileDefault("ds-test", {
       model: "deepseek-v4-flash",
       reasoningEffort: "high",
       contextWindow: 629_146,
     }, environment)).toMatchObject({ mode: "switching" });
     expect(parse(readFileSync(
-      join(codexHome, "sf-deepseek.config.toml"),
+      join(codexHome, "sf-ds-test.config.toml"),
       "utf8",
     ))).toMatchObject({
       model: "deepseek-v4-flash",
       model_reasoning_effort: "high",
     });
     expect(validateConfiguredModelProvider(environment))
-      .toEqual({ provider: "deepseek", mode: "switching" });
+      .toEqual({ provider: "ds-test", mode: "switching" });
   });
 
   it.each([undefined, null])("retains the original window when max_context_window is %s", async (maximum) => {
@@ -171,9 +171,9 @@ describe("managed model provider runtime", () => {
     const exclusiveHome = await configuredHome("exclusive");
 
     expect(validateConfiguredModelProvider(testEnvironment(switchingHome)))
-      .toEqual({ provider: "deepseek", mode: "switching" });
+      .toEqual({ provider: "ds-test", mode: "switching" });
     expect(validateConfiguredModelProvider(testEnvironment(exclusiveHome)))
-      .toEqual({ provider: "deepseek", mode: "exclusive" });
+      .toEqual({ provider: "ds-test", mode: "exclusive" });
   });
 
   it("rejects a managed configuration whose actual model catalog is missing", async () => {
@@ -224,8 +224,8 @@ describe("managed model provider runtime", () => {
     writeFileSync(
       join(codexHome, "config.toml"),
       providerProfile("exclusive", providerCatalogPath(codexHome)).replace(
-        'model_provider = "deepseek"\n',
-        'model_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+        'model_provider = "ds-test"\n',
+        'model_provider = "ds-test"\nmodel_reasoning_effort = "high"\n',
       ),
       { mode: 0o600 },
     );

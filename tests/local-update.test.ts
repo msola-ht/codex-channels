@@ -911,6 +911,7 @@ describe("local update", () => {
     delete environment.CODEX_CONNECT_SERVICE_ROLE;
 
     const result = await updateLocalInstallation(environment, {
+      deepseekMigrationId: "personal",
       inspectConfig: () => ({
         configPath: join(connectHome, "config.toml"),
         missingSafeDefaults: [],
@@ -935,7 +936,9 @@ describe("local update", () => {
     const providerDirectory = join(connectHome, "providers", "deepseek");
     expect(existsSync(join(providerDirectory, "models.json"))).toBe(true);
     expect(existsSync(join(providerDirectory, "models.manifest.json"))).toBe(true);
-    expect(existsSync(join(providerDirectory, "managed.toml"))).toBe(true);
+    expect(existsSync(join(providerDirectory, "managed.toml"))).toBe(false);
+    expect(existsSync(join(providerDirectory, "accounts/personal/managed.toml"))).toBe(true);
+    expect(existsSync(join(codexHome, "sf-ds-personal.config.toml"))).toBe(true);
     expect(existsSync(catalogPath)).toBe(false);
     expect(readdirSync(join(connectHome, "backups")).some((name) =>
       name.startsWith("provider-migration-"))).toBe(true);

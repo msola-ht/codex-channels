@@ -18,6 +18,7 @@ import {
   loadManagedModelProviderDefinitions,
 } from "./model-provider-definitions.mjs";
 import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
+import { deepseekAccountMarkerPath } from "./deepseek-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
@@ -29,7 +30,9 @@ export function managedProviderDirectory(environment, definition) {
 
 export function managedProviderMarkerPath(environment, definition) {
   if (definition.accountId !== undefined) {
-    return opencodeGoAccountMarkerPath(environment, definition.accountId);
+    return definition.storageId === "deepseek"
+      ? deepseekAccountMarkerPath(environment, definition.accountId)
+      : opencodeGoAccountMarkerPath(environment, definition.accountId);
   }
   return join(
     managedProviderDirectory(environment, definition),
@@ -191,13 +194,8 @@ export function writeManagedModelProviderProfileDefault(
   delete document.model_context_window;
   delete document.model_auto_compact_token_limit;
   delete document.model_auto_compact_token_limit_scope;
-  writePrivateFileAtomicSync(profile.catalogPath, nextCatalog);
-  try {
-    writePrivateFileAtomicSync(profilePath, stringify(document));
-  } catch (error) {
-    writePrivateFileAtomicSync(profile.catalogPath, previousCatalog);
-    throw error;
-  }
+  writeCatalogWithProfileMirrors(environment, definition, profile.catalogPath, nextCatalog,
+    new Map([[profilePath, stringify(document)]]));
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: "mirror",
@@ -214,10 +212,8 @@ export function writeManagedModelProviderCatalogSettings(
   validateManagedModelSettings(definition, settings);
   const previousContent = readPrivateFile(path, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
-  writePrivateFileAtomicSync(
-    path,
-    updateModelCatalogSettings(previousContent, definition, settings),
-  );
+  writeCatalogWithProfileMirrors(environment, definition, path,
+    updateModelCatalogSettings(previousContent, definition, settings));
   return previous;
 }
 
@@ -232,7 +228,42 @@ export function restoreManagedModelProviderCatalogContent(
   content,
   environment = process.env,
 ) {
-  writePrivateFileAtomicSync(managedProviderCatalogPath(provider, environment).path, content);
+  const { definition, path } = managedProviderCatalogPath(provider, environment);
+  writeCatalogWithProfileMirrors(environment, definition, path, content);
+}
+
+function writeCatalogWithProfileMirrors(environment, definition, catalogPath, content, updates = new Map()) {
+  // DS 账户共用目录；目录思考等级变化时同步其他账户的 Profile 镜像。
+  if (definition.storageId === "deepseek") {
+    const catalog = JSON.parse(content);
+    for (const sibling of managedProviderDefinitions(environment)) {
+      if (sibling.storageId !== "deepseek" || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
+      const path = join(codexHomePath(environment), sibling.profileFileName);
+      if (updates.has(path)) continue;
+      const document = record(parse(readPrivateFile(path)));
+      const model = catalog.models.find((entry) => entry.slug === document.model);
+      if (!model) throw new Error(`DeepSeek 目录不支持账户 ${sibling.accountId} 当前模型`);
+      document.model_reasoning_effort = model.default_reasoning_level;
+      updates.set(path, stringify(document));
+    }
+  }
+  updates = new Map([[catalogPath, content], ...updates]);
+  const originals = new Map([...updates.keys()].map((path) => [path, readPrivateFile(path, maximumCatalogBytes)]));
+  const written = [];
+  try {
+    for (const [path, next] of updates) {
+      writePrivateFileAtomicSync(path, next);
+      written.push(path);
+    }
+  } catch (error) {
+    const errors = [error];
+    for (const path of written.reverse()) {
+      try { writePrivateFileAtomicSync(path, originals.get(path)); }
+      catch (rollbackError) { errors.push(rollbackError); }
+    }
+    if (errors.length > 1) throw new AggregateError(errors, "模型目录与 Profile 回滚未完成", { cause: error });
+    throw error;
+  }
 }
 
 function managedProviderCatalogPath(provider, environment) {

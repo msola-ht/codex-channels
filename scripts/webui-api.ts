@@ -679,9 +679,8 @@ export interface ManagementAccountSettingsResponse {
   }
   deepseek: {
     configured: boolean
-    mode: "switching" | "exclusive" | null
-    model: string | null
-    restoreAvailable: boolean
+    migrationRequired: boolean
+    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
 
@@ -702,12 +701,13 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "opencode.account.remove"; accountId: string; confirmHistoryLoss?: boolean }
   | {
       operation: "deepseek.configure"
+      accountId: string
+      reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey: string
-      windowPercent?: number
       confirmExclusiveConfigChange?: boolean
     }
-  | { operation: "deepseek.restore"; confirmRestore?: boolean }
+  | { operation: "deepseek.migrate" | "deepseek.default" | "deepseek.remove"; accountId: string }
 
 export interface ManagementAccountSettingsPreview {
   operation: string

@@ -117,8 +117,10 @@ describe("WebUI management operation boundaries", () => {
       .toMatchObject({ confirmHistoryLoss: true });
     expect(accountSettingsApplyInput({ operation: "deepseek.configure", mode: "exclusive", apiKey: "secret" }))
       .toMatchObject({ confirmExclusiveConfigChange: true });
-    expect(accountSettingsApplyInput({ operation: "deepseek.restore" }))
-      .toMatchObject({ confirmRestore: true });
+    expect(accountSettingsApplyInput({ operation: "deepseek.migrate", accountId: "work" }))
+      .toMatchObject({ confirmMigration: true });
+    expect(accountSettingsApplyInput({ operation: "deepseek.remove", accountId: "work" }))
+      .toMatchObject({ confirmRemove: true });
   });
 
   it("accepts only loopback management clients and matching bearer tokens", () => {

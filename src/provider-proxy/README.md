@@ -51,7 +51,7 @@
   代理关闭时取消在途刷新并执行有上限的等待。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
-  `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
+  `network.proxy` 选择传入上游 Agent。OpenCode Go 与 DeepSeek 的共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按 `ocg-<账户>` Socket 上报；私有 `/role/external` 请求归属
   `agents.external` 选择的默认账户并在转发前剥离该前缀。
@@ -103,7 +103,7 @@
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定请求统计输入事件。
 App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应
-代理；所有 OpenCode Go 账户共享同一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
+代理；OpenCode Go、DeepSeek 各自的全部账户共享各自一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
 Server 的 `base_url` 带 `/go/<账户>` 前缀。不暴露手工监听配置。
 服务通过共享运行时的私有监管 Socket 独占完整 App Server 拓扑；前台只能复用监管身份和
 Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配置级所有权 Socket 全局互斥，

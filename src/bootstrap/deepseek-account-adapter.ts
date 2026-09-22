@@ -1,5 +1,5 @@
 import { loadDeepseekAccountCredential } from "../../runtime/model-provider-runtime.mjs";
-import { deepseekProviderDefinition } from "../../runtime/model-provider-definitions.mjs";
+import { loadDeepseekAccounts, deepseekProviderId, isDeepseekAccountProvider } from "../../runtime/deepseek-accounts.mjs";
 import { readBoundedFetchBody } from "./bounded-fetch-body.js";
 
 import type {
@@ -18,15 +18,16 @@ export function createDeepseekAccountAdapter(
 ): ProviderAccountAdapter {
   const environment = options.environment ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const provider = options.provider ?? deepseekProviderDefinition.id;
-  if (provider !== deepseekProviderDefinition.id) {
+  const defaultAccount = options.provider === undefined ? loadDeepseekAccounts(environment).find((account) => account.default) : undefined;
+  const provider = options.provider ?? (defaultAccount ? deepseekProviderId(defaultAccount.id) : "");
+  if (!isDeepseekAccountProvider(provider)) {
     throw new Error(`DeepSeek 账户适配器不支持 Provider：${provider}`);
   }
   return {
     provider,
     async accountUsage() {
       try {
-        const apiKey = loadDeepseekAccountCredential(environment);
+        const apiKey = loadDeepseekAccountCredential(environment, provider);
         const response = await fetchImpl(deepseekBalanceUrl, {
           method: "GET",
           headers: {
@@ -43,7 +44,7 @@ export function createDeepseekAccountAdapter(
           tooLarge: () => new Error("DeepSeek balance response is too large"),
           missingBody: () => new Error("DeepSeek balance response is empty"),
         });
-        return parseBalanceResponse(JSON.parse(body.toString("utf8")) as unknown);
+        return { ...parseBalanceResponse(JSON.parse(body.toString("utf8")) as unknown), provider };
       } catch {
         throw new UserFacingError(
           "provider.account.unavailable",
@@ -61,7 +62,7 @@ export interface DeepseekAccountAdapterOptions {
   provider?: string;
 }
 
-function parseBalanceResponse(value: unknown): ProviderAccountUsage {
+function parseBalanceResponse(value: unknown): Extract<ProviderAccountUsage, { kind: "balance" }> {
   const response = record(value);
   if (typeof response.is_available !== "boolean" || !Array.isArray(response.balance_infos)) {
     throw new Error("DeepSeek balance response schema is invalid");

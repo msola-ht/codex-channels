@@ -45,6 +45,7 @@ import {
   opencodeGoProviderId,
   sharedProviderProxyKey,
 } from "./opencode-go-accounts.mjs";
+import { loadDeepseekAccounts, deepseekAccountIdFromProvider, deepseekProviderId } from "./deepseek-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
@@ -185,7 +186,14 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               );
             },
           }
-        : {
+        : provider === "deepseek" ? {
+            accountIds: dsAccounts.map((account) => account.id),
+            defaultAccountId: dsRoleAccountId ?? dsAccounts.find((account) => account.default)?.id,
+            onMetrics: (metrics, accountId) => {
+              if (accountId === undefined) throw new Error("DS 统计缺少账户 ID");
+              return sendProviderProxyMetrics(providerMetricsSocketPath(socketPath, deepseekProviderId(accountId)), metrics);
+            },
+          } : {
             onMetrics: (metrics) => sendProviderProxyMetrics(
               providerMetricsSocketPath(socketPath, provider),
               metrics,
@@ -231,6 +239,9 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         }
       : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
+  const dsAccounts = loadDeepseekAccounts(runtime.environment);
+  const dsRoleAccountId = thirdPartyRole ? deepseekAccountIdFromProvider(thirdPartyRole.provider) : undefined;
+  const proxyAccountId = (provider) => opencodeGoAccountIdFromProvider(provider) ?? deepseekAccountIdFromProvider(provider);
   const goAccountIds = goAccounts.map((account) => account.id);
   const goDefaultAccount = thirdPartyRole
     && opencodeGoAccountIdFromProvider(thirdPartyRole.provider)
@@ -414,8 +425,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               ))),
         );
         proxy = startedProxy.proxy;
-        const providerBaseUrl = isGoProvider(provider)
-          ? `${startedProxy.baseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
+        const providerBaseUrl = proxyAccountId(provider) !== undefined
+          ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
         refreshThirdPartyRoleConfig(
           provider,
@@ -631,15 +642,15 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      const providerKey = isGoProvider(definition.id) ? "ocg" : definition.id;
+      const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
           ? await goProxyOptions()
           : await proxyOptionsForUrl(new URL(definition.baseUrl))),
       );
-      const primaryBaseUrl = isGoProvider(definition.id)
-        ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
+      const primaryBaseUrl = proxyAccountId(definition.id) !== undefined
+        ? `${localBaseUrl}/go/${proxyAccountId(definition.id)}`
         : localBaseUrl;
       primaryArguments = withProviderBaseUrl(
         primaryArguments,
@@ -656,7 +667,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       const definition = providerDefinitions.get(provider);
       const customDefinition = customSwitchingProvidersById.get(provider);
       if (!definition && !customDefinition) throw new Error(`未知第三方 Provider：${provider}`);
-      const providerKey = isGoProvider(provider) ? "ocg" : provider;
+      const providerKey = sharedProviderProxyKey(provider);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
         withExternalRoleMetrics(provider, isGoProvider(provider)

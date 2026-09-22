@@ -1,3 +1,4 @@
+import { loadDeepseekAccounts, deepseekAccountIdFromProvider } from "../runtime/deepseek-accounts.mjs";
 import {
   GatewayAccountRefreshError,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -246,6 +247,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       });
     }
     const configuredAccounts = accounts ?? [];
+    const dsAccounts = loadDeepseekAccounts(environment);
     const accountById = new Map(configuredAccounts.map((account) => [account.id, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
@@ -256,15 +258,17 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
           || (snapshot.accountId !== null && accountById.has(snapshot.accountId));
       })
       .map((snapshot) => {
-        const account = snapshot.accountId === null
+        const dsAccountId = deepseekAccountIdFromProvider(snapshot.provider);
+        const dsAccount = dsAccounts.find((entry) => entry.id === dsAccountId);
+        const account = !snapshot.provider.startsWith("ocg-") || snapshot.accountId === null
           ? undefined
           : accountById.get(snapshot.accountId);
         return {
           ...snapshot,
-          displayName: account === undefined
+          displayName: dsAccount ? `DS ${dsAccount.id}` : account === undefined
             ? snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider
             : opencodeGoAccountDisplayName(account),
-          default: account?.default ?? false,
+          default: dsAccount?.default ?? account?.default ?? false,
         };
       });
     for (const account of configuredAccounts) {

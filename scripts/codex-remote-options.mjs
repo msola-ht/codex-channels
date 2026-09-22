@@ -214,7 +214,7 @@ function nonCanonicalManagedProfileName(definition) {
       ? "opencode-go"
       : `opencode-go-${definition.accountId}`;
   }
-  return definition.id === "deepseek" || isOpencodeGoProviderNamespace(definition.id)
+  return definition.storageId === "deepseek" || isOpencodeGoProviderNamespace(definition.id)
     ? definition.id
     : undefined;
 }
@@ -232,6 +232,8 @@ function reservedManagedProfileArgument(args, index) {
     profile = argument.slice(2);
   }
   return profile === "sf-custom"
+    || profile === "sf-deepseek"
+    || profile?.startsWith("sf-ds-")
     || profile?.startsWith("sf-custom-")
     || profile === "sf-opencode-go"
     || profile?.startsWith("sf-opencode-go-")
@@ -242,6 +244,7 @@ function reservedManagedProfileArgument(args, index) {
 }
 
 function reservedManagedProfileMessage(profile) {
+  if (profile === "sf-deepseek") return "旧 DeepSeek 单账户 Profile 已停用，请先迁移账户并使用 --profile sf-ds-<账户>";
   if (profile === "sf-custom") {
     return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
   }

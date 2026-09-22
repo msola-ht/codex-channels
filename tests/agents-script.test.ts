@@ -30,7 +30,7 @@ import type {
   ThirdPartyAgentProvider,
 } from "../scripts/agents.mjs";
 import {
-  deepseekProviderDefinition,
+  deepseekAccountDefinition,
   opencodeGoProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import type {
@@ -55,7 +55,7 @@ import {
 describe("codexc agents script", () => {
   it("previews a shared role change without prompts or configuration writes", () => {
     const preview = previewThirdPartyAgentChange(
-      { action: "configure", provider: "deepseek", model: "deepseek-v4-pro" },
+      { action: "configure", provider: "ds-test", model: "deepseek-v4-pro" },
       {
         environment: {},
         loadProviders: managementProviders,
@@ -68,8 +68,8 @@ describe("codexc agents script", () => {
       operation: "configure",
       current: { configured: false, provider: null, model: null },
       selection: {
-        provider: "deepseek",
-        providerDisplayName: "DeepSeek",
+        provider: "ds-test",
+        providerDisplayName: "DS test",
         model: "deepseek-v4-pro",
         modelDisplayName: "DeepSeek V4 Pro",
       },
@@ -81,7 +81,7 @@ describe("codexc agents script", () => {
   it("returns stable field errors from the shared role management interface", () => {
     try {
       previewThirdPartyAgentChange(
-        { action: "configure", provider: "deepseek", model: "unknown-model" },
+        { action: "configure", provider: "ds-test", model: "unknown-model" },
         {
           environment: {},
           loadProviders: managementProviders,
@@ -103,7 +103,7 @@ describe("codexc agents script", () => {
       model: model ?? "deepseek-flash",
     }));
     const configured = await applyThirdPartyAgentChange(
-      { action: "configure", provider: "deepseek" },
+      { action: "configure", provider: "ds-test" },
       {
         environment: {},
         loadProviders: managementProviders,
@@ -115,10 +115,10 @@ describe("codexc agents script", () => {
       action: "configured",
       activation: "restart-app-server",
       previous: { configured: false, provider: null, model: null },
-      selection: { provider: "deepseek", model: "deepseek-flash" },
+      selection: { provider: "ds-test", model: "deepseek-flash" },
     });
     expect(configureRole).toHaveBeenCalledWith(
-      "deepseek",
+      "ds-test",
       "deepseek-flash",
       {},
     );
@@ -144,14 +144,14 @@ describe("codexc agents script", () => {
   it("configures the shared role through the Setup menu", async () => {
     const configureRole = vi.fn(async () => ({
       role: "external" as const,
-      provider: "deepseek" as const,
+      provider: "ds-test" as const,
       model: "deepseek-v4-pro",
     }));
     const output: string[] = [];
     const prompts = {
       select: vi.fn()
         .mockResolvedValueOnce("configure")
-        .mockResolvedValueOnce("deepseek")
+        .mockResolvedValueOnce("ds-test")
         .mockResolvedValueOnce("deepseek-v4-pro"),
       confirm: vi.fn(),
       isCancel: () => false,
@@ -162,8 +162,8 @@ describe("codexc agents script", () => {
       output: { write: (value: string) => output.push(value) > 0 },
       prompts,
       loadProviders: () => [{
-        provider: "deepseek",
-        displayName: "DeepSeek",
+        provider: "ds-test",
+        displayName: "DS test",
         model: "deepseek-flash",
         reasoningEffort: "high",
         mode: "switching",
@@ -197,7 +197,7 @@ describe("codexc agents script", () => {
 
     expect(result).toEqual({
       action: "configured",
-      provider: "deepseek",
+      provider: "ds-test",
       model: "deepseek-v4-pro",
       activation: "restart-app-server",
       activationResult: {
@@ -206,8 +206,8 @@ describe("codexc agents script", () => {
         commands: ["codexc service restart app-server"],
       },
     });
-    expect(configureRole).toHaveBeenCalledWith("deepseek", "deepseek-v4-pro", {});
-    expect(output.join("")).toContain("已配置共享第三方子代理：deepseek / deepseek-v4-pro");
+    expect(configureRole).toHaveBeenCalledWith("ds-test", "deepseek-v4-pro", {});
+    expect(output.join("")).toContain("已配置共享第三方子代理：ds-test / deepseek-v4-pro");
     expect(output.join("")).toContain("codexc service restart app-server");
   });
 
@@ -231,7 +231,7 @@ describe("codexc agents script", () => {
         multiAgentV2Enabled: true,
         externalRoleConfigured: true,
         legacyDsRoleConfigured: false,
-        provider: "deepseek",
+        provider: "ds-test",
         model: "deepseek-v4-pro",
       }),
       disableRole,
@@ -252,7 +252,7 @@ describe("codexc agents script", () => {
   });
 
   it.each([
-    [deepseekProviderDefinition.id, deepseekProviderDefinition],
+    [deepseekAccountDefinition("test").id, deepseekAccountDefinition("test")],
     [opencodeGoProviderId("main"), opencodeGoMainDefinition()],
   ] as const)("binds the shared role to configured provider %s", async (provider, definition) => {
     const fixture = createFixture();
@@ -308,9 +308,9 @@ describe("codexc agents script", () => {
   it("switches the same role between providers and accepts an explicit model", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
       writeProviderFixture(fixture, opencodeGoMainDefinition(), "switching");
-      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+      await configureThirdPartyRole("ds-test", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
       await configureThirdPartyRole("ocg-main", "deepseek-v4-pro", fixture.environment, {
@@ -380,8 +380,8 @@ describe("codexc agents script", () => {
     const fixture = createFixture();
     const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
-      writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
+      writeFileSync(legacyPath, 'model_provider = "ds-test"\n', { mode: 0o600 });
       writeFileSync(fixture.configPath, [
         "[features]",
         "multi_agent_v2 = true",
@@ -393,7 +393,7 @@ describe("codexc agents script", () => {
         "",
       ].join("\n"), { mode: 0o600 });
 
-      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+      await configureThirdPartyRole("ds-test", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
 
@@ -411,7 +411,7 @@ describe("codexc agents script", () => {
     const fixture = createFixture();
     const legacyPath = join(fixture.home, "codex-connect-ds-subagent.config.toml");
     try {
-      writeFileSync(legacyPath, 'model_provider = "deepseek"\n', { mode: 0o600 });
+      writeFileSync(legacyPath, 'model_provider = "ds-test"\n', { mode: 0o600 });
       writeFileSync(fixture.configPath, [
         "[features]",
         "multi_agent_v2 = true",
@@ -483,28 +483,28 @@ describe("codexc agents script", () => {
     const fixture = createFixture();
     try {
       await expect(configureThirdPartyRole(
-        "deepseek",
+        "ds-test",
         undefined,
         fixture.environment,
         { updateConfig: applyConfigUpdate },
-      )).rejects.toThrow("尚未配置");
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      )).rejects.toThrow("未配置");
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
       await expect(configureThirdPartyRole(
-        "deepseek",
+        "ds-test",
         "unknown-model",
         fixture.environment,
         { updateConfig: applyConfigUpdate },
       )).rejects.toThrow("不支持模型");
       writeFileSync(
         join(
-          fixture.providerDirectory(deepseekProviderDefinition),
-          deepseekProviderDefinition.catalogFileName,
+          fixture.providerDirectory(deepseekAccountDefinition("test")),
+          deepseekAccountDefinition("test").catalogFileName,
         ),
         '{"models":[{"slug":"deepseek-v4-flash"}]}\n',
         { mode: 0o600 },
       );
       await expect(configureThirdPartyRole(
-        "deepseek",
+        "ds-test",
         "deepseek-v4-pro",
         fixture.environment,
         { updateConfig: applyConfigUpdate },
@@ -517,7 +517,7 @@ describe("codexc agents script", () => {
   it("does not overwrite a user-managed agents.external role", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
       writeFileSync(fixture.configPath, [
         "[features]",
         "multi_agent_v2 = true",
@@ -534,7 +534,7 @@ describe("codexc agents script", () => {
       });
 
       await expect(configureThirdPartyRole(
-        "deepseek",
+        "ds-test",
         undefined,
         fixture.environment,
         { updateConfig: applyConfigUpdate },
@@ -547,8 +547,8 @@ describe("codexc agents script", () => {
   it("disables only the managed role and preserves multi_agent_v2 when other roles exist", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
-      await configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
+      await configureThirdPartyRole("ds-test", undefined, fixture.environment, {
         updateConfig: applyConfigUpdate,
       });
       const config = record(parse(readFileSync(fixture.configPath, "utf8")));
@@ -585,10 +585,10 @@ describe("codexc agents script", () => {
       await applyConfigUpdate(environment, createEdits);
     };
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
       writeProviderFixture(fixture, opencodeGoMainDefinition(), "switching");
 
-      const first = configureThirdPartyRole("deepseek", undefined, fixture.environment, {
+      const first = configureThirdPartyRole("ds-test", undefined, fixture.environment, {
         updateConfig: serializedUpdate,
       });
       await firstEntered;
@@ -615,9 +615,9 @@ describe("codexc agents script", () => {
   it("rolls back the role file when the config transaction fails", async () => {
     const fixture = createFixture();
     try {
-      writeProviderFixture(fixture, deepseekProviderDefinition, "switching");
+      writeProviderFixture(fixture, deepseekAccountDefinition("test"), "switching");
       await expect(configureThirdPartyRole(
-        "deepseek",
+        "ds-test",
         undefined,
         fixture.environment,
         { updateConfig: vi.fn(async () => { throw new Error("version conflict"); }) },
@@ -631,8 +631,8 @@ describe("codexc agents script", () => {
 
 function managementProviders(): ThirdPartyAgentProvider[] {
   return [{
-    provider: "deepseek",
-    displayName: "DeepSeek",
+    provider: "ds-test",
+    displayName: "DS test",
     model: "deepseek-flash",
     reasoningEffort: "high",
     mode: "switching",

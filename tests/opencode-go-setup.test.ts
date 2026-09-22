@@ -286,7 +286,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
     const entry = loadManagedModelWindow(environment).find(
       (model) => model.model === "deepseek-flash",
     );
-    expect(entry?.perProvider).toEqual({ deepseek: 40, "ocg-main": 60 });
+    expect(entry?.perProvider).toEqual({ "ds-test": 40, "ocg-main": 60 });
     expect(entry?.conflicts).toBe(true);
     // 最大窗口一致时不阻断统一设置；占比差异由 conflicts 单独暴露。
     expect(entry?.windowConflict).toBe(false);
@@ -757,10 +757,12 @@ function deepseekFixture(): string {
   const connectHome = join(codexHome, ".codex-connect");
   const providerDirectory = join(connectHome, "providers", "deepseek");
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(join(providerDirectory, "accounts", "test"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(providerDirectory, "accounts.json"), JSON.stringify([{ id: "test", default: true }]), { mode: 0o600 });
   const catalogPath = join(providerDirectory, "models.json");
   writeFileSync(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    join(providerDirectory, "accounts", "test", "managed.toml"),
+    'version = 1\nprovider = "ds-test"\nmode = "switching"\n',
     { mode: 0o600 },
   );
   writeFileSync(catalogPath, JSON.stringify({
@@ -782,14 +784,14 @@ function deepseekFixture(): string {
     })),
   }), { mode: 0o600 });
   writeFileSync(
-    join(codexHome, "sf-deepseek.config.toml"),
+    join(codexHome, "sf-ds-test.config.toml"),
     [
       'model = "deepseek-flash"',
-      'model_provider = "deepseek"',
+      'model_provider = "ds-test"',
       'model_reasoning_effort = "high"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-      "[model_providers.deepseek]",
-      'name = "deepseek"',
+      "[model_providers.ds-test]",
+      'name = "ds-test"',
       'base_url = "https://api.deepseek.com/"',
       'wire_api = "responses"',
       "requires_openai_auth = false",

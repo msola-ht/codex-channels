@@ -21,7 +21,7 @@ import {
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
-  deepseekProviderDefinition,
+  deepseekAccountDefinition,
   opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
   type ModelProviderDefinition,
@@ -416,12 +416,12 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
     store.record({
       ...metricsSample(2),
-      provider: "deepseek",
+      provider: "ds-test",
       model: "shared-model",
     });
     store.record({
       ...metricsSample(3),
-      provider: "deepseek",
+      provider: "ds-test",
       model: "shared-model",
       status: "failed",
       httpStatus: 429,
@@ -444,7 +444,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const report = JSON.parse(jsonOutput);
     expect(report.report.groups).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        provider: "deepseek",
+        provider: "ds-test",
         model: "shared-model",
         aggregate: expect.objectContaining({ requestCount: expect.any(Number) }),
       }),
@@ -455,7 +455,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       }),
     ]));
     expect(report.errors.groups).toEqual([
-      expect.objectContaining({ provider: "deepseek", errorType: "rate_limit" }),
+      expect.objectContaining({ provider: "ds-test", errorType: "rate_limit" }),
     ]);
 
     const csvOutput = execFileSync(process.execPath, [
@@ -475,9 +475,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(header).toContain("errorType");
     expect(header).toContain("lastOccurredAtMs");
     expect(rows).toEqual(expect.arrayContaining([
-      expect.stringMatching(/^group,deepseek,shared-model,/u),
+      expect.stringMatching(/^group,ds-test,shared-model,/u),
       expect.stringMatching(/^group,openai,shared-model,/u),
-      expect.stringMatching(/^error,deepseek,shared-model,/u),
+      expect.stringMatching(/^error,ds-test,shared-model,/u),
     ]));
   });
 
@@ -533,7 +533,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(report.totalGroupCount).toBe(21);
     expect(report.groups).toHaveLength(20);
     expect(report.groups.every((group: { provider: string }) =>
-      group.provider === "deepseek"
+      group.provider === "ds-test"
     )).toBe(true);
   });
 
@@ -1449,7 +1449,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-test-secret",
     );
@@ -1467,20 +1467,20 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
     const supervisor = new AppServerSupervisorOwner(primarySocketPath, {
       primaryProvider: "openai",
-      managedProviders: ["deepseek"],
+      managedProviders: ["ds-test"],
       socketPaths: [
         primarySocketPath,
-        join(home, "runtime", "codex-app-server-deepseek.sock"),
+        join(home, "runtime", "codex-app-server-ds-test.sock"),
       ],
     }, { ensureProvider: async () => undefined });
     await supervisor.start();
     try {
       for (const [index, args] of [
-        ["--profile", "sf-deepseek"],
-        ["--profile=sf-deepseek"],
-        ["-p", "sf-deepseek"],
-        ["-p=sf-deepseek"],
-        ["-psf-deepseek"],
+        ["--profile", "sf-ds-test"],
+        ["--profile=sf-ds-test"],
+        ["-p", "sf-ds-test"],
+        ["-p=sf-ds-test"],
+        ["-psf-ds-test"],
       ].entries()) {
         const capturePath = join(root, `capture-${index}.json`);
         await execFileAsync(process.execPath, [cli, "remote", ...args, "resume"], {
@@ -1491,18 +1491,18 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
         expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
           "--remote",
-          `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+          `unix://${join(home, "runtime", "codex-app-server-ds-test.sock")}`,
           "-C",
           realpathSync(workspace),
           "--profile",
-          "sf-deepseek",
+          "sf-ds-test",
           "resume",
         ]);
       }
       const passthroughCapture = join(root, "capture-passthrough.json");
       await execFileAsync(
         process.execPath,
-        [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
+        [cli, "remote", "resume", "--", "--profile", "ds-test", "--workspace", "external"],
         {
           cwd: workspace,
           env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
@@ -1511,15 +1511,15 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       );
       expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
         "--remote",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+        `unix://${join(home, "runtime", "codex-app-server-ds-test.sock")}`,
         "-C",
         realpathSync(workspace),
         "--profile",
-        "sf-deepseek",
+        "sf-ds-test",
         "resume",
         "--",
         "--profile",
-        "deepseek",
+        "ds-test",
         "--workspace",
         "external",
       ]);
@@ -1877,7 +1877,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "import { appendFileSync } from 'node:fs';",
       "appendFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
       "  args: process.argv.slice(2),",
-      "  hasDeepseekApiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY !== undefined,",
+      "  hasDeepseekApiKey: process.env.CODEX_CONNECT_DEEPSEEK_TEST_API_KEY !== undefined,",
       "  hasOpenCodeApiKey: process.env.CODEX_CONNECT_OPENCODE_GO_API_KEY !== undefined,",
       "}) + '\\n');",
       "await new Promise((resolve) => setTimeout(resolve, 100));",
@@ -1886,7 +1886,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-service-secret",
     );
@@ -1899,7 +1899,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "ds-test"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -1935,7 +1935,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       args.some((value: string) => value.startsWith("openai_base_url="))
     );
     const deepseekCapture = captures.find(({ args }) =>
-      args.includes('model_provider="deepseek"')
+      args.includes('model_provider="ds-test"')
     );
     expect(openAiCapture?.args).toEqual([
       "-c",
@@ -2164,13 +2164,13 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-service-secret",
     );
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "ds-test"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -2285,13 +2285,13 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
       "const args = process.argv.slice(2);",
       `if (args[0] === '--version') { process.stdout.write('codex-cli ${expectedAppServerVersion}\\n'); process.exit(0); }`,
-      "const baseUrlArg = args.find((value) => value.startsWith('model_providers.deepseek.base_url='));",
+      "const baseUrlArg = args.find((value) => value.startsWith('model_providers.ds-test.base_url='));",
       "const listenUrl = args.at(-1);",
       "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
       "const capture = {",
       "  baseUrlArg,",
-      "  requestRetries: args.find((value) => value === 'model_providers.deepseek.request_max_retries=1'),",
-      "  streamRetries: args.find((value) => value === 'model_providers.deepseek.stream_max_retries=0'),",
+      "  requestRetries: args.find((value) => value === 'model_providers.ds-test.request_max_retries=1'),",
+      "  streamRetries: args.find((value) => value === 'model_providers.ds-test.stream_max_retries=0'),",
       "  initialized: false,",
       "};",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
@@ -2324,7 +2324,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "exclusive",
       "sk-start-secret",
     );
@@ -2414,10 +2414,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     };
     expect(captured.initialized).toBe(true);
     expect(captured.baseUrlArg).toMatch(
-      /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
+      /^model_providers\.ds-test\.base_url="http:\/\/127\.0\.0\.1:\d+\/go\/test"$/u,
     );
-    expect(captured.requestRetries).toBe("model_providers.deepseek.request_max_retries=1");
-    expect(captured.streamRetries).toBe("model_providers.deepseek.stream_max_retries=0");
+    expect(captured.requestRetries).toBe("model_providers.ds-test.request_max_retries=1");
+    expect(captured.streamRetries).toBe("model_providers.ds-test.stream_max_retries=0");
   }, 15_000);
 
   it("rejects a partial App Server topology instead of bypassing a provider proxy", async () => {
@@ -2434,7 +2434,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-start-secret",
     );
@@ -2489,7 +2489,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "exclusive",
       "sk-start-secret",
     );
@@ -2747,11 +2747,12 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
     chmodSync(fakeCodex, 0o700);
-    const providerDirectory = join(home, "providers", deepseekProviderDefinition.id);
+    const providerDirectory = join(home, "providers", "deepseek", "accounts", "test");
     mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(home, "providers", "deepseek", "accounts.json"), JSON.stringify([{ id: "test", default: true }]), { mode: 0o600 });
     writeFileSync(
-      join(providerDirectory, deepseekProviderDefinition.managedMarkerFileName),
-      'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
+      join(providerDirectory, deepseekAccountDefinition("test").managedMarkerFileName),
+      'version = 1\nprovider = "ds-test"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
     const environment = {
@@ -2842,7 +2843,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["work", "add", "--name", "-Project", "--unknown"], "未知参数：--unknown"],
       [["work", "unknown"], "用法：codexc work"],
       [["remote", "--workspace"], "用法：codexc remote"],
-      [["remote", "--workspace", "--profile", "deepseek"], "用法：codexc remote"],
+      [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
       [["agents"], "用法：codexc agents"],
       [["agents", "unknown"], "用法：codexc agents"],
       [["agents", "status", "--json", "unexpected"], "用法：codexc agents"],
@@ -3052,7 +3053,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     chmodSync(fakeCodex, 0o700);
     writeFileSync(
       join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
+      'model = "deepseek-flash"\nmodel_provider = "ds-test"\nmodel_reasoning_effort = "high"\n',
       { mode: 0o600 },
     );
     writeFileSync(
@@ -3091,7 +3092,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("DeepSeek Provider 尚未配置");
+    expect(result.stderr).toContain("第三方子代理角色配置无效");
     expect(result.signal).toBeNull();
   });
 
@@ -4487,7 +4488,7 @@ function signalTestProcess(pid: number, signal: NodeJS.Signals): void {
 function metricsSample(index: number): ModelRequestMetricSample {
   const now = Date.now();
   return {
-    provider: "deepseek",
+    provider: "ds-test",
     transport: "http",
     responseFormat: "sse",
     operation: "response",

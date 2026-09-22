@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertManagedModelProviderCapabilities,
   deepseekProviderDefinition,
+  deepseekAccountDefinition,
   expandManagedModelProviderDefinitions,
   loadManagedModelProviderWatcherDefinitions,
   managedModelProviderDefinitions,
@@ -48,7 +49,7 @@ describe("managed Provider capability registry", () => {
     expect(deepseekProviderDefinition.capabilities).toEqual({
       catalogSource: "deepseek-official",
       accountAdapter: "deepseek",
-      instanceAdapter: "single",
+      instanceAdapter: "deepseek-accounts",
       catalogUpdateAdapter: "deepseek",
     });
     expect(opencodeGoAccountDefinition("lunare").capabilities)
@@ -68,7 +69,7 @@ describe("managed Provider capability registry", () => {
     expect(expandManagedModelProviderDefinitions(
       [deepseekProviderDefinition, futureProvider],
       process.env,
-    ).map(({ id }) => id)).toEqual(["deepseek", "future-provider"]);
+    ).map(({ id }) => id)).toEqual(["future-provider"]);
   });
 
   it("supports a managed Provider without account or catalog update adapters", () => {
@@ -117,7 +118,7 @@ describe("managed Provider capability registry", () => {
 
   it("selects account adapters by capability without merging provider keys", () => {
     const definitions = [
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       opencodeGoAccountDefinition("lunare"),
     ];
     const accounts = createManagedProviderAccountAdapters(definitions, {
@@ -126,7 +127,7 @@ describe("managed Provider capability registry", () => {
       metricsDatabasePath: join(tmpdir(), "codexc-provider-capabilities.sqlite3"),
     });
     expect(accounts.map(({ provider }) => provider)).toEqual([
-      "deepseek",
+      "ds-test",
       "ocg-lunare",
     ]);
   });

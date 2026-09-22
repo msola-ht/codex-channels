@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { deepseekAccountDefinition, loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { defaultCodexRemoteProfile, parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
 import { configuredHome, configureOpenCodeGo, testEnvironment } from "./model-provider-runtime-test-fixture.js";
 
@@ -17,30 +18,30 @@ function parseCodexRemoteOptions(
   args: Parameters<typeof parseCodexRemoteOptionsRaw>[0],
   options: NonNullable<Parameters<typeof parseCodexRemoteOptionsRaw>[1]> = {},
 ) {
-  return parseCodexRemoteOptionsRaw(args, { environment: isolatedEnvironment, ...options });
+  return parseCodexRemoteOptionsRaw(args, { environment: isolatedEnvironment, managedProfileDefinitions: [deepseekAccountDefinition("test"), ...loadManagedModelProviderDefinitions(options.environment ?? isolatedEnvironment)], ...options });
 }
 
 describe("Codex Remote options", () => {
   it("selects the sole switching Provider without official login and rejects ambiguous defaults", async () => {
     const environment = testEnvironment(await configuredHome("switching"));
-    expect(defaultCodexRemoteProfile(environment)).toBe("sf-deepseek");
+    expect(defaultCodexRemoteProfile(environment)).toBe("sf-ds-test");
     expect(parseCodexRemoteOptions([], {
       selectDefaultProfile: () => defaultCodexRemoteProfile(environment),
-    }).selectedProfile).toBe("sf-deepseek");
+    }).selectedProfile).toBe("sf-ds-test");
     configureOpenCodeGo(environment.CODEX_HOME!);
     expect(() => defaultCodexRemoteProfile(environment)).toThrow("请指定 --profile");
   });
 
   it("preserves explicit profiles without resolving the unauthenticated default", () => {
     const selectDefaultProfile = () => { throw new Error("must not resolve default"); };
-    expect(parseCodexRemoteOptions(["--profile", "sf-deepseek"], { selectDefaultProfile }).selectedProfile)
-      .toBe("sf-deepseek");
+    expect(parseCodexRemoteOptions(["--profile", "sf-ds-test"], { selectDefaultProfile }).selectedProfile)
+      .toBe("sf-ds-test");
     expect(parseCodexRemoteOptions(["--profile", "personal"], { selectDefaultProfile }).passthrough)
       .toEqual(["--profile", "personal"]);
   });
 
   it.each([
-    [["--profile", "sf-deepseek"], "sf-deepseek"],
+    [["--profile", "sf-ds-test"], "sf-ds-test"],
   ] as const)("selects a managed Provider profile from %j", (args, selectedProfile) => {
     expect(parseCodexRemoteOptions([...args])).toEqual({
       passthrough: [],
@@ -122,7 +123,7 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
-    ["deepseek", "sf-deepseek"],
+    ["ds-test", "sf-ds-test"],
   ])("rejects the old managed Profile %s", (profileName, canonicalProfileName) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
@@ -200,7 +201,7 @@ describe("Codex Remote options", () => {
   it.each([
     [{ providerId: "proxy-a", profileName: "" }],
     [{ providerId: "proxy-a", profileName: "custom-proxy-a" }],
-    [{ providerId: "proxy-a", profileName: "sf-deepseek" }],
+    [{ providerId: "proxy-a", profileName: "sf-ds-test" }],
   ])("rejects an invalid or conflicting managed Profile definition %j", (definition) => {
     expect(() => parseCodexRemoteOptions([], {
       customSwitchingProfiles: [definition],
@@ -209,14 +210,14 @@ describe("Codex Remote options", () => {
 
   it("rejects selecting two managed Provider profiles", () => {
     expect(() => parseCodexRemoteOptions([
-      "--profile", "sf-deepseek",
-      "--profile", "sf-deepseek",
+      "--profile", "sf-ds-test",
+      "--profile", "sf-ds-test",
     ])).toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");
   });
 
   it.each([
-    [["--profile", "personal", "--profile", "sf-deepseek"]],
-    [["--profile=sf-deepseek", "-ppersonal"]],
+    [["--profile", "personal", "--profile", "sf-ds-test"]],
+    [["--profile=sf-ds-test", "-ppersonal"]],
   ])("rejects mixing managed and unmanaged profiles in %j", (args) => {
     expect(() => parseCodexRemoteOptions(args))
       .toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");

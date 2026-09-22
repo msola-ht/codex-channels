@@ -4,7 +4,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { parse } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
-import { deepseekProviderDefinition } from "./model-provider-definitions.mjs";
+import { loadDeepseekAccounts, deepseekProviderId, isDeepseekAccountProvider } from "./deepseek-accounts.mjs";
 import {
   catalogHasModel,
   exclusiveManagedProviders,
@@ -40,7 +40,6 @@ import { writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const managedThirdPartyRoleName = "external";
 const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
-const deepseekProvider = providerDescriptor(deepseekProviderDefinition);
 
 export function loadManagedModelProvider(environment = process.env) {
   return loadManagedModelProviders(environment)[0];
@@ -197,14 +196,17 @@ export function withOpenAiBaseUrl(argumentsList, baseUrl) {
   return [...kept, "-c", `openai_base_url=${JSON.stringify(baseUrl)}`];
 }
 
-export function loadDeepseekAccountCredential(environment = process.env) {
-  const managed = loadManagedProviderProfileFor(
-    environment,
-    deepseekProviderDefinition,
-  );
-  if (managed !== undefined) return managed.apiKey;
-  const configPath = join(codexHomePath(environment), "config.toml");
-  return readProviderProfile(configPath, deepseekProvider, { requireSelection: false }).apiKey;
+export function loadDeepseekAccountCredential(environment = process.env, provider) {
+  if (provider === undefined) {
+    const account = loadDeepseekAccounts(environment).find((entry) => entry.default);
+    if (!account) throw new Error("尚未配置 DeepSeek 默认账户");
+    provider = deepseekProviderId(account.id);
+  }
+  const definition = isDeepseekAccountProvider(provider) && findManagedProviderDefinition(environment, provider);
+  if (!definition) throw new Error(`未知 DeepSeek 账户：${provider}`);
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error(`DeepSeek 账户尚未配置：${provider}`);
+  return profile.apiKey;
 }
 
 export function loadOpencodeGoAccountCredential(environment = process.env) {

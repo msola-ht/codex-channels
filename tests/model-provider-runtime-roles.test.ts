@@ -33,7 +33,7 @@ describe("model provider runtime roles", () => {
     const rolePath = managedModelProviderRoleConfigPath(environment);
 
     writeManagedModelProviderRoleConfig(environment, {
-      provider: "deepseek",
+      provider: "ds-test",
       baseUrl: "http://127.0.0.1:39491/",
     });
     writeFileSync(
@@ -44,7 +44,7 @@ describe("model provider runtime roles", () => {
 
     const content = readFileSync(rolePath, "utf8");
     expect(content).toContain('model = "deepseek-v4-flash"');
-    expect(content).toContain('model_provider = "deepseek"');
+    expect(content).toContain('model_provider = "ds-test"');
     expect(content).toContain('model_reasoning_effort = "high"');
     expect(content).toContain(
       'developer_instructions = "你是第三方模型单次子代理。',
@@ -53,7 +53,7 @@ describe("model provider runtime roles", () => {
     expect(content).toContain("不要尝试解析 encrypted_content");
     expect(content).toContain("不等待或请求后续消息");
     expect(content).toContain('base_url = "http://127.0.0.1:39491/"');
-    expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_API_KEY"');
+    expect(content).toContain('env_key = "CODEX_CONNECT_DEEPSEEK_TEST_API_KEY"');
     expect(content).toContain("request_max_retries = 1");
     expect(content).toContain("stream_max_retries = 0");
     expect(content).not.toContain("model_context_window");
@@ -62,7 +62,7 @@ describe("model provider runtime roles", () => {
     expect(content).not.toContain("sk-test-secret");
     expect(loadManagedModelProviderRole(environment)).toEqual({
       role: "external",
-      provider: "deepseek",
+      provider: "ds-test",
       model: "deepseek-v4-flash",
       reasoningEffort: "high",
     });
@@ -70,7 +70,7 @@ describe("model provider runtime roles", () => {
     if (process.platform !== "win32") expect(statSync(rolePath).mode & 0o777).toBe(0o600);
     const firstRoleInode = statSync(rolePath).ino;
     writeManagedModelProviderRoleConfig(environment, {
-      provider: "deepseek",
+      provider: "ds-test",
       model: "deepseek-v4-pro",
       baseUrl: "http://127.0.0.1:39492/",
     });
@@ -81,7 +81,7 @@ describe("model provider runtime roles", () => {
     expect(readFileSync(rolePath, "utf8")).toContain('model = "deepseek-v4-pro"');
     expect(readFileSync(rolePath, "utf8")).toContain('model_reasoning_effort = "low"');
     expect(() => writeManagedModelProviderRoleConfig(environment, {
-      provider: "deepseek",
+      provider: "ds-test",
       baseUrl: "not-a-url",
     })).toThrow("base_url 无效");
 

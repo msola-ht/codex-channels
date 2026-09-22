@@ -1,6 +1,7 @@
 export type ManagedModelProviderId =
   | "ccg"
   | "deepseek"
+  | `ds-${string}`
   | "ocg"
   | `ocg-${string}`
   /** 仅用于读取遗留配置；运行时不再生成或接受该 Provider。 */
@@ -9,7 +10,7 @@ export type ManagedModelProviderId =
 
 export type ManagedModelProviderCatalogSource = "none" | "deepseek-official";
 export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go";
-export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts";
+export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts";
 export type ManagedModelProviderCatalogUpdateAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
 
 export interface ModelProviderCapabilities {
@@ -21,7 +22,7 @@ export interface ModelProviderCapabilities {
 
 export interface ModelProviderDefinition {
   readonly id: ManagedModelProviderId;
-  /** OpenCode Go 账户实例的账户 id（非账户实例为 undefined） */
+  /** 受管账户实例的账户 id（非账户实例为 undefined） */
   readonly accountId?: string;
   /** OpenCode Go 账户展示与指标身份使用的邮箱或手机号 */
   readonly email?: string;
@@ -46,6 +47,7 @@ export interface ModelProviderDefinition {
 }
 
 export const deepseekProviderDefinition: ModelProviderDefinition;
+export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;
 export const commandCodeProviderDefinition: ModelProviderDefinition;
 export function isManagedProviderApiKeyValid(definition: ModelProviderDefinition, apiKey: unknown): boolean;
 export function isManagedProviderModelValid(definition: { id: string }, model: unknown): boolean;

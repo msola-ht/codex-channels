@@ -1,92 +1,77 @@
-# DeepSeek 使用说明
+# DeepSeek 多账户
 
-本页说明 `codexc setup` 管理的 DeepSeek 配置、终端使用方式和 Provider 切换边界。一般用户只需
-完成 Setup，并在配置变化后运行 `codexc service restart all`。
+DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server。同一批 DS 账户共用
+DS 官方模型目录，OCG、CCG 的目录及增量模型保持独立，DS 不增加 V4.1 条目。
 
-DeepSeek Profile 写入 `~/.codex`，模型目录与管理标记写入 `~/.codex-connect/providers/deepseek/`，
-均不写入 Gateway 的 `~/.codex-connect/config.toml`；后者只保存通讯渠道、Workspace、显示和
-Gateway 运行配置。
+## 配置与迁移
 
-## 配置模式
+在 `codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方` 管理账户，
+也可在 WebUI 账户设置中操作，或使用以下命令：
 
-运行 `codexc setup`，选择“模型与提供商 → 第三方 Provider → DeepSeek 官方”并填写 DeepSeek API Key。Setup 提供两种安装模式：
+```bash
+codexc deepseek account migrate personal   # 为旧单账户填写 ID，确认后直接迁移
+codexc deepseek account add work           # 新增账户，交互输入模式和 Key
+codexc deepseek account reconfigure work   # 重新配置已有账户
+codexc deepseek account list --json        # 列出账户与默认标记，不包含 Key
+codexc deepseek account default work       # 选择默认账户
+codexc deepseek account remove personal    # 确认后删除账户配置
+codexc service restart all                 # 应用配置变化
+```
 
-### OpenAI + DeepSeek 切换模式
+账户 ID 必须由用户填写，使用 1–32 位小写字母、数字、`-` 或 `_`，不自动创建 `main`。
+首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
+旧账户通过迁移入口保留原 Key、运行模式、模型目录及模型设置，并改写共享子代理的 Provider 引用。
+迁移删除旧 `sf-deepseek` Profile 和单账户管理标记，旧备份保留；不提供旧 Provider 的运行别名或回退入口。
+旧 Thread 的 `deepseek` 身份不改写，也不保证继续恢复。原指标数据库不修改，历史请求仍在
+`deepseek` 名下查询，新请求按 `ds-<账户>` 统计。
 
-- OpenAI 继续作为原生 Codex 默认提供商，`~/.codex/config.toml` 的配置内容保持不变。
-- DeepSeek 的模型、Provider 和 API Key 保存在权限为 `0600` 的
-  `~/.codex/sf-deepseek.config.toml`。
-- 聊天渠道使用 `/model` 为当前会话选择模型。
-- `codexc remote` 连接 OpenAI App Server；`codexc remote --profile sf-deepseek` 连接共享的
-  DeepSeek App Server。
-- 直接运行 `codex` 或 `codex --profile sf-deepseek` 会启动独立 TUI，不共享 Gateway Thread；
-  Profile 镜像所选模型的默认思考等级，与 Remote/App Server 一致。
+迁移目标已经存在或旧固定模式缺少必要备份时明确报错；写入失败会回滚本次文件变更。
+先完成旧账户迁移再新增账户或刷新目录，避免两套运行配置并存。
 
-### 仅 DeepSeek 固定模式
+`codexc update` 检测到旧 DS 配置时，会在停止服务前要求填写并校验账户 ID，随后在停机窗口内
+先迁移账户，再刷新目录并继续配置和数据库更新。源码更新的候选预检与已安装包更新共用该步骤。
+取消输入、ID 无效或非交互入口缺少 ID 时，在停止服务前报错；非交互更新前需先完成账户迁移。
 
-- Setup 在 `~/.codex/config.toml` 中注册并选中官方目录的默认模型 `deepseek-flash`。
-- 原生 Codex CLI、TUI、IDE 和 Gateway 都默认使用 DeepSeek。
-- 固定模式只有一个 DeepSeek 主 App Server，使用 `codexc remote` 连接。
-
-Setup 不强制改变 Codex 登录方式。切换模式不会覆盖 OpenAI 登录信息；固定模式直接使用配置中的
-DeepSeek Provider。
-
-### 上下文窗口
-
-安装流程在填写 API Key 后会为初始 `deepseek-flash` 模型询问上下文窗口占比。后续有两种入口：`codexc setup`
-中选择“模型与提供商 → 第三方 Provider → DeepSeek 官方 → 修改模型设置（思考等级）”，或选择
-“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → DeepSeek”选择默认思考等级；如需按模型名
-统一设置窗口，使用“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名选择占比（10–100%，
-100% 为模型官方窗口），同名模型在所有 Provider 共用同一值。该占比按模型目录的
-`max_context_window` 换算成 `context_window` 写入模型目录；旧目录缺少最大窗口时，首次修改会保留原始窗口作为最大值。
-未改窗口时不写模型目录，压缩阈值也不再由
-本机设置，旧版遗留的非空阈值会在改窗口时清掉，压缩回落到上游按当前窗口推导的默认值（90%）。切换模式
-Profile 顶层只镜像所选模型的默认思考等级
-（校验必须与模型目录一致），上下文窗口只由模型目录声明。修改后 Gateway 会自动检测设置文件变化，
-校验通过并在无活动 Turn 时自动重启 App Server 生效；如需立即生效，可在终端手动运行
-`codexc service restart app-server`。
-
-## 管理的文件
+## 文件与运行模式
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.codex/sf-deepseek.config.toml` | 切换模式的 DeepSeek 模型、默认思考等级镜像、Provider 和 API Key |
-| `~/.codex-connect/providers/deepseek/models.json` | 从 DeepSeek 官方安装脚本提取并校验的模型目录 |
-| `~/.codex-connect/providers/deepseek/models.manifest.json` | 模型目录下载校验清单与一次性默认模型迁移记录 |
-| `~/.codex-connect/providers/deepseek/managed.toml` | 不含凭据的 Gateway 管理标记 |
-| `~/.codex-connect/providers/deepseek/backup/` | 首次修改前的基础配置、同名 Profile、管理标记和角色文件备份 |
-| `~/.codex/sf-agent.config.toml` | 不含凭据的共享第三方子代理配置 |
+| `~/.codex-connect/providers/deepseek/accounts.json` | 账户 ID 与默认标记，不含凭据 |
+| `~/.codex/sf-ds-<账户>.config.toml` | 切换账户的模型、Provider 与私有 Key |
+| `~/.codex-connect/providers/deepseek/accounts/<账户>/managed.toml` | 账户运行模式 |
+| `~/.codex-connect/providers/deepseek/accounts/<账户>/backup/config.json` | 本次安装前的基础配置 |
+| `~/.codex-connect/providers/deepseek/models.json` | 全部 DS 账户共用的官方模型目录 |
+| `~/.codex-connect/providers/deepseek/models.manifest.json` | 目录来源和更新时间 |
 
-Profile 位于 Codex 用户目录（原生 `--profile` 只识别这里），模型目录与管理标记位于 Gateway 数据
-目录 `~/.codex-connect/providers/`，均不写入项目或 npm 包。重复运行 Setup 可以更新 API Key 或
-切换模式，并保留仍受支持的默认模型及逐模型思考、窗口设置；重新配置时明确选择的初始模型窗口占比优先于旧值，
-选择“模型官方窗口”恢复为 100%。目录刷新时按原窗口占比和新的最大窗口
-重新计算 `context_window`，压缩阈值继续使用上游默认。
-恢复操作把文件还原到首次备份状态，会覆盖安装后对 `~/.codex/config.toml` 的修改。安装前已存在
-的同路径角色文件会原样恢复，原来不存在时则删除 Setup 生成的角色文件。
-OpenCode Go 从相同上游内容生成自己的模型目录，因此恢复或修改任一 Provider 不影响另一方设置。
-从旧版文件布局升级时，运行 `codexc update` 会在核心服务停止期间把受管模型目录、清单、管理标记
-和备份迁移到 `~/.codex-connect/providers/deepseek/`；新旧文件同时存在时不会猜测覆盖关系，而是
-明确报错。旧版 Profile 顶层的思考等级会迁移进对应模型目录；旧版根级或目录里的自动压缩阈值按同一
-基准折算为 `context_window` 并清空 `auto_compact_token_limit`，切换模式 Profile 再镜像所选模型的
-默认思考等级；迁移不保留旧的 `body_after_prefix` 压缩作用域。迁移后同一命令会下载并校验最新官方
-模型目录，保留仍存在的模型及其思考等级与窗口占比。旧模型名不再出现在官方目录时（例如 Flash Vision Exp），`codexc update` 会把
-Profile 与共享子代理角色切回目录默认模型 `deepseek-flash`，并在 `models.manifest.json` 记录
-`from`/`to`；仍存在于目录中的模型（例如 `deepseek-v4-pro`）保留用户选择。
+切换模式保留 OpenAI 主配置，每个账户使用独立私有 Profile；固定模式在确认后修改 Codex
+主配置，同一时刻只能有一个固定主 Provider。账户 Key 保存在 0600 私有配置中，仅进入目标
+App Server 子进程，不进入账户注册表、命令行或日志。
 
-当前 DeepSeek 官方目录声明 `deepseek-flash` 与 `deepseek-v4-pro`，两者都可通过 `/model` 选择；
-新安装默认使用 `deepseek-flash`。之后可在 `codexc setup` 的“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置”
-中按模型设置 DeepSeek 新会话的默认模型与思考等级；上下文窗口走“模型上下文窗口”按模型名统一设置。
-历史 Thread 仍保留自身模型。
-可选模型以下载的官方目录为准：目录里声明什么就显示什么，没有的模型不出现在 `/model` 与 Setup
-选项中。旧模型名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 仍可由 DeepSeek 接受，
-但已不在目录中。
+删除账户保留共享模型目录、历史统计和备份。删除默认账户前需先选择其他默认账户；删除最后
+一个账户无需选择。共享子代理正在使用该账户时需先切换或停用。固定账户删除或改为切换模式时
+仅恢复受管 Provider 字段，保留其他主配置修改。删除后重新添加会建立新的恢复基线，旧备份归档保留。
 
-`deepseek-flash` 原生支持文字和图片；Gateway 从官方模型目录读取该输入能力，渠道图片
-在统一提交边界转换为受限的 PNG/JPEG/WebP/非动画 GIF Base64 Data URL，并通过稳定 `image` Turn 输入交给 App Server，
-不携带本地暂存路径，也不增加 DeepSeek API 客户端或另一套调用方式。
-`deepseek-v4-pro` 仍只支持文字；发送图片前应切换到 `deepseek-flash`，否则 Gateway
-会在创建 Turn 前明确拒绝。
+## 模型与设置
+
+DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
+`deepseek-v4-pro`；实际选项以下载目录为准。新增账户复用已有 DS 目录，首次配置才下载；
+`codexc update` 统一刷新目录并保留仍支持的逐模型思考等级和窗口比例。
+已下线模型会切到目录默认模型，同时更新对应账户与共享子代理配置。
+
+通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”按模型名设置窗口比例。
+账户分别选择默认模型；思考等级、上下文和能力字段存放在共享目录，同一模型的这些设置会影响
+所有 DS 账户。切换 Profile 的思考等级镜像同步更新，避免其他账户因目录变化而失效。
+压缩使用上游默认，不写入独立自动压缩阈值。
+
+切换账户的共享终端入口：
+
+```bash
+codexc remote --profile sf-ds-personal
+```
+
+聊天使用 `/model` 选择 `DS <账户>` 下的模型。同账户切模型保持 Thread，跨账户选择会保留并
+解绑旧 Thread，下一条消息在目标账户新建 Thread，不复制历史。每个账户的 App Server 按需启动，
+DS 账户共用一个统计代理，通过内部账户路径区分请求并上报到各账户指标 Socket。
 
 ## 网页搜索
 
@@ -103,16 +88,16 @@ DeepSeek（官方目录中的模型 + Codex 0.154.0）支持网页搜索，且�
 - 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数与 Token
   统计；不消耗 OpenAI 额度。
 - 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
-  `codex exec -p sf-deepseek -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
+  `codex exec -p sf-ds-<账户> -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
 - 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
   不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
 
 ## App Server 与 Thread
 
-切换模式由同一个后台服务监管 OpenAI 主 App Server 和隔离的 DeepSeek App Server。服务启动时只
+切换模式由同一个后台服务监管 OpenAI 主 App Server 和各账户隔离的 App Server。服务启动时只
 启动主实例；当前共享子代理选择 DeepSeek 时还会预先启动其统计代理。首次选择 DeepSeek 模型、
 恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
-App Server。DeepSeek API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
+App Server。该账户 API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
 日志；其他 Provider 的 Key 不会随之注入。
 
 Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review、Goal、MCP 和审批请求。
@@ -122,7 +107,7 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 2. 在下一条消息中为目标 Provider 新建 Thread。
 3. 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。
 
-旧 Thread 仍可通过 `/resume` 恢复。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
+同一账户的 Thread 仍可通过 `/resume` 恢复，迁移前的 `deepseek` Thread 不再接续。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
 生效。切换 Workspace、新会话或同 Provider 历史 Thread 时，渠道会在内存中保留当前模型、思考
 等级和服务层级并用于下一 Turn。切换 Workspace 后下一条消息会新建 Thread，不自动接续目标 Workspace 的历史
 Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Provider。
@@ -174,7 +159,7 @@ DeepSeek 与 OpenCode Go 共用 `agents.external`，不按 Provider 注册重复
 Provider 与模型，或运行下面的显式命令，才会注册或更新角色：
 
 ```bash
-codexc agents configure deepseek deepseek-v4-pro
+codexc agents configure ds-<账户> deepseek-v4-pro
 codexc agents configure ocg-<accountId> deepseek-flash
 codexc agents status
 codexc agents disable

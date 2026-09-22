@@ -42,6 +42,7 @@ export function validateCustomPrimaryModelProviderId(id, environment = process.e
   }
   if (
     builtInModelProviderIds.has(id)
+    || id === "deepseek" || id.startsWith("ds-")
     || isOpencodeGoProviderNamespace(id)
     || managedProviderDefinitions(environment).some((definition) => definition.id === id)
   ) {

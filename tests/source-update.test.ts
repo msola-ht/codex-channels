@@ -40,7 +40,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     const calls: string[] = [];
     await updateInstalledPackage(fixture.environment, {
       projectDir: fixture.checkout,
-      inspectStaged: async () => ({ services: { installed: true } }),
+      inspectStaged: async () => ({ services: { installed: true }, deepseekMigrationId: "personal" }),
       confirmCodexCliInstall: (request) => {
         expect(request).toEqual({ currentVersion: "0.147.0", requiredVersion: "0.148.0" });
         calls.push("confirm");
@@ -59,7 +59,10 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         calls.push("install");
         writeFakeCodex(fixture.codex, version);
       },
-      runLocalUpdate: () => { calls.push("local-update"); },
+      runLocalUpdate: (_checkout, _environment, options) => {
+        expect(options.deepseekMigrationId).toBe("personal");
+        calls.push("local-update");
+      },
     });
     expect(calls).toEqual(["confirm", "prepare", "validate", "stop", "install", "local-update"]);
   });
@@ -263,11 +266,12 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         writeFileSync(join(candidate, "dist", "main.js"), "");
         writeFileSync(join(candidate, "webui", "dist", "index.html"), "");
       },
-      inspectStaged: async () => ({ services: { installed: false } }),
+      inspectStaged: async () => ({ services: { installed: false }, deepseekMigrationId: "personal" }),
       installGlobalPackage: () => { globalInstalls += 1; },
       projectDir: fixture.checkout,
       repository: fixture.repository,
-      runLocalUpdate: (candidate) => {
+      runLocalUpdate: (candidate, _environment, options) => {
+        expect(options.deepseekMigrationId).toBe("personal");
         localUpdateCheckout = candidate;
       },
       writeMessage: (kind, message) => { messages.push([kind, message]); },
@@ -448,7 +452,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         projectDir: fixture.checkout,
         repository: fixture.repository,
         buildCheckout: () => { throw new Error("unexpected rebuild"); },
-        inspectStaged: async () => ({ services: { installed: true } }),
+        inspectStaged: async () => ({ services: { installed: true }, deepseekMigrationId: "personal" }),
         confirmCodexCliInstall: () => {
           calls.push("confirm");
           return state !== "declined";
@@ -464,7 +468,10 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
           writeFakeCodex(fixture.codex, version);
         },
         installGlobalPackage: () => { calls.push("refresh"); },
-        runLocalUpdate: () => { calls.push("local-update"); },
+        runLocalUpdate: (_checkout, _environment, options) => {
+          expect(options.deepseekMigrationId).toBe("personal");
+          calls.push("local-update");
+        },
       });
       if (state === "declined") {
         await expect(update).rejects.toThrow("版本不匹配");

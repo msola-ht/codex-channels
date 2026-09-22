@@ -104,6 +104,7 @@ const helpText = {
   agents                       管理共享第三方子代理
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
+  deepseek                     管理 DeepSeek 多账户与旧账户迁移
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
@@ -145,7 +146,7 @@ DeepSeek 与 OpenCode Go 子菜单中的“修改模型设置”会打开同一�
   remote: `${CODEX_REMOTE_USAGE}
 
 连接 Gateway 共用的 App Server，并把其余参数传给原生 Codex CLI。
-切换模式可用 --profile sf-deepseek、sf-ocg-<账户>、sf-ccg 或
+切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   desktop_app: desktopAppCommandUsage,
   service: `用法：codexc service <命令>
@@ -454,6 +455,9 @@ try {
       runScript("scripts/primary-provider-cli.mjs", args, {
         failureReportedByChild: true,
       });
+      break;
+    case "deepseek":
+      runScript("scripts/deepseek-account-setup.mjs", args, { failureReportedByChild: true });
       break;
     case "opencode-go":
       opencodeGoAccount(args);

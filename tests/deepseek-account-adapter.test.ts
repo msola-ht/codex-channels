@@ -1,11 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDeepseekAccountAdapter } from "../src/bootstrap/deepseek-account-adapter.js";
-import { securePrivateDirectorySync, securePrivateFileSync } from "../runtime/private-file.mjs";
+import { configuredHome, testEnvironment } from "./model-provider-runtime-test-fixture.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -34,7 +32,7 @@ describe("DeepSeek account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toEqual({
       kind: "balance",
-      provider: "deepseek",
+      provider: "ds-test",
       available: true,
       balances: [{
         currency: "CNY",
@@ -65,15 +63,9 @@ describe("DeepSeek account adapter", () => {
     });
   });
 
-  it("falls back to the fixed-mode base config when no managed profile exists", async () => {
-    const codexHome = await mkdtemp(join(tmpdir(), "codexc-deepseek-fixed-account-"));
+  it("reads the selected fixed account credential from its main config", async () => {
+    const codexHome = await configuredHome("exclusive");
     temporaryDirectories.push(codexHome);
-    await writeFile(
-      join(codexHome, "config.toml"),
-      providerConfig("sk-fixed-secret"),
-      { mode: 0o600 },
-    );
-    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "config.toml"));
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       is_available: false,
       balance_infos: [],
@@ -85,7 +77,7 @@ describe("DeepSeek account adapter", () => {
 
     await expect(adapter.accountUsage()).resolves.toMatchObject({
       kind: "balance",
-      provider: "deepseek",
+      provider: "ds-test",
       available: false,
     });
   });
@@ -93,40 +85,7 @@ describe("DeepSeek account adapter", () => {
 });
 
 async function createCodexHome(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "codexc-deepseek-account-"));
+  const directory = await configuredHome("switching");
   temporaryDirectories.push(directory);
-  const providerDirectory = join(
-    directory,
-    ".codex-connect",
-    "providers",
-    "deepseek",
-  );
-  await mkdir(providerDirectory, { recursive: true, mode: 0o700 });
-  if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
-  await writeFile(join(directory, "config.toml"), 'model = "gpt-5.6-sol"\n', { mode: 0o600 });
-  if (process.platform === "win32") securePrivateFileSync(join(directory, "config.toml"));
-  await writeFile(
-    join(directory, "sf-deepseek.config.toml"),
-    `model = "deepseek-v4-flash"\nmodel_provider = "deepseek"\n${providerConfig("sk-test-secret")}`,
-    { mode: 0o600 },
-  );
-  if (process.platform === "win32") securePrivateFileSync(join(directory, "sf-deepseek.config.toml"));
-  await writeFile(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "deepseek"\n',
-    { mode: 0o600 },
-  );
-  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
   return directory;
-}
-
-function testEnvironment(codexHome: string): NodeJS.ProcessEnv {
-  return {
-    CODEX_HOME: codexHome,
-    CODEX_CONNECT_HOME: join(codexHome, ".codex-connect"),
-  };
-}
-
-function providerConfig(apiKey: string): string {
-  return `[model_providers.deepseek]\nname = "deepseek"\nbase_url = "https://api.deepseek.com/"\nwire_api = "responses"\nrequires_openai_auth = false\nexperimental_bearer_token = "${apiKey}"\n`;
 }

@@ -27,11 +27,13 @@ export async function configuredHome(mode: "switching" | "exclusive"): Promise<s
   secureTestDirectory(codexHome);
   const providerDirectory = join(connectHomeFor(codexHome), "providers", "deepseek");
   secureTestDirectory(providerDirectory);
+  secureTestDirectory(join(providerDirectory, "accounts", "test"));
   secureTestFile(
-    join(providerDirectory, "managed.toml"),
-    `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
+    join(providerDirectory, "accounts", "test", "managed.toml"),
+    `version = 1\nprovider = "ds-test"\nmode = "${mode}"\n`,
   );
-  const profilePath = mode === "exclusive" ? "config.toml" : "sf-deepseek.config.toml";
+  secureTestFile(join(providerDirectory, "accounts.json"), JSON.stringify([{ id: "test", default: true }]));
+  const profilePath = mode === "exclusive" ? "config.toml" : "sf-ds-test.config.toml";
   const catalogPath = join(providerDirectory, "models.json");
   secureTestFile(
     join(codexHome, profilePath),
@@ -50,11 +52,11 @@ export function providerProfile(
 ): string {
   return [
     'model = "deepseek-v4-flash"',
-    'model_provider = "deepseek"',
+    'model_provider = "ds-test"',
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    "[model_providers.deepseek]",
-    'name = "deepseek"',
+    "[model_providers.ds-test]",
+    'name = "ds-test"',
     'base_url = "https://api.deepseek.com/"',
     'wire_api = "responses"',
     "requires_openai_auth = false",

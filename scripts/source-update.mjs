@@ -162,11 +162,11 @@ export async function updateManagedSourceInstallation(
       await runStage("local-update", () => updateInstalledPackage(environment, {
         ...options,
         projectDir: checkout,
-        runLocalUpdate: async () => {
+        runLocalUpdate: async (_checkout, _environment, localOptions) => {
           if (plan.refreshCommand) {
             await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
           }
-          await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+          await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, localOptions);
         },
       }));
       writeCodexPlanSettingNotice(writeMessage, environment);
@@ -333,7 +333,7 @@ export async function updateManagedSourceInstallation(
     );
     await runStage(
       "local-update",
-      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options),
+      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, { ...options, deepseekMigrationId: inspection.deepseekMigrationId }),
     );
     await runStage("cleanup", () => {
       rmSync(backupPath, { recursive: true, force: true });
@@ -898,7 +898,10 @@ async function inspectStagedInstallation(checkout, environment) {
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  return { config, services };
+  const deepseekMigrationId = await staged.prepareDeepseekUpdateMigration(environment, {
+    requestDeepseekMigrationId: () => staged.requestDeepseekMigrationId(environment),
+  });
+  return { config, services, deepseekMigrationId };
 }
 
 async function stopCoreServices(checkout, environment, options) {
@@ -924,7 +927,7 @@ async function startCoreServices(checkout, environment, options) {
 async function runLocalUpdate(checkout, environment, options) {
   run(
     process.execPath,
-    [join(checkout, "scripts", "local-update.mjs")],
+    [join(checkout, "scripts", "local-update.mjs"), ...(options.deepseekMigrationId === undefined ? [] : [options.deepseekMigrationId])],
     checkout,
     environment,
     options.runCommand,
@@ -1051,7 +1054,7 @@ export async function updateInstalledPackage(environment = process.env, options 
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
     }
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, { ...options, deepseekMigrationId: inspection.deepseekMigrationId });
   } catch (error) {
     if (servicesStopped) {
       try {
