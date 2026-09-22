@@ -7,10 +7,5 @@ export function writeGatewayConfigActivationNotice(
   environment?: NodeJS.ProcessEnv,
   action?:
     | "auto"
-    | "none"
-    | "restart"
-    | "restart-webui"
-    | "reinstall"
-    | "reinstall-services"
     | ConfigActivationResult,
 ): void;

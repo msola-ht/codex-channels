@@ -39,7 +39,8 @@ import {
 } from "@/lib/format"
 import type {
   Aggregate,
-  DeepseekBalance,
+  CcgCreditAccountUsage,
+  DeepseekAccountBalance,
   ErrorsReport,
   OpencodeGoQuotaWindow,
   ProviderGroup,
@@ -177,24 +178,35 @@ export function WeeklyQuotaCard({
   )
 }
 
-export function DeepseekBalanceCard({
-  available,
-  observedAtMs,
-  balances,
-  refreshControl,
+export function DeepseekBalanceCards({
+  accounts,
+  refreshControls,
 }: {
-  available: boolean
-  observedAtMs: number
-  balances: DeepseekBalance[]
-  refreshControl: AccountRefreshControl | undefined
+  accounts: DeepseekAccountBalance[]
+  refreshControls: Record<string, AccountRefreshControl>
 }) {
+  if (accounts.length === 0) {
+    return <AccountProviderEmpty title="DS 账户余额" description="尚未配置 DeepSeek 账户" />
+  }
+  return <div className="flex flex-col gap-4">{accounts.map((account) => (
+    <DeepseekBalanceCard
+      key={account.provider}
+      {...account}
+      refreshControl={refreshControls[account.provider]}
+    />
+  ))}</div>
+}
+
+function DeepseekBalanceCard({
+  displayName, default: isDefault, available, observedAtMs, balances, refreshControl,
+}: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined }) {
   const primary = balances[0]
   return (
     <Card aria-busy={refreshControl?.refreshing}>
       <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2">DS 账户余额 <AccountFreshnessBadge observedAtMs={observedAtMs} /></CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{displayName}</span><AccountFreshnessBadge observedAtMs={observedAtMs} /></CardTitle>
         <CardDescription>
-          {observedAtMs <= 0
+          {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
             ? "DeepSeek 账户余额暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
@@ -226,6 +238,72 @@ export function DeepseekBalanceCard({
       ) : !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
+}
+
+export function CcgCreditUsageCards({
+  accounts,
+  refreshControls,
+}: {
+  accounts: CcgCreditAccountUsage[]
+  refreshControls: Record<string, AccountRefreshControl>
+}) {
+  if (accounts.length === 0) {
+    return <AccountProviderEmpty title="CCG 账户额度" description="尚未配置 CCG 账户" />
+  }
+  return <div className="flex flex-col gap-4">{accounts.map((account) => (
+    <CcgCreditAccountCard
+      key={account.provider}
+      {...account}
+      refreshControl={refreshControls[account.provider]}
+    />
+  ))}</div>
+}
+
+function CcgCreditAccountCard({
+  displayName,
+  default: isDefault,
+  available,
+  observedAtMs,
+  planId,
+  monthlyRemaining,
+  purchasedRemaining,
+  freeRemaining,
+  totalRemaining,
+  windows,
+  refreshControl,
+}: CcgCreditAccountUsage & { refreshControl: AccountRefreshControl | undefined }) {
+  return (
+    <Card aria-busy={refreshControl?.refreshing}>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 break-all">{displayName}</span>
+          {planId === null ? null : <Badge variant="outline">{planId}</Badge>}
+          <AccountFreshnessBadge observedAtMs={observedAtMs} />
+        </CardTitle>
+        <CardDescription>
+          {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
+            ? "CCG 账户额度暂不可用"
+            : `更新于 ${formatTime(observedAtMs)}`}
+        </CardDescription>
+        {refreshControl && !refreshControl.error && available
+          ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
+      </CardHeader>
+      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available} /></CardContent> : null}
+      {available ? <CardContent className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="text-2xl font-semibold tabular-nums">${totalRemaining}</span>
+          <span className="text-xs text-muted-foreground">
+            月度 ${monthlyRemaining} · 充值 ${purchasedRemaining} · 赠送 ${freeRemaining}
+          </span>
+        </div>
+        <QuotaWindows windows={windows} />
+      </CardContent> : !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
+    </Card>
+  )
+}
+
+function AccountProviderEmpty({ title, description }: { title: string; description: string }) {
+  return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader></Card>
 }
 
 export function OpencodeGoUsageCard({
@@ -308,31 +386,28 @@ function OpencodeGoAccountCard({
       {subscriptionRequired
         ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
         : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
-      {!subscriptionRequired && available && windows.length > 0 ? <CardContent className="flex flex-col gap-3">
-        {windows.map((window) => (
-          <div key={window.windowId} className="flex flex-col gap-1">
-            <div className="flex items-center justify-between text-sm">
-              <span>{window.label}</span>
-              <span className="tabular-nums text-muted-foreground">
-                已用 {window.usedPercent.toFixed(1)}%
-              </span>
-            </div>
-            <Progress value={Math.min(100, window.usedPercent)} />
-            <p className="text-xs text-muted-foreground">
-              {window.resetsAt === null
-                ? "重置时间未知"
-                : `下次重置 ${formatTime(window.resetsAt)}`}
-            </p>
-            {window.localTokens !== null && window.localTokens !== undefined ? (
-              <p className="text-xs text-muted-foreground">
-                本地 Token 约 {formatTokens(window.localTokens)}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
+      {!subscriptionRequired && available && windows.length > 0 ? <CardContent><QuotaWindows windows={windows} /></CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
+}
+
+function QuotaWindows({ windows }: { windows: OpencodeGoQuotaWindow[] }) {
+  if (windows.length === 0) return null
+  return <div className="flex flex-col gap-3">{windows.map((window) => (
+    <div key={window.windowId} className="flex flex-col gap-1">
+      <div className="flex items-center justify-between text-sm">
+        <span>{window.label}</span>
+        <span className="tabular-nums text-muted-foreground">已用 {window.usedPercent.toFixed(1)}%</span>
+      </div>
+      <Progress value={Math.min(100, window.usedPercent)} />
+      <p className="text-xs text-muted-foreground">
+        {window.resetsAt === null ? "重置时间未知" : `下次重置 ${formatTime(window.resetsAt)}`}
+      </p>
+      {window.localTokens !== null && window.localTokens !== undefined ? (
+        <p className="text-xs text-muted-foreground">本地 Token 约 {formatTokens(window.localTokens)}</p>
+      ) : null}
+    </div>
+  ))}</div>
 }
 
 

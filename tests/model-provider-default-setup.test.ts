@@ -20,13 +20,13 @@ describe("managed model provider default setup", () => {
       environment: testEnvironment(codexHome),
       output,
       prompter: {
-        selectProvider: async () => "deepseek",
+        selectProvider: async () => "ds-test",
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "max",
       },
     })).resolves.toEqual({
       action: "configured",
-      provider: "deepseek",
+      provider: "ds-test",
       model: "deepseek-v4-pro",
       reasoningEffort: "max",
       mode: "switching",
@@ -38,10 +38,10 @@ describe("managed model provider default setup", () => {
       },
     });
 
-    const profile = parse(readFileSync(join(codexHome, "sf-deepseek.config.toml"), "utf8"));
+    const profile = parse(readFileSync(join(codexHome, "sf-ds-test.config.toml"), "utf8"));
     expect(profile).toMatchObject({
       model: "deepseek-v4-pro",
-      model_provider: "deepseek",
+      model_provider: "ds-test",
     });
     expect(profile.model_reasoning_effort).toBe("max");
     const catalog = JSON.parse(readFileSync(
@@ -78,7 +78,7 @@ describe("managed model provider default setup", () => {
     // 窗口写入只补 context_window；下载目录没有的字段不会被写回。
     expect(selected.max_context_window).toBeUndefined();
     expect(output.write).toHaveBeenCalledWith(
-      "DeepSeek 默认模型已设为 deepseek-v4-pro。\n",
+      "DS test 默认模型已设为 deepseek-v4-pro。\n",
     );
   });
 
@@ -90,7 +90,7 @@ describe("managed model provider default setup", () => {
       environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
-        selectProvider: async () => "deepseek",
+        selectProvider: async () => "ds-test",
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "low",
       },
@@ -123,7 +123,7 @@ describe("managed model provider default setup", () => {
       environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
-        selectProvider: async () => "deepseek",
+        selectProvider: async () => "ds-test",
         selectModel: async () => "deepseek-v4-pro",
         selectReasoningEffort: async () => "max",
       },
@@ -157,7 +157,7 @@ describe("managed model provider default setup", () => {
     const selectProvider = vi.fn();
 
     await expect(runModelProviderDefaultSetup({
-      provider: "deepseek",
+      provider: "ds-test",
       environment: testEnvironment(codexHome),
       output: { write: vi.fn() },
       prompter: {
@@ -167,7 +167,7 @@ describe("managed model provider default setup", () => {
       },
     })).resolves.toMatchObject({
       action: "configured",
-      provider: "deepseek",
+      provider: "ds-test",
       model: "deepseek-v4-pro",
     });
 
@@ -193,15 +193,18 @@ function providerFixture(mode: "switching" | "exclusive") {
     "deepseek",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(join(providerDirectory, "accounts", "test"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(providerDirectory, "accounts.json"), JSON.stringify([{ id: "test", default: true }]), { mode: 0o600 });
+  if (process.platform === "win32") { securePrivateDirectorySync(join(providerDirectory, "accounts")); securePrivateDirectorySync(join(providerDirectory, "accounts", "test")); securePrivateFileSync(join(providerDirectory, "accounts.json")); }
   if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
-    'model_provider = "deepseek"',
+    'model_provider = "ds-test"',
     ...(mode === "switching" ? ['model_reasoning_effort = "high"'] : []),
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    "[model_providers.deepseek]",
-    'name = "deepseek"',
+    "[model_providers.ds-test]",
+    'name = "ds-test"',
     'base_url = "https://api.deepseek.com/"',
     'wire_api = "responses"',
     "requires_openai_auth = false",
@@ -209,11 +212,11 @@ function providerFixture(mode: "switching" | "exclusive") {
     "",
   ].join("\n");
   writeFileSync(
-    join(providerDirectory, "managed.toml"),
-    `version = 1\nprovider = "deepseek"\nmode = "${mode}"\n`,
+    join(providerDirectory, "accounts", "test", "managed.toml"),
+    `version = 1\nprovider = "ds-test"\nmode = "${mode}"\n`,
     { mode: 0o600 },
   );
-  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
+  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "accounts", "test", "managed.toml"));
   writeFileSync(catalogPath, JSON.stringify({
     models: [
       "deepseek-v4-flash",
@@ -234,8 +237,8 @@ function providerFixture(mode: "switching" | "exclusive") {
   }), { mode: 0o600 });
   if (process.platform === "win32") securePrivateFileSync(catalogPath);
   if (mode === "switching") {
-    writeFileSync(join(codexHome, "sf-deepseek.config.toml"), providerLines, { mode: 0o600 });
-    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "sf-deepseek.config.toml"));
+    writeFileSync(join(codexHome, "sf-ds-test.config.toml"), providerLines, { mode: 0o600 });
+    if (process.platform === "win32") securePrivateFileSync(join(codexHome, "sf-ds-test.config.toml"));
     writeFileSync(
       join(codexHome, "config.toml"),
       'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',

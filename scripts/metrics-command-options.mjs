@@ -1,5 +1,6 @@
 import { managedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { isOpencodeGoProvider } from "../runtime/opencode-go-accounts.mjs";
+import { isDeepseekAccountProvider } from "../runtime/deepseek-accounts.mjs";
 import {
   isRequestMetricsRangeName,
   requestMetricsAggregationDimension,
@@ -21,7 +22,7 @@ export const metricsProviderIds = Object.freeze([
 export function isMetricsProviderId(value, environment = process.env) {
   if (typeof value !== "string") return false;
   if (new Set(metricsProviderIds).has(value)
-    || isOpencodeGoProvider(value)) {
+    || isOpencodeGoProvider(value) || isDeepseekAccountProvider(value)) {
     return true;
   }
   const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider(environment);
@@ -155,12 +156,6 @@ export function validateMetricsCommandArgs(subcommand, args) {
   if (subcommand === "prune") {
     if (args.length !== 1 || !isPrunableMetricsProviderId(args[0])) {
       throw new Error("用法：codexc metrics prune <provider>");
-    }
-    return;
-  }
-  if (subcommand === "upgrade") {
-    if (args.length > 1 || (args.length === 1 && args[0] !== "--restart-gateway")) {
-      throw new Error(`用法：codexc metrics ${subcommand} [--restart-gateway]`);
     }
     return;
   }

@@ -81,17 +81,6 @@ enabled = true
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。
 
-### 实验性上下文管理
-
-在 `codexc config → Codex 新会话与用户偏好 → 实验性上下文管理` 中控制上游的实验性上下文管理，默认关闭：
-
-```toml
-[features.context_management]
-experimental_mode = true
-```
-
-该值写入 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。保存后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变。它只对满足资格条件的官方 ChatGPT Codex 新会话生效，使用 API Key、自定义或第三方 Provider 的会话不会启用该能力。`codexc doctor` 只读显示当前开关状态和适用范围。
-
 ### TUI 空闲总结
 
 在 `codexc config → Codex 新会话与用户偏好 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
@@ -109,10 +98,6 @@ auto_recap = false
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
-
-首次运行包含 0.155.1 升级处理的 `codexc update` 时，会将 Codex 用户主配置的推理摘要统一设为
-`none`，包括已有的 `auto/concise/detailed`；完成后可以在 Config 重新选择，后续更新不会再次覆盖。
-独立 Profile 的显式覆盖保持不变。更新按当前 Codex 配置目录记录一次完成状态，写入失败会明确报错。
 
 ### 渠道会话空闲自动解除
 
@@ -167,10 +152,7 @@ Codex、Gateway 渠道和模型统计代理共用该文件；修改后在任务�
 
 `.env` 字段优先于继承的标准代理环境变量；同名大小写同时存在时大写优先。已有任一代理地址时，
 不补读系统代理；仅有 `NO_PROXY` 时仍允许自动发现。Windows 不读取 WinINET/WinHTTP。
-`codexc update` 会备份并迁移旧 TOML `[network]` 到 `.env`，成功后删除 `[network]`；
-若待迁移值与 `.env` 已配置的值冲突则明确报错，不覆盖现有值。正常启动不再接受旧 `[network]`。
-迁移按合并后的设置校验代理组合；写入和失败回滚都检查文件是否被其他操作改动。若回滚冲突，
-保留当前 `.env` 与迁移备份并报错，核对后再重试更新。
+不支持旧 TOML `[network]`，更新器不会迁移或修改代理配置。
 
 Workspace 只能从已登记项目中选择，并可分别设置 Sandbox、审批策略或 Permission Profile；不会接受聊天用户提交的任意绝对路径。
 
@@ -203,7 +185,7 @@ DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSe
 ```bash
 codexc remote
 codexc remote resume
-codexc remote --profile sf-deepseek resume
+codexc remote --profile sf-ds-<账户> resume
 ```
 
 直接运行 `codex` 会创建独立 TUI，不共享 Gateway Thread；需要共享会话时使用 `codexc remote`。跨 Provider 切换会创建目标 Provider 的新 Thread，不复制原 Provider 历史。
@@ -310,25 +292,51 @@ codexc doctor
 ```
 
 本地源码通过 `npm run install:global` 安装后，运行 `codexc update` 同步已安装包要求的
-Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI 和本地配置；
+Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。当前数据库基线只校验、不写库；后续 Schema 变化随版本提供具体迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
-从包含直接 API Provider 预留注册表的旧版升级时，`codexc update` 会识别旧 Schema 自动补入的
-顶层空数组 `api_providers = []`，并在停机窗口备份配置后移除，避免运行中的旧 Gateway 再次补入
-该默认值而阻断候选预检。配置包含一个或多个 `[[api_providers]]` 表时仍会失败关闭；先备份
-`~/.codex-connect/config.toml` 并手工删除这些表后再更新，不会隐式迁移非空 Provider 配置。历史
-`~/.codex-connect/credentials/api-providers/` 文件不会再被读取，也不会自动删除；确认不再需要后可自行处理。
+### 本机清理与归档
 
-从仍包含远程指标中心的旧源码直接更新时，`codexc update` 会在候选预检中识别
-`[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]`，切换后先停止并注销旧的本机指标中心
-后台服务，再备份 `config.toml` 并移除这些旧配置段。更新不会删除旧的中心 SQLite 或同步水位文件；
-如不再需要，可在确认备份后自行处理。
+统一交互入口：
 
-仓库源码删除不会自动删除已经部署到外部平台的旧指标中心。曾使用项目历史 Cloudflare 示例时，
-还需在对应 Cloudflare 账户中分别退役 Worker `codex-metrics-sync`、Pages 项目
-`codex-metrics-viewer`，并在确认历史数据不再需要或已导出后删除 D1 数据库 `codex-metrics`。
+```bash
+codexc cleanup
+```
+
+菜单包含以下五项，完成或取消单项后返回菜单，现有直接命令继续可用：
+
+| 菜单项目 | 直接命令 | 执行条件与结果 |
+| --- | --- | --- |
+| 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
+| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server；永久删除当前配置目录下全部转储 |
+| 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
+| 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
+| 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
+
+`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并退出。
+
+会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
+
+```bash
+codexc service stop gateway
+codexc sessions cleanup 3 --idle-days 7
+```
+
+核对后在交互终端执行，命令会重新扫描并再次询问确认：
+
+```bash
+codexc sessions cleanup 3 --idle-days 7 --confirm
+codexc service start gateway
+```
+
+也可运行 `codexc sessions` 进入专门的会话归档菜单。不指定 `--idle-days` 就没有会话年龄限制。
+轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
+活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
+官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。
+
+### 卸载
 
 卸载但保留用户数据：
 
@@ -359,7 +367,6 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 `/model` 选择 OpenAI 模型会关闭下一轮的 Fast，并同步保存为 Codex 用户默认值，避免 `all` 重启后
 重新开启；需要时可用 `/fast on` 再打开。选择第三方模型不修改 OpenAI 的 Fast 默认值。
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话会优先显示本机指标/缓存中的 Turn 轮数；打开列表不等待历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn 统计；本地没有记录时不会猜测数量。需要完整官方历史计数时，`codexc sessions cleanup` 仍会按候选读取。
-可使用 `codexc sessions cleanup <最大轮数>` 预览并按轮数批量归档短会话；追加 `--idle-days <天数>` 可进一步要求会话连续空闲达到指定天数（两个条件同时满足）。在交互终端追加 `--confirm` 后会再次展示候选并询问确认。执行前需停止 Gateway；命令覆盖配置中的全部 Workspace 和 Provider，Provider 不可连接时失败关闭，使用本机轮数缓存，归档不会永久删除会话。
 
 计划任务是 Gateway 自有功能，不是 App Server 原生计划 RPC。启用方式和确认语法见 [`计划任务开发设计`](scheduled-tasks-development.md)。
 

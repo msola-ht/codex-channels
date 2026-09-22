@@ -374,9 +374,6 @@ export interface ManagementProvidersResponse {
   }
   official: { authenticated: boolean }
   providers: ManagementProviderEntry[]
-  externalAgent:
-    | { status: "configured"; provider: string | null; model: string | null }
-    | { status: "unavailable" | "not-configured" }
 }
 
 export interface ManagementSettingsResponse {
@@ -433,7 +430,6 @@ export interface CodexUserSettingsResponse {
     fastEnabled: boolean
     webSearch: "live" | "indexed" | "cached" | "disabled" | null
     updatePlanEnabled: boolean
-    contextManagementEnabled: boolean
     autoRecapEnabled: boolean
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
     planModeReasoningEffort?: string | null
@@ -475,7 +471,7 @@ export type ManagementTaskInput =
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
   | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
-  | { operation: "metrics"; action: "upgrade" | "cleanup" | "reset" }
+  | { operation: "metrics"; action: "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
   | { operation: "traffic"; action: "cleanup" }
 
@@ -547,9 +543,6 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
   }
-  externalAgent:
-    | { status: "configured"; provider: string; model: string }
-    | { status: "unavailable" | "not-configured" }
   modelWindow: Array<{
     id: string
     displayName: string
@@ -591,11 +584,9 @@ export type ManagementProviderSettingsMutationInput =
       model: string
       windowPercent: number
     }
-  | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
-  | { operation: "external-agent"; action: "disable" }
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "configure" | "disable"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window"
   activation: string
   target?: {
     id: string
@@ -629,8 +620,6 @@ export interface ManagementProviderSettingsPreview {
     storedAsPlaintext?: true
     destination?: "private-profile" | "main-config"
   }
-  current?: { configured: boolean; provider: string | null; model: string | null }
-  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
 }
 
 export interface ManagementProviderSettingsPreviewResponse {
@@ -657,9 +646,6 @@ export interface ManagementProviderSettingsMutationResponse {
   warnings?: Array<{ code: string; providerId?: string }>
   activation?: string
   auditStatus?: "recorded" | "degraded"
-  current?: { configured: boolean; provider: string | null; model: string | null }
-  previous?: { configured: boolean; provider: string | null; model: string | null }
-  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
 }
 
 export interface ManagementAccountSettingsResponse {
@@ -679,9 +665,8 @@ export interface ManagementAccountSettingsResponse {
   }
   deepseek: {
     configured: boolean
-    mode: "switching" | "exclusive" | null
-    model: string | null
-    restoreAvailable: boolean
+    legacyConfigurationPresent: boolean
+    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
 
@@ -702,12 +687,14 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "opencode.account.remove"; accountId: string; confirmHistoryLoss?: boolean }
   | {
       operation: "deepseek.configure"
+      accountId: string
+      reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey: string
-      windowPercent?: number
       confirmExclusiveConfigChange?: boolean
     }
-  | { operation: "deepseek.restore"; confirmRestore?: boolean }
+  | { operation: "deepseek.default" | "deepseek.remove"; accountId: string }
+  | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
   operation: string
@@ -760,6 +747,14 @@ export interface DeepseekBalance {
 }
 
 export interface DeepseekBalanceResponse {
+  accounts: DeepseekAccountBalance[]
+}
+
+export interface DeepseekAccountBalance {
+  provider: string
+  account: string | null
+  displayName: string
+  default: boolean
   available: boolean
   observedAtMs: number
   balances: DeepseekBalance[]
@@ -789,6 +784,25 @@ export interface OpencodeGoUsageResponse {
   accounts: OpencodeGoAccountUsage[]
 }
 
+export interface CcgCreditAccountUsage {
+  provider: string
+  account: string | null
+  displayName: string
+  default: boolean
+  available: boolean
+  observedAtMs: number
+  planId: string | null
+  monthlyRemaining: string
+  purchasedRemaining: string
+  freeRemaining: string
+  totalRemaining: string
+  windows: OpencodeGoQuotaWindow[]
+}
+
+export interface CcgCreditUsageResponse {
+  accounts: CcgCreditAccountUsage[]
+}
+
 export interface OfficialAccountSnapshot {
   provider: string
   accountId: string | null
@@ -804,7 +818,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "opencode-go"
+    source: "deepseek" | "opencode-go" | "ccg"
     code: "registry_unavailable"
     message: string
   }>

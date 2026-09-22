@@ -8,6 +8,7 @@ export interface SourceUpdateResult {
 
 export type SourceUpdateStage =
   | "inspect"
+  | "update-installation"
   | "clone-candidate"
   | "validate-candidate"
   | "build-candidate"
@@ -18,7 +19,8 @@ export type SourceUpdateStage =
   | "stop-services"
   | "switch-source"
   | "refresh-command"
-  | "local-update"
+  | "upgrade-databases"
+  | "restore-services"
   | "cleanup";
 
 export interface SourceUpdatePlan {
@@ -30,13 +32,12 @@ export interface SourceUpdatePlan {
   currentVersion?: string;
   targetCommit?: string;
   updateAvailable?: boolean;
-  refreshCommand?: boolean;
   steps: SourceUpdateStage[];
 }
 
 export interface PreparedSourceUpdatePlan extends SourceUpdatePlan {
   requiresServiceInterruption: boolean;
-  services: { installed: boolean; obsoleteServices?: string[] };
+  services: { installed: boolean };
   targetVersion: string;
 }
 
@@ -53,7 +54,7 @@ export interface SourceUpdateFailure {
   stage: SourceUpdateStage;
   completedStages: SourceUpdateStage[];
   recovery: {
-    services: "not-needed" | "restored" | "failed" | "unknown";
+    services: "not-needed" | "restored" | "failed" | "unknown" | "stopped";
     source: "unchanged" | "restore-failed" | "switched" | "switched-backup-retained";
     backupPath?: string;
   };
@@ -104,18 +105,13 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean; obsoleteServices?: string[] } }>;
+  ) => Promise<{ services: { installed: boolean }; databaseUpdatesRequired: boolean }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
   startServices?: (
-    checkout: string,
-    environment: NodeJS.ProcessEnv,
-    options: SourceUpdateOptions,
-  ) => Promise<void> | void;
-  runLocalUpdate?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,

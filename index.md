@@ -3,12 +3,14 @@
 ## 使用与配置
 
 - [`README.md`](README.md)：最短安装入口、常用命令和专题导航。
-- [`docs/user-guide.md`](docs/user-guide.md)：完整安装、配置、渠道使用、服务管理、升级、排障和开发指导。
+- [`docs/user-guide.md`](docs/user-guide.md)：完整安装、配置、渠道使用、服务管理、升级、本机清理、排障和开发指导。
 - [`config.example.toml`](config.example.toml)：Gateway 配置示例。
+- [`provider-model-catalog.json`](provider-model-catalog.json)：OCG/CCG 基于 DS 目录扩展 V4.1 的模型 ID 与显示名映射。
 - [`startup-network-policy.json`](startup-network-policy.json)：首次网络探测与启动恢复的时限、退避参数。
 - [`docs/display.md`](docs/display.md)：渠道展示口径、`/metrics` 命令与调试模式说明。
 - [`docs/deepseek.md`](docs/deepseek.md)：DeepSeek 配置模式、终端使用、Provider 切换、网页搜索能力与运行统计。
 - [`docs/opencode-go.md`](docs/opencode-go.md)：OpenCode Go 独立 Provider、按需运行与官方目录模型。
+- [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、旧单账户移除、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。

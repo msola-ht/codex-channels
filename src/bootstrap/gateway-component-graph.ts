@@ -48,6 +48,7 @@ import {
 import {
   opencodeGoAccountIdFromProvider,
 } from "../../runtime/opencode-go-accounts.mjs";
+import { resolveDefaultManagedProvider } from "../../runtime/managed-provider-account-routing.mjs";
 import { listConfiguredAgentRoles } from "../../runtime/agent-roles.mjs";
 import { ApprovalCoordinator, InteractionRouter } from "../approval/index.js";
 import {
@@ -204,6 +205,11 @@ export abstract class GatewayComponentGraph {
     const customPrimaryProvider = loadConfiguredCustomPrimaryModelProvider();
     const customSwitchingProviders = loadConfiguredCustomSwitchingModelProviders();
     const managedProviders = loadManagedModelProviders();
+    const switchingProviderIds = [
+      ...managedProviders.map(({ provider }) => provider),
+      ...customSwitchingProviders.map(({ provider }) => provider),
+    ];
+    const defaultThirdPartyProvider = resolveDefaultManagedProvider(switchingProviderIds);
     const providerDefinitions = loadManagedModelProviderDefinitions();
     const configuredProviders = new Set<string>([
       primaryProvider,
@@ -491,6 +497,7 @@ export abstract class GatewayComponentGraph {
           && snapshot.usage !== null && typeof snapshot.usage === "object"
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
+      defaultThirdPartyProvider,
     );
     this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
     const collaborationModes = new CollaborationModeSelectionService(

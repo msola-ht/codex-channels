@@ -297,20 +297,6 @@ deepseekCatalogContractTest(
         { sandbox: "read-only" },
       );
       await client.connect();
-      const userConfig = await client.readUserConfigSnapshot();
-      await client.writeUserConfigEdits([{
-        keyPath: "features.context_management.experimental_mode",
-        value: true,
-      }], { expectedVersion: userConfig.version });
-      await expect(client.readUserConfigSnapshot()).resolves.toMatchObject({
-        config: {
-          features: {
-            context_management: {
-              experimental_mode: true,
-            },
-          },
-        },
-      });
       expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
       const router = new SessionRouter(client, new MemoryBindingStore(), new WorkspaceRegistry([
         { id: "contract", name: "Contract", cwd: workdir },

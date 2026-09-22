@@ -9,7 +9,6 @@ import { formatBytes } from "@/lib/format"
 import type { ManagementTaskController } from "@/lib/settings-management"
 
 const maintenanceActions = [
-  ["upgrade", "升级指标库"],
   ["cleanup", "清理指标库"],
   ["reset", "重建指标库"],
 ] as const
@@ -30,7 +29,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>更新源码</Button>
           {maintenanceActions.map(([action, label]) => (
-            <Button key={action} variant={action === "upgrade" ? "outline" : "destructive"} size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
+            <Button key={action} variant="destructive" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
           ))}
         </div>
         <FieldGroup className="gap-0">
@@ -75,7 +74,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
     ...pending.preview.preconditions.map((condition) => `前置条件：${condition}`),
     pending.preview.recovery ? `失败处理：${pending.preview.recovery}` : null,
   ].filter((item): item is string => item !== null)
-  const destructive = (pending.input.operation === "metrics" && pending.input.action !== "upgrade")
+  const destructive = pending.input.operation === "metrics"
     || pending.input.operation === "traffic"
     || (pending.input.operation === "service" && (pending.input.action === "uninstall" || pending.input.action === "stop"))
   const traffic = pending.input.operation === "traffic"

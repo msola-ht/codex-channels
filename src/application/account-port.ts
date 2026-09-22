@@ -161,6 +161,17 @@ export type ProviderAccountUsage =
     }
   | { kind: "balance"; provider: string; available: boolean; balances: ProviderBalance[] }
   | {
+      kind: "credit-usage";
+      provider: string;
+      available: boolean;
+      planId: string | null;
+      monthlyRemaining: string;
+      purchasedRemaining: string;
+      freeRemaining: string;
+      totalRemaining: string;
+      windows: ProviderQuotaWindow[];
+    }
+  | {
       kind: "quota-windows";
       provider: string;
       available: boolean;

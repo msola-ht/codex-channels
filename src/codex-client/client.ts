@@ -64,6 +64,7 @@ import type {
   ThreadGoalGetResponse,
   ThreadGoalSetResponse,
   ThreadListResponse,
+  ThreadListParams,
   ThreadLoadedListResponse,
   ThreadMetadataUpdateResponse,
   ThreadReadResponse,
@@ -204,6 +205,34 @@ export class CodexAppServerClient implements
     cwd: string,
     options: ThreadQueryOptions = {},
   ): Promise<ThreadSnapshot[]> {
+    return this.listThreadPages({
+      cwd,
+      modelProviders: [],
+      sourceKinds: ["cli", "vscode", "appServer"],
+      sortKey: options.sortKey ?? "updated_at",
+      sortDirection: options.sortDirection ?? "desc",
+      useStateDbOnly: !options.fullScan,
+      archived: options.archived ?? false,
+      ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
+      ...(options.sectionId ? { sectionId: options.sectionId } : {}),
+    });
+  }
+
+  /** CLI archive preview: include descendants across cwd and source boundaries. */
+  async listThreadDescendants(threadId: string, archived: boolean): Promise<ThreadSnapshot[]> {
+    return this.listThreadPages({
+      ancestorThreadId: threadId,
+      modelProviders: [],
+      sourceKinds: ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
+        "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"],
+      archived,
+      useStateDbOnly: false,
+      sortKey: "created_at",
+      sortDirection: "asc",
+    });
+  }
+
+  private async listThreadPages(params: ThreadListParams): Promise<ThreadSnapshot[]> {
     const threads: ThreadSnapshot[] = [];
     const cursors = new Set<string>();
     let cursor: string | null = null;
@@ -211,15 +240,7 @@ export class CodexAppServerClient implements
       const result: ThreadListResponse = await this.rpc.request<ThreadListResponse>({
         method: "thread/list",
         params: {
-          cwd,
-          modelProviders: [],
-          sourceKinds: ["cli", "vscode", "appServer"],
-          sortKey: options.sortKey ?? "updated_at",
-          sortDirection: options.sortDirection ?? "desc",
-          useStateDbOnly: !options.fullScan,
-          archived: options.archived ?? false,
-          ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
-          ...(options.sectionId ? { sectionId: options.sectionId } : {}),
+          ...params,
           limit: 100,
           ...(cursor ? { cursor } : {}),
         },

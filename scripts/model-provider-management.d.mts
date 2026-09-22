@@ -15,9 +15,6 @@ export interface ModelProviderManagementState {
     backupCandidates: CustomProviderCandidate[];
   };
   switchingProviders: Array<ManagedProviderManagementEntry | CustomSwitchingProviderEntry>;
-  externalAgent:
-    | { status: "configured"; provider: string; model: string }
-    | { status: "unavailable" | "not-configured" };
 }
 
 export interface ManagedProviderManagementEntry {
@@ -96,11 +93,5 @@ export function loadModelProviderManagementState(options?: {
   }>;
   listCustomCandidates?: (providers: Record<string, unknown>) => string[];
   readBackup?: (environment: NodeJS.ProcessEnv) => Record<string, Record<string, unknown>>;
-  loadAgentStatus?: (environment: NodeJS.ProcessEnv) => {
-    externalRoleConfigured: boolean;
-    legacyDsRoleConfigured?: boolean;
-    provider?: string;
-    model?: string;
-  };
   checkOfficialAuth?: (environment: NodeJS.ProcessEnv) => boolean;
 }): Promise<ModelProviderManagementState>;

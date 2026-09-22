@@ -29,22 +29,23 @@ import {
 import {
   loadConfiguredCustomPrimaryModelProvider,
   loadOpenAiBaseUrl,
-  loadThirdPartyModelProviderRole,
-  loadThirdPartyProviderCredential,
   providerMetricsSocketPath,
   withOfficialModelCatalog,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
   writeCustomOfficialModelCatalog,
-  writeThirdPartyModelProviderRoleConfig,
 } from "./model-provider-runtime.mjs";
 import {
-  loadOpencodeGoDefaultAccount,
   loadOpencodeGoAccounts,
   opencodeGoAccountIdFromProvider,
   opencodeGoProviderId,
-  sharedProviderProxyKey,
 } from "./opencode-go-accounts.mjs";
+import {
+  managedProviderAccountIdFromProvider,
+  sharedProviderProxyKey,
+} from "./managed-provider-account-routing.mjs";
+import { loadDeepseekAccounts, deepseekProviderId } from "./deepseek-accounts.mjs";
+import { loadCcgAccounts, ccgProviderId } from "./ccg-accounts.mjs";
 import { createOpencodeGoQuotaWindowsProvider } from "./opencode-go-quota-windows.mjs";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import {
@@ -161,6 +162,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           }),
     };
     const opencodeGo = provider === "ocg";
+    const managedAccountProxyOptions = (accounts, providerId, label) => ({
+      accountIds: accounts.map((account) => account.id),
+      defaultAccountId: accounts.find((account) => account.default)?.id,
+      onMetrics: (metrics, accountId) => {
+        if (accountId === undefined) throw new Error(`${label} 统计缺少账户 ID`);
+        return sendProviderProxyMetrics(
+          providerMetricsSocketPath(socketPath, providerId(accountId)),
+          metrics,
+        );
+      },
+    });
     const modelProxy = new ProviderProxy("127.0.0.1:0", {
       ...optionsWithUserAgent,
       ...(opencodeGo
@@ -185,12 +197,16 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
               );
             },
           }
-        : {
-            onMetrics: (metrics) => sendProviderProxyMetrics(
-              providerMetricsSocketPath(socketPath, provider),
-              metrics,
-            ),
-          }),
+        : provider === "deepseek"
+          ? managedAccountProxyOptions(dsAccounts, deepseekProviderId, "DS")
+          : provider === "ccg"
+            ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
+            : {
+                onMetrics: (metrics) => sendProviderProxyMetrics(
+                  providerMetricsSocketPath(socketPath, provider),
+                  metrics,
+                ),
+              }),
       onError: (error) => {
         proxySelector.invalidate();
         console.error(
@@ -219,24 +235,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     loadManagedModelProviderDefinitions(runtime.environment)
       .map((definition) => [definition.id, definition]),
   );
-  const thirdPartyRole = loadThirdPartyModelProviderRole(runtime.environment);
-  const externalRoleBaseUrl = (baseUrl) =>
-    `${baseUrl.replace(/\/+$/u, "")}/role/external`;
-  const withExternalRoleMetrics = (provider, options) =>
-    thirdPartyRole
-      && sharedProviderProxyKey(thirdPartyRole.provider) === sharedProviderProxyKey(provider)
-      ? {
-          ...options,
-          externalRoleReasoningEffort: thirdPartyRole.reasoningEffort,
-        }
-      : options;
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
+  const dsAccounts = loadDeepseekAccounts(runtime.environment);
+  const ccgAccounts = loadCcgAccounts(runtime.environment);
+  const proxyAccountId = managedProviderAccountIdFromProvider;
   const goAccountIds = goAccounts.map((account) => account.id);
-  const goDefaultAccount = thirdPartyRole
-    && opencodeGoAccountIdFromProvider(thirdPartyRole.provider)
-    ? goAccounts.find((account) =>
-        account.id === opencodeGoAccountIdFromProvider(thirdPartyRole.provider))
-    : loadOpencodeGoDefaultAccount(runtime.environment);
+  const goDefaultAccount = goAccounts.find((account) => account.default);
   const goDefaultAccountId = goDefaultAccount?.id;
   const opencodeGoQuotaWindows = new Map(goAccounts.map((account) => [
     account.id,
@@ -253,21 +257,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   ]));
   const isGoProvider = (provider) =>
     opencodeGoAccountIdFromProvider(provider) !== undefined;
-  const refreshThirdPartyRoleConfig = (provider, baseUrl) => {
-    if (thirdPartyRole?.provider !== provider) return;
-    try {
-      writeThirdPartyModelProviderRoleConfig(runtime.environment, {
-        provider,
-        model: thirdPartyRole.model,
-        baseUrl,
-      });
-    } catch (error) {
-      throw new Error(
-        `第三方子代理角色配置生成失败：${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
-  };
   const proxyOptionsForUrl = async (upstreamUrl) => {
     await proxySelector.validate(upstreamUrl);
     return {
@@ -300,21 +289,10 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const childrenByProvider = new Map();
   const providerProxyIsInUse = (proxyKey) =>
     providerProxyRuntimes.hasUsers(proxyKey)
-    || sharedProviderProxyKey(primaryProvider) === proxyKey
-    || (
-      thirdPartyRole !== undefined
-      && sharedProviderProxyKey(thirdPartyRole.provider) === proxyKey
-    );
+    || sharedProviderProxyKey(primaryProvider) === proxyKey;
   let watchChild;
   let detachChild;
-  const primaryChildCredential = thirdPartyRole
-    ? loadThirdPartyProviderCredential(thirdPartyRole.provider, runtime.environment)
-    : undefined;
   const primaryChildEnvironment = withoutManagedProviderApiKeys(runtime.environment);
-  if (primaryChildCredential) {
-    primaryChildEnvironment[primaryChildCredential.environmentKey] =
-      primaryChildCredential.apiKey;
-  }
   const ensureInstance = (provider, { waitForReady = true } = {}) => {
     const existing = instanceLaunches.get(provider);
     if (existing) return existing;
@@ -407,20 +385,16 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       try {
         const startedProxy = await startProviderProxy(
           proxyKey,
-          withExternalRoleMetrics(provider, isGoProvider(provider)
+          isGoProvider(provider)
             ? await goProxyOptions()
             : await proxyOptionsForUrl(new URL(
                 definition?.baseUrl ?? customDefinition.baseUrl,
-              ))),
+              )),
         );
         proxy = startedProxy.proxy;
-        const providerBaseUrl = isGoProvider(provider)
-          ? `${startedProxy.baseUrl}/go/${opencodeGoAccountIdFromProvider(provider)}`
+        const providerBaseUrl = proxyAccountId(provider) !== undefined
+          ? `${startedProxy.baseUrl}/go/${proxyAccountId(provider)}`
           : startedProxy.baseUrl;
-        refreshThirdPartyRoleConfig(
-          provider,
-          externalRoleBaseUrl(startedProxy.baseUrl),
-        );
         const argumentsList = withProviderBaseUrl(
           managed.runtime.arguments,
           provider,
@@ -579,10 +553,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     if (customPrimaryProvider) {
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         primaryProvider,
-        withExternalRoleMetrics(
-          customPrimaryProvider.id,
-          await proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
-        ),
+        await proxyOptionsForUrl(new URL(customPrimaryProvider.baseUrl)),
       );
       primaryArguments = withProviderBaseUrl(
         ["-c", `model_provider=${JSON.stringify(customPrimaryProvider.id)}`],
@@ -590,10 +561,6 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         localBaseUrl,
       );
       primaryArguments = withOfficialModelCatalog(primaryArguments, officialCatalogPath);
-      refreshThirdPartyRoleConfig(
-        customPrimaryProvider.id,
-        externalRoleBaseUrl(localBaseUrl),
-      );
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       const configuredOpenAiUrl = configuredOpenAiBaseUrl
@@ -631,39 +598,21 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      const providerKey = isGoProvider(definition.id) ? "ocg" : definition.id;
+      const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,
-        withExternalRoleMetrics(definition.id, isGoProvider(definition.id)
+        isGoProvider(definition.id)
           ? await goProxyOptions()
-          : await proxyOptionsForUrl(new URL(definition.baseUrl))),
+          : await proxyOptionsForUrl(new URL(definition.baseUrl)),
       );
-      const primaryBaseUrl = isGoProvider(definition.id)
-        ? `${localBaseUrl}/go/${opencodeGoAccountIdFromProvider(definition.id)}`
+      const primaryBaseUrl = proxyAccountId(definition.id) !== undefined
+        ? `${localBaseUrl}/go/${proxyAccountId(definition.id)}`
         : localBaseUrl;
       primaryArguments = withProviderBaseUrl(
         primaryArguments,
         definition.id,
         primaryBaseUrl,
       );
-      refreshThirdPartyRoleConfig(
-        definition.id,
-        externalRoleBaseUrl(localBaseUrl),
-      );
-    }
-    if (thirdPartyRole && managedByProvider.has(thirdPartyRole.provider)) {
-      const provider = thirdPartyRole.provider;
-      const definition = providerDefinitions.get(provider);
-      const customDefinition = customSwitchingProvidersById.get(provider);
-      if (!definition && !customDefinition) throw new Error(`未知第三方 Provider：${provider}`);
-      const providerKey = isGoProvider(provider) ? "ocg" : provider;
-      const { baseUrl: localBaseUrl } = await startProviderProxy(
-        providerKey,
-        withExternalRoleMetrics(provider, isGoProvider(provider)
-          ? await goProxyOptions()
-          : await proxyOptionsForUrl(new URL(definition?.baseUrl ?? customDefinition.baseUrl))),
-      );
-      refreshThirdPartyRoleConfig(provider, externalRoleBaseUrl(localBaseUrl));
     }
     const lifecycle = forwardChildrenLifecycle(children, async () => {
       await proxySelector.close();
@@ -757,7 +706,7 @@ function withoutManagedProviderApiKeys(environment) {
     loadManagedModelProviderDefinitions(environment)
       .map(({ apiKeyEnvironmentKey }) => apiKeyEnvironmentKey),
   );
-  // 旧版单账户环境变量在迁移后不再属于动态定义，仍必须从子进程环境剥离。
+  // 旧版单账户环境变量不属于当前动态定义，仍必须从子进程环境剥离。
   managedKeys.add("CODEX_CONNECT_OPENCODE_GO_API_KEY");
   for (const key of managedKeys) {
     delete childEnvironment[key];

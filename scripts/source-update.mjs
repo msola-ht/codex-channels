@@ -2,22 +2,17 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
-  lstatSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   renameSync,
-  rmdirSync,
   rmSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 
-import { parse } from "smol-toml";
 
-import { codexHomePath } from "../runtime/codex-home.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
@@ -28,7 +23,6 @@ import {
   inferNpmGlobalPrefix,
   recordManagedSourceMetadata,
 } from "./source-install-metadata.mjs";
-import { removeLegacySourceShellPaths } from "./source-shell-path.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
@@ -74,8 +68,6 @@ export function inspectManagedSourceUpdatePlan(
   ).trim();
   const currentVersion = packageVersion(checkout);
   const updateAvailable = currentCommit !== targetCommit;
-  const refreshCommand = !updateAvailable
-    && hasManagedSourceLauncher(resolve(checkout, ".."));
   return withSourceUpdateRevision({
     operation: "source-update",
     managed: true,
@@ -84,7 +76,6 @@ export function inspectManagedSourceUpdatePlan(
     currentVersion,
     targetCommit,
     updateAvailable,
-    refreshCommand,
     steps: [
       "inspect",
       ...(updateAvailable
@@ -99,10 +90,11 @@ export function inspectManagedSourceUpdatePlan(
             "install-codex-cli",
             "switch-source",
             "refresh-command",
-            "local-update",
+            "upgrade-databases",
+            "restore-services",
             "cleanup",
           ]
-        : ["local-update"]),
+        : ["update-installation"]),
     ],
   });
 }
@@ -159,17 +151,10 @@ export async function updateManagedSourceInstallation(
   const installRoot = resolve(checkout, "..");
   if (currentCommit === remoteCommit) {
     try {
-      await runStage("local-update", () => updateInstalledPackage(environment, {
+      await runStage("update-installation", () => updateInstalledPackage(environment, {
         ...options,
         projectDir: checkout,
-        runLocalUpdate: async () => {
-          if (plan.refreshCommand) {
-            await installManagedSourceCommand(checkout, installRoot, environment, writeMessage, options);
-          }
-          await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
-        },
       }));
-      writeCodexPlanSettingNotice(writeMessage, environment);
     } catch (error) {
       throw annotateSourceUpdateFailure(error, {
         stage: activeStage,
@@ -187,6 +172,7 @@ export async function updateManagedSourceInstallation(
   let servicesMayNeedRestore = false;
   let servicesRestored = false;
   let backupPath;
+  let databasesReady = true;
   const renamePath = options.renamePath ?? renameSync;
   try {
     writeMessageSafely(writeMessage, "note", "正在克隆 Git main 候选源码。");
@@ -249,13 +235,13 @@ export async function updateManagedSourceInstallation(
       "inspect-candidate",
       () => (options.inspectStaged ?? inspectStagedInstallation)(stagedCheckout, environment),
     );
-    const candidateRequiresServiceInterruption = inspection.services.installed
-      || (inspection.services.obsoleteServices?.length ?? 0) > 0;
+    const candidateRequiresServiceInterruption = inspection.services.installed;
+    databasesReady = !inspection.databaseUpdatesRequired;
     notifySafely(options.onPrepared, withSourceUpdateRevision({
       ...plan,
       steps: inspection.services.installed
         ? plan.steps
-        : plan.steps.filter((stage) => stage !== "stop-services"),
+        : plan.steps.filter((stage) => stage !== "stop-services" && stage !== "restore-services"),
       services: inspection.services,
       requiresServiceInterruption: candidateRequiresServiceInterruption,
       targetVersion: candidate.targetVersion,
@@ -279,7 +265,6 @@ export async function updateManagedSourceInstallation(
         options,
       ),
     );
-    writeCodexPlanSettingNotice(writeMessage, preparedCodex.validationEnvironment);
     if (inspection.services.installed) {
       servicesMayNeedRestore = true;
       await runStage(
@@ -325,16 +310,20 @@ export async function updateManagedSourceInstallation(
       "refresh-command",
       () => installManagedSourceCommand(
         checkout,
-        installRoot,
         environment,
         writeMessage,
         options,
       ),
     );
-    await runStage(
-      "local-update",
-      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options),
-    );
+    databasesReady = false;
+    await runStage("upgrade-databases", () =>
+      applyCandidateDatabaseUpdates(checkout, environment, options));
+    databasesReady = true;
+    if (inspection.services.installed) {
+      await runStage("restore-services", () =>
+        (options.startServices ?? startCoreServices)(checkout, environment, options));
+      servicesMayNeedRestore = false;
+    }
     await runStage("cleanup", () => {
       rmSync(backupPath, { recursive: true, force: true });
       backupPath = undefined;
@@ -350,9 +339,21 @@ export async function updateManagedSourceInstallation(
     let updateError = error;
     if (switched && backupPath) {
       updateError = new Error(
-        `main 源码已切换，但本地更新未完成；旧源码保留在 ${backupPath}。${errorMessage(error)}`,
+        `main 源码已切换，但更新未完成；旧源码保留在 ${backupPath}。${errorMessage(error)}`,
         { cause: error },
       );
+    }
+    if (switched && !databasesReady) {
+      throw annotateSourceUpdateFailure(updateError, {
+        stage: activeStage,
+        completedStages,
+        recovery: {
+          services: servicesMayNeedRestore ? "stopped" : "not-needed",
+          source: sourceRecoveryStatus(switched, backupPath),
+          ...(backupPath ? { backupPath } : {}),
+        },
+        recommendation: "数据库升级尚未完成，未启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update；不要直接回退源码或启动服务",
+      });
     }
     if (servicesMayNeedRestore) {
       try {
@@ -362,7 +363,7 @@ export async function updateManagedSourceInstallation(
         const combinedError = new AggregateError(
           [updateError, startError],
           switched
-            ? "源码已切换但本地更新失败，且核心服务未能恢复运行"
+            ? "源码已切换但更新失败，且核心服务未能恢复运行"
             : "源码更新失败，且原核心服务未能恢复运行",
           { cause: startError },
         );
@@ -501,48 +502,19 @@ function annotateSourceUpdateFailure(error, details) {
   return target;
 }
 
-function hasManagedSourceLauncher(installRoot) {
-  return [join(installRoot, "bin", "codexc"), join(installRoot, ".bin", "codexc")]
-    .some((launcher) => existsSync(launcher));
-}
-
 async function installManagedSourceCommand(
   checkout,
-  installRoot,
   environment,
   writeMessage,
   options,
 ) {
-  const legacyDirectory = join(installRoot, "bin");
-  const legacyLauncher = join(legacyDirectory, "codexc");
-  const hiddenDirectory = join(installRoot, ".bin");
-  const hiddenLauncher = join(hiddenDirectory, "codexc");
-  for (const launcher of [legacyLauncher, hiddenLauncher]) {
-    if (!existsSync(launcher)) continue;
-    const launcherStat = lstatSync(launcher);
-    const launcherContent = launcherStat.isFile() && !launcherStat.isSymbolicLink()
-      ? readFileSync(launcher, "utf8")
-      : "";
-    if (!launcherContent.includes('"$CODEX_CONNECT_HOME/codex-channels/bin/codexc.mjs"')) {
-      throw new Error(`旧命令入口不属于受管源码安装，拒绝迁移：${launcher}`);
-    }
-  }
-
   markManagedSourceCheckout(checkout, environment);
   await (options.installGlobalPackage ?? installGlobalPackage)(checkout, environment, options);
 
-  for (const launcher of [legacyLauncher, hiddenLauncher]) {
-    if (!existsSync(launcher)) continue;
-    rmSync(launcher);
-  }
-  for (const directory of [legacyDirectory, hiddenDirectory]) {
-    if (existsSync(directory) && readdirSync(directory).length === 0) rmdirSync(directory);
-  }
-  removeLegacySourceShellPaths(environment);
   writeMessageSafely(
     writeMessage,
     "note",
-    "源码命令已刷新到 npm 全局安装，并清理旧 PATH 入口。",
+    "源码命令已刷新到 npm 全局安装。",
   );
 }
 
@@ -732,39 +704,6 @@ function validateCodexContract(checkout, environment, options) {
   );
 }
 
-function writeCodexPlanSettingNotice(writeMessage, environment) {
-  const status = readCodexPlanSetting(environment);
-  if (status.error) {
-    writeMessageSafely(writeMessage, "note", `Codex 计划清单工具：无法读取（${status.error}）`);
-    return;
-  }
-  writeMessageSafely(
-    writeMessage,
-    "note",
-    `Codex 计划清单工具：${status.enabled ? "开启" : "关闭（默认）"}`
-      + "；可在 codexc config → Codex 新会话与用户偏好中修改",
-  );
-}
-
-function readCodexPlanSetting(environment) {
-  const path = join(codexHomePath(environment), "config.toml");
-  if (!existsSync(path)) return { enabled: false };
-  try {
-    const document = parse(readFileSync(path, "utf8"));
-    const tools = document?.tools;
-    const updatePlan = tools && typeof tools === "object" && !Array.isArray(tools)
-      ? tools.update_plan
-      : undefined;
-    const enabled = updatePlan
-      && typeof updatePlan === "object"
-      && !Array.isArray(updatePlan)
-      && updatePlan.enabled === true;
-    return { enabled };
-  } catch {
-    return { enabled: false, error: "Codex 用户配置无法解析" };
-  }
-}
-
 function installedCodexVersion(environment, captureCommand) {
   const executable = environment.CODEX_BINARY?.trim() || "codex";
   const output = capture(
@@ -888,17 +827,35 @@ function runQuiet(command, args, cwd, environment, implementation) {
 }
 
 async function inspectStagedInstallation(checkout, environment) {
-  const moduleUrl = `${pathToFileURL(join(checkout, "scripts", "local-update.mjs")).href}?staged`;
+  const moduleUrl = `${pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href}?staged`;
   const staged = await import(moduleUrl);
   const config = staged.inspectGatewayConfiguration(environment);
-  staged.inspectDatabaseUpdates(environment);
+  const databases = staged.inspectDatabaseUpdates(environment);
+  if (typeof databases.required !== "boolean") {
+    throw new Error("候选版本未返回数据库升级预检结果");
+  }
   const services = staged.inspectCoreServiceInstallation(environment);
   if (!services.installed && await gatewayOwnerIsActive(config.configPath)) {
     throw new Error(
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  return { config, services };
+  return { config, services, databaseUpdatesRequired: databases.required };
+}
+
+async function applyCandidateDatabaseUpdates(checkout, environment, options) {
+  run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      "const candidate = await import(process.argv[1]); await candidate.applyDatabaseUpdates(process.env);",
+      pathToFileURL(join(checkout, "scripts", "local-installation.mjs")).href,
+    ],
+    checkout,
+    environment,
+    options.runCommand,
+  );
 }
 
 async function stopCoreServices(checkout, environment, options) {
@@ -915,16 +872,6 @@ async function startCoreServices(checkout, environment, options) {
   run(
     process.execPath,
     [join(checkout, "bin", "codexc.mjs"), "service", "start", "all"],
-    checkout,
-    environment,
-    options.runCommand,
-  );
-}
-
-async function runLocalUpdate(checkout, environment, options) {
-  run(
-    process.execPath,
-    [join(checkout, "scripts", "local-update.mjs")],
     checkout,
     environment,
     options.runCommand,
@@ -1032,6 +979,9 @@ export async function updateInstalledPackage(environment = process.env, options 
   const writeMessage = options.writeMessage ?? writeCliMessage;
   let temporaryDirectory;
   let servicesStopped = false;
+  let serviceStopCompleted = false;
+  let databasesReady = !inspection.databaseUpdatesRequired;
+  let packageStage = "install-codex-cli";
   try {
     const prepared = await prepareCodexVersion(expected, checkout, environment, writeMessage, {
       ...options,
@@ -1046,13 +996,35 @@ export async function updateInstalledPackage(environment = process.env, options 
     await (options.validateCodexContract ?? validateCodexContract)(
       checkout, prepared.validationEnvironment, options,
     );
-    if (prepared.installRequired && inspection.services.installed) {
+    if ((prepared.installRequired || inspection.databaseUpdatesRequired) && inspection.services.installed) {
       servicesStopped = true;
+      packageStage = "stop-services";
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
+      serviceStopCompleted = true;
     }
+    packageStage = "install-codex-cli";
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
+    if (inspection.databaseUpdatesRequired) {
+      packageStage = "upgrade-databases";
+      await applyCandidateDatabaseUpdates(checkout, environment, options);
+      databasesReady = true;
+    }
+    if (servicesStopped) {
+      await (options.startServices ?? startCoreServices)(checkout, environment, options);
+      servicesStopped = false;
+    }
   } catch (error) {
+    if (!databasesReady && (servicesStopped || packageStage === "upgrade-databases")) {
+      throw annotateSourceUpdateFailure(error, {
+        stage: packageStage,
+        completedStages: [],
+        recovery: {
+          services: serviceStopCompleted ? "stopped" : servicesStopped ? "unknown" : "not-needed",
+          source: "unchanged",
+        },
+        recommendation: "数据库升级尚未完成，未尝试启动服务；检查迁移错误和数据库备份，修复后重新运行 codexc update",
+      });
+    }
     if (servicesStopped) {
       try {
         await (options.startServices ?? startCoreServices)(checkout, environment, options);
@@ -1095,13 +1067,13 @@ async function main() {
   if (!result.changed) {
     writeCliMessage(
       "note",
-      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 检查与本地更新已完成。`,
+      `Git 源码已是 main 最新提交 ${result.commit.slice(0, 12)}（版本 ${result.version}），配套 CLI 与数据库更新检查已完成。`,
     );
     return;
   }
   writeCliMessage(
     "success",
-    `Git main 源码已更新到 ${result.commit.slice(0, 12)}（版本 ${result.version}），本地更新与服务恢复已完成。`,
+    `Git main 源码已更新到 ${result.commit.slice(0, 12)}（版本 ${result.version}），服务恢复已完成。`,
   );
 }
 

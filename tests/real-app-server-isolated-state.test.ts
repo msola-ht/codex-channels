@@ -11,10 +11,9 @@ import {
 import { join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
-import { updateReasoningSummaryOnce } from "../scripts/local-update.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -314,6 +313,11 @@ contractSuite("isolated Codex App Server state contract", () => {
       expect(incompatible.current(target)).toBeUndefined();
       expect(incompatible.idleState(target).forceNew).toBe(true);
       expect((await ownerClient.readThread(id)).status.type).toBe("active");
+      // turn/started does not guarantee the history is persisted; establish that
+      // prerequisite before interrupting the turn used by the recovery contract.
+      await vi.waitFor(async () => {
+        expect((await peerClient.listThreads(historicalCwd)).some((thread) => thread.id === id)).toBe(true);
+      }, { timeout: 10_000, interval: 50 });
       await ownerClient.interruptTurn(id, activeTurnId!);
       await waitFor(() => completed, 2_000);
       await ownerClient.unsubscribeThread(id);
@@ -1170,30 +1174,6 @@ contractSuite("isolated Codex App Server state contract", () => {
           keyPath: "sandbox_workspace_write.network_access",
           value: beforeWorkspace?.network_access ?? null,
         },
-      ]);
-    }
-  }, 15_000);
-
-  it("resets reasoning summary once and preserves later choices across clients", async () => {
-    const before = await ownerClient.readUserConfigSnapshot();
-    const environment = { ...process.env, CODEX_HOME: codexHome };
-    try {
-      for (const summary of ["detailed", "auto"] as const) {
-        const current = await ownerClient.readUserConfigSnapshot();
-        await ownerClient.writeUserConfigEdits([
-          { keyPath: "model_reasoning_summary", value: summary },
-        ], { expectedVersion: current.version });
-        const peer = await peerClient.readUserConfigSnapshot();
-        expect(peer.config.model_reasoning_summary).toBe(summary);
-        expect(await updateReasoningSummaryOnce(environment)).toEqual({
-          changed: summary === "detailed",
-        });
-        const updated = await peerClient.readUserConfigSnapshot();
-        expect(updated.config.model_reasoning_summary).toBe(summary === "detailed" ? "none" : "auto");
-      }
-    } finally {
-      await ownerClient.writeUserConfigEdits([
-        { keyPath: "model_reasoning_summary", value: before.config.model_reasoning_summary ?? null },
       ]);
     }
   }, 15_000);

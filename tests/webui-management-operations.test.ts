@@ -47,7 +47,6 @@ describe("WebUI management operation boundaries", () => {
       primary: { id: "openai", displayName: "OpenAI", kind: "official", mode: "official" },
       managedProviders: [],
       customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
-      externalAgent: { status: "not-configured" },
     };
     let resolveState: ((value: typeof state) => void) | undefined;
     const cache = { value: null, expiresAtMs: 0, pending: null } as { value: unknown; expiresAtMs: number; pending: Promise<unknown> | null; generation?: number };
@@ -117,8 +116,10 @@ describe("WebUI management operation boundaries", () => {
       .toMatchObject({ confirmHistoryLoss: true });
     expect(accountSettingsApplyInput({ operation: "deepseek.configure", mode: "exclusive", apiKey: "secret" }))
       .toMatchObject({ confirmExclusiveConfigChange: true });
-    expect(accountSettingsApplyInput({ operation: "deepseek.restore" }))
-      .toMatchObject({ confirmRestore: true });
+    expect(accountSettingsApplyInput({ operation: "deepseek.legacy.remove" }))
+      .toMatchObject({ confirmRemove: true });
+    expect(accountSettingsApplyInput({ operation: "deepseek.remove", accountId: "work" }))
+      .toMatchObject({ confirmRemove: true });
   });
 
   it("accepts only loopback management clients and matching bearer tokens", () => {

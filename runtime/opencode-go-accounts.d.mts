@@ -13,7 +13,6 @@ export interface OpencodeGoAccountMarker {
 
 export function isOpencodeGoProviderNamespace(provider: string): boolean;
 export function isOpencodeGoProvider(provider: string): boolean;
-export function sharedProviderProxyKey(provider: string): string;
 export function opencodeGoAccountIdFromProvider(provider: string): string | undefined;
 export function opencodeGoProviderId(accountId: string): string;
 export function validateOpencodeGoAccountId(accountId: string): string;
@@ -57,6 +56,7 @@ export function opencodeGoAccountBackupDirectory(
 
 export function loadOpencodeGoAccounts(
   environment?: NodeJS.ProcessEnv,
+  options?: { allowMissingDefault?: boolean },
 ): OpencodeGoAccount[];
 export function writeOpencodeGoAccounts(
   environment: NodeJS.ProcessEnv,
@@ -74,9 +74,5 @@ export function writeOpencodeGoAccountMarker(
   accountId: string,
   mode: "switching" | "exclusive",
 ): void;
-
-export function migrateLegacyOpencodeGoAccount(
-  environment?: NodeJS.ProcessEnv,
-): { changed: boolean; accountId: string | undefined };
 
 export function opencodeGoApiKeyEnvironmentKey(accountId: string): string;

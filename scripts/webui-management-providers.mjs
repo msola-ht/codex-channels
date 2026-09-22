@@ -74,13 +74,6 @@ export function projectProviderManagementState(state) {
       authenticated: state.officialAuth?.authenticated !== false,
     },
     providers,
-    externalAgent: state.externalAgent.status === "configured"
-      ? {
-          status: "configured",
-          provider: publicProviderId(state.externalAgent.provider),
-          model: publicProviderText(state.externalAgent.model) ?? "unknown",
-        }
-      : { status: state.externalAgent.status },
   }
 }
 

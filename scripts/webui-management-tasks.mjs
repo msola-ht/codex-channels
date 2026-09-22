@@ -6,8 +6,8 @@ import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
 const targets = new Set(["gateway", "app-server", "webui", "all"]);
 const serviceActions = new Set(["install", "uninstall", "start", "stop", "reload", "restart"]);
-const maintenanceActions = new Set(["upgrade", "cleanup", "prune", "reset"]);
-const metricsRequireStoppedGateway = new Set(["upgrade", "cleanup", "reset"]);
+const maintenanceActions = new Set(["cleanup", "prune", "reset"]);
+const metricsRequireStoppedGateway = new Set(["cleanup", "reset"]);
 const maximumTaskHistory = 32;
 const defaultCancellationGraceMs = 10_000;
 

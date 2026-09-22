@@ -38,9 +38,10 @@
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
-  官方未登录时为未绑定会话解析唯一第三方的 Profile 默认模型，供状态、菜单与建线程复用；
+  官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
+  Profile 默认模型供状态、菜单与建线程复用；
   受管 Provider 设置应用后更新补充模型目录与默认标记，保留已绑定模型及待生效的明确选择；
-  多个可选第三方保持未选择状态，发送前要求明确选择；模型选择始终保留 Provider 身份，
+  没有明确默认 Provider 的多个可选第三方保持未选择状态，发送前要求明确选择；模型选择始终保留 Provider 身份，
   实际离开旧 Thread 的 Provider 切换提示与身份字段分开维护，目标 Thread 建立后不再提示待切换。
   模型选择入口按注入的共享账户状态过滤无有效订阅的 Provider，浏览和手动选择使用相同结果；
   结构化选择不依赖当前浏览范围，异步读取默认设置后及保存待生效选择前再次核对订阅。
@@ -75,7 +76,7 @@
   Fast 默认值窄端口；CLI Setup 的全局模型默认值不进入会话 Application 边界。
   Application 和 Surface 不接收完整官方模型对象。
 - `account-port.ts`：分别定义 OpenAI 账户 Token/额度、当前 Thread 官方估算、账户 ID、普通用量权限、
-  Luna Reserve 后端授权摘要、第三方余额和未支持状态的可辨识结果，
+  Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用

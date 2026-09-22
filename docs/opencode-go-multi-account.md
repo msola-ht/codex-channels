@@ -35,7 +35,7 @@ Codex Thread 的 `modelProvider` 创建后不可变。因此：
   accounts.json                            账户注册表（id、default、email 或 phone）
   models.json / models.manifest.json       共享模型目录
   accounts/<account>/managed.toml          管理标记（version、provider、mode）
-  accounts/<account>/backup/               删除前的私有 Profile 与管理标记备份
+  accounts/<account>/backup/               固定恢复基线及删除前的私有文件备份
 ```
 
 切换模式下，每个账户使用独立的 0600 Profile：
@@ -69,15 +69,27 @@ codexc opencode-go account stop <id>
   都按删除前快照回滚；存在 Remote TUI
   租约或运行中的 Supervisor 协议不兼容、响应无效时失败关闭且不修改账户文件；删除最后一个账户时
   同时清理共享模型目录，若该账户是固定模式还会恢复安装前的 Codex 主配置；
-- `default` 原子更新注册表，不修改 `agents.external`；需要切换共享子代理账户时，使用
-  `codexc agents configure ocg-<accountId> <模型>` 显式选择；
+- `default` 原子更新默认账户注册表；
 - `stop` 立即请求释放账户 App Server；如果对应 Remote TUI 正在持有租约，则保留实例并提示用户
   退出 TUI 后重试；
 - 删除账户后，该账户历史 Thread 因 Provider 不再存在而不可恢复，CLI 会要求明确确认。
 
-已注册的旧账户升级时会改为 `sf-ocg-<accountId>.config.toml`，并把配置和角色中的 Provider
-引用迁移到 `ocg-<accountId>`。没有账户 ID 的旧单账户配置不会被擅自命名为 `main`，需使用明确 ID
-重新添加。迁移无法获得联系方式，但不影响账户路由；旧会话若仍引用已不存在的旧 Provider，则不保证可恢复。
+注册表非空时必须有且只有一个默认账户。删除默认账户且仍有其他账户时必须先运行 `default`，删除
+流程不会按目录顺序自动提升。旧版注册表若没有默认标记，正常运行会失败关闭，但 `default` 命令可
+读取该状态并写回一个明确默认账户。
+
+同一时刻只允许一个固定主 Provider，一个固定 OCG 账户可以与其他切换账户共存。账户从切换模式进入
+固定模式时，以当时 `config.toml` 建立账户级恢复基线并归档旧基线；固定模式内重新配置不覆盖该基线。
+删除固定账户或把它改回切换模式时，仅恢复该 Provider 管理的主配置字段，保留之后产生的
+其他用户设置。
+
+启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
+有 ID 的账户（包括旧注册账户）统一使用 `codexc opencode-go account remove <accountId>`；
+没有 ID 的旧单账户使用 `codexc opencode-go legacy remove`，也可在 Setup 选择移除旧单账户。
+命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
+固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
+移除后再使用明确账户 ID 重新添加。更新器不检查或清理 Provider 旧账户配置。
+仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 ## 共享统计代理
 
@@ -97,8 +109,8 @@ Provider 操作或启动任务时，只有自动解除触发的全局释放轮�
 再关闭全部已连接的 Provider Client，并停止未被租约占用的 App Server 进程（含主实例）。该策略不
 区分 OpenCode Go 账户；服务进程保持运行，后续使用按需启动。其他原因导致的无绑定关闭不发送这条通知。
 
-`agents.external` 通过主 App Server 直接复用该账户 Key 与共享统计代理，不依赖账户隔离 App
-Server，因此角色仍可连续或并发启动子 Thread。
+原生子代理在父线程所在 App Server 执行，复用父线程的 Provider、账户 Key 与统计代理，
+不向主 App Server 注入其他账户凭据。
 
 渠道 Turn 在运行期间保留 Conversation 绑定；`codexc remote` 在 TUI 整个生命周期内通过私有
 Supervisor Socket 持有租约，进程正常退出或异常断开时租约自动撤销。Supervisor 仍负责受管实例
@@ -113,12 +125,10 @@ Gateway 空闲释放终止。再次选择账户、恢复 Thread 或启动 Remote
 - 完成卡片只展示当前 Thread 账户，不跨账户汇总；
 - WebUI 为所有已配置账户分别展示用量卡；
 - 额度耗尽时展示当前账户状态，但 Gateway 不主动切换账户或拦截请求；
-- `agents.external` 使用 OpenCode Go 时只指向配置时明确选择的账户，不跟随注册表默认账户；
-  修改默认账户只影响新会话，需要在共享子代理配置中重新选择账户。
 
 ## 主要验证边界
 
-测试覆盖账户注册表与旧配置迁移、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
+测试覆盖账户注册表、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
 账户用量适配、按需启动、全局 Provider Client 空闲关闭、Remote TUI 租约，以及 Supervisor 的运行中、
 显式释放和租约状态。
 

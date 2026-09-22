@@ -66,8 +66,8 @@ export async function runAppServerServiceCommand(args) {
 /**
  * 安装服务时按运行命令的终端补入缺失的 `[codex].terminal_identity`：App Server 由服务进程
  * 启动、自身没有终端，只有用户直接运行的安装命令能探测到其实际使用的终端。已配置或探测不到终端
- * 时保持配置原样；补入失败只提示并继续，不阻塞安装。更新与配置时机分别由 `local-update.mjs`
- * 与 `config-system-menu.mjs` 处理。
+ * 时保持配置原样；补入失败只提示并继续，不阻塞安装。日常配置由 `config-system-menu.mjs` 处理，
+ * 更新器不补入终端标识。
  */
 function recordInstalledTerminalIdentity(environment) {
   let terminalIdentity;
@@ -200,7 +200,7 @@ export async function waitForManagedServiceReadiness(
   environment = process.env,
   options = undefined,
 ) {
-  const { waitForCoreServiceTarget } = await import("./local-update.mjs");
+  const { waitForCoreServiceTarget } = await import("./local-installation.mjs");
   await waitForCoreServiceTarget(target, environment, options);
 }
 

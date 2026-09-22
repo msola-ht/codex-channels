@@ -148,11 +148,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = options?.cause === undefined
-      && actualVersion >= 3
-      && actualVersion < expectedVersion
-      ? "codexc metrics upgrade 备份并升级指标库"
-      : "codexc metrics reset 重建指标库";
+    const remedy = "codexc metrics reset 重建指标库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,

@@ -9,7 +9,8 @@ import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import {
-  DeepseekBalanceCard,
+  CcgCreditUsageCards,
+  DeepseekBalanceCards,
   ErrorsSummary,
   GlobalCards,
   OpencodeGoUsageCard,
@@ -22,6 +23,7 @@ import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useDashboard } from "@/hooks/use-dashboard"
 import { cn } from "@/lib/utils"
 import type {
+  CcgCreditUsageResponse,
   DeepseekBalanceResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
@@ -68,8 +70,9 @@ export function ConsolePage({ range, onRangeChange }: {
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
         overview={dashboard.data}
-        balance={officialAccounts.data?.deepseek ?? null}
+        deepseek={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
+        ccgUsage={officialAccounts.data?.ccg ?? null}
         refreshControls={officialAccounts.refreshControls}
         accountError={officialAccounts.refreshError ?? officialAccounts.error}
         accountWarning={officialAccounts.data?.warning ?? null}
@@ -140,8 +143,9 @@ function AccountStatusCards({
   onAccountRemoved,
   removalNotice,
   overview,
-  balance,
+  deepseek,
   opencodeGoUsage,
+  ccgUsage,
   refreshControls,
   accountError,
   accountWarning,
@@ -151,8 +155,9 @@ function AccountStatusCards({
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: string | null
   overview: OverviewResponse | null
-  balance: DeepseekBalanceResponse | null
+  deepseek: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
+  ccgUsage: CcgCreditUsageResponse | null
   refreshControls: Record<string, AccountRefreshControl>
   accountError: string | null
   accountWarning: string | null
@@ -175,6 +180,7 @@ function AccountStatusCards({
           </Button>
         </AlertDescription>
       </Alert> : null}
+      {accountWarning ? <Alert><AlertTitle>账户信息暂不可用</AlertTitle><AlertDescription>{accountWarning}</AlertDescription></Alert> : null}
       {removalNotice ? <Alert><AlertTitle>本地账户已删除</AlertTitle><AlertDescription>{removalNotice}</AlertDescription></Alert> : null}
       <div className="grid gap-6 lg:grid-cols-2">
         <WeeklyQuotaCard
@@ -182,20 +188,19 @@ function AccountStatusCards({
           resetsAt={overview?.weeklyQuota?.resetsAt ?? null}
           planType={overview?.weeklyQuota?.planType ?? null}
         />
-        <DeepseekBalanceCard
-          available={balance?.available ?? false}
-          observedAtMs={balance?.observedAtMs ?? 0}
-          balances={balance?.balances ?? []}
-          refreshControl={refreshControls.deepseek}
+        <DeepseekBalanceCards
+          accounts={deepseek?.accounts ?? []}
+          refreshControls={refreshControls}
         />
-        <div className="flex flex-col gap-2">
-          {accountWarning ? <Alert><AlertTitle>OCG 账户信息暂不可用</AlertTitle><AlertDescription>{accountWarning}</AlertDescription></Alert> : null}
-          <OpencodeGoUsageCard
-            accounts={opencodeGoUsage?.accounts ?? []}
-            refreshControls={refreshControls}
-            onAccountsChanged={onAccountRemoved}
-          />
-        </div>
+        <OpencodeGoUsageCard
+          accounts={opencodeGoUsage?.accounts ?? []}
+          refreshControls={refreshControls}
+          onAccountsChanged={onAccountRemoved}
+        />
+        <CcgCreditUsageCards
+          accounts={ccgUsage?.accounts ?? []}
+          refreshControls={refreshControls}
+        />
       </div>
     </div>
   )

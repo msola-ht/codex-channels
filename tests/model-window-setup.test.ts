@@ -27,7 +27,7 @@ describe("managed model window setup", () => {
       model: "deepseek-v4-flash",
       windowPercent: 75,
       contextWindow: 786_432,
-      providers: ["deepseek"],
+      providers: ["ds-test"],
       activation: "restart-app-server",
       activationResult: {
         status: "restart",
@@ -89,15 +89,18 @@ function providerFixture() {
     "deepseek",
   );
   mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+  mkdirSync(join(providerDirectory, "accounts", "test"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(providerDirectory, "accounts.json"), JSON.stringify([{ id: "test", default: true }]), { mode: 0o600 });
+  if (process.platform === "win32") { securePrivateDirectorySync(join(providerDirectory, "accounts")); securePrivateDirectorySync(join(providerDirectory, "accounts", "test")); securePrivateFileSync(join(providerDirectory, "accounts.json")); }
   if (process.platform === "win32") securePrivateDirectorySync(providerDirectory);
   const catalogPath = join(providerDirectory, "models.json");
   const providerLines = [
     'model = "deepseek-v4-flash"',
-    'model_provider = "deepseek"',
+    'model_provider = "ds-test"',
     'model_reasoning_effort = "high"',
     `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-    "[model_providers.deepseek]",
-    'name = "deepseek"',
+    "[model_providers.ds-test]",
+    'name = "ds-test"',
     'base_url = "https://api.deepseek.com/"',
     'wire_api = "responses"',
     "requires_openai_auth = false",
@@ -105,11 +108,11 @@ function providerFixture() {
     "",
   ].join("\n");
   writeFileSync(
-    join(providerDirectory, "managed.toml"),
-    'version = 1\nprovider = "deepseek"\nmode = "switching"\n',
+    join(providerDirectory, "accounts", "test", "managed.toml"),
+    'version = 1\nprovider = "ds-test"\nmode = "switching"\n',
     { mode: 0o600 },
   );
-  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "managed.toml"));
+  if (process.platform === "win32") securePrivateFileSync(join(providerDirectory, "accounts", "test", "managed.toml"));
   writeFileSync(catalogPath, JSON.stringify({
     models: [
       { slug: "deepseek-v4-flash", display_name: "DeepSeek V4 Flash", context_window: 629_146 },
@@ -127,8 +130,8 @@ function providerFixture() {
     })),
   }), { mode: 0o600 });
   if (process.platform === "win32") securePrivateFileSync(catalogPath);
-  writeFileSync(join(codexHome, "sf-deepseek.config.toml"), providerLines, { mode: 0o600 });
-  if (process.platform === "win32") securePrivateFileSync(join(codexHome, "sf-deepseek.config.toml"));
+  writeFileSync(join(codexHome, "sf-ds-test.config.toml"), providerLines, { mode: 0o600 });
+  if (process.platform === "win32") securePrivateFileSync(join(codexHome, "sf-ds-test.config.toml"));
   writeFileSync(
     join(codexHome, "config.toml"),
     'model = "gpt-5.6-sol"\nmodel_provider = "openai"\n',

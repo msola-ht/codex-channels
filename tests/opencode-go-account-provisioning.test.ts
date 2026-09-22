@@ -9,10 +9,10 @@ import {
   previewOpencodeGoAccountConfiguration,
 } from "../scripts/opencode-go-account-provisioning.mjs";
 import {
-  assertOpencodeGoFileSnapshots,
-  refreshOpencodeGoFileSnapshot,
-  snapshotOpencodeGoFiles,
-} from "../scripts/opencode-go-account-files.mjs";
+  assertProviderFileSnapshots,
+  refreshProviderFileSnapshot,
+  snapshotProviderFiles,
+} from "../scripts/managed-provider-files.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -73,6 +73,14 @@ describe("OpenCode Go account provisioning", () => {
     })).rejects.toMatchObject({ code: "account-exists", field: "accountId" });
   });
 
+  it("does not turn a stale reconfiguration request into a new account", async () => {
+    await expect(previewOpencodeGoAccountConfiguration({
+      accountId: "missing", reconfigure: true, contact: "user@example.com",
+    }, { environment: previewEnvironment() })).rejects.toMatchObject({
+      code: "account-not-found", field: "accountId",
+    });
+  });
+
   it("rejects multiple contact fields instead of silently choosing one", async () => {
     await expect(previewOpencodeGoAccountConfiguration({
       accountId: "work",
@@ -122,15 +130,15 @@ describe("OpenCode Go account provisioning", () => {
     const second = join(root, "second");
     writeFileSync(first, "before-a", { mode: 0o600 });
     writeFileSync(second, "before-b", { mode: 0o600 });
-    const snapshots = snapshotOpencodeGoFiles([first, second]);
+    const snapshots = snapshotProviderFiles([first, second]);
 
     writeFileSync(first, "after-a", { mode: 0o600 });
-    const guards = refreshOpencodeGoFileSnapshot(snapshots, first);
-    await expect(assertOpencodeGoFileSnapshots(guards)).resolves.toBeUndefined();
+    const guards = refreshProviderFileSnapshot(snapshots, first);
+    await expect(assertProviderFileSnapshots(guards)).resolves.toBeUndefined();
 
     writeFileSync(second, "external-b", { mode: 0o600 });
-    await expect(assertOpencodeGoFileSnapshots(guards))
-      .rejects.toThrow(`OpenCode Go 配置文件在事务期间发生变化：${second}`);
+    await expect(assertProviderFileSnapshots(guards))
+      .rejects.toThrow(`第三方 Provider 配置文件在事务期间发生变化：${second}`);
   });
 });
 

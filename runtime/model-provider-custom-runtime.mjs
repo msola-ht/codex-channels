@@ -26,7 +26,6 @@ const maximumConfigBytes = 1_048_576;
 export const customPrimaryProviderProfileName = "sf-custom";
 const builtInModelProviderIds = new Set(["openai", "ollama", "lmstudio", "amazon-bedrock"]);
 const customProviderIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
-const thirdPartyRoleReasoningEffortPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/u;
 const customSwitchingRegistryMaximumBytes = 262_144;
 const customSwitchingDefaultReasoningEffort = "medium";
 const officialModelCatalogMaximumBytes = 8 * 1024 * 1024;
@@ -42,6 +41,8 @@ export function validateCustomPrimaryModelProviderId(id, environment = process.e
   }
   if (
     builtInModelProviderIds.has(id)
+    || id === "deepseek" || id.startsWith("ds-")
+    || id === "ccg" || id.startsWith("ccg-")
     || isOpencodeGoProviderNamespace(id)
     || managedProviderDefinitions(environment).some((definition) => definition.id === id)
   ) {
@@ -347,56 +348,6 @@ export function loadConfiguredCustomSwitchingModelProviders(environment = proces
     }
   }
   return providers.map((provider) => loadCustomSwitchingProfile(environment, provider));
-}
-
-export function loadCustomModelProviderRoleCandidates(environment = process.env) {
-  const switching = loadConfiguredCustomSwitchingModelProviders(environment).map((provider) => ({
-    provider: provider.id,
-    displayName: provider.name,
-    model: provider.model,
-    reasoningEffort: provider.reasoningEffort,
-    mode: "switching",
-    baseUrl: provider.baseUrl,
-    apiKey: provider.apiKey,
-    apiKeyEnvironmentKey: customSwitchingProviderEnvironmentKey(provider.id),
-    supportsWebsockets: provider.supportsWebsockets,
-  }));
-  const primary = loadConfiguredCustomPrimaryModelProvider(environment);
-  if (primary === undefined) return switching;
-  const configPath = join(codexHomePath(environment), "config.toml");
-  let document;
-  try {
-    document = record(parse(readCodexConfigFile(configPath)));
-  } catch {
-    throw new Error("Codex 自定义固定 Provider 配置无法安全读取");
-  }
-  const provider = record(record(document.model_providers)[primary.id]);
-  const model = document.model;
-  const reasoningEffort = document.model_reasoning_effort ?? customSwitchingDefaultReasoningEffort;
-  const apiKey = provider.experimental_bearer_token;
-  if (
-    typeof model !== "string"
-    || model.trim() === ""
-    || !validThirdPartyRoleReasoningEffort(reasoningEffort)
-    || typeof apiKey !== "string"
-    || apiKey.trim() === ""
-    || /[\r\n]/u.test(apiKey)
-  ) {
-    throw new Error(`Codex 自定义固定 Provider ${primary.id} 不具备可用的子代理配置`);
-  }
-  return [...switching, {
-    provider: primary.id,
-    displayName: typeof provider.name === "string" && provider.name.trim() !== ""
-      ? provider.name.trim()
-      : primary.id,
-    model: model.trim(),
-    reasoningEffort: reasoningEffort.trim(),
-    mode: "exclusive",
-    baseUrl: primary.baseUrl,
-    apiKey,
-    apiKeyEnvironmentKey: customSwitchingProviderEnvironmentKey(primary.id),
-    supportsWebsockets: provider.supports_websockets === true,
-  }];
 }
 
 function loadCustomSwitchingProfile(environment, registeredProvider) {
@@ -791,11 +742,4 @@ export function validProviderBaseUrl(value, label) {
     throw new Error(`${label} base_url 必须是无凭据、查询和片段的 HTTP(S) URL`);
   }
   return url.toString();
-}
-
-export function validThirdPartyRoleReasoningEffort(value) {
-  return typeof value === "string"
-    && value.length > 0
-    && value.length <= 128
-    && thirdPartyRoleReasoningEffortPattern.test(value);
 }

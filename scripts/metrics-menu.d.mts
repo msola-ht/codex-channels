@@ -14,6 +14,12 @@ export interface MetricsMenuThread {
   lastRecordedAtMs: number;
 }
 
+export function runMetricsMaintenanceMenu(action: "cleanup" | "reset", options: {
+  prompts?: MetricsMenuPrompts;
+  readStorage?: () => Record<string, unknown>;
+  runDatabaseCommand: (args: string[]) => void;
+}): Promise<void>;
+
 export function runMetricsMenu(options: {
   prompts?: MetricsMenuPrompts;
   readStorage?: () => Record<string, unknown>;

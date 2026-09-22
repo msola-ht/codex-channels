@@ -53,11 +53,6 @@ describe("model Provider management state", () => {
         apiKey: "switch-secret",
         profileContent: "secret-content",
       }],
-      loadAgentStatus: () => ({
-        externalRoleConfigured: true,
-        provider: "deepseek",
-        model: "deepseek-flash",
-      }),
     });
 
     expect(state).toMatchObject({
@@ -68,10 +63,6 @@ describe("model Provider management state", () => {
         displayName: "Code Proxy",
         kind: "custom",
         mode: "exclusive",
-      },
-      externalAgent: {
-        status: "configured",
-        provider: "deepseek",
       },
     });
     expect(state.switchingProviders.map((provider) => provider.id)).toEqual([
@@ -97,9 +88,6 @@ describe("model Provider management state", () => {
       readBackup: () => ({}),
       loadManagedProviders: () => [],
       loadCustomSwitchingProviders: () => [],
-      loadAgentStatus: () => ({
-        externalRoleConfigured: false,
-      }),
       checkOfficialAuth: () => false,
     });
 

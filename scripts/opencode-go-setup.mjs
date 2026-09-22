@@ -1,3 +1,4 @@
+import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "./opencode-go-account-management.mjs";
 import {
   existsSync,
   rmSync,
@@ -7,7 +8,6 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
-import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
@@ -18,25 +18,18 @@ import {
 } from "./opencode-go-account-management.mjs";
 import {
   applyOpencodeGoAccountConfiguration,
-  configuredWindowPercentByModel,
   previewOpencodeGoAccountConfiguration,
-  readOpencodeGoDefaultModelMigration,
-  readOpencodeGoOptionalJson,
 } from "./opencode-go-account-provisioning.mjs";
 import { opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
-  loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
-  managedModelProviderRoleConfigPath,
   managedProviderDirectory,
-  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
-  migrateLegacyOpencodeGoAccount,
   opencodeGoAccountDirectory,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
@@ -53,18 +46,15 @@ import {
 import {
   opencodeGoAccountPaths,
   opencodeGoProfileFileName,
-  readOptionalOpencodeGoFile,
-  removeOptionalOpencodeGoFile,
-  restoreOpencodeGoFileSnapshots,
-  snapshotOpencodeGoFiles,
 } from "./opencode-go-account-files.mjs";
+import {
+  removeOptionalProviderFile,
+} from "./managed-provider-files.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
+import { downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
   ManagedModelProviderSetupError,
-  createManagedProviderCatalog,
   createManagedProviderRestorePreview,
-  resolveManagedCatalogModel,
 } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 
@@ -140,17 +130,21 @@ export async function runOpenCodeGoSetup({
 } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
   const defaultAccount = accounts.find((account) => account.default);
-  const hasModelSettings = loadManagedModelProviderSettings(environment)
+  const legacy = hasLegacyOpencodeGoConfiguration(environment);
+  const hasOldAccounts = accounts.some((account) => hasLegacyOpencodeGoConfiguration(environment, account.id));
+  const hasModelSettings = !legacy && !hasOldAccounts && loadManagedModelProviderSettings(environment)
     .some((candidate) => isOpencodeGoProvider(candidate.provider));
   const prompt = prompter ?? createPrompter(prompts, {
     allowBack,
     hasModelSettings,
     hasAccounts: accounts.length > 0,
     legacyBackup: hasLegacyBackup(environment),
+    legacy,
   });
   try {
     const action = await prompt.select();
     if (action === "back") return { action: "back" };
+    if (action === "legacy-remove") return runLegacyOpencodeGoRemoval(undefined, { environment, output, prompts });
     if (action === "model-settings") {
       if (!defaultAccount) return { action: "back" };
       return runModelProviderDefaultSetup({
@@ -227,7 +221,7 @@ export async function runOpenCodeGoSetup({
         ?? (typeof prompt.contact === "function" ? await prompt.contact() : undefined);
       return addOpencodeGoAccount(accountId, {
         mode: action,
-        reconfigure: true,
+        reconfigure: defaultAccount !== undefined,
         contact,
         environment,
         output,
@@ -303,7 +297,6 @@ export async function addOpencodeGoAccount(accountId, {
     ? `OpenCode Go 账户 Profile 已保存：${paths.profilePath}\n`
     : `OpenCode Go 账户固定配置已保存：${paths.configPath}\n`);
   output.write(`模型目录：${paths.catalogPath}\n`);
-  output.write("未自动配置共享第三方子代理（agents.external）；如需启用请运行 codexc agents configure ocg-<id> <模型>。\n");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return {
     action: "configured",
@@ -352,6 +345,9 @@ export async function removeOpencodeGoAccount(accountId, {
   prompts = clackPrompts,
   confirm = true,
 } = {}) {
+  if (hasLegacyOpencodeGoConfiguration(environment, accountId)) {
+    return runLegacyOpencodeGoRemoval(accountId, { environment, output, prompts, confirm });
+  }
   const preview = await previewOpencodeGoAccountRemoval(accountId, { environment });
   const removesLastAccount = preview.effects?.removesLastAccount === true;
   const confirmationMessage = removesLastAccount
@@ -396,142 +392,6 @@ export async function setOpencodeGoDefaultAccount(accountId, {
   return { action: result.action, accountId };
 }
 
-export async function refreshOpencodeGoCatalogForUpdate(
-  environment = process.env,
-  options = {},
-) {
-  const accounts = loadOpencodeGoAccounts(environment);
-  const previousSettings = loadManagedModelProviderSettings(environment)
-    .filter(({ provider }) => isOpencodeGoProvider(provider));
-  if (accounts.length === 0 || previousSettings.length === 0) {
-    return { status: "not-configured" };
-  }
-  const downloaded = await (options.downloadCatalog
-    ? options.downloadCatalog()
-    : downloadDeepseekCatalog(options.fetchImpl ?? globalThis.fetch));
-  const managedCatalog = createManagedProviderCatalog(downloaded.catalog, definition, {
-    previousModels: previousSettings[0]?.models,
-    modelWindowPercentByModel: configuredWindowPercentByModel(environment),
-  });
-  const defaultModel = resolveManagedCatalogModel(managedCatalog, definition);
-  const catalogSlugs = new Set(
-    managedCatalog.models.flatMap((model) =>
-      typeof model?.slug === "string" ? [model.slug] : []),
-  );
-  const managedDefault = managedCatalog.models.find(
-    (model) => model?.slug === defaultModel,
-  );
-  const reasoningEffort = managedDefault?.default_reasoning_level;
-  if (typeof reasoningEffort !== "string") {
-    throw new Error("OpenCode Go 模型目录缺少默认思考等级");
-  }
-  const providerDirectory = managedProviderDirectory(environment, definition);
-  const catalogPath = join(providerDirectory, definition.catalogFileName);
-  const manifestPath = join(providerDirectory, definition.catalogManifestFileName);
-  const previousManifest = await readOpencodeGoOptionalJson(
-    manifestPath,
-    "OpenCode Go 模型目录清单",
-  );
-  const previousMigration = readOpencodeGoDefaultModelMigration(previousManifest);
-  const settingsByProvider = new Map(
-    previousSettings.map((settings) => [settings.provider, settings]),
-  );
-  const updates = [];
-  const migratedProviders = [];
-  let migrationFrom;
-  for (const account of accounts) {
-    const provider = opencodeGoProviderId(account.id);
-    const settings = settingsByProvider.get(provider);
-    if (!settings || catalogSlugs.has(settings.model)) continue;
-    migrationFrom ??= settings.model;
-    const paths = opencodeGoAccountPaths(environment, account.id);
-    const documentPath = settings.mode === "switching" ? paths.profilePath : paths.configPath;
-    const document = await readTomlFile(documentPath);
-    if (document.model !== settings.model || document.model_provider !== provider) {
-      throw new Error(`OpenCode Go 账户 ${account.id} 默认模型配置不一致`);
-    }
-    document.model = defaultModel;
-    if (settings.mode === "switching") {
-      document.model_reasoning_effort = reasoningEffort;
-    } else {
-      delete document.model_reasoning_effort;
-      delete document.model_context_window;
-      delete document.model_auto_compact_token_limit;
-      delete document.model_auto_compact_token_limit_scope;
-    }
-    updates.push({ path: documentPath, content: stringify(document) });
-    migratedProviders.push(provider);
-  }
-  const role = loadManagedModelProviderRole(environment);
-  const roleModel = role !== undefined
-    && isOpencodeGoProvider(role.provider)
-    && !catalogSlugs.has(role.model)
-    ? role.model
-    : undefined;
-  const migrateRole = roleModel !== undefined;
-  migrationFrom ??= roleModel;
-  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
-  const transactionPaths = [
-    catalogPath,
-    manifestPath,
-    ...updates.map(({ path }) => path),
-    ...(migrateRole ? [roleConfigPath] : []),
-  ];
-  const snapshots = snapshotOpencodeGoFiles(transactionPaths);
-  let guards = snapshots;
-  try {
-    await writePrivateFileAtomic(catalogPath, `${JSON.stringify(managedCatalog, null, 2)}\n`);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    const updatedAt = (options.now ?? (() => new Date()))().toISOString();
-    await writePrivateFileAtomic(manifestPath, `${JSON.stringify({
-      source: deepseekSetupScriptUrl,
-      sha256: downloaded.sha256,
-      downloadedAt: updatedAt,
-      ...(migrationFrom === undefined
-        ? (previousMigration === undefined
-            ? {}
-            : { defaultModelMigration: previousMigration })
-        : { defaultModelMigration: {
-            from: migrationFrom,
-            to: defaultModel,
-            appliedAt: updatedAt,
-          } }),
-    }, null, 2)}\n`);
-    guards = snapshotOpencodeGoFiles(transactionPaths);
-    for (const update of updates) {
-      await writePrivateFileAtomic(update.path, update.content);
-      guards = snapshotOpencodeGoFiles(transactionPaths);
-    }
-    if (migrateRole) {
-      writeManagedModelProviderRoleConfig(environment, {
-        provider: role.provider,
-        model: defaultModel,
-      });
-      guards = snapshotOpencodeGoFiles(transactionPaths);
-    }
-  } catch (error) {
-    try {
-      await restoreOpencodeGoFileSnapshots(snapshots, guards);
-    } catch (rollbackError) {
-      throw new AggregateError(
-        [error, rollbackError],
-        "OpenCode Go 模型目录更新失败，且未能完整恢复更新前文件",
-        { cause: rollbackError },
-      );
-    }
-    throw error;
-  }
-  return {
-    status: "updated",
-    catalogPath,
-    manifestPath,
-    modelCount: managedCatalog.models.length,
-    migratedProviders,
-    roleMigrated: migrateRole,
-    defaultModelMigrationApplied: migrationFrom !== undefined,
-  };
-}
-
 export async function stopOpencodeGoAccount(accountId, {
   environment = process.env,
   output = process.stdout,
@@ -556,8 +416,29 @@ export async function stopOpencodeGoAccount(accountId, {
   return { action: result.action, accountId };
 }
 
+async function runLegacyOpencodeGoRemoval(accountId, {
+  environment = process.env, output = process.stdout, prompts = clackPrompts, confirm = true,
+} = {}) {
+  const preview = await previewLegacyOpencodeGoRemoval(accountId, { environment });
+  output.write(`将移除或恢复以下旧账户文件：\n${preview.files.join("\n")}\n`);
+  if (confirm && !await confirmPrompt(prompts, "移除旧 OCG 账户配置和 Key？保留备份与历史统计；之后需重新添加账户。", false)) {
+    return { action: "cancelled" };
+  }
+  const result = await removeLegacyOpencodeGoAccount({ accountId, confirmRemove: true }, { environment });
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  return result;
+}
+
 export async function runOpencodeGoAccountCli(args, options = {}) {
+  const usage = "用法：codexc opencode-go account <add|list|remove|default|stop> [id]\ncodexc opencode-go legacy remove（确认后移除旧单账户）";
+  if (args.includes("--help") || args.includes("-h")) {
+    (options.output ?? process.stdout).write(`${usage}\n`);
+    return;
+  }
   const [command, action, id, ...extra] = args;
+  if (command === "legacy" && action === "remove" && id === undefined) {
+    return runLegacyOpencodeGoRemoval(undefined, options);
+  }
   if (command !== "account" || !["add", "list", "remove", "default", "stop"].includes(action)) {
     throw new Error(
       "用法：codexc opencode-go account <add|list|remove|default|stop> [id]",
@@ -574,7 +455,7 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     );
     return;
   }
-  if (id === undefined || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
+  if (id === undefined || extra.length > 0 || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
     throw new Error(
       `用法：codexc opencode-go account ${action} <id>`,
     );
@@ -640,19 +521,14 @@ async function restoreOpencodeGoSetup(environment) {
     state.marker,
   );
   await restoreBackup(
-    accountPathsValue.roleConfigPath,
-    join(legacyBackup, "sf-agent.config.toml"),
-    state.roleConfig,
-  );
-  await restoreBackup(
     accountPathsValue.catalogPath,
     join(legacyBackup, definition.catalogFileName),
-    state.catalog === undefined ? false : state.catalog,
+    state.catalog,
   );
   await restoreBackup(
     accountPathsValue.manifestPath,
     join(legacyBackup, definition.catalogManifestFileName),
-    state.manifest === undefined ? false : state.manifest,
+    state.manifest,
   );
   try {
     unlinkSync(opencodeGoAccountsFilePath(environment));
@@ -668,7 +544,6 @@ async function restoreOpencodeGoSetup(environment) {
     // 账户目录清理失败不阻断恢复结果展示。
   }
   for (const file of [
-    "sf-agent.config.toml",
     "config.toml",
     opencodeGoProfileFileName(accountId),
   ]) {
@@ -731,14 +606,12 @@ function readOpencodeGoRestoreState(environment) {
       error,
     );
   }
-  const legacyCatalogState = state.catalog === undefined && state.manifest === undefined;
   const restoredState = {
     config: state.config,
     profile: state.profile,
     marker: state.marker,
-    roleConfig: state.roleConfig,
-    catalog: legacyCatalogState ? false : state.catalog,
-    manifest: legacyCatalogState ? false : state.manifest,
+    catalog: state.catalog,
+    manifest: state.manifest,
   };
   if (Object.values(restoredState).some((value) => typeof value !== "boolean")) {
     throw managedSetupInvalid(
@@ -752,7 +625,6 @@ function readOpencodeGoRestoreState(environment) {
 
 function backupKey(file) {
   if (file === "config.toml") return "config";
-  if (file === "sf-agent.config.toml") return "roleConfig";
   if (file.startsWith("sf-ocg-")) return "profile";
   return file;
 }
@@ -764,19 +636,9 @@ async function restoreBackup(target, backup, existed) {
       readPrivateFileSync(backup, maximumPrivateConfigBytes),
     );
   } else if (existed === false) {
-    await removeOptionalOpencodeGoFile(target);
+    await removeOptionalProviderFile(target);
   } else {
     throw new Error("OpenCode Go 初始配置备份状态无效");
-  }
-}
-
-async function readTomlFile(path) {
-  const content = await readOptionalOpencodeGoFile(path);
-  if (content === undefined) return {};
-  try {
-    return parse(content.toString("utf8"));
-  } catch {
-    throw new Error("Codex config.toml 无法安全读取或解析");
   }
 }
 
@@ -792,10 +654,11 @@ function printAccounts(environment, output) {
   printOpencodeGoAccounts(environment, output);
 }
 
-function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, legacyBackup }) {
+function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, legacyBackup, legacy = false }) {
   return {
     select: async () => {
       const options = [];
+      if (legacy) options.push({ value: "legacy-remove", label: "移除旧单账户，然后重新添加" });
       if (hasAccounts) {
         options.push(
           { value: "account-add", label: "添加账户" },
@@ -916,7 +779,6 @@ function managedSetupInvalid(code, field, message, cause) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  migrateLegacyOpencodeGoAccount(process.env);
   await runOpencodeGoAccountCli(process.argv.slice(2)).catch((error) => {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

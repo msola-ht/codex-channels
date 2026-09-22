@@ -4,8 +4,8 @@
 服务商）的标准流程、决策点、实现清单、安全边界与验收要求。新增通讯渠道（飞书、Telegram、
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
-当前受管第三方 Provider 是编译期注册的：DeepSeek 与 OpenCode Go 共用同一套受管管道，
-Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目录更新、账户和 Setup。
+当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go 与 CCG 共用同一套受管管道，
+Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账户和 Setup。
 新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
 ## 1. 接入前决策清单
@@ -46,17 +46,15 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
   `catalogManifestFileName`、`managedMarkerFileName`、`backupDirectoryName`；
 - `baseUrl`、`wireApi`、`apiKeyEnvironmentKey`、`supportsWebsockets`；
 - `defaultModel`、`defaultReasoningEffort`、受控 `models` 列表。
-- `capabilities`：只允许声明已实现的实例展开、模型目录来源与更新适配器、账户适配器；
-  无自动目录更新或无账户能力时显式使用 `none`，静态或人工审查目录可把来源也设为 `none`，
-  不得把任意 URL、脚本或动态插件放入定义。启用目录更新适配器时必须声明非空受控来源。
+- `capabilities`：只声明已实现的实例展开与账户适配器；无账户能力时显式使用 `none`。模型目录由 Setup 管理，程序更新器不刷新目录。
 
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
 注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
-`agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
+文件布局、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
-重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 多账户实例继承基础定义的能力
+重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 与 CCG 多账户实例继承基础定义的能力
 元数据；watcher 另保留未配置的共享模型目录，并按 Provider 合并重复定义与路径。
 
 ### 3.2 模型目录与 manifest
@@ -64,14 +62,13 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 在 `~/.codex-connect/providers/<id>/` 生成 `models.json`，schema 与现有目录一致：每个模型必须有
   `context_window`、非空 `supported_reasoning_levels`、合法 `default_reasoning_level`、
   `display_name` 与输入能力；`max_context_window` 存在时作为窗口占比的换算基准，上下文窗口
-  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样，压缩使用上游默认；
-- 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间，以及需要跨版本执行一次的
-  默认模型迁移记录；Profile（切换模式）与固定
+  只由「模型上下文窗口」按模型名统一写入，其余字段保持下载原样；`auto_compact_token_limit`
+  是独立的上游压缩阈值，不换算为上下文窗口，修改窗口时也不清空该字段；
+- 同目录写入 `models.manifest.json`：来源 URL、sha256、下载时间；Profile（切换模式）与固定
   基础配置仍位于 `~/.codex`，原生 `codex --profile` 只识别该目录；
 - 目录按 Provider 隔离；同名模型（如两个 Provider 都提供 `deepseek-flash`）是独立选项，
  模型 key 为 `provider + model`；
-- 可选模型以各 Provider 下载的官方模型目录为准：目录里声明什么就开放什么，目录不再声明的
-  旧模型名不会出现在 `/model` 与 Setup 选项中；
+- 可选模型以各 Provider 生成的模型目录为准：OCG/CCG 以 DS 完整目录为基础，复制 Flash 内容增加 V4.1，并按 Provider 映射模型 ID；目录不再声明的旧模型名不会出现在 `/model` 与 Setup 选项中；
 - 默认模型写入 Profile 后，Profile 顶层 `model_reasoning_effort` 必须镜像目录默认值，
   运行时校验不一致即失败关闭。
 
@@ -86,7 +83,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
   usage URL、凭据读取和指标库 Provider 过滤；
 - 余额形态：通过 `deepseek-account-adapter.ts` 受控创建；该适配器只接受 DeepSeek Provider，
   不会把未知 Provider 当作余额账户。
-- 无账户：`/usage` 明确显示不支持，不回退 OpenAI；
+- 无账户接口：`/usage` 明确显示不支持，不回退 OpenAI；仍可使用显式账户 ID 隔离多个凭据和运行实例；
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
@@ -115,8 +112,6 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - GO 形态优先复用/参数化 `opencode-go-setup.mjs`；否则新建 `scripts/<id>-setup.mjs`；
 - 必须包含：API Key 校验、switching/exclusive 选择、模型目录下载与校验、Profile/
   基础配置写入、管理标记、首次备份、失败回滚；
-- Provider Setup 不得自动创建或切换 `agents.external`；共享子代理只通过显式
-  `codexc agents configure` 或设置菜单中的“共享第三方子代理”入口修改；
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
@@ -124,10 +119,10 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 至少覆盖：
 
-- 定义与文件布局（`model-provider-file-layout.test.ts` 风格）；
+- 定义与文件布局（`model-provider-managed-runtime.test.ts` 风格）；
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 账户适配器：余额或用量窗口、本机 Token 统计、窗口边界、窗口快照归属与缺失回退；
-- Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
+- Setup：新增、更新、恢复、回滚；
 - 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 
@@ -165,7 +160,6 @@ codexc doctor
 - 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启 App Server；
   设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
   重启或目录刷新失败时报告应用失败，并沿用 watcher 的冷却重试流程，刷新成功后才报告已应用；
-- `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
 ## 6. 用户配置的主 Provider
 
@@ -223,17 +217,19 @@ stream_max_retries = 0
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
-多个第三方 Provider 可选时不按目录顺序决定默认值，先通过 `/model` 选择提供商和模型，再发送消息；
+多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于同一家 DS、OCG
+或 CCG 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
 选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
 目标 Thread 建立后该提示消失。
-`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；
-配置了多个第三方时明确提示指定 `--profile`。显式 Profile 和固定模式仍按原配置执行。
+`codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个同一家 DS、
+OCG 或 CCG 实例且没有混合其他 Provider 时连接该家默认账户，其他多 Provider 配置明确提示指定 `--profile`。
+显式 Profile 和固定模式仍按原配置执行。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
-`openai`、`ollama`、`lmstudio`、`amazon-bedrock`、OpenCode Go 保留命名空间
-`ocg` / `ocg-*`，或其他项目受管 Provider ID。`opencode-go` 仅保留为管理命令和既有磁盘目录的历史名称。
+`openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
+`ocg` / `ocg-*`、CCG 保留命名空间 `ccg` / `ccg-*`，或其他项目受管 Provider ID。`opencode-go` 仅保留为管理命令和既有磁盘目录的历史名称。
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。
@@ -264,11 +260,8 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 当前不支持用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
 配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
 `~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
-注入固定/切换自定义 App Server 与自定义子代理角色；目录只随本机锁定的 Codex CLI 版本更新。
-固定与切换模式的自定义 Provider 可以作为共享 `agents.external`，当前使用其 Setup 已确认的模型和
-`medium` 思考等级；角色文件保存 `env_key` 和可用的官方目录快照路径，App Server 服务仅把该 Provider
-的 Key 注入主进程，并提前启动同一 Provider 的 `/role/external` 统计代理。正在被共享子代理使用的 Provider 必须先切换或停用角色，
-才能恢复官方模式或删除，避免留下不可启动的角色配置。自定义 Provider 切换模式可以与受管切换模式
+注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。
+自定义 Provider 切换模式可以与受管切换模式
 共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
 受管 Provider 流程接入。
 
@@ -293,6 +286,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 ## 关联文档
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
+- [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离与 Command Code Credits 查询的参考实现；
 - [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；

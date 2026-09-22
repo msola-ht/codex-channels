@@ -568,7 +568,7 @@ contractSuite("real supervised App Server tools", () => {
       }
     }, 30_000);
 
-    it("attributes native subagent completion activity to the initiating parent Turn", async () => {
+    it("inherits parent Provider credentials with native role model overrides and attributes completion to the parent Turn", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-subagent-completion-contract-"));
       const codexHome = join(testRuntime, "codex-home");
       const workspace = join(testRuntime, "workspace");
@@ -577,6 +577,8 @@ contractSuite("real supervised App Server tools", () => {
       const childPrompt = "Complete the child contract task.";
       const spawnCallId = "spawn-completion-contract-worker";
       let responseSequence = 0;
+      let childRequest: { model?: string; reasoning?: { effort?: string } } | undefined;
+      let childAuthorization: string | undefined;
       let releaseChildResponse!: () => void;
       const parentCompleted = new Promise<void>((resolveCompleted) => {
         releaseChildResponse = resolveCompleted;
@@ -645,6 +647,7 @@ contractSuite("real supervised App Server tools", () => {
                       message: childPrompt,
                       task_name: "contract_worker",
                       fork_turns: "none",
+                      agent_type: "external",
                     }),
                   },
                 },
@@ -658,6 +661,8 @@ contractSuite("real supervised App Server tools", () => {
             response.end();
           };
           if (!body.includes(spawnCallId) && body.includes(childPrompt)) {
+            childRequest = JSON.parse(body) as typeof childRequest;
+            childAuthorization = request.headers.authorization;
             // Exercise late child completion deterministically, not by model-response timing.
             void parentCompleted.then(sendResponse);
           } else {
@@ -675,6 +680,8 @@ contractSuite("real supervised App Server tools", () => {
       }
       mkdirSync(codexHome, { recursive: true, mode: 0o700 });
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      const rolePath = join(codexHome, "sf-agent.config.toml");
+      writeFileSync(rolePath, 'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "low"\n', { mode: 0o600 });
       writeFileSync(join(codexHome, "config.toml"), [
         'model = "subagent-contract-model"',
         'model_provider = "subagent-contract"',
@@ -682,12 +689,17 @@ contractSuite("real supervised App Server tools", () => {
         "[features]",
         "multi_agent_v2 = true",
         "",
+        "[agents.external]",
+        'description = "Native role contract"',
+        `config_file = ${JSON.stringify(rolePath)}`,
+        "",
         "[model_providers.subagent-contract]",
         'name = "Subagent Contract Provider"',
         `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
         'wire_api = "responses"',
         "requires_openai_auth = false",
         "supports_websockets = false",
+        'experimental_bearer_token = "parent-contract-key"',
         "",
       ].join("\n"), { mode: 0o600 });
 
@@ -728,7 +740,7 @@ contractSuite("real supervised App Server tools", () => {
           { sandbox: "read-only" },
         );
         await client.connect();
-        const started = await client.startThread(workspace, { ephemeral: true });
+        const started = await client.startThread(workspace);
         threadId = started.thread.id;
         removeNotification = client.onNotification((notification) => {
           const event = toConversationInputEvent(notification);
@@ -755,6 +767,8 @@ contractSuite("real supervised App Server tools", () => {
         const spawned = activities.find(({ kind }) => kind === "started");
         const completed = activities.find(({ kind }) => kind === "completed");
         expect(spawned).toBeDefined();
+        expect(childRequest).toMatchObject({ model: "gpt-5.6-terra", reasoning: { effort: "low" } });
+        expect(childAuthorization).toBe("Bearer parent-contract-key");
         expect(completed).toMatchObject({
           threadId,
           turnId: parentTurnId,
@@ -766,6 +780,19 @@ contractSuite("real supervised App Server tools", () => {
         expect(parentSequence.indexOf("subagent.completed")).toBeGreaterThan(
           parentSequence.indexOf("parent.turn.completed"),
         );
+        const descendants = await client.listThreadDescendants(threadId, false);
+        expect(descendants).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: spawned?.agentThreadId, parentThreadId: threadId }),
+        ]));
+        await client.archiveThread(threadId);
+        expect(await client.listThreadDescendants(threadId, false)).toEqual([]);
+        expect(await client.listThreadDescendants(threadId, true)).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: spawned?.agentThreadId, parentThreadId: threadId }),
+        ]));
+        expect(await client.listThreads(workspace, { archived: true, fullScan: true }))
+          .toEqual(expect.arrayContaining([expect.objectContaining({ id: threadId })]));
+        parentTurnId = undefined;
+        threadId = undefined;
       } finally {
         releaseChildResponse();
         removeNotification?.();

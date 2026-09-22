@@ -18,7 +18,6 @@ import {
 import {
   resolveHttpProxyUrl,
   resolveProxyEnvironment,
-  type ProxySettings,
 } from "../../runtime/network-proxy.mjs";
 import { assertPrivateConfigAccessSync } from "../../runtime/private-file.mjs";
 
@@ -185,18 +184,16 @@ export function loadConfigDocument(
   {
     environment = {},
     detectSystemProxy = false,
-    proxySettings,
   }: {
     environment?: NodeJS.ProcessEnv;
     detectSystemProxy?: boolean;
-    proxySettings?: ProxySettings;
   } = {},
 ): GatewayConfig {
   const documents = parseConfigDocuments(content);
   return loadValidatedConfigDocument(
     documents.validated,
     baseDirectory,
-    { environment, detectSystemProxy, ...(proxySettings ? { proxySettings } : {}) },
+    { environment, detectSystemProxy },
   );
 }
 
@@ -223,11 +220,9 @@ function loadValidatedConfigDocument(
   {
     environment = {},
     detectSystemProxy = false,
-    proxySettings,
   }: {
     environment?: NodeJS.ProcessEnv;
     detectSystemProxy?: boolean;
-    proxySettings?: ProxySettings;
   } = {},
 ): GatewayConfig {
   const workspaces = validateWorkspaces(raw.workspaces);
@@ -244,7 +239,7 @@ function loadValidatedConfigDocument(
     throw new ConfigurationError(`default_workspace 不存在：${raw.default_workspace}`);
   }
   const proxyEnvironment = resolveProxyEnvironment(
-    proxySettings ?? readCodexProxySettings(environment),
+    readCodexProxySettings(environment),
     environment,
     detectSystemProxy ? {} : { readSystemProxy: () => ({}) },
   );

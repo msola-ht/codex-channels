@@ -3,8 +3,11 @@
 Codex Connect 可把 OpenCode Go 作为独立第三方 Provider 使用，并支持在同一 Gateway 内配置多个
 OpenCode Go 账户（各自 Key、各自套餐额度）。当前官方目录中的模型为 `deepseek-flash` 和
 `deepseek-v4-pro`；它们与 DeepSeek 官方 Provider 的同名模型仍是独立选项，分别使用各自的
-API Key、上游地址与 Thread 路由。可选模型同样以下载的官方目录为准，DeepSeek 下线的
-旧模型名不会出现在 `/model` 与 Setup 选项中。
+API Key、上游地址与 Thread 路由。目录保留 DS 原有模型，并复制 Flash 的完整内容增加
+`DeepSeek V4.1 Flash`（`deepseek-v4.1-flash`），仅修改模型 ID 与显示名。
+映射参数位于 [`provider-model-catalog.json`](../provider-model-catalog.json)，DS 自身的目录不增加该条目。
+ID 已由 [OCG 公开模型目录](https://opencode.ai/zen/go/v1/models) 确认；能力字段按 Flash 复用，
+尚未完成 4.1 的真实 API 联调。DeepSeek 下线的旧模型名不会出现在 `/model` 与 Setup 选项中。
 
 ## 配置与使用
 
@@ -26,12 +29,20 @@ codexc opencode-go account stop <id>     # 立即释放该账户隔离 App Serve
 不进入注册表、配置或日志。添加账户时必须输入邮箱或手机号码（二选一）；联系方式只用于本机展示，不参与 CLI Provider 路由。模型目录与管理标记共享
 `~/.codex-connect/providers/opencode-go/`。首个账户也可通过 Setup 选择保留 OpenAI 默认的
 切换模式，或让原生 Codex 和 Gateway 默认使用 OpenCode Go 的固定模式；固定模式会先备份再修改
-`~/.codex/config.toml`。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
+`~/.codex/config.toml`。同一时刻只允许一个固定主 Provider；一个 OCG 账户处于固定模式时，其他
+OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会以当时主配置更新该账户的恢复基线，旧基线
+按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。账户基线缺失时明确报错，不读取共享旧备份代替。
+Setup 恢复首次配置前状态只接受字段完整的当前备份，缺少目录归属字段的旧备份会在恢复前报错。
+如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
-已注册的旧账户会迁移到相同账户 ID 的 `ocg-<accountId>` 与
-`sf-ocg-<accountId>.config.toml`，并重写其中的 Provider 引用。没有账户 ID 的旧单账户配置不会被
-擅自命名为 `main`，需使用明确 ID 重新添加；迁移不会猜测联系方式，后续重新配置账户时可补充邮箱或手机号；旧会话若仍引用已不存在的旧 Provider，则不能保证继续恢复。
+启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
+有 ID 的账户（包括旧注册账户）统一使用 `codexc opencode-go account remove <accountId>`；
+没有 ID 的旧单账户使用 `codexc opencode-go legacy remove`，也可在 Setup 选择移除旧单账户。
+命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
+固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
+移除后再使用明确账户 ID 重新添加。更新器不检查或清理 Provider 旧账户配置。
+仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 配置完成后运行：
 
@@ -41,17 +52,11 @@ codexc service restart all
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
-再按模型设置默认思考等级；上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
+再按模型设置默认思考等级，同一目录中引用该模型的账户 Profile 同步该等级，原生子代理保留独立设置，选择其他模型的账户保持各自模型的等级；目录刷新也同步仍存在模型的有效等级。上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
 每个模型按自己的 `max_context_window` 换算窗口，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型窗口占比，
-不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
-所选模型已不在新目录中的账户，以及引用该模型的共享子代理，会切到目录默认模型 `deepseek-flash`，
-已选择仍在目录中的 Pro 的账户保持不变；仍存在于目录中的选择不会被后续更新覆盖。目录更新后
-的窗口按原占比和新的最大窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
+不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；更新器不刷新模型目录。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
-
-设置默认账户不会自动修改 `agents.external`，共享子代理仍使用配置时明确选择的账户；如需切换账户，
-请运行 `codexc agents configure ocg-<accountId> <模型>`。
 
 聊天中使用 `/model` 选择带 `ocg-<邮箱或手机号>`（无联系方式时回退为 `ocg-<accountId>`）前缀的模型；同账户内切换模型不新建 Thread，
 跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），
@@ -64,9 +69,7 @@ codexc remote --profile sf-ocg-<账户>              # 任一已配置账户
 所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需
 启动。服务启动时只登记配置，首次选择对应账户模型、恢复对应 Thread 或使用对应 Remote TUI 时，
 App Server 监管进程才启动该账户的隔离实例；账户 App Server 的 `base_url` 指向共享代理并带
-`/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。当前被
-`agents.external` 选择的账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
-也未选作子代理的账户不增加进程。
+`/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。未使用的账户不增加进程。
 
 Gateway 的全局空闲策略统一关闭已连接的 Provider Client：当没有任何前台或后台 Conversation 绑定、
 进行中的 Provider 操作或启动任务时，先等待 60 秒；期间新消息或恢复 Thread 会取消本轮释放。宽限期
@@ -80,10 +83,10 @@ Supervisor 会按需重新启动实例。
 ## 协议与模型范围
 
 OpenCode Go 的基础地址为 `https://opencode.ai/zen/go/v1`。本项目使用 Codex App Server 的
-Responses Provider 配置；当前 V4.1 Flash 与 Pro 已通过 `/responses` 流式文本和工具调用实测，
-其中 `deepseek-flash` 声明文字和图片输入。官方 Go
+Responses Provider 配置；`deepseek-flash` 声明文字和图片输入，新增的
+`deepseek-v4.1-flash` 复制其完整能力字段，本次未验证该独立模型 ID 的真实流式请求和工具调用。官方 Go
 页面列出的其他模型使用多种端点协议，不能只因为出现在官方页面或 `/models` 中就自动开放；可选模型
-仍以下载的官方目录为准：目录里声明什么就出现在选项中，官方页面新增但未写入该目录的模型不开放。
+以 DS 基础内容和显式 V4.1 扩展生成的目录为准；官方页面新增但未写入该目录的模型不开放。
 
 OpenCode Go 已接入独立账户用量接口：当前 Thread 使用 OpenCode Go 时，`/usage` 会实时通过官方
 `GET /zen/go/v1/usage` 查询 5 小时（$12）、7 天（$30）和月度（$60）三个配额窗口的已用百分比与
@@ -131,7 +134,8 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   查看错误分类。
 - 所有账户 id 都由添加时明确输入，使用小写字母/数字/`-`/`_`（1–32 位），不允许与现有
   Provider id 冲突；CLI 和 Thread 一律使用 `ocg-<accountId>`，默认账户只使用注册表标记；删除账户前
-  会备份 Profile 与账户目录，删除后该账户历史 Thread 不可恢复；删除最后一个账户时账户命令会
+  会备份 Profile 与账户目录；存在其他账户时必须先把默认标记切换到其他账户，不能由删除操作自动提升；
+  删除后该账户历史 Thread 不可恢复；删除最后一个账户时账户命令会
   直接清理共享模型目录，固定模式还会恢复安装前的 Codex 主配置。删除后重启 Gateway 会自动解绑已删除账户的
   外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：完成卡片展示请求结果、Token、缓存与压缩摘要，并在官方

@@ -1,0 +1,14 @@
+{
+  "flashSourceModel": "deepseek-flash",
+  "v41DisplayName": "DeepSeek V4.1 Flash",
+  "ocg": {
+    "v41Model": "deepseek-v4.1-flash"
+  },
+  "ccg": {
+    "modelIds": {
+      "deepseek-flash": "deepseek/deepseek-v4-flash",
+      "deepseek-v4-pro": "deepseek/deepseek-v4-pro"
+    },
+    "v41Model": "deepseek/deepseek-v4.1-flash"
+  }
+}

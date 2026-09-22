@@ -12,25 +12,16 @@ import { stringify } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 
-import {
-  AppServerSupervisorOwner,
-  ensureAppServerProvider,
-  inspectAppServerSupervisor,
-  releaseAppServerProvider,
-} from "../runtime/app-server-supervisor.mjs";
+import { AppServerSupervisorOwner, inspectAppServerSupervisor } from "../runtime/app-server-supervisor.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { gatewayOwnerIsActive, GatewayOwner } from "../runtime/gateway-owner.mjs";
 import {
-  deepseekProviderDefinition,
+  deepseekAccountDefinition,
   opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
   type ModelProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
-import {
-  customOfficialModelCatalogPath,
-  writeCustomPrimaryProviderSwitchingProfile,
-  writeThirdPartyModelProviderRoleConfig,
-} from "../runtime/model-provider-runtime.mjs";
+import { writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
 import {
   acknowledgeConfigEvents,
   configEventQueuePath,
@@ -177,10 +168,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["rules", "-h"], "用法：codexc rules"],
       [["rules", "init", "-h"], "用法：codexc rules init"],
       [["rules", "check", "--help"], "用法：codexc rules check"],
-      [["agents", "-h"], "用法：codexc agents"],
-      [["agents", "status", "--help"], "用法：codexc agents status"],
-      [["agents", "configure", "-h"], "用法：codexc agents configure"],
-      [["agents", "disable", "--help"], "用法：codexc agents disable"],
       [["primary-provider", "-h"], "用法：codexc primary-provider"],
       [["opencode-go", "-h"], "用法：codexc opencode-go"],
       [["opencode-go", "account", "--help"], "用法：codexc opencode-go account"],
@@ -191,11 +178,11 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["opencode-go", "account", "stop", "-h"], "用法：codexc opencode-go account stop"],
       [["update", "--help"], "用法：codexc update"],
       [["uninstall", "--help"], "用法：codexc uninstall"],
-      [["state", "-h"], "用法：codexc state upgrade"],
-      [["state", "upgrade", "--help"], "用法：codexc state upgrade"],
       [["metrics", "-h"], "用法：codexc metrics"],
+      [["cleanup", "-h"], "用法：codexc cleanup"],
+      [["cleanup", "--help"], "用法：codexc cleanup"],
+      [["cleanup"], "用法：codexc cleanup"],
       [["metrics", "status", "--help"], "用法：codexc metrics status"],
-      [["metrics", "upgrade", "--help"], "用法：codexc metrics upgrade"],
       [["metrics", "run", "--help"], "用法：codexc metrics run"],
       [["metrics", "turns", "--help"], "用法：codexc metrics turns"],
       [["metrics", "threads", "--help"], "用法：codexc metrics threads"],
@@ -230,7 +217,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         args: ["setup", "--help"],
         includes: [
           "OpenAI 官方 → 登录并恢复官方",
-          "受管 Provider 模型设置 / 共享第三方子代理",
+          "受管 Provider 模型设置",
         ],
       },
       { args: ["work", "--help"], includes: ["权限"] },
@@ -251,7 +238,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       {
         args: ["remote", "--help"],
-        includes: ["sf-ocg-<账户>", "sf-custom-<Provider ID>"],
+        includes: ["sf-ocg-<账户>", "sf-ccg-<账户>", "sf-custom-<Provider ID>"],
       },
       {
         args: ["channel", "--help"],
@@ -260,7 +247,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       {
         args: ["update", "--help"],
-        includes: ["更新失败也会尝试恢复已停止的核心服务"],
+        includes: ["数据库升级未完成时不启动服务", "当前数据库基线无迁移写入", "执行目标版本的数据库升级入口"],
       },
       { args: ["doctor", "--help"], includes: ["codexc doctor [--json]"] },
       {
@@ -288,7 +275,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "remote",
       "work",
       "rules",
-      "agents",
       "primary-provider",
       "opencode-go",
       "metrics",
@@ -297,7 +283,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "start",
       "service",
       "update",
-      "state",
       "version",
     ]) {
       expect(result.stdout).toContain(`\n  ${command}`);
@@ -416,12 +401,12 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
     store.record({
       ...metricsSample(2),
-      provider: "deepseek",
+      provider: "ds-test",
       model: "shared-model",
     });
     store.record({
       ...metricsSample(3),
-      provider: "deepseek",
+      provider: "ds-test",
       model: "shared-model",
       status: "failed",
       httpStatus: 429,
@@ -444,7 +429,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const report = JSON.parse(jsonOutput);
     expect(report.report.groups).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        provider: "deepseek",
+        provider: "ds-test",
         model: "shared-model",
         aggregate: expect.objectContaining({ requestCount: expect.any(Number) }),
       }),
@@ -455,7 +440,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       }),
     ]));
     expect(report.errors.groups).toEqual([
-      expect.objectContaining({ provider: "deepseek", errorType: "rate_limit" }),
+      expect.objectContaining({ provider: "ds-test", errorType: "rate_limit" }),
     ]);
 
     const csvOutput = execFileSync(process.execPath, [
@@ -475,9 +460,9 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(header).toContain("errorType");
     expect(header).toContain("lastOccurredAtMs");
     expect(rows).toEqual(expect.arrayContaining([
-      expect.stringMatching(/^group,deepseek,shared-model,/u),
+      expect.stringMatching(/^group,ds-test,shared-model,/u),
       expect.stringMatching(/^group,openai,shared-model,/u),
-      expect.stringMatching(/^error,deepseek,shared-model,/u),
+      expect.stringMatching(/^error,ds-test,shared-model,/u),
     ]));
   });
 
@@ -533,7 +518,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(report.totalGroupCount).toBe(21);
     expect(report.groups).toHaveLength(20);
     expect(report.groups.every((group: { provider: string }) =>
-      group.provider === "deepseek"
+      group.provider === "ds-test"
     )).toBe(true);
   });
 
@@ -1449,7 +1434,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-test-secret",
     );
@@ -1467,20 +1452,20 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
     const supervisor = new AppServerSupervisorOwner(primarySocketPath, {
       primaryProvider: "openai",
-      managedProviders: ["deepseek"],
+      managedProviders: ["ds-test"],
       socketPaths: [
         primarySocketPath,
-        join(home, "runtime", "codex-app-server-deepseek.sock"),
+        join(home, "runtime", "codex-app-server-ds-test.sock"),
       ],
     }, { ensureProvider: async () => undefined });
     await supervisor.start();
     try {
       for (const [index, args] of [
-        ["--profile", "sf-deepseek"],
-        ["--profile=sf-deepseek"],
-        ["-p", "sf-deepseek"],
-        ["-p=sf-deepseek"],
-        ["-psf-deepseek"],
+        ["--profile", "sf-ds-test"],
+        ["--profile=sf-ds-test"],
+        ["-p", "sf-ds-test"],
+        ["-p=sf-ds-test"],
+        ["-psf-ds-test"],
       ].entries()) {
         const capturePath = join(root, `capture-${index}.json`);
         await execFileAsync(process.execPath, [cli, "remote", ...args, "resume"], {
@@ -1491,18 +1476,18 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
         expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
           "--remote",
-          `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+          `unix://${join(home, "runtime", "codex-app-server-ds-test.sock")}`,
           "-C",
           realpathSync(workspace),
           "--profile",
-          "sf-deepseek",
+          "sf-ds-test",
           "resume",
         ]);
       }
       const passthroughCapture = join(root, "capture-passthrough.json");
       await execFileAsync(
         process.execPath,
-        [cli, "remote", "resume", "--", "--profile", "deepseek", "--workspace", "external"],
+        [cli, "remote", "resume", "--", "--profile", "ds-test", "--workspace", "external"],
         {
           cwd: workspace,
           env: { ...environment, CODEX_TEST_CAPTURE: passthroughCapture },
@@ -1511,15 +1496,15 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       );
       expect(JSON.parse(readFileSync(passthroughCapture, "utf8"))).toEqual([
         "--remote",
-        `unix://${join(home, "runtime", "codex-app-server-deepseek.sock")}`,
+        `unix://${join(home, "runtime", "codex-app-server-ds-test.sock")}`,
         "-C",
         realpathSync(workspace),
         "--profile",
-        "sf-deepseek",
+        "sf-ds-test",
         "resume",
         "--",
         "--profile",
-        "deepseek",
+        "ds-test",
         "--workspace",
         "external",
       ]);
@@ -1775,436 +1760,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(captured.signals).toBeGreaterThanOrEqual(1);
   });
 
-  it("starts a selected custom Responses Provider and its shared role through one metrics proxy", () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-custom-provider-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const capturePath = join(root, "capture.json");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "const args = process.argv.slice(2);",
-      "if (args.join(' ') === 'debug models --bundled') {",
-      "  process.stdout.write(JSON.stringify({",
-      "    models: [{ slug: 'gpt-5.6-terra', display_name: 'GPT-5.6-Terra' }],",
-      "  }));",
-      "  process.exit(0);",
-      "}",
-      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args,",
-      "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
-      "}));",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-      CODEX_TEST_CAPTURE: capturePath,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
-    writeFileSync(join(codexHome, "config.toml"), [
-      'model = "gpt-5.6-terra"',
-      'model_reasoning_effort = "medium"',
-      "",
-      "[model_providers.thirdparty]",
-      'name = "Third-party Responses"',
-      'base_url = "https://proxy.example.test/v1"',
-      'wire_api = "responses"',
-      "requires_openai_auth = true",
-      "supports_websockets = false",
-      'experimental_bearer_token = "custom-fixed-secret"',
-      "",
-      "[agents.external]",
-      `config_file = ${JSON.stringify(roleConfigPath)}`,
-      "",
-    ].join("\n"), { mode: 0o600 });
-    writeThirdPartyModelProviderRoleConfig(environment, { provider: "thirdparty" });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    execFileSync(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: environment,
-    });
-
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual({
-      args: [
-        "-c",
-        'model_provider="thirdparty"',
-        "-c",
-        expect.stringMatching(/^model_providers\.thirdparty\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
-        "-c",
-        "model_providers.thirdparty.request_max_retries=1",
-        "-c",
-        "model_providers.thirdparty.stream_max_retries=0",
-        "-c",
-        `model_catalog_json=${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
-        "app-server",
-        "--listen",
-        `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-      ],
-      customKeys: ["CODEX_CONNECT_CUSTOM_74686972647061727479_API_KEY"],
-    });
-    const roleContent = readFileSync(roleConfigPath, "utf8");
-    expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
-    expect(roleContent).toContain(
-      `model_catalog_json = ${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
-    );
-    expect(roleContent).not.toContain("custom-fixed-secret");
-  });
-
-  it("starts the DeepSeek proxy for subagents without eagerly starting its App Server", () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-provider-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const capturePath = join(root, "capture.json");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { appendFileSync } from 'node:fs';",
-      "appendFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args: process.argv.slice(2),",
-      "  hasDeepseekApiKey: process.env.CODEX_CONNECT_DEEPSEEK_API_KEY !== undefined,",
-      "  hasOpenCodeApiKey: process.env.CODEX_CONNECT_OPENCODE_GO_API_KEY !== undefined,",
-      "}) + '\\n');",
-      "await new Promise((resolve) => setTimeout(resolve, 100));",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-    writeManagedProviderFixture(
-      codexHome,
-      home,
-      deepseekProviderDefinition,
-      "switching",
-      "sk-service-secret",
-    );
-    writeManagedProviderFixture(
-      codexHome,
-      home,
-      opencodeGoProviderDefinition,
-      "switching",
-      "sk-opencode-secret",
-    );
-    writeFileSync(
-      join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      `[agents.external]\nconfig_file = ${JSON.stringify(
-        join(codexHome, "sf-agent.config.toml"),
-      )}\n`,
-      { mode: 0o600 },
-    );
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-      CODEX_TEST_CAPTURE: capturePath,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    execFileSync(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: environment,
-    });
-
-    const captures = readFileSync(capturePath, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    expect(captures).toHaveLength(1);
-    const openAiCapture = captures.find(({ args }) =>
-      args.some((value: string) => value.startsWith("openai_base_url="))
-    );
-    const deepseekCapture = captures.find(({ args }) =>
-      args.includes('model_provider="deepseek"')
-    );
-    expect(openAiCapture?.args).toEqual([
-      "-c",
-      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
-      "app-server",
-      "--listen",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-    ]);
-    expect(deepseekCapture).toBeUndefined();
-    expect(openAiCapture).toMatchObject({
-      hasDeepseekApiKey: true,
-      hasOpenCodeApiKey: false,
-    });
-    expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-service-secret");
-    expect(JSON.stringify(captures.map(({ args }) => args))).not.toContain("sk-opencode-secret");
-    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
-    expect(readFileSync(roleConfigPath, "utf8")).toMatch(
-      /base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u,
-    );
-  });
-
-  it("starts a custom Provider proxy for subagents and injects only its isolated API key", () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-custom-role-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const capturePath = join(root, "capture.json");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "const args = process.argv.slice(2);",
-      "if (args.join(' ') === 'debug models --bundled') {",
-      "  process.stdout.write(JSON.stringify({",
-      "    models: [{ slug: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol' }],",
-      "  }));",
-      "  process.exit(0);",
-      "}",
-      "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify({",
-      "  args,",
-      "  customKeys: Object.keys(process.env).filter((key) => key.startsWith('CODEX_CONNECT_CUSTOM_')),",
-      "}));",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-      CODEX_TEST_CAPTURE: capturePath,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    writeCustomPrimaryProviderSwitchingProfile({
-      provider: "codeproxy-dev",
-      model: "gpt-5.6-sol",
-      name: "CodeProxy Dev",
-      baseUrl: "https://proxy.example.test/v1",
-      apiKey: "custom-agent-secret",
-    }, environment);
-    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
-    writeFileSync(
-      roleConfigPath,
-      'model = "gpt-5.6-sol"\nmodel_provider = "codeproxy-dev"\nmodel_reasoning_effort = "medium"\n',
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      `model_provider = "openai"\n[agents.external]\nconfig_file = ${JSON.stringify(roleConfigPath)}\n`,
-      { mode: 0o600 },
-    );
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    execFileSync(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: environment,
-    });
-
-    const capture = JSON.parse(readFileSync(capturePath, "utf8"));
-    expect(capture.args).toEqual([
-      "-c",
-      expect.stringMatching(/^openai_base_url="http:\/\/127\.0\.0\.1:\d+"$/u),
-      "app-server",
-      "--listen",
-      `unix://${join(home, "runtime", "codex-app-server.sock")}`,
-    ]);
-    expect(capture.customKeys).toEqual([
-      "CODEX_CONNECT_CUSTOM_636F646570726F78792D646576_API_KEY",
-    ]);
-    const roleContent = readFileSync(roleConfigPath, "utf8");
-    expect(roleContent).toMatch(/base_url = "http:\/\/127\.0\.0\.1:\d+\/role\/external"/u);
-    expect(roleContent).toContain(
-      `model_catalog_json = ${JSON.stringify(customOfficialModelCatalogPath(environment))}`,
-    );
-    expect(roleContent).not.toContain("custom-agent-secret");
-  });
-
-  it("keeps the shared GO proxy running when releasing the role account App Server", async () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-role-release-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { createServer } from 'node:http';",
-      `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
-      "const listenUrl = process.argv.at(-1);",
-      "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
-      "if (!socketPath) process.exit(2);",
-      "const server = createServer();",
-      "const webSocketServer = new WebSocketServer({ server });",
-      "server.listen(socketPath);",
-      "const stop = () => {",
-      "  for (const client of webSocketServer.clients) client.terminate();",
-      "  webSocketServer.close(() => server.close(() => process.exit(0)));",
-      "};",
-      "process.once('SIGTERM', stop);",
-      "process.once('SIGINT', stop);",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-    writeManagedProviderFixture(
-      codexHome,
-      home,
-      opencodeGoProviderDefinition,
-      "switching",
-      "sk-opencode-secret",
-    );
-    const roleConfigPath = join(codexHome, "sf-agent.config.toml");
-    writeFileSync(
-      roleConfigPath,
-      'model = "deepseek-flash"\nmodel_provider = "ocg-main"\nmodel_reasoning_effort = "high"\n',
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      `[agents.external]\nconfig_file = ${JSON.stringify(roleConfigPath)}\n`,
-      { mode: 0o600 },
-    );
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    const service = spawn(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    service.stdout.setEncoding("utf8");
-    service.stderr.setEncoding("utf8");
-    let stderr = "";
-    service.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const primarySocketPath = join(home, "runtime", "codex-app-server.sock");
-    const exited = new Promise<void>((resolveExit) => service.once("exit", () => resolveExit()));
-
-    try {
-      await waitForCondition(
-        () => existsSync(primarySocketPath),
-        5_000,
-        () => service.exitCode === null
-          ? undefined
-          : new Error(`App Server 服务提前退出：${stderr}`),
-      );
-      await ensureAppServerProvider(primarySocketPath, "ocg-main");
-      const beforeRelease = readFileSync(roleConfigPath, "utf8");
-      const roleBaseUrl = /base_url = "([^"]+)"/u.exec(beforeRelease)?.[1];
-      expect(roleBaseUrl).toBeDefined();
-      if (!roleBaseUrl) throw new Error("第三方子代理角色缺少本地代理地址");
-      await expect(fetch(new URL("/health", roleBaseUrl)).then((response) => response.status))
-        .resolves.toBe(404);
-
-      await expect(releaseAppServerProvider(primarySocketPath, "ocg-main"))
-        .resolves.toEqual({ released: true, reason: "released" });
-
-      expect(readFileSync(roleConfigPath, "utf8")).toBe(beforeRelease);
-      await expect(fetch(new URL("/health", roleBaseUrl)).then((response) => response.status))
-        .resolves.toBe(404);
-    } finally {
-      if (service.exitCode === null && service.signalCode === null) service.kill("SIGTERM");
-      await exited;
-    }
-  }, 15_000);
-
-  it("fails closed when the managed subagent role cannot be refreshed", () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-service-role-write-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    const faultInjection = join(root, "fail-role-write.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
-    chmodSync(fakeCodex, 0o700);
-    writeFileSync(faultInjection, [
-      "import fs from 'node:fs';",
-      "import { syncBuiltinESMExports } from 'node:module';",
-      "const renameSync = fs.renameSync;",
-      "fs.renameSync = (source, target) => {",
-      "  if (String(target).endsWith('sf-agent.config.toml')) {",
-      "    const error = new Error('injected role config write failure');",
-      "    error.code = 'EACCES';",
-      "    throw error;",
-      "  }",
-      "  return renameSync(source, target);",
-      "};",
-      "syncBuiltinESMExports();",
-    ].join("\n"));
-    writeManagedProviderFixture(
-      codexHome,
-      home,
-      deepseekProviderDefinition,
-      "switching",
-      "sk-service-secret",
-    );
-    writeFileSync(
-      join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      `[agents.external]\nconfig_file = ${JSON.stringify(
-        join(codexHome, "sf-agent.config.toml"),
-      )}\n`,
-      { mode: 0o600 },
-    );
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    updateGatewayConfig(join(home, "config.toml"), (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    const result = spawnSync(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: {
-        ...environment,
-        NODE_OPTIONS: `--import=${pathToFileURL(faultInjection).href}`,
-      },
-      encoding: "utf8",
-      timeout: 10_000,
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("第三方子代理角色配置生成失败");
-  });
-
     }
 
     if (shard === "supervision") {
@@ -2285,13 +1840,13 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       `const { WebSocketServer } = await import(${JSON.stringify(pathToFileURL(resolve("node_modules/ws/wrapper.mjs")).href)});`,
       "const args = process.argv.slice(2);",
       `if (args[0] === '--version') { process.stdout.write('codex-cli ${expectedAppServerVersion}\\n'); process.exit(0); }`,
-      "const baseUrlArg = args.find((value) => value.startsWith('model_providers.deepseek.base_url='));",
+      "const baseUrlArg = args.find((value) => value.startsWith('model_providers.ds-test.base_url='));",
       "const listenUrl = args.at(-1);",
       "const socketPath = listenUrl?.startsWith('unix://') ? listenUrl.slice('unix://'.length) : undefined;",
       "const capture = {",
       "  baseUrlArg,",
-      "  requestRetries: args.find((value) => value === 'model_providers.deepseek.request_max_retries=1'),",
-      "  streamRetries: args.find((value) => value === 'model_providers.deepseek.stream_max_retries=0'),",
+      "  requestRetries: args.find((value) => value === 'model_providers.ds-test.request_max_retries=1'),",
+      "  streamRetries: args.find((value) => value === 'model_providers.ds-test.stream_max_retries=0'),",
       "  initialized: false,",
       "};",
       "writeFileSync(process.env.CODEX_TEST_CAPTURE, JSON.stringify(capture));",
@@ -2324,7 +1879,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "exclusive",
       "sk-start-secret",
     );
@@ -2414,10 +1969,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     };
     expect(captured.initialized).toBe(true);
     expect(captured.baseUrlArg).toMatch(
-      /^model_providers\.deepseek\.base_url="http:\/\/127\.0\.0\.1:\d+"$/u,
+      /^model_providers\.ds-test\.base_url="http:\/\/127\.0\.0\.1:\d+\/go\/test"$/u,
     );
-    expect(captured.requestRetries).toBe("model_providers.deepseek.request_max_retries=1");
-    expect(captured.streamRetries).toBe("model_providers.deepseek.stream_max_retries=0");
+    expect(captured.requestRetries).toBe("model_providers.ds-test.request_max_retries=1");
+    expect(captured.streamRetries).toBe("model_providers.ds-test.stream_max_retries=0");
   }, 15_000);
 
   it("rejects a partial App Server topology instead of bypassing a provider proxy", async () => {
@@ -2434,7 +1989,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "switching",
       "sk-start-secret",
     );
@@ -2489,7 +2044,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     writeManagedProviderFixture(
       codexHome,
       home,
-      deepseekProviderDefinition,
+      deepseekAccountDefinition("test"),
       "exclusive",
       "sk-start-secret",
     );
@@ -2747,11 +2302,12 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     mkdirSync(codexHome);
     writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
     chmodSync(fakeCodex, 0o700);
-    const providerDirectory = join(home, "providers", deepseekProviderDefinition.id);
+    const providerDirectory = join(home, "providers", "deepseek", "accounts", "test");
     mkdirSync(providerDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(home, "providers", "deepseek", "accounts.json"), JSON.stringify([{ id: "test", default: true }]), { mode: 0o600 });
     writeFileSync(
-      join(providerDirectory, deepseekProviderDefinition.managedMarkerFileName),
-      'version = 1\nprovider = "deepseek"\nmode = "exclusive"\n',
+      join(providerDirectory, deepseekAccountDefinition("test").managedMarkerFileName),
+      'version = 1\nprovider = "ds-test"\nmode = "exclusive"\n',
       { mode: 0o600 },
     );
     const environment = {
@@ -2841,11 +2397,10 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["work", "add", "--id", "--prune-missing"], "--id 缺少值"],
       [["work", "add", "--name", "-Project", "--unknown"], "未知参数：--unknown"],
       [["work", "unknown"], "用法：codexc work"],
+      [["state", "upgrade"], "未知命令：state"],
+      [["metrics", "upgrade"], "用法：codexc metrics"],
       [["remote", "--workspace"], "用法：codexc remote"],
-      [["remote", "--workspace", "--profile", "deepseek"], "用法：codexc remote"],
-      [["agents"], "用法：codexc agents"],
-      [["agents", "unknown"], "用法：codexc agents"],
-      [["agents", "status", "--json", "unexpected"], "用法：codexc agents"],
+      [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
       [["rules", "check", "--json", "unexpected"], "用法：codexc rules"],
       [["config", "--json", "unexpected"], "用法：codexc config [--json]"],
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
@@ -2908,9 +2463,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
     for (const [args, expected] of [
       [["work", "list", "unexpected"], "用法：codexc work list"],
-      [["agents", "status", "unexpected"], "用法：codexc agents"],
-      [["agents", "configure"], "用法：codexc agents"],
-      [["agents", "disable", "unexpected"], "用法：codexc agents"],
     ] as const) {
       const result = spawnSync(process.execPath, [cli, ...args], {
         cwd: root,
@@ -2920,45 +2472,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(1);
       expect(result.stderr).toContain(expected);
     }
-  });
-
-  it("reads agents status without requiring Gateway initialization", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-agents-status-"));
-    temporaryDirectories.push(root);
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: join(root, "missing-gateway-home"),
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: join(root, ".codex"),
-    };
-
-    const result = spawnSync(process.execPath, [cli, "agents", "status"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-    });
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("multi_agent_v2：未启用");
-    expect(result.stdout).toContain("第三方子代理：未配置");
-    expect(result.stderr).toBe("");
-
-    const jsonResult = spawnSync(
-      process.execPath,
-      [cli, "agents", "status", "--json"],
-      { cwd: root, env: environment, encoding: "utf8" },
-    );
-    expect(jsonResult.status, jsonResult.stderr).toBe(0);
-    expect(JSON.parse(jsonResult.stdout)).toEqual({
-      configPath: expect.any(String),
-      roleConfigPath: expect.any(String),
-      multiAgentV2Enabled: false,
-      externalRoleConfigured: false,
-      legacyDsRoleConfigured: false,
-      provider: null,
-      model: null,
-    });
-    expect(jsonResult.stderr).toBe("");
   });
 
   it("reports a foreground start failure exactly once without a Node stack", () => {
@@ -3037,62 +2550,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
     expect(result.stderr).not.toContain("子命令执行失败");
     expect(result.stderr).not.toContain("Node.js v");
-  });
-
-  it.skipIf(process.platform === "win32")("fails fast when the managed role references an unconfigured provider", () => {
-    const root = mkdtempSync(join(unixSocketTmpdir, "codex-connect-start-role-missing-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const codexHome = join(root, ".codex");
-    const workspace = join(root, "Workspace");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(workspace);
-    mkdirSync(codexHome);
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\nprocess.exit(0);\n");
-    chmodSync(fakeCodex, 0o700);
-    writeFileSync(
-      join(codexHome, "sf-agent.config.toml"),
-      'model = "deepseek-flash"\nmodel_provider = "deepseek"\nmodel_reasoning_effort = "high"\n',
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(codexHome, "config.toml"),
-      [
-        "[agents.external]",
-        `config_file = ${JSON.stringify(join(codexHome, "sf-agent.config.toml"))}`,
-        "",
-      ].join("\n"),
-      { mode: 0o600 },
-    );
-    const environment = {
-      ...process.env,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_HOME: codexHome,
-    };
-    execFileSync(process.execPath, [cli, "init"], { cwd: workspace, env: environment });
-    const configPath = join(home, "config.toml");
-    updateGatewayConfig(configPath, (document) => {
-      table(document.codex).binary = fakeCodex;
-      const agents = document.agents && typeof document.agents === "object"
-        ? document.agents as Record<string, unknown>
-        : {};
-      agents.external = {
-        config_file: join(codexHome, "sf-agent.config.toml"),
-      };
-      document.agents = agents;
-    });
-
-    const result = spawnSync(process.execPath, [cli, "service-app-server"], {
-      cwd: root,
-      env: environment,
-      encoding: "utf8",
-      timeout: 10_000,
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("DeepSeek Provider 尚未配置");
-    expect(result.signal).toBeNull();
   });
 
   it("does not repeat a managed child command failure", () => {
@@ -3426,7 +2883,7 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     });
 
     expect(output).toContain("脱敏接入状态总览");
-    expect(output).toContain("模型与提供商、共享第三方子代理、通讯渠道和项目技能");
+    expect(output).toContain("模型与提供商、通讯渠道和项目技能");
     expect(output).not.toContain("直接 API Provider");
   });
 
@@ -3619,8 +3076,8 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "doctor") {
-  it("rejects removed Workspace command aliases", () => {
-    for (const alias of ["workspace", "ws"]) {
+  it("rejects removed commands and Workspace aliases", () => {
+    for (const alias of ["workspace", "ws", "agents"]) {
       const result = spawnSync(process.execPath, [cli, alias], { encoding: "utf8" });
 
       expect(result.status).toBe(1);
@@ -4487,7 +3944,7 @@ function signalTestProcess(pid: number, signal: NodeJS.Signals): void {
 function metricsSample(index: number): ModelRequestMetricSample {
   const now = Date.now();
   return {
-    provider: "deepseek",
+    provider: "ds-test",
     transport: "http",
     responseFormat: "sse",
     operation: "response",

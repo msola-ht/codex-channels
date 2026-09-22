@@ -5,6 +5,7 @@ import * as clackPrompts from "@clack/prompts";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
+import { runCcgSetup } from "./ccg-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
 import { runSkillSetup } from "./skill-setup.mjs";
@@ -14,7 +15,6 @@ import { runModelWindowSetup } from "./model-window-setup.mjs";
 import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
 import { runOfficialLoginSetup } from "./official-login-setup.mjs";
 import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
-import { runThirdPartyAgentSetup } from "./agents-setup.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runSetup({
@@ -23,6 +23,7 @@ export async function runSetup({
   prompts = clackPrompts,
   feishuSetup = runFeishuSetup,
   deepseekSetup = runDeepseekSetup,
+  ccgSetup = runCcgSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   skillSetup = runSkillSetup,
@@ -32,7 +33,6 @@ export async function runSetup({
   customPrimarySetup = runCustomPrimaryProviderMenu,
   officialLoginSetup = runOfficialLoginSetup,
   setupSummary = writeSetupConfigurationSummary,
-  agentsSetup = runThirdPartyAgentSetup,
   stayOnMenu = false,
   onResult,
 } = {}) {
@@ -45,7 +45,7 @@ export async function runSetup({
         {
           value: "summary",
           label: "接入状态总览",
-          hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
+          hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
         },
         {
           value: "models",
@@ -99,12 +99,12 @@ export async function runSetup({
           output,
           prompts,
           deepseekSetup,
+          ccgSetup,
           openCodeGoSetup,
           modelProviderDefaultSetup,
           modelWindowSetup,
           customPrimarySetup,
           officialLoginSetup,
-          agentsSetup,
         });
         if (isBackResult(result)) continue;
         const enriched = enrichSetupResult(result);
@@ -135,12 +135,12 @@ async function runModelSetup({
   output,
   prompts,
   deepseekSetup,
+  ccgSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
   customPrimarySetup,
   officialLoginSetup,
-  agentsSetup,
 }) {
   while (true) {
     const category = await prompts.select({
@@ -177,11 +177,11 @@ async function runModelSetup({
         output,
         prompts,
         deepseekSetup,
+        ccgSetup,
         openCodeGoSetup,
         modelProviderDefaultSetup,
         modelWindowSetup,
         customPrimarySetup,
-        agentsSetup,
       });
       if (isBackResult(result)) continue;
       return enrichSetupResult(result, "restart-all");
@@ -226,11 +226,11 @@ async function runThirdPartyModelSetup({
   output,
   prompts,
   deepseekSetup,
+  ccgSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
   customPrimarySetup,
-  agentsSetup,
 }) {
   while (true) {
     const module = await prompts.select({
@@ -255,17 +255,17 @@ async function runThirdPartyModelSetup({
         {
           value: "provider_default",
           label: "受管 Provider 模型设置",
-          hint: "设置 DeepSeek 与 OpenCode Go 各 Provider 的默认模型与思考等级",
+          hint: "设置各受管 Provider 的默认模型与思考等级",
+        },
+        {
+          value: "ccg",
+          label: "CCG（CommandCode）",
+          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
         },
         {
           value: "model_window",
           label: "模型上下文窗口",
-          hint: "按模型名统一设置 DeepSeek 与 OpenCode Go 的上下文窗口占比",
-        },
-        {
-          value: "agents",
-          label: "共享第三方子代理",
-          hint: "选择已配置 Provider 与模型，或停用 agents.external",
+          hint: "按模型名统一设置受管 Provider 的上下文窗口占比",
         },
         { value: "back", label: "返回", hint: "返回模型与提供商菜单" },
       ],
@@ -276,14 +276,14 @@ async function runThirdPartyModelSetup({
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
     } else if (module === "opencode-go") {
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "ccg") {
+      result = await ccgSetup({ input, output, prompts, allowBack: true });
     } else if (module === "custom_primary") {
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {
       result = await modelProviderDefaultSetup({ input, output, prompts, allowBack: true });
     } else if (module === "model_window") {
       result = await modelWindowSetup({ input, output, prompts, allowBack: true });
-    } else if (module === "agents") {
-      result = await agentsSetup({ input, output, prompts, allowBack: true });
     } else {
       throw new Error(`未知第三方设置：${String(module)}`);
     }
@@ -380,9 +380,9 @@ function setupFallbackActivation(module, result) {
   return {
     custom_primary: "restart-all",
     deepseek: "restart-all",
+    ccg: "restart-all",
     "opencode-go": "restart-all",
     provider_default: "restart-app-server",
-    agents: "restart-app-server",
   }[module];
 }
 

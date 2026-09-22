@@ -60,6 +60,41 @@ export function createSwitchingProviderProfile(definition, {
   });
 }
 
+export function createManagedProviderConfiguration(current, initial, definition, {
+  mode,
+  previousMode,
+  apiKey,
+  catalogPath,
+  catalog,
+  model,
+}) {
+  if (mode === "exclusive") {
+    return {
+      config: applyExclusiveProviderConfig(current, definition, { apiKey, catalogPath, model }),
+      profile: undefined,
+    };
+  }
+  const config = previousMode === "exclusive"
+    ? restoreProviderBaseConfig(current, initial, definition)
+    : current;
+  if (hasProviderBaseConfig(config, definition)) {
+    throw new Error(
+      `安装前的 Codex config.toml 已占用 ${definition.id} Provider 或 Profile；请先手工移除或改名`,
+    );
+  }
+  const reasoningEffort = catalog.models.find((entry) => entry.slug === model)
+    ?.default_reasoning_level;
+  if (typeof reasoningEffort !== "string") {
+    throw new Error(`${definition.displayName} 模型目录缺少默认思考等级`);
+  }
+  return {
+    config,
+    profile: createSwitchingProviderProfile(definition, {
+      apiKey, catalogPath, model, reasoningEffort,
+    }),
+  };
+}
+
 export function createManagedProviderCatalog(catalog, definition, {
   previousModels = [],
   windowPercent = null,

@@ -12,13 +12,18 @@ import { parse, stringify } from "smol-toml";
 
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
-import { loadManagedModelProviderDefinitions } from "./model-provider-definitions.mjs";
+import {
+  isManagedProviderModelValid,
+  isManagedProviderApiKeyValid,
+  loadManagedModelProviderDefinitions,
+} from "./model-provider-definitions.mjs";
 import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
+import { deepseekAccountMarkerPath } from "./deepseek-accounts.mjs";
+import { ccgAccountMarkerPath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedCatalogModelPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
 
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
@@ -26,6 +31,12 @@ export function managedProviderDirectory(environment, definition) {
 
 export function managedProviderMarkerPath(environment, definition) {
   if (definition.accountId !== undefined) {
+    if (definition.storageId === "deepseek") {
+      return deepseekAccountMarkerPath(environment, definition.accountId);
+    }
+    if (definition.storageId === "ccg") {
+      return ccgAccountMarkerPath(environment, definition.accountId);
+    }
     return opencodeGoAccountMarkerPath(environment, definition.accountId);
   }
   return join(
@@ -188,13 +199,8 @@ export function writeManagedModelProviderProfileDefault(
   delete document.model_context_window;
   delete document.model_auto_compact_token_limit;
   delete document.model_auto_compact_token_limit_scope;
-  writePrivateFileAtomicSync(profile.catalogPath, nextCatalog);
-  try {
-    writePrivateFileAtomicSync(profilePath, stringify(document));
-  } catch (error) {
-    writePrivateFileAtomicSync(profile.catalogPath, previousCatalog);
-    throw error;
-  }
+  writeCatalogWithProfileMirrors(environment, definition, profile.catalogPath, nextCatalog,
+    new Map([[profilePath, stringify(document)]]));
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: "mirror",
@@ -211,10 +217,8 @@ export function writeManagedModelProviderCatalogSettings(
   validateManagedModelSettings(definition, settings);
   const previousContent = readPrivateFile(path, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
-  writePrivateFileAtomicSync(
-    path,
-    updateModelCatalogSettings(previousContent, definition, settings),
-  );
+  writeCatalogWithProfileMirrors(environment, definition, path,
+    updateModelCatalogSettings(previousContent, definition, settings));
   return previous;
 }
 
@@ -229,7 +233,41 @@ export function restoreManagedModelProviderCatalogContent(
   content,
   environment = process.env,
 ) {
-  writePrivateFileAtomicSync(managedProviderCatalogPath(provider, environment).path, content);
+  const { definition, path } = managedProviderCatalogPath(provider, environment);
+  writeCatalogWithProfileMirrors(environment, definition, path, content);
+}
+
+function writeCatalogWithProfileMirrors(environment, definition, catalogPath, content, updates = new Map()) {
+  // 账户 Profile 镜像目录默认值；角色独立选择模型与思考等级。
+  const catalog = JSON.parse(content);
+  for (const sibling of managedProviderDefinitions(environment)) {
+    if (join(managedProviderDirectory(environment, sibling), sibling.catalogFileName) !== catalogPath
+      || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
+    const path = join(codexHomePath(environment), sibling.profileFileName);
+    if (updates.has(path)) continue;
+    const document = record(parse(readPrivateFile(path)));
+    const model = catalog.models.find((entry) => entry.slug === document.model);
+    if (!model) throw new Error(`${sibling.displayName} 目录不支持当前模型`);
+    document.model_reasoning_effort = model.default_reasoning_level;
+    updates.set(path, stringify(document));
+  }
+  updates = new Map([[catalogPath, content], ...updates]);
+  const originals = new Map([...updates.keys()].map((path) => [path, readPrivateFile(path, maximumCatalogBytes)]));
+  const written = [];
+  try {
+    for (const [path, next] of updates) {
+      writePrivateFileAtomicSync(path, next);
+      written.push(path);
+    }
+  } catch (error) {
+    const errors = [error];
+    for (const path of written.reverse()) {
+      try { writePrivateFileAtomicSync(path, originals.get(path)); }
+      catch (rollbackError) { errors.push(rollbackError); }
+    }
+    if (errors.length > 1) throw new AggregateError(errors, "模型目录与引用配置回滚未完成", { cause: error });
+    throw error;
+  }
 }
 
 function managedProviderCatalogPath(provider, environment) {
@@ -520,10 +558,7 @@ export function readProviderProfile(
   }
   const apiKey = provider.experimental_bearer_token;
   if (
-    typeof apiKey !== "string"
-    || !/^sk-[^\s"]+$/u.test(apiKey)
-    || apiKey.length > 4_096
-    || /[\r\n]/u.test(apiKey)
+    !isManagedProviderApiKeyValid(descriptor.definition, apiKey)
   ) {
     throw new Error(`Codex ${descriptor.definition.displayName} API Key 缺失或无效`);
   }
@@ -610,8 +645,7 @@ export function catalogHasModel(path, definition, model) {
 function catalogSlugSet(catalog, definition) {
   if (Array.isArray(catalog?.models)
     && catalog.models.some((entry) =>
-      typeof record(entry).slug !== "string"
-      || !managedCatalogModelPattern.test(record(entry).slug))) {
+      !isManagedProviderModelValid(definition, record(entry).slug))) {
     throw new Error(`Codex ${definition.displayName} 模型目录包含无效模型名`);
   }
   return new Set(
@@ -636,7 +670,7 @@ export function readModelCatalogSetting(path, definition, model) {
   }
 }
 
-// 迁移路径允许选中模型已从官方目录消失；目录本身不可读或条目无效仍然失败关闭。
+// 目录刷新允许原选中模型已下架；目录本身不可读或条目无效仍然失败关闭。
 function readOptionalModelCatalogSetting(path, definition, model) {
   const content = readPrivateFile(path, maximumCatalogBytes);
   let catalog;
@@ -662,7 +696,7 @@ function modelCatalogSetting(content, definition, model) {
   const document = record(candidate);
   const contextWindow = document.context_window;
   const maxContextWindow = document.max_context_window;
-  const legacyThreshold = document.auto_compact_token_limit;
+  const compactThreshold = document.auto_compact_token_limit;
   const levels = Array.isArray(document.supported_reasoning_levels)
     ? document.supported_reasoning_levels
     : [];
@@ -681,26 +715,22 @@ function modelCatalogSetting(content, definition, model) {
     || !reasoningEfforts.some(({ effort }) => effort === reasoningEffort)
     || (maxContextWindow !== null && maxContextWindow !== undefined
       && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow <= 0))
-    || (legacyThreshold !== null && legacyThreshold !== undefined
-      && (!Number.isSafeInteger(legacyThreshold) || legacyThreshold <= 0))
+    || (compactThreshold !== null && compactThreshold !== undefined
+      && (!Number.isSafeInteger(compactThreshold) || compactThreshold <= 0))
   ) {
     throw new Error(`Codex ${definition.displayName} 模型目录无效`);
   }
   const windowBase = maxContextWindow === null || maxContextWindow === undefined
     ? contextWindow
     : maxContextWindow;
-  // v2 之前的目录把百分比写成自动压缩阈值；阈值按同一基准折算为窗口。
-  const window = legacyThreshold === null || legacyThreshold === undefined
-    ? contextWindow
-    : Math.min(legacyThreshold, windowBase);
   return {
     model,
     displayName: typeof document.display_name === "string" ? document.display_name : model,
-    contextWindow: window,
+    contextWindow,
     maxContextWindow: windowBase,
     reasoningEffort,
     reasoningEfforts,
-    windowPercent: Math.round(window * 100 / windowBase),
+    windowPercent: Math.round(contextWindow * 100 / windowBase),
   };
 }
 
@@ -735,13 +765,8 @@ function updateModelCatalogSettings(content, definition, settings) {
       ? {}
       : {
           context_window: settings.contextWindow,
-          // 缺少最大窗口的旧目录必须保留原始基准，避免下次按缩小后的窗口计算。
+          // 最大窗口是可选字段；首次修改时保存基准，避免后续按缩小后的窗口计算。
           max_context_window: current.maxContextWindow,
-          // 旧版本写在目录里的压缩阈值会卡住新窗口，随窗口一并清掉。
-          ...(entry.auto_compact_token_limit === undefined
-            || entry.auto_compact_token_limit === null
-            ? {}
-            : { auto_compact_token_limit: null }),
         }),
   };
   return `${JSON.stringify({ ...catalog, models }, null, 2)}\n`;

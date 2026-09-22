@@ -5,7 +5,10 @@ import {
   accountSnapshotsWithMissingProviders,
   accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved,
+  ccgAccountFromSnapshot,
+  deepseekAccountFromSnapshot,
   refreshableAccounts,
+  remainingRemovedAccountProviders,
   opencodeAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
 import type { ManagementProvidersResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
@@ -37,8 +40,26 @@ describe("WebUI per-account refresh state", () => {
   it("does not resurrect a confirmed deletion from old snapshots or missing-provider placeholders", () => {
     const response = { observedAtMs: 0, warnings: [], snapshots: [] };
     const stale = accountSnapshotsWithMissingProviders(response, [{ id: "ocg-old", displayName: "Old" }, { id: "deepseek", displayName: "DS" }]);
-    expect(accountSnapshotsWithoutRemoved(stale, ["old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
-    expect(accountSnapshotsWithoutRemoved({ ...stale, snapshots: stale.snapshots.map((item) => ({ ...item, accountId: item.provider === "ocg-old" ? "old" : null })) }, ["old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+    expect(accountSnapshotsWithoutRemoved(stale, ["ocg-old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+    expect(accountSnapshotsWithoutRemoved({ ...stale, snapshots: stale.snapshots.map((item) => ({ ...item, accountId: item.provider === "ocg-old" ? "old" : null })) }, ["ocg-old"]).snapshots.map((item) => item.provider)).toEqual(["deepseek"]);
+  });
+  it("removes only the exact provider when DS, OCG and CCG share an account id", () => {
+    const response = { observedAtMs: 1, warnings: [], snapshots: ["ds-main", "ocg-main", "ccg-main"].map((provider) => ({
+      provider, accountId: "main", displayName: provider, default: true,
+      observedAtMs: 1, available: true, usage: null, limits: null,
+    })) };
+    expect(accountSnapshotsWithoutRemoved(response, ["ocg-main"]).snapshots.map((item) => item.provider))
+      .toEqual(["ds-main", "ccg-main"]);
+    const placeholders = accountSnapshotsWithMissingProviders({ ...response, snapshots: [] },
+      response.snapshots.map((snapshot) => ({ id: snapshot.provider, displayName: snapshot.displayName })));
+    expect(accountSnapshotsWithoutRemoved(placeholders, ["ocg-main"]).snapshots.map((item) => item.provider))
+      .toEqual(["ds-main", "ccg-main"]);
+    const confirmed = accountSnapshotsWithoutRemoved(response, ["ocg-main"]);
+    const providers = confirmed.snapshots.map((snapshot) => ({ id: snapshot.provider, displayName: snapshot.displayName }));
+    expect(remainingRemovedAccountProviders(confirmed, providers, ["ocg-main"])).toEqual([]);
+    expect(remainingRemovedAccountProviders(response, providers, ["ocg-main"])).toEqual(["ocg-main"]);
+    expect(remainingRemovedAccountProviders(confirmed, [...providers, { id: "ocg-main", displayName: "OCG" }], ["ocg-main"]))
+      .toEqual(["ocg-main"]);
   });
   it("keeps missing account identity null instead of turning a provider label into a deletion target", () => {
     const snapshot = {
@@ -88,12 +109,36 @@ describe("WebUI per-account refresh state", () => {
     expect(accountSnapshotIsStale(99_999, 1_000_000)).toBe(true);
   });
 
-  it("refreshes only managed DS and OCG accounts", () => {
+  it("refreshes all managed DS, OCG, and CCG accounts", () => {
     const providers = [
       { id: "openai", kind: "managed" }, { id: "deepseek", kind: "managed" },
+      { id: "ds-work", kind: "managed" },
       { id: "ocg-one", kind: "managed" }, { id: "ocg-custom", kind: "custom" },
+      { id: "ccg-main", kind: "managed" }, { id: "ccg-custom", kind: "custom" },
     ].map((provider) => ({ ...provider, displayName: provider.id }));
     expect(refreshableAccounts({ providers } as ManagementProvidersResponse).map((provider) => provider.id))
-      .toEqual(["deepseek", "ocg-one"]);
+      .toEqual(["deepseek", "ds-work", "ocg-one", "ccg-main"]);
+  });
+
+  it("projects DS balances and CCG credits from account snapshots", () => {
+    const base = {
+      accountId: "main", displayName: "Account", default: true,
+      observedAtMs: 123, available: true, limits: null,
+    };
+    expect(deepseekAccountFromSnapshot({
+      ...base, provider: "ds-main",
+      usage: { kind: "balance", balances: [{ currency: "USD", totalBalance: "2", grantedBalance: "1", toppedUpBalance: "1" }] },
+    })).toMatchObject({ provider: "ds-main", account: "main", default: true, balances: [{ totalBalance: "2" }] });
+    expect(ccgAccountFromSnapshot({
+      ...base, provider: "ccg-main",
+      usage: {
+        kind: "credit-usage", planId: "individual-pro", monthlyRemaining: "4.00",
+        purchasedRemaining: "2.00", freeRemaining: "1.00", totalRemaining: "7.00",
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 25, resetsAt: 456, status: null }],
+      },
+    })).toMatchObject({
+      provider: "ccg-main", totalRemaining: "7.00",
+      windows: [{ windowId: "weekly", resetsAt: 456000 }],
+    });
   });
 });

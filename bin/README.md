@@ -23,8 +23,8 @@
   Gateway；只有监管身份、Provider 拓扑和真实 WebSocket 健康检查全部匹配的现有 App Server
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
-- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-deepseek`、
-  `--profile sf-ocg-<账户>` 或 `--profile sf-custom-<Provider ID>`
+- `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-ds-<账户>`、
+  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>` 或 `--profile sf-custom-<Provider ID>`
   选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   在 TUI 生命周期内持有对应实例的 Supervisor 租约，直接运行的 `codex --remote` 不具备该保护；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
@@ -36,24 +36,22 @@
 - `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
 - `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
+- `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
-- `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
-  `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
+- `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户；三家均以 `legacy remove` 移除没有 ID 的旧单账户，保留备份与历史统计，之后重新添加。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
-  释放对应隔离实例；设置默认账户不会自动修改 `agents.external`，需要时使用 `codexc agents configure`。
-- `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
-  配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
+  释放对应隔离实例。
+- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。当前数据库入口只校验版本与结构；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
-- `state`：在 Gateway 停止后显式备份并升级业务状态数据库。
 - `metrics`：查询、导出、清理或显式维护独立模型指标库；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 JSON Lines 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
-  记录；参数在读取用户配置前完成校验，命令只读转储目录，不访问网络或凭据。
+  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。
@@ -68,10 +66,9 @@
   管理员权限，登录当前用户后启动。
 
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
-Provider 的独立回环统计代理（全部 OpenCode Go 账户共享一个）；任一非主动释放的受监管组件异常
+Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部账户共享一个）；任一非主动释放的受监管组件异常
 退出都会共同重建。主 App Server 与 Provider App Server 都支持按需启动和释放；Gateway 全局空闲
-释放会停止未被租约占用的实例，`agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的
-隔离实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，并按实例串行
+释放会停止未被租约占用的实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，并按实例串行
 处理启动、释放和租约获取；释放结果区分已释放、租约占用与实例未运行，防止并发租约误停 Remote TUI。
 再次使用自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，

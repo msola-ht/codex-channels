@@ -10,11 +10,11 @@ interface ManagedCatalogDefinition {
   id: string;
   displayName: string;
   catalogFileName: string;
-  defaultReasoningEffort: string;
+  defaultReasoningEffort?: string;
 }
 
-// 与 runtime/model-provider-runtime.mjs 的受管模型目录契约一致。
-const modelSlugPattern = /^[a-z0-9][a-z0-9._-]{0,119}$/u;
+// Provider 注册与受控模型范围由 Bootstrap/Runtime 校验；目录允许单层命名空间。
+const modelSlugPattern = /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u;
 
 export function loadManagedModelOptions(
   providerDirectory: string,
@@ -55,6 +55,12 @@ export function loadManagedModelOptions(
       throw new Error(`${definition.displayName} 模型目录缺少思考等级：${catalogPath}`);
     }
     const slug = model.slug;
+    const defaultReasoningEffort = typeof model.default_reasoning_level === "string"
+      ? model.default_reasoning_level
+      : definition.defaultReasoningEffort;
+    if (typeof defaultReasoningEffort !== "string") {
+      throw new Error(`${definition.displayName} 模型目录缺少默认思考等级：${catalogPath}`);
+    }
     const inputModalities = parseInputModalities(
       model.input_modalities,
       definition.displayName,
@@ -69,9 +75,7 @@ export function loadManagedModelOptions(
         ? model.display_name
         : slug}`,
       supportedReasoningEfforts: efforts,
-      defaultReasoningEffort: typeof model.default_reasoning_level === "string"
-        ? model.default_reasoning_level
-        : definition.defaultReasoningEffort,
+      defaultReasoningEffort,
       serviceTiers: [],
       defaultServiceTier: null,
       isDefault: false,

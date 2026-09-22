@@ -25,24 +25,31 @@
   请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
   观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
 - `codex-proxy-env.mjs` / `codex-proxy-env.d.mts`：共享代理文件的读取、字面值校验和原子更新，
-  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI、WebUI 和更新迁移的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖。迁移快照先校验字段，合并旧配置后再校验代理组合；正常读取仍校验完整组合。
+  只处理 Codex Home `.env` 中四个代理字段，保留其他内容；CLI 与 WebUI 的写入与回滚复用共享文件锁并在锁内比较原文，拒绝并发覆盖；读取和保存均校验完整代理组合。
 - `network-proxy.d.mts`：声明共享代理解析模块的 TypeScript 接口。
 - `proxy-fetch.mjs` / `proxy-fetch.d.mts`：把共享 HTTP(S) 代理选择适配为 Fetch；命中
   `NO_PROXY` 时直连，否则按代理 URL 复用 Undici Dispatcher，供 Gateway 与 App Server 服务 Runtime
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
-  `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 OpenCode
-  Go 账户注册表动态生成 `ocg-<账户>` 实例；能力元数据固定声明实例展开、模型目录来源与
-  更新、账户能力，允许显式无更新/无账户能力。账户实例继承共享定义；
+  CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
+  查询 Credits 与 5 小时/7 天窗口；模型 ID
+  支持上游命名空间，凭据按 Bearer 格式校验。
+  `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
+  Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据声明实例展开与账户能力。账户实例继承共享定义；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
+- `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
+- `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
-  （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
-  `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
+  （`accounts.json`）、账户目录与管理标记；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
+- `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
+  CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
+- `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中三家账户
+  Provider 的账户 ID、共享统计代理键和同一家多账户默认选择；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
-  config 编辑映射；DeepSeek、OpenCode Go 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
+  config 编辑映射；DeepSeek、OpenCode Go、CCG 与自定义 Provider 共用一次 HTTP 重试、零次流重连的
   故障边界，避免 Codex 默认两层重试相乘；OpenAI 官方 Provider 保持 Codex 原生策略。
 - `opencode-go-quota-windows.mjs` / `opencode-go-quota-windows.d.mts`：为 OpenCode Go 统计代理
   提供官方 5 小时/7 天/月度配额窗口 `resetsAt` 快照；按最早 `resetsAt` 失效前缓存，失败时短时
@@ -52,7 +59,7 @@
   导出门面与 TypeScript 接口，不承载具体读取、写入或启动逻辑。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
-  历史目录中的自动压缩阈值只用于迁移为上下文窗口，当前目录不再管理压缩阈值；受管 Profile 必须
+  自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
 - `model-provider-custom-runtime.mjs`：拥有自定义主 Provider 候选备份和切换模式注册表，逐 Provider
@@ -63,7 +70,7 @@
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
-  OpenCode Go 与共享第三方子代理的凭据和角色配置读取。全部第三方 Provider 沿用一次 HTTP 重试、
+  OpenCode Go、CCG 的凭据读取。全部第三方 Provider 沿用一次 HTTP 重试、
   零次流重连的固定边界。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
@@ -82,7 +89,7 @@
   `User-Agent` 的终端标识（`TERM_PROGRAM[/版本]` 优先，其次各终端专有变量，最后 `TERM`），
   只读环境、不执行子进程；`detectTerminalUserAgentToken` 复现官方取值，供“一键设为官方 TUI
   身份”的 UA 文本使用，`detectTerminalIdentity` 只在结果可作为 `[codex].terminal_identity`
-  记录时返回，供安装、更新服务的命令与 `codexc config` 复用。
+  记录时返回，供服务安装命令与 `codexc config` 复用。
 - `app-server-runtime.mjs` / `app-server-runtime.d.mts`：从当前 TOML、数据目录和 Provider
   配置一次性派生主 Socket、受管或自定义切换 Provider Socket 与 Supervisor 拓扑，供启动、Doctor、远程终端
   和服务安装入口复用；Windows 同时校验最终 UDS 路径长度，避免各入口独立解释运行拓扑。
@@ -113,8 +120,8 @@
   留给固定版 App Server 原地恢复，Unix 继续安全保留失效 Socket；关闭时主动清理已接入连接，不因本地客户端
   保持连接而阻塞服务退出，同时等待已经开始的 Provider 生命周期操作收尾且拒绝启动排队操作。
 - `provider-proxy-runtime-registry.mjs` / `provider-proxy-runtime-registry.d.mts`：按共享代理键合并并发
-  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 OpenCode Go
-  多账户同时启动时重复创建或过早关闭共享代理。
+  启动，保存已启动代理及其 Provider 使用者，并提供统一查询、移除和关闭遍历入口，避免 DS、OpenCode Go
+  与 CCG 多账户同时启动时重复创建或过早关闭共享代理。
 - `app-server-supervisor.d.mts`：声明 App Server 监管拓扑与健康检查接口。
 - `gateway-owner.mjs` / `gateway-owner.d.mts`：按当前配置文件持有独立于 Provider 和指标通道的
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
@@ -149,8 +156,8 @@
   继续原样转发检查输出。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
 - `agent-roles.mjs`：读取 `~/.codex/config.toml` 的 `[agents]` 配置，返回带描述的子代理角色
-  列表，供渠道 `/agents` 命令展示与调用；不含任何角色实现。
-- `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
+  列表，供渠道 `/agents` 命令展示与调用。
+- `agent-roles.d.mts`：声明原生子代理角色查询模块的 TypeScript 接口。
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），并检测 Codex 官方鉴权文件 `auth.json` 是否存在，供 CLI、脚本、Runtime 与
   Bootstrap 复用。
@@ -163,9 +170,9 @@
   持有进程的 PID、启动时间和可执行路径，并在终止前通过同一进程对象复核启动时间。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
-  `providers/`，供 Setup、迁移脚本与 Runtime 复用。
+  `providers/`，供 Setup 与 Runtime 复用。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
-  管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
+  管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
   适配器，原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和

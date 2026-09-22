@@ -45,42 +45,10 @@ function ProviderSettingsCard({
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
   const [windowPercent, setWindowPercent] = useState("100")
   const [windowError, setWindowError] = useState<string | null>(null)
-  const [agentProvider, setAgentProvider] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.provider : settings.managedProviders[0]?.id ?? settings.customProviders.switchingProviders[0]?.id ?? "")
-  const [agentModel, setAgentModel] = useState(settings.externalAgent.status === "configured" ? settings.externalAgent.model : settings.managedProviders[0]?.models[0]?.id ?? settings.customProviders.switchingProviders[0]?.model ?? "")
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
   const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel) ?? managed?.models[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
-  const agentProviders = useMemo(() => {
-    const providers = new Map<string, { id: string; displayName: string; models: Array<{ id: string; displayName: string }> }>()
-    settings.managedProviders.forEach((provider) => {
-      providers.set(provider.id, {
-        id: provider.id,
-        displayName: provider.displayName,
-        models: provider.models.map((candidate) => ({ id: candidate.id, displayName: candidate.displayName })),
-      })
-    })
-    settings.customProviders.switchingProviders.forEach((provider) => {
-      if (!providers.has(provider.id)) {
-        providers.set(provider.id, {
-          id: provider.id,
-          displayName: provider.displayName,
-          models: [{ id: provider.model, displayName: provider.model }],
-        })
-      }
-    })
-    const activeFixed = settings.customProviders.fixedCandidates.find((provider) => provider.active)
-    if (activeFixed !== undefined && settings.defaults.model !== null && !providers.has(activeFixed.id)) {
-      providers.set(activeFixed.id, {
-        id: activeFixed.id,
-        displayName: activeFixed.displayName,
-        models: [{ id: settings.defaults.model, displayName: settings.defaults.model }],
-      })
-    }
-    return [...providers.values()]
-  }, [settings.customProviders.fixedCandidates, settings.customProviders.switchingProviders, settings.defaults.model, settings.managedProviders])
-  const agentProviderEntry = agentProviders.find((provider) => provider.id === agentProvider) ?? agentProviders[0]
-  const agentModels = useMemo(() => agentProviderEntry?.models ?? [], [agentProviderEntry])
   const candidates = useMemo(() => [
     ...settings.customProviders.fixedCandidates,
     ...settings.customProviders.switchingProviders,
@@ -101,12 +69,6 @@ function ProviderSettingsCard({
     setWindowPercent(String(windowEntry.windowPercent ?? 100))
   }, [windowEntry, settings.modelWindow])
 
-  useEffect(() => {
-    if (agentProviderEntry === undefined) return
-    const configured = settings.externalAgent.status === "configured" ? settings.externalAgent : null
-    setAgentProvider((current) => agentProviders.some((provider) => provider.id === current) ? current : configured?.provider ?? agentProviderEntry.id)
-    setAgentModel((current) => agentModels.some((modelOption) => modelOption.id === current) ? current : configured?.model ?? agentModels[0]?.id ?? "")
-  }, [agentModels, agentProviderEntry, agentProviders, settings.externalAgent])
 
   const resetForm = () => {
     setEditingId(null)
@@ -190,14 +152,7 @@ function ProviderSettingsCard({
     }
   }
 
-  const configureAgent = async () => {
-    if (agentProviderEntry === undefined || agentModel === "") return
-    await management.mutate({ operation: "external-agent", action: "configure", provider: agentProviderEntry.id, model: agentModel })
-  }
 
-  const disableAgent = async () => {
-    await management.mutate({ operation: "external-agent", action: "disable" })
-  }
 
   const cancelPending = () => {
     management.cancel()
@@ -249,21 +204,6 @@ function ProviderSettingsCard({
       </section>
       <Separator />
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <div><h3 className="font-medium">共享第三方子代理</h3><p className="text-xs text-muted-foreground">配置或停用 agents.external；修改后需要重启全部服务。</p></div>
-          <Badge variant="outline">{settings.externalAgent.status === "configured" ? "已配置" : "未配置"}</Badge>
-        </div>
-        {agentProviderEntry === undefined ? <SettingsEmpty>尚未配置可用的第三方 Provider。</SettingsEmpty> : <>
-          <FieldGroup>
-            <ManagedSelect label="Provider" value={agentProviderEntry.id} options={agentProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={(value) => { setAgentProvider(value); const next = agentProviders.find((provider) => provider.id === value); setAgentModel(next?.models[0]?.id ?? "") }} />
-            <ManagedSelect label="模型" value={agentModel} options={agentModels.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={setAgentModel} />
-          </FieldGroup>
-          <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || agentModel === ""} onClick={() => void configureAgent()}>保存子代理设置</Button>
-        </>}
-        {settings.externalAgent.status === "configured" ? <Button className="self-start" variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void disableAgent()}>停用共享子代理</Button> : null}
-      </section>
-      <Separator />
-      <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">自定义主 Provider</h3><p className="text-xs text-muted-foreground">可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
         {candidates.length === 0 ? <SettingsEmpty>当前没有自定义主 Provider。</SettingsEmpty> : candidates.map((candidate) => <div key={`${candidate.id}:${candidate.baseUrl}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{candidate.displayName} {"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : null}</div><div className="truncate text-xs text-muted-foreground">{candidate.id} · {candidate.baseUrl || "地址未返回"}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></div>)}
         <FieldGroup className="grid gap-3 md:grid-cols-2">
@@ -298,7 +238,6 @@ function ProviderSettingsConfirmationDialog({
   const lines = [`操作：${pending.operation}`]
   if (pending.provider !== undefined) lines.push(`Provider：${pending.provider.displayName ?? pending.provider.name ?? pending.provider.id}`)
   if (pending.target !== undefined) lines.push(`目标：${pending.target.displayName}（${pending.target.id}）`)
-  if (pending.selection !== undefined) lines.push(`选择：${pending.selection.providerDisplayName ?? pending.selection.provider} / ${pending.selection.modelDisplayName ?? pending.selection.model}`)
   if (pending.model !== undefined) lines.push(`模型：${pending.model.displayName}（${pending.model.id}）`)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(`应用 Provider：${pending.providers.join("、")}`)
   if (pending.overridden !== undefined && pending.overridden.length > 0) lines.push(`将覆盖：${pending.overridden.map((entry) => `${entry.provider}（原 ${entry.previousPercent}%）`).join("、")}`)
@@ -307,8 +246,7 @@ function ProviderSettingsConfirmationDialog({
   if (pending.reasoningEffort !== undefined) lines.push(`思考等级：${pending.reasoningEffort}`)
   if (pending.windowPercent !== undefined) lines.push(`上下文窗口：${pending.windowPercent}%`)
   if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
-  if (pending.current !== undefined) lines.push(`当前：${pending.current.configured ? `${pending.current.provider ?? "未知"} / ${pending.current.model ?? "未知"}` : "未配置"}`)
-  return <ManagementConfirmationDialog open saving={saving} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" || pending.operation === "disable" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+  return <ManagementConfirmationDialog open saving={saving} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     <p className="text-muted-foreground">生效目标：{pending.activation}</p>
   </ManagementConfirmationDialog>

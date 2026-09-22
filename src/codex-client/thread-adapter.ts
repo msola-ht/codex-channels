@@ -38,6 +38,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   requireString(thread.sessionId, "sessionId");
   requireString(thread.preview, "preview");
   requireString(thread.cwd, "cwd");
+  if (thread.parentThreadId != null) requireString(thread.parentThreadId, "parentThreadId");
   if (thread.name !== null) {
     requireString(thread.name, "name");
   }
@@ -55,6 +56,7 @@ export function toThreadSnapshot(thread: Thread): ThreadSnapshot {
   return {
     id: thread.id,
     sessionId: thread.sessionId,
+    ...(thread.parentThreadId == null ? {} : { parentThreadId: thread.parentThreadId }),
     modelProvider: toThreadModelProvider(thread),
     preview: thread.preview,
     name: thread.name,

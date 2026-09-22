@@ -13,7 +13,6 @@ import {
   readMetricsRun,
   readMetricsThreads,
   readMetricsTurns,
-  upgradeMetricsDatabase,
   validateMetricsDatabaseStructure,
 } from "../scripts/metrics-database.mjs";
 import {
@@ -95,13 +94,11 @@ describe("model request metrics database access", () => {
     });
   });
 
-  it("rejects an upgradeable version whose required structure is incomplete", () => {
+  it("rejects an old schema without upgrading it", () => {
     const { environment, databasePath } = fixture();
     createMetricsDatabase(databasePath, 3, 1);
 
-    expect(() => validateMetricsDatabaseStructure(environment, {
-      allowUpgradeable: true,
-    })).toThrow(/Schema 3 结构不完整/u);
+    expect(() => validateMetricsDatabaseStructure(environment)).toThrow(/Schema 3 不受支持/u);
   });
 
   it("rejects a current version whose required structure is incomplete", () => {
@@ -122,11 +119,6 @@ describe("model request metrics database access", () => {
     database.close();
 
     expect(() => validateMetricsDatabaseStructure(environment)).toThrow(
-      new RegExp(`Schema ${modelRequestMetricsSchemaVersion} 结构不完整`, "u"),
-    );
-    expect(() => upgradeMetricsDatabase(environment, {
-      gatewayRunning: () => false,
-    })).toThrow(
       new RegExp(`Schema ${modelRequestMetricsSchemaVersion} 结构不完整`, "u"),
     );
     expect(() => {

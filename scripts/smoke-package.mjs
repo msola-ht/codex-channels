@@ -64,7 +64,6 @@ try {
     "remote",
     "work",
     "rules",
-    "agents",
     "metrics",
     "channel",
     "webui",
@@ -72,7 +71,6 @@ try {
     "service",
     "update",
     "uninstall",
-    "state",
     "version",
   ];
   if (publicCommands.some((publicCommand) => !help.includes(`\n  ${publicCommand}`))) {
@@ -120,8 +118,6 @@ try {
     "scripts/windows-service-launcher.ps1",
     "scripts/model-provider-default-setup.d.mts",
     "scripts/model-provider-default-setup.mjs",
-    "scripts/model-provider-file-layout.d.mts",
-    "scripts/model-provider-file-layout.mjs",
     "scripts/codex-user-settings-management.d.mts",
     "scripts/codex-user-settings-management.mjs",
     "scripts/codex-user-settings-setup.d.mts",

@@ -29,7 +29,6 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
           <StatusRow label="Codex 默认模型" value={state.defaults.model ?? "跟随 Provider 默认值"} />
           <StatusRow label="默认思考等级" value={state.defaults.reasoningEffort ?? "跟随模型默认值"} />
           <StatusRow label="配置版本" value={String(state.configVersion ?? "未知")} code />
-          <StatusRow label="共享第三方子代理" value={externalAgentLabel(state.externalAgent)} />
         </div>
         <Separator />
         <div className="flex flex-col gap-3">
@@ -117,9 +116,4 @@ function providerModeLabel(mode: ManagementProvidersResponse["providers"][number
 
 function providerStateLabel(state: ManagementProvidersResponse["providers"][number]["state"]): string {
   return state === "backup" ? "备份" : "已配置"
-}
-
-function externalAgentLabel(agent: ManagementProvidersResponse["externalAgent"]): string {
-  if (agent.status === "configured") return `${agent.provider ?? "未知 Provider"} · ${agent.model ?? "未知模型"}`
-  return agent.status === "unavailable" ? "已配置但不可用" : "未配置"
 }

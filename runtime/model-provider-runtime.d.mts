@@ -190,6 +190,7 @@ export function withPreservedManagedModelCatalogSettings(
 
 export function loadDeepseekAccountCredential(
   environment?: NodeJS.ProcessEnv,
+  provider?: string,
 ): string;
 
 export function loadOpencodeGoAccountCredential(
@@ -242,21 +243,6 @@ export interface ConfiguredCustomSwitchingModelProvider {
 export function loadConfiguredCustomSwitchingModelProviders(
   environment?: NodeJS.ProcessEnv,
 ): ConfiguredCustomSwitchingModelProvider[];
-
-export interface CustomModelProviderRoleCandidate {
-  provider: string;
-  displayName: string;
-  model: string;
-  reasoningEffort: string;
-  mode: "switching" | "exclusive";
-  baseUrl: string;
-  apiKey: string;
-  apiKeyEnvironmentKey: string;
-  supportsWebsockets: boolean;
-}
-export function loadCustomModelProviderRoleCandidates(
-  environment?: NodeJS.ProcessEnv,
-): CustomModelProviderRoleCandidate[];
 
 export function writeCustomPrimaryProviderSwitchingProfile(
   options: {
@@ -313,46 +299,7 @@ export function withProviderBaseUrl(
 ): string[];
 export function withOpenAiBaseUrl(argumentsList: string[], baseUrl: string): string[];
 
-export function managedModelProviderRoleConfigPath(
-  environment?: NodeJS.ProcessEnv,
-): string;
-
-export function writeManagedModelProviderRoleConfig(
-  environment?: NodeJS.ProcessEnv,
-  options?: { provider?: ManagedModelProviderId; model?: string; baseUrl?: string },
-): { role: "external"; provider: ManagedModelProviderId; model: string };
-export function writeThirdPartyModelProviderRoleConfig(
-  environment?: NodeJS.ProcessEnv,
-  options?: { provider?: string; model?: string; baseUrl?: string },
-): { role: "external"; provider: string; model: string };
-
-export function loadManagedModelProviderRole(
-  environment?: NodeJS.ProcessEnv,
-): {
-  role: "external";
-  provider: ManagedModelProviderId;
-  model: string;
-  reasoningEffort: string;
-} | undefined;
-export function loadThirdPartyModelProviderRole(
-  environment?: NodeJS.ProcessEnv,
-): {
-  role: "external";
-  provider: string;
-  model: string;
-  reasoningEffort: string;
-  providerType: "managed" | "custom";
-} | undefined;
-
 export function loadConfiguredProviderCredential(
   provider: ManagedModelProviderId,
   environment?: NodeJS.ProcessEnv,
 ): { environmentKey: string; apiKey: string };
-export function loadThirdPartyProviderCredential(
-  provider: string,
-  environment?: NodeJS.ProcessEnv,
-): { environmentKey: string; apiKey: string };
-
-export function removeManagedModelProviderRoleConfig(
-  environment?: NodeJS.ProcessEnv,
-): void;

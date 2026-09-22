@@ -1,5 +1,4 @@
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { configActivationResult } from "./config-activation-result.mjs";
 
 export const gatewayConfigActivationNotice =
   "运行中的 Gateway 会自动重新读取配置；需要重建连接时，"
@@ -11,18 +10,13 @@ export function writeGatewayConfigActivationNotice(
   environment = process.env,
   action = "auto",
 ) {
-  const legacy = action === "restart"
-    ? configActivationResult("restart-gateway")
-    : action === "reinstall" || action === "reinstall-services"
-      ? configActivationResult("reinstall-services")
-      : null;
-  const activation = typeof action === "object" && action !== null
-    ? action
-    : legacy ?? (action === "auto" ? null : configActivationResult(action));
   const isAuto = action === "auto";
+  if (!isAuto && (typeof action !== "object" || action === null)) {
+    throw new Error("配置生效提示需要结构化结果");
+  }
   const message = isAuto
     ? `配置已保存。\n${gatewayConfigActivationNotice}`
-    : activationNotice(activation);
+    : activationNotice(action);
   writeCliMessage("note", message, {
     stdout: output,
     environment,

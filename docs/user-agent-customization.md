@@ -50,8 +50,7 @@ codex-tui/0.155.1 (<系统与架构>) <终端标识> (codex-tui; 0.155.1)
 定义不提供终端环境，因此缺省上报 `unknown`；原生 TUI 连接到同一个 App Server 时结果相同，因为
 该字段在 App Server 进程而不是客户端进程生成。配置 `[codex].terminal_identity` 后，`codexc`
 启动 App Server 时把终端名与版本写入子进程的 `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，重启
-App Server 后模型上游 UA 即带该标识。该值由 `codexc config`、`codexc service install` 或
-`codexc update` 按运行命令的终端探测后写入，也可以直接编辑 TOML。
+App Server 后模型上游 UA 即带该标识。该值由 `codexc config` 或 `codexc service install` 按运行命令的终端探测后写入，也可以直接编辑 TOML。
 
 模型数据通路在本机由 `codexc` 的 App Server 服务进程自建回环 Provider Proxy
 （`runtime/app-server-service-runtime.mjs` 通过 `ProviderProxy` 创建并监听回环地址），App Server 子进程通过 `model_provider` 指向该回环
@@ -165,10 +164,9 @@ UA。回显不出现在聊天渠道。
 终端标识的取值来自运行命令的终端，而不是常驻进程：`codexc config` → 系统设置 →
 “模型上游终端标识” 预填运行该命令的终端探测结果（`TERM_PROGRAM[/版本]` 优先，其次各终端
 专有变量，最后 `TERM`），可编辑后保存，留空则删除 `terminal_identity` 并回到 App Server
-自行探测；`codexc service install` 在生成服务定义前、`codexc update` 在真正重启核心服务前，
+自行探测；`codexc service install` 在生成服务定义前，
 于 `terminal_identity` 未配置且能探测到终端时按运行该命令的终端自动补入并打印一行，已配置时
-不覆盖，因此记录下来的值在下一次 App Server 启动时立即生效；`codexc update` 已是最新版本、
-本次不重启服务时不写入。补入失败只打印一次失败原因并继续当前命令，不阻塞安装或更新。其余
+不覆盖，因此记录下来的值在下一次 App Server 启动时立即生效。补入失败只打印一次失败原因并继续当前命令，不阻塞安装。更新器不改写该设置。其余
 服务命令（`start`、`restart`、`reload`、`stop`、`status`、`logs`、`uninstall`）不改写该配置。
 WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后与客户端身份、上游 UA 一起原子写入。
 
@@ -185,7 +183,7 @@ WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后
 - 完整上游 UA 由每个受管 Provider Proxy 在构造出站请求时覆盖。
 - `terminal_identity` 只在 App Server 服务进程启动子进程时写入环境，进程内终端探测只解析一次，
   因此修改后必须重启 App Server（受管服务下即 `codexc service restart all` 中的 App Server 目标）。
-- 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和共享第三方子代理使用同一全局值。
+- 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和原生子代理使用同一全局值。
 - 默认身份随 Codex CLI 升级自动变化，只需重启 `codexc service restart all` 即可生效；显式覆盖任一
   字段后运行 `codexc service restart all`，同时应用 Gateway 身份与上游 UA；仅运行
   `codexc service restart gateway` 不会重建 Provider Proxy，只重启
@@ -223,7 +221,7 @@ Provider ID 字符串插值到全局 UA。
   `[codex].upstream_user_agent`，主代理、按需 Provider 代理和 OpenCode Go 共享代理复用同一值；
   启动主 App Server 与 Provider App Server 前把 `[codex].terminal_identity` 写入子进程的
   `TERM_PROGRAM` / `TERM_PROGRAM_VERSION`，未配置时保持环境原样；`codexc service install`
-  在生成服务定义前、`codexc update` 在重启服务前，若 `terminal_identity` 未配置且运行命令的
+  在生成服务定义前，若 `terminal_identity` 未配置且运行命令的
   终端可探测，则由 `scripts/service-command.mjs` 按该终端补入配置；其余服务命令不改写该配置。
 - `scripts/config-management.mjs`、`scripts/config-system-menu.mjs`：通过 `codexc config` 的
   「系统设置 → 一键设为官方 TUI 身份」用当前系统与终端信息生成官方格式 `User-Agent`，

@@ -5,8 +5,14 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { ccgAccountDefinition, deepseekAccountDefinition, loadManagedModelProviderDefinitions } from "../runtime/model-provider-definitions.mjs";
 import { defaultCodexRemoteProfile, parseCodexRemoteOptions as parseCodexRemoteOptionsRaw } from "../scripts/codex-remote-options.mjs";
-import { configuredHome, configureOpenCodeGo, testEnvironment } from "./model-provider-runtime-test-fixture.js";
+import {
+  configuredHome,
+  configureCcgAccounts,
+  configureOpenCodeGo,
+  testEnvironment,
+} from "./model-provider-runtime-test-fixture.js";
 
 const isolatedEnvironment = {
   CODEX_HOME: join(tmpdir(), "codexc-remote-options-empty-codex"),
@@ -17,30 +23,40 @@ function parseCodexRemoteOptions(
   args: Parameters<typeof parseCodexRemoteOptionsRaw>[0],
   options: NonNullable<Parameters<typeof parseCodexRemoteOptionsRaw>[1]> = {},
 ) {
-  return parseCodexRemoteOptionsRaw(args, { environment: isolatedEnvironment, ...options });
+  return parseCodexRemoteOptionsRaw(args, { environment: isolatedEnvironment, managedProfileDefinitions: [deepseekAccountDefinition("test"), ...loadManagedModelProviderDefinitions(options.environment ?? isolatedEnvironment)], ...options });
 }
 
 describe("Codex Remote options", () => {
   it("selects the sole switching Provider without official login and rejects ambiguous defaults", async () => {
     const environment = testEnvironment(await configuredHome("switching"));
-    expect(defaultCodexRemoteProfile(environment)).toBe("sf-deepseek");
+    expect(defaultCodexRemoteProfile(environment)).toBe("sf-ds-test");
     expect(parseCodexRemoteOptions([], {
       selectDefaultProfile: () => defaultCodexRemoteProfile(environment),
-    }).selectedProfile).toBe("sf-deepseek");
+    }).selectedProfile).toBe("sf-ds-test");
     configureOpenCodeGo(environment.CODEX_HOME!);
     expect(() => defaultCodexRemoteProfile(environment)).toThrow("请指定 --profile");
   });
 
+  it("selects the registered default when every switching Provider is a CCG account", () => {
+    const home = mkdtempSync(join(tmpdir(), "codexc-remote-ccg-default-"));
+    try {
+      configureCcgAccounts(home, "work");
+      expect(defaultCodexRemoteProfile(testEnvironment(home))).toBe("sf-ccg-work");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("preserves explicit profiles without resolving the unauthenticated default", () => {
     const selectDefaultProfile = () => { throw new Error("must not resolve default"); };
-    expect(parseCodexRemoteOptions(["--profile", "sf-deepseek"], { selectDefaultProfile }).selectedProfile)
-      .toBe("sf-deepseek");
+    expect(parseCodexRemoteOptions(["--profile", "sf-ds-test"], { selectDefaultProfile }).selectedProfile)
+      .toBe("sf-ds-test");
     expect(parseCodexRemoteOptions(["--profile", "personal"], { selectDefaultProfile }).passthrough)
       .toEqual(["--profile", "personal"]);
   });
 
   it.each([
-    [["--profile", "sf-deepseek"], "sf-deepseek"],
+    [["--profile", "sf-ds-test"], "sf-ds-test"],
   ] as const)("selects a managed Provider profile from %j", (args, selectedProfile) => {
     expect(parseCodexRemoteOptions([...args])).toEqual({
       passthrough: [],
@@ -122,7 +138,7 @@ describe("Codex Remote options", () => {
   });
 
   it.each([
-    ["deepseek", "sf-deepseek"],
+    ["ds-test", "sf-ds-test"],
   ])("rejects the old managed Profile %s", (profileName, canonicalProfileName) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
@@ -177,9 +193,29 @@ describe("Codex Remote options", () => {
     }
   });
 
+  it("uses one canonical Profile name for a configured CCG account", () => {
+    const definitions = [ccgAccountDefinition("work")];
+    expect(parseCodexRemoteOptions(["--profile", "sf-ccg-work"], {
+      managedProfileDefinitions: definitions,
+      customSwitchingProfiles: [],
+    })).toEqual({
+      passthrough: [],
+      selectedProfile: "sf-ccg-work",
+      workspaceId: undefined,
+    });
+    expect(() => parseCodexRemoteOptions(["--profile", "ccg-work"], {
+      managedProfileDefinitions: definitions,
+      customSwitchingProfiles: [],
+    })).toThrow(
+      "Profile ccg-work 不是该 Provider 的规范名称；请使用 --profile sf-ccg-work",
+    );
+  });
+
   it.each([
     ["sf-ocg-missing", "OpenCode Go Profile sf-ocg-missing 尚未配置"],
     ["sf-opencode-go-missing", "OpenCode Go Profile sf-opencode-go-missing 已废弃"],
+    ["sf-ccg-missing", "CCG Profile sf-ccg-missing 尚未配置"],
+    ["sf-ccg", "旧 CCG 单账户 Profile 已停用，请先运行 codexc ccg legacy remove 并重新添加账户"],
   ])("rejects an unconfigured project-owned Profile namespace %s", (profileName, message) => {
     expect(() => parseCodexRemoteOptions(["--profile", profileName], {
       customSwitchingProfiles: [],
@@ -200,7 +236,7 @@ describe("Codex Remote options", () => {
   it.each([
     [{ providerId: "proxy-a", profileName: "" }],
     [{ providerId: "proxy-a", profileName: "custom-proxy-a" }],
-    [{ providerId: "proxy-a", profileName: "sf-deepseek" }],
+    [{ providerId: "proxy-a", profileName: "sf-ds-test" }],
   ])("rejects an invalid or conflicting managed Profile definition %j", (definition) => {
     expect(() => parseCodexRemoteOptions([], {
       customSwitchingProfiles: [definition],
@@ -209,14 +245,14 @@ describe("Codex Remote options", () => {
 
   it("rejects selecting two managed Provider profiles", () => {
     expect(() => parseCodexRemoteOptions([
-      "--profile", "sf-deepseek",
-      "--profile", "sf-deepseek",
+      "--profile", "sf-ds-test",
+      "--profile", "sf-ds-test",
     ])).toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");
   });
 
   it.each([
-    [["--profile", "personal", "--profile", "sf-deepseek"]],
-    [["--profile=sf-deepseek", "-ppersonal"]],
+    [["--profile", "personal", "--profile", "sf-ds-test"]],
+    [["--profile=sf-ds-test", "-ppersonal"]],
   ])("rejects mixing managed and unmanaged profiles in %j", (args) => {
     expect(() => parseCodexRemoteOptions(args))
       .toThrow("受管模型 Provider --profile 不能与其他 --profile 同时使用");

@@ -63,9 +63,9 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   指标库与异常报告中。
 - Gateway 不在本地计算或估算模型价格与费用，完成卡片不展示总价、均价、单价或峰谷档位，也不
   保存价格快照或刷新价格目录。账户与额度仍展示官方来源的数据：OpenAI 周限、
-  DeepSeek 账户余额、OpenCode Go 官方配额窗口；这些数据不是本地价格估算。
+  DeepSeek 账户余额、OpenCode Go 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。
 - 完成卡片正式模式在本次运行和会话信息之外，保留精简的“账户状态”：OpenAI 优先显示
-  OpenAI 官方周限；OpenCode Go 与 DeepSeek 的完整账户信息可通过 `/usage` 查看，也可在本机
+  OpenAI 官方周限；DeepSeek、OpenCode Go 与 CCG 的完整账户信息可通过 `/usage` 查看，也可在本机
   WebUI 控制台首次打开时自动刷新，或通过汇总范围旁的刷新按钮手动更新。
   官方用量接口或本地指标不可用时，对应字段不显示。
 
@@ -80,7 +80,7 @@ OpenAI `/usage` 先展示账户活动摘要；当前账户选择和 Conversation
 - 仅对所有分组都提供的 Token 字段求和，缺失字段不按零累计；分组最多显示 8 组，缺失分组名称显示“其他”。
 - `threadUsage` 不可用时保留账户摘要，并说明该官方计费能力仅向部分 Business/Enterprise 工作区开放；
   查询失败时显示稳定重试提示。账户摘要失败仍沿用既有失败行为。
-- 没有当前 Thread 时不发起官方 Thread 查询；DeepSeek、OpenCode Go 和其他第三方 Provider 保持自身账户余额或额度口径。
+- 没有当前 Thread 时不发起官方 Thread 查询；DeepSeek、OpenCode Go、CCG 和其他第三方 Provider 保持自身账户余额或额度口径。
 - 官方估算可能在 Turn 完成后延迟结算；本地请求明细与子代理累计继续使用 `/metrics`，两类金额不得相减或合并为真实账单。
 
 ## Luna Reserve 自动回退
@@ -238,7 +238,12 @@ Telegram 使用内联按钮，微信显示可输入的 `/effort` 选项。飞书
 `/resume`（及 `/r`）、`/sessions` 和 `/archived` 的当前页会话都优先显示本机指标/缓存中的 Turn 轮数；
 打开列表不会等待 `thread/turns/list` 历史扫描。该轮数与 WebUI 相同，按本机已记录模型请求的不同 Turn
 统计；本地没有记录时暂不显示猜测值。需要完整官方历史计数时，清理命令仍会按候选读取。
-会话清理已移至本机 CLI：`codexc sessions cleanup <最大轮数>` 先预览，交互终端追加 `--confirm` 后还会再次列出候选并询问确认才归档；可用 `--idle-days <天数>` 增加空闲时间条件。扫描只对通过元数据过滤的旧会话读取 Turn 历史，轮数命中本机派生缓存时跳过读取；执行前需停止 Gateway，Provider 不可连接或目录不完整时会失败关闭，当前、活动、后台、固定或无法读取轮数的会话会排除。
+本机批量归档使用 `codexc sessions cleanup <最大轮数>`：先预览，交互终端追加 `--confirm` 后再次列出候选并确认。
+按主会话真实 Turn 数筛选，超过上限即停止计数，不使用展示缓存；可用 `--idle-days <天数>` 要求整组可查询成员均达到空闲条件。
+派生子孙会话随父会话由官方归档，Fork 会话独立筛选。预览列出主会话的 Provider、Workspace、轮数及未归档/已归档后代数，数量仅代表可查询成员，不承诺列出官方内部全部代理。
+执行前需停止 Gateway；Provider 不可连接或主目录扫描失败时中止。可查询成员包含活动、固定、渠道当前/后台绑定、未配置 Workspace 或无法读取状态时跳过整组；单组历史读取失败不阻断其他组。计划任务主会话不进入候选。
+确认后重新检查 Gateway、当前绑定、成员集合和状态；变化时跳过，Gateway 已启动时停止剩余归档。每组只向父会话所属实例发一次 `thread/archive`，不自行关闭或逐个归档子代理。
+官方操作不是整组原子事务，也没有预期版本条件；归档期间请勿在其他客户端操作候选会话。执行后重新查询官方状态，区分已核验的可查询成员、部分完成、未归档、结果未确认与跳过；不自动重试或回滚。
 跨 Provider 选择优先显示目标 Provider App Server 配置的有效思考等级；该等级缺失或不受目标模型支持时，
 才显示目标模型目录默认值，不继承原 Provider 的 Thread 设置。
 `/model` 还会只读显示当前模型声明的 Codex 多代理运行时；官方 OpenAI 模型带结构化替代信息时，
@@ -293,7 +298,7 @@ Thread 的通知不向渠道广播。失败原因在 Client 边界先脱敏，Te
 仍可通过 `/mcp` 查询当前状态。
 
 `/agents` 无参数时列出内置角色（default/explorer/worker）与 `~/.codex/config.toml` 中
-配置的角色（如共享第三方角色 `agents.external`）；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
+配置的原生角色；`/agents <角色名称或序号> <任务>` 以包含官方 `agent_type` 和
 `fork_turns="1"` 的文本指示子代理执行任务，调用结果与普通 Turn 启动一致。
 
 `codexc metrics threads` 的会话列表增加“类型”列：Gateway 在绑定线程中观测到

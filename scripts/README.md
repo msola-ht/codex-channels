@@ -25,27 +25,7 @@
   自身退出时只释放租约和 Proxy，不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
-- `source-update.mjs` / `source-update.d.mts`：在 `~/.codex-connect/codex-channels` 精确 Git
-  源码安装布局下比较官方 `main` commit，拒绝脏仓库、自定义提交、非官方 origin、降级和 Codex CLI
-  版本不匹配；交互终端遇到不匹配时以默认确认的 `Y/n` 询问是否全局安装精确 Codex CLI 版本，确认
-  后先安装到随候选清理的临时目录完成真实合同检查，通过后才执行独立全局安装阶段并继续原更新
-  事务；拒绝、临时或全局安装失败、合同失败及非交互调用均在停服和切换源码前失败，并显示精确
-  错误或安装与重试命令。接受与候选协议
-  基础版本一致的 `-rc.N` Gateway 候选版或 `-fixN` 修复版，Codex CLI 校验仍使用候选协议元数据中的
-  正式版本；更新前返回不包含 origin 的修订计划，候选准备完成后再返回目标版本、服务中断要求和
-  精确执行阶段，预检状态变化时在克隆或停服前拒绝执行；
-  候选源码先在同盘临时仓库完成依赖安装、Gateway/WebUI 构建及新版本本地预检，并用临时候选 CLI
-  校验包含 `--config` 的候选公开合同、本地审批允许值及 Codex 根级和所有 Profile 用户配置；无新提交与
-  Registry 安装也执行同一只读检查。不一致时在全局安装、停服和切换前失败，不自动迁移审批策略；
-  合同通过后先停止已安装的核心服务，再安装全局 CLI 并原子切换源码，
-  最后由新版本继续执行统一本地更新；成功路径显示有界 Git 阶段摘要并隐藏 npm/Vite
-  明细，失败时保留对应工具输出；源码切换后刷新 npm 全局命令，并清理旧 `bin/codexc`、
-  `.bin/codexc` 与 Shell PATH。阶段进度和失败对象包含已完成阶段、服务/源码恢复状态与修复建议，
-  观察者或 CLI 展示异常不改变更新事务。本地 `install:global` 构建安装与 Registry 安装也先按
-  已安装包锁定版本确认、临时校验并同步配套 Codex CLI，再委派本地更新；不修改 Gateway 程序包。
-  这两种安装的 CLI 临时候选目录在成功或失败后清理，合同通过前不安装全局 CLI、不停止服务。
-  受管源码没有新提交时同样复用该流程，在一个 `local-update` 阶段内完成 CLI 同步、按需刷新旧命令
-  和本地更新；CLI 主入口不再重复执行本地更新。
+- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -54,54 +34,19 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-update.mjs` / `local-update.d.mts`：实现并声明 `codexc update` 的本地兼容更新；先只读严格
-  检查旧 `[network]` 与 Codex `.env` 的冲突和合并后的代理组合，持有共享代理文件锁完成备份、迁移与失败回滚；回滚时原文变化则保留当前代理文件与备份并报错；同时
-  校验 `config.toml`、状态库、指标库、计划任务库、会话展示缓存及核心服务定义的完整状态，并返回不含凭据的修订
-  计划、是否需要中断服务及按需阶段进度；预检与进度观察者异常不影响更新事务。服务已安装时在同一个
-  App Server、Gateway 停机窗口内分别备份并更新配置和各数据库（包括计划任务库 v1→v2 以及可重建的会话展示缓存），离线复核
-  后启动并通过 Socket 与监管拓扑确认核心服务稳定就绪；服务未安装且 Gateway 未运行时只执行离线
-  更新，不擅自安装或启动，检测到
-  `codexc start` 前台 Gateway 时则在任何写入前失败并提示先结束该进程。真正重启核心服务前，
-  若 `[codex].terminal_identity` 未配置且运行更新命令的终端可探测，则按该终端补入该配置并提示
-  一次，使值随下一次 App Server 启动生效；其余服务命令不改写该配置。公开服务命令复用同一按
-  目标健康检查，并为 App Server 初始化、正常渠道连接和订阅恢复保留 150 秒默认等待窗口。
-  首次本地更新通过带修订检查的官方配置事务将根级 `model_reasoning_summary` 统一写为 `none`，
-  成功后在当前 Codex Home 保存 `.codexc-reasoning-summary-0.155.1` 完成标记；不修改独立 Profile，
-  后续更新保留用户重新选择的值。标记不含配置正文，写入失败不记录完成；可通过 Setup 重新选择摘要。
-  源码已经切换后刷新全局命令或本地更新失败时仍保留新源码与旧源码备份，并先尝试恢复核心服务；
-  服务恢复也失败时同时报告两个错误；失败对象另附失败阶段、已完成阶段、已应用改动范围、服务恢复状态
-  和修复建议，不要求调用方解析异常文案。
-  未知配置、残缺结构或不受支持的 Schema 在写入前失败关闭；停机窗口内还会通过
-  `backup-provider-migration.mjs` 先完整备份旧布局、现有新目录与被改写引用文件，再把受管
-  第三方 Provider 的旧布局原子迁移到 `~/.codex-connect/providers/<id>/`，遇到新旧文件冲突或
-  不安全权限时拒绝覆盖，迁移失败时恢复原有目录；随后遍历编译期 Provider 定义，按目录更新
-  适配器执行，并按目录来源复用同一个下载 Promise。当前会刷新已配置 DeepSeek 与 OpenCode Go
-  的受管模型目录并保留逐模型设置；所选模型已不在新目录中时（例如旧默认 Flash Vision Exp），
-  把 OpenCode Go 账户与共享子代理切到目录默认模型，并把迁移记录写入目录清单；
-  更新过程中自动停止并注销已废弃的本机指标中心服务，在私有备份后移除旧 Schema 自动补入的空
-  `api_providers`、`[vision]`、`[metrics.sync]`、`[metrics.center]` 和 `[metrics.view]` 配置段；
-  非空直接 API Provider 注册表仍失败关闭，历史 Provider 凭据、中心数据库、同步水位和外部
-  Cloudflare 资源均保留。
-- `upgrade-state.mjs`：仅在显式执行 `codexc state upgrade` 时备份并把状态数据库从 Schema v3
-  或 v4 升级到 v5，同时备份并显式升级计划任务数据库 v1→v2（`hourly`→`interval`），为统一更新入口
-  提供只读版本检查；不自动迁移未知版本。运行时由 SqliteBindingStore 和
-  SqliteScheduledTaskStore 保持失败关闭。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前基线返回无需迁移，执行入口仅复核、不写库；未来具体迁移须在执行入口完成备份、事务及目标结构校验，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `state-database.mjs`：只读检查当前状态库和计划任务库的版本与结构，不提供升级或写入入口。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
-  组合只读访问、输出渲染以及 `upgrade`、`reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
+  组合只读访问、输出渲染以及 `reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
   `metrics-export-format.mjs`；运行、会话与聚合输出从现有 `compact` 明细
   派生上下文压缩模型、请求数与 Token 摘要；删除旧计时与直接 API 分栏后的 JSON 合同使用
   report/export v3、run/turns v2、threads v1；期间查询 JSON 附加范围和筛选条件；JSON/CSV 同时保留可视化字段；
   `export` CSV 用独立类型行区分请求历史额度快照
-  与 OpenAI 当前额度估算摘要，避免重复附加全局状态；upgrade 要求 Gateway 停止并把 Schema v3..v18
-  检查点回写、私有备份后，在单一事务中重建为 v19；模型请求记录只复制当前保留字段，新增字段为 NULL，保留已有耗时与模型名称，转储关联不按历史时间猜配，删除旧价格、
-  成本、计时列和派生 View（v8 升级 v9 为 OpenCode Go 窗口快照新增 `quota_windows` 列，v9 升级 v10 为
-  `subagent_threads.parent_turn_id` 新增可空父 Turn 关联，v10 升级 v11 新增运行级
-  `subagent_turns`，v11 升级 v12 新增官方账户快照表，v12 升级 v13 新增记录实际发往模型上游
-  `User-Agent` 的 `user_agent` 列；历史运行归属不猜测），
+  与 OpenAI 当前额度估算摘要，避免重复附加全局状态。
   reset 要求 Gateway 停止、检查点回写、`0600` 备份后移除旧库，不迁移或覆盖原指标记录。
   服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
@@ -118,7 +63,8 @@
   `data/channel-outbox/pending/` 并写入 manifest；由 Gateway 轮询后按 Thread 绑定
   会话发送并归档，详见 `docs/channel-image.md`。
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
-  App Server 枚举多 Provider/Workspace，会话元数据过滤后按 Turn 上限和可选空闲天数预览、确认归档。
+  App Server 枚举多 Provider/Workspace，按主会话真实轮数和整组可查询成员的空闲条件预览；所属 Provider 读取状态，后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档并核验结果。
+- `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `session-menu.mjs` / `session-menu.d.mts`：`codexc sessions` 无子命令时的交互菜单；收集 Turn 上限和空闲天数后调用
   会话清理 CLI，并保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
@@ -135,7 +81,8 @@
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
   Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；状态
-  路由返回受管服务安全摘要，并按 5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
+  快照按 DS、OCG、CCG 三家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
+  5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
 - `webui-traffic-route.mjs`：WebUI 的模型转储读取路由，列出 V2 逻辑调用摘要并提供单条请求与终态
@@ -143,8 +90,8 @@
   只接受回环连接，只按已知标签和实际存在的 writer session 读取用户数据目录，不接受任意
   路径；正文超过上限时返回截断标记，独立 trace 按总字节与记录数分页。旧版逐帧 JSONL 不自动混读。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
-- `webui-provider-settings-management.mjs`：复用主 Provider、托管 Provider 默认值、自定义 Provider 和共享第三方子代理管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
-- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek Setup 的配置、默认切换、停止、删除与恢复接口，为 WebUI 提供账户资源投影、统一预览、确认后写入和结果脱敏；不返回凭据正文。
+- `webui-provider-settings-management.mjs`：复用主 Provider、受管 Provider 默认值与模型窗口、自定义 Provider 管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
@@ -174,7 +121,7 @@
   写入 stderr，并按每行一个事件把脱敏结果写入 stdout；默认 `codexc setup` 仍保持纯交互文本输出。
 - `setup-summary.mjs` / `setup-summary.d.mts`：复用统一 Provider 管理状态读取 Codex 全局默认模型与思考等级，先返回
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
-  共享第三方子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
+  原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
 - `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
@@ -204,16 +151,15 @@
   同一文件锁内原子写入私有 Profile，并统一返回生效动作和备份清理警告；CLI
   继续负责字段询问、危险修改确认和中文渲染。
 - `model-provider-management.mjs` / `model-provider-management.d.mts`：统一返回 OpenAI 默认值、当前主
-  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选、受管模型目录和共享
-  第三方子代理的脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
+  Provider、受管 Provider（含 OpenCode Go 账户）、自定义固定/切换/备份候选和受管模型目录的
+  脱敏管理状态；移除 API Key、私有 Profile 内容和子进程环境，并供 Setup 总览与主
   Provider CLI 列表共同复用；同时按 `CODEX_HOME/auth.json` 是否存在返回 OpenAI 官方登录状态，
   未检测到鉴权文件时按未登录处理。
 - `model-provider-management-transaction.mjs` / `model-provider-management-transaction.d.mts`：统一
-  串行 DeepSeek、OpenCode Go、自定义主 Provider、默认模型设置与共享第三方子代理的跨文件管理
-  事务；同一异步调用链中的嵌套操作复用事务，避免角色切换与 Provider/账户删除交叉提交。
+  串行 DeepSeek、OpenCode Go、自定义主 Provider 与默认模型设置的跨文件管理
+  事务；同一异步调用链中的嵌套操作复用事务，避免 Provider 设置与账户删除交叉提交。
 - `primary-provider-management.mjs` / `primary-provider-management.d.mts`：提供自定义主 Provider
-  切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行继续保护共享子代理
-  正在使用的 Provider、校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
+  切换与删除的无终端预览和执行接口；预览仅返回脱敏目标、影响与生效动作，执行校验显式模型属于 App Server 官方目录、保持配置/Profile/私有备份事务顺序，
   并以稳定错误码和结构化警告报告失败或备份清理部分成功。
 - `primary-provider-config-transaction.mjs` / `primary-provider-config-transaction.d.mts`：统一自定义
   Provider 固定模式写入事务；切换与新增/编辑共同复用 Profile 移除、Codex 配置版本写入、响应丢失
@@ -235,12 +181,6 @@
   模式时保留官方模型。
 - `primary-provider-usage.mjs`：`codexc primary-provider` 的规范帮助文案，供脚本与入口帮助共用，
   避免两份文案漂移。
-- `agents.mjs`：提供不依赖终端提示的共享第三方子代理 Provider 列表、配置/停用预览与执行接口，
-  `codexc agents` 复用该接口；`status --json` 返回稳定配置状态，Provider 与模型未配置时显式使用
-  `null`，不要求 Gateway 已初始化。角色文件和 Codex 主配置复用统一 Provider 管理事务，避免与
-  Provider/账户配置、切换或删除交叉提交；管理结果只包含脱敏选择和 App Server 重启动作。
-- `agents-setup.mjs` / `agents-setup.d.mts`：向 Setup 提供共享第三方子代理的受管或自定义 Provider、
-  模型选择和停用确认，只编排 `agents.mjs` 的管理接口；自定义 Provider 当前使用其已配置模型。
 - `official-login-setup.mjs` / `official-login-setup.d.mts`：`codexc setup` 的“模型与提供商 → OpenAI 官方 → 登录并恢复官方”；运行
   `codex login --device-auth` 完成官方登录（打开终端显示的链接并输入验证码），并通过
   `config/batchWrite` 把 `model_provider` 写回 `openai`，候选块移入私有备份并从 config 清理，
@@ -249,12 +189,12 @@
   占用状态，再按最新配置修订备份并提交，避免登录期间的并发修改被旧快照覆盖。
 - `codex-tool-settings.mjs` / `codex-tool-settings.d.mts`：投影电脑、浏览器和已有 MCP 的用户设置与合并配置，定义可编辑字段与校验；插件 MCP 只接受原生策略覆盖，不返回启动配置和凭据。
 - `codex-user-settings-management.mjs` / `codex-user-settings-management.d.mts`：统一返回不依赖终端的
-  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、实验性上下文管理、TUI 空闲总结，
+  Codex 用户设置快照，并以配置版本保护的 `config/batchWrite` 受控修改默认模型与思考等级、Fast、计划清单工具、TUI 空闲总结，
   一起修改 Sandbox、审批和 Workspace Sandbox 网络权限，或一次原子写入核心默认值；Fast 仅作为
   OpenAI 主配置偏好写入。单独设置页可选择 `live`、`indexed`、`cached` 或 `disabled`，不读取第三方模型目录。
   第三方固定模式不开放官方默认模型、思考等级和 Fast；已有 `default_permissions` 时不混写传统 Sandbox 字段。
 - `codex-user-settings-setup.mjs` / `codex-user-settings-setup.d.mts`：`codexc config` 的“Codex 新会话与用户偏好”
-  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、实验性上下文管理、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、人格、
+  适配器，只负责选择、预览和中文结果；可单独设置计划清单工具、TUI 空闲总结、Plan 思考等级、推理摘要（未配置时默认 `none`）、输出详细程度、人格、
   更新检查和历史保存；第三方 Provider 的模型与凭据继续留在 Provider Setup。
 - `codex-defaults-setup.mjs` / `codex-defaults-setup.d.mts`：从官方模型目录选择 Codex 全局默认模型和
   思考等级，写入复用统一用户设置管理接口；不修改登录凭据或 Gateway 的 Thread 默认模型。
@@ -276,8 +216,8 @@
   Provider、模型与思考等级交互与中文渲染，写入复用管理接口；第三方 Provider 总菜单会先选择 Provider，DeepSeek 与 OpenCode Go 子菜单则复用同一入口并预选当前 Provider。上下文窗口不在本流程，转到
   `model-window-setup.mjs`；历史 Thread 仍保留创建时的模型。
 - `codex-user-config.mjs` / `codex-user-config.d.mts`：统一创建隔离的 stdio App Server Client，把 Codex 官方默认值与
-  `multi_agent_v2` / `agents.external` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
-  受控角色修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
+  `multi_agent_v2` 普通键级修改作为官方 `config/batchWrite` 事务写入用户配置；
+  用户设置修改在同一 Client 中读取原始用户层及版本，并通过 `expectedVersion` 拒绝并发覆盖。
 - `skill-setup.mjs` / `skill-setup.d.mts`：`codexc setup` 的“项目技能”类别；列出项目 `.codex/skills` 下带
   `SKILL.md` 的技能，安装/覆盖到 `~/.agents/skills/<技能名>`（可用
   `CODEX_AGENTS_SKILLS_DIR` 覆盖目标目录），支持卸载；只复制技能目录本身，不修改
@@ -328,58 +268,34 @@
   限速和审计原语，配置了 WebUI 令牌时直接使用 Bearer 令牌认证。
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 系统设置中的调试快捷开关使用 `debug` / `info`，
   高级设置复用同一写入函数选择完整日志等级，不改写显示设置或凭据。
-- `deepseek-setup.mjs`：复用共享的非敏感 DeepSeek Provider 定义，提供 OpenAI/DeepSeek 切换和
-  仅 DeepSeek 两种安装模式；安装与恢复均提供脱敏预览、明确确认和无终端事务接口，CLI 只负责询问与展示；只下载、不执行
-  DeepSeek 官方脚本，提取唯一模型目录 heredoc 并校验大小与 JSON 结构后写入
-  `~/.codex-connect/providers/deepseek/`。切换模式保持 OpenAI 默认模型与认证不变，按 Codex 新版独立 Profile 文件格式把
-  模型、Provider 与 API Key 写入 CLI 使用的 `sf-deepseek.config.toml`，模型目录与管理标记写入
-  `~/.codex-connect/providers/deepseek/`，不自动创建或切换共享 `agents.external`；
-  共享角色只由 `codexc agents configure` 或设置菜单中的“共享第三方子代理”显式修改；
-  首次修改前记录原配置、同名 Profile、管理标记与角色文件是否存在并备份原文，固定模式显式
-  确认后才覆盖默认 Provider，恢复选项可精确还原首次安装状态，并在保留的审计备份中记录已恢复
-  生命周期。重复安装基于当前配置更新，不从首次备份回滚后续修改，并保留仍受支持的默认模型、
-  逐模型思考等级和上下文窗口占比；目录上下文更新时按原占比在新基准上重算窗口。退出固定模式时只还原 Setup
-  管理的字段（含模型目录里的上下文窗口与压缩阈值），恢复后新增的同名用户 Provider 不会被误判为旧版托管配置；
-  安装事务按写入阶段更新并发保护快照，失败时恢复本次安装前的目标文件，若目标已被其他进程修改则停止回滚并保留外部修改；
-  安装时为初始模型设置上下文窗口；后续通过各 Provider 菜单的“修改模型设置”或统一的“第三方
-  模型设置”按模型维护 10–100% 窗口占比，只有明确改窗口时才写入模型目录的 `context_window`，
-  未请求窗口变更时目录条目保持原样，让压缩使用上游默认，不再使用会覆盖
-  全部模型的 Profile 顶层字段。`codexc update` 刷新官方目录后，若所选模型已不在目录中（例如
-  Flash Vision Exp），会把 Profile 与同 Provider 共享子代理切到目录默认模型，并把
-  `from`/`to`/`appliedAt` 迁移记录写入模型目录清单；仍在目录中的模型保留用户选择。
+- `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、`codexc ccg account remove` / `legacy remove` 确认移除入口、默认账户及删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
+- `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
+- `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
+- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，保留目录字段和窗口设置；导出账户菜单与目录刷新入口。
+- `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户与删除事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
+- `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc deepseek account` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
   上下文、输入模态、思考等级、搜索、并行工具和最低客户端版本；`digest` 是模型条目紧凑 JSON 的
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
-- `deepseek-setup.d.mts`：声明 DeepSeek Setup 的公开脚本类型。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
-  受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；DeepSeek 与
-  OpenCode Go 共同复用，账户注册和历史备份格式仍由各自适配层负责。
+  受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；OCG 与
+  CCG 共用完整模式配置生成，DeepSeek 复用配置原语，账户注册和历史备份格式仍由各自适配层负责。
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
-  路径、受限读取、快照和并发保护回滚原语，供账户新增、删除、目录刷新与恢复事务复用。
+  路径与 Profile 文件名；私有文件事务使用 `managed-provider-files.mjs`。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
-  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口；默认切换只更新注册表，不修改共享子代理，
+  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口，以及旧单账户与旧注册账户的显式移除事务；默认切换只更新注册表，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
-  删除最后一个账户会清理共享模型目录，固定模式账户还会恢复安装前 Codex 主配置。
+  删除默认账户前必须先指定其他默认账户；删除最后一个账户会清理共享模型目录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
-  账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、首次备份、Key 写入、切换/固定模式配置和多文件事务回滚。
+  账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
   生成模型目录时继承已配置 Provider 的同名模型全局窗口占比，避免新账户回落到 OCG 默认值。
 - `opencode-go-setup.mjs` / `opencode-go-setup.d.mts`：OpenCode Go 多账户管理
-  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`list --json`
+  （add/list/remove/default/stop，供 `codexc opencode-go account` 调用）与 Setup 菜单；`legacy remove` 移除旧单账户，旧注册账户复用 `account remove`；`list --json`
   返回不含 Key 与 Profile 路径的稳定账户摘要；新增/重新配置复用账户 provisioning 接口，默认切换、停止和删除复用账户管理接口；配置切换/固定模式
   或通过脱敏预览、明确确认与无终端执行接口恢复首次配置前状态，从同一受审查来源
-  生成共享模型目录；共享子代理由显式 agents 配置入口管理，
-  但不复用凭据或 Provider 身份；兼容独立目录引入前的备份状态，重复配置时保留仍受支持的
-  默认模型与逐模型设置；为 `codexc update` 提供共享目录刷新和旧默认模型的事务迁移，已主动选择
-  Pro 的账户保持不变。
-- `model-provider-file-layout.mjs` / `model-provider-file-layout.d.mts`：把旧第三方文件迁移到统一
-  `~/.codex-connect/providers/<id>/` 布局，并把 Provider 根级上下文、思考等级迁入各自模型目录；
-  旧版根级或目录里的自动压缩阈值按同一基准折算成 `context_window` 后清空阈值，切换模式 Profile
-  再镜像所选模型的默认思考等级。
-- `backup-provider-migration.mjs` / `backup-provider-migration.d.mts`：在迁移前把旧布局文件、
-  现有新布局 Provider 目录与被改写引用文件完整复制到 `~/.codex-connect/backups/` 下带时间戳的
-  备份目录，再执行文件布局与模型设置迁移；遇到新旧并存时先把现有 Provider 目录移到备份内
-  的 `original-providers/`，迁移失败时恢复原目录。默认只预演，需显式 `--apply` 才写入；
-  `codexc update` 的停机窗口会自动以 `--apply` 方式调用。
+  生成共享模型目录；恢复只接受字段完整的当前备份状态，重复配置时保留仍受支持的
+  默认模型与逐模型设置。
 - `terminal-prompter.mjs`：为各通讯渠道 Setup 提供最小的终端文本、确认和可见凭据输入接口，并允许
   长流程通过 `AbortSignal` 中止尚未完成的问题。
 - `telegram-setup.mjs`：把 Telegram Bot 来源、长轮询冲突确认、允许名单输入和中文输出适配到
@@ -412,28 +328,21 @@
 - `workspace-command.mjs`：实现 `codexc work` 的参数校验、交互菜单和目录创建，并调用统一的 Workspace 权限设置用例；
   `list --json` 返回稳定的 Workspace 注册摘要；CLI 入口只负责分发。
 - `workspace-config.mjs`：读取、检查和原子更新 TOML 中的 Workspace 配置，通过 `runtime/config-event-queue.mjs` 保证 Gateway 重启窗口内的 Workspace 新增通知可恢复；支持列出失效项、删除注册记录，并恢复固定默认 Workspace。
-- `agents.mjs` / `agents.d.mts`：`codexc agents` 的执行脚本与公开声明，在 `~/.codex/config.toml` 中开启或关闭
-  `features.multi_agent_v2` 并注册单次共享 `agents.external` 角色；命令按已配置的受管或自定义 Provider 与模型
-  更新同一角色，角色说明要求主模型以 `fork_turns=1` 传入当前用户消息；非托管同名角色会失败关闭，不会被覆盖。启用时先原子生成
-  无凭据角色文件，再通过带用户层版本校验的官方键级配置事务更新主配置，事务失败时恢复角色文件；
-  显式禁用同样拒绝删除非托管同名角色。App Server 服务启动时原子刷新角色文件为
-  当前 Provider 的本机统计代理地址，只把该 Provider 的 Key 注入主 App Server 子进程，同时写入禁止
-  解析加密正文和等待后续消息的受控指令。普通服务退出保留文件以维持 Codex 配置可解析，显式
-  禁用或恢复首次配置时删除；只读 `status` 不依赖 Gateway 配置。
 
 ## 开发与协议
 
 - `dev-all.mjs`：开发模式下复用完整的现有 App Server 拓扑，或通过唯一的内部
   `service-app-server` 入口立即启动主 App Server；已配置的隔离 Provider App Server
   在首次选择模型、恢复 Thread 或使用对应 Remote TUI 时由监管入口按需启动。统计代理也按 Provider
-  使用情况启动；共享 `agents.external` 当前选择的 Provider 会预先启动统计代理以保证子代理可用；
+  使用情况启动；原生子代理复用父线程实例与代理；
   随后再启动 Gateway。只复用私有监管身份、Provider 拓扑和真实 WebSocket 健康检查一致的实例，
   Gateway 进程再通过与 Provider 无关的配置级所有权 Socket 拒绝所有入口的重复实例。部分拓扑或裸
   App Server 失败关闭；脚本统一收敛自身启动错误，已经由内部服务入口展示的失败不重复包装。
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
-  无显式 Profile 且官方未登录时解析唯一第三方 Profile；多个候选要求明确选择，不修改主配置。
+  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG 或 CCG 账户时使用注册表默认账户，
+  其他多个候选要求明确选择，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
   完成第三方 Provider 认证；同时按当前目录或显式
@@ -585,7 +494,7 @@
   稳定的状态、目标和可执行命令列表，供 Config、Setup 与自动化复用；Codex 用户偏好使用
   `next-thread / codex`、`next-tui / codex` 和 `next-thread-and-tui / codex` 分别表示新 Thread、
   新启动 TUI 或两类生命周期读取，Workspace 权限使用 `reload / gateway`，
-  共享第三方子代理使用 `restart / app-server`，App Server 时区使用
+  App Server 重启动作使用 `restart / app-server`，App Server 时区使用
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
@@ -626,5 +535,6 @@
 脚本不得把凭据写入 npm 安装目录；用户配置、SQLite、配置事件队列、Socket 和日志必须留在用户级 `.codex-connect`。
 
 `session-cleanup.mjs` 实现 `codexc sessions cleanup`：Gateway 停止时通过 App Server 枚举全部
-Workspace/Provider，先按 Thread 元数据过滤活动/近期会话，再复用会话轮数缓存，并仅在交互终端
-`--confirm` 二次询问通过后归档符合 Turn 上限的旧会话；可用 `--idle-days` 增加空闲天数条件；不会从渠道触发。
+Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决定资格。后代通过 `ancestorThreadId`
+查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
+发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。

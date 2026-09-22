@@ -18,7 +18,6 @@ import {
   createCodexUserConfigClient,
   readCodexUserConfigSnapshot,
 } from "./codex-user-config.mjs";
-import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
@@ -172,7 +171,6 @@ async function removalPlanForExecution(input, preview, options) {
       "删除预览与当前 Provider 不匹配，请重新生成预览",
     );
   }
-  assertProviderNotInUse(normalizedId, environment);
   if (preview.target.state === "stale-switching") {
     const registered = loadCustomSwitchingProviderIds(environment).includes(normalizedId);
     const profileExists = existsSync(customPrimaryProviderProfilePath(environment, normalizedId));
@@ -284,9 +282,6 @@ async function buildSwitchPlan(
   const switchingProviders = loadConfiguredCustomSwitchingModelProviders(environment);
   const switching = switchingProviders.find(({ id }) => id === normalizedId);
   if (normalizedId === "openai") {
-    if (currentProvider !== "openai") {
-      assertProviderNotInUse(currentProvider, environment);
-    }
     const candidateIds = listCustomPrimaryProviderCandidates(providers);
     const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
     const clearsCustomModel = currentProvider !== "openai";
@@ -320,9 +315,6 @@ async function buildSwitchPlan(
         candidateIdsToBackup: candidateIds,
       },
     };
-  }
-  if (currentProvider !== "openai" && currentProvider !== normalizedId) {
-    assertProviderNotInUse(currentProvider, environment);
   }
   const otherSwitchingProviderIds = switchingProviders
     .map(({ id }) => id)
@@ -426,7 +418,6 @@ async function buildRemovalPlan(
   } = {},
 ) {
   const normalizedId = normalizeProviderId(providerId);
-  assertProviderNotInUse(normalizedId, environment);
   const switchingProviderIds = loadCustomSwitchingProviderIds(environment);
   if (
     switchingProviderIds.includes(normalizedId)
@@ -531,18 +522,6 @@ function normalizeProviderId(value, { allowOfficial = false } = {}) {
   return normalized;
 }
 
-function assertProviderNotInUse(providerId, environment) {
-  try {
-    assertThirdPartyRoleDoesNotUseProvider(providerId, environment);
-  } catch (error) {
-    throw invalid(
-      "provider-in-use",
-      "providerId",
-      error instanceof Error ? error.message : String(error),
-      error,
-    );
-  }
-}
 
 function invalid(code, field, message, cause) {
   return new PrimaryProviderManagementError(

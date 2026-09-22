@@ -5,6 +5,24 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { appServerThread, FakeTransport, pinnedThreadSection } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient threads", () => {
+    it("lists spawned descendants across directories with explicit sources and archive state", async () => {
+      const transport = new FakeTransport();
+      transport.threadListData = [appServerThread({ parentThreadId: "parent", cwd: "/other" })];
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      try {
+        const threads = await client.listThreadDescendants("parent", true);
+        expect(threads[0]).toMatchObject({ parentThreadId: "parent", cwd: "/other" });
+        const request = transport.sent.find((message) => message.method === "thread/list");
+        expect(request?.params).toEqual({
+          ancestorThreadId: "parent", archived: true, modelProviders: [],
+          sourceKinds: ["cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
+            "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"],
+          useStateDbOnly: false, sortKey: "created_at", sortDirection: "asc", limit: 100,
+        });
+      } finally { await client.close(); }
+    });
+
     it("lists CLI, Remote TUI, and App Server thread sources explicitly", async () => {
       const transport = new FakeTransport();
       const rpc = new JsonRpcClient(transport);

@@ -3,6 +3,7 @@ import type {
   AppServerSupervisorInspection,
 } from "../runtime/app-server-supervisor.mjs";
 import type { ManagedModelProviderId } from "../runtime/model-provider-definitions.mjs";
+import type { OpencodeGoAccountMarker } from "../runtime/opencode-go-accounts.mjs";
 
 export class OpenCodeGoAccountManagementError extends Error {
   code: string;
@@ -95,9 +96,10 @@ export function applyOpencodeGoAccountStop(
 }>;
 
 interface RemovalOptions extends StopOptions {
-  loadRole?: (environment: NodeJS.ProcessEnv) =>
-    | { provider: ManagedModelProviderId; model: string }
-    | undefined;
+  readMarker?: (
+    environment: NodeJS.ProcessEnv,
+    accountId: string,
+  ) => OpencodeGoAccountMarker | undefined;
 }
 
 export function previewOpencodeGoAccountRemoval(
@@ -135,3 +137,13 @@ export function applyOpencodeGoAccountRemoval(
   runtime: "stopped" | "not-running";
   backupDirectory: string;
 } & OpenCodeGoAccountRemovalPreview>;
+
+export function hasLegacyOpencodeGoConfiguration(environment?: NodeJS.ProcessEnv, accountId?: string): boolean;
+export function previewLegacyOpencodeGoRemoval(accountId?: string, options?: import("./managed-provider-account-runtime.mjs").ManagedAccountRuntimeOptions): Promise<{
+  operation: "legacy-remove"; account: { id?: string; provider: string }; files: string[];
+  effects: { stopsRunningAppServer: boolean; restoresInitialConfig: boolean; preservesPrivateBackup: true; historyThreadsBecomeUnavailable: true };
+  activation: "restart-all";
+}>;
+export function removeLegacyOpencodeGoAccount(input?: { accountId?: string; confirmRemove?: boolean }, options?: import("./managed-provider-account-runtime.mjs").ManagedAccountRuntimeOptions): Promise<{
+  action: "legacy-removed"; runtime: "stopped" | "not-running"; activation: "restart-all";
+}>;

@@ -1,9 +1,14 @@
 import {
-  applyDeepseekConfiguration,
-  applyDeepseekRestore,
-  previewDeepseekConfiguration,
-  previewDeepseekRestore,
-} from "./deepseek-setup.mjs";
+  applyDeepseekAccountConfiguration,
+  previewDeepseekAccountConfiguration,
+  hasLegacyDeepseekConfiguration,
+  previewLegacyDeepseekRemoval,
+  removeLegacyDeepseekAccount,
+  removeDeepseekAccount,
+  previewDeepseekAccountRemoval,
+  setDeepseekDefaultAccount,
+} from "./deepseek-account-management.mjs";
+import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import {
   applyOpencodeGoDefaultAccountChange,
   applyOpencodeGoAccountRemoval,
@@ -32,14 +37,7 @@ export async function loadAccountSettingsResource(
   try {
     const accounts = loadAccounts(environment);
     const providers = loadProviders(environment);
-    let restoreAvailable = false;
-    try {
-      await previewDeepseekRestore({ environment });
-      restoreAvailable = true;
-    } catch {
-      // 没有 DeepSeek 初始备份时不可恢复；详细状态由配置预览返回。
-    }
-    const deepseek = providers.find((provider) => provider.provider === "deepseek");
+    const dsAccounts = loadDeepseekAccounts(environment);
     return {
       opencodeGo: {
         configured: accounts.length > 0,
@@ -57,10 +55,12 @@ export async function loadAccountSettingsResource(
         }),
       },
       deepseek: {
-        configured: deepseek !== undefined,
-        mode: deepseek?.mode ?? null,
-        model: deepseek?.model ?? null,
-        restoreAvailable,
+        configured: dsAccounts.length > 0,
+        legacyConfigurationPresent: hasLegacyDeepseekConfiguration(environment),
+        accounts: dsAccounts.map((account) => {
+          const provider = providers.find((entry) => entry.provider === deepseekProviderId(account.id));
+          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
+        }),
       },
     };
   } catch {
@@ -100,18 +100,19 @@ export function normalizeAccountSettingsMutation(input) {
     case "deepseek.configure":
       return {
         operation: input.operation,
+        accountId: input.accountId,
+        ...(input.reconfigure === undefined ? {} : { reconfigure: input.reconfigure }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
         ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
-        ...(input.windowPercent === undefined ? {} : { windowPercent: input.windowPercent }),
         ...(input.confirmExclusiveConfigChange === undefined
           ? {}
           : { confirmExclusiveConfigChange: input.confirmExclusiveConfigChange }),
       };
-    case "deepseek.restore":
-      return {
-        operation: input.operation,
-        ...(input.confirmRestore === undefined ? {} : { confirmRestore: input.confirmRestore }),
-      };
+    case "deepseek.legacy.remove":
+      return { operation: input.operation };
+    case "deepseek.default":
+    case "deepseek.remove":
+      return { operation: input.operation, accountId: input.accountId };
     default:
       throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
   }
@@ -129,9 +130,16 @@ export async function previewAccountSettingsMutation(input, environment) {
       case "opencode.account.remove":
         return await previewOpencodeGoAccountRemoval(input.accountId, { environment });
       case "deepseek.configure":
-        return previewDeepseekConfiguration(input, { environment });
-      case "deepseek.restore":
-        return await previewDeepseekRestore({ environment });
+        return previewDeepseekAccountConfiguration(input, { environment });
+      case "deepseek.legacy.remove":
+        return await previewLegacyDeepseekRemoval({ environment });
+      case "deepseek.remove":
+        return await previewDeepseekAccountRemoval(input.accountId, { environment });
+      case "deepseek.default": {
+        const account = loadDeepseekAccounts(environment).find((entry) => entry.id === input.accountId);
+        if (!account) throw new Error("DeepSeek 账户不存在");
+        return { operation: input.operation, account: { ...account, provider: deepseekProviderId(account.id) }, activation: "restart-all" };
+      }
       default:
         throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
     }
@@ -152,9 +160,13 @@ export async function applyAccountSettingsMutation(input, environment) {
       case "opencode.account.remove":
         return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
-        return await applyDeepseekConfiguration(accountSettingsApplyInput(input), { environment });
-      case "deepseek.restore":
-        return await applyDeepseekRestore(accountSettingsApplyInput(input), { environment });
+        return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
+      case "deepseek.legacy.remove":
+        return await removeLegacyDeepseekAccount(accountSettingsApplyInput(input), { environment });
+      case "deepseek.default":
+        return await setDeepseekDefaultAccount(input.accountId, { environment });
+      case "deepseek.remove":
+        return await removeDeepseekAccount(accountSettingsApplyInput(input), { environment });
       default:
         throw new ManagementOperationError("invalid_account_operation", "账户设置操作不受支持");
     }
@@ -175,8 +187,10 @@ export function accountSettingsApplyInput(input) {
       return input.mode === "exclusive"
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
-    case "deepseek.restore":
-      return { ...input, confirmRestore: true };
+    case "deepseek.legacy.remove":
+      return { ...input, confirmRemove: true };
+    case "deepseek.remove":
+      return { ...input, confirmRemove: true };
     default:
       return input;
   }

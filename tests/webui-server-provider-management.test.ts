@@ -1,14 +1,18 @@
-import {
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
+import { deepseekAccountsFilePath } from "../runtime/deepseek-accounts.mjs";
+import { opencodeGoAccountsFilePath, writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { ProviderAccountService } from "../src/application/index.js";
+import { createManagedProviderAccountAdapters } from "../src/bootstrap/managed-provider-capabilities.js";
+import { ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
+import { configureCcgAccounts } from "./model-provider-runtime-test-fixture.js";
+import type { OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -37,6 +41,77 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("isolates same-name accounts through CCG refresh, persistence, failure, recovery and OCG removal", async () => {
+    const fixture = createFixture();
+    configureCcgAccounts(fixture.home);
+    const environment = { ...fixture.environment,
+      CODEX_CONNECT_HOME: join(fixture.home, ".codex-connect"),
+      CODEX_CONNECT_CONFIG_FILE: join(fixture.home, "config.toml"),
+    };
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(environment), JSON.stringify([{ id: "main", default: true }]));
+    writeOpencodeGoAccounts(environment, [{ id: "main", default: true }]);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    for (const provider of ["ds-main", "ocg-main"]) {
+      store.upsertAccountSnapshot({
+        sourceId: `${provider}:main`, provider, accountId: "main", displayName: provider,
+        enabled: true, observedAtMs: Date.now(), available: true,
+        usage: { kind: provider === "ds-main" ? "balance" : "quota-windows", provider, available: true },
+        limits: { kind: "unsupported", provider },
+      });
+    }
+    store.close();
+    let failMain = false;
+    const upstreamFetch: typeof fetch = async (input, init) => {
+      const key = new Headers(init?.headers).get("authorization");
+      expect(["Bearer cmd_main-secret", "Bearer cmd_work-secret"]).toContain(key);
+      const account = key === "Bearer cmd_main-secret" ? "main" : "work";
+      const url = String(input);
+      if (url.endsWith("/alpha/whoami?limits=1")) {
+        return Response.json({ success: true, user: {}, org: { id: account } });
+      }
+      expect(url).toBe(`https://api.commandcode.ai/alpha/billing/credits?orgId=${account}`);
+      return Response.json(failMain && account === "main" ? { error: "invalid credits" }
+        : { credits: { monthlyCredits: account === "main" ? 10 : 20 } });
+    };
+    const adapters = createManagedProviderAccountAdapters([ccgAccountDefinition("main"), ccgAccountDefinition("work")], {
+      environment, fetchImpl: upstreamFetch, metricsDatabasePath: fixture.databasePath,
+    });
+    const service = new ProviderAccountService(adapters, {
+      writeOfficialAccountSnapshot: (snapshot) => {
+        const writer = new SqliteModelRequestMetricsStore(fixture.databasePath);
+        try {
+          const accountId = snapshot.provider.slice("ccg-".length);
+          writer.upsertAccountSnapshot({ ...snapshot, accountId,
+            sourceId: `${snapshot.provider}:${accountId}`, displayName: snapshot.provider, enabled: true });
+        } finally { writer.close(); }
+      },
+    });
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(environment, undefined, {
+      managementOrigin,
+      refreshGatewayAccount: async (_path, provider) => service.refreshAccountSnapshot(provider),
+    });
+    const refresh = (provider: string) => fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
+    expect((await refresh("ccg-main")).status).toBe(200);
+    expect((await refresh("ccg-work")).status).toBe(200);
+    const before = await read();
+    expect(before.snapshots.find((snapshot) => snapshot.provider === "ccg-main")?.usage).toMatchObject({ totalRemaining: "10.00" });
+    expect(before.snapshots.find((snapshot) => snapshot.provider === "ccg-work")?.usage).toMatchObject({ totalRemaining: "20.00" });
+    failMain = true;
+    expect((await refresh("ccg-main")).status).toBe(503);
+    expect(await read()).toEqual(before);
+    failMain = false;
+    expect((await refresh("ccg-main")).status).toBe(200);
+    unlinkSync(opencodeGoAccountsFilePath(environment));
+    const after = await read();
+    expect(after.snapshots.map((snapshot) => snapshot.provider).sort()).toEqual(["ccg-main", "ccg-work", "ds-main"]);
+    expect(after.snapshots.find((snapshot) => snapshot.provider === "ds-main"))
+      .toEqual(before.snapshots.find((snapshot) => snapshot.provider === "ds-main"));
+  });
   it("returns persisted subscription facts from Gateway refresh and subsequent reads", async () => {
     const fixture = createFixture();
     writeOpencodeGoAccounts(fixture.environment, [{ id: "main", default: true }]);
@@ -189,7 +264,6 @@ describe("webui server Provider and account management", () => {
         backupCandidates: [],
       },
       switchingProviders: [],
-      externalAgent: { status: "configured", provider: "deepseek", model: "deepseek-v4-flash" },
     };
     const { origin } = await startServer(
       fixture.environment,
@@ -207,13 +281,11 @@ describe("webui server Provider and account management", () => {
       providers: Array<Record<string, unknown>>;
       primary: { id: string; mode: string };
       official: { authenticated: boolean };
-      externalAgent: { status: string; provider?: string; model?: string };
     };
     expect(body.primary).toEqual({ id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" });
     expect(body.official).toEqual({ authenticated: true });
     expect(body.providers).toHaveLength(3);
     expect(body.providers.find((provider) => provider.id === "relay")).toMatchObject({ selected: true, model: null });
-    expect(body.externalAgent).toEqual({ status: "configured", provider: "deepseek", model: "deepseek-v4-flash" });
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("secret");
     expect(serialized).not.toContain("sf-custom-backup-relay");
@@ -280,7 +352,6 @@ describe("webui server Provider and account management", () => {
         models: [{ id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", contextWindow: 128000 }],
       }],
       customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
-      externalAgent: { status: "unconfigured", provider: null, model: null },
     };
     let appliedInput: unknown = null;
     const { origin } = await startServer(fixture.environment, undefined, {
@@ -289,15 +360,6 @@ describe("webui server Provider and account management", () => {
       loadProviderState: async () => providerState,
       previewProviderSettings: async (input: unknown) => {
         const normalized = input as { operation: string; providerId?: string };
-        if (normalized.operation === "external-agent") {
-          return {
-            operation: "configure",
-            current: { configured: false, provider: null, model: null },
-            selection: { provider: "deepseek", providerDisplayName: "DeepSeek", model: "deepseek-v4-flash", modelDisplayName: "DeepSeek V4 Flash" },
-            willChange: true,
-            activation: "restart-all",
-          };
-        }
         return {
           operation: "switch",
           target: { id: normalized.providerId ?? "unknown", displayName: "Relay", source: "switching" },
@@ -307,14 +369,6 @@ describe("webui server Provider and account management", () => {
       },
       applyProviderSettings: async (input: unknown) => {
         appliedInput = input;
-        if ((input as { operation?: string }).operation === "external-agent") {
-          return {
-            action: "configured",
-            operation: "configure",
-            selection: { provider: "deepseek", model: "deepseek-v4-flash" },
-            activation: "restart-all",
-          };
-        }
         return {
           action: "switched",
           operation: "switch",
@@ -350,25 +404,11 @@ describe("webui server Provider and account management", () => {
     expect(previewBody.confirmationToken).toMatch(/^[A-Za-z0-9_-]+$/u);
 
     const agentPreview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash" }),
+      method: "POST", headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek" }),
     });
-    expect(agentPreview.status).toBe(200);
-    const agentPreviewBody = await agentPreview.json() as { confirmationToken: string; preview: { selection?: { provider: string } } };
-    expect(agentPreviewBody.preview.selection?.provider).toBe("deepseek");
-    const agentApply = await fetch(`${origin}/api/v1/management/provider-settings`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash", confirmationToken: agentPreviewBody.confirmationToken }),
-    });
-    expect(agentApply.status).toBe(200);
-    expect(await agentApply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
-    const auditEntries = readFileSync(join(fixture.home, "management-audit.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { target?: string });
-    expect(auditEntries.some((entry) => entry.target === "deepseek")).toBe(true);
+    expect(agentPreview.status).toBe(400);
+    expect(await agentPreview.json()).toMatchObject({ error: { code: "invalid_provider_operation" } });
 
     const apply = await fetch(`${origin}/api/v1/management/provider-settings`, {
       method: "POST",
@@ -464,6 +504,37 @@ describe("webui server Provider and account management", () => {
         available: false,
       }],
     });
+  });
+
+  it("returns account metadata and empty snapshots for every managed account family", async () => {
+    const fixture = createFixture();
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), `${JSON.stringify([
+      { id: "work", default: true },
+    ])}\n`);
+    writeOpencodeGoAccounts(fixture.environment, [{ id: "main", default: true, email: "main@example.com" }]);
+    writePrivateFileAtomicSync(ccgAccountsFilePath(fixture.environment), `${JSON.stringify([
+      { id: "team", default: true },
+    ])}\n`);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    store.upsertAccountSnapshot({
+      sourceId: "ccg:default", provider: "ccg", accountId: null, displayName: "CCG",
+      enabled: true, observedAtMs: 1, available: true,
+      usage: { kind: "unsupported", provider: "ccg" },
+      limits: { kind: "unsupported", provider: "ccg" },
+    });
+    store.close();
+    const { origin } = await startServer(fixture.environment);
+
+    const response = await fetch(`${origin}/api/v1/accounts`);
+
+    expect(response.status).toBe(200);
+    const snapshots = (await response.json()).snapshots;
+    expect(snapshots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "ds-work", accountId: "work", displayName: "DS work", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ocg-main", accountId: "main", displayName: "ocg-main@example.com", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CCG team", default: true, observedAtMs: 0 }),
+    ]));
+    expect(snapshots).not.toContainEqual(expect.objectContaining({ provider: "ccg" }));
   });
 
   it("refreshes one account through Gateway and returns the updated snapshot", async () => {

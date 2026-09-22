@@ -27,7 +27,7 @@
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
   恢复结果保留响应的实际目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
-  缺少必需字段时失败关闭。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
+  缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
@@ -45,6 +45,7 @@
 - `model-provider-catalog.ts`：按 Bootstrap 注入的 Provider 定义读取 Setup 下载到用户
   `CODEX_HOME` 的受管模型目录；目录里声明什么就开放什么，相同模型 ID 仍按 Provider 独立映射；
   已开放模型的 `text/image/audio` 输入能力从目录严格校验后映射，未知、重复或缺少文字能力时失败关闭。
+  CCG 使用从 DS 基础内容生成的独立本地目录，保留含命名空间的上游模型 ID。
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application

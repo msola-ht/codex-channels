@@ -82,7 +82,6 @@ describe("Codex user settings management", () => {
         fastEnabled: true,
         webSearch: null,
         updatePlanEnabled: false,
-        contextManagementEnabled: false,
         autoRecapEnabled: false,
         reasoningSummary: null,
         planModeReasoningEffort: null,
@@ -127,21 +126,6 @@ describe("Codex user settings management", () => {
       { keyPath: "model", value: "gpt-test" },
       { keyPath: "model_reasoning_effort", value: "high" },
     ], { expectedVersion: "version-1" });
-  });
-
-  it("rejects malformed experimental context management values", async () => {
-    const client = settingsClient({
-      features: { context_management: { experimental_mode: "true" } },
-    });
-
-    await expect(loadCodexUserSettings({
-      environment: { CODEX_HOME: "/tmp/codex-home" },
-      createClient: async () => client,
-      primaryProvider: () => "openai",
-    })).rejects.toMatchObject({
-      code: "invalid-boolean",
-      field: "features.context_management.experimental_mode",
-    });
   });
 
   it("writes every user default in one versioned transaction", async () => {
@@ -273,6 +257,21 @@ describe("Codex user settings management", () => {
     });
   });
 
+  it.each([
+    ["preview", previewCodexUserSetting],
+    ["update", updateCodexUserSetting],
+  ] as const)("rejects removed context management in %s without writing config", async (_name, operation) => {
+    const client = settingsClient({});
+    const input = { kind: "context-management", enabled: true } as unknown as Parameters<typeof operation>[0];
+
+    await expect(operation(input, {
+      expectedVersion: "version-1",
+      createClient: async () => client,
+      primaryProvider: () => "deepseek",
+    })).rejects.toMatchObject({ code: "unknown-setting", field: "kind" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+  });
+
   it("writes the upstream plan checklist tool setting separately", async () => {
     const client = settingsClient({ tools: { update_plan: { enabled: false } } });
 
@@ -291,27 +290,6 @@ describe("Codex user settings management", () => {
 
     expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
       { keyPath: "tools.update_plan.enabled", value: true },
-    ], { expectedVersion: "version-1" });
-  });
-
-  it("writes experimental context management separately", async () => {
-    const client = settingsClient({ features: { context_management: { experimental_mode: false } } });
-
-    await expect(updateCodexUserSetting({
-      kind: "context-management",
-      enabled: true,
-    }, {
-      expectedVersion: "version-1",
-      createClient: async () => client,
-      primaryProvider: () => "deepseek",
-    })).resolves.toMatchObject({
-      kind: "context-management",
-      value: { enabled: true },
-      activation: "next-thread",
-    });
-
-    expect(client.writeUserConfigEdits).toHaveBeenCalledWith([
-      { keyPath: "features.context_management.experimental_mode", value: true },
     ], { expectedVersion: "version-1" });
   });
 

@@ -4,6 +4,17 @@ import { configActivationResult } from "../scripts/config-activation-result.mjs"
 import { writeGatewayConfigActivationNotice } from "../scripts/config-activation-notice.mjs";
 
 describe("配置激活结果文案", () => {
+  it.each(["restart", "reinstall", "reinstall-services"])("拒绝旧字符串结果 %s", (action) => {
+    const output: string[] = [];
+    expect(() => writeGatewayConfigActivationNotice(
+      { write: (value: string) => output.push(value) },
+      {},
+      // @ts-expect-error Old string inputs are deliberately outside the public contract.
+      action,
+    )).toThrow("配置生效提示需要结构化结果");
+    expect(output).toEqual([]);
+  });
+
   it("列出时区变更影响的三个服务并说明网关启动方式", () => {
     const activation = configActivationResult("restart-app-server-gateway-webui");
     expect(activation).toEqual({

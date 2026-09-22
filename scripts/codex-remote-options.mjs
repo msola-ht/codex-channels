@@ -9,6 +9,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import { isOpencodeGoProviderNamespace } from "../runtime/opencode-go-accounts.mjs";
+import { resolveDefaultManagedProvider } from "../runtime/managed-provider-account-routing.mjs";
 
 export const CODEX_REMOTE_USAGE = "用法：codexc remote [--workspace ID] [Codex 参数...]";
 
@@ -105,15 +106,25 @@ export function defaultCodexRemoteProfile(environment = process.env) {
     || hasCodexAuthFile(environment)
   ) return undefined;
   const enabled = new Set(loadManagedModelProviders(environment).map(({ provider }) => provider));
+  const managedProfiles = loadManagedModelProviderDefinitions(environment)
+    .filter(({ id }) => enabled.has(id));
+  const customProfiles = loadConfiguredCustomSwitchingModelProviders(environment);
   const profiles = [
-    ...loadManagedModelProviderDefinitions(environment)
-      .filter(({ id }) => enabled.has(id)).map(({ profileName }) => profileName),
-    ...loadConfiguredCustomSwitchingModelProviders(environment).map(({ profileName }) => profileName),
+    ...managedProfiles.map(({ profileName }) => profileName),
+    ...customProfiles.map(({ profileName }) => profileName),
   ];
   if (profiles.length === 0) {
     throw new Error("OpenAI 官方未登录，请先运行 codex login 或通过 codexc setup 配置第三方提供商");
   }
   if (profiles.length > 1) {
+    if (customProfiles.length === 0) {
+      const defaultProvider = resolveDefaultManagedProvider(
+        managedProfiles.map(({ id }) => id),
+        environment,
+      );
+      const defaultProfile = managedProfiles.find(({ id }) => id === defaultProvider)?.profileName;
+      if (defaultProfile !== undefined) return defaultProfile;
+    }
     throw new Error(`OpenAI 官方未登录，已配置多个第三方提供商；请指定 --profile：${profiles.join("、")}`);
   }
   return profiles[0];
@@ -214,7 +225,8 @@ function nonCanonicalManagedProfileName(definition) {
       ? "opencode-go"
       : `opencode-go-${definition.accountId}`;
   }
-  return definition.id === "deepseek" || isOpencodeGoProviderNamespace(definition.id)
+  return ["deepseek", "ccg"].includes(definition.storageId)
+    || isOpencodeGoProviderNamespace(definition.id)
     ? definition.id
     : undefined;
 }
@@ -232,16 +244,21 @@ function reservedManagedProfileArgument(args, index) {
     profile = argument.slice(2);
   }
   return profile === "sf-custom"
+    || profile === "sf-deepseek"
+    || profile?.startsWith("sf-ds-")
     || profile?.startsWith("sf-custom-")
     || profile === "sf-opencode-go"
     || profile?.startsWith("sf-opencode-go-")
     || profile === "sf-ocg"
     || profile?.startsWith("sf-ocg-")
+    || profile === "sf-ccg"
+    || profile?.startsWith("sf-ccg-")
     ? profile
     : undefined;
 }
 
 function reservedManagedProfileMessage(profile) {
+  if (profile === "sf-deepseek") return "旧 DeepSeek 单账户 Profile 已停用，请先运行 codexc deepseek legacy remove 并重新添加账户，再使用 --profile sf-ds-<账户>";
   if (profile === "sf-custom") {
     return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
   }
@@ -253,6 +270,12 @@ function reservedManagedProfileMessage(profile) {
   }
   if (profile === "sf-ocg" || profile.startsWith("sf-ocg-")) {
     return `OpenCode Go Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
+  }
+  if (profile === "sf-ccg") {
+    return "旧 CCG 单账户 Profile 已停用，请先运行 codexc ccg legacy remove 并重新添加账户，再使用 --profile sf-ccg-<账户>";
+  }
+  if (profile.startsWith("sf-ccg-")) {
+    return `CCG Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应账户`;
   }
   return `Codex Profile ${profile} 尚未配置；请先运行 codexc setup 配置对应 Provider`;
 }

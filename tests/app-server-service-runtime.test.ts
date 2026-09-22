@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error JavaScript service runtime intentionally has no declaration file.
-import { runAppServerService, applyAppServerTimezone } from "../runtime/app-server-service-runtime.mjs";
+import { applyAppServerTimezone, runAppServerService } from "../runtime/app-server-service-runtime.mjs";
 
 describe("App Server service runtime", () => {
   it("only sets the process timezone when it is configured", () => {

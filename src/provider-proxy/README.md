@@ -11,7 +11,7 @@
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
-  OpenCode Go 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
+  OpenCode Go、CCG 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
@@ -42,8 +42,7 @@
   `request_kind=compaction` 操作标记和不计指标的 `request_kind=prewarm`；其他值保持普通响应语义。
   SSE 单行使用 1,048,576 字符上限，非流式 JSON Responses 使用 1 MiB 临时上限解析相同元数据，
   正文和响应 ID 不进入指标；HTTP 请求正文不截取 `reasoning.effort`，普通 Thread 由组合层按
-  Thread 设置回退，`agents.external` 则只通过本地私有 `/role/external` 路径附加角色配置中的
-  默认思考等级；
+  Thread 设置回退；原生子代理复用父线程 Provider 线路，不设角色专用路径或配置值注入；
   超限或畸形响应只保留基础 HTTP 状态与错误分类。上游模型、服务层级及错误标识符只接受受限字符，
   不能把控制字符带入指标展示。WebSocket 在完成事件投递前先解除活动指标引用，
   避免紧随其后的关闭事件重复写入。
@@ -51,10 +50,9 @@
   代理关闭时取消在途刷新并执行有上限的等待。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
-  `network.proxy` 选择传入上游 Agent。OpenCode Go 共享代理额外接受
+  `network.proxy` 选择传入上游 Agent。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
-  携带账户标识供服务侧按 `ocg-<账户>` Socket 上报；私有 `/role/external` 请求归属
-  `agents.external` 选择的默认账户并在转发前剥离该前缀。
+  携带账户标识供服务侧按具体账户 Provider Socket 上报。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
@@ -103,7 +101,7 @@
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
 `observability` 独立指标库和 `conversation-core` 的稳定请求统计输入事件。
 App Server 服务立即为主 Provider 创建独立代理，并在可选切换 Provider 首次使用时按需创建对应
-代理；所有 OpenCode Go 账户共享同一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
+代理；OpenCode Go、DeepSeek 与 CCG 各自的全部账户共享各自一个代理（内存 HTTP Server，不随账户增长），账户隔离 App
 Server 的 `base_url` 带 `/go/<账户>` 前缀。不暴露手工监听配置。
 服务通过共享运行时的私有监管 Socket 独占完整 App Server 拓扑；前台只能复用监管身份和
 Provider 拓扑匹配且已完成 WebSocket 握手的实例。Gateway 另以配置级所有权 Socket 全局互斥，

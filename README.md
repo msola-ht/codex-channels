@@ -44,37 +44,28 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ```
 
 源码安装的目录、更新、代理和 Windows 处理见[`源码安装与更新`](docs/source-install.md)。
-本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI 和本地配置。
-首次执行 0.155.1 的 `codexc update` 会将用户主配置的推理摘要设为关闭，后续更新保留重新选择的值，见[推理摘要设置](docs/user-guide.md#推理摘要)。
+本地开发源码执行 `npm run install:global` 后，再运行 `codexc update` 同步配套 Codex CLI。
 
 ## 常用入口
 
 ```bash
 codexc setup                 # Provider、渠道和项目技能接入
 codexc config                # Codex 新会话偏好与 Gateway 日常设置
+codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
-codexc metrics               # 查询、导出和维护本机模型请求指标
-codexc traffic               # 查看模型请求与响应转储（列表、详情、跟随或确认清理）
+codexc metrics               # 查询和导出本机模型请求指标
+codexc traffic               # 查看模型请求与响应转储
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc sessions              # 交互式会话清理菜单
-codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）
-codexc update                # 源码安装更新
+codexc sessions              # 交互式会话归档菜单
+codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）
 ```
 
-计划清单工具在 `codexc config → Codex 新会话与用户偏好 → 计划清单工具` 中管理，默认关闭。它与 Gateway 的 `display.plan_updates` 渠道展示开关和 `/plan` 协作模式相互独立，具体说明见[使用指导](docs/user-guide.md#计划相关设置)。
-
-Codex 执行中发出的异步问题可直接在渠道中选择或填写答案，操作方式见[异步问题](docs/display.md#异步问题)。
-
-符合 OpenAI 后端权益的账户在普通用量耗尽后，会把当前 Session 自动切换到 Luna Reserve；当前 Gateway 进程持续运行、账户和 Thread 未切换且原模型仍可用时，会在普通用量恢复后切回。失败的消息需要重新发送，细节见[渠道展示与本地指标](docs/display.md#luna-reserve-自动回退)。
-
-模型请求指标保存在本机 `request-metrics.sqlite3`，由 `codexc metrics` 和本地 WebUI 读取；当前部署不包含远程指标中心或云端同步服务。
-
-电脑、浏览器与已有 MCP 的原生配置可在 `codexc config` 的 Codex 用户偏好或 WebUI 的 App Server 设置中管理，范围见[使用指导](docs/user-guide.md#computer-use-与浏览器排障)。
+首次接入使用 `setup`，日常设置使用 `config`，数据维护使用 `cleanup`。清理菜单的五项操作、服务启停要求和会话归档示例见[本机清理与归档](docs/user-guide.md#本机清理与归档)。在聊天渠道发送 `/help` 查看可用命令。
 
 ## 配置位置
 
@@ -90,12 +81,10 @@ Codex 用户配置：
 ~/.codex/config.toml
 ```
 
-共享代理通过 `codexc config → 网络代理` 写入 `~/.codex/.env`；`codexc update` 会迁移并清理旧 TOML 代理配置，见[代理设置](docs/user-guide.md#代理与权限)。
-开机时网络或代理尚未就绪，Gateway 会在五分钟启动恢复窗口内有限复检，并在恢复后处理已观察到的 `codex_apps` 启动失败；详细边界见[启动连通性说明](docs/display.md)。
+共享代理通过 `codexc config → 网络代理` 设置，保存在 `~/.codex/.env`，见[代理设置](docs/user-guide.md#代理与权限)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
-未登录 OpenAI 且只配置一个第三方时，新会话和 `codexc remote` 自动使用该提供商的默认模型；多个第三方需先选择，见[Provider 默认选择](docs/provider-integration-guide.md)。
-旧版自动补入的空 `api_providers = []` 会由更新器备份后移除；非空旧配置需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工处理。
+DS、OCG、CCG 支持多账户，在 `codexc setup → 模型与提供商` 中管理。旧单账户需要先确认移除再重新添加，更新器不执行账户迁移；具体命令见下面的提供商文档。
 
 ## 专题文档
 
@@ -104,8 +93,9 @@ Codex 用户配置：
 - [渠道展示与本地指标](docs/display.md)
 - [错误字典](docs/errors.md)
 - [本地指标 WebUI](docs/webui.md)
-- [DeepSeek](docs/deepseek.md)
+- [DeepSeek 多账户管理](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
+- [CCG（CommandCode）](docs/ccg.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

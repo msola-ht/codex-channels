@@ -17,7 +17,7 @@ npm run lint       # oxlint
 ```text
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
-  lib/         API 客户端、令牌存取、共享类型转出与格式化；format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址
+  lib/         API 客户端、令牌存取、共享类型转出与格式化；format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址
   hooks/       数据 hook（useApi 统一 loading/error/refetch，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、设置管理（共用版本化预览/确认状态机）与全局货币上下文
   components/  layout（Sidebar）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件）
   pages/       概览、Threads、Thread 详情、请求、错误、调用详情、设置（只负责组合设置域组件）

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+export { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
 import {
   copyFileSync,
   existsSync,
@@ -21,16 +22,9 @@ import {
 import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
-  metricStorageColumns,
-  metricStorageColumnsSql,
-  modelRequestMetricsSchemaVersion,
-  modelRequestMetricsIndexesSql,
-  modelRequestMetricsTableSql,
-  requireCurrentModelRequestMetricsSchema,
 } from "../dist/observability/index.js";
 import {
   inspectMetricsDatabase,
-  metricsDatabaseCanUpgrade,
   readMetricsExport,
   readQuotaHistory,
   readMetricsReport,
@@ -39,7 +33,6 @@ import {
   readMetricsTurns,
   requireCompatibleMetricsDatabase,
   resolveMetricsDatabaseContext,
-  validateMetricsDatabaseStructure,
 } from "./metrics-database-access.mjs";
 import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { resolveConfiguredPath } from "./runtime-config.mjs";
@@ -79,7 +72,6 @@ export {
   readMetricsThreads,
   readMetricsTurns,
   readWeeklyQuota,
-  validateMetricsDatabaseStructure,
 } from "./metrics-database-access.mjs";
 
 export function resetMetricsDatabase(
@@ -134,230 +126,6 @@ export function resetMetricsDatabase(
   } finally {
     lock.release();
   }
-}
-
-export function upgradeMetricsDatabase(
-  environment = process.env,
-  options = {},
-) {
-  const runtime = resolveMetricsRuntime(environment);
-  const gatewayRunning = options.gatewayRunning ?? (() => isGatewayRunning(environment));
-  if (
-    gatewayRunning()
-    || runtime.metricsSocketPaths.some(metricsSocketIsActive)
-  ) {
-    throw new Error("Gateway 仍在运行；请先执行 codexc service stop gateway，再重试");
-  }
-  if (!existsSync(runtime.databasePath)) {
-    return {
-      backupPath: null,
-      changed: false,
-      databasePath: runtime.databasePath,
-      previousSchemaVersion: null,
-      schemaVersion: null,
-    };
-  }
-  const lock = acquireRequestMetricsDatabaseLock(runtime.databasePath);
-  try {
-    const status = inspectMetricsDatabase(environment);
-    if (status.schemaVersion === modelRequestMetricsSchemaVersion) {
-      validateMetricsDatabaseStructure(environment);
-      return {
-        backupPath: null,
-        changed: false,
-        databasePath: status.databasePath,
-        previousSchemaVersion: status.schemaVersion,
-        schemaVersion: status.schemaVersion,
-      };
-    }
-    if (!metricsDatabaseCanUpgrade(status.schemaVersion)) {
-      throw new Error(
-        `指标数据库无法升级：当前 Schema ${status.schemaVersion ?? "unknown"}，`
-        + `仅支持 v3/v4/v5/v6/v7/v8/v9/v10/v11/v12/v13/v14/v15/v16/v17/v18 升级到 v${modelRequestMetricsSchemaVersion}`,
-      );
-    }
-    checkpoint(status.databasePath);
-    const now = options.now ?? (() => new Date());
-    const previousSchemaVersion = status.schemaVersion;
-    const backupPath = `${status.databasePath}.v${previousSchemaVersion}.${backupTimestamp(now())}.bak`;
-    if (existsSync(backupPath)) throw new Error(`指标数据库备份已存在：${backupPath}`);
-    copyFileSync(status.databasePath, backupPath);
-    securePrivateFileSync(backupPath);
-    const database = new DatabaseSync(status.databasePath);
-    try {
-      const statements = ["BEGIN IMMEDIATE;"];
-      if (previousSchemaVersion === 3) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_limit_id TEXT
-            CHECK (weekly_quota_limit_id IS NULL OR weekly_quota_limit_id = 'codex');
-          ALTER TABLE model_request_metrics ADD COLUMN weekly_used_percent_millionths INTEGER
-            CHECK (weekly_used_percent_millionths IS NULL
-              OR weekly_used_percent_millionths BETWEEN 0 AND 100000000);
-          ALTER TABLE model_request_metrics ADD COLUMN weekly_resets_at INTEGER
-            CHECK (weekly_resets_at IS NULL OR weekly_resets_at >= 0);
-        `);
-      }
-      if (previousSchemaVersion < 5) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN weekly_quota_plan_type TEXT;
-        `);
-      }
-      if (previousSchemaVersion < 6) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN error_message TEXT;
-        `);
-      }
-      if (previousSchemaVersion < 9) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN quota_windows TEXT;
-        `);
-      }
-      if (
-        previousSchemaVersion < 13
-        && !databaseHasColumn(database, "model_request_metrics", "user_agent")
-      ) {
-        statements.push(`
-          ALTER TABLE model_request_metrics ADD COLUMN user_agent TEXT;
-        `);
-      }
-      if (previousSchemaVersion < 12) {
-        statements.push(`
-          CREATE TABLE IF NOT EXISTS account_sources (
-            source_id TEXT PRIMARY KEY,
-            provider TEXT NOT NULL,
-            account_id TEXT,
-            display_name TEXT NOT NULL,
-            enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-            UNIQUE (provider, account_id)
-          );
-          CREATE TABLE IF NOT EXISTS account_snapshots (
-            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_id TEXT NOT NULL REFERENCES account_sources(source_id) ON DELETE CASCADE,
-            observed_at_ms INTEGER NOT NULL,
-            available INTEGER NOT NULL CHECK (available IN (0, 1)),
-            usage_json TEXT NOT NULL,
-            limits_json TEXT NOT NULL,
-            UNIQUE (source_id, observed_at_ms)
-          );
-          CREATE INDEX IF NOT EXISTS account_snapshots_latest
-            ON account_snapshots (source_id, observed_at_ms DESC);
-        `);
-      }
-      if (!databaseHasTable(database, "subagent_threads")) {
-        statements.push(`
-          CREATE TABLE subagent_threads (
-            thread_id TEXT PRIMARY KEY,
-            parent_thread_id TEXT NOT NULL,
-            parent_turn_id TEXT,
-            agent_path TEXT NOT NULL,
-            recorded_at_ms INTEGER NOT NULL
-          );
-        `);
-      } else if (!databaseHasColumn(database, "subagent_threads", "parent_turn_id")) {
-        statements.push(`
-          ALTER TABLE subagent_threads ADD COLUMN parent_turn_id TEXT;
-        `);
-      }
-      if (!databaseHasTable(database, "subagent_turns")) {
-        statements.push(`
-          CREATE TABLE subagent_turns (
-            thread_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            parent_thread_id TEXT NOT NULL,
-            parent_turn_id TEXT NOT NULL,
-            agent_path TEXT NOT NULL,
-            recorded_at_ms INTEGER NOT NULL,
-            PRIMARY KEY (thread_id, turn_id)
-          );
-        `);
-      }
-      statements.push(`
-        CREATE INDEX IF NOT EXISTS subagent_turns_parent_turn
-          ON subagent_turns (parent_thread_id, parent_turn_id);
-      `);
-      statements.push(`
-        DROP VIEW IF EXISTS model_request_metrics_enriched;
-        ALTER TABLE model_request_metrics RENAME TO model_request_metrics_legacy;
-        ${modelRequestMetricsTableSql}
-        INSERT INTO model_request_metrics (id, ${metricStorageColumnsSql})
-          SELECT id, ${metricStorageColumns.map((column) =>
-            column === "request_service_tier"
-              || (column === "total_duration_ms" && previousSchemaVersion < 18)
-              || (previousSchemaVersion < 17 && ["traffic_label", "traffic_session", "traffic_interaction"].includes(column))
-              || (previousSchemaVersion < 16 && ["first_content_ms", "request_model", "response_model"].includes(column))
-              || (column === "upstream_ttft_ms" && previousSchemaVersion < 15) ? "NULL" : column).join(", ")}
-          FROM model_request_metrics_legacy;
-        DROP TABLE model_request_metrics_legacy;
-        ${modelRequestMetricsIndexesSql}
-        UPDATE schema_metadata SET value = ${modelRequestMetricsSchemaVersion}
-          WHERE name = 'schema_version';
-      `);
-      database.exec(statements.join("\n"));
-      requireMigratedMetricsColumns(database);
-      database.exec("COMMIT;");
-    } catch (error) {
-      try { database.exec("ROLLBACK"); } catch { /* transaction already closed */ }
-      throw error;
-    } finally {
-      database.close();
-    }
-    return {
-      backupPath,
-      changed: true,
-      databasePath: status.databasePath,
-      previousSchemaVersion,
-      schemaVersion: modelRequestMetricsSchemaVersion,
-    };
-  } finally {
-    lock.release();
-  }
-}
-
-export function upgradeMetricsDatabaseWithGatewayRestart(
-  environment = process.env,
-  options = {},
-) {
-  const stopGateway = options.stopGateway
-    ?? (() => runGatewayServiceAction("stop", environment));
-  const startGateway = options.startGateway
-    ?? (() => runGatewayServiceAction("start", environment));
-  const upgrade = options.upgrade
-    ?? (() => upgradeMetricsDatabase(environment));
-  let stopError;
-  try {
-    stopGateway();
-  } catch (error) {
-    stopError = error;
-  }
-  let result;
-  let upgradeError;
-  try {
-    result = upgrade();
-  } catch (error) {
-    upgradeError = error;
-  }
-  let startError;
-  try {
-    startGateway();
-  } catch (error) {
-    startError = error;
-  }
-  if (stopError && startError) {
-    throw new AggregateError(
-      [stopError, startError],
-      "指标库升级前停止 Gateway 失败，且 Gateway 未能重新启动",
-    );
-  }
-  if (stopError) throw stopError;
-  if (upgradeError && startError) {
-    throw new AggregateError(
-      [upgradeError, startError],
-      "指标库升级失败，且 Gateway 未能重新启动",
-    );
-  }
-  if (upgradeError) throw upgradeError;
-  if (startError) throw startError;
-  return result;
 }
 
 export function pruneProviderMetrics(provider, environment = process.env, options = {}) {
@@ -717,63 +485,6 @@ socket.setTimeout(500, () => finish(2));`,
   return result.status !== 1;
 }
 
-function databaseHasTable(database, name) {
-  return database.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-  ).get(name) !== undefined;
-}
-
-function databaseHasColumn(database, table, name) {
-  return database.prepare(`PRAGMA table_info(${table})`)
-    .all()
-    .some((column) => column.name === name);
-}
-
-function requireMigratedMetricsColumns(database) {
-  const columns = database.prepare("PRAGMA table_info(model_request_metrics)")
-    .all()
-    .map((column) => column.name);
-  const required = ["id", ...metricStorageColumns];
-  if (
-    columns.length !== required.length
-    || required.some((column, index) => columns[index] !== column)
-  ) {
-    throw new Error("model_request_metrics 列定义不匹配");
-  }
-  const legacyView = database.prepare(`
-    SELECT 1 FROM sqlite_master
-    WHERE type = 'view' AND name = 'model_request_metrics_enriched'
-  `).get();
-  if (legacyView !== undefined) throw new Error("遗留指标 View 仍然存在");
-  if (!databaseHasTable(database, "subagent_threads")) {
-    throw new Error("subagent_threads 表缺失");
-  }
-  const subagentColumns = database.prepare("PRAGMA table_info(subagent_threads)")
-    .all()
-    .map((column) => column.name);
-  const missingSubagent = [
-    "thread_id", "parent_thread_id", "parent_turn_id", "agent_path", "recorded_at_ms",
-  ].filter((column) => !subagentColumns.includes(column));
-  if (missingSubagent.length > 0) {
-    throw new Error(`subagent_threads 缺少 ${missingSubagent.join("、")}`);
-  }
-  if (!databaseHasTable(database, "subagent_turns")) {
-    throw new Error("subagent_turns 表缺失");
-  }
-  const subagentTurnColumns = database.prepare("PRAGMA table_info(subagent_turns)")
-    .all()
-    .map((column) => column.name);
-  const missingSubagentTurns = [
-    "thread_id", "turn_id", "parent_thread_id", "parent_turn_id", "agent_path",
-    "recorded_at_ms",
-  ].filter((column) => !subagentTurnColumns.includes(column));
-  if (missingSubagentTurns.length > 0) {
-    throw new Error(`subagent_turns 缺少 ${missingSubagentTurns.join("、")}`);
-  }
-  if (!databaseHasTable(database, "account_sources")) throw new Error("account_sources 表缺失");
-  if (!databaseHasTable(database, "account_snapshots")) throw new Error("account_snapshots 表缺失");
-  requireCurrentModelRequestMetricsSchema(database);
-}
 
 function backupTimestamp(date) {
   return date.toISOString().replaceAll(/[:.]/gu, "-");
@@ -804,31 +515,6 @@ if (
         console.log(`旧库备份：${result.backupPath}`);
         writeCliMessage("remediation", "启动 Gateway 后将自动创建当前 Schema。");
       }
-    } else if (command === "upgrade" && process.argv.length === 3) {
-      const result = upgradeMetricsDatabase();
-      if (!result.changed) {
-        writeCliMessage("note", result.schemaVersion === null
-          ? "指标数据库尚未创建，无需升级。"
-          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
-        if (result.schemaVersion === null) console.log(`数据库：${result.databasePath}`);
-      } else {
-        writeCliMessage("success", `指标数据库已升级到 Schema v${result.schemaVersion}。`);
-        console.log(`数据库：${result.databasePath}`);
-        console.log(`升级前备份：${result.backupPath}`);
-      }
-    } else if (command === "upgrade-restart" && process.argv.length === 3) {
-      const result = upgradeMetricsDatabaseWithGatewayRestart();
-      if (!result.changed) {
-        writeCliMessage("note", result.schemaVersion === null
-          ? "指标数据库尚未创建，无需升级。"
-          : `指标数据库已经是 Schema v${result.schemaVersion}。`);
-        if (result.schemaVersion === null) console.log(`数据库：${result.databasePath}`);
-      } else {
-        writeCliMessage("success", `指标数据库已升级到 Schema v${result.schemaVersion}。`);
-        console.log(`数据库：${result.databasePath}`);
-        console.log(`升级前备份：${result.backupPath}`);
-      }
-      writeCliMessage("success", "Gateway 已重新启动。");
     } else if (command === "prune" && process.argv.length === 4) {
       const provider = process.argv[3];
       const result = pruneProviderMetrics(provider);
@@ -891,7 +577,7 @@ if (
       printMetricsTurns(readMetricsTurns(process.env, options.threadId, options), options.format);
     } else {
       throw new Error(
-        "用法：codexc metrics <status|run|threads|turns|report|export|quota|upgrade|reset|cleanup|prune>",
+        "用法：codexc metrics <status|run|threads|turns|report|export|quota|reset|cleanup|prune>",
       );
     }
   } catch (error) {

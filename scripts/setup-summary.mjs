@@ -44,7 +44,6 @@ export async function loadSetupConfigurationSummary({
     modelDefaults,
     channels: gatewayChannelStates(document),
     installedSkillCount: installedSkills.length,
-    agent: providerState.externalAgent,
     configPath,
   };
 }
@@ -62,7 +61,6 @@ export async function writeSetupConfigurationSummary({
     `- 第三方模型默认值：${summary.modelDefaults.map(modelDefaultLabel).join("；") || "未配置"}`,
     `- 通讯渠道：${summary.channels.map(channelLabel).join("、") || "未配置"}`,
     `- 用户技能目录：${summary.installedSkillCount} 个技能`,
-    `- 共享第三方子代理：${agentLabel(summary.agent)}`,
     `- Gateway 配置：${summary.configPath}`,
     "- 作用范围：Provider、模型与登录由 Codex 配置管理；通讯渠道由 Gateway 配置管理。",
     "- 安全提示：API Key、Token、应用凭据、允许名单和代理值均不显示。",
@@ -88,11 +86,6 @@ function modelDefaultLabel(entry) {
 
 function channelLabel(channel) {
   return `${channel.displayName}（${channel.enabled ? "已启用" : "已配置，未启用"}）`;
-}
-
-function agentLabel(agent) {
-  if (agent.status === "configured") return `${agent.provider} · ${agent.model}`;
-  return agent.status === "unavailable" ? "已配置（Provider 或模型状态不可用）" : "未配置";
 }
 
 function defaultGatewayDocumentLoader(environment) {

@@ -13,10 +13,6 @@ import {
   applyCustomPrimaryProviderSave,
   previewCustomPrimaryProviderSave,
 } from "./custom-primary-provider-management.mjs";
-import {
-  applyThirdPartyAgentChange,
-  previewThirdPartyAgentChange,
-} from "./agents.mjs";
 import { ManagementOperationError } from "./webui-management-operations.mjs";
 import {
   applyModelWindowChange,
@@ -93,13 +89,6 @@ export function normalizeProviderSettingsMutation(input) {
         model: input.model,
         windowPercent: input.windowPercent,
       };
-    case "external-agent":
-      return {
-        operation: input.operation,
-        action: input.action,
-        ...(input.provider === undefined ? {} : { provider: input.provider }),
-        ...(input.model === undefined ? {} : { model: input.model }),
-      };
     default:
       throw new ManagementOperationError(
         "invalid_provider_operation",
@@ -136,15 +125,6 @@ export async function previewProviderSettingsMutation(input, environment) {
             { environment },
           ),
         };
-      case "external-agent":
-        return await previewThirdPartyAgentChange(
-          {
-            action: input.action,
-            ...(input.provider === undefined ? {} : { provider: input.provider }),
-            ...(input.model === undefined ? {} : { model: input.model }),
-          },
-          { environment },
-        );
       case "managed.window":
         return {
           operation: "managed.window",
@@ -186,15 +166,6 @@ export async function applyProviderSettingsMutation(input, environment, preview)
             model: input.model,
             reasoningEffort: input.reasoningEffort,
             windowPercent: input.windowPercent,
-          },
-          { environment },
-        );
-      case "external-agent":
-        return await applyThirdPartyAgentChange(
-          {
-            action: input.action,
-            ...(input.provider === undefined ? {} : { provider: input.provider }),
-            ...(input.model === undefined ? {} : { model: input.model }),
           },
           { environment },
         );
@@ -245,9 +216,6 @@ export function redactProviderSettingsResult(result) {
       : {}),
     ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
     ...(result.activation !== undefined ? { activation: result.activation } : {}),
-    ...(result.current !== undefined ? { current: redactAgentState(result.current) } : {}),
-    ...(result.previous !== undefined ? { previous: redactAgentState(result.previous) } : {}),
-    ...(result.selection !== undefined ? { selection: redactAgentSelection(result.selection) } : {}),
   };
 }
 
@@ -287,7 +255,6 @@ export function projectProviderSettings(state) {
       })),
       backupCandidates: state.customProviders.backupCandidates.map(redactTarget),
     },
-    externalAgent: state.externalAgent,
   };
 }
 
@@ -325,25 +292,6 @@ function redactModel(model) {
     ...(model.id === undefined ? {} : { id: model.id }),
     ...(model.displayName === undefined ? {} : { displayName: model.displayName }),
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
-  };
-}
-
-function redactAgentState(state) {
-  if (state === null || typeof state !== "object") return state;
-  return {
-    ...(typeof state.configured === "boolean" ? { configured: state.configured } : {}),
-    ...(state.provider === null || typeof state.provider === "string" ? { provider: state.provider } : {}),
-    ...(state.model === null || typeof state.model === "string" ? { model: state.model } : {}),
-  };
-}
-
-function redactAgentSelection(selection) {
-  if (selection === null || typeof selection !== "object") return selection;
-  return {
-    ...(typeof selection.provider === "string" ? { provider: selection.provider } : {}),
-    ...(typeof selection.providerDisplayName === "string" ? { providerDisplayName: selection.providerDisplayName } : {}),
-    ...(typeof selection.model === "string" ? { model: selection.model } : {}),
-    ...(typeof selection.modelDisplayName === "string" ? { modelDisplayName: selection.modelDisplayName } : {}),
   };
 }
 
