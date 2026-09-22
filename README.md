@@ -97,6 +97,7 @@ Codex 用户配置：
 未登录 OpenAI 且只配置一个第三方时，新会话和 `codexc remote` 自动使用该提供商的默认模型；多个
 DS、OCG 或 CCG 账户且没有混合其他 Provider 时使用该家注册表的默认账户，混合 Provider 配置需先选择，见
 [Provider 默认选择](docs/provider-integration-guide.md)。
+三家账户均通过 `codexc <deepseek|opencode-go|ccg> account remove <id>` 确认移除；没有 ID 的旧单账户使用 `legacy remove`，之后重新添加。
 旧版自动补入的空 `api_providers = []` 会由更新器备份后移除；非空旧配置需按[使用指导](docs/user-guide.md#5-后台服务与更新)手工处理。
 
 ## 专题文档

@@ -41,7 +41,7 @@ import {
   removeLegacyCcgAccount,
   refreshCcgCatalogForUpdate,
   removeCcgConfiguration,
-  runCcgSetup,
+  runCcgSetup, runCcgAccountCli,
   setCcgDefaultAccount,
 } from "../scripts/ccg-setup.mjs";
 import { createCcgCatalog } from "../scripts/provider-model-catalog.mjs";
@@ -483,6 +483,19 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     }));
     await expect(removeLegacyCcgAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
     expect(existsSync(marker)).toBe(true);
+  });
+
+  it("exposes account removal through the CCG CLI and keeps cancellation read-only", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    const prompts = { confirm: async () => false, isCancel: () => false };
+    const cliOptions = { environment: options.environment, prompts, output: { write: () => undefined } };
+    await runCcgAccountCli(["account", "remove", "main"], cliOptions);
+    expect(existsSync(options.paths.marker)).toBe(true);
+    prompts.confirm = async () => true;
+    await runCcgAccountCli(["account", "remove", "main"], cliOptions);
+    expect(existsSync(options.paths.marker)).toBe(false);
+    await expect(runCcgAccountCli(["account", "remove", "main", "extra"], cliOptions)).rejects.toThrow("用法");
   });
 
   it("uses an independent file's model defaults and capabilities without DS defaults", async () => {

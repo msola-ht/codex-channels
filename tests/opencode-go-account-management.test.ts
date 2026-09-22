@@ -268,7 +268,7 @@ describe("OpenCode Go account management", () => {
     }
   });
 
-  it("removes a managed role config when the final exclusive account had none initially", async () => {
+  it("preserves an unrelated role and clears the catalog when removing the final exclusive account", async () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-ocg-management-"));
     const environment = {
       CODEX_HOME: join(home, ".codex"),
@@ -285,6 +285,8 @@ describe("OpenCode Go account management", () => {
     writeFileSync(join(paths.providerDirectory, "backup", "config.toml"), "profile = \"openai\"\n", { mode: 0o600 });
     mkdirSync(join(paths.roleConfigPath, ".."), { recursive: true, mode: 0o700 });
     writeFileSync(paths.roleConfigPath, "[agents]\n", { mode: 0o600 });
+    writeFileSync(paths.catalogPath, "current-catalog", { mode: 0o600 });
+    writeFileSync(join(paths.providerDirectory, "backup", "models.json"), "old-catalog", { mode: 0o600 });
     try {
       await expect(applyOpencodeGoAccountRemoval({
         accountId: "main",
@@ -307,7 +309,9 @@ describe("OpenCode Go account management", () => {
           }
         },
       })).resolves.toMatchObject({ action: "removed" });
-      expect(existsSync(paths.roleConfigPath)).toBe(false);
+      expect(readFileSync(paths.roleConfigPath, "utf8")).toBe("[agents]\n");
+      expect(existsSync(paths.catalogPath)).toBe(false);
+      expect(readFileSync(join(paths.providerDirectory, "backup", "models.json"), "utf8")).toBe("old-catalog");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

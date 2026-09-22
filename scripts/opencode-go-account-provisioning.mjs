@@ -1,3 +1,4 @@
+import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-account-management.mjs";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -296,6 +297,10 @@ async function buildPlan(
     accounts = loadAccounts(environment);
   } catch (error) {
     throw normalize("account-state-unavailable", "accountId", error);
+  }
+  if (hasLegacyOpencodeGoConfiguration(environment)
+    || accounts.some((account) => hasLegacyOpencodeGoConfiguration(environment, account.id))) {
+    throw invalid("provider-state-unavailable", "accountId", "请先通过 legacy remove 或 account remove <id> 移除旧 OCG 账户，再重新添加");
   }
   const existing = accounts.find((account) => account.id === accountId);
   if (existing !== undefined && reconfigure !== true) {

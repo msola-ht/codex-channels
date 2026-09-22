@@ -85,8 +85,11 @@ codexc opencode-go account stop <id>
 其他用户设置。
 
 启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
-旧版配置需先通过对应旧版本的移除入口清理，再使用明确账户 ID 重新添加；
-当前账户继续通过 `codexc opencode-go account remove <accountId>` 确认删除。
+有 ID 的账户（包括旧注册账户）统一使用 `codexc opencode-go account remove <accountId>`；
+没有 ID 的旧单账户使用 `codexc opencode-go legacy remove`，也可在 Setup 选择移除旧单账户。
+命令先预览并要求确认，再停止对应实例并清理配置；保留其他账户、备份和历史统计。
+固定模式只恢复受管主配置字段，不恢复或删除无关子代理；删除最后一个账户清理共享模型目录。
+移除后再使用明确账户 ID 重新添加。旧配置未移除时，更新在停止服务前报错。
 仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 ## 共享统计代理

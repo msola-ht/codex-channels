@@ -1,3 +1,4 @@
+import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "./opencode-go-account-management.mjs";
 import {
   existsSync,
   rmSync,
@@ -142,17 +143,21 @@ export async function runOpenCodeGoSetup({
 } = {}) {
   const accounts = loadOpencodeGoAccounts(environment);
   const defaultAccount = accounts.find((account) => account.default);
-  const hasModelSettings = loadManagedModelProviderSettings(environment)
+  const legacy = hasLegacyOpencodeGoConfiguration(environment);
+  const hasOldAccounts = accounts.some((account) => hasLegacyOpencodeGoConfiguration(environment, account.id));
+  const hasModelSettings = !legacy && !hasOldAccounts && loadManagedModelProviderSettings(environment)
     .some((candidate) => isOpencodeGoProvider(candidate.provider));
   const prompt = prompter ?? createPrompter(prompts, {
     allowBack,
     hasModelSettings,
     hasAccounts: accounts.length > 0,
     legacyBackup: hasLegacyBackup(environment),
+    legacy,
   });
   try {
     const action = await prompt.select();
     if (action === "back") return { action: "back" };
+    if (action === "legacy-remove") return runLegacyOpencodeGoRemoval(undefined, { environment, output, prompts });
     if (action === "model-settings") {
       if (!defaultAccount) return { action: "back" };
       return runModelProviderDefaultSetup({
@@ -354,6 +359,9 @@ export async function removeOpencodeGoAccount(accountId, {
   prompts = clackPrompts,
   confirm = true,
 } = {}) {
+  if (hasLegacyOpencodeGoConfiguration(environment, accountId)) {
+    return runLegacyOpencodeGoRemoval(accountId, { environment, output, prompts, confirm });
+  }
   const preview = await previewOpencodeGoAccountRemoval(accountId, { environment });
   const removesLastAccount = preview.effects?.removesLastAccount === true;
   const confirmationMessage = removesLastAccount
@@ -563,8 +571,29 @@ export async function stopOpencodeGoAccount(accountId, {
   return { action: result.action, accountId };
 }
 
+async function runLegacyOpencodeGoRemoval(accountId, {
+  environment = process.env, output = process.stdout, prompts = clackPrompts, confirm = true,
+} = {}) {
+  const preview = await previewLegacyOpencodeGoRemoval(accountId, { environment });
+  output.write(`将移除或恢复以下旧账户文件：\n${preview.files.join("\n")}\n`);
+  if (confirm && !await confirmPrompt(prompts, "移除旧 OCG 账户配置和 Key？保留备份与历史统计；之后需重新添加账户。", false)) {
+    return { action: "cancelled" };
+  }
+  const result = await removeLegacyOpencodeGoAccount({ accountId, confirmRemove: true }, { environment });
+  writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+  return result;
+}
+
 export async function runOpencodeGoAccountCli(args, options = {}) {
+  const usage = "用法：codexc opencode-go account <add|list|remove|default|stop> [id]\ncodexc opencode-go legacy remove（确认后移除旧单账户）";
+  if (args.includes("--help") || args.includes("-h")) {
+    (options.output ?? process.stdout).write(`${usage}\n`);
+    return;
+  }
   const [command, action, id, ...extra] = args;
+  if (command === "legacy" && action === "remove" && id === undefined) {
+    return runLegacyOpencodeGoRemoval(undefined, options);
+  }
   if (command !== "account" || !["add", "list", "remove", "default", "stop"].includes(action)) {
     throw new Error(
       "用法：codexc opencode-go account <add|list|remove|default|stop> [id]",
@@ -581,7 +610,7 @@ export async function runOpencodeGoAccountCli(args, options = {}) {
     );
     return;
   }
-  if (id === undefined || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
+  if (id === undefined || extra.length > 0 || (action === "add" && !options.prompter && !process.stdin.isTTY)) {
     throw new Error(
       `用法：codexc opencode-go account ${action} <id>`,
     );
@@ -799,10 +828,11 @@ function printAccounts(environment, output) {
   printOpencodeGoAccounts(environment, output);
 }
 
-function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, legacyBackup }) {
+function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, legacyBackup, legacy = false }) {
   return {
     select: async () => {
       const options = [];
+      if (legacy) options.push({ value: "legacy-remove", label: "移除旧单账户，然后重新添加" });
       if (hasAccounts) {
         options.push(
           { value: "account-add", label: "添加账户" },

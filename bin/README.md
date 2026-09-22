@@ -41,6 +41,7 @@
 - `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
   `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
+- `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户；三家均以 `legacy remove` 移除没有 ID 的旧单账户，保留备份与历史统计，之后重新添加。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例；设置默认账户不会自动修改 `agents.external`，需要时使用 `codexc agents configure`。

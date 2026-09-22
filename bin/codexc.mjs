@@ -104,7 +104,8 @@ const helpText = {
   agents                       管理共享第三方子代理
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
-  deepseek                     管理 DeepSeek 多账户管理
+  ccg                          移除 CCG 账户或旧单账户
+  deepseek                     管理 DeepSeek 多账户
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
@@ -212,7 +213,9 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
   default <id> 设置新会话默认账户（不自动修改 agents.external）
-  stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）`,
+  stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）
+
+旧单账户：codexc opencode-go legacy remove`,
   "opencode_go.account": `用法：codexc opencode-go account <add|list|remove|default|stop> [id]`,
   "opencode_go.account.add": "用法：codexc opencode-go account add <id>（交互输入邮箱或手机号、API Key）",
   "opencode_go.account.list": "用法：codexc opencode-go account list [--json]",
@@ -456,8 +459,20 @@ try {
         failureReportedByChild: true,
       });
       break;
+    case "ccg":
+      if (args.some(isHelpArgument)) {
+        runStandaloneScript("scripts/ccg-setup.mjs", args);
+      } else {
+        if (!(args.length === 2 && args[0] === "legacy" && args[1] === "remove")
+          && !(args.length === 3 && args[0] === "account" && args[1] === "remove")) {
+          throw new Error("用法：codexc ccg account remove <id> 或 codexc ccg legacy remove");
+        }
+        runScript("scripts/ccg-setup.mjs", args, { failureReportedByChild: true });
+      }
+      break;
     case "deepseek":
-      runScript("scripts/deepseek-account-setup.mjs", args, { failureReportedByChild: true });
+      if (args.some(isHelpArgument)) runStandaloneScript("scripts/deepseek-account-setup.mjs", args);
+      else runScript("scripts/deepseek-account-setup.mjs", args, { failureReportedByChild: true });
       break;
     case "opencode-go":
       opencodeGoAccount(args);
@@ -685,6 +700,14 @@ function agents(args) {
 }
 
 function opencodeGoAccount(args) {
+  if (args[0] === "legacy") {
+    if (args.some(isHelpArgument)) runStandaloneScript("scripts/opencode-go-setup.mjs", args);
+    else {
+      if (args.length !== 2 || args[1] !== "remove") throw new Error("用法：codexc opencode-go legacy remove");
+      runScript("scripts/opencode-go-setup.mjs", args, { failureReportedByChild: true });
+    }
+    return;
+  }
   if (showRequestedHelp(args, "opencode_go")) {
     return;
   }

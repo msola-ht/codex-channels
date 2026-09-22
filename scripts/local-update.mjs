@@ -1,3 +1,5 @@
+import { hasLegacyOpencodeGoConfiguration } from "./opencode-go-account-management.mjs";
+import { loadOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
@@ -267,6 +269,12 @@ export async function updateReasoningSummaryOnce(environment = process.env, opti
 }
 
 export function assertProviderUpdateReady(environment = process.env) {
+  if (hasLegacyOpencodeGoConfiguration(environment)) {
+    throw new Error("请先运行 codexc opencode-go legacy remove 移除旧单账户，再重新添加。尚未停止服务。");
+  }
+  if (loadOpencodeGoAccounts(environment).some((account) => hasLegacyOpencodeGoConfiguration(environment, account.id))) {
+    throw new Error("请先运行 codexc opencode-go account remove <id> 移除旧账户，再重新添加。尚未停止服务。");
+  }
   if (hasLegacyCcgConfiguration(environment)) {
     throw new Error("旧 CCG 账户不再自动迁移；请先通过 CCG Setup 移除旧单账户，再重新添加。尚未停止服务。");
   }

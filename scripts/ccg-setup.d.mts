@@ -48,3 +48,11 @@ export function refreshCcgCatalogForUpdate(environment?: NodeJS.ProcessEnv, opti
   downloadCatalog?: () => Promise<{ catalog: CcgCatalog }>;
   now?: () => Date;
 }): Promise<{ status: "not-configured" } | { status: "updated"; providers: string[] }>;
+
+export function runCcgAccountCli(args: string[], options?: Parameters<typeof runCcgSetup>[0]): Promise<unknown>;
+
+export function previewLegacyCcgRemoval(options?: ManagedAccountRuntimeOptions): Promise<{
+  operation: "legacy-remove"; account: { provider: "ccg" }; files: string[];
+  effects: { stopsRunningAppServer: boolean; restoresInitialConfig: boolean; preservesPrivateBackup: true; historyThreadsBecomeUnavailable: true };
+  activation: "restart-all";
+}>;

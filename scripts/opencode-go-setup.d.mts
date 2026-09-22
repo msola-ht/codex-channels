@@ -40,6 +40,8 @@ export function runOpenCodeGoSetup(options?: {
 }): Promise<
   | { action: "back" }
   | { action: "restored" }
+  | { action: "legacy-removed"; runtime: "stopped" | "not-running"; activation: "restart-all" }
+  | { action: "cancelled" }
   | { action: "configured"; mode: "switching" | "exclusive"; accountId: string }
   | { action: "default-set" }
   | { action: "stopped" | "not-running" | "in-use"; accountId: string }
