@@ -81,17 +81,6 @@ enabled = true
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。
 
-### 实验性上下文管理
-
-在 `codexc config → Codex 新会话与用户偏好 → 实验性上下文管理` 中控制上游的实验性上下文管理，默认关闭：
-
-```toml
-[features.context_management]
-experimental_mode = true
-```
-
-该值写入 Codex 用户配置 `~/.codex/config.toml`，不属于 Gateway 的 `~/.codex-connect/config.toml`。保存后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变。它只对满足资格条件的官方 ChatGPT Codex 新会话生效，使用 API Key、自定义或第三方 Provider 的会话不会启用该能力。`codexc doctor` 只读显示当前开关状态和适用范围。
-
 ### TUI 空闲总结
 
 在 `codexc config → Codex 新会话与用户偏好 → 空闲总结` 中控制 TUI 失去焦点后的自动回顾，默认写入关闭：
@@ -313,7 +302,7 @@ codexc doctor
 Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI 和本地配置；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具与实验性上下文管理。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
+更新会先检查官方 `main`、Codex CLI 公开合同、用户设置、数据库和服务状态，再在停机窗口中更新并恢复服务。数据库阶段同时处理状态库、指标库和可重建的会话展示缓存；缓存版本不兼容时会先备份再重建，不影响会话正文。`codexc update` 会提示计划清单工具当前状态；`codexc doctor` 只读诊断计划清单工具。详细边界见 [`Codex CLI 升级流程`](codex-cli-upgrade.md) 和 [`升级决策记录`](codex-cli-upgrade-decisions.md)。
 
 从包含直接 API Provider 预留注册表的旧版升级时，`codexc update` 会识别旧 Schema 自动补入的
 顶层空数组 `api_providers = []`，并在停机窗口备份配置后移除，避免运行中的旧 Gateway 再次补入

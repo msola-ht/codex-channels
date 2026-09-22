@@ -289,7 +289,7 @@ CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读�
 [`real-app-server-isolated-state.test.ts`](../tests/real-app-server-isolated-state.test.ts) 验证字段隔离、带点键与精确删除。
 渠道选择 OpenAI 官方模型时不继承当前 Thread 或用户配置中的 Fast，下一 Turn 显式使用标准服务层级；
 Fast 只在用户之后通过 `/fast on` 明确开启时生效。
-模型、思考等级、Fast、计划清单工具、实验性上下文管理、
+模型、思考等级、Fast、计划清单工具、
 `multi_agent_v2` 的普通键级写入使用官方 `config/batchWrite` 事务。
 Codex 原生角色的 Provider、凭据、目录与权限继承父线程；本项目不提供第三方子代理配置入口。
 官方行为见锁定版本的
@@ -301,9 +301,7 @@ Codex 原生角色的 Provider、凭据、目录与权限继承父线程；本�
 App Server 启动时读取 Profile 的该设置并显式携带，原生 `codex --profile sf-*` 与 Remote/
 App Server 保持一致，避免继承全局 `config.toml` 的官方思考等级。子代理复用父线程统计代理，不设角色专用路由，不从角色配置推测请求的思考等级。
 用户设置的读改写从同一 Client 的原始用户层取得版本并传入 `expectedVersion`，版本冲突失败关闭，
-不自动重试或覆盖用户并发修改。实验性上下文管理仅写入 Codex 用户层
-`features.context_management.experimental_mode`，默认关闭；它只对符合条件的官方 ChatGPT Codex
-新会话可用，不改变 Gateway 的渠道会话语义。
+不自动重试或覆盖用户并发修改。
 DeepSeek 完整安装、备份恢复和 App Server 无法管理的专属文件仍由 Setup 执行私有文件级事务。
 
 完成卡片中的“思考次数”表示本轮明确返回推理 Usage 且推理输出大于零的模型请求数；上游未返回

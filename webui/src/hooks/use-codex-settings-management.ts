@@ -31,7 +31,6 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
   }
   if (setting.kind === "web-search") return { mode: settings.defaults.webSearch ?? "disabled" }
   if (setting.kind === "update-plan") return { enabled: settings.defaults.updatePlanEnabled }
-  if (setting.kind === "context-management") return { enabled: settings.defaults.contextManagementEnabled }
   if (setting.kind === "auto-recap") return { enabled: settings.defaults.autoRecapEnabled }
   if (setting.kind === "model-compact") return settings.compact
   if (setting.kind === "preferences") return {

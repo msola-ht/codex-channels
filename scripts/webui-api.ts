@@ -430,7 +430,6 @@ export interface CodexUserSettingsResponse {
     fastEnabled: boolean
     webSearch: "live" | "indexed" | "cached" | "disabled" | null
     updatePlanEnabled: boolean
-    contextManagementEnabled: boolean
     autoRecapEnabled: boolean
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null
     planModeReasoningEffort?: string | null
