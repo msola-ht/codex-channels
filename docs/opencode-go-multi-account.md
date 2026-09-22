@@ -84,9 +84,10 @@ codexc opencode-go account stop <id>
 删除固定账户或把它改回切换模式时，仅恢复该 Provider 管理的主配置字段，保留之后产生的
 其他用户设置。
 
-已注册的旧账户升级时会改为 `sf-ocg-<accountId>.config.toml`，并把配置和角色中的 Provider
-引用迁移到 `ocg-<accountId>`。没有账户 ID 的旧单账户配置不会被擅自命名为 `main`，需使用明确 ID
-重新添加。迁移无法获得联系方式，但不影响账户路由；旧会话若仍引用已不存在的旧 Provider，则不保证可恢复。
+启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
+旧版配置需先通过对应旧版本的移除入口清理，再使用明确账户 ID 重新添加；
+当前账户继续通过 `codexc opencode-go account remove <accountId>` 确认删除。
+仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 ## 共享统计代理
 
@@ -127,7 +128,7 @@ Gateway 空闲释放终止。再次选择账户、恢复 Thread 或启动 Remote
 
 ## 主要验证边界
 
-测试覆盖账户注册表与旧配置迁移、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
+测试覆盖账户注册表、CLI 原子写入和回滚、共享代理路径与分账户指标、Provider 路由、
 账户用量适配、按需启动、全局 Provider Client 空闲关闭、Remote TUI 租约，以及 Supervisor 的运行中、
 显式释放和租约状态。
 

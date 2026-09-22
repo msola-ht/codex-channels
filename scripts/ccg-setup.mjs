@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
@@ -150,7 +150,7 @@ export async function applyCcgConfiguration({
   environment = process.env,
 } = {}) {
   validateCcgAccountId(accountId);
-  if (hasLegacyCcgConfiguration(environment)) throw new Error("请先迁移旧 CCG 单账户配置并填写账户 ID");
+  if (hasLegacyCcgConfiguration(environment)) throw new Error("请先通过 CCG Setup 移除旧单账户，再重新添加账户");
   if (!["switching", "exclusive"].includes(mode)) throw new Error("CCG 模式无效");
   const definition = ccgAccountDefinition(accountId);
   if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new Error("CCG API Key 无效");
@@ -239,63 +239,42 @@ export async function applyCcgConfiguration({
   });
 }
 
-export async function migrateCcgAccount({ accountId, confirmMigration = false }, {
-  environment = process.env,
-} = {}) {
-  validateCcgAccountId(accountId);
-  if (confirmMigration !== true) throw new Error("迁移 CCG 账户必须明确确认");
+export async function removeLegacyCcgAccount({ confirmRemove = false } = {}, options = {}) {
+  const environment = options.environment ?? process.env;
+  if (confirmRemove !== true) throw new Error("移除旧 CCG 账户必须明确确认");
   return withModelProviderManagementTransaction(environment, async () => {
-    if (!hasLegacyCcgConfiguration(environment)) throw new Error("没有待迁移的 CCG 单账户配置");
-    if (loadCcgAccounts(environment).length > 0) throw new Error("CCG 多账户配置已经存在");
-    const definition = ccgAccountDefinition(accountId);
-    const paths = ccgSetupPaths(environment, accountId);
     const legacy = legacyCcgPaths(environment);
     const marker = await readConfig(legacy.marker);
     if (marker.version !== 1 || marker.provider !== "ccg"
       || !["switching", "exclusive"].includes(marker.mode)) {
       throw new Error("旧 CCG 管理标记无效");
     }
-    const sourcePath = marker.mode === "exclusive" ? paths.config : legacy.profile;
-    const source = await readConfig(sourcePath);
-    if (source.model_provider !== "ccg" || source.model_providers?.ccg === undefined) {
+    const configPath = join(codexHomePath(environment), "config.toml");
+    const current = await readConfig(configPath);
+    for (const role of Object.values(current.agents ?? {})) {
+      if (typeof role?.config_file === "string"
+        && (await readConfig(resolve(dirname(configPath), role.config_file))).model_provider === "ccg") {
+        throw new Error("请先切换或停用旧 CCG 共享子代理");
+      }
+    }
+    const updates = new Map([[legacy.marker, undefined], [legacy.profile, undefined]]);
+    if (marker.mode === "exclusive") {
+      if (current.model_provider !== "ccg") throw new Error("旧 CCG 配置与管理标记不一致");
+      const initial = await readInitialConfig(legacy.backup);
+      if (!initial) throw new Error("旧 CCG 初始配置备份缺失");
+      updates.set(configPath, stringify(restoreProviderBaseConfig(current, initial.config, baseDefinition)));
+    } else if (current.model_provider === "ccg") {
       throw new Error("旧 CCG 配置与管理标记不一致");
     }
-    const backup = await readOptionalProviderFile(legacy.backup);
-    if (backup === undefined) throw new Error("旧 CCG 初始配置备份缺失");
-    const snapshots = snapshotProviderFiles([
-      ...Object.values(paths), ...Object.values(legacy), sourcePath,
-    ]);
-    const rewrite = (document) => {
-      const provider = document.model_providers?.ccg;
-      if (provider === undefined) throw new Error("旧 CCG 配置缺少 Provider");
-      document.model_provider = definition.id;
-      document.model_providers[definition.id] = { ...provider, name: definition.id };
-      if (provider.env_key !== undefined) {
-        document.model_providers[definition.id].env_key = definition.apiKeyEnvironmentKey;
-      }
-      delete document.model_providers.ccg;
-      return stringify(document);
-    };
-    const updates = new Map([
-      [marker.mode === "exclusive" ? paths.config : paths.profile, rewrite(source)],
-      [paths.marker, stringify(createManagedProviderMarker(definition, marker.mode))],
-      [paths.backup, backup],
-      [paths.registry, `${JSON.stringify([{ id: accountId, default: true }], null, 2)}\n`],
-      [legacy.marker, undefined],
-      [legacy.profile, undefined],
-      [legacy.backup, undefined],
-    ]);
-    const roleDocument = await readConfig(paths.role);
-    if (roleDocument.model_provider === "ccg") {
-      updates.set(paths.role, rewrite(roleDocument));
+    if (loadCcgAccounts(environment).length === 0) {
+      const directory = managedProviderDirectory(environment, baseDefinition);
+      updates.set(join(directory, baseDefinition.catalogFileName), undefined);
+      updates.set(join(directory, baseDefinition.catalogManifestFileName), undefined);
     }
+    const snapshots = snapshotProviderFiles([...updates.keys()]);
+    const runtime = await stopManagedAccountForRemoval("ccg", options);
     await applyProviderFileUpdates(updates, snapshots);
-    return {
-      action: "migrated",
-      account: { id: accountId, provider: definition.id, default: true },
-      mode: marker.mode,
-      activation: "restart-all",
-    };
+    return { action: "legacy-removed", runtime, activation: "restart-all" };
   });
 }
 
@@ -314,7 +293,7 @@ function ccgRoleUpdate(catalog, environment) {
 
 export async function refreshCcgCatalogForUpdate(environment = process.env, options = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
-    if (hasLegacyCcgConfiguration(environment)) throw new Error("请先迁移旧 CCG 单账户配置并填写账户 ID");
+    if (hasLegacyCcgConfiguration(environment)) throw new Error("请先通过 CCG Setup 移除旧单账户，再重新添加账户");
     const accounts = loadCcgAccounts(environment);
     if (accounts.length === 0) return { status: "not-configured" };
     const providers = loadManagedModelProviderSettings(environment)
@@ -428,7 +407,7 @@ export async function runCcgSetup({
   const action = requestedAction ?? await prompts.select({
     message: "CCG（CommandCode）账户管理",
     options: [
-      ...(legacy ? [{ value: "migrate", label: "迁移旧单账户（保留 Key 与设置）" }] : [{ value: "add", label: "新增账户" }]),
+      ...(legacy ? [{ value: "legacy-remove", label: "移除旧单账户，然后重新添加" }] : [{ value: "add", label: "新增账户" }]),
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
@@ -439,7 +418,17 @@ export async function runCcgSetup({
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  const accountId = requestedAccountId ?? (["add", "migrate"].includes(action)
+  if (action === "legacy-remove") {
+    const confirmed = await prompts.confirm({
+      message: "移除旧 CCG 账户的 Key 与运行配置？保留备份和历史统计，之后需重新添加。",
+      initialValue: false,
+    });
+    if (confirmed !== true) return { action: "back" };
+    const result = await removeLegacyCcgAccount({ confirmRemove: true }, { environment });
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+    return result;
+  }
+  const accountId = requestedAccountId ?? (action === "add"
     ? await prompts.text({
         message: "账户 ID",
         validate: (value) => {
@@ -456,14 +445,7 @@ export async function runCcgSetup({
   if (prompts.isCancel(accountId)) return { action: "back" };
   validateCcgAccountId(accountId);
   let result;
-  if (action === "migrate") {
-    const confirmed = await prompts.confirm({
-      message: `将旧 CCG 配置迁移为 ${ccgProviderId(accountId)}？旧 Provider 会停止接续历史会话。`,
-      initialValue: false,
-    });
-    if (confirmed !== true) return { action: "back" };
-    result = await migrateCcgAccount({ accountId, confirmMigration: true }, { environment });
-  } else if (action === "remove") {
+  if (action === "remove") {
     const confirmed = await prompts.confirm({
       message: `删除 CCG 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`,
       initialValue: false,

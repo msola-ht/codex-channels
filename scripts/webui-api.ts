@@ -679,7 +679,7 @@ export interface ManagementAccountSettingsResponse {
   }
   deepseek: {
     configured: boolean
-    migrationRequired: boolean
+    legacyConfigurationPresent: boolean
     accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
   }
 }
@@ -707,7 +707,8 @@ export type ManagementAccountSettingsMutationInput =
       apiKey: string
       confirmExclusiveConfigChange?: boolean
     }
-  | { operation: "deepseek.migrate" | "deepseek.default" | "deepseek.remove"; accountId: string }
+  | { operation: "deepseek.default" | "deepseek.remove"; accountId: string }
+  | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
   operation: string

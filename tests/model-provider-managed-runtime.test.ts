@@ -65,6 +65,8 @@ describe("managed model provider runtime", () => {
       "amazon-bedrock",
       "ocg",
       "ocg-main",
+      "ccg",
+      "ccg-team",
     ]) {
       expect(validateCustomPrimaryModelProviderId(id, environment))
         .toBe("该 Provider ID 已被 Codex 或 Gateway 保留");

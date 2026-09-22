@@ -106,7 +106,7 @@ DS、OCG 或 CCG 账户且没有混合其他 Provider 时使用该家注册表�
 - [渠道展示与本地指标](docs/display.md)
 - [错误字典](docs/errors.md)
 - [本地指标 WebUI](docs/webui.md)
-- [DeepSeek 多账户与旧配置迁移](docs/deepseek.md)
+- [DeepSeek 多账户管理](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)

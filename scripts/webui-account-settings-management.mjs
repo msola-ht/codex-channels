@@ -2,8 +2,8 @@ import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,
   hasLegacyDeepseekConfiguration,
-  previewDeepseekAccountMigration,
-  migrateDeepseekAccount,
+  previewLegacyDeepseekRemoval,
+  removeLegacyDeepseekAccount,
   removeDeepseekAccount,
   previewDeepseekAccountRemoval,
   setDeepseekDefaultAccount,
@@ -56,7 +56,7 @@ export async function loadAccountSettingsResource(
       },
       deepseek: {
         configured: dsAccounts.length > 0,
-        migrationRequired: hasLegacyDeepseekConfiguration(environment),
+        legacyConfigurationPresent: hasLegacyDeepseekConfiguration(environment),
         accounts: dsAccounts.map((account) => {
           const provider = providers.find((entry) => entry.provider === deepseekProviderId(account.id));
           return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
@@ -108,7 +108,8 @@ export function normalizeAccountSettingsMutation(input) {
           ? {}
           : { confirmExclusiveConfigChange: input.confirmExclusiveConfigChange }),
       };
-    case "deepseek.migrate":
+    case "deepseek.legacy.remove":
+      return { operation: input.operation };
     case "deepseek.default":
     case "deepseek.remove":
       return { operation: input.operation, accountId: input.accountId };
@@ -130,8 +131,8 @@ export async function previewAccountSettingsMutation(input, environment) {
         return await previewOpencodeGoAccountRemoval(input.accountId, { environment });
       case "deepseek.configure":
         return previewDeepseekAccountConfiguration(input, { environment });
-      case "deepseek.migrate":
-        return previewDeepseekAccountMigration(input.accountId, { environment });
+      case "deepseek.legacy.remove":
+        return await previewLegacyDeepseekRemoval({ environment });
       case "deepseek.remove":
         return await previewDeepseekAccountRemoval(input.accountId, { environment });
       case "deepseek.default": {
@@ -160,8 +161,8 @@ export async function applyAccountSettingsMutation(input, environment) {
         return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
         return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
-      case "deepseek.migrate":
-        return await migrateDeepseekAccount(accountSettingsApplyInput(input), { environment });
+      case "deepseek.legacy.remove":
+        return await removeLegacyDeepseekAccount(accountSettingsApplyInput(input), { environment });
       case "deepseek.default":
         return await setDeepseekDefaultAccount(input.accountId, { environment });
       case "deepseek.remove":
@@ -186,8 +187,8 @@ export function accountSettingsApplyInput(input) {
       return input.mode === "exclusive"
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
-    case "deepseek.migrate":
-      return { ...input, confirmMigration: true };
+    case "deepseek.legacy.remove":
+      return { ...input, confirmRemove: true };
     case "deepseek.remove":
       return { ...input, confirmRemove: true };
     default:

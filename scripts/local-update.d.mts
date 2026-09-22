@@ -52,7 +52,6 @@ export type LocalUpdateStage =
   | "inspect"
   | "stop-services"
   | "obsolete-services"
-  | "provider-files"
   | "provider-catalogs"
   | "codex-settings"
   | "config"
@@ -190,8 +189,6 @@ export function updateGatewayConfiguration(
 export function updateLocalInstallation(
   environment?: LocalUpdateEnvironment,
   options?: {
-    deepseekMigrationId?: string;
-    requestDeepseekMigrationId?: () => Promise<string | undefined>;
     databaseOptions?: Parameters<typeof updateDatabases>[1];
     expectedRevision?: string;
     inspectConfig?: () => {
@@ -219,7 +216,6 @@ export function updateLocalInstallation(
     removeObsoleteServices?: () => unknown;
     startServices?: () => void;
     stopServices?: () => void;
-    updateProviderFiles?: () => unknown;
     updateProviderCatalogs?: () => unknown | Promise<unknown>;
     updateCodexSettings?: () => unknown | Promise<unknown>;
     updateConfig?: () => unknown;
@@ -237,12 +233,7 @@ export function updateLocalInstallation(
 
 export function getLocalUpdateFailure(error: unknown): LocalUpdateFailure | undefined;
 
-export function prepareDeepseekUpdateMigration(environment?: LocalUpdateEnvironment, options?: {
-  deepseekMigrationId?: string;
-  requestDeepseekMigrationId?: () => Promise<string | undefined>;
-}): Promise<string | undefined>;
-
-export function requestDeepseekMigrationId(environment?: LocalUpdateEnvironment): Promise<string | undefined>;
+export function assertProviderUpdateReady(environment?: LocalUpdateEnvironment): void;
 
 export function updateReasoningSummaryOnce(
   environment?: LocalUpdateEnvironment,

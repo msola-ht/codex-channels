@@ -25,13 +25,9 @@ export function applyCcgConfiguration(input: {
   activation: "restart-all";
 }>;
 export function hasLegacyCcgConfiguration(environment?: NodeJS.ProcessEnv): boolean;
-export function migrateCcgAccount(input: {
-  accountId: string;
-  confirmMigration?: boolean;
-}, options?: { environment?: NodeJS.ProcessEnv }): Promise<{
-  action: "migrated";
-  account: { id: string; provider: `ccg-${string}`; default: true };
-  mode: "switching" | "exclusive";
+export function removeLegacyCcgAccount(input?: { confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{
+  action: "legacy-removed";
+  runtime: "stopped" | "not-running";
   activation: "restart-all";
 }>;
 export function setCcgDefaultAccount(accountId: string, options?: {
@@ -44,7 +40,7 @@ export function runCcgSetup(options?: {
   prompts?: unknown;
   fetchImpl?: typeof fetch;
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: CcgCatalog }>;
-  action?: "add" | "migrate" | "reconfigure" | "settings" | "default" | "remove";
+  action?: "add" | "legacy-remove" | "reconfigure" | "settings" | "default" | "remove";
   accountId?: string;
 }): Promise<unknown>;
 export function refreshCcgCatalogForUpdate(environment?: NodeJS.ProcessEnv, options?: {

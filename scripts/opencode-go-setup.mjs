@@ -36,7 +36,6 @@ import {
 import {
   isOpencodeGoProvider,
   loadOpencodeGoAccounts,
-  migrateLegacyOpencodeGoAccount,
   opencodeGoAccountDirectory,
   opencodeGoAccountsFilePath,
   opencodeGoProviderId,
@@ -924,7 +923,6 @@ function managedSetupInvalid(code, field, message, cause) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  migrateLegacyOpencodeGoAccount(process.env);
   await runOpencodeGoAccountCli(process.argv.slice(2)).catch((error) => {
     writeCliMessage("failure", error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

@@ -3,13 +3,13 @@
 DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server。同一批 DS 账户共用
 DS 官方模型目录，OCG、CCG 的目录及增量模型保持独立，DS 不增加 V4.1 条目。
 
-## 配置与迁移
+## 配置与移除
 
 在 `codexc setup → 模型与提供商 → 第三方 Provider → DeepSeek 官方` 管理账户，
 也可在 WebUI 账户设置中操作，或使用以下命令：
 
 ```bash
-codexc deepseek account migrate personal   # 为旧单账户填写 ID，确认后直接迁移
+codexc deepseek legacy remove              # 确认后移除旧单账户，再重新添加
 codexc deepseek account add work           # 新增账户，交互输入模式和 Key
 codexc deepseek account reconfigure work   # 重新配置已有账户
 codexc deepseek account list --json        # 列出账户与默认标记，不包含 Key
@@ -20,17 +20,16 @@ codexc service restart all                 # 应用配置变化
 
 账户 ID 必须由用户填写，使用 1–32 位小写字母、数字、`-` 或 `_`，不自动创建 `main`。
 首个账户标记为默认，后续可手动修改。不同 ID 不能生成相同的凭据环境变量名。
-旧账户通过迁移入口保留原 Key、运行模式、模型目录及模型设置，并改写共享子代理的 Provider 引用。
-迁移删除旧 `sf-deepseek` Profile 和单账户管理标记，旧备份保留；不提供旧 Provider 的运行别名或回退入口。
-旧 Thread 的 `deepseek` 身份不改写，也不保证继续恢复。原指标数据库不修改，历史请求仍在
-`deepseek` 名下查询，新请求按 `ds-<账户>` 统计。
+旧单账户不再迁移。已有配置保持原样，需先运行 `codexc deepseek legacy remove`，
+确认移除旧 Key、Profile 和管理标记后，再使用明确账户 ID 重新添加。
+固定模式只恢复该 Provider 管理的主配置字段；安装前备份和历史统计保留。
+共享子代理仍引用旧账户时，需先停用或改配；Remote TUI 正在使用旧实例时，需先退出。
+旧配置与新账户并存时，移除旧账户保留现有注册表、账户文件和共享模型目录。
+必要恢复备份缺失时明确报错，写入失败会回滚本次文件变更。
 
-迁移目标已经存在或旧固定模式缺少必要备份时明确报错；写入失败会回滚本次文件变更。
-先完成旧账户迁移再新增账户或刷新目录，避免两套运行配置并存。
-
-`codexc update` 检测到旧 DS 配置时，会在停止服务前要求填写并校验账户 ID，随后在停机窗口内
-先迁移账户，再刷新目录并继续配置和数据库更新。源码更新的候选预检与已安装包更新共用该步骤。
-取消输入、ID 无效或非交互入口缺少 ID 时，在停止服务前报错；非交互更新前需先完成账户迁移。
+`codexc update` 检测到旧 DS 配置时在停止服务前报错，不自动移动文件或改写账户身份。
+旧 Thread 的 `deepseek` 身份不改写，也不保证继续恢复；历史指标仍在 `deepseek` 名下查询，
+新请求按 `ds-<账户>` 统计。
 
 ## 文件与运行模式
 
@@ -112,7 +111,7 @@ Gateway 根据 Thread 的 `modelProvider` 路由新建、恢复、Turn、Review�
 2. 在下一条消息中为目标 Provider 新建 Thread。
 3. 不复制可能包含 Provider 专属 reasoning、工具结果或加密内容的历史。
 
-同一账户的 Thread 仍可通过 `/resume` 恢复，迁移前的 `deepseek` Thread 不再接续。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
+同一账户的 Thread 仍可通过 `/resume` 恢复，旧单账户的 `deepseek` Thread 不再接续。同一 Provider 内切换模型时不新建 Thread，选择在下一次 Turn
 生效。切换 Workspace、新会话或同 Provider 历史 Thread 时，渠道会在内存中保留当前模型、思考
 等级和服务层级并用于下一 Turn。切换 Workspace 后下一条消息会新建 Thread，不自动接续目标 Workspace 的历史
 Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Provider。

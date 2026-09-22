@@ -4,7 +4,7 @@ import * as clackPrompts from "@clack/prompts";
 import { loadDeepseekAccounts, deepseekProviderId, validateDeepseekAccountId } from "../runtime/deepseek-accounts.mjs";
 import {
   applyDeepseekAccountConfiguration, hasLegacyDeepseekConfiguration,
-  migrateDeepseekAccount, removeDeepseekAccount, setDeepseekDefaultAccount,
+  previewLegacyDeepseekRemoval, removeLegacyDeepseekAccount, removeDeepseekAccount, setDeepseekDefaultAccount,
 } from "./deepseek-account-management.mjs";
 import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
@@ -16,7 +16,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
   const action = requestedAction ?? await prompts.select({
     message: "DeepSeek 账户管理",
     options: [
-      ...(legacy ? [{ value: "migrate", label: "迁移旧单账户（保留 Key 与设置）" }] : [{ value: "add", label: "新增账户" }]),
+      ...(legacy ? [{ value: "legacy-remove", label: "移除旧单账户，然后重新添加" }] : [{ value: "add", label: "新增账户" }]),
       ...(accounts.length === 0 ? [] : [
         { value: "reconfigure", label: "重新配置账户" },
         { value: "settings", label: "修改默认模型与思考等级" },
@@ -27,16 +27,21 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
     ],
   });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
-  const accountId = requestedId ?? (["add", "migrate"].includes(action)
+  if (action === "legacy-remove") {
+    const preview = await previewLegacyDeepseekRemoval({ environment });
+    output.write(`将移除或恢复以下旧账户文件：\n${preview.files.join("\n")}\n`);
+    if (await prompts.confirm({ message: "移除旧 DS 账户配置和 Key？保留备份与历史统计；之后需重新添加账户。", initialValue: false }) !== true) return { action: "back" };
+    const result = await removeLegacyDeepseekAccount({ confirmRemove: true }, { environment });
+    writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
+    return result;
+  }
+  const accountId = requestedId ?? (action === "add"
     ? await prompts.text({ message: "账户 ID", validate: (value) => { try { validateDeepseekAccountId(value); } catch (error) { return error.message; } } })
     : await prompts.select({ message: "选择 DS 账户", options: accounts.map((account) => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) }));
   if (prompts.isCancel(accountId)) return { action: "back" };
   validateDeepseekAccountId(accountId);
   let result;
-  if (action === "migrate") {
-    if (await prompts.confirm({ message: `将旧 DS 配置迁移为 ${deepseekProviderId(accountId)}？历史统计保留，旧会话不再接续。`, initialValue: false }) !== true) return { action: "back" };
-    result = await migrateDeepseekAccount({ accountId, confirmMigration: true }, { environment });
-  } else if (action === "remove") {
+  if (action === "remove") {
     if (await prompts.confirm({ message: `删除 DS 账户 ${accountId}？将停止对应 App Server，历史 Thread 将不可恢复；保留历史统计和安装前备份。`, initialValue: false }) !== true) return { action: "back" };
     result = await removeDeepseekAccount({ accountId, confirmRemove: true }, { environment });
   } else if (action === "default") {
@@ -57,12 +62,15 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
 
 export async function runDeepseekAccountCli(args, options = {}) {
   const [command, action, ...rest] = args;
-  const usage = "用法：codexc deepseek account <add|migrate|list|reconfigure|remove|default> [id]（list 支持 --json）";
+  const usage = "用法：codexc deepseek account <add|list|reconfigure|remove|default> [id]（list 支持 --json）\ncodexc deepseek legacy remove（确认后移除旧单账户）";
   if (args.includes("--help") || args.includes("-h")) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
   }
-  if (command !== "account" || !["add", "migrate", "list", "reconfigure", "remove", "default"].includes(action)
+  if (command === "legacy" && action === "remove" && rest.length === 0) {
+    return runDeepseekSetup({ ...options, action: "legacy-remove" });
+  }
+  if (command !== "account" || !["add", "list", "reconfigure", "remove", "default"].includes(action)
     || (action === "list" ? !(rest.length === 0 || (rest.length === 1 && rest[0] === "--json")) : rest.length !== 1)) throw new Error(usage);
   if (action === "list") {
     const accounts = loadDeepseekAccounts(options.environment ?? process.env);

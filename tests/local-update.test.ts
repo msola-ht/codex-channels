@@ -231,7 +231,6 @@ describe("local update", () => {
         inspectDatabases: () => ({ state: {}, metrics: {} }),
         inspectServices: () => ({ installed: true }),
         stopServices: () => { calls.push("stop"); },
-        updateProviderFiles: () => undefined,
         updateProviderCatalogs: () => undefined,
         updateCodexSettings: async () => {
           calls.push("settings");
@@ -674,9 +673,6 @@ describe("local update", () => {
         calls.push("remove-obsolete-services");
         return "obsolete-services";
       },
-      updateProviderFiles: () => {
-        calls.push("update-provider-files");
-      },
       updateProviderCatalogs: () => {
         calls.push("update-provider-catalogs");
         return "provider-catalogs";
@@ -708,7 +704,6 @@ describe("local update", () => {
       "inspect-databases",
       "stop",
       "remove-obsolete-services",
-      "update-provider-files",
       "update-provider-catalogs",
       "update-config",
       "update-databases",
@@ -730,8 +725,6 @@ describe("local update", () => {
       ["stop-services", "completed"],
       ["obsolete-services", "started"],
       ["obsolete-services", "completed"],
-      ["provider-files", "started"],
-      ["provider-files", "completed"],
       ["provider-catalogs", "started"],
       ["provider-catalogs", "completed"],
       ["codex-settings", "started"],
@@ -767,7 +760,6 @@ describe("local update", () => {
       steps: [
         "inspect",
         "stop-services",
-        "provider-files",
         "provider-catalogs",
         "codex-settings",
         "config",
@@ -816,7 +808,6 @@ describe("local update", () => {
         return { installed: false };
       },
       stopServices: () => calls.push("stop"),
-      updateProviderFiles: () => calls.push("update-provider-files"),
       updateProviderCatalogs: () => {
         calls.push("update-provider-catalogs");
         return "provider-catalogs";
@@ -841,7 +832,6 @@ describe("local update", () => {
       "inspect-config",
       "inspect-databases",
       "inspect-services",
-      "update-provider-files",
       "update-provider-catalogs",
       "update-config",
       "update-databases",
@@ -855,7 +845,7 @@ describe("local update", () => {
     });
   });
 
-  it("backs up and migrates legacy provider files by default", async () => {
+  it("preserves legacy provider files and rejects updates before stopping services", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-local-update-provider-migration-"));
     temporaryDirectories.push(root);
     const codexHome = join(root, ".codex");
@@ -910,38 +900,16 @@ describe("local update", () => {
     };
     delete environment.CODEX_CONNECT_SERVICE_ROLE;
 
-    const result = await updateLocalInstallation(environment, {
-      deepseekMigrationId: "personal",
-      inspectConfig: () => ({
-        configPath: join(connectHome, "config.toml"),
-        missingSafeDefaults: [],
-      }),
+    const stopServices = vi.fn();
+    await expect(updateLocalInstallation(environment, {
+      inspectConfig: () => ({ configPath: join(connectHome, "config.toml") }),
       inspectDatabases: () => ({ state: {}, metrics: {} }),
-      inspectServices: () => ({ installed: false }),
-      updateCodexSettings: () => undefined,
-      updateConfig: () => "config",
-      updateProviderCatalogs: () => "provider-catalogs",
-      updateDatabases: () => "databases",
-      validateOffline: () => undefined,
-      startServices: () => undefined,
-      waitForServices: async () => undefined,
-    });
-
-    expect(result).toEqual({
-      config: "config",
-      databases: "databases",
-      providerCatalogs: "provider-catalogs",
-      servicesRestored: false,
-    });
-    const providerDirectory = join(connectHome, "providers", "deepseek");
-    expect(existsSync(join(providerDirectory, "models.json"))).toBe(true);
-    expect(existsSync(join(providerDirectory, "models.manifest.json"))).toBe(true);
-    expect(existsSync(join(providerDirectory, "managed.toml"))).toBe(false);
-    expect(existsSync(join(providerDirectory, "accounts/personal/managed.toml"))).toBe(true);
-    expect(existsSync(join(codexHome, "sf-ds-personal.config.toml"))).toBe(true);
-    expect(existsSync(catalogPath)).toBe(false);
-    expect(readdirSync(join(connectHome, "backups")).some((name) =>
-      name.startsWith("provider-migration-"))).toBe(true);
+      inspectServices: () => ({ installed: true }), stopServices,
+    })).rejects.toThrow("codexc deepseek legacy remove");
+    expect(stopServices).not.toHaveBeenCalled();
+    expect(existsSync(catalogPath)).toBe(true);
+    expect(existsSync(join(codexHome, "sf-deepseek.managed.toml"))).toBe(true);
+    expect(existsSync(join(connectHome, "backups"))).toBe(false);
   });
 
   it("rejects before writing when an uninstalled foreground Gateway is active", async () => {
@@ -1011,7 +979,6 @@ describe("local update", () => {
         inspectDatabases: () => ({ state: {}, metrics: {} }),
         inspectServices: () => ({ installed: true }),
         stopServices: () => calls.push("stop"),
-        updateProviderFiles: () => calls.push("update-provider-files"),
         updateProviderCatalogs: () => calls.push("update-provider-catalogs"),
         updateCodexSettings: () => undefined,
         updateConfig: () => calls.push("update-config"),
@@ -1037,7 +1004,6 @@ describe("local update", () => {
       completedStages: [
         "inspect",
         "stop-services",
-        "provider-files",
         "provider-catalogs",
         "codex-settings",
         "config",
@@ -1048,7 +1014,6 @@ describe("local update", () => {
     });
     expect(calls).toEqual([
       "stop",
-      "update-provider-files",
       "update-provider-catalogs",
       "update-config",
       "update-databases",

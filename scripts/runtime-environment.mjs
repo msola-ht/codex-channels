@@ -3,7 +3,6 @@ import { dirname, join, resolve } from "node:path";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { readCodexProxySettings } from "../runtime/codex-proxy-env.mjs";
 import { resolveProxyEnvironment } from "../runtime/network-proxy.mjs";
-import { migrateLegacyOpencodeGoAccount } from "../runtime/opencode-go-accounts.mjs";
 import { requireUserConfig, userDataDir } from "./runtime-config.mjs";
 
 export function configuredEnvironment(sourceEnvironment = process.env) {
@@ -13,7 +12,6 @@ export function configuredEnvironment(sourceEnvironment = process.env) {
     CODEX_CONNECT_HOME: dataDir,
     CODEX_CONNECT_CONFIG_FILE: configPath,
   };
-  migrateLegacyOpencodeGoAccount(environment);
   const document = readGatewayConfig(configPath);
   const network = readCodexProxySettings(environment);
   const codex = table(document.codex);

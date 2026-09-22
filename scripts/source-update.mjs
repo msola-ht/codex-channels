@@ -333,7 +333,7 @@ export async function updateManagedSourceInstallation(
     );
     await runStage(
       "local-update",
-      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, { ...options, deepseekMigrationId: inspection.deepseekMigrationId }),
+      () => (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options),
     );
     await runStage("cleanup", () => {
       rmSync(backupPath, { recursive: true, force: true });
@@ -898,10 +898,8 @@ async function inspectStagedInstallation(checkout, environment) {
       "核心后台服务未安装，但检测到前台 Gateway 正在运行；请先按 Ctrl-C 结束后再更新",
     );
   }
-  const deepseekMigrationId = await staged.prepareDeepseekUpdateMigration(environment, {
-    requestDeepseekMigrationId: () => staged.requestDeepseekMigrationId(environment),
-  });
-  return { config, services, deepseekMigrationId };
+  staged.assertProviderUpdateReady(environment);
+  return { config, services };
 }
 
 async function stopCoreServices(checkout, environment, options) {
@@ -927,7 +925,7 @@ async function startCoreServices(checkout, environment, options) {
 async function runLocalUpdate(checkout, environment, options) {
   run(
     process.execPath,
-    [join(checkout, "scripts", "local-update.mjs"), ...(options.deepseekMigrationId === undefined ? [] : [options.deepseekMigrationId])],
+    [join(checkout, "scripts", "local-update.mjs")],
     checkout,
     environment,
     options.runCommand,
@@ -1054,7 +1052,7 @@ export async function updateInstalledPackage(environment = process.env, options 
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
     }
     await installPreparedCodexVersion(prepared, expected, checkout, environment, writeMessage, options);
-    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, { ...options, deepseekMigrationId: inspection.deepseekMigrationId });
+    await (options.runLocalUpdate ?? runLocalUpdate)(checkout, environment, options);
   } catch (error) {
     if (servicesStopped) {
       try {

@@ -61,7 +61,6 @@ export interface SourceUpdateFailure {
 }
 
 export interface SourceUpdateOptions {
-  deepseekMigrationId?: string;
   expectedRevision?: string;
   projectDir?: string;
   repository?: string;
@@ -105,7 +104,7 @@ export interface SourceUpdateOptions {
   inspectStaged?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
-  ) => Promise<{ services: { installed: boolean; obsoleteServices?: string[] }; deepseekMigrationId?: string }>;
+  ) => Promise<{ services: { installed: boolean; obsoleteServices?: string[] } }>;
   stopServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,

@@ -258,7 +258,7 @@ function reservedManagedProfileArgument(args, index) {
 }
 
 function reservedManagedProfileMessage(profile) {
-  if (profile === "sf-deepseek") return "旧 DeepSeek 单账户 Profile 已停用，请先迁移账户并使用 --profile sf-ds-<账户>";
+  if (profile === "sf-deepseek") return "旧 DeepSeek 单账户 Profile 已停用，请先运行 codexc deepseek legacy remove 并重新添加账户，再使用 --profile sf-ds-<账户>";
   if (profile === "sf-custom") {
     return "Codex Profile sf-custom 是内部保留名称；固定模式请直接使用 codexc remote";
   }

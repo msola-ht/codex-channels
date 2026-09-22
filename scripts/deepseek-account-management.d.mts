@@ -24,10 +24,13 @@ export function applyDeepseekAccountConfiguration(input: DeepseekAccountConfigur
   downloadCatalog?: (fetchImpl: typeof fetch) => Promise<{ catalog: Catalog }>;
   fetchImpl?: typeof fetch;
 }): Promise<ReturnType<typeof previewDeepseekAccountConfiguration> & { action: "configured"; model: string }>;
-export function previewDeepseekAccountMigration(accountId: string, options?: Options): {
-  operation: "migrate"; account: { id: string; provider: string }; confirmation: { required: true; field: string }; activation: "restart-all";
-};
-export function migrateDeepseekAccount(input: { accountId: string; confirmMigration?: boolean }, options?: Options): Promise<ReturnType<typeof previewDeepseekAccountMigration> & { action: "migrated" }>;
+export function previewLegacyDeepseekRemoval(options?: ManagedAccountRuntimeOptions): Promise<{
+  operation: "legacy-remove"; account: { provider: "deepseek" }; mode: "switching" | "exclusive";
+  files: string[]; effects: { stopsRunningAppServer: boolean; restoresInitialConfig: boolean; preservesPrivateBackup: true }; activation: "restart-all";
+}>;
+export function removeLegacyDeepseekAccount(input?: { confirmRemove?: boolean }, options?: ManagedAccountRuntimeOptions): Promise<{
+  action: "legacy-removed"; runtime: "stopped" | "not-running"; activation: "restart-all";
+}>;
 export function setDeepseekDefaultAccount(accountId: string, options?: Options): Promise<{ action: "default-set"; accountId: string; activation: "restart-all" }>;
 export function previewDeepseekAccountRemoval(accountId: string, options?: ManagedAccountRuntimeOptions): Promise<{
   operation: "remove"; account: { id: string; provider: string };

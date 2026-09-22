@@ -75,8 +75,4 @@ export function writeOpencodeGoAccountMarker(
   mode: "switching" | "exclusive",
 ): void;
 
-export function migrateLegacyOpencodeGoAccount(
-  environment?: NodeJS.ProcessEnv,
-): { changed: boolean; accountId: string | undefined };
-
 export function opencodeGoApiKeyEnvironmentKey(accountId: string): string;

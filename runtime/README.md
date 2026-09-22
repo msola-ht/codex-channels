@@ -43,8 +43,7 @@
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
-  （`accounts.json`）、账户目录与管理标记，以及已注册旧账户到 `ocg-<账户>` 与
-  `sf-ocg-<账户>` 的迁移；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
+  （`accounts.json`）、账户目录与管理标记；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
 - `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
   CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
 - `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中三家账户
@@ -61,7 +60,7 @@
   导出门面与 TypeScript 接口，不承载具体读取、写入或启动逻辑。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
-  历史目录中的自动压缩阈值只用于迁移为上下文窗口，当前目录不再管理压缩阈值；受管 Profile 必须
+  当前目录不管理自动压缩阈值；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
 - `model-provider-custom-runtime.mjs`：拥有自定义主 Provider 候选备份和切换模式注册表，逐 Provider
@@ -172,7 +171,7 @@
   持有进程的 PID、启动时间和可执行路径，并在终止前通过同一进程对象复核启动时间。
 - `connect-home.mjs` / `connect-home.d.mts`：统一解析 Gateway 数据目录（`CODEX_CONNECT_HOME`
   或 `~/.codex-connect`），并提供受管第三方 Provider 存储根目录
-  `providers/`，供 Setup、迁移脚本与 Runtime 复用。
+  `providers/`，供 Setup 与 Runtime 复用。
 - `private-file.mjs` / `private-file.d.mts`：为 App Server 无法管理的 Profile、模型目录、
   管理标记、子代理配置和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，

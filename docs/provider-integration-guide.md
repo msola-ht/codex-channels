@@ -53,7 +53,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
 注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
-`agents.external` 角色、文件迁移、`/model` 的 Provider 选项、App Server 启动参数。
+`agents.external` 角色、文件布局、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
 重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 与 CCG 多账户实例继承基础定义的能力
@@ -123,7 +123,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 至少覆盖：
 
-- 定义与文件布局（`model-provider-file-layout.test.ts` 风格）；
+- 定义与文件布局（`model-provider-managed-runtime.test.ts` 风格）；
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 账户适配器：余额或用量窗口、本机 Token 统计、窗口边界、窗口快照归属与缺失回退；
 - Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
@@ -234,7 +234,7 @@ OCG 或 CCG 实例且没有混合其他 Provider 时连接该家默认账户，�
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
 `openai`、`ollama`、`lmstudio`、`amazon-bedrock`、DeepSeek 保留命名空间 `deepseek` / `ds-*`、OpenCode Go 保留命名空间
-`ocg` / `ocg-*`，或其他项目受管 Provider ID。`opencode-go` 仅保留为管理命令和既有磁盘目录的历史名称。
+`ocg` / `ocg-*`、CCG 保留命名空间 `ccg` / `ccg-*`，或其他项目受管 Provider ID。`opencode-go` 仅保留为管理命令和既有磁盘目录的历史名称。
 
 修改后运行 `codexc service restart all`。若上游不支持 Responses WebSocket，必须保留
 `supports_websockets = false`，否则 App Server 可能在渠道中出现 WebSocket 建连失败。

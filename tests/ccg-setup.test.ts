@@ -38,7 +38,7 @@ vi.mock("../runtime/private-file.mjs", async (importOriginal) => {
 import {
   applyCcgConfiguration,
   ccgSetupPaths,
-  migrateCcgAccount,
+  removeLegacyCcgAccount,
   refreshCcgCatalogForUpdate,
   removeCcgConfiguration,
   runCcgSetup,
@@ -443,35 +443,46 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     ]);
   });
 
-  it("migrates the legacy single CCG provider only after an explicit account ID", async () => {
+  it.each(["switching", "exclusive"] as const)("removes the legacy %s CCG provider only after confirmation", async (mode) => {
     const options = fixture();
-    await applyCcgConfiguration(options.input, options);
+    await applyCcgConfiguration({ ...options.input, mode, confirmExclusiveConfigChange: mode === "exclusive" }, options);
     const providerDirectory = dirname(options.paths.catalog);
     const legacyBackup = join(providerDirectory, "backup", "config.json");
     const legacyProfile = join(options.environment.CODEX_HOME, "sf-ccg.config.toml");
     const legacyMarker = join(providerDirectory, "managed.toml");
-    const profile = readFileSync(options.paths.profile, "utf8").replaceAll("ccg-main", "ccg");
+    const profile = readFileSync(mode === "exclusive" ? options.paths.config : options.paths.profile, "utf8").replaceAll("ccg-main", "ccg");
     const backup = readFileSync(options.paths.backup);
-    rmSync(options.paths.profile);
+    if (existsSync(options.paths.profile)) rmSync(options.paths.profile);
     rmSync(options.paths.marker);
     rmSync(options.paths.registry);
     mkdirSync(dirname(legacyBackup), { recursive: true });
-    writePrivateFileAtomicSync(legacyProfile, profile);
-    writePrivateFileAtomicSync(legacyMarker, 'version = 1\nprovider = "ccg"\nmode = "switching"\n');
+    if (mode === "switching") writePrivateFileAtomicSync(legacyProfile, profile);
+    writePrivateFileAtomicSync(legacyMarker, `version = 1\nprovider = "ccg"\nmode = "${mode}"\n`);
+    if (mode === "exclusive") writePrivateFileAtomicSync(options.paths.config, profile);
     writePrivateFileAtomicSync(legacyBackup, backup);
 
-    await expect(migrateCcgAccount({
-      accountId: "main", confirmMigration: false,
+    await expect(removeLegacyCcgAccount({
+      confirmRemove: false,
     }, options)).rejects.toThrow("明确确认");
-    await migrateCcgAccount({ accountId: "main", confirmMigration: true }, options);
+    await removeLegacyCcgAccount({ confirmRemove: true }, options);
 
-    expect(loadCcgAccounts(options.environment)).toEqual([{ id: "main", default: true }]);
-    expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({
-      provider: "ccg-main",
-      model: options.input.model,
-    });
+    expect(loadCcgAccounts(options.environment)).toEqual([]);
+    expect(existsSync(legacyBackup)).toBe(true);
+    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "gpt-5.5" });
     expect(existsSync(legacyProfile)).toBe(false);
     expect(existsSync(legacyMarker)).toBe(false);
+  });
+
+  it("rejects removal when a relative role still uses the legacy CCG account", async () => {
+    const options = fixture();
+    const marker = join(dirname(options.paths.catalog), "managed.toml");
+    writePrivateFileAtomicSync(marker, 'version = 1\nprovider = "ccg"\nmode = "switching"\n');
+    writePrivateFileAtomicSync(options.paths.role, 'model_provider = "ccg"\n');
+    writePrivateFileAtomicSync(options.paths.config, stringify({
+      agents: { external: { config_file: "sf-agent.config.toml" } },
+    }));
+    await expect(removeLegacyCcgAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
+    expect(existsSync(marker)).toBe(true);
   });
 
   it("uses an independent file's model defaults and capabilities without DS defaults", async () => {

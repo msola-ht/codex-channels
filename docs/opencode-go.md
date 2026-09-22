@@ -34,9 +34,10 @@ OCG 账户仍可保留切换模式。切换账户每次进入固定模式都会�
 按 UUID 归档；固定模式内重新配置继续使用本次进入时的基线。如果 `~/.codex/config.toml` 已存在手工配置的同名 Provider 或 Profile，
 会明确拒绝，不会覆盖用户配置。
 
-已注册的旧账户会迁移到相同账户 ID 的 `ocg-<accountId>` 与
-`sf-ocg-<accountId>.config.toml`，并重写其中的 Provider 引用。没有账户 ID 的旧单账户配置不会被
-擅自命名为 `main`，需使用明确 ID 重新添加；迁移不会猜测联系方式，后续重新配置账户时可补充邮箱或手机号；旧会话若仍引用已不存在的旧 Provider，则不能保证继续恢复。
+启动和更新均不再迁移旧账户、改写 Provider 身份或移动 Profile。
+旧版配置需先通过对应旧版本的移除入口清理，再使用明确账户 ID 重新添加；
+当前账户继续通过 `codexc opencode-go account remove <accountId>` 确认删除。
+仍引用旧 Provider 的历史 Thread 不保证可恢复。
 
 配置完成后运行：
 

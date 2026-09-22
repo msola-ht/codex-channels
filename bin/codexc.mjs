@@ -104,7 +104,7 @@ const helpText = {
   agents                       管理共享第三方子代理
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
-  deepseek                     管理 DeepSeek 多账户与旧账户迁移
+  deepseek                     管理 DeepSeek 多账户管理
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）

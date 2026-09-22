@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
@@ -70,7 +70,7 @@ export function previewDeepseekAccountConfiguration(input, { environment = proce
   const definition = deepseekAccountDefinition(input.accountId);
   const mode = input.mode ?? "switching";
   if (!["switching", "exclusive"].includes(mode)) throw new Error("DeepSeek 模式无效");
-  if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先迁移旧 DeepSeek 单账户配置");
+  if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先运行 codexc deepseek legacy remove 移除旧账户，再重新添加");
   const accounts = loadDeepseekAccounts(environment);
   const previous = accounts.find((account) => account.id === input.accountId);
   if (Boolean(previous) !== (input.reconfigure === true)) {
@@ -144,61 +144,70 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
   });
 }
 
-export function previewDeepseekAccountMigration(accountId, { environment = process.env } = {}) {
-  const paths = deepseekAccountPaths(environment, accountId);
-  if (!hasLegacyDeepseekConfiguration(environment)) throw new Error("没有待迁移的 DeepSeek 单账户配置");
-  const accounts = loadDeepseekAccounts(environment);
-  if (accounts.some((account) => account.id === accountId) || existsSync(paths.profile) || existsSync(paths.marker) || existsSync(paths.backup)) throw new Error("DeepSeek 迁移目标账户已存在");
-  validateDeepseekAccounts([...accounts, { id: accountId, default: accounts.length === 0 }]);
-  return { operation: "migrate", account: { id: accountId, provider: deepseekProviderId(accountId) }, confirmation: { required: true, field: "confirmMigration" }, activation: "restart-all" };
+function legacyDeepseekRemovalPlan(environment) {
+  const home = codexHomePath(environment);
+  const directory = managedProviderDirectory(environment, deepseekProviderDefinition);
+  const configPath = join(home, "config.toml");
+  const markers = [join(directory, "managed.toml"), join(home, "sf-deepseek.managed.toml"), join(home, "codex-connect-deepseek.config.toml")].filter(existsSync);
+  if (markers.length !== 1) throw new Error("旧 DeepSeek 管理标记缺失或存在多个版本，请先核对配置");
+  const marker = readToml(markers[0]);
+  if (marker.version !== 1 || marker.provider !== "deepseek" || !["switching", "exclusive"].includes(marker.mode)) throw new Error("DeepSeek 旧管理标记无效");
+  const config = readToml(configPath);
+  for (const roleName of ["external", "ds"]) {
+    const rolePath = config.agents?.[roleName]?.config_file;
+    if (typeof rolePath === "string" && readToml(resolve(home, rolePath)).model_provider === "deepseek") {
+      throw new Error("请先停用或改配引用旧 DeepSeek 账户的共享子代理，再移除旧账户");
+    }
+  }
+  const files = [...markers, join(home, "sf-deepseek.config.toml"), join(home, "deepseek.config.toml")];
+  if (loadDeepseekAccounts(environment).length === 0) {
+    files.push(join(directory, "models.json"), join(directory, "models.manifest.json"));
+    for (const prefix of ["deepseek", "sf-deepseek"]) {
+      files.push(join(home, `${prefix}.models.json`), join(home, `${prefix}.models.manifest.json`));
+    }
+  }
+  const updates = new Map(files.filter(existsSync).map((path) => [path, undefined]));
+  const readPaths = [configPath, ...files];
+  if (marker.mode === "exclusive") {
+    if (config.model_provider !== "deepseek") throw new Error("旧 DeepSeek 固定模式与主配置不一致，未删除文件");
+    const backupDirectories = [join(directory, "backup"), join(home, "backup-codex-connect-deepseek")];
+    const backups = backupDirectories.map((path) => join(path, "config.toml")).filter(existsSync);
+    const states = backupDirectories.map((path) => join(path, "state.json")).filter(existsSync);
+    readPaths.push(...backups, ...states);
+    if (backups.length > 1) throw new Error("旧 DeepSeek 主配置备份存在多个版本，请先核对");
+    let initial;
+    if (backups.length === 1) initial = readToml(backups[0]);
+    else {
+      if (states.length !== 1) throw new Error("旧 DeepSeek 原始主配置备份缺失，未删除文件");
+      let state;
+      try { state = JSON.parse(readPrivateFileSync(states[0])); }
+      catch { throw new Error("旧 DeepSeek 原始主配置备份状态无效"); }
+      if (state.originalConfigExisted !== false) throw new Error("旧 DeepSeek 原始主配置备份缺失，未删除文件");
+      initial = {};
+    }
+    updates.set(configPath, stringify(restoreProviderBaseConfig(config, initial, deepseekProviderDefinition)));
+  } else if (config.model_provider === "deepseek") {
+    throw new Error("旧 DeepSeek 切换模式与主配置不一致，未删除文件");
+  }
+  return { updates, snapshots: snapshotProviderFiles(readPaths), files: [...updates.keys()], mode: marker.mode };
 }
 
-export async function migrateDeepseekAccount({ accountId, confirmMigration = false }, { environment = process.env } = {}) {
+export async function previewLegacyDeepseekRemoval(options = {}) {
+  const environment = options.environment ?? process.env;
+  const plan = legacyDeepseekRemovalPlan(environment);
+  const runtime = await inspectManagedAccountRuntime("deepseek", options);
+  return { operation: "legacy-remove", account: { provider: "deepseek" }, mode: plan.mode,
+    files: plan.files, effects: { stopsRunningAppServer: runtime.running, restoresInitialConfig: plan.mode === "exclusive", preservesPrivateBackup: true }, activation: "restart-all" };
+}
+
+export async function removeLegacyDeepseekAccount({ confirmRemove = false } = {}, options = {}) {
+  const environment = options.environment ?? process.env;
   return withModelProviderManagementTransaction(environment, async () => {
-    const preview = previewDeepseekAccountMigration(accountId, { environment });
-    if (confirmMigration !== true) throw new Error("迁移 DeepSeek 账户必须明确确认");
-    const definition = deepseekAccountDefinition(accountId);
-    const paths = deepseekAccountPaths(environment, accountId);
-    const directory = managedProviderDirectory(environment, deepseekProviderDefinition);
-    const oldMarker = join(directory, "managed.toml");
-    const oldProfile = join(codexHomePath(environment), deepseekProviderDefinition.profileFileName);
-    const marker = readToml(oldMarker);
-    if (marker.version !== 1 || marker.provider !== "deepseek" || !["switching", "exclusive"].includes(marker.mode)) throw new Error("DeepSeek 旧管理标记无效");
-    const source = marker.mode === "exclusive" ? paths.config : oldProfile;
-    const original = readToml(source);
-    if (original.model_provider !== "deepseek" || !original.model_providers?.deepseek) throw new Error("DeepSeek 旧配置与管理标记不一致");
-    const snapshots = snapshotProviderFiles([...Object.values(paths), oldMarker, oldProfile]);
-    const updates = new Map();
-    const rewrite = (document) => {
-      const provider = document.model_providers?.deepseek;
-      if (!provider) throw new Error("DeepSeek 旧配置缺少 Provider");
-      document.model_provider = definition.id;
-      document.model_providers[definition.id] = { ...provider, name: definition.id };
-      if (provider.env_key !== undefined) document.model_providers[definition.id].env_key = definition.apiKeyEnvironmentKey;
-      delete document.model_providers.deepseek;
-      return stringify(document);
-    };
-    updates.set(marker.mode === "exclusive" ? paths.config : paths.profile, rewrite(original));
-    const originalConfigPath = join(directory, "backup", "config.toml");
-    let initialConfig = readToml(paths.config);
-    if (marker.mode === "exclusive") {
-      if (!existsSync(originalConfigPath)) {
-        let state;
-        try { state = JSON.parse(readPrivateFileSync(join(directory, "backup", "state.json"))); }
-        catch { throw new Error("DeepSeek 原始主配置备份缺失，无法迁移固定账户"); }
-        if (state?.originalConfigExisted !== false) throw new Error("DeepSeek 原始主配置备份缺失，无法迁移固定账户");
-      }
-      initialConfig = readToml(originalConfigPath);
-    }
-    updates.set(paths.backup, `${JSON.stringify({ config: initialConfig })}\n`);
-    const role = readToml(paths.role);
-    if (role.model_provider === "deepseek") updates.set(paths.role, rewrite(role));
-    updates.set(paths.marker, stringify(createManagedProviderMarker(definition, marker.mode)));
-    updates.set(paths.registry, `${JSON.stringify(validateDeepseekAccounts([...loadDeepseekAccounts(environment), { id: accountId, default: loadDeepseekAccounts(environment).length === 0 }]))}\n`);
-    updates.set(oldProfile, undefined);
-    updates.set(oldMarker, undefined);
-    await applyProviderFileUpdates(updates, snapshots);
-    return { ...preview, action: "migrated" };
+    if (confirmRemove !== true) throw new Error("移除旧 DeepSeek 账户必须明确确认");
+    const plan = legacyDeepseekRemovalPlan(environment);
+    const runtime = await stopManagedAccountForRemoval("deepseek", options);
+    await applyProviderFileUpdates(plan.updates, plan.snapshots);
+    return { action: "legacy-removed", runtime, activation: "restart-all" };
   });
 }
 
@@ -258,7 +267,7 @@ export async function removeDeepseekAccount({ accountId, confirmRemove = false }
 
 export async function refreshDeepseekAccountsCatalog(environment = process.env, options = {}) {
   return withModelProviderManagementTransaction(environment, async () => {
-    if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先通过 DeepSeek 账户迁移入口填写账户 ID");
+    if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先运行 codexc deepseek legacy remove 移除旧账户，再重新添加");
     const accounts = loadDeepseekAccounts(environment);
     if (accounts.length === 0) return { status: "not-configured" };
     const providers = loadManagedModelProviderSettings(environment).filter((provider) => accounts.some((account) => deepseekProviderId(account.id) === provider.provider));
