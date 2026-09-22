@@ -185,7 +185,7 @@ WebUI 在“官方 TUI 请求身份”分区提供同一字段，手工填写后
 - 完整上游 UA 由每个受管 Provider Proxy 在构造出站请求时覆盖。
 - `terminal_identity` 只在 App Server 服务进程启动子进程时写入环境，进程内终端探测只解析一次，
   因此修改后必须重启 App Server（受管服务下即 `codexc service restart all` 中的 App Server 目标）。
-- 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和共享第三方子代理使用同一全局值。
+- 主 Provider、DeepSeek、OpenCode Go 多账户、自定义 Provider 和原生子代理使用同一全局值。
 - 默认身份随 Codex CLI 升级自动变化，只需重启 `codexc service restart all` 即可生效；显式覆盖任一
   字段后运行 `codexc service restart all`，同时应用 Gateway 身份与上游 UA；仅运行
   `codexc service restart gateway` 不会重建 Provider Proxy，只重启

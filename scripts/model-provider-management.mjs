@@ -5,7 +5,6 @@ import {
   loadManagedModelProviderSettings,
   readPrimaryProviderBackup,
 } from "../runtime/model-provider-runtime.mjs";
-import { agentsStatus } from "./agents.mjs";
 import { readCodexUserConfigSnapshot } from "./codex-user-config.mjs";
 
 export async function loadModelProviderManagementState({
@@ -15,7 +14,6 @@ export async function loadModelProviderManagementState({
   loadCustomSwitchingProviders = loadConfiguredCustomSwitchingModelProviders,
   listCustomCandidates = listCustomPrimaryProviderCandidates,
   readBackup = readPrimaryProviderBackup,
-  loadAgentStatus = agentsStatus,
   checkOfficialAuth = hasCodexAuthFile,
 } = {}) {
   const snapshot = await readUserConfig(environment);
@@ -95,7 +93,6 @@ export async function loadModelProviderManagementState({
       ...managedProviders.filter((provider) => provider.mode === "switching"),
       ...customSwitchingProviders,
     ],
-    externalAgent: safeAgentStatus(loadAgentStatus(environment)),
   };
 }
 
@@ -132,15 +129,6 @@ function customCandidate(id, value, state, active) {
     supportsWebsockets: provider.supports_websockets === true,
     baseUrl: publicBaseUrl(provider.base_url),
   };
-}
-
-function safeAgentStatus(status) {
-  if (status.provider && status.model) {
-    return { status: "configured", provider: status.provider, model: status.model };
-  }
-  return status.externalRoleConfigured || status.legacyDsRoleConfigured
-    ? { status: "unavailable" }
-    : { status: "not-configured" };
 }
 
 function publicBaseUrl(value) {

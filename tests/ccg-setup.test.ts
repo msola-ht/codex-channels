@@ -1,4 +1,4 @@
-import {
+import { writeFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -53,8 +53,6 @@ import { JsonRpcClient, loadManagedModelOptions, StdioTransport } from "../src/c
 import {
   loadManagedModelProviderSettings,
   loadManagedProviderAppServers,
-  managedModelProviderRoleConfigPath,
-  writeManagedModelProviderRoleConfig,
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
 
@@ -254,49 +252,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     }
   });
 
-  it("rejects removing the shared role's model from the catalog", async () => {
-    const options = fixture();
-    await applyCcgConfiguration(options.input, options);
-    writeManagedModelProviderRoleConfig(options.environment, {
-      provider: "ccg-main", model: "deepseek/deepseek-v4-pro",
-    });
-    const rolePath = managedModelProviderRoleConfigPath(options.environment);
-    writePrivateFileAtomicSync(options.paths.config, stringify({
-      model: "gpt-5.5", agents: { external: { config_file: rolePath } },
-    }));
-    const before = readFileSync(options.paths.catalog);
-    const source = deepseekSource(options.source);
-    source.models.pop();
-    await expect(refreshCcgCatalogForUpdate(options.environment, {
-      downloadCatalog: async () => ({ catalog: source }),
-    })).rejects.toThrow("共享第三方子代理当前模型");
-    expect(readFileSync(options.paths.catalog)).toEqual(before);
-  });
-
-  it("synchronizes the shared role when its model reasoning changes", async () => {
-    const options = fixture();
-    await applyCcgConfiguration(options.input, options);
-    writeManagedModelProviderRoleConfig(options.environment, {
-      provider: "ccg-main", model: options.input.model,
-    });
-    const rolePath = managedModelProviderRoleConfigPath(options.environment);
-    writePrivateFileAtomicSync(options.paths.config, stringify({
-      model: "gpt-5.5", agents: { external: { config_file: rolePath } },
-    }));
-    const source = deepseekSource(options.source);
-    source.models[0]!.default_reasoning_level = "max";
-    source.models[0]!.supported_reasoning_levels = [{ effort: "max", description: "Max" }];
-
-    await refreshCcgCatalogForUpdate(options.environment, {
-      downloadCatalog: async () => ({ catalog: source }),
-    });
-
-    expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model_provider: "ccg-main",
-      model_reasoning_effort: "max",
-    });
-  });
-
   it.skipIf(process.env.RUN_CODEX_CONTRACT !== "1")("loads the configured file through real App Server model/list", async () => {
     const options = fixture();
     await applyCcgConfiguration({
@@ -355,7 +310,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
         { provider: "ccg", model: "deepseek/deepseek-v4-flash", inputModalities: ["text"] },
         { provider: "ccg", model: "deepseek/deepseek-v4-pro", inputModalities: ["text"] },
       ]);
-    expect(existsSync(join(options.environment.CODEX_HOME, "sf-agent.config.toml"))).toBe(false);
+    expect(existsSync(join(options.environment.CODEX_HOME!, "fixture-agent.toml"))).toBe(false);
   });
 
   it("isolates CCG account keys and App Servers while sharing one model catalog", async () => {
@@ -473,18 +428,6 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     expect(existsSync(legacyMarker)).toBe(false);
   });
 
-  it("rejects removal when a relative role still uses the legacy CCG account", async () => {
-    const options = fixture();
-    const marker = join(dirname(options.paths.catalog), "managed.toml");
-    writePrivateFileAtomicSync(marker, 'version = 1\nprovider = "ccg"\nmode = "switching"\n');
-    writePrivateFileAtomicSync(options.paths.role, 'model_provider = "ccg"\n');
-    writePrivateFileAtomicSync(options.paths.config, stringify({
-      agents: { external: { config_file: "sf-agent.config.toml" } },
-    }));
-    await expect(removeLegacyCcgAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
-    expect(existsSync(marker)).toBe(true);
-  });
-
   it("exposes account removal through the CCG CLI and keeps cancellation read-only", async () => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
@@ -529,10 +472,8 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
   it("preserves model choices when refreshing the catalog and credential", async () => {
     const options = fixture();
     await applyCcgConfiguration(options.input, options);
-    writeManagedModelProviderRoleConfig(options.environment, {
-      provider: "ccg-main", model: "deepseek/deepseek-v4-pro",
-    });
-    const rolePath = managedModelProviderRoleConfigPath(options.environment);
+    writeFileSync(join(options.environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("deepseek/deepseek-v4-pro") + '\nmodel_reasoning_effort = ' + JSON.stringify("high") + '\n', { mode: 0o600 });
+    const rolePath = join(options.environment.CODEX_HOME!, "fixture-agent.toml");
     writePrivateFileAtomicSync(options.paths.config, stringify({
       model: "gpt-5.5", agents: { external: { config_file: rolePath } },
     }));
@@ -540,9 +481,8 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
       model: "deepseek/deepseek-v4-pro", reasoningEffort: "max",
     }, options.environment);
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model_provider: "ccg-main",
       model: "deepseek/deepseek-v4-pro",
-      model_reasoning_effort: "max",
+      model_reasoning_effort: "high",
     });
     await applyCcgConfiguration({
       ...options.input,

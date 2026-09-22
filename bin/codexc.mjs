@@ -101,7 +101,6 @@ const helpText = {
   desktop-app                 管理 Codex Desktop App 共享连接
   work                         管理 Workspace（交互菜单或子命令）
   rules                        管理项目 Codex 命令预设
-  agents                       管理共享第三方子代理
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
   ccg                          移除 CCG 账户或旧单账户
@@ -130,13 +129,13 @@ const helpText = {
 初始化用户数据目录和 config.toml；已有配置不会被覆盖。`,
   setup: `用法：codexc setup [--json]
 
-打开脱敏接入状态总览，以及模型与提供商、共享第三方子代理、通讯渠道和项目技能设置菜单。
+打开脱敏接入状态总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
 
 默认模式输出中文交互文本；--json 保留交互输入，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
-  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / 受管 Provider 模型设置 / 共享第三方子代理
+  codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider / DeepSeek 官方 / OpenCode Go 官方 / CCG（CommandCode） / 受管 Provider 模型设置
   codexc setup → 通讯渠道 → Telegram / 飞书 / 微信
   codexc setup → 项目技能（安装或卸载项目技能）
 
@@ -190,21 +189,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
 具体用法：
   codexc rules init [--force]
   codexc rules check [--json]`,
-  agents: `用法：codexc agents <configure|disable|status> [参数]
-
-  configure <Provider> [模型]  配置共享第三方子代理（agents.external）
-  disable                    移除共享第三方子代理
-  status [--json]            查看当前状态`,
   "primary-provider": primaryProviderUsage,
-  "agents.configure": `用法：codexc agents configure <Provider> [模型]
-
-选择已配置的第三方 Provider 与模型，启用 multi_agent_v2 并注册 agents.external。`,
-  "agents.disable": `用法：codexc agents disable
-
-移除本项目管理的 agents.external；没有其他角色时同时关闭 multi_agent_v2。`,
-  "agents.status": `用法：codexc agents status [--json]
-
-查看 multi_agent_v2 与共享第三方子代理配置状态；--json 输出稳定 JSON。`,
   opencode_go: `用法：codexc opencode-go account <add|list|remove|default|stop> [id]
 
 管理 OpenCode Go 多账户。Key 只写入 0600 私有 Codex Profile，不进入 Gateway config.toml、命令行或日志。
@@ -212,7 +197,7 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   add <id>     新增账户（交互输入邮箱或手机号、API Key）
   list         列出账户与默认标记
   remove <id>  备份后删除账户 Profile 与注册表项
-  default <id> 设置新会话默认账户（不自动修改 agents.external）
+  default <id> 设置新会话默认账户
   stop <id>    立即释放该账户的隔离 App Server（空闲可自动重新拉起）
 
 旧单账户：codexc opencode-go legacy remove`,
@@ -448,9 +433,6 @@ try {
     case "rules":
       projectRules(args);
       break;
-    case "agents":
-      agents(args);
-      break;
     case "primary-provider":
       if (showRequestedHelp(args, "primary-provider")) {
         break;
@@ -673,31 +655,6 @@ function projectRulesCodexBinary() {
   return effectiveCodexBinary(validateCodexConfigDocument(document.codex).binary);
 }
 
-function agents(args) {
-  if (showRequestedHelp(args, "agents")) {
-    return;
-  }
-  if (showSubcommandHelp(args, "status", "agents.status") ||
-    showSubcommandHelp(args, "configure", "agents.configure") ||
-    showSubcommandHelp(args, "disable", "agents.disable")) {
-    return;
-  }
-  if (
-    !(
-      (args[0] === "status"
-        && (args.length === 1 || (args.length === 2 && args[1] === "--json")))
-      || (args[0] === "disable" && args.length === 1)
-      || (args[0] === "configure" && (args.length === 2 || args.length === 3))
-    )
-  ) {
-    throw new Error(helpText.agents);
-  }
-  if (args[0] === "status") {
-    runStandaloneScript("scripts/agents.mjs", args);
-    return;
-  }
-  runScript("scripts/agents.mjs", args, { failureReportedByChild: true });
-}
 
 function opencodeGoAccount(args) {
   if (args[0] === "legacy") {

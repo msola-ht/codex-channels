@@ -374,9 +374,6 @@ export interface ManagementProvidersResponse {
   }
   official: { authenticated: boolean }
   providers: ManagementProviderEntry[]
-  externalAgent:
-    | { status: "configured"; provider: string | null; model: string | null }
-    | { status: "unavailable" | "not-configured" }
 }
 
 export interface ManagementSettingsResponse {
@@ -547,9 +544,6 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
   }
-  externalAgent:
-    | { status: "configured"; provider: string; model: string }
-    | { status: "unavailable" | "not-configured" }
   modelWindow: Array<{
     id: string
     displayName: string
@@ -591,11 +585,9 @@ export type ManagementProviderSettingsMutationInput =
       model: string
       windowPercent: number
     }
-  | { operation: "external-agent"; action: "configure"; provider: string; model?: string }
-  | { operation: "external-agent"; action: "disable" }
 
 export interface ManagementProviderSettingsPreview {
-  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window" | "configure" | "disable"
+  operation: "switch" | "remove" | "create" | "update" | "managed.default" | "managed.window"
   activation: string
   target?: {
     id: string
@@ -629,8 +621,6 @@ export interface ManagementProviderSettingsPreview {
     storedAsPlaintext?: true
     destination?: "private-profile" | "main-config"
   }
-  current?: { configured: boolean; provider: string | null; model: string | null }
-  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
 }
 
 export interface ManagementProviderSettingsPreviewResponse {
@@ -657,9 +647,6 @@ export interface ManagementProviderSettingsMutationResponse {
   warnings?: Array<{ code: string; providerId?: string }>
   activation?: string
   auditStatus?: "recorded" | "degraded"
-  current?: { configured: boolean; provider: string | null; model: string | null }
-  previous?: { configured: boolean; provider: string | null; model: string | null }
-  selection?: { provider: string; providerDisplayName?: string; model: string; modelDisplayName?: string }
 }
 
 export interface ManagementAccountSettingsResponse {

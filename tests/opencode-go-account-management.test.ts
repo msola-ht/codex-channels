@@ -176,7 +176,6 @@ describe("OpenCode Go account management", () => {
     const preview = await previewOpencodeGoAccountRemoval("b", {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => undefined,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
@@ -205,7 +204,6 @@ describe("OpenCode Go account management", () => {
     await expect(previewOpencodeGoAccountRemoval("main", {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => undefined,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
@@ -239,7 +237,6 @@ describe("OpenCode Go account management", () => {
           CODEX_CONNECT_HOME: join(home, ".codex-connect"),
         },
         loadAccounts: () => [{ id: "main", default: true, email: "user@example.com" }],
-        loadRole: () => undefined,
         resolvePrimarySocket: () => "/tmp/app-server.sock",
         inspectSupervisor: async () => ({ status: "missing" as const }),
       });
@@ -283,8 +280,8 @@ describe("OpenCode Go account management", () => {
       { mode: 0o600 },
     );
     writeFileSync(join(paths.providerDirectory, "backup", "config.toml"), "profile = \"openai\"\n", { mode: 0o600 });
-    mkdirSync(join(paths.roleConfigPath, ".."), { recursive: true, mode: 0o700 });
-    writeFileSync(paths.roleConfigPath, "[agents]\n", { mode: 0o600 });
+    mkdirSync(join(join(environment.CODEX_HOME, "fixture-agent.toml"), ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(join(environment.CODEX_HOME, "fixture-agent.toml"), "[agents]\n", { mode: 0o600 });
     writeFileSync(paths.catalogPath, "current-catalog", { mode: 0o600 });
     writeFileSync(join(paths.providerDirectory, "backup", "models.json"), "old-catalog", { mode: 0o600 });
     try {
@@ -294,7 +291,6 @@ describe("OpenCode Go account management", () => {
       }, {
         environment,
         loadAccounts: () => [{ id: "main", default: true, email: "user@example.com" }],
-        loadRole: () => undefined,
         resolvePrimarySocket: () => "/tmp/app-server.sock",
         inspectSupervisor: async () => ({ status: "missing" as const }),
         stopAccount: async () => ({ action: "not-running" as const }),
@@ -309,7 +305,7 @@ describe("OpenCode Go account management", () => {
           }
         },
       })).resolves.toMatchObject({ action: "removed" });
-      expect(readFileSync(paths.roleConfigPath, "utf8")).toBe("[agents]\n");
+      expect(readFileSync(join(environment.CODEX_HOME, "fixture-agent.toml"), "utf8")).toBe("[agents]\n");
       expect(existsSync(paths.catalogPath)).toBe(false);
       expect(readFileSync(join(paths.providerDirectory, "backup", "models.json"), "utf8")).toBe("old-catalog");
     } finally {
@@ -321,7 +317,6 @@ describe("OpenCode Go account management", () => {
     await expect(applyOpencodeGoAccountRemoval({ accountId: "b" }, {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => undefined,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
@@ -338,7 +333,6 @@ describe("OpenCode Go account management", () => {
     }, {
       environment: {},
       loadAccounts: () => accounts,
-      loadRole: () => undefined,
       readMarker: () => ({ version: 1, provider: "ocg-b", mode: "switching" }),
       resolvePrimarySocket: () => "/tmp/app-server.sock",
       inspectSupervisor: async () => ({ status: "missing" as const }),
@@ -392,7 +386,6 @@ describe("OpenCode Go account management", () => {
           { id: "switch", default: true, email: "switch@example.com" },
           { id: "fixed", default: false, email: "fixed@example.com" },
         ],
-        loadRole: () => undefined,
         resolvePrimarySocket: () => "/tmp/app-server.sock",
         inspectSupervisor: async () => ({ status: "missing" as const }),
         stopAccount: async () => ({ action: "not-running" as const }),

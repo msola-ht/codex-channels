@@ -24,8 +24,6 @@ import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.
 
 const maximumConfigBytes = 1_048_576;
 const maximumCatalogBytes = 2_097_152;
-const managedThirdPartyRoleName = "external";
-const managedThirdPartyRoleConfigFileName = "sf-agent.config.toml";
 
 export function managedProviderDirectory(environment, definition) {
   return join(providerStorageRoot(environment), definition.storageId ?? definition.id);
@@ -240,7 +238,7 @@ export function restoreManagedModelProviderCatalogContent(
 }
 
 function writeCatalogWithProfileMirrors(environment, definition, catalogPath, content, updates = new Map()) {
-  // 同一目录的模型设置由所有引用方共享；Profile 与共享角色只保存所选模型的镜像。
+  // 账户 Profile 镜像目录默认值；角色独立选择模型与思考等级。
   const catalog = JSON.parse(content);
   for (const sibling of managedProviderDefinitions(environment)) {
     if (join(managedProviderDirectory(environment, sibling), sibling.catalogFileName) !== catalogPath
@@ -253,7 +251,6 @@ function writeCatalogWithProfileMirrors(environment, definition, catalogPath, co
     document.model_reasoning_effort = model.default_reasoning_level;
     updates.set(path, stringify(document));
   }
-  addManagedRoleMirrorUpdate(environment, catalogPath, catalog, updates);
   updates = new Map([[catalogPath, content], ...updates]);
   const originals = new Map([...updates.keys()].map((path) => [path, readPrivateFile(path, maximumCatalogBytes)]));
   const written = [];
@@ -271,31 +268,6 @@ function writeCatalogWithProfileMirrors(environment, definition, catalogPath, co
     if (errors.length > 1) throw new AggregateError(errors, "模型目录与引用配置回滚未完成", { cause: error });
     throw error;
   }
-}
-
-function addManagedRoleMirrorUpdate(environment, catalogPath, catalog, updates) {
-  const rolePath = join(codexHomePath(environment), managedThirdPartyRoleConfigFileName);
-  let config;
-  let role;
-  try {
-    config = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))));
-    if (record(record(config.agents)[managedThirdPartyRoleName]).config_file !== rolePath) return;
-    role = record(parse(readPrivateFile(rolePath)));
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    // TOML 解析错误可能包含用户配置或角色文件原文，不能作为 cause 暴露。
-    // eslint-disable-next-line preserve-caught-error
-    throw new Error("第三方子代理角色配置无法安全读取");
-  }
-  const roleDefinition = findManagedProviderDefinition(environment, role.model_provider);
-  if (roleDefinition === undefined
-    || join(managedProviderDirectory(environment, roleDefinition), roleDefinition.catalogFileName) !== catalogPath) {
-    return;
-  }
-  const model = catalog.models.find((entry) => entry.slug === role.model);
-  if (!model) throw new Error(`${roleDefinition.displayName} 目录不支持共享第三方子代理当前模型`);
-  role.model_reasoning_effort = model.default_reasoning_level;
-  updates.set(rolePath, stringify(role));
 }
 
 function managedProviderCatalogPath(provider, environment) {

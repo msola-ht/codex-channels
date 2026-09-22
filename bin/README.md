@@ -38,13 +38,11 @@
 - `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
 - `rules`：为当前 Git/Node 项目生成或检查 `.codex/rules/default.rules`，不修改 Workspace Registry；
   `check --json` 静默底层 Codex 展示并返回可解析的成功或失败结果。
-- `agents`：从已配置的受管或自定义 Provider 中选择、查看或停用 Codex multi_agent_v2 的共享第三方子代理（`agents.external`）；
-  `agents status` 只读取 Codex 用户配置，不要求 Gateway 已初始化，`--json` 返回稳定状态对象。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户；三家均以 `legacy remove` 移除没有 ID 的旧单账户，保留备份与历史统计，之后重新添加。
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
-  释放对应隔离实例；设置默认账户不会自动修改 `agents.external`，需要时使用 `codexc agents configure`。
+  释放对应隔离实例。
 - `update`：Git 源码安装先在临时仓库构建并预检官方 `main` 最新提交，切换后再统一审查并更新用户
   配置、状态数据库和指标数据库，然后恢复核心服务；npm 安装不修改程序包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
@@ -71,8 +69,7 @@
 内部 `service-app-server` 入口同时监管主 App Server、可选 Provider App Server，以及每个已启用
 Provider 的独立回环统计代理（DS、OpenCode Go 与 CCG 各自的全部账户共享一个）；任一非主动释放的受监管组件异常
 退出都会共同重建。主 App Server 与 Provider App Server 都支持按需启动和释放；Gateway 全局空闲
-释放会停止未被租约占用的实例，`agents.external` 复用主 App Server 和共享统计代理，不锁定同账户的
-隔离实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，并按实例串行
+释放会停止未被租约占用的实例。监管入口记录运行、主动释放与租约状态，防止 Gateway 立即把实例重新拉起，并按实例串行
 处理启动、释放和租约获取；释放结果区分已释放、租约占用与实例未运行，防止并发租约误停 Remote TUI。
 再次使用自动启动。代理指标通过私有 Unix Socket
 发送给 Gateway，Gateway 生命周期不再控制模型数据通路。入口持有独立 `0600` 监管 Socket，

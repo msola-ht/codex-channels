@@ -50,17 +50,14 @@ codexc service restart all
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
-再按模型设置默认思考等级，同一目录中引用该模型的账户 Profile 和共享第三方子代理同步该等级，选择其他模型的账户保持各自模型的等级；目录刷新也同步仍存在模型的有效等级。上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
+再按模型设置默认思考等级，同一目录中引用该模型的账户 Profile 同步该等级，原生子代理保留独立设置，选择其他模型的账户保持各自模型的等级；目录刷新也同步仍存在模型的有效等级。上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
 每个模型按自己的 `max_context_window` 换算窗口，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型窗口占比，
 不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；`codexc update` 刷新目录时，
-所选模型已不在新目录中的账户，以及引用该模型的共享子代理，会切到目录默认模型 `deepseek-flash`，
+所选模型已不在新目录中的账户会切到目录默认模型 `deepseek-flash`，
 已选择仍在目录中的 Pro 的账户保持不变；仍存在于目录中的选择不会被后续更新覆盖。目录更新后
 的窗口按原占比和新的最大窗口重新计算。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
-
-设置默认账户不会自动修改 `agents.external`，共享子代理仍使用配置时明确选择的账户；如需切换账户，
-请运行 `codexc agents configure ocg-<accountId> <模型>`。
 
 聊天中使用 `/model` 选择带 `ocg-<邮箱或手机号>`（无联系方式时回退为 `ocg-<accountId>`）前缀的模型；同账户内切换模型不新建 Thread，
 跨账户切换会保留并解绑当前 Thread，下一条消息以目标账户默认模型新建 Thread（不复制历史），
@@ -73,9 +70,7 @@ codexc remote --profile sf-ocg-<账户>              # 任一已配置账户
 所有 OpenCode Go 账户共享同一个统计代理（不随账户数量增长）；每个账户的隔离 App Server 按需
 启动。服务启动时只登记配置，首次选择对应账户模型、恢复对应 Thread 或使用对应 Remote TUI 时，
 App Server 监管进程才启动该账户的隔离实例；账户 App Server 的 `base_url` 指向共享代理并带
-`/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。当前被
-`agents.external` 选择的账户会预先启动共享统计代理，确保子代理随主 App Server 可用；未使用
-也未选作子代理的账户不增加进程。
+`/go/<账户>` 前缀，代理按前缀区分账户、转发时剥离前缀并按账户分开上报指标。未使用的账户不增加进程。
 
 Gateway 的全局空闲策略统一关闭已连接的 Provider Client：当没有任何前台或后台 Conversation 绑定、
 进行中的 Provider 操作或启动任务时，先等待 60 秒；期间新消息或恢复 Thread 会取消本轮释放。宽限期

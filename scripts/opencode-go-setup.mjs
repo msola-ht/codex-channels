@@ -28,11 +28,8 @@ import { opencodeGoProviderDefinition } from "../runtime/model-provider-definiti
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import {
-  loadManagedModelProviderRole,
   loadManagedModelProviderSettings,
-  managedModelProviderRoleConfigPath,
   managedProviderDirectory,
-  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   isOpencodeGoProvider,
@@ -310,7 +307,6 @@ export async function addOpencodeGoAccount(accountId, {
     ? `OpenCode Go 账户 Profile 已保存：${paths.profilePath}\n`
     : `OpenCode Go 账户固定配置已保存：${paths.configPath}\n`);
   output.write(`模型目录：${paths.catalogPath}\n`);
-  output.write("未自动配置共享第三方子代理（agents.external）；如需启用请运行 codexc agents configure ocg-<id> <模型>。\n");
   writeGatewayConfigActivationNotice(output, environment, configActivationResult("restart-all"));
   return {
     action: "configured",
@@ -474,23 +470,10 @@ export async function refreshOpencodeGoCatalogForUpdate(
     updates.push({ path: documentPath, content: stringify(document) });
     if (modelChanged) migratedProviders.push(provider);
   }
-  const role = loadManagedModelProviderRole(environment);
-  const roleSelection = role !== undefined && isOpencodeGoProvider(role.provider)
-    ? managedCatalog.models.find((model) => model.slug === role.model) ?? managedDefault
-    : undefined;
-  const roleModel = roleSelection !== undefined && roleSelection.slug !== role.model
-    ? role.model
-    : undefined;
-  const migrateRole = roleModel !== undefined;
-  const updateRole = roleSelection !== undefined
-    && (migrateRole || role.reasoningEffort !== roleSelection.default_reasoning_level);
-  migrationFrom ??= roleModel;
-  const roleConfigPath = managedModelProviderRoleConfigPath(environment);
   const transactionPaths = [
     catalogPath,
     manifestPath,
     ...updates.map(({ path }) => path),
-    ...(updateRole ? [roleConfigPath] : []),
   ];
   const snapshots = snapshotProviderFiles(transactionPaths);
   let guards = snapshots;
@@ -517,13 +500,6 @@ export async function refreshOpencodeGoCatalogForUpdate(
       await writePrivateFileAtomic(update.path, update.content);
       guards = snapshotProviderFiles(transactionPaths);
     }
-    if (updateRole) {
-      writeManagedModelProviderRoleConfig(environment, {
-        provider: role.provider,
-        model: roleSelection.slug,
-      });
-      guards = snapshotProviderFiles(transactionPaths);
-    }
   } catch (error) {
     try {
       await restoreProviderFileSnapshots(snapshots, guards);
@@ -542,7 +518,6 @@ export async function refreshOpencodeGoCatalogForUpdate(
     manifestPath,
     modelCount: managedCatalog.models.length,
     migratedProviders,
-    roleMigrated: migrateRole,
     defaultModelMigrationApplied: migrationFrom !== undefined,
   };
 }
@@ -676,11 +651,6 @@ async function restoreOpencodeGoSetup(environment) {
     state.marker,
   );
   await restoreBackup(
-    accountPathsValue.roleConfigPath,
-    join(legacyBackup, "sf-agent.config.toml"),
-    state.roleConfig,
-  );
-  await restoreBackup(
     accountPathsValue.catalogPath,
     join(legacyBackup, definition.catalogFileName),
     state.catalog === undefined ? false : state.catalog,
@@ -704,7 +674,6 @@ async function restoreOpencodeGoSetup(environment) {
     // 账户目录清理失败不阻断恢复结果展示。
   }
   for (const file of [
-    "sf-agent.config.toml",
     "config.toml",
     opencodeGoProfileFileName(accountId),
   ]) {
@@ -772,7 +741,6 @@ function readOpencodeGoRestoreState(environment) {
     config: state.config,
     profile: state.profile,
     marker: state.marker,
-    roleConfig: state.roleConfig,
     catalog: legacyCatalogState ? false : state.catalog,
     manifest: legacyCatalogState ? false : state.manifest,
   };
@@ -788,7 +756,6 @@ function readOpencodeGoRestoreState(environment) {
 
 function backupKey(file) {
   if (file === "config.toml") return "config";
-  if (file === "sf-agent.config.toml") return "roleConfig";
   if (file.startsWith("sf-ocg-")) return "profile";
   return file;
 }

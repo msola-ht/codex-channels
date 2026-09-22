@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { writeFileSync, chmodSync, existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
@@ -53,6 +53,8 @@ async function fixture(family: "ds" | "ocg" | "ccg") {
 }
 
 describe.each(["ds", "ocg", "ccg"] as const)("%s account lifecycle contract", (family) => {
+
+
   it("rejects reconfiguration of incomplete registered accounts without changing files", async () => {
     const account = await fixture(family);
     unlinkSync(account.paths.profile);
@@ -87,6 +89,13 @@ describe.each(["ds", "ocg", "ccg"] as const)("%s account lifecycle contract", (f
 
   it("releases only the selected provider before deleting its files", async () => {
     const account = await fixture(family);
+    writeFileSync(join(account.environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("deepseek-flash") + '\nmodel_reasoning_effort = ' + JSON.stringify("high") + '\n', { mode: 0o600 });
+    const rolePath = join(account.environment.CODEX_HOME!, "fixture-agent.toml");
+    const customRolePath = join(account.environment.CODEX_HOME!, "reviewer.toml");
+    writePrivateFileAtomicSync(customRolePath, 'model = "review-model"\nmodel_reasoning_effort = "low"\n');
+    chmodSync(customRolePath, 0o644);
+    writePrivateFileAtomicSync(join(account.environment.CODEX_HOME!, "config.toml"), `[agents.external]\nconfig_file = ${JSON.stringify(rolePath)}\n[agents.reviewer]\nconfig_file = "reviewer.toml"\n`);
+    const roleBefore = readFileSync(rolePath, "utf8");
     const releaseProvider = vi.fn(async () => {
       expect(existsSync(account.paths.profile)).toBe(true);
       expect(existsSync(account.paths.marker)).toBe(true);
@@ -102,6 +111,7 @@ describe.each(["ds", "ocg", "ccg"] as const)("%s account lifecycle contract", (f
     expect(releaseProvider).toHaveBeenCalledExactlyOnceWith("/fixture/app-server.sock", account.provider);
     expect(existsSync(account.paths.profile)).toBe(false);
     expect(existsSync(account.paths.marker)).toBe(false);
+    expect(readFileSync(rolePath, "utf8")).toBe(roleBefore);
   });
 });
 

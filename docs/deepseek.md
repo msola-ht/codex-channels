@@ -23,7 +23,7 @@ codexc service restart all                 # 应用配置变化
 旧单账户不再迁移。已有配置保持原样，需先运行 `codexc deepseek legacy remove`，
 确认移除旧 Key、Profile 和管理标记后，再使用明确账户 ID 重新添加。
 固定模式只恢复该 Provider 管理的主配置字段；安装前备份和历史统计保留。
-共享子代理仍引用旧账户时，需先停用或改配；Remote TUI 正在使用旧实例时，需先退出。
+Remote TUI 正在使用旧实例时，需先退出。
 旧配置与新账户并存时，移除旧账户保留现有注册表、账户文件和共享模型目录。
 必要恢复备份缺失时明确报错，写入失败会回滚本次文件变更。
 
@@ -49,7 +49,7 @@ App Server 子进程，不进入账户注册表、命令行或日志。
 删除账户保留历史统计和备份；仍有账户时保留共享模型目录，删除最后一个账户时清理目录。删除前检查并停止对应 App Server；Remote TUI
 正在占用、监管状态异常或停止失败时，不删除账户文件。删除后该账户历史 Thread 将不可恢复。
 删除默认账户前需先选择其他默认账户；删除最后一个账户无需选择。
-共享子代理正在使用该账户时需先切换或停用。固定账户删除或改为切换模式时
+旧跨 Provider 角色仍引用该账户时需先重新配置或停用；原生角色不绑定账户。固定账户删除或改为切换模式时
 仅恢复受管 Provider 字段，保留其他主配置修改。删除后重新添加会建立新的恢复基线，旧备份归档保留。
 切换账户每次进入固定模式时都会以当时主配置更新该账户的恢复基线，并把旧基线归档；固定模式内
 重新配置继续使用本次进入时的基线。同一时刻仍只允许一个固定主 Provider，其他 DS 账户可保持切换模式。
@@ -59,12 +59,11 @@ App Server 子进程，不进入账户注册表、命令行或日志。
 DS 目录从官方安装脚本提取，不执行下载脚本。当前目录为 `deepseek-flash` 与
 `deepseek-v4-pro`；实际选项以下载目录为准。新增账户复用已有 DS 目录，首次配置才下载；
 `codexc update` 统一刷新目录并保留仍支持的逐模型思考等级和窗口比例。
-已下线模型会切到目录默认模型，同时更新对应账户与共享子代理配置。
+已下线模型会切到目录默认模型，同时更新对应账户配置。
 
 通过账户菜单选择默认模型和思考等级，通过“模型上下文窗口”按模型名设置窗口比例。
 账户分别选择默认模型；思考等级、上下文和能力字段存放在共享目录，同一模型的这些设置会影响
-所有 DS 账户。切换 Profile 和引用该模型的共享第三方子代理会同步思考等级镜像，避免目录变化后
-账户配置、角色配置与请求指标使用不同等级。
+所有 DS 账户。切换 Profile 同步目录默认思考等级；原生角色独立保存自己的思考等级，目录更新不覆盖角色选择。
 压缩使用上游默认，不写入独立自动压缩阈值。
 
 切换账户的共享终端入口：
@@ -99,7 +98,7 @@ DeepSeek（官方目录中的模型 + Codex 0.154.0）支持网页搜索，且�
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和各账户隔离的 App Server。服务启动时只
-启动主实例；当前共享子代理选择 DeepSeek 时还会预先启动其统计代理。首次选择 DeepSeek 模型、
+启动主实例；原生子代理复用父线程所在 Provider 实例。首次选择 DeepSeek 模型、
 恢复其 Thread 或使用 DeepSeek Remote TUI 时，监管入口才读取并校验私有 Profile，按需启动隔离
 App Server。该账户 API Key 只进入需要它的 App Server 子进程环境，不进入命令行、服务定义或
 日志；其他 Provider 的 Key 不会随之注入。
@@ -151,57 +150,10 @@ Pro 仍为文字模型，收到图片时会在 Turn 前明确拒绝；需要看�
 旧版 `[vision]` 配置已删除；`codexc update` 会先创建私有备份，再自动移除该配置段。旧的
 `credentials/vision/` 单视觉凭据不再读取，也不会自动删除。
 
-固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动，若共享 `agents.external`
-当前选择 DeepSeek，则随服务预先启动统计代理。代理支持项目当前使用的
+固定模式下，DeepSeek 代理服务于主 App Server；切换模式按需启动。原生子代理复用父线程所在实例与统计代理。代理支持项目当前使用的
 HTTP/SSE、Responses WebSocket、压缩和模型目录请求，复用统一网络代理，并保留用户已有的
 `openai_base_url` 上游。认证 Header、请求正文和响应正文只做内存转发，不写入指标或日志。
 Gateway 停止或重启时计时指标可能丢失，但模型请求不会因此中断。
-
-## 共享第三方子代理
-
-DeepSeek、OpenCode Go 与 CCG 共用 `agents.external`，不按 Provider 注册重复角色。配置 Provider 不会
-自动创建或切换该角色；只有明确进入“模型与提供商 → 第三方 Provider → 共享第三方子代理”并选择
-Provider 与模型，或运行下面的显式命令，才会注册或更新角色：
-
-```bash
-codexc agents configure ds-<账户> deepseek-v4-pro
-codexc agents configure ocg-<accountId> deepseek-flash
-codexc agents configure ccg-<accountId> deepseek/deepseek-v4-pro
-codexc agents status
-codexc agents disable
-```
-
-配置或停用共享子代理后只需运行 `codexc service restart app-server`；Gateway 会自动重连，
-无需重启 Gateway。
-
-修改默认账户或重新运行 Provider Setup 不会自动切换该角色的 Provider 或模型；模型目录中的默认
-思考等级变化会同步到仍引用该模型的角色。需要变更子代理 Provider 或模型时，应重新进入共享第三方子代理配置或再次运行
-`codexc agents configure ...`。
-
-角色文件 `~/.codex/sf-agent.config.toml` 只保存 Provider、模型、默认思考等级和 `env_key`
-引用，不保存 API Key。App Server 服务启动时只为当前角色选择的 Provider 启动统计代理并刷新本机
-地址；未选作子代理且尚未用于会话的第三方 Provider 不增加进程。认证密钥只进入 App Server
-子进程环境。
-
-该角色是 V2 单次子代理：主模型必须使用 `agent_type="external"` 和 `fork_turns="1"`，任务必须在
-当前用户消息中完整给出。它不等待后续消息，也不调用子代理通信工具；需要多轮协作时使用 OpenAI
-官方子代理。
-
-子代理统计会在指标库中标注：Gateway 捕获父线程里的 `subAgentActivity` 通知后，把子代理
-线程 ID 和代理路径写入 `subagent_threads` 表，`codexc metrics threads` 与 WebUI Threads
-页面显示“子代理 · <代理路径>”。子代理线程标注自指标库 Schema v7 起可用；Schema v10
-以可空 `parent_turn_id` 保存线程级父 Turn 关系，当前 Schema v19 另以 `subagent_turns` 保存每次
-子代理运行的精确子 Turn 与父 Turn；v7–v10 历史运行关系不按时间推断。从本机终端
-运行 `codexc update` 会统一预检、自动备份升级并恢复 App Server 与 Gateway，也可单独运行
-`codexc metrics upgrade`。
-
-Gateway 在收到以下官方终态信号之一后，向父会话推送带具体终态的子代理卡片：V2
-自动订阅子线程后收到的 `turn/completed`，官方 `subAgentActivity` 的 `interrupted`，以及兼容旧版
-父线程 `collabAgentToolCall.agentsStates` 的子代理终态。不再以最后模型请求后的静默时间推断完成。
-卡片基于指标库汇总展示任务名、模型、请求次数与 Token。终态信号后约 5 秒只用于等待指标收敛；没有模型指标
-时仍发送零统计终态卡片，指标写入或读取失败则显示“统计暂不可用”。收敛结束后会等待当前指标 Writer 水位
-落库，避免积压时读取部分汇总。缓存和推理分项仅在调试模式展示。紧凑操作模式
-只保留子代理启动与失败，成功的等待和交互操作不再各自生成完成卡片。
 
 ## 应用配置
 

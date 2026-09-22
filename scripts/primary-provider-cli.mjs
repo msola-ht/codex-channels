@@ -52,7 +52,6 @@ export async function listPrimaryProviders({
       { createClient },
     ),
     loadManagedProviders: () => [],
-    loadAgentStatus: () => ({ externalRoleConfigured: false }),
   });
   const activeId = state.primary.id;
   const switchingProviders = state.customProviders.switchingProviders;

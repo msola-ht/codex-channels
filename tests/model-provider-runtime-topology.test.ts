@@ -21,14 +21,12 @@ import {
   loadManagedProviderAppServers,
   loadOpenAiBaseUrl,
   loadPrimaryModelProvider,
-  managedModelProviderRoleConfigPath,
   providerAppServerSocketPath,
   providerMetricsSocketPath,
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
   withOpenAiBaseUrl,
   withProviderBaseUrl,
-  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   configuredHome,
@@ -100,11 +98,11 @@ describe("model provider App Server topology", () => {
       { provider: "ocg-main", mode: "switching" },
     ]);
 
-    writeManagedModelProviderRoleConfig(environment, { provider: "ds-test" });
-    expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
-      .toContain('model_provider = "ds-test"');
-    expect(readFileSync(managedModelProviderRoleConfigPath(environment), "utf8"))
-      .toContain("request_max_retries = 1");
+    writeFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("deepseek-flash") + '\nmodel_reasoning_effort = ' + JSON.stringify("high") + '\n', { mode: 0o600 });
+    expect(readFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), "utf8"))
+      .not.toContain("model_provider");
+    expect(readFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), "utf8"))
+      .not.toContain("request_max_retries");
   });
 
   it("uses OpenAI as primary and exposes DeepSeek as an auxiliary switching server", async () => {

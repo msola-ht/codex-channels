@@ -71,7 +71,7 @@
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、
-  OpenCode Go、CCG 与共享第三方子代理的凭据和角色配置读取。全部第三方 Provider 沿用一次 HTTP 重试、
+  OpenCode Go、CCG 的凭据读取。全部第三方 Provider 沿用一次 HTTP 重试、
   零次流重连的固定边界。
 - `app-server-read.mjs`：连接本机 Codex App Server 并完成 `initialize` 握手，返回 App Server
   生成的完整 `User-Agent`；供 Doctor 的版本核验复用，Windows 使用已构建的 `codex-client`
@@ -157,8 +157,8 @@
   继续原样转发检查输出。
 - `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
 - `agent-roles.mjs`：读取 `~/.codex/config.toml` 的 `[agents]` 配置，返回带描述的子代理角色
-  列表，供渠道 `/agents` 命令展示与调用；不含任何角色实现。
-- `agent-roles.d.mts`：声明共享子代理角色配置模块的 TypeScript 接口。
+  列表，供渠道 `/agents` 命令展示与调用。
+- `agent-roles.d.mts`：声明原生子代理角色查询模块的 TypeScript 接口。
 - `codex-home.mjs` / `codex-home.d.mts`：统一解析 Codex 用户目录（`CODEX_HOME` 或
   `~/.codex`），并检测 Codex 官方鉴权文件 `auth.json` 是否存在，供 CLI、脚本、Runtime 与
   Bootstrap 复用。

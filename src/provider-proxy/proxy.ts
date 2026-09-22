@@ -79,8 +79,6 @@ export interface ProviderProxyOptions {
   accountIds?: readonly string[];
   /** 共享代理无账户前缀请求归属的默认账户。 */
   defaultAccountId?: string;
-  /** 私有 `/role/external` 路径对应的 agents.external 默认思考等级。 */
-  externalRoleReasoningEffort?: string;
   /** 覆盖发给模型上游的完整 User-Agent；缺省时原样转发 App Server 生成的 UA。 */
   upstreamUserAgent?: string;
   /**
@@ -125,7 +123,6 @@ export class ProviderProxy {
   private readonly pendingUpgrades = new Set<Duplex>();
   private readonly accountIds: readonly string[] | undefined;
   private readonly defaultAccountId: string | undefined;
-  private readonly externalRoleReasoningEffort: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
   private readonly trafficDump: ModelTrafficDump | undefined;
@@ -165,16 +162,6 @@ export class ProviderProxy {
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
-    const externalRoleReasoningEffort = boundedString(
-      options.externalRoleReasoningEffort,
-    );
-    if (
-      options.externalRoleReasoningEffort !== undefined
-      && externalRoleReasoningEffort === null
-    ) {
-      throw new Error("第三方子代理默认思考等级无效");
-    }
-    this.externalRoleReasoningEffort = externalRoleReasoningEffort ?? undefined;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
@@ -270,7 +257,6 @@ export class ProviderProxy {
       request.url,
       this.accountIds,
       this.defaultAccountId,
-      this.externalRoleReasoningEffort !== undefined,
     );
     if (!route || !isSupportedHttpRoute(
       request.method,
@@ -296,7 +282,6 @@ export class ProviderProxy {
         metadata.operation,
         effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs, startedAtMonotonicMs);
       metrics.httpStatus = 502;
-      if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
       markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
       const exchange = this.trafficDump?.beginHttpExchange({
         ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
@@ -342,9 +327,6 @@ export class ProviderProxy {
     const requestModelScanner = createTopLevelStringFieldScanner("model");
     const requestTierScanner = createTopLevelStringFieldScanner("service_tier");
     const requestModelDecoder = new StringDecoder("utf8");
-    if (route.externalRole) {
-      metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
-    }
     const recordsResponseMetrics = route.kind === "response";
     let metricsDelivery: Promise<void> | undefined;
     const emitMetrics = (): Promise<void> => {
@@ -498,7 +480,6 @@ export class ProviderProxy {
       request.url,
       this.accountIds,
       this.defaultAccountId,
-      this.externalRoleReasoningEffort !== undefined,
     );
     const recordsResponseMetrics = route?.kind === "response";
     if (
@@ -531,7 +512,6 @@ export class ProviderProxy {
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs,
         );
         metrics.httpStatus = 502;
-        if (route.externalRole) metrics.reasoningEffort = this.externalRoleReasoningEffort ?? null;
         markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
         await this.deliverMetrics(metrics, route.accountId);
       }
@@ -629,10 +609,7 @@ export class ProviderProxy {
           exchange?.observeRequestMetrics(activeMetrics);
           activeMetrics.serviceTier = inspected.serviceTier ?? null;
           activeMetrics.requestServiceTier = inspected.serviceTier ?? null;
-          activeMetrics.reasoningEffort = inspected.reasoningEffort
-            ?? (route.externalRole
-              ? this.externalRoleReasoningEffort ?? null
-              : null);
+          activeMetrics.reasoningEffort = inspected.reasoningEffort ?? null;
         }
       }
       if (upstream.readyState === WebSocket.OPEN) {
@@ -674,9 +651,6 @@ export class ProviderProxy {
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
           receivedAtMonotonicMs,
         );
-        if (route.externalRole) {
-          fallback.reasoningEffort = this.externalRoleReasoningEffort ?? null;
-        }
         fallback.httpStatus = statusCode;
         markMetricsFailed(fallback, "upstream_handshake_error", Date.now());
         fallback.responseCompletedAtMs = receivedAtMs;

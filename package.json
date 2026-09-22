@@ -36,8 +36,6 @@
     "systemd/",
     "scripts/*.d.mts",
     "scripts/README.md",
-    "scripts/agents-setup.mjs",
-    "scripts/agents.mjs",
     "scripts/channel-send-image-options.mjs",
     "scripts/channel-send-image.mjs",
     "scripts/ccg-setup.mjs",

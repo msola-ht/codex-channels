@@ -27,13 +27,13 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 后续通过 CCG 菜单的“修改默认模型与思考等级”或“受管 Provider 模型设置”调整默认值，
 通过“模型上下文窗口”调整窗口占比。`codexc update` 会从 DS 获取最新基础目录，
 重新生成 CCG 文件并保留仍有效的逐模型设置；更新不会自动切换到新增的 4.1。
-同一目录中引用某模型的账户 Profile 与共享第三方子代理会同步该模型的默认思考等级；选择其他模型
-的账户保留各自模型等级。新目录不再包含账户或共享子代理当前模型时会明确失败，需先选择受支持模型。
+同一目录中引用某模型的账户 Profile 同步该模型的默认思考等级；选择其他模型的账户保留各自模型等级。
+新目录不再包含账户默认模型时明确失败。
 
 账户移除命令为 `codexc ccg account remove <id>`。旧版单实例 `ccg` 不再迁移，
 使用 `codexc ccg legacy remove`，或进入 CCG Setup 选择“移除旧单账户，然后重新添加”，
 确认后移除旧 Key 和运行配置，保留安装前备份及历史统计，再填写明确账户 ID 重新添加。
-固定模式恢复原有主配置字段；共享子代理引用旧账户或 Remote TUI 正在使用时须先退出或停用。
+固定模式恢复原有主配置字段；Remote TUI 正在使用时须先退出。
 更新命令检测到旧配置会在停止服务前报错。旧 Provider 的历史 Thread 不再接续。
 
 ## 文件与运行模式
@@ -54,7 +54,7 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 删除后重新安装会以当时的主配置建立新备份，旧备份保留为 `backup/config-<UUID>.json`；
 切换模式账户每次进入固定模式时，都会以当时的主配置更新恢复基线并归档旧备份，避免恢复其他账户
 已经退出的固定配置。固定模式内重新配置以及退出固定模式继续使用本次进入固定模式时的恢复基线。
-账户正在被共享第三方子代理使用时，先切换或停用该角色再删除。
+旧跨 Provider 角色仍引用账户时，先重新配置为原生角色或停用；原生角色不绑定账户。
 已配置 CCG 的原始备份缺失时，重新配置会报错，需先恢复原始备份。
 
 当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，新 Conversation 与未显式指定 Profile 的
@@ -82,7 +82,6 @@ CCG 复用现有按需启动、Provider 路由、模型设置及本地请求指�
 凭据和指标 Provider；全部账户共享一个统计代理，内部账户路径负责把请求归入对应 `ccg-<账户>`。
 配置生成与 OCG 共用 `managed-model-provider-setup.mjs`，文件事务共用
 `managed-provider-files.mjs`；账户行为与目录适配保留各自实现。
-不自动创建 `agents.external`；可通过现有共享第三方子代理入口显式选择 CCG。
 账户 Credits 与额度窗口按账户查询；本地 Token 与请求指标按 `ccg-<账户>` 隔离。
 
 本地配置、模型目录、运行参数和回滚由 [`ccg-setup.test.ts`](../tests/ccg-setup.test.ts) 验证，账户响应

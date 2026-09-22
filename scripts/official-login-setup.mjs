@@ -11,7 +11,6 @@ import {
   listCustomPrimaryProviderCandidates,
 } from "../runtime/model-provider-runtime.mjs";
 import { createCodexUserConfigClient } from "./codex-user-config.mjs";
-import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
@@ -67,10 +66,6 @@ export async function runOfficialLoginSetup({
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
-  const currentProvider = optionalString(config.model_provider);
-  if (currentProvider !== undefined && currentProvider !== "openai") {
-    assertThirdPartyRoleDoesNotUseProvider(currentProvider, environment);
-  }
   const candidates = listCustomPrimaryProviderCandidates(record(config.model_providers));
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
 
@@ -109,9 +104,6 @@ export async function runOfficialLoginSetup({
       const currentSnapshot = await writer.readUserConfigSnapshot();
       const currentConfig = record(currentSnapshot.config);
       const activeProvider = optionalString(currentConfig.model_provider);
-      if (activeProvider !== undefined && activeProvider !== "openai") {
-        assertThirdPartyRoleDoesNotUseProvider(activeProvider, environment);
-      }
       const currentCandidates = backupPrimaryProviderCandidates(
         record(currentConfig.model_providers),
         environment,

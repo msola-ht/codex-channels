@@ -8,7 +8,6 @@ export interface OpenCodeGoAccountPaths {
   markerPath: string;
   catalogPath: string;
   manifestPath: string;
-  roleConfigPath: string;
 }
 
 export function opencodeGoAccountPaths(

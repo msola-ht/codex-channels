@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
@@ -10,7 +10,7 @@ import {
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { opencodeGoAccountDefinition, opencodeGoProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
-  loadManagedModelProviderRole, managedProviderDirectory,
+  managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   loadOpencodeGoAccounts,
@@ -160,7 +160,6 @@ export async function previewOpencodeGoAccountRemoval(
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
-    loadRole = loadManagedModelProviderRole,
     readMarker = readOpencodeGoAccountMarker,
     resolvePrimarySocket = defaultPrimarySocket,
     inspectSupervisor = inspectAppServerSupervisorState,
@@ -169,7 +168,6 @@ export async function previewOpencodeGoAccountRemoval(
   return publicRemovalPreview(await buildRemovalPlan(accountId, {
     environment,
     loadAccounts,
-    loadRole,
     readMarker,
     resolvePrimarySocket,
     inspectSupervisor,
@@ -195,7 +193,6 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   {
     environment = process.env,
     loadAccounts = loadOpencodeGoAccounts,
-    loadRole = loadManagedModelProviderRole,
     readMarker = readOpencodeGoAccountMarker,
     writeAccounts = writeOpencodeGoAccounts,
     removeAccounts = removeOptionalProviderFile,
@@ -208,7 +205,6 @@ async function applyOpencodeGoAccountRemovalUnlocked(
   const plan = await buildRemovalPlan(accountId, {
     environment,
     loadAccounts,
-    loadRole,
     readMarker,
     resolvePrimarySocket,
     inspectSupervisor,
@@ -381,7 +377,7 @@ async function buildStopPlan(
 
 async function buildRemovalPlan(
   accountId,
-  { environment, loadAccounts, loadRole, readMarker, resolvePrimarySocket, inspectSupervisor },
+  { environment, loadAccounts, readMarker, resolvePrimarySocket, inspectSupervisor },
 ) {
   const normalizedId = validAccountId(accountId);
   const accounts = loadAccountsSafely(loadAccounts, environment);
@@ -430,26 +426,6 @@ async function buildRemovalPlan(
         "删除 OpenCode Go 固定账户需要进入固定模式前的配置备份；未找到备份，无法安全恢复主配置",
       );
     }
-  }
-  let role;
-  try {
-    role = loadRole(environment);
-  } catch (error) {
-    throw invalid(
-      "provider-state-unavailable",
-      "accountId",
-      error instanceof Error ? error.message : String(error),
-      error,
-    );
-  }
-  if (role?.provider === opencodeGoProviderId(normalizedId)) {
-    throw invalid(
-      "account-used-by-agent",
-      "accountId",
-      removesLastAccount
-        ? `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents disable`
-        : `OpenCode Go 账户 ${normalizedId} 是 agents.external 当前账户；请先运行 codexc agents configure ocg-<其他账户> <模型> 或 codexc agents disable`,
-    );
   }
   const stop = await previewOpencodeGoAccountStop(normalizedId, {
     environment,
@@ -717,14 +693,6 @@ function legacyRemovalPlan(environment, accountId) {
   const configPath = join(home, "config.toml");
   const current = readLegacyToml(configPath);
   const readPaths = [configPath, markerPath, opencodeGoAccountsFilePath(environment)];
-  for (const role of Object.values(current.agents ?? {})) {
-    if (typeof role?.config_file !== "string") continue;
-    const path = resolve(home, role.config_file);
-    readPaths.push(path);
-    if (readLegacyToml(path).model_provider === marker.provider) {
-      throw new Error("请先切换或停用旧 OpenCode Go 共享子代理");
-    }
-  }
   const profiles = accountId === undefined ? [join(home, "sf-opencode-go.config.toml")]
     : [join(home, `sf-opencode-go-${accountId}.config.toml`),
       ...(marker.provider === "opencode-go" || account.default ? [join(home, "sf-opencode-go.config.toml")] : [])];

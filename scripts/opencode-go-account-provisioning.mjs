@@ -175,7 +175,6 @@ async function applyOpencodeGoAccountConfigurationUnlocked(
     plan.paths.configPath,
     plan.paths.profilePath,
     plan.paths.markerPath,
-    plan.paths.roleConfigPath,
     plan.paths.catalogPath,
     plan.paths.manifestPath,
     exclusiveBaselinePath,
@@ -490,10 +489,6 @@ async function preserveInitialFiles(paths, accountId) {
       join(backup, opencodeGoProfileFileName(accountId)),
     ),
     marker: await backupOptional(paths.markerPath, join(backup, "managed.toml")),
-    roleConfig: await backupOptional(
-      paths.roleConfigPath,
-      join(backup, "sf-agent.config.toml"),
-    ),
     catalog: await backupOptional(
       paths.catalogPath,
       join(backup, definition.catalogFileName),

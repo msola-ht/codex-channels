@@ -470,8 +470,7 @@ contractSuite("real supervised App Server provider", () => {
         roleConfigPath,
         [
           'model = "deepseek-v4-flash"',
-          'model_provider = "ocg-main"',
-          'model_reasoning_effort = "high"',
+          'model_reasoning_effort = "low"',
           'developer_instructions = "Integration fixture role"',
           "",
         ].join("\n"),
@@ -501,7 +500,7 @@ contractSuite("real supervised App Server provider", () => {
           supported_reasoning_levels: [{
             effort: "high",
             description: "OpenCode Go contract fixture",
-          }],
+          }, { effort: "low", description: "Role selection" }],
           shell_type: "shell_command",
           visibility: "list",
           supported_in_api: true,
@@ -527,7 +526,7 @@ contractSuite("real supervised App Server provider", () => {
           supported_reasoning_levels: [{
             effort: "high",
             description: "OpenCode Go contract fixture",
-          }],
+          }, { effort: "low", description: "Role selection" }],
         }],
       })}\n`;
       writeFileSync(
@@ -705,6 +704,9 @@ contractSuite("real supervised App Server provider", () => {
           await waitFor(() => !existsSync(supervisorSocketPath), 2_000);
           expect(existsSync(roleConfigPath)).toBe(true);
           expect(readFileSync(roleConfigPath, "utf8")).not.toContain("api_key");
+          expect(readFileSync(roleConfigPath, "utf8")).not.toContain("model_provider");
+          expect(readFileSync(roleConfigPath, "utf8")).not.toContain("base_url");
+          expect(readFileSync(roleConfigPath, "utf8")).toContain('model_reasoning_effort = "low"');
         } finally {
           rmSync(testRuntime, { recursive: true, force: true });
         }

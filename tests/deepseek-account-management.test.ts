@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { writeFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
@@ -20,9 +20,7 @@ import {
   loadDeepseekAccountCredential,
   loadManagedModelProviderSettings,
   loadManagedProviderAppServers,
-  managedModelProviderRoleConfigPath,
   writeManagedModelProviderProfileDefault,
-  writeManagedModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import { JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
 import { updateLocalInstallation } from "../scripts/local-update.mjs";
@@ -157,7 +155,7 @@ describe("DeepSeek managed accounts", () => {
     await applyDeepseekAccountConfiguration(input, options);
     const marker = join(options.environment.CODEX_HOME, "sf-deepseek.managed.toml");
     writePrivateFileAtomicSync(marker, 'version = 1\nprovider = "deepseek"\nmode = "switching"\n');
-    const role = managedModelProviderRoleConfigPath(options.environment);
+    const role = join(options.environment.CODEX_HOME!, "fixture-agent.toml");
     writePrivateFileAtomicSync(role, 'model_provider = "custom-provider"\nmodel = "custom-model"\n');
     writePrivateFileAtomicSync(options.paths.config, stringify({ model: "original", agents: { external: { config_file: role } } }));
     const retained = [options.paths.profile, options.paths.marker, options.paths.registry, options.paths.catalog, options.paths.config, role];
@@ -166,21 +164,6 @@ describe("DeepSeek managed accounts", () => {
     expect(existsSync(marker)).toBe(false);
     expect(retained.map((path) => readFileSync(path))).toEqual(before);
     expect(loadDeepseekAccountCredential(options.environment, "ds-personal")).toBe("sk-personal");
-  });
-
-  it.each([
-    ["external", "absolute"], ["external", "relative"],
-    ["ds", "absolute"], ["ds", "relative"],
-    ["reviewer", "absolute"], ["reviewer", "relative"],
-  ] as const)("rejects a legacy account referenced by %s with a %s role path without deleting files", async (roleName, kind) => {
-    const options = await legacyFixture("switching");
-    const role = managedModelProviderRoleConfigPath(options.environment);
-    writePrivateFileAtomicSync(role, 'model_provider = "deepseek"\n');
-    writePrivateFileAtomicSync(options.paths.config, stringify({ agents: { [roleName]: { config_file: kind === "absolute" ? role : "sf-agent.config.toml" } } }));
-    const paths = [options.legacyMarker, options.legacyProfile, options.paths.catalog, options.paths.config, role];
-    const before = paths.map((path) => readFileSync(path));
-    await expect(removeLegacyDeepseekAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
-    expect(paths.map((path) => readFileSync(path))).toEqual(before);
   });
 
   it("rolls back deleted files if restoring the fixed config fails", async () => {
@@ -281,18 +264,15 @@ describe("DeepSeek managed accounts", () => {
     const options = fixture();
     await applyDeepseekAccountConfiguration(input, options);
     await applyDeepseekAccountConfiguration({ accountId: "work", apiKey: "sk-work" }, options);
-    writeManagedModelProviderRoleConfig(options.environment, {
-      provider: "ds-personal", model: "deepseek-flash",
-    });
-    const rolePath = managedModelProviderRoleConfigPath(options.environment);
+    writeFileSync(join(options.environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("deepseek-flash") + '\nmodel_reasoning_effort = ' + JSON.stringify("high") + '\n', { mode: 0o600 });
+    const rolePath = join(options.environment.CODEX_HOME!, "fixture-agent.toml");
     writePrivateFileAtomicSync(options.paths.config, stringify({
       model: "original", agents: { external: { config_file: rolePath } },
     }));
     writeManagedModelProviderProfileDefault("ds-personal", { model: "deepseek-flash", reasoningEffort: "max" }, options.environment);
     expect(loadManagedModelProviderSettings(options.environment).map((provider) => provider.reasoningEffort)).toEqual(["max", "max"]);
     expect(parse(readFileSync(rolePath, "utf8"))).toMatchObject({
-      model_provider: "ds-personal",
-      model_reasoning_effort: "max",
+      model_reasoning_effort: "high",
     });
   });
 

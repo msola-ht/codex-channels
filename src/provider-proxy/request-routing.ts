@@ -18,7 +18,6 @@ export type ProxyRouteKind =
 
 export interface ResolvedProxyRoute {
   accountId?: string;
-  externalRole?: true;
   kind: ProxyRouteKind;
   path: string;
 }
@@ -43,7 +42,6 @@ export function resolveProxyRoute(
   value: string | undefined,
   accounts: readonly string[] | undefined,
   defaultAccountId: string | undefined,
-  externalRoleEnabled = false,
 ): ResolvedProxyRoute | undefined {
   if (!value) return undefined;
   let url: URL;
@@ -53,18 +51,6 @@ export function resolveProxyRoute(
     return undefined;
   }
   const pathname = url.pathname;
-  const externalRolePrefix = "/role/external";
-  if (
-    pathname === externalRolePrefix
-    || pathname.startsWith(`${externalRolePrefix}/`)
-  ) {
-    if (!externalRoleEnabled) return undefined;
-    const rest = pathname.slice(externalRolePrefix.length);
-    return resolvedRoute(rest || "/", url.search, {
-      ...(defaultAccountId === undefined ? {} : { accountId: defaultAccountId }),
-      externalRole: true,
-    });
-  }
   if (pathname === "/go" || pathname.startsWith("/go/")) {
     const segments = pathname.split("/");
     const accountId = segments[2];
@@ -100,7 +86,7 @@ export function isSupportedHttpRoute(
 function resolvedRoute(
   pathname: string,
   search: string,
-  identity: Pick<ResolvedProxyRoute, "accountId" | "externalRole">,
+  identity: Pick<ResolvedProxyRoute, "accountId">,
 ): ResolvedProxyRoute {
   return {
     ...identity,

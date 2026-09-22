@@ -109,7 +109,6 @@ export function refreshOpencodeGoCatalogForUpdate(
       manifestPath: string;
       modelCount: number;
       migratedProviders: string[];
-      roleMigrated: boolean;
       defaultModelMigrationApplied: boolean;
     }
 >;

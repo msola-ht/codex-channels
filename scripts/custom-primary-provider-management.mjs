@@ -18,7 +18,6 @@ import { createCodexUserConfigClient } from "./codex-user-config.mjs";
 import {
   writePrimaryProviderConfigEditsWithProfileRemoval,
 } from "./primary-provider-config-transaction.mjs";
-import { assertThirdPartyRoleDoesNotUseProvider } from "./agents.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { PrimaryProviderManagementError } from "./primary-provider-management.mjs";
 
@@ -111,9 +110,6 @@ export async function applyCustomPrimaryProviderSave(input, options = {}) {
 
 async function applySavePlan(input, plan, options) {
   const { environment = process.env, createClient = createCodexUserConfigClient } = options;
-  if (plan.providerIdToDeactivate !== undefined) {
-    assertProviderNotInUse(plan.providerIdToDeactivate, environment);
-  }
   if (plan.provider.mode === "switching") {
     const client = await createClient({ environment });
     try {
@@ -270,9 +266,6 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     );
   }
   if (mode === "exclusive") {
-    if (hasCustomFixedMainProvider && effectiveActiveProviderId !== providerId) {
-      assertProviderNotInUse(effectiveActiveProviderId, environment);
-    }
     if (!hasOfficialMainProvider && !hasCustomFixedMainProvider) {
       throw invalid(
         "managed-fixed-provider-active",
@@ -351,10 +344,6 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     expectedVersion: snapshot.version,
     switchingProvider,
     registeredProviderIds: switchingProviders.map(({ id }) => id),
-    providerIdToDeactivate: hasCustomFixedMainProvider
-      && effectiveActiveProviderId !== providerId
-      ? effectiveActiveProviderId
-      : undefined,
     backupCandidateToRemove: input.operation === "update" && backedUp
       ? providerId
       : undefined,
@@ -422,18 +411,6 @@ function sameUrlOrigin(left, right) {
   }
 }
 
-function assertProviderNotInUse(providerId, environment) {
-  try {
-    assertThirdPartyRoleDoesNotUseProvider(providerId, environment);
-  } catch (error) {
-    throw invalid(
-      "provider-in-use",
-      "providerId",
-      error instanceof Error ? error.message : String(error),
-      error,
-    );
-  }
-}
 
 function requiredString(value, field, message) {
   const normalized = typeof value === "string" ? value.trim() : "";

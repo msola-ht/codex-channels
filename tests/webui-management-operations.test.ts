@@ -47,7 +47,6 @@ describe("WebUI management operation boundaries", () => {
       primary: { id: "openai", displayName: "OpenAI", kind: "official", mode: "official" },
       managedProviders: [],
       customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
-      externalAgent: { status: "not-configured" },
     };
     let resolveState: ((value: typeof state) => void) | undefined;
     const cache = { value: null, expiresAtMs: 0, pending: null } as { value: unknown; expiresAtMs: number; pending: Promise<unknown> | null; generation?: number };

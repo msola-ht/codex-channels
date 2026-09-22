@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
@@ -14,7 +14,6 @@ import {
   ccgAccountMarkerPath,
   ccgAccountsFilePath,
   ccgProviderId,
-  isCcgAccountProvider,
   loadCcgAccounts,
   validateCcgAccountId,
   validateCcgAccounts,
@@ -31,9 +30,7 @@ import { createManagedProviderMarker } from "../runtime/model-provider-profile.m
 import {
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
-  loadThirdPartyModelProviderRole,
   managedProviderDirectory,
-  managedModelProviderRoleConfigPath,
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
@@ -121,7 +118,6 @@ export function ccgSetupPaths(environment = process.env, accountId) {
     manifest: join(directory, definition.catalogManifestFileName),
     backup: join(accountDirectory, definition.backupDirectoryName, "config.json"),
     registry: ccgAccountsFilePath(environment),
-    role: managedModelProviderRoleConfigPath(environment),
   };
 }
 
@@ -249,12 +245,6 @@ async function legacyCcgRemovalPlan(environment) {
   }
   const configPath = join(codexHomePath(environment), "config.toml");
   const current = await readConfig(configPath);
-  for (const role of Object.values(current.agents ?? {})) {
-    if (typeof role?.config_file === "string"
-      && (await readConfig(resolve(dirname(configPath), role.config_file))).model_provider === "ccg") {
-      throw new Error("请先切换或停用旧 CCG 共享子代理");
-    }
-  }
   const updates = new Map([[legacy.marker, undefined], [legacy.profile, undefined]]);
   if (marker.mode === "exclusive") {
     if (current.model_provider !== "ccg") throw new Error("旧 CCG 配置与管理标记不一致");
@@ -290,19 +280,6 @@ export async function removeLegacyCcgAccount({ confirmRemove = false } = {}, opt
     await applyProviderFileUpdates(plan.updates, plan.snapshots);
     return { action: "legacy-removed", runtime, activation: "restart-all" };
   });
-}
-
-function ccgRoleUpdate(catalog, environment) {
-  const role = loadThirdPartyModelProviderRole(environment);
-  if (role === undefined || !isCcgAccountProvider(role.provider)) return undefined;
-  const model = catalog.models.find((entry) => entry.slug === role.model);
-  if (model === undefined) {
-    throw new Error("新 CCG 目录不支持共享第三方子代理当前模型，请先切换或停用该角色");
-  }
-  const path = managedModelProviderRoleConfigPath(environment);
-  const document = parse(readPrivateFileSync(path, maximumCatalogBytes));
-  document.model_reasoning_effort = model.default_reasoning_level;
-  return { path, content: stringify(document) };
 }
 
 export async function refreshCcgCatalogForUpdate(environment = process.env, options = {}) {
@@ -345,8 +322,6 @@ export async function refreshCcgCatalogForUpdate(environment = process.env, opti
         updates.set(accountPathsForProvider.profile, stringify(profile));
       }
     }
-    const roleUpdate = ccgRoleUpdate(catalog, environment);
-    if (roleUpdate !== undefined) updates.set(roleUpdate.path, roleUpdate.content);
     await applyProviderFileUpdates(updates, snapshots);
     return { status: "updated", providers: providers.map((provider) => provider.provider) };
   });
@@ -375,9 +350,6 @@ export async function removeCcgConfiguration({ accountId, confirmRemove = false 
     const currentAccount = accounts.find((account) => account.id === accountId);
     if (currentAccount === undefined) throw new Error("CCG 账户不存在");
     const definition = ccgAccountDefinition(accountId);
-    if (loadThirdPartyModelProviderRole(environment)?.provider === definition.id) {
-      throw new Error("请先切换或停用该 CCG 账户的共享第三方子代理");
-    }
     const remaining = accounts.filter((account) => account.id !== accountId);
     if (remaining.length > 0 && currentAccount.default) throw new Error("请先选择其他 CCG 默认账户");
     const paths = ccgSetupPaths(environment, accountId);

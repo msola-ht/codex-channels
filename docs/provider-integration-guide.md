@@ -53,7 +53,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、目�
 `profileName` 必须使用项目受管的 `sf-` 前缀，`profileFileName` 必须由
 `${profileName}.config.toml` 派生；`codexc remote`、原生 `codex --profile` 和磁盘文件不得再定义别名。
 注册后自动获得：watcher 目录路径、`codexc remote --profile <profileName>` 规范名称、
-`agents.external` 角色、文件布局、`/model` 的 Provider 选项、App Server 启动参数。
+文件布局、`/model` 的 Provider 选项、App Server 启动参数。
 Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义展开为运行时注册表；Bootstrap
 按账户适配器创建账户窄适配器，并以精确 Provider ID 登记。未知能力和
 重复 Provider 适配器均启动失败关闭，不回退 OpenAI。OpenCode Go 与 CCG 多账户实例继承基础定义的能力
@@ -114,8 +114,6 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - GO 形态优先复用/参数化 `opencode-go-setup.mjs`；否则新建 `scripts/<id>-setup.mjs`；
 - 必须包含：API Key 校验、switching/exclusive 选择、模型目录下载与校验、Profile/
   基础配置写入、管理标记、首次备份、失败回滚；
-- Provider Setup 不得自动创建或切换 `agents.external`；共享子代理只通过显式
-  `codexc agents configure` 或设置菜单中的“共享第三方子代理”入口修改；
 - 文件权限 `0600`，目录 `0700`，符号链接与越权读取失败关闭；
 - `codexc setup` 菜单同步加入入口。
 
@@ -126,7 +124,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 定义与文件布局（`model-provider-managed-runtime.test.ts` 风格）；
 - Profile 镜像校验与失败关闭（`model-provider-runtime.test.ts` 风格）；
 - 账户适配器：余额或用量窗口、本机 Token 统计、窗口边界、窗口快照归属与缺失回退；
-- Setup：新增、更新、恢复、回滚，以及确认不会自动创建或切换共享角色；
+- Setup：新增、更新、恢复、回滚；
 - 生命周期：60 秒全局空闲宽限判定、自动解除后的关闭前通知、关闭后按需重连；
 - 协议与真实 App Server 合同测试只在 Transport 或共享行为变化时新增。
 
@@ -164,7 +162,6 @@ codexc doctor
 - 修改默认模型/思考等级后，watcher 校验通过并在无活动 Turn 时自动重启 App Server；
   设置应用后 Gateway 同步刷新受管模型目录与默认模型，已有 Thread 和手动选择保持不变；
   重启或目录刷新失败时报告应用失败，并沿用 watcher 的冷却重试流程，刷新成功后才报告已应用；
-- `agents.configure <id> <model>` 能切换共享第三方子代理并保持 Key 隔离。
 
 ## 6. 用户配置的主 Provider
 
@@ -265,11 +262,8 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 当前不支持用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
 配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
 `~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
-注入固定/切换自定义 App Server 与自定义子代理角色；目录只随本机锁定的 Codex CLI 版本更新。
-固定与切换模式的自定义 Provider 可以作为共享 `agents.external`，当前使用其 Setup 已确认的模型和
-`medium` 思考等级；角色文件保存 `env_key` 和可用的官方目录快照路径，App Server 服务仅把该 Provider
-的 Key 注入主进程，并提前启动同一 Provider 的 `/role/external` 统计代理。正在被共享子代理使用的 Provider 必须先切换或停用角色，
-才能恢复官方模式或删除，避免留下不可启动的角色配置。自定义 Provider 切换模式可以与受管切换模式
+注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。
+自定义 Provider 切换模式可以与受管切换模式
 共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
 受管 Provider 流程接入。
 

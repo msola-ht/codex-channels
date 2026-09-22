@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 
@@ -12,8 +12,8 @@ import {
 import { deepseekAccountDefinition, deepseekProviderDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import {
-  loadManagedModelProviderSettings, loadPrimaryModelProvider, loadThirdPartyModelProviderRole,
-  managedProviderDirectory, managedModelProviderRoleConfigPath,
+  loadManagedModelProviderSettings, loadPrimaryModelProvider,
+  managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
@@ -33,7 +33,6 @@ export function deepseekAccountPaths(environment, accountId) {
     registry: deepseekAccountsFilePath(environment),
     catalog: join(directory, definition.catalogFileName),
     manifest: join(directory, definition.catalogManifestFileName),
-    role: managedModelProviderRoleConfigPath(environment),
   };
 }
 
@@ -153,12 +152,6 @@ function legacyDeepseekRemovalPlan(environment) {
   const marker = readToml(markers[0]);
   if (marker.version !== 1 || marker.provider !== "deepseek" || !["switching", "exclusive"].includes(marker.mode)) throw new Error("DeepSeek 旧管理标记无效");
   const config = readToml(configPath);
-  for (const role of Object.values(config.agents ?? {})) {
-    const rolePath = role?.config_file;
-    if (typeof rolePath === "string" && readToml(resolve(home, rolePath)).model_provider === "deepseek") {
-      throw new Error("请先停用或改配引用旧 DeepSeek 账户的共享子代理，再移除旧账户");
-    }
-  }
   const files = [...markers, join(home, "sf-deepseek.config.toml"), join(home, "deepseek.config.toml")];
   if (loadDeepseekAccounts(environment).length === 0) {
     files.push(join(directory, "models.json"), join(directory, "models.manifest.json"));
@@ -226,7 +219,6 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   const definition = deepseekAccountDefinition(accountId);
   const accounts = loadDeepseekAccounts(environment);
   if (!accounts.some((account) => account.id === accountId)) throw new Error("DeepSeek 账户不存在");
-  if (loadThirdPartyModelProviderRole(environment)?.provider === definition.id) throw new Error("请先切换或停用该账户的共享子代理");
   const configured = loadManagedModelProviderSettings(environment).find((provider) => provider.provider === definition.id);
   if (!configured) throw new Error("DeepSeek 账户配置不完整，请先恢复缺失文件");
   const remaining = accounts.filter((account) => account.id !== accountId);
@@ -299,17 +291,7 @@ export async function refreshDeepseekAccountsCatalog(environment = process.env, 
       updates.set(path, stringify(document));
       if (model !== provider.model) migrated.push(provider.provider);
     }
-    const role = readToml(paths.role);
-    const roleAccount = accounts.find((entry) => deepseekProviderId(entry.id) === role.model_provider);
-    let roleMigrated = false;
-    if (roleAccount) {
-      const model = resolveManagedCatalogModel(catalog, deepseekAccountDefinition(roleAccount.id), role.model);
-      roleMigrated = model !== role.model;
-      role.model = model;
-      role.model_reasoning_effort = catalog.models.find((entry) => entry.slug === model).default_reasoning_level;
-      updates.set(paths.role, stringify(role));
-    }
     await applyProviderFileUpdates(updates, snapshots);
-    return { status: "updated", catalogPath: paths.catalog, manifestPath: paths.manifest, modelCount: catalog.models.length, modelMigrated: migrated.length > 0, roleMigrated, migratedProviders: migrated };
+    return { status: "updated", catalogPath: paths.catalog, manifestPath: paths.manifest, modelCount: catalog.models.length, modelMigrated: migrated.length > 0, migratedProviders: migrated };
   });
 }

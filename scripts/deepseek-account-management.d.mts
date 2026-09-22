@@ -44,5 +44,5 @@ export function refreshDeepseekAccountsCatalog(environment?: NodeJS.ProcessEnv, 
   now?: () => Date;
 }): Promise<{ status: "not-configured" } | {
   status: "updated"; catalogPath: string; manifestPath: string; modelCount: number;
-  modelMigrated: boolean; roleMigrated: boolean; migratedProviders: string[];
+  modelMigrated: boolean; migratedProviders: string[];
 }>;

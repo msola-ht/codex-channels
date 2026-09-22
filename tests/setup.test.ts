@@ -46,7 +46,7 @@ describe("Codex Connect setup", () => {
       options: [{
         value: "summary",
         label: "接入状态总览",
-        hint: "脱敏显示 Provider、模型、共享子代理、通讯渠道与用户技能状态",
+        hint: "脱敏显示 Provider、模型、通讯渠道与用户技能状态",
       }, {
         value: "models",
         label: "模型与提供商",
@@ -321,40 +321,6 @@ describe("Codex Connect setup", () => {
     });
   });
 
-  it("selects shared third-party agent setup under models and providers", async () => {
-    const input = {};
-    const output = {};
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("models")
-        .mockResolvedValueOnce("third_party")
-        .mockResolvedValueOnce("agents"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-    const agentsSetup = vi.fn(async () => "agents-configured");
-
-    await expect(runSetup({
-      input,
-      output,
-      prompts,
-      agentsSetup,
-    })).resolves.toBe("agents-configured");
-
-    expect(agentsSetup).toHaveBeenCalledWith({
-      input,
-      output,
-      prompts,
-      allowBack: true,
-    });
-    expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
-      value: "agents",
-      label: "共享第三方子代理",
-      hint: "选择已配置 Provider 与模型，或停用 agents.external",
-    });
-  });
-
   it("selects the official login setup under models and providers", async () => {
     const input = {};
     const output = {};
@@ -498,11 +464,6 @@ describe("Codex Connect setup", () => {
             profileName: "sf-custom-codeproxy",
           },
         ],
-        externalAgent: {
-          status: "configured",
-          provider: "deepseek",
-          model: "deepseek-v4-pro",
-        },
       }),
       loadInstalledSkills: () => ["channel-image"],
     });
@@ -519,7 +480,6 @@ describe("Codex Connect setup", () => {
     expect(rendered).toContain("DeepSeek · deepseek-flash · high");
     expect(rendered).toContain("通讯渠道：Telegram（已启用）");
     expect(rendered).toContain("用户技能目录：1 个技能");
-    expect(rendered).toContain("共享第三方子代理：deepseek · deepseek-v4-pro");
     expect(rendered).not.toContain("telegram-secret");
     expect(rendered).not.toContain("123456");
     expect(rendered).not.toContain("managed-secret");
@@ -551,7 +511,6 @@ describe("Codex Connect setup", () => {
           backupCandidates: [],
         },
         switchingProviders: [],
-        externalAgent: { status: "not-configured" },
       }),
       loadInstalledSkills: () => [],
     });
@@ -568,7 +527,6 @@ describe("Codex Connect setup", () => {
       modelDefaults: [],
       channels: [],
       installedSkillCount: 0,
-      agent: { status: "not-configured" },
       configPath: "/private/config.toml",
     });
   });
@@ -599,7 +557,6 @@ describe("Codex Connect setup", () => {
           backupCandidates: [],
         },
         switchingProviders: [],
-        externalAgent: { status: "not-configured" },
       }),
       loadInstalledSkills: () => [],
     });
@@ -633,7 +590,6 @@ describe("Codex Connect setup", () => {
           backupCandidates: [],
         },
         switchingProviders: [],
-        externalAgent: { status: "not-configured" },
       }),
       loadInstalledSkills: () => [],
     });

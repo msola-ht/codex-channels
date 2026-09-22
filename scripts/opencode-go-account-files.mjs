@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { opencodeGoAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
-  managedModelProviderRoleConfigPath,
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import {
@@ -26,7 +25,6 @@ export function opencodeGoAccountPaths(environment, accountId) {
     markerPath: opencodeGoAccountMarkerPath(environment, accountId),
     catalogPath: join(providerDirectory, definition.catalogFileName),
     manifestPath: join(providerDirectory, definition.catalogManifestFileName),
-    roleConfigPath: managedModelProviderRoleConfigPath(environment),
   };
 }
 

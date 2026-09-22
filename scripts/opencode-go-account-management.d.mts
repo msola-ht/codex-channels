@@ -96,9 +96,6 @@ export function applyOpencodeGoAccountStop(
 }>;
 
 interface RemovalOptions extends StopOptions {
-  loadRole?: (environment: NodeJS.ProcessEnv) =>
-    | { provider: ManagedModelProviderId; model: string }
-    | undefined;
   readMarker?: (
     environment: NodeJS.ProcessEnv,
     accountId: string,

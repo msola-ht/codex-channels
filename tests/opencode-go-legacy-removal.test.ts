@@ -97,12 +97,13 @@ describe("explicit legacy OCG removal", () => {
     expect(existsSync(options.profile)).toBe(false);
   });
 
-  it("does not remove files when a relative role references the old provider", async () => {
+  it("removes the old provider without interpreting unrelated Codex role files", async () => {
     const options = fixture("switching");
     write(join(options.environment.CODEX_HOME, "role.toml"), 'model_provider = "opencode-go"\n');
     write(options.config, stringify({ agents: { external: { config_file: "role.toml" } } }));
-    await expect(removeLegacyOpencodeGoAccount({ confirmRemove: true }, options)).rejects.toThrow("共享子代理");
-    expect(existsSync(options.marker)).toBe(true);
+    await expect(removeLegacyOpencodeGoAccount({ confirmRemove: true }, options)).resolves.toMatchObject({ action: "legacy-removed" });
+    expect(existsSync(options.marker)).toBe(false);
+    expect(readFileSync(join(options.environment.CODEX_HOME, "role.toml"), "utf8")).toBe('model_provider = "opencode-go"\n');
   });
 
   it("refuses a missing fixed-mode baseline before removing any file", async () => {

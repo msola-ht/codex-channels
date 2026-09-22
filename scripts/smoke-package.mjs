@@ -64,7 +64,6 @@ try {
     "remote",
     "work",
     "rules",
-    "agents",
     "metrics",
     "channel",
     "webui",

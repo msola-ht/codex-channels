@@ -5,7 +5,7 @@ export interface CcgCatalog {
 
 export function ccgSetupPaths(environment: NodeJS.ProcessEnv | undefined, accountId: string): {
   config: string; profile: string; marker: string;
-  catalog: string; manifest: string; backup: string; registry: string; role: string;
+  catalog: string; manifest: string; backup: string; registry: string;
 };
 export function applyCcgConfiguration(input: {
   accountId: string;

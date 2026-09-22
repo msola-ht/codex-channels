@@ -24,7 +24,6 @@ import {
   primaryProviderBackupPath,
   readPrimaryProviderBackup,
   writeCustomPrimaryProviderSwitchingProfile,
-  writeThirdPartyModelProviderRoleConfig,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   clientFixture,
@@ -542,7 +541,7 @@ describe("primary provider CLI", () => {
     expect(backup.thirdparty.base_url).toBe("https://third.example.test/v1");
   });
 
-  it.skipIf(process.platform === "win32")("refuses to replace a fixed custom Provider still used by agents.external", async () => {
+  it.skipIf(process.platform === "win32")("allows replacing a model source because native roles inherit their parent Provider", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-role-switch-");
     const config = {
       model: "gpt-5.6-sol",
@@ -573,12 +572,12 @@ describe("primary provider CLI", () => {
       'experimental_bearer_token = "custom-fixed-secret"',
       "",
     ].join("\n"), { mode: 0o600 });
-    writeThirdPartyModelProviderRoleConfig(environment, { provider: "codeproxy-fixed" });
+    writeFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("gpt-5.6-sol") + '\nmodel_reasoning_effort = ' + JSON.stringify("medium") + '\n', { mode: 0o600 });
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), [
       readFileSync(join(environment.CODEX_HOME!, "config.toml"), "utf8").trimEnd(),
       "",
       "[agents.external]",
-      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "sf-agent.config.toml"))}`,
+      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "fixture-agent.toml"))}`,
       "",
     ].join("\n"), { mode: 0o600 });
     const { createClient, writeUserConfigEdits } = clientFixture({ config, version: "v1" });
@@ -587,9 +586,10 @@ describe("primary provider CLI", () => {
       environment,
       output: { write: vi.fn() },
       createClient,
-    })).rejects.toThrow("正由 agents.external 使用");
+    })).resolves.toBeUndefined();
 
-    expect(writeUserConfigEdits).not.toHaveBeenCalled();
+    expect(writeUserConfigEdits).toHaveBeenCalled();
+    expect(readFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), "utf8")).not.toContain("model_provider");
   });
 
   it("keeps the configured model when the primary Provider is already official", async () => {
@@ -855,7 +855,7 @@ describe("primary provider CLI", () => {
     expect(readPrimaryProviderBackup(environment)).toEqual({});
   });
 
-  it.skipIf(process.platform === "win32")("refuses to delete a custom switching Provider still used by agents.external", async () => {
+  it.skipIf(process.platform === "win32")("allows deleting a model source without deleting the native role", async () => {
     const environment = isolatedEnvironment("codexc-primary-provider-role-remove-");
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n', {
       mode: 0o600,
@@ -867,27 +867,26 @@ describe("primary provider CLI", () => {
       baseUrl: "https://proxy.example.test/v1",
       apiKey: "custom-agent-secret",
     }, environment);
-    writeThirdPartyModelProviderRoleConfig(environment, { provider: "codeproxy-dev" });
+    writeFileSync(join(environment.CODEX_HOME!, "fixture-agent.toml"), 'model = ' + JSON.stringify("gpt-5.6-sol") + '\nmodel_reasoning_effort = ' + JSON.stringify("medium") + '\n', { mode: 0o600 });
     writeFileSync(join(environment.CODEX_HOME!, "config.toml"), [
       'model_provider = "openai"',
       "",
       "[agents.external]",
-      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "sf-agent.config.toml"))}`,
+      `config_file = ${JSON.stringify(join(environment.CODEX_HOME!, "fixture-agent.toml"))}`,
       "",
     ].join("\n"), { mode: 0o600 });
-    const createClient = vi.fn(async () => {
-      throw new Error("App Server should not be required");
+    const { createClient } = clientFixture({
+      config: { model_provider: "openai", model_providers: {} }, version: "v1",
     });
-
+    const rolePath = join(environment.CODEX_HOME!, "fixture-agent.toml");
+    const before = readFileSync(rolePath, "utf8");
     await expect(removePrimaryProvider("codeproxy-dev", {
-      environment,
-      output: { write: vi.fn() },
-      createClient,
-    })).rejects.toThrow("正由 agents.external 使用");
+      environment, output: { write: vi.fn() }, createClient,
+    })).resolves.toBeUndefined();
+    expect(existsSync(customPrimaryProviderProfilePath(environment, "codeproxy-dev"))).toBe(false);
+    expect(loadCustomSwitchingProviderIds(environment)).toEqual([]);
+    expect(readFileSync(rolePath, "utf8")).toBe(before);
 
-    expect(existsSync(customPrimaryProviderProfilePath(environment, "codeproxy-dev"))).toBe(true);
-    expect(loadCustomSwitchingProviderIds(environment)).toEqual(["codeproxy-dev"]);
-    expect(createClient).not.toHaveBeenCalled();
   });
 
   it("removes the same private backup when cleaning a missing switching Profile", async () => {

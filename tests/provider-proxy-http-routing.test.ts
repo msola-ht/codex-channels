@@ -293,7 +293,7 @@ it("routes /go/<account> prefixes to the shared upstream and reports the account
     expect(metricsAccounts).toEqual(["b", "main"]);
   });
 
-it("attributes configured reasoning effort only to the private external-role route", async () => {
+it("rejects the removed external-role route without forwarding or fabricating metrics", async () => {
     const seenPaths: string[] = [];
     const upstream = createServer((request, response) => {
       seenPaths.push(request.url ?? "");
@@ -314,7 +314,6 @@ it("attributes configured reasoning effort only to the private external-role rou
       upstreamHost: "127.0.0.1",
       upstreamPort: upstreamAddress.port,
       upstreamProtocol: "http",
-      externalRoleReasoningEffort: "high",
       onMetrics: (metric) => {
         metrics.push(metric);
       },
@@ -323,12 +322,11 @@ it("attributes configured reasoning effort only to the private external-role rou
     openServers.push(proxy);
     const proxyPort = Number(proxy.address().split(":")[1]);
 
-    await requestProxy(proxyPort, "/role/external/responses", "POST");
+    await expect(requestProxy(proxyPort, "/role/external/responses", "POST")).rejects.toThrow("404");
     await requestProxy(proxyPort, "/responses", "POST");
 
-    expect(seenPaths).toEqual(["/responses", "/responses"]);
+    expect(seenPaths).toEqual(["/responses"]);
     expect(metrics.map(({ reasoningEffort }) => reasoningEffort)).toEqual([
-      "high",
       null,
     ]);
   });

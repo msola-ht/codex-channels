@@ -1,9 +1,4 @@
-import {
-  mkdirSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -269,7 +264,6 @@ describe("webui server Provider and account management", () => {
         backupCandidates: [],
       },
       switchingProviders: [],
-      externalAgent: { status: "configured", provider: "deepseek", model: "deepseek-v4-flash" },
     };
     const { origin } = await startServer(
       fixture.environment,
@@ -287,13 +281,11 @@ describe("webui server Provider and account management", () => {
       providers: Array<Record<string, unknown>>;
       primary: { id: string; mode: string };
       official: { authenticated: boolean };
-      externalAgent: { status: string; provider?: string; model?: string };
     };
     expect(body.primary).toEqual({ id: "relay", displayName: "Relay", kind: "custom", mode: "exclusive" });
     expect(body.official).toEqual({ authenticated: true });
     expect(body.providers).toHaveLength(3);
     expect(body.providers.find((provider) => provider.id === "relay")).toMatchObject({ selected: true, model: null });
-    expect(body.externalAgent).toEqual({ status: "configured", provider: "deepseek", model: "deepseek-v4-flash" });
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("secret");
     expect(serialized).not.toContain("sf-custom-backup-relay");
@@ -360,7 +352,6 @@ describe("webui server Provider and account management", () => {
         models: [{ id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash", contextWindow: 128000 }],
       }],
       customProviders: { fixedCandidates: [], switchingProviders: [], backupCandidates: [] },
-      externalAgent: { status: "unconfigured", provider: null, model: null },
     };
     let appliedInput: unknown = null;
     const { origin } = await startServer(fixture.environment, undefined, {
@@ -369,15 +360,6 @@ describe("webui server Provider and account management", () => {
       loadProviderState: async () => providerState,
       previewProviderSettings: async (input: unknown) => {
         const normalized = input as { operation: string; providerId?: string };
-        if (normalized.operation === "external-agent") {
-          return {
-            operation: "configure",
-            current: { configured: false, provider: null, model: null },
-            selection: { provider: "deepseek", providerDisplayName: "DeepSeek", model: "deepseek-v4-flash", modelDisplayName: "DeepSeek V4 Flash" },
-            willChange: true,
-            activation: "restart-all",
-          };
-        }
         return {
           operation: "switch",
           target: { id: normalized.providerId ?? "unknown", displayName: "Relay", source: "switching" },
@@ -387,14 +369,6 @@ describe("webui server Provider and account management", () => {
       },
       applyProviderSettings: async (input: unknown) => {
         appliedInput = input;
-        if ((input as { operation?: string }).operation === "external-agent") {
-          return {
-            action: "configured",
-            operation: "configure",
-            selection: { provider: "deepseek", model: "deepseek-v4-flash" },
-            activation: "restart-all",
-          };
-        }
         return {
           action: "switched",
           operation: "switch",
@@ -430,25 +404,11 @@ describe("webui server Provider and account management", () => {
     expect(previewBody.confirmationToken).toMatch(/^[A-Za-z0-9_-]+$/u);
 
     const agentPreview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash" }),
+      method: "POST", headers,
+      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek" }),
     });
-    expect(agentPreview.status).toBe(200);
-    const agentPreviewBody = await agentPreview.json() as { confirmationToken: string; preview: { selection?: { provider: string } } };
-    expect(agentPreviewBody.preview.selection?.provider).toBe("deepseek");
-    const agentApply = await fetch(`${origin}/api/v1/management/provider-settings`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ operation: "external-agent", action: "configure", provider: "deepseek", model: "deepseek-v4-flash", confirmationToken: agentPreviewBody.confirmationToken }),
-    });
-    expect(agentApply.status).toBe(200);
-    expect(await agentApply.json()).toMatchObject({ action: "configured", auditStatus: "recorded" });
-    const auditEntries = readFileSync(join(fixture.home, "management-audit.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as { target?: string });
-    expect(auditEntries.some((entry) => entry.target === "deepseek")).toBe(true);
+    expect(agentPreview.status).toBe(400);
+    expect(await agentPreview.json()).toMatchObject({ error: { code: "invalid_provider_operation" } });
 
     const apply = await fetch(`${origin}/api/v1/management/provider-settings`, {
       method: "POST",
