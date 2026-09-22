@@ -24,6 +24,7 @@ export type {
 export type { RateLimitSnapshot } from "./generated/v2/RateLimitSnapshot.js";
 export type { ThreadDeleteResponse } from "./generated/v2/ThreadDeleteResponse.js";
 export type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
+export type { ThreadListParams } from "./generated/v2/ThreadListParams.js";
 export type { ThreadLoadedListResponse } from "./generated/v2/ThreadLoadedListResponse.js";
 export type {
   ThreadSectionMoveResponse,

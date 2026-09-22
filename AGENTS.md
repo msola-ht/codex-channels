@@ -130,7 +130,7 @@ Surface -> Application/Core <- Codex Client
 ## Thread 与会话
 
 - 使用 App Server 的 `thread/list` 查询会话，不维护平行的会话索引。
-- Thread 查询必须显式传入服务端允许的 `cwd` 和 `sourceKinds`。
+- 普通 Thread 列表查询必须显式传入服务端允许的 `cwd` 和 `sourceKinds`。本机会话归档预览的后代查询只允许以明确的 `ancestorThreadId` 限定范围，并显式覆盖官方来源类型；不按父会话 `cwd` 截断后代。归档前检查可查询后代的 Workspace、Provider 和保护状态，不据此声称已枚举官方内部全部代理。
 - 自动接续前检查 Thread 来源、Workspace、运行状态和现有绑定。
 - 一个 Thread 不能同时绑定多个外部 Conversation；活动 Thread 不得无条件追加新 Turn。
 - 切换、退出、新建、归档或解绑时按协议取消旧订阅，不能只删除本地映射。

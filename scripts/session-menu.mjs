@@ -14,8 +14,8 @@ export async function runSessionMenu({
     options: [
       {
         value: "cleanup",
-        label: "清理旧会话",
-        hint: "按 Turn 轮数预览并交互确认归档",
+        label: "归档旧会话及子会话",
+        hint: "按主会话轮数预览，派生后代随官方归档",
       },
       { value: "cancel", label: "取消" },
     ],
@@ -27,7 +27,7 @@ export async function runSessionMenu({
   if (action !== "cleanup") throw new Error(`未知会话操作：${String(action)}`);
 
   const maxTurns = await prompts.text({
-    message: "最多保留多少轮（超过此数不清理）",
+    message: "归档主会话的最大轮数（超过此数跳过整组）",
     placeholder: "3",
     initialValue: "3",
     validate: (value) => {

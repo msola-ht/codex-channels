@@ -58,8 +58,8 @@ codexc doctor                # 只读诊断
 codexc metrics               # 查询、导出和维护本机模型请求指标
 codexc traffic               # 查看模型请求与响应转储（列表、详情、跟随或确认清理）
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc sessions              # 交互式会话清理菜单
-codexc sessions cleanup 3    # 预览 Turn 数较少的旧会话（交互终端加 --confirm 再确认）
+codexc sessions              # 交互式会话归档菜单
+codexc sessions cleanup 3    # 按主会话轮数预览，子会话随官方归档（加 --confirm 再确认）
 codexc update                # 源码安装更新
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）

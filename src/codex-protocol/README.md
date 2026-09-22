@@ -6,7 +6,7 @@
 
 - `index.ts`：只向 `codex-client` 暴露经过审查的最小协议类型集合，包括约束出站消息的
   `ClientRequest`、`ClientNotification`、用户配置编辑值 `JsonValue`，账户用量请求使用的
-  `GetAccountTokenUsageParams` 与响应类型，以及原生 Queue、分页历史、Revert 请求/响应和通知类型；
+  `GetAccountTokenUsageParams` 与响应类型、包含后代关系查询的 `ThreadListParams`，以及原生 Queue、分页历史、Revert 请求/响应和通知类型；
   其他业务模块不得导入。
 - `version.json`：记录生成类型对应的 `codex-cli` 版本及实验生成状态。
 - `public-cli-contract.json`：记录本项目实际转发的公开 CLI 参数、别名、参数形状和枚举值；升级脚本

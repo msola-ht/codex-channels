@@ -740,7 +740,7 @@ contractSuite("real supervised App Server tools", () => {
           { sandbox: "read-only" },
         );
         await client.connect();
-        const started = await client.startThread(workspace, { ephemeral: true });
+        const started = await client.startThread(workspace);
         threadId = started.thread.id;
         removeNotification = client.onNotification((notification) => {
           const event = toConversationInputEvent(notification);
@@ -780,6 +780,19 @@ contractSuite("real supervised App Server tools", () => {
         expect(parentSequence.indexOf("subagent.completed")).toBeGreaterThan(
           parentSequence.indexOf("parent.turn.completed"),
         );
+        const descendants = await client.listThreadDescendants(threadId, false);
+        expect(descendants).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: spawned?.agentThreadId, parentThreadId: threadId }),
+        ]));
+        await client.archiveThread(threadId);
+        expect(await client.listThreadDescendants(threadId, false)).toEqual([]);
+        expect(await client.listThreadDescendants(threadId, true)).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: spawned?.agentThreadId, parentThreadId: threadId }),
+        ]));
+        expect(await client.listThreads(workspace, { archived: true, fullScan: true }))
+          .toEqual(expect.arrayContaining([expect.objectContaining({ id: threadId })]));
+        parentTurnId = undefined;
+        threadId = undefined;
       } finally {
         releaseChildResponse();
         removeNotification?.();

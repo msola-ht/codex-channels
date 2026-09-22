@@ -16,6 +16,8 @@ export interface ThreadSectionSnapshot {
 export interface ThreadSnapshot {
   id: string;
   sessionId: string;
+  /** Official spawned-parent relationship; forks remain independent. */
+  parentThreadId?: string | null;
   modelProvider: string;
   preview: string;
   name: string | null;
