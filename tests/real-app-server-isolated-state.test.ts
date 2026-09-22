@@ -11,7 +11,7 @@ import {
 import { join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import { updateReasoningSummaryOnce } from "../scripts/local-update.mjs";
@@ -314,6 +314,11 @@ contractSuite("isolated Codex App Server state contract", () => {
       expect(incompatible.current(target)).toBeUndefined();
       expect(incompatible.idleState(target).forceNew).toBe(true);
       expect((await ownerClient.readThread(id)).status.type).toBe("active");
+      // turn/started does not guarantee the history is persisted; establish that
+      // prerequisite before interrupting the turn used by the recovery contract.
+      await vi.waitFor(async () => {
+        expect((await peerClient.listThreads(historicalCwd)).some((thread) => thread.id === id)).toBe(true);
+      }, { timeout: 10_000, interval: 50 });
       await ownerClient.interruptTurn(id, activeTurnId!);
       await waitFor(() => completed, 2_000);
       await ownerClient.unsubscribeThread(id);
