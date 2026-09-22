@@ -51,9 +51,19 @@ export function refreshProviderFileSnapshot(snapshots, path) {
 
 export async function restoreProviderFileSnapshots(snapshots, guards) {
   await assertProviderFileSnapshots(guards);
+  const errors = [];
   for (const snapshot of snapshots) {
-    await replaceOptionalProviderFile(snapshot.path, snapshot.content);
+    try {
+      const guard = guards.find((item) => item.path === snapshot.path);
+      if (!guard) throw new Error(`第三方 Provider 配置缺少事务快照：${snapshot.path}`);
+      if (!sameOptionalContent(snapshot.content, guard.content)) {
+        await replaceOptionalProviderFile(snapshot.path, snapshot.content);
+      }
+    } catch (error) {
+      errors.push(error);
+    }
   }
+  if (errors.length > 0) throw new AggregateError(errors, "第三方 Provider 配置文件回滚未完成");
 }
 
 export async function applyProviderFileUpdates(updates, snapshots) {

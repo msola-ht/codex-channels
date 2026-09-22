@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
@@ -140,7 +141,7 @@ export async function applyCcgConfiguration({
     }
     const backup = await readInitialConfig(paths.backup);
     if (previous && !backup) throw new Error("CCG 初始配置备份缺失，请先恢复原始备份");
-    const initial = backup ?? { config: current };
+    const initial = previous ? backup : { config: current };
     checkCcgCatalog(source);
     if (!source.models.some((entry) => entry.slug === model)) {
       throw new Error("请选择 CCG 模型目录中的模型");
@@ -154,7 +155,15 @@ export async function applyCcgConfiguration({
         apiKey, catalogPath: paths.catalog, catalog, model,
       },
     );
-    const updates = new Map([
+    const updates = new Map();
+    if (!previous && backup) {
+      const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
+      const [snapshot] = snapshotProviderFiles([archive]);
+      if (snapshot.content !== undefined) throw new Error("CCG 备份归档路径已被占用");
+      snapshots.push(snapshot);
+      updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
+    }
+    for (const [path, content] of [
       [paths.backup, `${JSON.stringify(initial)}\n`],
       [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
       [paths.manifest, `${JSON.stringify({
@@ -163,7 +172,7 @@ export async function applyCcgConfiguration({
       }, null, 2)}\n`],
       [paths.profile, profile === undefined ? undefined : stringify(profile)],
       [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
-    ]);
+    ]) updates.set(path, content);
     if (mode === "exclusive" || previous?.mode === "exclusive") {
       updates.set(paths.config, stringify(nextConfig));
     }
@@ -272,7 +281,7 @@ export async function runCcgSetup({
   let result;
   if (action === "remove") {
     const confirmed = await prompts.confirm({
-      message: "删除 CCG 配置？固定模式将恢复首次配置前的 Provider 设置，备份保留。",
+      message: "删除 CCG 配置？固定模式将恢复本次安装前的 Provider 设置，备份保留。",
       initialValue: false,
     });
     if (confirmed !== true) return { action: "back" };

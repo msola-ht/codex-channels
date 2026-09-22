@@ -34,12 +34,14 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 - 模型目录：`~/.codex-connect/providers/ccg/models.json`。
 - 目录来源记录：同目录 `models.manifest.json`。
 - 管理标记：同目录 `managed.toml`。
-- 首次主配置备份：同目录 `backup/config.json`。
+- 本次安装前的主配置备份：同目录 `backup/config.json`。
 
 固定模式会在明确确认后备份并修改 Codex 主配置；切换模式使用独立受管 App Server，
 共享 TUI 入口为 `codexc remote --profile sf-ccg`。API Key 保存在 0600 私有配置，
 只注入目标 App Server 子进程，不进入命令行参数或 Gateway TOML。
 删除入口移除 CCG 受管文件；固定模式仅恢复相关 Provider 设置，保留备份和其他设置。
+删除后重新安装会以当时的主配置建立新备份，旧备份保留为 `backup/config-<UUID>.json`；
+同一次安装中的重新配置和模式切换继续使用该次安装的原始备份。
 正在被共享第三方子代理使用时，先切换或停用该角色再删除。
 已配置 CCG 的原始备份缺失时，重新配置会报错，需先恢复原始备份。
 

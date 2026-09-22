@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -170,6 +170,50 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     await expect(applyCcgConfiguration(input, options)).rejects.toThrow("初始配置备份缺失");
     expect(existsSync(options.paths.backup)).toBe(false);
     expect(readFileSync(options.paths.config)).toEqual(before);
+  });
+
+  it("captures a fresh baseline after removal and keeps the previous backup", async () => {
+    const options = fixture();
+    const input = { ...options.input, mode: "exclusive" as const, confirmExclusiveConfigChange: true };
+    await applyCcgConfiguration(input, options);
+    const oldBackup = readFileSync(options.paths.backup, "utf8");
+    await removeCcgConfiguration({ confirmRemove: true }, options);
+    writePrivateFileAtomicSync(options.paths.config, 'model = "new-user-model"\nmodel_reasoning_effort = "low"\n');
+    await applyCcgConfiguration(input, options);
+    const archive = readdirSync(dirname(options.paths.backup)).filter((name) => name !== "config.json");
+    expect(archive).toHaveLength(1);
+    expect(readFileSync(join(dirname(options.paths.backup), archive[0]!), "utf8")).toBe(oldBackup);
+    await removeCcgConfiguration({ confirmRemove: true }, options);
+    expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({
+      model: "new-user-model", model_reasoning_effort: "low",
+    });
+  });
+
+  it("rolls back a reinstallation baseline and archive when installation fails", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    await removeCcgConfiguration({ confirmRemove: true }, options);
+    const oldBackup = readFileSync(options.paths.backup);
+    writePrivateFileAtomicSync(options.paths.config, 'model = "new-user-model"\n');
+    failure.path = options.paths.marker;
+    await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow("injected");
+    expect(readFileSync(options.paths.backup)).toEqual(oldBackup);
+    expect(readdirSync(dirname(options.paths.backup))).toEqual(["config.json"]);
+    expect(existsSync(options.paths.catalog)).toBe(false);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("restores the catalog when the unchanged Codex Home is read-only", async () => {
+    const options = fixture();
+    await applyCcgConfiguration(options.input, options);
+    const before = Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined);
+    options.source.models[0]!.description = "new catalog content";
+    chmodSync(options.environment.CODEX_HOME, 0o500);
+    try {
+      await expect(applyCcgConfiguration(options.input, options)).rejects.toThrow();
+      expect(Object.values(options.paths).map((path) => existsSync(path) ? readFileSync(path) : undefined)).toEqual(before);
+    } finally {
+      chmodSync(options.environment.CODEX_HOME, 0o700);
+    }
   });
 
   it.each(["model", "reasoning"])("rejects removing the shared role's %s from the catalog", async (removed) => {
