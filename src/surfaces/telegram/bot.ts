@@ -115,6 +115,7 @@ export interface TelegramSurfaceOptions {
   planUpdatesEnabled?: boolean;
   reasoningEnabled?: boolean;
   codexUpstreamUserAgent?: () => string | undefined;
+  officialOpenAiAuthenticated?: () => boolean | undefined;
   openAiConnectivity?: () => NonNullable<StartupRuntimeInfo["openAiConnectivity"]>;
   inputQuietWindowMs?: number;
   now?: () => number;
@@ -269,6 +270,7 @@ export class TelegramSurface {
             },
             { includeGitBranch: true },
           );
+          const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated?.();
           return {
             chatId,
             text: formatStartupNotification(workspaces, status, {
@@ -280,6 +282,9 @@ export class TelegramSurface {
               nodeVersion: process.version,
               transport: "Unix WebSocket",
               codexUpstreamUserAgent: options.codexUpstreamUserAgent?.() ?? null,
+              ...(officialOpenAiAuthenticated === undefined
+                ? {}
+                : { officialOpenAiAuthenticated }),
               ...(options.openAiConnectivity
                 ? { openAiConnectivity: options.openAiConnectivity() }
                 : {}),

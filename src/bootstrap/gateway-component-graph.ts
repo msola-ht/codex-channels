@@ -839,6 +839,11 @@ export abstract class GatewayComponentGraph {
       logger,
       gatewayVersion: codexCliVersion,
       codexUpstreamUserAgent: () => this.codexUpstreamUserAgent,
+      officialOpenAiAuthenticated: () => (
+        this.primaryProvider === "openai" && this.customPrimaryProviderId === undefined
+          ? hasCodexAuthFile(process.env)
+          : undefined
+      ),
       openAiConnectivity: () => this.openAiConnectivity,
       onFatal: (surface, accountId, error) => this.handleSurfaceFatal(
         surface,

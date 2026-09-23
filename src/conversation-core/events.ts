@@ -1,7 +1,7 @@
 export type SurfaceId = string;
 export type MessagePhase = "commentary" | "final_answer";
 export type TurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
-export type TurnErrorCode = "misalignmentPolicyViolation" | "usageLimitExceeded";
+export type TurnErrorCode = "misalignmentPolicyViolation" | "usageLimitExceeded" | "unauthorized";
 export type TurnPlanStepStatus = "pending" | "inProgress" | "completed";
 export type GoalStatus =
   | "active"

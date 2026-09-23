@@ -213,6 +213,9 @@ stream_max_retries = 0
 `~/.codex/auth.json`）；未检测到该鉴权文件按 OpenAI 官方未登录处理，WebUI Provider 状态不把
 官方 OpenAI 作为主 Provider 展示，Setup 总览与 `codexc primary-provider list` 标注“未登录”，
 会话 `/model` 不列出官方 OpenAI 模型，只有第三方模型可继续选择。
+渠道启动通知同时标注“OpenAI 官方未登录”并给出 `codex login` 或 `/model` 的选择提示；已有官方
+Thread 不自动迁移 Provider，若 Turn 返回结构化 `unauthorized`，完成卡片按 OpenAI 官方与其他
+Provider 分别提示重新登录、改选第三方或更新对应凭据。
 未绑定 Thread 且没有手动选择时，只有一个可选第三方 Provider 就自动使用它的 Profile 默认模型，
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，

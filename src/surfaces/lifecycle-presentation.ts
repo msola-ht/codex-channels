@@ -71,6 +71,8 @@ export interface StartupRuntimeInfo {
   transport: string;
   codexUpstreamUserAgent: string | null;
   debugEnabled?: boolean;
+  /** 官方主路由是否已有 Codex 鉴权；`undefined` 表示当前未使用官方主路由。 */
+  officialOpenAiAuthenticated?: boolean;
   openAiConnectivity?:
     | "recovering"
     | "reachable"
@@ -132,6 +134,12 @@ export function createStartupPresentation(
         value: `Codex Connect ${gatewayMetadata.version} · Codex ${runtime.gatewayVersion}`,
       },
       ...openAiConnectivityFields(runtime.openAiConnectivity),
+      ...(runtime.officialOpenAiAuthenticated === false
+        ? [{
+            label: "OpenAI 官方",
+            value: "未登录；请运行 codex login，或发送 /model 选择第三方提供商",
+          }]
+        : []),
     ],
     sections: [
       ...(runtime.debugEnabled === true
@@ -392,6 +400,11 @@ function formatTurnErrorMessage(
       return "Luna Reserve 用量已用尽。";
     }
     return "OpenAI 普通用量已用尽。";
+  }
+  if (errorCode === "unauthorized") {
+    return usesOpenAiAccount(modelProvider)
+      ? "OpenAI 官方登录已失效，请运行 codex login；或发送 /model 选择第三方提供商后重试。"
+      : "当前提供商凭据已失效，请通过 codexc setup 更新对应 Provider 的密钥或账户后重试。";
   }
   return formatOpenAiErrorMessage(value);
 }

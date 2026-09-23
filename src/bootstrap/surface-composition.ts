@@ -144,6 +144,7 @@ function createWeixinModule(
       ),
       text: (target) => {
         const status = options.service.status(target, { includeGitBranch: true });
+        const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
         return Promise.resolve(renderWeixinStartupNotification(
           options.config.workspaces,
           status,
@@ -157,6 +158,9 @@ function createWeixinModule(
             transport: "Unix WebSocket",
             codexUpstreamUserAgent:
               options.codexUpstreamUserAgent() ?? null,
+            ...(officialOpenAiAuthenticated === undefined
+              ? {}
+              : { officialOpenAiAuthenticated }),
             openAiConnectivity: options.openAiConnectivity(),
             debugEnabled: isDebugLogLevel(options.config.logLevel),
           },
@@ -254,6 +258,7 @@ function createFeishuModule(
           },
           { includeGitBranch: true },
         );
+        const officialOpenAiAuthenticated = options.officialOpenAiAuthenticated();
         return {
           chatId,
           text: renderFeishuStartupNotification(
@@ -269,6 +274,9 @@ function createFeishuModule(
               transport: "Unix WebSocket",
               codexUpstreamUserAgent:
                 options.codexUpstreamUserAgent() ?? null,
+              ...(officialOpenAiAuthenticated === undefined
+                ? {}
+                : { officialOpenAiAuthenticated }),
               openAiConnectivity: options.openAiConnectivity(),
               debugEnabled: isDebugLogLevel(options.config.logLevel),
             },
@@ -341,6 +349,7 @@ function createTelegramModule(
     gatewayVersion: options.gatewayVersion,
     ...(config.codexTimezone === undefined ? {} : { appServerTimezone: config.codexTimezone }),
     codexUpstreamUserAgent: options.codexUpstreamUserAgent,
+    officialOpenAiAuthenticated: options.officialOpenAiAuthenticated,
     openAiConnectivity: options.openAiConnectivity,
   });
   return createTelegramRuntimeModule(

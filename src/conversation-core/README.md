@@ -12,8 +12,8 @@
   Core 不重复发布问题正文、不标记最终答复；Turn 完成事件原样携带 Client 已校验的官方
   `durationMs` 与 Router 已确认的 Workspace、`modelProvider`；普通前台用户 Turn 在官方成功终态前
   未产生非空最终回复时附加稳定诊断标记，手动压缩和后台 Turn 不参与该判断；结构化
-  `misalignmentPolicyViolation` 与 Luna Reserve 触发所需的 `usageLimitExceeded` 只以窄分类
-  传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入
+  `misalignmentPolicyViolation`、Luna Reserve 触发所需的 `usageLimitExceeded` 与登录或刷新令牌
+  失效的 `unauthorized` 只以窄分类传递到完成事件并由共享 Surface 展示层生成固定提示；模型代理提供时，Core 把稳定请求统计输入
   交给 `turn-timing-accumulator.ts`，不读取 SQLite。完成卡片消费官方 Turn 总耗时以及请求结果、
   Token 与压缩摘要，以及本轮首个有效上游 `upstreamTtftMs` 样本；统计摘要不计算模型请求聚合耗时、
   本地首段回复延迟或纯生成速度；完成事件允许 Bootstrap 从持久化请求注入平均 `tokensPerSecond`，Core 不重复计算；

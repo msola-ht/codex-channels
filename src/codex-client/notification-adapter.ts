@@ -725,9 +725,10 @@ function parseTurnErrorCode(value: unknown): TurnErrorCode | undefined {
   if (value === ("misalignmentPolicyViolation" satisfies CodexErrorInfo)) {
     return "misalignmentPolicyViolation";
   }
-  return value === ("usageLimitExceeded" satisfies CodexErrorInfo)
-    ? "usageLimitExceeded"
-    : undefined;
+  if (value === ("usageLimitExceeded" satisfies CodexErrorInfo)) {
+    return "usageLimitExceeded";
+  }
+  return value === ("unauthorized" satisfies CodexErrorInfo) ? "unauthorized" : undefined;
 }
 
 function parseAuthMode(

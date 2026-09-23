@@ -197,6 +197,8 @@ Gateway 启动时读取的 `codex.timezone` 并标注“配置”，未配置时
 使用 Gateway 进程的实际时区。App Server 字段不表示已核实其实际生效状态，配置生效条件见
 [模型可见时区](model-timezone.md)。Node.js 运行时、连接方式和 App Server User-Agent 仍作为调试字段放在
 “运行环境”小节。当前 Codex Home 缺少 `auth.json` 时跳过 OpenAI 启动连通性检查，不显示连通性告警。
+此时启动通知额外显示“OpenAI 官方：未登录；请运行 codex login，或发送 /model 选择第三方提供商”；
+使用自定义主 Provider 或固定第三方 Provider 时官方登录不参与当前路由，不显示该字段。
 存在鉴权文件时，先从 App Server 读取当前认证路由，再只探测对应的 API Key
 或 ChatGPT 官方线路；自定义 Base URL 按 API 线路检查。代理连接失败会在总计 12 秒的启动窗口内
 有限重试；该总时限包含 `account/read`，超时会取消未完成的 RPC。仍不可达、Base URL 路径无效、
@@ -372,7 +374,9 @@ Turn 推理期间，Gateway 消费官方 `item/reasoning/summaryTextDelta`、`su
 Turn 的 `misalignmentPolicyViolation` 结构化错误只在边界和 Core 中保留窄分类，完成卡片统一显示
 “请求因安全策略不一致而终止，请调整请求内容或目标后重试。”；上游自由文本和额外细节不直接作为
 该分类文案，Turn 指标使用独立的 `misalignment_policy_violation` 分类并保留原协议代码，
-`willRetry=false` 与失败终态保持原样。其他 `CodexErrorInfo` 继续沿用既有脱敏文本。
+`willRetry=false` 与失败终态保持原样。`unauthorized` 结构化错误表示登录或刷新令牌失效，完成卡片
+按 OpenAI 官方与其他 Provider 分别提示运行 `codex login` 或发送 `/model`，以及更新对应 Provider
+凭据，不展示上游原文。其他 `CodexErrorInfo` 继续沿用既有脱敏文本。
 
 `/plugin <对象>` 的详情只显示 `plugin/installed` 返回的安全摘要；能力和适用套餐标识各最多展示
 8 项并明确省略数量，不显示 Plugin 来源路径、远端 URL、图标、截图或默认提示词。
