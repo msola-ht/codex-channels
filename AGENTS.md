@@ -1,63 +1,61 @@
-# codex-channels 项目约束
+# codex-channels Project Rules
 
-## 适用范围与事实来源
+## Scope and Sources of Truth
 
-- 本文件适用于整个仓库；更具体目录中的 `AGENTS.override.md` 或 `AGENTS.md` 优先。
-- 开始工作时确认适用规则；按任务读取相关资料，不把全文通读作为每次编辑的前置条件。
-  用户操作查阅 `README.md` 的入口及 `docs/user-guide.md` 对应章节；模块边界查阅
-  `src/README.md` 与受影响模块 README；实现修改查阅相关公开接口和既有测试。
-- 已读取且未变化的资料不重复读取。上下文压缩、模型切换或中断后，补读已丢失的适用规则；
-  工作区、规则或任务范围变化时读取新增的相关部分。编辑、提交、跨轮继续或经过固定时长本身不触发重读。
-- 本文件定义稳定的开发边界；用户行为以根 README 链接的使用指导和专题文档为准，模块职责以模块 README 为准。
-- 只支持当前文档、配置示例、协议基线和存储 Schema 明确定义的接口。不支持的输入必须明确报错，不增加隐式别名、迁移或回退。
+- These rules apply to the entire repository. More specific `AGENTS.override.md` or `AGENTS.md` files take precedence.
+- Establish the applicable rules when starting work. Read material needed for the task, rather than requiring a full read before every edit.
+  For user operations, use the entry points in `README.md` and relevant sections of `docs/user-guide.md`.
+  For module boundaries, use `src/README.md` and affected module READMEs. For implementation changes, inspect relevant public interfaces and existing tests.
+- Do not reread unchanged material already in context. After compaction, a model switch or an interruption, restore missing applicable rules.
+  When the workspace, rules or task scope changes, read the newly relevant parts. Editing, committing, continuing across turns or elapsed time alone does not trigger rereading.
+- This file defines stable development boundaries. User-facing behavior is defined by the guides and topic documents linked from the root README; module responsibilities are defined by module READMEs.
+- Support only interfaces explicitly defined by current documentation, configuration examples, protocol baselines and storage schemas. Reject unsupported inputs explicitly; do not add implicit aliases, migrations or fallbacks.
 
-## 官方资料查阅
+## Consulting Official Sources
 
-- 新增或改变微信、飞书平台交互行为时，先通过 `docs/upstream-sources.md` 定位对应资料。如果其中记录的
-  `upstream/` 本地仓库存在且 HEAD 与项目锁定基线一致，必须优先查阅本地源码和测试，
-  不得先联网搜索同一版本内容。只有本地仓库缺失、基线不匹配、锁定源码未包含所需资料、
-  需要核对动态开放平台文档或用户明确要求更新时，才允许联网查询，并先说明原因。
-- `upstream/` 是被主项目忽略的只读参考仓库。不得修改、提交、推送其中内容，也不得静默
-  `fetch`、切换版本或以远端 `main` 替代项目锁定基线。升级上游基线必须先按
-  `docs/upstream-sources.md` 审查差异，再同步对应资料索引、实现与测试。
-- 新增、修改或删除任何 Codex App Server RPC 方法、`codex-protocol` 业务类型依赖，以及
-  Transport、初始化、Thread、Turn、Item、Notification、Server Request、审批、模型设置、
-  Fast、Goal、Review、账户用量、Skill、MCP、Plugin 或 Codex CLI 版本相关行为前，必须先查阅
-  `docs/index.md` 中对应条目，核对相关本地生成类型、模块公开接口和项目测试；新增或改变协议
-  语义时进一步核对锁定版本官方源码与测试，官方文档用于补充契约说明。只读取涉及的方法、字段
-  和调用链，不通读无关资料；纯文案、排版或不改变协议行为的整理不触发上游阅读。
-  不得凭记忆实现协议字段或行为。
-- 官方资料、当前锁定版本源码和本地实现含义不清或看似冲突时，先完成针对性查询并明确版本差异，
-  不以官方 `main` 分支替代项目锁定版本，不通过反复试改推断协议。
-- 协议升级或上述行为、官方源码定位、本项目实现入口发生变化时，必须同步更新
-  `docs/index.md` 中实际变化的版本、数量、固定版本链接、当前支持矩阵、实现映射或复核命令。新增协议
-  能力必须先在矩阵中标明官方方法、本地入口和验证方式；生成类型存在不代表项目已经支持，
-  生成类型仍是当前锁定 CLI 协议字段的最终事实来源。
+- Before adding or changing WeChat or Feishu platform interactions, locate the relevant sources through `docs/upstream-sources.md`.
+  If the referenced local `upstream/` repository exists and its HEAD matches the locked baseline, consult its source and tests first;
+  do not search online for the same version first. Online queries are allowed only when local sources are missing, the baseline differs,
+  required information is absent from the locked source, dynamic platform documentation needs checking, or the user explicitly requests an update. Explain the reason first.
+- `upstream/` contains read-only reference repositories ignored by the main project. Do not modify, commit or push their contents,
+  silently `fetch` or switch versions, or substitute remote `main` for the locked baseline. Before upgrading an upstream baseline,
+  review differences under `docs/upstream-sources.md`, then update the relevant source index, implementation and tests together.
+- Before adding, changing or removing Codex App Server RPC methods, business dependencies on `codex-protocol` types, or behavior involving
+  Transport, initialization, Thread, Turn, Item, Notification, Server Request, approvals, model settings, Fast, Goal, Review, account usage,
+  Skill, MCP, Plugin or the Codex CLI version, consult the relevant `docs/index.md` entries and check local generated types, module public interfaces and project tests.
+  When adding or changing protocol semantics, also check official source and tests at the locked version; official documentation supplements the contract.
+  Read only the affected methods, fields and call chains. Copy edits, formatting and cleanup that do not change protocol behavior do not trigger upstream reading.
+  Do not implement protocol fields or behavior from memory.
+- If official documentation, locked source and local implementation are unclear or appear inconsistent, perform a targeted investigation and identify version differences first.
+  Do not substitute official `main` for the locked version or infer the protocol through repeated trial edits.
+- When a protocol upgrade or the above behavior, official source locations or local implementation entry points change, update the affected versions,
+  counts, pinned links, support matrix entries, implementation mappings or verification commands in `docs/index.md`.
+  Before adding a protocol capability, record its official method, local entry point and verification in the matrix.
+  Generated types do not establish local support; they remain the final source of truth for protocol fields of the locked CLI.
 
-## Codex CLI 升级与发布
+## Codex CLI Upgrades and Releases
 
-- 仅在升级或发布任务中读取并遵循 [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)。
-  只采用官方正式 Codex CLI，审查生成差异并完成业务适配，不保留旧协议兼容层。
-- 升级提案保持 Draft，未经明确授权不得转 Ready、合并、发布或部署。升级与发布保留完整验证、
-  失败报告和最小工作流权限；执行细节以升级流程及 `.github/workflows/README.md` 为准。
-- 已发布 Tag 与 npm 包不可覆盖。候选版、修复版发布后的开发基线恢复属于发行闭环，
-  必须按升级流程完成后才能开始下一轮发布准备。
+- Read and follow [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md) for upgrade or release tasks only.
+  Use official stable Codex CLI releases, review generated differences and complete business adaptations without retaining old-protocol compatibility layers.
+- Keep upgrade proposals in Draft. Do not mark Ready, merge, release or deploy without explicit authorization.
+  Preserve complete validation, failure reports and minimal workflow permissions. Execution details are defined by the upgrade guide and `.github/workflows/README.md`.
+- Published tags and npm packages must not be overwritten. Restoring the development baseline after a candidate or fix release is part of release completion;
+  finish it under the upgrade guide before preparing the next release.
 
-## 当前实现
+## Current Architecture
 
-- 仓库只包含一个 TypeScript 模块化 Gateway；正式本机入口是 npm CLI `codexc`。
-- Codex App Server 独立运行；默认或固定模式使用一个主实例，切换模式可增加由同一服务入口监管的
-  Provider 隔离实例。原生 Codex TUI 与 Gateway 按 Provider 连接对应实例，共享该侧 Thread 和实时状态。
-- App Server 是 Thread、Turn、Item、Goal 和会话历史的唯一事实来源。
-- Gateway 停止或重启不得主动终止共享 App Server。
-- 本机主 App Server 与可选 Provider App Server 都使用各自的私有 Unix WebSocket；Socket 生命周期
-  和权限由运行时与服务安装脚本管理。
-- 原生终端交互由 `codex --remote` 提供，Gateway 不实现第二套终端会话界面。
-- Gateway 不读取、解析或修改 Codex 内部会话文件，也不复制完整会话历史。
+- The repository contains one modular TypeScript Gateway. The official local entry point is the npm CLI `codexc`.
+- Codex App Server runs independently. Default or fixed mode uses one primary instance; switching mode may add Provider-isolated instances supervised by the same service entry point.
+  Native Codex TUI and Gateway connect to the corresponding Provider instance and share its Threads and live state.
+- App Server is the sole source of truth for Thread, Turn, Item, Goal and conversation history.
+- Stopping or restarting Gateway must not actively terminate the shared App Server.
+- The local primary App Server and optional Provider App Servers each use a private Unix WebSocket. Runtime and service installation scripts manage socket lifecycle and permissions.
+- Native terminal interaction is provided by `codex --remote`; Gateway does not implement a second terminal session interface.
+- Gateway does not read, parse or modify Codex internal session files or duplicate complete conversation history.
 
-## 模块边界
+## Module Boundaries
 
-一级模块职责与文件索引见 [`src/README.md`](src/README.md) 及对应模块 README，依赖方向保持为：
+Top-level module responsibilities and file indexes are documented in [`src/README.md`](src/README.md) and each module README. Preserve this dependency direction:
 
 ```text
 Surface -> Application/Core <- Codex Client
@@ -65,222 +63,217 @@ Surface -> Application/Core <- Codex Client
        Policy / Storage / Scheduled Tasks
 ```
 
-- `bootstrap` 是组合根，具体实现选择和生命周期协调集中在这里。
-- 每个一级模块通过自己的 `index.ts` 暴露公开能力；跨模块不得导入其他模块的内部实现文件。
-- 一级模块之间只允许 `tests/module-boundaries.test.ts` 明确列出的依赖方向；新增依赖必须先确认
-  职责归属并同步允许列表，不能只为通过测试扩大白名单。
-- Conversation Core 不得依赖平台 SDK、具体数据库、服务管理器或底层 JSON-RPC Transport。
-- Surface 不得直接操作底层 Transport，也不得把平台 SDK 类型带入核心模块。
-- Codex Client 不得调用平台 API、生成平台文案或保存业务绑定。
-- 不复制状态归约、协议解析、审批协调或授权逻辑来绕过模块接口。
+- `bootstrap` is the composition root; concrete implementation selection and lifecycle coordination belong there.
+- Each top-level module exposes public capabilities through its own `index.ts`. Do not import another module's internal implementation files across module boundaries.
+- Top-level dependencies are limited to directions explicitly allowed by `tests/module-boundaries.test.ts`.
+  Establish responsibility before adding a dependency and update the allowlist accordingly; do not expand it merely to pass tests.
+- Conversation Core must not depend on platform SDKs, concrete databases, service managers or the underlying JSON-RPC Transport.
+- Surfaces must not directly operate the underlying Transport or introduce platform SDK types into core modules.
+- Codex Client must not call platform APIs, generate platform-facing copy or store business bindings.
+- Do not duplicate state reduction, protocol parsing, approval coordination or authorization logic to bypass module interfaces.
 
-## App Server 协议
+## App Server Protocol
 
-- 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
-- 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
-- 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖未获准的实验协议。修改相关能力前读取
-  [`docs/index.md` 的受控协议边界](docs/index.md#受控协议边界)；只使用该处明确允许的能力、
-  受控导出及用途，并保留真实 App Server 合同。生成类型存在不等于项目已支持。
-- 运行时只可协商当前精确版本、稳定生成类型或索引中受控例外的生成类型已覆盖、且当前功能必需的实验能力；启用前必须审查
-  同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并
-  增加真实 App Server 合同测试。
-- 每个 Transport 连接只执行一次 `initialize`，成功后发送 `initialized`；初始化前不得发送其他请求。
-- JSON-RPC Response、Notification 和 Server Request 必须分别处理。
-- Request ID 必须唯一关联 Pending Response，并在超时、断线和关闭时完成清理。
-- 未知 Notification 可以记录后忽略；未知 Server Request 必须返回明确错误或安全拒绝，不能悬挂。
-- 只有可证明安全的只读或幂等请求可以在过载后自动重试；创建和写入操作不得盲目重试。
+- Generate protocol types from the supported Codex CLI. Do not handwrite protocol fields from memory.
+- Record and validate the exact Codex CLI version associated with generated types.
+- On protocol upgrades, review generated differences before updating controlled exports in `codex-protocol`, implementation and tests.
+- Stable business code must not depend on unapproved experimental protocol capabilities. Before changing related capabilities, read
+  [controlled protocol boundaries in `docs/index.md`](docs/index.md#受控协议边界). Use only the capabilities, controlled exports and purposes explicitly allowed there,
+  and retain real App Server contracts. A generated type does not imply project support.
+- Runtime may negotiate only experimental capabilities required by current functionality and covered by the exact current version's stable generated types or the indexed controlled exceptions.
+  Before enabling them, review the Notifications, Server Requests and fields enabled together. New privileged inputs must be explicitly presented or fail closed;
+  add real App Server contract tests.
+- Each Transport connection performs `initialize` once, then sends `initialized` after success. Send no other requests before initialization.
+- Handle JSON-RPC Responses, Notifications and Server Requests separately.
+- Request IDs must uniquely correlate pending responses, with cleanup on timeout, disconnection and close.
+- Unknown Notifications may be logged and ignored. Unknown Server Requests must receive an explicit error or safe rejection; never leave them hanging.
+- Only provably safe read-only or idempotent requests may be retried automatically after overload. Do not blindly retry creation or write operations.
 
-## Thread 与会话
+## Threads and Sessions
 
-- 使用 App Server 的 `thread/list` 查询会话，不维护平行的会话索引。
-- 普通 Thread 列表查询必须显式传入服务端允许的 `cwd` 和 `sourceKinds`。
-- 本机会话归档预览以明确的 `ancestorThreadId` 限定后代范围，并显式覆盖官方来源类型，不按父会话
-  `cwd` 截断后代。归档前检查可查询后代的 Workspace、Provider 和保护状态，不据此声称已枚举官方内部全部代理。
-- 自动接续前检查 Thread 来源、Workspace、运行状态和现有绑定。
-- 一个 Thread 不能同时绑定多个外部 Conversation；活动 Thread 不得无条件追加新 Turn。
-- 切换、退出、新建、归档或解绑时按协议取消旧订阅，不能只删除本地映射。
-- `thread/resume`、`thread/read`、请求响应和状态通知是事实来源；本地缓存只用于路由和界面展示。
-- 不从单次请求调用推断 App Server 未明确返回的状态变化。
+- Query sessions using App Server `thread/list`; do not maintain a parallel session index.
+- Ordinary Thread list queries must explicitly pass server-allowed `cwd` and `sourceKinds`.
+- Local session archive previews must scope descendants by explicit `ancestorThreadId` and explicitly cover official source kinds, rather than truncating descendants by the parent's `cwd`.
+  Before archiving, check the Workspace, Provider and protection state of queryable descendants. Do not claim this enumerates all official internal agents.
+- Before automatic continuation, check Thread source, Workspace, running state and existing bindings.
+- A Thread cannot be bound to multiple external Conversations simultaneously. Do not unconditionally append a new Turn to an active Thread.
+- When switching, exiting, creating, archiving or unbinding, cancel old subscriptions through the protocol; deleting local mappings alone is insufficient.
+- `thread/resume`, `thread/read`, request responses and state notifications are authoritative. Local caches serve routing and presentation only.
+- Do not infer state transitions that App Server has not explicitly returned from a single request invocation.
 
-## 状态与持久化
+## State and Persistence
 
-- SQLite StateStore 只保存 Conversation 身份、已授权 Actor、Workspace、Thread 和 Session 的最小绑定。
-- 一个 Conversation 由 `surface + accountId + conversationId` 唯一标识。
-- StateStore 不持久化消息正文、Turn/Item 历史、Diff、Plan、审批内容或 Codex 会话文件副本。
-- 运行时只接受当前 Schema，不执行隐式迁移；不支持的版本必须失败关闭。数据库结构变更时，须随版本
-  提供明确支持范围的显式升级流程及备份、失败处理和验证，不以清空数据库代替升级。
-- StateStore 保持可替换，业务模块只能依赖其公开接口。
-- 用户配置、数据库、Socket、日志和临时上传不得写入会被 npm 升级替换的包目录。
-- Surface 用户 OAuth Token 不得写入配置文件或 StateStore；macOS 使用系统 Keychain，Linux
-  使用 Gateway 数据目录下由独立随机主密钥保护的 AES-256-GCM 私有凭据文件。Token 不得进入
-  日志、平台消息或 Application/Core，必须提供按当前 Surface Actor 撤销和进程停止取消路径。
-- 用户级 Gateway 配置唯一来源是 `~/.codex-connect/config.toml` 或
-  `CODEX_CONNECT_CONFIG_FILE` 显式指定的 TOML 文件；共享代理单独统一保存在 Codex Home 的 `.env`，
-  只读取四个代理变量，不读取旧 Gateway `.env`。不支持旧 `[network]` 表，更新器不迁移代理配置。
-- Gateway 只可在当前配置版本完成结构与运行语义校验后，原子补入严格 Schema 明确定义的缺失安全
-  默认值；不得覆盖已有值，不得补渠道凭据、身份或允许名单，不得借此兼容未知字段或迁移不受支持版本。
-- 代理字段未明确配置时可以读取标准代理环境变量及受支持的当前系统代理；Codex `.env` 明确值优先，
-  自动发现只形成进程环境，不得回写用户配置或服务定义。
-- `codexc doctor` 保持只读；Gateway 配置与共享代理分别以当前 TOML 和 Codex `.env` 为配置来源，
-  不兼容旧配置、不改写配置，也不得输出敏感内容。
-- 新增项目依赖时说明必要性、影响和移除方式，复用用户已给出的相应授权；尚未授权时先确认。
-  仅用于当前任务、不改变项目配置或用户数据的临时工具依赖按环境权限执行，不套用数据升级审批。
-- 改变持久化格式前，提供具体的数据处理、备份、失败恢复与回滚方案并取得相应授权；
-  已确认的方案不重复确认，范围或风险实质变化时重新说明。
+- SQLite StateStore stores only minimal bindings for Conversation identity, authorized Actor, Workspace, Thread and Session.
+- A Conversation is uniquely identified by `surface + accountId + conversationId`.
+- StateStore must not persist message bodies, Turn/Item history, Diff, Plan, approval content or copies of Codex session files.
+- Runtime accepts only the current schema and performs no implicit migration; unsupported versions must fail closed.
+  Database schema changes must ship an explicit upgrade process with a defined supported range, backup, failure handling and verification. Do not replace upgrades with database deletion.
+- Keep StateStore replaceable. Business modules may depend only on its public interface.
+- Do not store user configuration, databases, sockets, logs or temporary uploads in package directories replaced by npm upgrades.
+- Surface user OAuth Tokens must not be stored in configuration files or StateStore. Use the system Keychain on macOS;
+  on Linux, use a private AES-256-GCM credential file under Gateway's data directory, protected by an independent random master key.
+  Tokens must not enter logs, platform messages or Application/Core. Provide revocation for the current Surface Actor and cancellation on process shutdown.
+- The sole source of user-level Gateway configuration is `~/.codex-connect/config.toml` or a TOML file explicitly selected by `CODEX_CONNECT_CONFIG_FILE`.
+  Shared proxy settings are stored separately in Codex Home's `.env`; read only the four proxy variables, never the old Gateway `.env`.
+  The old `[network]` table is unsupported, and the updater does not migrate proxy configuration.
+- Only after structural and runtime semantic validation of the current configuration version may Gateway atomically fill missing safe defaults explicitly defined by the strict schema.
+  Never overwrite existing values or fill channel credentials, identities or allowlists. Do not use defaults to accept unknown fields or migrate unsupported versions.
+- When proxy fields are not explicitly configured, standard proxy environment variables and supported current system proxy settings may be read.
+  Explicit Codex `.env` values take precedence. Automatic discovery affects process environment only; do not write it back to user configuration or service definitions.
+- `codexc doctor` is read-only. Use current TOML for Gateway configuration and Codex `.env` for shared proxies.
+  Do not support old configuration formats, rewrite configuration or output sensitive content.
+- When adding project dependencies, explain necessity, impact and removal, and reuse applicable user authorization; ask first if not authorized.
+  Temporary tool dependencies used only for the current task, without changing project configuration or user data, follow environment permissions rather than data-upgrade approval procedures.
+- Before changing persistence formats, provide a concrete plan for data handling, backup, failure recovery and rollback, and obtain applicable authorization.
+  Do not reconfirm an approved plan unless its scope or risk changes materially.
 
-## Surface、审批与并发
+## Surfaces, Approvals and Concurrency
 
-- Surface 通过编译期内置插件注册表显式接入，并通过统一的输入、输出、授权和审批接口调用
-  Application/Core。每个插件 ID 必须与其返回的 Surface ID 一致，`surface + accountId` 不得重复；
-  不扫描目录、不动态加载 npm 包，也不允许插件绕过组合根直接注册。
-- Surface 对外提供的 Codex 能力必须已经列入 `docs/index.md` 当前支持矩阵，并由当前锁定版本的
-  官方协议、受控类型、本地实现和验证共同支撑。平台 SDK 自身具备某项能力，不代表 Gateway 可以
-  把它解释为新的 Thread、Turn、Item、工具、审批或历史能力。
-- Setup、Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道运维或呈现能力，必须留在
-  Surface 边界；它们不得复制 Codex 状态、伪造 App Server 事件，或为协议未支持的行为建立
-  平行语义。
-- App Server Reader 只负责读取、解析、关联 Response 和投递事件，不等待平台网络请求。
-- 平台输出使用有界队列；同一 Conversation 保持顺序，不同 Conversation 可以并行。
-- 队列过载时可以合并或丢弃非关键中间事件，但不得静默丢弃审批、错误、Item 完成或 Turn 完成事件。
-- 平台 API 超时、限流或失败不得阻塞 App Server Reader。
-- 后台任务必须有明确所有者、取消路径、有限重试和关闭等待上限。
-- 下一 Turn 的补充输入统一使用当前 Thread 的 App Server Queue；Gateway 不保存第二套消息正文队列，
-  入队、列表、更新、删除、排序和启动必须通过受控 Queue 端口，入队时明确提示 App Server 持久化语义。
-- 审批状态必须绑定 Thread、协议提供的 Turn 和请求标识；MCP elicitation 无法关联活动 Turn
-  时允许 `turnId` 为 `null`，但仍必须保留 Thread 与 App Server 请求 ID。交互令牌必须不可预测、
-  一次性使用并设置过期时间。
-- 已被其他客户端解决的请求必须及时使当前交互失效。
-- 未识别、无法路由或缺少归属信息的高权限请求默认拒绝或取消。
-- 命令或文件审批只有在协议明确支持且用户显式选择时才能映射为本次 App Server 会话持续授权；
-  一次批准不得静默升级。临时权限审批始终限定当前 Turn。
-- 命令前缀持久授权必须与会话授权分开显示；只有 App Server 提供完全一致的
-  `proposedExecpolicyAmendment` 和 `acceptWithExecpolicyAmendment` 时才可选择，并且只能在用户
-  明确选择后原样返回该提议。Gateway 不自行写入或扩大 Codex 执行规则。
-- 网络规则持久授权必须显示精确主机和允许或拒绝动作；只有
-  `proposedNetworkPolicyAmendments` 与 `applyNetworkPolicyAmendment` 完全一致时才可选择，
-  并且所有规则主机必须与 `networkApprovalContext.host` 一致；不一致时失败关闭。网络会话授权
-  必须显示其目标主机，每次只原样返回用户明确选择的一条规则。Gateway 不合并、推导或扩大网络规则。
+- Integrate Surfaces explicitly through a built-in plugin registry defined at compile time, invoking Application/Core through shared input, output, authorization and approval interfaces.
+  Each plugin ID must match its returned Surface ID, and `surface + accountId` must be unique.
+  Do not scan directories, dynamically load npm packages or let plugins register directly around the composition root.
+- Codex capabilities exposed by a Surface must already appear in the current `docs/index.md` support matrix, backed by the locked official protocol,
+  controlled types, local implementation and verification. Platform SDK capabilities alone do not authorize new Thread, Turn, Item, tool, approval or history semantics.
+- Setup, Doctor, menus, input status, connection health and platform media transfer are channel operations or presentation capabilities and must remain within Surface boundaries.
+  They must not duplicate Codex state, fabricate App Server events or establish parallel semantics for unsupported protocol behavior.
+- App Server Reader only reads, parses, correlates responses and dispatches events; it must not wait for platform network requests.
+- Use bounded queues for platform output. Preserve ordering within each Conversation; different Conversations may run concurrently.
+- On overload, noncritical intermediate events may be merged or dropped, but approvals, errors, Item completion and Turn completion must never be silently dropped.
+- Platform API timeouts, rate limits or failures must not block App Server Reader.
+- Background tasks need a clear owner, cancellation path, bounded retries and a shutdown wait limit.
+- Additional input for the next Turn uses the current Thread's App Server Queue. Gateway must not store a second message-body queue.
+  Add, list, update, delete, reorder and start through the controlled Queue port; explain App Server persistence semantics when enqueueing.
+- Bind approval state to Thread, the protocol-provided Turn and request identifier. MCP elicitation may use `turnId: null` when no active Turn can be associated,
+  but must retain Thread and App Server request ID. Interaction tokens must be unpredictable, single-use and expiring.
+- Promptly invalidate interactions for requests already resolved by another client.
+- Reject or cancel unrecognized, unroutable or unattributed privileged requests by default.
+- Map command or file approval to persistent authorization for the current App Server session only when the protocol supports it and the user explicitly selects it.
+  Never silently promote a one-time approval. Temporary permission approvals remain limited to the current Turn.
+- Display persistent command-prefix authorization separately from session authorization. Offer it only when App Server provides matching
+  `proposedExecpolicyAmendment` and `acceptWithExecpolicyAmendment`; return the proposal unchanged only after explicit user selection.
+  Gateway must not write or broaden Codex execution rules itself.
+- Persistent network-rule authorization must show the exact host and allow/deny action. Offer it only when
+  `proposedNetworkPolicyAmendments` and `applyNetworkPolicyAmendment` match exactly and every rule host equals `networkApprovalContext.host`; otherwise fail closed.
+  Network session authorization must show its target host. Return only one explicitly selected rule unchanged at a time. Gateway must not merge, infer or broaden network rules.
 
-## 安全
+## Security
 
-- 外部用户只能选择预配置 Workspace，不能提交任意绝对工作目录。
-- 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用 Thread、Turn、命令、文件或权限能力。
-- Unix Socket 父目录权限必须限制为当前用户，Socket 不得向无关用户开放。
-  当前 CLI 的 rendezvous 链接只接受官方确定性目标，共享 Runtime 必须校验链接属主、规范路径哈希、
-  受保护目录与真实 Socket 的类型、权限和属主；Transport 与服务监管不得分别放宽校验或跟随任意链接。
-- 无认证 App Server 不得监听非回环网络地址。
-- 默认不自动批准命令、文件写入、额外文件系统权限或网络权限。
-- 配置错误必须失败关闭，不得采用更宽松的权限、目录或网络默认值。
-- 日志、异常和平台消息不得包含 Token、Cookie、Authorization Header、敏感表单或未经约束的上游响应。
-- 外部用户消息只显示明确标记的结构化错误；未知内部异常不得原样发送。
+- External users may select only preconfigured Workspaces, never arbitrary absolute working directories.
+- Authorize every external input against the Surface Actor and Workspace before invoking Thread, Turn, command, file or permission capabilities.
+- Restrict Unix Socket parent-directory permissions to the current user; sockets must not be accessible to unrelated users.
+  Current CLI rendezvous links may target only the official deterministic destination. Shared Runtime must validate link ownership, canonical path hashes,
+  protected directories, and the real socket's type, permissions and owner. Transport and service supervision must not independently relax checks or follow arbitrary links.
+- Unauthenticated App Server must not listen on non-loopback network addresses.
+- Do not automatically approve commands, file writes, additional filesystem permissions or network permissions by default.
+- Configuration errors must fail closed, never fall back to broader permissions, directories or network defaults.
+- Logs, exceptions and platform messages must not contain Tokens, Cookies, Authorization Headers, sensitive forms or unconstrained upstream responses.
+- External user messages may expose only explicitly designated structured errors; never send unknown internal exceptions verbatim.
 
-## 实现与修改
+## Implementation and Changes
 
-- 采用满足当前目标的最小完整修改，优先复用现有模块、公开接口和类型。
-- 不为未出现的需求增加抽象层、通用框架、配置项或扩展机制。
-- 同一可信数据不重复解析或验证；跨越新的信任边界、保护不同业务不变量或资源状态可能变化时，执行必要检查。
-- 协议核心使用明确类型和可辨识联合，避免不受约束的 `any`。
-- 错误保留可操作上下文但不泄露敏感信息；降级行为必须可观察。
-- 不把网络、协议、状态、渲染和存储职责集中到同一个大型模块。
-- 修改公开命令、配置键、协议基线、持久化格式或默认行为时，检查并更新实际受影响的文档、示例和测试。
-- 删除或替换实现时同步删除孤儿入口、依赖、配置、脚本和测试。
-- 使用计划工具时，在阶段完成或计划变化后及时更新，状态应反映实际进展，不提前标记完成。
+- Make the smallest complete change that meets the current goal, reusing existing modules, public interfaces and types.
+- Do not add abstraction layers, general frameworks, configuration options or extension mechanisms for needs that have not arisen.
+- Do not repeatedly parse or validate the same trusted data. Check as needed when crossing a new trust boundary, protecting a different business invariant or handling resources whose state may change.
+- Use explicit types and discriminated unions in the protocol core; avoid unconstrained `any`.
+- Preserve actionable error context without sensitive information. Degraded behavior must be observable.
+- Do not concentrate networking, protocol, state, rendering and storage responsibilities in one large module.
+- When changing public commands, configuration keys, protocol baselines, persistence formats or defaults, check and update the documentation, examples and tests actually affected.
+- When deleting or replacing implementations, remove orphaned entry points, dependencies, configuration, scripts and tests together.
+- When using a plan tool, update it promptly after stage completion or plan changes. Reflect actual progress; do not mark unfinished work complete.
 
-## 命令与提权
+## Commands and Permission Escalation
 
-- 命令执行遵循当前环境的权限策略；已有授权在适用范围内复用，不为每次 Git、npm 或验证命令
-  另设确认步骤。已知需要沙箱外权限时直接申请提权，执行受沙箱限制时按工具要求处理，不绕过权限控制。
-- 提权请求必须说明命令目的并保持在当前仓库和当前任务范围内；不得借此扩大修改、提交或远端写入权限。
-- 提权只解决命令执行权限，不代替用户授权。提交、推送、依赖变更和其他外部写入仍须遵守本文件对应约束。
-- 公开 `codexc` 命令及子命令必须统一支持 `-h` / `--help`，只保留文档声明的规范名称，不增加
-  隐式别名。`gateway` 与 `service-app-server` 仅作为服务模板内部入口，不列入公开帮助。
-- 后台进程统一由 `codexc service` 管理；启停、重启、状态和日志使用 `gateway`、
-  `app-server`、`all` 目标。启停和状态默认 `all`，重启和日志默认 `gateway`。
-- 项目级 Codex 命令预设位于 `.codex/rules/default.rules`，只可免确认运行只读 Git 检查、仓库
-  已有验证脚本，以及已明确列入预设的 `codexc channel send-image`（把经共享校验的本地图片
-  发送到绑定渠道会话）；不得放行 Git 暂存、提交、推送、依赖安装、发布、服务管理、任意 Shell
-  或破坏性命令。
-- 使用 `codexc rules init` 从当前 Git/Node 项目根目录生成该文件，使用 `codexc rules check`
-  调用 Codex CLI 校验；规则属于磁盘项目，不得写入或依赖 Workspace Registry。
-- Surface 的项目规则命令只能操作当前授权 Workspace 的精确根目录，只接受生成或检查，不得
-  暴露强制覆盖；`.codex`、`rules` 或规则文件为符号链接时必须失败关闭。
+- Follow the current environment's permission policy. Reuse applicable authorization rather than adding confirmation for every Git, npm or verification command.
+  Request escalation directly when outside-sandbox permissions are known to be required. Handle sandbox restrictions as the tool requires; never bypass permission controls.
+- Escalation requests must explain the command's purpose and remain within this repository and task. They must not expand permission to modify, commit or write remotely.
+- Escalation grants execution permission, not user authorization. Commits, pushes, dependency changes and other external writes still follow their corresponding rules here.
+- Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
+  `gateway` and `service-app-server` are internal service-template entry points, excluded from public help.
+- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server` and `all`.
+  Start, stop and status default to `all`; restart and logs default to `gateway`.
+- Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
+  and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.
+  Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.
+- Generate the file from the current Git/Node project root using `codexc rules init`; validate it through Codex CLI using `codexc rules check`.
+  Rules belong to the on-disk project and must not be stored in or depend on Workspace Registry.
+- Surface project-rule commands may operate only on the exact root of the authorized Workspace and expose only generation or checking, never forced overwrite.
+  Fail closed if `.codex`, `rules` or the rule file is a symbolic link.
 
-## 验证
+## Verification
 
-- 验证按风险和阶段分层，不为每次文件保存或微小编辑重复运行同一检查。完成一个可验证的小批次后，
-  只运行与改动直接相关的最小测试；相关输入与环境未变化时，不主动重复已通过的开发验证；提交与 CI 门禁仍按各自入口执行。
-- 开发阶段按影响范围选择定向测试、`check`、`lint` 或 `docs:check`，不默认运行全量测试、构建、
-  打包或安装冒烟。只有协议、Transport、服务模板、打包安装等对应边界发生变化时，才在开发阶段
-  增加相关专项验证。
-- 定向测试是否需要构建取决于其输入：直接加载源码的测试可单独运行；读取 `dist/` 的 CLI、
-  安装或集成测试必须使用当前构建产物。`npm test -- <测试文件>` 自带构建，不再额外重复构建。
-- 已授权开发包含使用临时夹具的相关本地验证及修复本次改动造成的失败，无需逐步确认。
-  接触当前用户 App Server、账户、指定 Thread 或服务状态的集成操作，须核对实际影响与既有授权，
-  不能将隔离测试的授权推广到真实环境。
-- 新增行为、安全边界、失败路径或回归修复必须有有效测试覆盖，并执行相关验证；覆盖不足时新增或调整测试。纯移动、改名、去重或内部重构在
-  既有测试已经覆盖外部行为时，不机械新增重复测试；需要时只补一组共享契约测试。
-- 普通提交由 `.githooks/pre-commit` 执行一次完整 `verify:commit`，不提前手动重复运行。
-  `npm ci`、`npm install` 或 `npm run hooks:install` 必须安装该 hook；缺失或不可用时先运行
-  `npm run hooks:install` 修复后，由正常提交运行完整检查，不再提前手动重复执行。CI/门禁本身正在修改、用户明确要求或需要独立
-  诊断失败时也可手动运行；不得使用 `--no-verify` 或缩减检查绕过门禁。
-- `npm run verify:commit` 是本地提交与 GitHub CI 共用的完整提交检查入口，必须依次覆盖
-  暂存差异格式、类型与版本、生产和测试 Lint、WebUI 构建与 Lint、文档链接与索引、全量测试、Shell 语法、
-  npm tarball 安装冒烟，以及当前平台可执行的服务模板检查。干净源码全局安装不进入日常提交与
-  PR 门禁；完整 `npm run test:package`、正式发布工作流和 Codex CLI 升级验证仍必须覆盖该合同。
-- 修改检查脚本、Git hook 或 CI 时，必须保持 `verify:commit`、`.githooks/pre-commit`、
-  GitHub Actions 及实际受影响的脚本索引、工作流文档一致；用户开发入口变化时才更新根 README。
-- 协议、Transport 或共享 App Server 行为变化必须执行覆盖该变化的真实 App Server 冒烟验证；已有合同不足时扩展覆盖，不能只依赖 Mock。
-- 核心协议测试应覆盖初始化、消息分流、请求清理、Thread/Turn 主路径和订阅取消。
-- 会话测试应覆盖双向发现与接续、绑定独占、活动状态和 Gateway 重启恢复。
-- Surface 测试应覆盖授权、审批超时与失效、输出顺序、平台超时隔离和敏感信息清洗。
-- 无法执行必要验证时，交付中必须说明未验证项、原因和可执行的后续检查。
+- Match verification to risk and stage. Do not repeat checks for every save or small edit. After a verifiable batch, run the smallest directly relevant test set.
+  Do not proactively repeat successful development checks when their inputs and environment are unchanged. Commit and CI gates still run through their own entry points.
+- During development, choose targeted tests, `check`, `lint` or `docs:check` according to impact; do not default to full tests, builds, packaging or installation smoke tests.
+  Add specialized checks when their corresponding boundaries change, such as protocol, Transport, service templates or package installation.
+- Build requirements depend on test inputs. Tests loading source directly may run alone; CLI, installation or integration tests reading `dist/` must use current build output.
+  `npm test -- <test-file>` already builds; do not add another build.
+- Authorized development includes relevant local verification using disposable fixtures and fixing failures caused by the requested change, without approval at every step.
+  For integration operations touching the user's current App Server, account, specific Thread or service state, check actual effects and existing authorization.
+  Do not extend isolated-test authorization to live environments.
+- New behavior, security boundaries, failure paths and regression fixes need effective test coverage and relevant execution. Add or adjust tests only when coverage is insufficient.
+  Do not mechanically add duplicate tests for moves, renames, deduplication or internal refactors already covered by behavioral tests; add one shared contract suite when needed.
+- Ordinary commits run the full `verify:commit` once through `.githooks/pre-commit`; do not run it manually beforehand.
+  `npm ci`, `npm install` or `npm run hooks:install` must install the hook. If missing or unusable, repair it with `npm run hooks:install`, then let the normal commit run validation.
+  Manual runs are allowed when changing CI or gates, explicitly requested, or needed to diagnose a failure independently.
+  Never bypass gates with `--no-verify` or reduced checks.
+- `npm run verify:commit` is the shared full-check entry point for local commits and GitHub CI. In order, it covers staged diff formatting, types and versions,
+  production and test Lint, WebUI build and Lint, documentation links and indexes, the full test suite, shell syntax,
+  npm tarball installation smoke tests and service-template checks executable on the current platform.
+  Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, release workflows and Codex CLI upgrade validation.
+- When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
+  Update the root README only when user-facing development entry points change.
+- Protocol, Transport or shared App Server behavior changes require real App Server smoke verification covering the change. Extend existing contracts if insufficient; mocks alone are not enough.
+- Core protocol tests should cover initialization, message routing, request cleanup, primary Thread/Turn paths and subscription cancellation.
+- Session tests should cover bidirectional discovery and continuation, exclusive binding, active state and recovery after Gateway restart.
+- Surface tests should cover authorization, approval expiry and invalidation, output ordering, platform timeout isolation and sensitive-data sanitization.
+- If required verification cannot run, report the missing checks, reasons and executable follow-up checks in the delivery.
 
-## 文档放置
+## Documentation Placement
 
-各文档职责固定，新增或修改内容先判断归属，不把主题细节堆进根目录 README：
+Determine the document's responsibility before adding or changing content. Do not accumulate topic details in the root README.
 
-- 根目录 `README.md` 是用户入口，保留安装、配置、常用操作、排障与升级的结论及专题链接。
-  协议方法、内部状态、数据口径、安全校验、渠道差异和完整参数说明归对应专题，不作为功能变更日志堆积。
-- `docs/display.md`：渠道展示口径、完成卡片、`/metrics` 统计行为、信息命令格式与调试模式。
-- `docs/index.md`：Codex 协议基线、支持矩阵、官方源码与实现映射；CLI 导出等非协议能力只在
-  对应实现说明中一句话带过，不扩展支持矩阵。
-- `docs/deepseek.md`、`docs/errors.md` 等：单一主题文档，只写该主题内容。
-- `src/**/README.md`：模块职责、文件索引与公开接口，不重复用户可见的命令和配置说明。
-- `index.md`：全项目文档索引；新增或移动任何 `docs/` 文档或模块 README 时必须同步更新。
-- 不确定归属时优先放最具体的文档并更新 `index.md`，不把细节写进根 `README.md`。
-- 文档只随公开行为、接口、配置、命令、部署或文件索引变化更新；内部重构不扩写功能清单或测试说明。
-  新增、删除或移动文件时，只更新直接负责该目录的索引，避免多份文档重复记录实现细节。
-- 常规文档审查不包含 `.codex/skills/**` 和 `.agents/skills/**`；只有用户明确要求安装、更新或审查技能时才单独处理技能目录。
-- 规则文件必须与源码、接口、测试和文档一致，不保留已删除实现、旧名称、迁移阶段描述、未落地能力
-  或冲突要求；修改规则后按这些项目再次自审。
+- Root `README.md` is the user entry point: installation, configuration, common operations, troubleshooting and upgrade conclusions with topic links.
+  Protocol methods, internal state, data definitions, security checks, channel differences and complete parameter descriptions belong in their topic documents, not a feature changelog in the README.
+- `docs/display.md`: channel presentation conventions, completion cards, `/metrics` behavior, information-command formatting and debug mode.
+- `docs/index.md`: Codex protocol baseline, support matrix, official source and implementation mappings. Mention non-protocol capabilities such as CLI export briefly in the relevant implementation description; do not expand the support matrix for them.
+- `docs/deepseek.md`, `docs/errors.md` and similar files: single-topic documentation limited to that topic.
+- `src/**/README.md`: module responsibilities, file indexes and public interfaces; do not duplicate user-facing command or configuration documentation.
+- `index.md`: the project-wide documentation index. Update it when adding or moving any `docs/` document or module README.
+- If placement is unclear, prefer the most specific document and update `index.md`; do not put details in the root `README.md`.
+- Update documentation only for changes to public behavior, interfaces, configuration, commands, deployment or file indexes. Do not expand feature lists or test descriptions for internal refactoring.
+  When adding, deleting or moving files, update only the index responsible for that directory; avoid duplicating implementation details across documents.
+- Routine documentation review excludes `.codex/skills/**` and `.agents/skills/**`. Handle skill directories separately only when the user explicitly requests skill installation, updates or review.
+- Rules must stay consistent with source, interfaces, tests and documentation. Remove references to deleted implementations, old names, migration-stage descriptions, unimplemented capabilities and conflicting requirements.
+  Review these aspects again after changing rules.
 
-## Git 与交付
+## Git and Delivery
 
-- 保留 Git 历史，不通过删除仓库或重新初始化规避审查。
-- 不覆盖、回退或混入用户已有的未提交改动；无法安全绕开时停止并说明。
-- 提交前根据暂存差异复核根目录 `README.md` 相关章节、受影响的目录 README 与文档索引；
-  不重新遍历无关模块，当前任务已读取且内容未变化时不重复读取全文。
-- 暂存差异中的文档遵循上文职责划分；只审查本次受影响内容，不重复遍历无关专题。
-- 修复本次引入或直接影响的索引缺项、孤儿链接、旧名称和行为描述不一致；无关存量问题单独记录，
-  不自动扩大整理范围。既有门禁失败仍须如实报告并解决或取得相应处置，不能将失败声明为通过。
-- 提交前审查暂存范围与内容；差异格式、文档索引和完整检查由 pre-commit 的 `verify:commit` 统一执行。
-- 未经用户明确要求，不执行提交、推送、历史改写或其他远端写入。
-- PR 描述按实际内容使用“新增”“修复”“改动”，无内容的分类可省略；至少一类说明具体变化，保留的章节不得为空或仅有占位。正式
-  Codex CLI 升级 PR 还必须写明对本项目的收益、本次采用、本次不采用及风险与验证。
-- 合并 PR 时，合并提交标题与描述分别使用最终 PR 标题和正文，不使用自动生成的提交列表替代。
-- 完成修改时说明改动的模块和行为、已运行的验证、涉及的公开接口或安全边界，以及仍存在的风险。
-- 交付内容不复述工作规则；除非用户明确要求，只呈现任务结果、证据和限制。
+- Preserve Git history. Do not delete or reinitialize the repository to avoid review.
+- Do not overwrite, revert or mix in the user's existing uncommitted changes. Stop and explain if they cannot be safely avoided.
+- Before committing, review relevant root README sections, affected directory READMEs and documentation indexes against the staged diff.
+  Do not traverse unrelated modules or reread unchanged documents already read for the task.
+- Staged documentation changes must follow the responsibilities above. Review only affected content, not unrelated topics again.
+- Fix index gaps, orphaned links, old names and inconsistent behavior descriptions introduced or directly affected by this change.
+  Record unrelated existing issues separately without automatically broadening cleanup. Report existing gate failures honestly and resolve them or obtain an appropriate disposition; never claim a failed check passed.
+- Review staged scope and content before committing. The pre-commit `verify:commit` handles diff formatting, documentation indexes and full verification.
+- Do not commit, push, rewrite history or perform other remote writes unless explicitly requested by the user.
+- Use the PR categories “新增” (Added), “修复” (Fixed) and “改动” (Changed) as applicable. Empty categories may be omitted;
+  at least one must describe a concrete change, and retained sections must not be empty or contain only placeholders.
+  Formal Codex CLI upgrade PRs must also explain project benefits, adopted changes, excluded changes, risks and verification.
+- When merging a PR, use its final title and body as the merge commit title and description, rather than an automatically generated commit list.
+- On delivery, explain affected modules and behavior, verification performed, public interfaces or security boundaries involved and remaining risks.
+- Do not repeat work rules in the delivery. Unless requested, present only results, evidence and limitations.
 
-## 任务完成与继续执行
+## Completion and Persistence
 
-- 已授权开发应持续完成范围内实现、必要验证、相关文档和发现的回归，不在第一版实现后自动停下求确认。
-  普通实现选择、测试边界及可逆的本地修正自行决定；只有缺失信息实质影响结果、需要扩大范围或
-  超出既有授权时才询问。用户已给出的授权与偏好不重复确认。
-- 连续失败时重新检查证据、假设和方法，不以固定尝试次数强制停工；无法推进的依赖明确报告，
-  同时完成不依赖该阻塞的工作。缺少必要验证时不得宣称任务已完全验证。
-- 完成标准是请求范围已落实、相应检查通过、相关接口与文档一致，并说明剩余限制；不为可选优化
-  无限扩大任务。提交、推送、发布和部署只有被明确要求时才属于完成条件。
-- 只读审查以提供问题位置、影响、证据和调整方案为完成标准；用户要求确认后修改时，先交付审查结果。
-- 修改 Skills 时保留项目特有约束，按具体任务触发并按需读取参考资料；不因模型升级一概删除规则，
-  也不以固定阅读、反复确认或逐文件验证代替结果判断。专门流程服从适用项目规则和当前用户授权。
+- Continue authorized development through implementation, necessary verification, relevant documentation and identified regressions within scope; do not stop automatically after the first implementation to seek confirmation.
+  Decide routine implementation choices, test boundaries and reversible local fixes independently. Ask only when missing information materially affects the result,
+  scope must expand or an action exceeds existing authorization. Do not reconfirm permissions or preferences already given.
+- After repeated failures, reconsider evidence, hypotheses and methods rather than stopping at a fixed attempt count.
+  Report concrete blocked dependencies while completing independent work. Do not claim full verification when required checks remain missing.
+- Completion means the requested scope is implemented, applicable checks pass, related interfaces and documentation agree, and remaining limitations are stated.
+  Do not expand indefinitely for optional improvements. Commits, pushes, releases and deployment are completion conditions only when explicitly requested.
+- Read-only review is complete when it supplies issue locations, impacts, evidence and proposed adjustments. When the user requests confirmation before edits, deliver review findings first.
+- When changing Skills, preserve project-specific constraints, trigger them by concrete tasks and load references as needed.
+  Do not discard rules wholesale because of a model upgrade, or substitute fixed reading routines, repeated confirmations or per-file checks for judgment about results.
+  Specialized workflows follow applicable project rules and current user authorization.
