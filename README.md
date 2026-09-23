@@ -99,6 +99,7 @@ DS、OCG、CCG 支持多账户，在 `codexc setup → 模型与提供商` 中�
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)
+- [渠道图片输入与支持范围](docs/user-guide.md#正常发图与图片引用)
 - [项目文档索引](index.md)
 
 ## 本地开发

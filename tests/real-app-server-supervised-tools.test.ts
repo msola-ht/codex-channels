@@ -11,6 +11,7 @@ import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import type { ThreadStartResponse, ThreadTurnsListResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
@@ -20,6 +21,124 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server tools", () => {
+    it("forwards image fileId, preserves history and reports backend rejection", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "codex-image-reference-contract-"));
+      const codexHome = join(directory, "home");
+      const bodies: unknown[] = [];
+      const completions: { turnId: string; status: string }[] = [];
+      let rejectImage = false;
+      const apiServer = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end();
+            return;
+          }
+          bodies.push(JSON.parse(Buffer.concat(chunks).toString()) as unknown);
+          if (rejectImage) {
+            response.writeHead(400, { "content-type": "application/json" });
+            response.end(JSON.stringify({ error: { code: "invalid_image", message: "Fixture file is unavailable" } }));
+            return;
+          }
+          const id = "image-reference-response";
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          for (const event of [
+            { type: "response.created", response: { id } },
+            { type: "response.output_item.done", item: { type: "message", role: "assistant", id: "fixture-answer",
+              content: [{ type: "output_text", text: "Transport fixture; no image recognition" }] } },
+            completedResponseEvent(id),
+          ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+          response.end();
+        });
+      });
+      let rpc: JsonRpcClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
+        const address = apiServer.address();
+        if (!address || typeof address === "string") throw new Error("Missing image fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        const catalog = join(codexHome, "models.json");
+        writeFileSync(catalog, JSON.stringify({ models: [{
+          slug: "image-contract", display_name: "Image fixture", description: "Offline image fixture",
+          context_window: 200_000, default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+          shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+          availability_nux: null, upgrade: null, base_instructions: "Do not call tools.",
+          support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: false,
+          experimental_supported_tools: [], input_modalities: ["text", "image"],
+        }] }));
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "image-contract"', 'model_provider = "image-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[model_providers.image-contract]', 'name = "Image fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
+          'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+          'request_max_retries = 0', 'stream_max_retries = 0',
+        ].join("\n"));
+        rpc = new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { PATH: process.env.PATH, CODEX_HOME: codexHome },
+        }));
+        rpc.setServerRequestHandler(async () => { throw new Error("Unexpected image contract Server Request"); });
+        await rpc.connect();
+        removeNotification = rpc.onNotification((notification) => {
+          if (notification.method === "turn/completed") {
+            const params = notification.params as { turn: { id: string; status: string } };
+            completions.push({ turnId: params.turn.id, status: params.turn.status });
+          }
+        });
+        const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+          cwd: directory, sandbox: "read-only", approvalPolicy: "never", historyMode: "paginated",
+        } });
+        // Exercise generated protocol directly: Gateway intentionally has no fileId input port yet.
+        const input = [{ type: "image" as const, fileId: "file_contract_fixture", detail: "high" as const }];
+        const accepted = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [...input] } });
+        await waitFor(() => completions.some(turn => turn.turnId === accepted.turn.id), 15_000);
+        expect(completions).toContainEqual({ turnId: accepted.turn.id, status: "completed" });
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]).toMatchObject({ input: expect.arrayContaining([
+          expect.objectContaining({ role: "user", content: expect.arrayContaining([
+            { type: "input_image", file_id: "file_contract_fixture", detail: "high" },
+          ]) }),
+        ]) });
+        const history = await rpc.request<ThreadTurnsListResponse>({ method: "thread/turns/list", params: {
+          threadId: thread.id, itemsView: "full", limit: 10,
+        } });
+        expect(history.data.flatMap(turn => turn.items)).toContainEqual(expect.objectContaining({
+          type: "userMessage", content: expect.arrayContaining([...input]),
+        }));
+        const followup = await rpc.request<TurnStartResponse>({ method: "turn/start", params: {
+          threadId: thread.id, input: [{ type: "text", text: "Continue discussing the previous image.", text_elements: [] }],
+        } });
+        await waitFor(() => completions.some(turn => turn.turnId === followup.turn.id), 15_000);
+        expect(completions).toContainEqual({ turnId: followup.turn.id, status: "completed" });
+        expect(bodies).toHaveLength(2);
+        expect(bodies[1]).toMatchObject({ input: expect.arrayContaining([
+          expect.objectContaining({ role: "user", content: expect.arrayContaining([
+            { type: "input_image", file_id: "file_contract_fixture", detail: "high" },
+          ]) }),
+        ]) });
+        const followupBody = bodies[1] as { input: { content?: { type: string; file_id?: string; image_url?: string }[] }[] };
+        const followupImages = followupBody.input.flatMap(item => item.content ?? [])
+          .filter(item => item.type === "input_image");
+        expect(followupImages).toEqual([{ type: "input_image", file_id: "file_contract_fixture", detail: "high" }]);
+        rejectImage = true;
+        const rejected = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [...input] } });
+        await waitFor(() => completions.some(turn => turn.turnId === rejected.turn.id), 15_000);
+        expect(completions).toContainEqual({ turnId: rejected.turn.id, status: "failed" });
+        expect(bodies).toHaveLength(3);
+        await rpc.request({ method: "thread/unsubscribe", params: { threadId: thread.id } });
+      } finally {
+        removeNotification?.();
+        await rpc?.close();
+        apiServer.closeAllConnections();
+        await new Promise<void>((resolve) => apiServer.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }, 45_000);
+
+
     it("delivers async questions without a Server Request and accepts ordinary steer and next-Turn answers", async () => {
       const directory = mkdtempSync(join(tmpdir(), "codex-async-contract-"));
       const codexHome = join(directory, "home");

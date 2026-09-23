@@ -86,7 +86,7 @@ export async function runCodexUserSettingsSetup({
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
-        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、人格、更新检查与历史",
+        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、更新检查与历史",
       }] : []),
       {
         value: "permissions",

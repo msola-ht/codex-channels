@@ -44,6 +44,7 @@
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、
   不采用原因、重新评估条件与基线升级影响。
+- [`docs/codex-image-fileid-probe.md`](docs/codex-image-fileid-probe.md)：原生图片引用的离线与在线脱敏证据、夹具、复现步骤及验收限制。
 - [`docs/thread-queue-revert-development.md`](docs/thread-queue-revert-development.md)：Codex 0.148.0
   原生 Thread Queue 替换方案、分页历史与 Revert 的实施边界和验收链路。
 - [`docs/thread-usage-development.md`](docs/thread-usage-development.md)：Codex 0.148.0

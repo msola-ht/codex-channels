@@ -89,7 +89,7 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许三类
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许四类
   受控协议例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`；Luna Reserve 自动回退为原样保留当前
   Default/Plan 模式，还允许 `thread/settings/update.collaborationMode`。这些字段必须通过
@@ -100,12 +100,17 @@ Surface -> Application/Core <- Codex Client
   合同测试覆盖；列表可进行有界只读重试，写入不得盲目重试。Thread Revert 只允许使用
   `thread/turns/list`、`thread/revert` 与 `thread/reverted`，同样必须通过
   `--experimental` 生成类型、从 `codex-protocol` 受控导出并由真实 App Server 合同测试覆盖；
-  分页历史仅允许有界只读重试，Revert 写请求不得重试，且不得接入 `thread/items/list`。开发中
-  Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
+  分页历史仅允许有界只读重试，Revert 写请求不得重试，且不得接入 `thread/items/list`。
+  前台计划任务动态工具只允许使用 `thread/start.dynamicTools` 注册顶层 `schedule_task`，
+  并处理对应 `item/tool/call`；必须通过 `--experimental` 生成类型、从 `codex-protocol`
+  受控导出，并由真实 App Server 合同覆盖注册与回调。调用必须关联已绑定的前台 Thread
+  与唯一授权 Actor，创建和删除仍须用户确认；后台计划任务 Thread 不注册工具并拒绝递归调用。
+  不向已有 Thread 注入工具，不接入 `additionalContext`、任意动态工具或其他命名空间。
+  开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
   并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；开关默认关闭且必须在 Doctor、
   命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些例外或开发中入口接入、暴露其他
   实验方法、字段或通知。
-- 运行时只可协商当前精确版本、默认生成类型已覆盖且当前功能必需的实验能力；启用前必须审查
+- 运行时只可协商当前精确版本、稳定生成类型或上述受控例外的生成类型已覆盖、且当前功能必需的实验能力；启用前必须审查
   同时开放的 Notification、Server Request 和字段，新增高权限输入必须显式展示或失败关闭，并
   增加真实 App Server 合同测试。
 - 每个 Transport 连接只执行一次 `initialize`，成功后发送 `initialized`；初始化前不得发送其他请求。
