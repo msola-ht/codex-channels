@@ -369,8 +369,7 @@
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
   逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
-- `check-pr-description.mjs`：所有 Ready PR 必须写清新增、修复和改动，没有对应内容时明确写
-  “无”；正式升级 PR 还要把自动占位内容替换为本项目的收益、采用项、不采用项及风险与验证。
+- `check-pr-description.mjs`：所有 Ready PR 至少在新增、修复、改动之一说明具体变化，无内容分类可省略，保留章节不得为空或仅有占位；正式升级 PR 还要把自动占位内容替换为本项目的收益、采用项、不采用项及风险与验证。
   Draft PR 暂时跳过，转为 Ready 时由同一门禁重新检查。
 - `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，

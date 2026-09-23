@@ -24,7 +24,7 @@
   Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败 Artifact 和 `resolve.log`，
   不会因目标版本为空丢失现场。
 - `codex-upgrade-pr.yml`：统一检查 PR 描述；Draft 阶段允许模板或自动占位内容，所有 Ready PR
-  必须写清新增、修复和改动，没有对应内容时明确写“无”。正式 Codex CLI 升级 PR 还必须写清
+  至少在新增、修复、改动之一说明具体变化，无内容分类可省略，保留章节不得为空或仅有占位。正式 Codex CLI 升级 PR 还必须写清
   对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
   为兼容 main 的现有 Branch Protection 保留。
 - `publish.yml`：推送与 Codex CLI 协议基础版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把

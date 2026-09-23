@@ -163,7 +163,6 @@ function readPackageScripts(projectRoot) {
 function renderRules(packageScripts) {
   const sections = [
     renderGitRule(),
-    renderGitInspectionRule(),
     renderChannelImageRule(),
   ];
   if (typeof packageScripts.test === "string") {
@@ -205,19 +204,6 @@ function renderGitRule() {
         "git add README.md",
         "git commit -m test",
         "git push",
-    ],
-)`;
-}
-
-function renderGitInspectionRule() {
-  return `prefix_rule(
-    pattern = ["git", ["branch", "remote"]],
-    decision = "allow",
-    justification = "Read-only branch and remote inspection is safe in this project",
-    match = [
-        "git branch --list",
-        "git branch -a",
-        "git remote -v",
     ],
 )`;
 }

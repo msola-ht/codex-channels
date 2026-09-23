@@ -3,19 +3,40 @@
 本页用于定位 Codex App Server 的官方说明、`0.156.1` 固定版本源码，以及本项目对应实现。
 它是查询入口，不替代生成协议类型，也不声明本项目支持官方协议的全部能力。
 
+## 受控协议边界
+
+修改实验能力、动态工具、图片引用或 Plugin 接入时读取本节；以下约束不因资料移位而放宽。
+
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许五类
+  受控协议例外。官方 Plan 模式只允许使用
+  `collaborationMode/list` 和 `turn/start.collaborationMode`；Luna Reserve 自动回退为原样保留当前
+  Default/Plan 模式，还允许 `thread/settings/update.collaborationMode`。这些字段必须通过
+  `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
+  合同测试覆盖。原生 Thread Queue 只允许使用
+  `thread/queue/add|list|update|delete|reorder|start` 与 `thread/queue/changed`，必须通过
+  `--experimental` 生成类型、从 `codex-protocol` 受控导出，并由真实 App Server
+  合同测试覆盖；列表可进行有界只读重试，写入不得盲目重试。Thread Revert 只允许使用
+  `thread/turns/list`、`thread/revert` 与 `thread/reverted`，同样必须通过
+  `--experimental` 生成类型、从 `codex-protocol` 受控导出并由真实 App Server 合同测试覆盖；
+  分页历史仅允许有界只读重试，Revert 写请求不得重试，且不得接入 `thread/items/list`。
+  前台计划任务动态工具只允许使用 `thread/start.dynamicTools` 注册顶层 `schedule_task`，
+  并处理对应 `item/tool/call`；必须通过 `--experimental` 生成类型、从 `codex-protocol`
+  受控导出，并由真实 App Server 合同覆盖注册与回调。调用必须关联已绑定的前台 Thread
+  与唯一授权 Actor，创建和删除仍须用户确认；后台计划任务 Thread 不注册工具并拒绝递归调用。
+  不向已有 Thread 注入工具，不接入 `additionalContext`、任意动态工具或其他命名空间。
+  图片引用上传只允许额外读取 `account/read.workspaceRouting`，用于核对当前 ChatGPT 账户、
+  后端与路由约束；通过官方 `getAuthStatus` 获取当前可导出的令牌，不读取磁盘凭据。
+  该字段必须使用受控生成类型并由真实 App Server 合同覆盖，不得用于其他账户或路由功能。
+  开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
+  并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；开关默认关闭且必须在 Doctor、
+  命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些例外或开发中入口接入、暴露其他
+  实验方法、字段或通知。
+
 ## 版本与数字
 
 当前索引对应 [`src/codex-protocol/version.json`](../src/codex-protocol/version.json) 锁定的
-`codex-cli 0.156.1`。生成时启用实验类型，但业务只采用固定版本官方 Plan 模式所需的
-`collaborationMode/list`、`turn/start.collaborationMode`、Luna Reserve 自动切换保持当前模式所需的
-`thread/settings/update.collaborationMode`、原生 Thread Queue 六请求与
-`thread/queue/changed`、Thread 分页历史与 Revert 所需的
-`thread/turns/list`、`thread/revert`、`thread/reverted`，以及前台计划任务工具所需的
-`thread/start.dynamicTools` 与对应 `item/tool/call` 回调。动态工具仅注册顶层 `schedule_task`，
-不接入 `additionalContext` 或任意其他动态工具。图片上传另允许读取 `account/read.workspaceRouting`，只用于账户与后端路由校验；
-五类受控例外均须有真实 App Server 合同。
-此外，配置开关控制的开发中 Plugin
-调试使用稳定 `plugin/installed` 与 Turn `mention` 输入；其他生成类型不表示已支持。
+`codex-cli 0.156.1`。生成时启用实验类型；业务采用范围及开发中 Plugin 入口以
+[受控协议边界](#受控协议边界)为准，其他生成类型不表示已支持。
 
 | 数量 | 是什么 | 事实来源 |
 | ---: | --- | --- |

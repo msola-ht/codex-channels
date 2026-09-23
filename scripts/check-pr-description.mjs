@@ -48,9 +48,13 @@ export function checkPullRequestDescription(event) {
   }
 
   const body = pullRequest.body || "";
-  const missing = commonSections.filter((section) => (
+  const presentSections = commonSections.filter((section) => sectionContent(body, section) !== undefined);
+  const missing = presentSections.filter((section) => (
     !hasMeaningfulContent(sectionContent(body, section), true)
   ));
+  if (!presentSections.some((section) => hasMeaningfulContent(sectionContent(body, section), false))) {
+    missing.push("至少一个有具体内容的新增、修复或改动章节");
+  }
 
   if (upgradeTitlePattern.test(pullRequest.title || "")) {
     missing.push(...upgradeSections.filter((section) => (
@@ -61,7 +65,7 @@ export function checkPullRequestDescription(event) {
   if (missing.length) {
     throw new Error(
       `PR 转为 Ready 前必须写清以下章节：${missing.join("、")}。`
-      + "没有对应的新增、修复或改动时必须明确写“无”，不能保留占位内容。",
+      + "无内容的分类可省略，保留的章节不能留空或保留占位内容。",
     );
   }
   return { checked: true };
@@ -76,7 +80,7 @@ function main() {
   const event = JSON.parse(readFileSync(resolve(eventPath), "utf8"));
   const result = checkPullRequestDescription(event);
   console.log(result.checked
-    ? "PR 的新增、修复和改动分类完整。"
+    ? "PR 描述包含具体变化，所需章节有效。"
     : "Draft PR 暂不检查描述，转为 Ready 后执行门禁。");
 }
 

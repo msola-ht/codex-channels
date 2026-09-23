@@ -1,6 +1,6 @@
 ---
 name: channel-image
-description: 把本地图片或截图发送回当前飞书、微信或 Telegram 会话时使用。触发场景包括用户要求“把截图发过来/发我看看”、需要把页面截图、生成的图表或本地图片发给当前渠道。使用 codexc channel send-image，禁止使用 lark-cli 或其他外部渠道 CLI 发图。
+description: 使用 codexc channel send-image，把用户要求发送的本地图片或截图发回当前绑定的飞书、微信或 Telegram 会话。
 ---
 
 # 渠道图片发送
@@ -15,7 +15,7 @@ description: 把本地图片或截图发送回当前飞书、微信或 Telegram 
 codexc channel send-image /绝对/路径.png [--thread <Thread ID>]
 ```
 
-4. 验证结果：`~/.codex-connect/data/channel-outbox/` 下 `pending/` 清空且 `done/` 出现同名文件即发送成功；`failed/` 出现 `*.error.txt` 则发送失败，读取原因。
+4. 验证本次提交项：在 `~/.codex-connect/data/channel-outbox/` 下检查对应文件；`done/` 出现本项文件表示成功，`failed/` 出现本项 `*.error.txt` 表示失败。不要等待整个共享 `pending/` 清空。采用有界等待；超时报告尚未确认送达，不盲目重新发送或宣称成功。
 
 ## 禁止
 
