@@ -75,6 +75,7 @@ describe("ConversationService conversation service session", () => {
       thread: { id: "old", sessionId: "old", cwd: main.cwd, source: "cli", modelProvider: "openai",
         preview: "", name: null, isPinned: false, historyMode: "paginated", status: { type: "idle" }, activeTurnId: null },
       model: "gpt-main", reasoningEffort: null, serviceTier: null, contextCompactionItemIds: [],
+      collaborationMode: "default",
       settingsMatch: false,
       effectiveSettings: { cwd: main.cwd, approvalPolicy: "never", sandbox: "read-only", permissions: null },
     };

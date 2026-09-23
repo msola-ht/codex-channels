@@ -11,7 +11,7 @@
 - `index.ts`：本模块的公开导出入口。
 - `transport.ts`：Transport 接口和公共生命周期基类。
 - `unix-websocket-transport.ts`：连接前校验当前用户私有的父目录和本人所有的真实 Unix Socket，
-  再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
+  通过共享 Runtime 校验 0.156.1 的确定性 rendezvous 链接与受保护目标，再完成 WebSocket HTTP Upgrade 的正式 Transport；消息上限与锁定版本原生 Remote Client 的
   128 MiB 边界一致，避免大型 Thread 恢复响应被客户端提前断开，同时保留有界内存约束。
 - `windows-proxy-transport.ts`：在 Windows 启动并拥有固定版 `codex app-server proxy --sock`
   子进程，把其双向 stdio 包装为标准 WebSocket Transport；复用 128 MiB 消息边界，握手使用独立
@@ -26,7 +26,7 @@
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
-  恢复结果保留响应的实际目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
+  恢复结果保留响应的实际 Default/Plan 模式、目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
   缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
@@ -49,7 +49,7 @@
 - `account-adapter.ts`：把 `account/read` 的当前认证类型裁剪为 API、ChatGPT 或无需 OpenAI 认证的
   启动探测路由，不读取或传播凭据；把账户 Token 用量、单桶或多桶额度、重置券数量与到期时间、账户 ID、普通用量权限及
   有界 Luna Reserve 授权摘要映射为 Application
-  稳定摘要；接受当前 0.155.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
+  稳定摘要；接受当前 0.156.1 完整套餐枚举，按请求 Thread 严格校验官方估算的 ID、整数单位、可选 Token 和分组字段，未知枚举或畸形数值失败关闭，
   不把上游响应正文交给 Surface。
 - `skill-adapter.ts`：从官方按 CWD 返回的 Skill 条目中只保留启用的用户或项目直接安装项，
   使用稳定 `SkillMetadata.pluginId` 排除系统与 Plugin 所有项，不从安装路径猜测来源；列表结果不含本机路径，显式调用只向 Application 返回精确匹配且名称、

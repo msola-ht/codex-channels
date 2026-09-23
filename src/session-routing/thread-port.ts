@@ -44,6 +44,7 @@ export interface ThreadSession {
 }
 
 export interface ThreadResumeSession extends ThreadSession {
+  collaborationMode: "default" | "plan";
   settingsMatch: boolean;
   effectiveSettings: {
     cwd: string;

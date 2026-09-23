@@ -39,6 +39,7 @@ describe("JsonRpcClient MCP", () => {
             runtimeStatus: "connected",
             authStatus: "oAuth",
             tools: { search: {}, fetch: {} },
+            serverCapabilities: { privateMetadata: "must-not-escape" },
           })],
           nextCursor: "1",
         },

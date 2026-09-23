@@ -1,8 +1,47 @@
 # Codex CLI 升级决策
 
 本页说明当前项目采用什么、为什么采用，以及哪些上游能力仍不接入，供下一次升级直接复核。
-当前基线为 `codex-cli 0.155.1`；具体协议、实现和测试以[支持矩阵](index.md#当前支持矩阵)为准，
+当前基线为 `codex-cli 0.156.1`；具体协议、实现和测试以[支持矩阵](index.md#当前支持矩阵)为准，
 升级步骤与门禁见[升级流程](codex-cli-upgrade.md)。本页不重复协议数量、命令参数或逐版本更新日志。
+
+## 0.156.1
+
+本次从 0.155.1 升至 0.156.1，同时审查 [0.156.0](https://github.com/openai/codex/releases/tag/rust-v0.156.0)
+与 [0.156.1](https://github.com/openai/codex/releases/tag/rust-v0.156.1) 两次正式发布；两版均非 Draft、非 Pre-release。
+目标源码为 `b412ff32c417f855c2b2d1581b77058eed87c84b`。0.156.1 相对 0.156.0 没有 App Server 协议变化，
+主要补充 Sol/Luna 模型目录与原生 TUI 提示。此处记录开发升级，不表示 Gateway 已发布。
+
+### 0.156.0 的采用与适配
+
+| 上游变化 | 本次决定与收益 | 验证与限制 |
+| --- | --- | --- |
+| 恢复响应增加实际协作模式 | 从稳定 `thread/resume.collaborationMode` 恢复 Default/Plan，显式接续、自动接续和重连不再固定为 Default | Client/Router 定向测试与真实 App Server 恢复合同；缺失或未知模式明确拒绝 |
+| 模型人格停用 | 移除 CLI/WebUI 人格选择和偏好写字段，避免无效设置；其他偏好保存保留原配置值 | 偏好投影、预览与事务测试；旧人格写请求明确报错，不迁移用户配置 |
+| 图片支持文件引用 | 共享 Queue 与历史把 URL/fileId 图片都裁剪为不可编辑的图片摘要 | 摘要测试不泄露 URL、路径或 fileId；渠道仍发送现有 Data URL，不提供文件引用上传/下载 |
+| Thread 禁用 Plugin 列表 | 现有设置与 Turn 写入不发送空列表覆盖服务端值 | 现有 RPC 合同；字段当前不代表上游已经过滤全部 Plugin 能力，不新增 Plugin 管理入口 |
+| MCP 服务能力与 App UI 元数据 | 保留生成类型，现有适配器只输出受控健康和工具摘要 | MCP/Item 投影与真实合同；任意 JSON、嵌入 UI 不进入渠道 |
+| 异步纯文本与问题 | 问题走现有协调器，纯文本走过程消息，均不充当最终答复 | 通知与 Core 回归；不自动开启实验工具开关 |
+| 登录代理、MCP OAuth 503、模型目录认证刷新、Plan/流式/子代理修复 | 随精确 CLI 吸收上游修复，继续使用官方状态和错误 | 不复制刷新、重试、调度或会话文件；在线认证恢复另需真实网络验证 |
+| Socket、沙箱、Guardian、压缩、TLS 与性能修复 | 适配新的确定性 Unix Socket 链接，严格校验物理路径、0700 目录、0600 Socket 与属主；Transport 和监管共用校验 | Linux 真实合同；macOS/Windows 专属安全行为需要各平台实机验收 |
+
+### 0.156.1 的采用
+
+- 现有 `model/list` 和模型选择器接受账户实际返回的 `gpt-6-sol`、`gpt-6-luna`；不硬编码可用性或默认模型。
+- 每个模型保持自己的思考等级。固定目录中 Sol 支持 low 至 ultra，Luna 支持 low 至 max；运行时仍以服务端目录为准，模型适配测试覆盖差异。
+- 原生 TUI 的 Luna 用量提示随 CLI 获得。Gateway 的 Luna Reserve 仍依赖精确隐藏 `gpt-reserve` 和账户权益，不能改为自动切换 `gpt-6-luna`。
+
+### 本次不采用
+
+- `rollout/compress`、Daybreak/访问计划、账户 `workspaceRouting`、设备公钥验证、MCP App UI 与 Plugin 市场管理没有 Gateway 入口。
+  新字段不意味着授权，未知高权限交互仍明确拒绝或取消；受管 Provider 限制由 App Server 执行，不绕过。
+- 移除的 `thread/rollback` 仅影响生成层；本项目继续使用分页历史与 `thread/revert`，不接入 `thread/items/list`。
+- 全屏 TUI、主题、搜索复制、Mermaid/公式、原生用量、Worktree、语音及 daemon 属于原生 CLI。
+  不复制到 Gateway/WebUI，不接入 Realtime，也不引入第二套服务生命周期或自动开启完成后压缩。
+- Plugin 更新中的接口重命名属于上游内部 API；现有 `plugin/installed` 等 RPC 名称未改变，不添加别名或兼容层。
+
+本次不新增依赖、不改变持久化 Schema。验收包含协议与公开 CLI 合同、类型、Lint、文档、全量测试、
+隔离真实 App Server、构建及完整打包安装；在线新模型推理、真实渠道和其他平台实机结果单独记录。
+固定版本依据与实现入口见[源码索引和支持矩阵](index.md)。
 
 ## 决策原则
 
@@ -66,7 +105,7 @@
 长会话 Fork 等已有功能的验证缺口属于回归验证工作；出现可重复夹具或实际回归时补齐，
 不作为新增功能长期挂在候选列表中。
 
-## 当前基线的升级影响
+## 仍有效的既有升级决定
 
 ### 0.155.1
 

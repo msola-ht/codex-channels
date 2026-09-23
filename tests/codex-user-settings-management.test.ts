@@ -11,6 +11,17 @@ import {
 } from "../scripts/codex-user-settings-management.mjs";
 
 describe("Codex user settings management", () => {
+  it.each([previewCodexUserSetting, updateCodexUserSetting])("rejects retired personality writes before config mutation", async (change) => {
+    const client = settingsClient({ personality: "friendly" });
+    const input = { kind: "preferences", personality: "pragmatic" } as unknown as Parameters<typeof change>[0];
+    await expect(change(input, {
+      expectedVersion: "version-1", createClient: async () => client, primaryProvider: () => "openai",
+    })).rejects.toMatchObject({ code: "unsupported-field", field: "personality" });
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    const settings = await loadCodexUserSettings({ createClient: async () => client, primaryProvider: () => "openai" });
+    expect(settings.defaults).not.toHaveProperty("personality");
+  });
+
   it("projects native policy separately from merged config without exposing MCP secrets", async () => {
     const config = {
       computer_use: { default_app_access: "allow" },
@@ -86,7 +97,6 @@ describe("Codex user settings management", () => {
         reasoningSummary: null,
         planModeReasoningEffort: null,
         verbosity: null,
-        personality: null,
         checkForUpdateOnStartup: null,
         historyPersistence: null,
       },
@@ -203,15 +213,14 @@ describe("Codex user settings management", () => {
     ], { expectedVersion: "version-1" });
   });
 
-  it("writes additional user preferences in one versioned transaction", async () => {
-    const client = settingsClient({});
+  it("writes preferences without changing the retired personality config", async () => {
+    const client = settingsClient({ personality: "friendly" });
 
     await expect(updateCodexUserSetting({
       kind: "preferences",
       reasoningSummary: "concise",
       planModeReasoningEffort: "high",
       verbosity: "high",
-      personality: "friendly",
       checkForUpdateOnStartup: false,
       historyPersistence: "none",
     }, {
@@ -228,7 +237,6 @@ describe("Codex user settings management", () => {
       { keyPath: "model_reasoning_summary", value: "concise" },
       { keyPath: "plan_mode_reasoning_effort", value: "high" },
       { keyPath: "model_verbosity", value: "high" },
-      { keyPath: "personality", value: "friendly" },
       { keyPath: "check_for_update_on_startup", value: false },
       { keyPath: "history.persistence", value: "none" },
     ], { expectedVersion: "version-1" });
@@ -242,7 +250,6 @@ describe("Codex user settings management", () => {
       reasoningSummary: "concise",
       planModeReasoningEffort: "high",
       verbosity: "high",
-      personality: "friendly",
       checkForUpdateOnStartup: false,
       historyPersistence: "none",
       apiKey: "must-not-echo",

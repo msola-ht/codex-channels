@@ -102,6 +102,7 @@
   变量仍保持最高优先级。CLI 与脚本只负责准备已校验的运行环境和默认 Workspace。
 - `gateway-service-runtime.mjs`：持有内部 Gateway 服务子进程及其 reload、终止、退出信号转发；受管服务
   启动前的 App Server 就绪等待由服务命令脚本注入。
+- `app-server-unix-socket.mjs` / `app-server-unix-socket.d.mts`：校验固定 CLI 的 Unix rendezvous 链接、规范路径 SHA-256、受保护目录及真实 Socket 的权限和属主；Transport 与监管探测共用，连接仅使用校验后的物理路径，失效链接保留时不操作其目标。
 - `private-ipc.mjs` / `private-ipc.d.mts`：为 Gateway Owner、App Server Supervisor 和 Provider
   Metrics 提供共享的当前用户私有 IPC。Unix 保留 `0600` Socket、属主和 inode 清理合同；Windows
   使用默认仅创建用户与管理员可访问的命名管道，并在当前 SID 私有描述文件中保存随机管道名和随机

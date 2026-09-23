@@ -1,9 +1,8 @@
-import { lstatSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname } from "node:path";
 
 import WebSocket, { type ClientOptions, type RawData } from "ws";
 
+import { inspectAppServerUnixSocket } from "../../runtime/app-server-unix-socket.mjs";
 import { BaseTransport } from "./transport.js";
 
 const officialRemoteMaxPayloadBytes = 128 * 1024 * 1024;
@@ -34,14 +33,15 @@ export class UnixWebSocketTransport extends BaseTransport {
       return;
     }
 
-    validateUnixSocket(this.socketPath);
+    const endpoint = inspectAppServerUnixSocket(this.socketPath);
+    if (!endpoint?.available) throw new Error("Codex Unix Socket 不可用");
     const options: ClientOptions = {
       perMessageDeflate: false,
       handshakeTimeout: this.connectTimeoutMs,
       maxPayload: this.maxPayloadBytes,
       // 与原生 `codex --remote` 一致，只发送标准 WebSocket Upgrade 头；
       // 客户端身份只在 initialize 的 clientInfo 中声明，不额外设置 HTTP User-Agent。
-      createConnection: () => createConnection(this.socketPath),
+      createConnection: () => createConnection(endpoint.path),
     };
     const socket = new WebSocket("ws://localhost/", options);
     this.socket = socket;
@@ -111,35 +111,6 @@ export class UnixWebSocketTransport extends BaseTransport {
         resolve();
       }, 2_000).unref();
     });
-  }
-}
-
-function validateUnixSocket(socketPath: string): void {
-  let parentStatus: ReturnType<typeof lstatSync>;
-  let socketStatus: ReturnType<typeof lstatSync>;
-  try {
-    parentStatus = lstatSync(dirname(socketPath));
-  } catch (error) {
-    throw new Error("Codex Unix Socket 父目录不可用", { cause: error });
-  }
-  const currentUserId = process.getuid?.();
-  if (
-    !parentStatus.isDirectory()
-    || (parentStatus.mode & 0o077) !== 0
-    || (currentUserId !== undefined && parentStatus.uid !== currentUserId)
-  ) {
-    throw new Error("Codex Unix Socket 父目录权限不安全");
-  }
-  try {
-    socketStatus = lstatSync(socketPath);
-  } catch (error) {
-    throw new Error("Codex Unix Socket 不可用", { cause: error });
-  }
-  if (
-    !socketStatus.isSocket()
-    || (currentUserId !== undefined && socketStatus.uid !== currentUserId)
-  ) {
-    throw new Error("Codex Unix Socket 必须是当前用户拥有的 Socket");
   }
 }
 

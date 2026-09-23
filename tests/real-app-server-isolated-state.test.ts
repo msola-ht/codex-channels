@@ -879,6 +879,15 @@ contractSuite("isolated Codex App Server state contract", () => {
         const resumed = await peerClient.resumeThread(threadId, workdir);
         peerSubscribed = true;
         expect(resumed.contextCompactionItemIds).toEqual([]);
+        expect(resumed.collaborationMode).toBe("plan");
+        const target = { surface: "telegram" as const, accountId: "contract", conversationId: "plan-resume" };
+        const router = new SessionRouter(peerClient, new MemoryBindingStore(), new WorkspaceRegistry([
+          { id: "contract", name: "Contract", cwd: workdir },
+        ], "contract"));
+        await router.resume(target, threadId);
+        expect(router.modelSettings(target)?.collaborationMode).toBe("plan");
+        expect(await router.restoreSubscriptions()).toEqual([]);
+        expect(router.modelSettings(target)?.collaborationMode).toBe("plan");
         await waitFor(
           () => resumedGoalObjective === updated.objective,
           2_000,

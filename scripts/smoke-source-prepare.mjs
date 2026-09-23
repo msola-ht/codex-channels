@@ -15,7 +15,9 @@ import { packageDir } from "./package-path.mjs";
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-prepare-"));
 const sourceDirectory = join(temporaryDirectory, "source");
+const sourceAssets = ["provider-model-catalog.json", "startup-network-policy.json"];
 const sourceEntries = new Set([
+  ...sourceAssets,
   "bin",
   "launchd",
   "package-lock.json",
@@ -77,7 +79,7 @@ try {
   }
   if (result.status !== 0) {
     throw new Error(
-      `干净源码全局安装失败：exit=${result.status ?? 1}\n${result.stderr || result.stdout}`,
+      `干净源码全局安装失败：exit=${result.status ?? 1}\n${result.stdout}\n${result.stderr}`,
     );
   }
   if (!existsSync(join(sourceDirectory, "dist", "main.js"))) {
@@ -100,6 +102,11 @@ try {
   );
   if (!existsSync(installedPackage) || lstatSync(installedPackage).isSymbolicLink()) {
     throw new Error("干净源码全局安装仍链接到源码目录");
+  }
+  for (const asset of sourceAssets) {
+    if (readFileSync(join(installedPackage, asset), "utf8") !== readFileSync(join(packageDir, asset), "utf8")) {
+      throw new Error(`干净源码全局安装未保留运行资源：${asset}`);
+    }
   }
   const commandInvocation = resolveExecutableInvocation(command, ["--version"]);
   const invoked = spawnSync(commandInvocation.file, commandInvocation.args, {

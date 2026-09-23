@@ -152,6 +152,15 @@ describe("Thread Queue Client", () => {
       .toHaveLength(2);
   });
 
+  it.each([
+    { type: "image", url: "data:image/png;base64,AA==" },
+    { type: "image", fileId: "private-file-reference" },
+  ])("keeps Queue image references private and non-editable: %j", (input) => {
+    const result = toThreadQueueItem(submission([input]) as never);
+    expect(result).toMatchObject({ inputType: "image", textPreview: null, editable: false });
+    expect(JSON.stringify(result)).not.toMatch(/private-file-reference|base64/);
+  });
+
   it("keeps Queue summaries platform-independent and does not expose paths", () => {
     const image = toThreadQueueItem({
       ...submission([{ type: "image", url: "data:image/png;base64,AA==" }], "image-1"),

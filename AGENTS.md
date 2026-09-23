@@ -89,7 +89,7 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.155.1` 只允许三类
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许三类
   受控协议例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`；Luna Reserve 自动回退为原样保留当前
   Default/Plan 模式，还允许 `thread/settings/update.collaborationMode`。这些字段必须通过
@@ -187,6 +187,8 @@ Surface -> Application/Core <- Codex Client
 - 外部用户只能选择预配置 Workspace，不能提交任意绝对工作目录。
 - 所有外部输入先完成 Surface Actor 与 Workspace 授权，再调用 Thread、Turn、命令、文件或权限能力。
 - Unix Socket 父目录权限必须限制为当前用户，Socket 不得向无关用户开放。
+  当前 CLI 的 rendezvous 链接只接受官方确定性目标，共享 Runtime 必须校验链接属主、规范路径哈希、
+  受保护目录与真实 Socket 的类型、权限和属主；Transport 与服务监管不得分别放宽校验或跟随任意链接。
 - 无认证 App Server 不得监听非回环网络地址。
 - 默认不自动批准命令、文件写入、额外文件系统权限或网络权限。
 - 配置错误必须失败关闭，不得采用更宽松的权限、目录或网络默认值。

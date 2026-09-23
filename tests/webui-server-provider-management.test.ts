@@ -219,8 +219,8 @@ describe("webui server Provider and account management", () => {
       "app-server", "gateway", "webui",
     ]);
     expect(body.entries.every((entry) => entry.version !== null)).toBe(true);
-    expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.155.1");
-    expect(body.entries.find((entry) => entry.target === "app-server")?.version).toBe("0.155.1");
+    expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.156.1");
+    expect(body.entries.find((entry) => entry.target === "app-server")?.version).toBe("0.156.1");
     const gateway = body.entries.find((entry) => entry.target === "gateway");
     expect(gateway?.recentError?.message).toBe("Error: authorization: Bearer [已隐藏]");
     expect(JSON.stringify(body)).not.toContain("service-secret");

@@ -17,6 +17,7 @@ import {
   securePrivateDirectorySync,
 } from "./private-file.mjs";
 import { terminateChildProcess } from "./process-lifecycle.mjs";
+import { inspectAppServerUnixSocket } from "./app-server-unix-socket.mjs";
 
 const protocolVersion = 5;
 const desktopAppHostProtocolVersion = 1;
@@ -741,15 +742,13 @@ export async function appServerSocketAcceptsWebSocket(socketPath) {
     assertPrivateDirectoryAccessSync(dirname(socketPath));
     return windowsAppServerProxyAcceptsWebSocket(socketPath);
   }
-  const status = lstatSync(socketPath, { throwIfNoEntry: false });
-  if (!status) return false;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`App Server Socket 路径不安全：${socketPath}`);
-  }
+  if (!lstatSync(dirname(socketPath), { throwIfNoEntry: false })) return false;
+  const endpoint = inspectAppServerUnixSocket(socketPath);
+  if (!endpoint?.available) return false;
   return new Promise((resolveCheck) => {
     const socket = new WebSocket("ws://localhost/", {
       perMessageDeflate: false,
-      createConnection: () => createConnection(socketPath),
+      createConnection: () => createConnection(endpoint.path),
     });
     let settled = false;
     const finish = (healthy) => {
@@ -909,8 +908,9 @@ function validProviderStateList(value, providerIds) {
 function preserveStaleSocket(socketPath) {
   const status = lstatSync(socketPath, { throwIfNoEntry: false });
   if (!status) return;
-  if (!status.isSocket() || status.uid !== process.getuid?.()) {
-    throw new Error(`App Server Socket 路径不安全：${socketPath}`);
+  const endpoint = inspectAppServerUnixSocket(socketPath);
+  if (!endpoint || endpoint.identity.dev !== status.dev || endpoint.identity.ino !== status.ino) {
+    throw new Error("App Server Socket 在检查期间发生变化");
   }
   const extension = extname(socketPath);
   const stem = basename(socketPath, extension);

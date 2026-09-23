@@ -43,6 +43,7 @@ function session(
   return {
     thread: value,
     settingsMatch: true,
+    collaborationMode: "default",
     model: "gpt-main",
     reasoningEffort: "medium",
     serviceTier: "default",
@@ -70,6 +71,24 @@ function threadPort(overrides: Partial<ThreadLifecyclePort> = {}): ThreadLifecyc
 }
 
 describe("SessionRouter", () => {
+  it.each(["resume", "ensure", "restore"])("recovers authoritative Plan mode through %s", async (entry) => {
+    const store = new MemoryBindingStore();
+    const historical = thread("history", { type: "idle" });
+    const router = new SessionRouter(threadPort({
+      listThreads: async () => [historical],
+      resumeThread: async () => session(historical, { collaborationMode: "plan" }),
+    }), store, registry);
+    if (entry === "restore") {
+      store.bind({ target, workspaceId: "main", threadId: historical.id, sessionId: historical.id });
+      expect(await router.restoreSubscriptions()).toEqual([]);
+    } else if (entry === "ensure") {
+      await router.ensure(target);
+    } else {
+      await router.resume(target, historical.id);
+    }
+    expect(router.modelSettings(target)?.collaborationMode).toBe("plan");
+  });
+
   it.each(["read", "resume", "cleanup"])("serializes workspace switching behind recovery at the %s boundary", async (phase) => {
     const store = new MemoryBindingStore();
     store.bind({ target, workspaceId: "main", threadId: "history", sessionId: "history" });
