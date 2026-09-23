@@ -140,6 +140,26 @@ describe("JsonRpcClient threads", () => {
       ]);
     });
 
+    it.each(["default", "plan"])("reads the authoritative %s mode when resuming", async (mode) => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = { collaborationMode: { mode, settings: {
+        model: "gpt-default", reasoning_effort: "medium", developer_instructions: null,
+      } } };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      expect((await client.resumeThread("thread-1", "/tmp/project")).collaborationMode).toBe(mode);
+      await client.close();
+    });
+
+    it.each([null, undefined, { mode: "unknown" }])("rejects invalid resume collaboration mode %j", async (collaborationMode) => {
+      const transport = new FakeTransport();
+      transport.resumeSettings = { collaborationMode };
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      await expect(client.resumeThread("thread-1", "/tmp/project")).rejects.toThrow("collaborationMode");
+      await client.close();
+    });
+
     it("extracts context compaction item ids when resuming a thread", async () => {
       const transport = new FakeTransport();
       transport.resumeThreadData = appServerThread({

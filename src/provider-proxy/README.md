@@ -7,7 +7,9 @@
 
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
-  主代理还按当前锁定 Codex 0.155.1 的固定端点清单接受 POST `/alpha/search`、
+  主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
+  ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
+  主代理还按当前锁定 Codex 0.156.1 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限
   Call ID 的 `/v1/live/<call-id>` WebSocket。这些额外端点不解析为 Responses 指标；DeepSeek、
@@ -31,7 +33,7 @@
   或成功率。通过普通 HTTP/WebSocket `/responses` 发送、由私有元数据
   `request_kind=compaction` 标记的 remote compaction v2 归为
   压缩操作；压缩操作以自身成功状态为准，不要求模型 Usage，但观测到的 Token 和额度快照
-  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.155.1 的 WebSocket 首轮
+  与普通模型请求一样进入 `/metrics` 汇总、异常报告和会话指标。当前锁定 Codex 0.156.1 的 WebSocket 首轮
   `request_kind=prewarm` 使用 `generate=false` 建立并复用连接，不是模型推理请求；代理照常透明
   转发其私有元数据，但不把其完成事件、Usage 或耗时写入模型请求指标。
   OpenAI HTTP/SSE 只从明确的 `x-codex-primary/secondary-*` 白名单响应头提取 10,080 分钟周窗口，

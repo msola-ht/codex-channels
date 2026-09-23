@@ -94,7 +94,9 @@ auto_recap = false
 
 ### 推理摘要
 
-在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.155.1
+Codex 0.156.1 已停用模型人格：CLI 与 WebUI 不再提供人格选择，保存其他偏好不会改写配置中已有的 `personality`。
+
+在 `codexc config → Codex 新会话与用户偏好 → 其他用户偏好` 中选择推理摘要。开发基线 0.156.1
 在尚未配置时预选“关闭”，与配套 CLI 的新建本地 TUI 会话默认值一致；已有的显式选择继续保留。
 不支持推理摘要的第三方 Provider 可能拒绝 `auto`、`concise` 或 `detailed`，遇到此类错误时
 检查对应 Codex 配置或 Profile 的 `model_reasoning_summary`，显式选择 `none`。
@@ -222,7 +224,7 @@ Remote Control、手机配对或第三方 Provider。Desktop 的连接环境属�
 macOS 上使用 ChatGPT `26.908.70816` 的实机验收已经确认 Desktop 与渠道可以双向发现、继续同一
 Thread。新的 macOS 受管入口会把 Desktop stdio 连接代理到同一
 私有 UDS，并在首次附加当前工具 Pipe 时短暂重启主 App Server 子进程，以 OpenAI 签名的 Desktop
-Node 托管项目锁定的 Codex CLI；开发基线为 0.155.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
+Node 托管项目锁定的 Codex CLI；开发基线为 0.156.1，既有私有 Pipe 与签名链实机验收使用 0.154.0，
 升级后仍需单独复核。Desktop 传入的内置插件启用值会受控应用到共享主实例，
 Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会先通过 App Server 的官方
 `thread/loaded/list` 和 `thread/read` 检查全部已加载的持久及临时 Thread；发现活动 Thread、
@@ -383,6 +385,37 @@ codexc traffic
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
 
+### 正常发图与图片引用
+
+照常在渠道发送图片即可，不需要额外命令。使用 OpenAI ChatGPT 登录时，Gateway 上传已校验的
+原图并以官方 `fileId` 提交；App Server 保存引用，后续历史继续使用引用。自动引用目前要求
+实际模型代理与账户均使用默认 ChatGPT 后端，且账户路由策略为 `NO_CONSTRAINT`；
+`us`、`us_cr` 或后端不一致时会在上传前报错。
+API Key、第三方 Provider 和独立自定义 OpenAI 后端保持内联图片输入。Actor、Workspace、模型能力和媒体大小限制继续适用。
+
+图片引用会跳过 App Server 的本地缩放，不能视为与普通原生 TUI 的图片预处理完全相同。
+上传最多等待 60 秒，可通过 `/stop` 取消；账户或路由变化、上传和引用失败都会明确报错，
+不自动重新上传或回退 Base64。远端图片没有自动删除入口，保留时间和跨重启可用性不作保证；
+此功能不提供文件管理、按编号下载或用户手动编号输入。
+实现、验证范围与限制见[图片引用决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
+
+部署后需要确认自动引用时，先按[模型请求转储](#模型请求转储)开启调用详情记录。为避免历史条目或
+长字段被裁剪，可临时把 `model_traffic_input_items` 和 `model_traffic_item_max_bytes` 都设为 `0`，
+重启 App Server 后在新会话中发送一张图片，再发送一条只引用前图的纯文本追问。用下面的命令分别
+展开首次发图和后续追问对应的模型调用：
+
+```bash
+codexc traffic
+codexc traffic --exchange <首次发图编号>
+codexc traffic --exchange <后续追问编号>
+```
+
+首次请求应包含 `input_image.file_id`，且不包含该图片的 `data:image/...;base64`。后续请求可能在
+完整历史中继续携带同一 `file_id`，也可能通过 `previous_response_id` 增量接续而完全不再携带图片；
+两者都属于官方历史复用。后续请求重新出现该图片的 Base64 才表示自动引用未生效。模型能够回答
+后续追问只能证明上下文可用，不能单独证明首次请求已经使用 `fileId`。转储包含未脱敏的会话正文、
+工具输出和代码，验证后恢复原来的裁剪配置并关闭转储，不要分享原始文件。
+
 从本机向绑定渠道发送图片：
 
 ```bash
@@ -484,8 +517,9 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 后永�
 
 ### 转储体积控制
 
-每次请求都会重发完整会话历史，长会话一轮就有几 MB；转储默认按下面的规则裁剪后落盘，不需要额外
-配置：
+首个请求或未采用增量接续的请求可能携带完整会话历史，长会话一轮就有几 MB；使用 WebSocket
+`previous_response_id` 接续时，后续请求也可能只携带本轮增量。转储对实际出现的 `input` 按下面的
+规则裁剪后落盘，不需要额外配置：
 
 ```toml
 [debug]
@@ -534,3 +568,5 @@ npm test
 ```
 
 协议升级必须先查阅 [`docs/index.md`](index.md)、官方固定 Tag 和 [`上游源码维护规则`](upstream-sources.md)，不得把生成类型存在误认为 Gateway 已支持。完整项目文档索引见 [`index.md`](../index.md)。
+
+项目命令规则预授权只读 Git 状态、差异、日志、声明的验证入口和绑定渠道图片发送；`git branch`、`git remote` 不整体预授权，按当前执行权限处理。

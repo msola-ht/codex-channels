@@ -222,7 +222,7 @@ export class SessionRouter {
             false,
             isCurrent,
           );
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(
             resumed.thread.id,
@@ -338,7 +338,7 @@ export class SessionRouter {
               "conversation.busy", "历史会话已有运行中的任务，请显式恢复会话",
             ));
           }
-          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+          this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
           this.namesByThread.set(resumed.thread.id, resumed.thread.name);
           this.contextCompactionItemIdsByThread.set(
             resumed.thread.id,
@@ -543,7 +543,7 @@ export class SessionRouter {
       await this.cleanupFailedResume(threadId, failure);
     }
     if (previousUnsubscribed && current) this.contextCompactionItemIdsByThread.delete(current.threadId);
-    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier);
+    this.captureModelSettings(resumed.thread.id, resumed.model, resumed.modelProvider, resumed.reasoningEffort, resumed.serviceTier, resumed.collaborationMode);
     this.namesByThread.set(resumed.thread.id, resumed.thread.name);
     this.contextCompactionItemIdsByThread.set(
       resumed.thread.id,
@@ -918,13 +918,14 @@ export class SessionRouter {
     modelProvider: string | undefined,
     effort: string | null,
     serviceTier: string | null | undefined,
+    collaborationMode: ThreadModelSettings["collaborationMode"] = "default",
   ): void {
     this.modelSettingsByThread.set(threadId, {
       model,
       modelProvider: modelProvider ?? "openai",
       effort,
       serviceTier: serviceTier ?? null,
-      collaborationMode: "default",
+      collaborationMode,
     });
   }
 }

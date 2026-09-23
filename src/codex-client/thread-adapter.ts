@@ -107,6 +107,10 @@ export function toThreadResumeSession(
   requested: { cwd: string; approvalPolicy: string; sandbox?: string; permissions?: string },
 ): ThreadResumeSession {
   requireString(response.cwd, "resume cwd");
+  const collaborationMode = response.collaborationMode?.mode;
+  if (collaborationMode !== "default" && collaborationMode !== "plan") {
+    throw new Error("Codex Thread 恢复响应缺少有效 collaborationMode");
+  }
   const sandboxModes = {
     readOnly: "read-only",
     workspaceWrite: "workspace-write",
@@ -115,6 +119,7 @@ export function toThreadResumeSession(
   } as const;
   return {
     ...toThreadSession(response),
+    collaborationMode,
     settingsMatch: response.cwd === requested.cwd
       && response.approvalPolicy === requested.approvalPolicy
       && (requested.permissions !== undefined

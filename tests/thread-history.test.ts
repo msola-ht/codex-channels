@@ -146,6 +146,15 @@ describe("Thread history Client boundary", () => {
     expect(transport.sent.filter((request) => request.method === "thread/revert")).toHaveLength(2);
   });
 
+  it("does not expose stored image file references in history", () => {
+    const page = toThreadTurnsPage({
+      data: [turn("turn-image", [{ type: "image", fileId: "private-file-reference" }])],
+      nextCursor: null, backwardsCursor: "backwards",
+    } as never);
+    expect(page.turns[0]).toMatchObject({ inputType: "image", textPreview: null });
+    expect(JSON.stringify(page)).not.toContain("private-file-reference");
+  });
+
   it("hashes no input into history summaries and rejects a Revert response carrying turns", () => {
     const page = toThreadTurnsPage({
       data: [turn("turn-image", [{ type: "localImage", path: "/private/secret/image.png" }])],

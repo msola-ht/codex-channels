@@ -5,6 +5,25 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { appServerModel, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient models", () => {
+    it("preserves Sol and Luna reasoning levels from the available official catalog", async () => {
+      const transport = new FakeTransport();
+      const efforts = ["low", "medium", "high", "xhigh", "max"];
+      transport.modelListData = ["gpt-6-sol", "gpt-6-luna"].map((model) => appServerModel({
+        id: model, model, multiAgentVersion: "v2", defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: (model === "gpt-6-sol" ? [...efforts, "ultra"] : efforts)
+          .map((effort) => ({ reasoningEffort: effort, description: effort })),
+        availableAccessPrograms: { privateMetadata: "must-not-escape" },
+      }));
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+      await client.connect();
+      const models = await client.listModels();
+      expect(models.map((model) => model.model)).toEqual(["gpt-6-sol", "gpt-6-luna"]);
+      expect(models[0]?.supportedReasoningEfforts.map((option) => option.effort)).toEqual([...efforts, "ultra"]);
+      expect(models[1]?.supportedReasoningEfforts.map((option) => option.effort)).toEqual(efforts);
+      expect(JSON.stringify(models)).not.toContain("privateMetadata");
+      await client.close();
+    });
+
     it("rejects repeated pagination cursors", async () => {
       const transport = new FakeTransport();
       transport.circularModelCursor = true;

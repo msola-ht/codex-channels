@@ -11,7 +11,7 @@
   差异、类型和版本、生产与测试 Lint、文档链接和索引、全量测试、Shell、真实 tarball 安装冒烟
   及平台模板检查；tarball 冒烟复用同次完整测试已经生成的 Gateway 构建产物，干净源码安装不进入
   日常 PR 门禁，并在日志中记录各阶段与全部检查耗时。
-  独立的 App Server 合同任务安装锁定的 Codex CLI 0.155.1，检查协议版本与生成类型，并使用隔离
+  独立的 App Server 合同任务安装锁定的 Codex CLI 0.156.1，检查协议版本与生成类型，并使用隔离
   `CODEX_HOME` 验证 Fast 默认值的跨客户端读取和新 Thread 状态。
 - `codex-upgrade-preview.yml`：每日及手动检查 `openai/codex` 正式发行版本；版本留空时使用
   最新正式 Release。项目已经同步时跳过，发现更新时安装对应 npm CLI、生成协议与版本
@@ -24,7 +24,7 @@
   Release 解析失败时仍上传以 `unresolved-<run id>` 命名的失败 Artifact 和 `resolve.log`，
   不会因目标版本为空丢失现场。
 - `codex-upgrade-pr.yml`：统一检查 PR 描述；Draft 阶段允许模板或自动占位内容，所有 Ready PR
-  必须写清新增、修复和改动，没有对应内容时明确写“无”。正式 Codex CLI 升级 PR 还必须写清
+  至少在新增、修复、改动之一说明具体变化，无内容分类可省略，保留章节不得为空或仅有占位。正式 Codex CLI 升级 PR 还必须写清
   对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
   为兼容 main 的现有 Branch Protection 保留。
 - `publish.yml`：推送与 Codex CLI 协议基础版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把

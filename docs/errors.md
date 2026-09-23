@@ -47,6 +47,7 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
+| `image.reference.failed` | 图片上传、账户路由校验或引用提交失败，也用于上传取消与超时 | 检查 Codex 登录状态及网络后重新发送；不会自动重传或改用内联图片 |
 | `image.url.invalid` | 图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL | Application 收到非法内联图片输入 |
 | `image.too-large` | 单张超过 10 MiB / 批量超过 20 MiB | 图片超过暂存大小限制 |
 | `image.too-many` | 一次最多处理 4 张图片 | 单次发送图片过多 |

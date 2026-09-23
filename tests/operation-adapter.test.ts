@@ -11,12 +11,13 @@ describe("operation normalization", () => {
       type: "mcpToolCall", id: "cua-1", server: "cua_repl", tool: "js",
       arguments: { title: "检查浏览器 TOKEN=private-token", code: "private-code" },
       result: { content: [{ text: "private-result" }] },
+      mcpAppUi: { resourceUri: "ui://private-app", preferredModelDisplayMode: "inline" },
     }, "started");
     expect(operation).toMatchObject({
       kind: "mcpTool", action: "computerUse", status: "running",
       detail: "检查浏览器 TOKEN=[REDACTED] · cua_repl.js",
     });
-    expect(JSON.stringify(operation)).not.toMatch(/private-token|private-code|private-result/);
+    expect(JSON.stringify(operation)).not.toMatch(/private-token|private-code|private-result|private-app/);
   });
 
   it.each([undefined, { title: " " }, { title: 12 }, "invalid"])(

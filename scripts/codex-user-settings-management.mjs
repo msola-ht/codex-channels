@@ -8,7 +8,6 @@ const approvalPolicies = new Set(supportedPublicApprovalPolicies);
 const webSearchModes = new Set(["live", "indexed", "cached", "disabled"]);
 const reasoningSummaries = new Set(["auto", "concise", "detailed", "none"]);
 const verbosities = new Set(["low", "medium", "high"]);
-const personalities = new Set(["none", "friendly", "pragmatic"]);
 const historyPersistences = new Set(["save-all", "none"]);
 
 export class CodexUserSettingsError extends Error {
@@ -167,7 +166,6 @@ function projectSettings(snapshot, provider, rawModels) {
   const reasoningSummary = reasoningSummaries.has(config.model_reasoning_summary)
     ? config.model_reasoning_summary : null;
   const verbosity = verbosities.has(config.model_verbosity) ? config.model_verbosity : null;
-  const personality = personalities.has(config.personality) ? config.personality : null;
   const history = record(config.history);
   const tools = record(config.tools);
   const updatePlan = record(tools.update_plan);
@@ -197,7 +195,6 @@ function projectSettings(snapshot, provider, rawModels) {
       reasoningSummary,
       planModeReasoningEffort,
       verbosity,
-      personality,
       checkForUpdateOnStartup: typeof config.check_for_update_on_startup === "boolean"
         ? config.check_for_update_on_startup : null,
       historyPersistence: historyPersistences.has(history.persistence) ? history.persistence : null,
@@ -342,10 +339,12 @@ function autoRecapEdits(input) {
 }
 
 function preferenceEdits(input, models) {
+  if (Object.hasOwn(input, "personality")) {
+    throw invalid("personality", "unsupported-field", "当前 Codex 已停用模型人格设置");
+  }
   const fields = [
     ["reasoningSummary", reasoningSummaries],
     ["verbosity", verbosities],
-    ["personality", personalities],
     ["historyPersistence", historyPersistences],
   ];
   for (const [field, allowed] of fields) {
@@ -365,7 +364,6 @@ function preferenceEdits(input, models) {
       { keyPath: "model_reasoning_summary", value: input.reasoningSummary },
       { keyPath: "plan_mode_reasoning_effort", value: effort },
       { keyPath: "model_verbosity", value: input.verbosity },
-      { keyPath: "personality", value: input.personality },
       { keyPath: "check_for_update_on_startup", value: input.checkForUpdateOnStartup },
       { keyPath: "history.persistence", value: input.historyPersistence },
     ],
@@ -373,7 +371,6 @@ function preferenceEdits(input, models) {
       reasoningSummary: input.reasoningSummary,
       planModeReasoningEffort: effort,
       verbosity: input.verbosity,
-      personality: input.personality,
       checkForUpdateOnStartup: input.checkForUpdateOnStartup,
       historyPersistence: input.historyPersistence,
     },

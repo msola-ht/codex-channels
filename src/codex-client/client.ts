@@ -45,6 +45,7 @@ import type {
   CollaborationModeListResponse,
   GetAccountParams,
   GetAccountResponse,
+  GetAuthStatusResponse,
   GetAccountTokenUsageParams,
   GetAccountTokenUsageResponse,
   GetAccountRateLimitsResponse,
@@ -104,6 +105,7 @@ import type {
   ThreadSnapshot,
 } from "../session-routing/index.js";
 import { JsonRpcClient, type RpcNotification, type ServerRequestHandler } from "./json-rpc.js";
+import { ImageReferenceUpload } from "./image-reference-upload.js";
 import {
   PINNED_THREAD_SECTION_ID,
   toThreadSession,
@@ -172,10 +174,19 @@ export class CodexAppServerClient implements
   ThreadQueuePort,
   ThreadHistoryPort
 {
+  private readonly imageUpload: ImageReferenceUpload | undefined;
+
   constructor(
     private readonly rpc: JsonRpcClient,
     private readonly defaults: ThreadDefaults,
-  ) {}
+    imageUploadHttp?: { upload: typeof fetch; local?: typeof fetch },
+  ) {
+    this.imageUpload = imageUploadHttp ? new ImageReferenceUpload(rpc, imageUploadHttp.upload, imageUploadHttp.local ?? fetch,
+      signal => this.rpc.request<GetAuthStatusResponse>({
+        method: "getAuthStatus",
+        params: { includeToken: true, refreshToken: false },
+      }, { retryOverload: false, signal })) : undefined;
+  }
 
   connect(): Promise<InitializeResponse> {
     return this.rpc.connect();
@@ -186,6 +197,7 @@ export class CodexAppServerClient implements
   }
 
   close(): Promise<void> {
+    this.imageUpload?.cancelAll();
     return this.rpc.close();
   }
 
@@ -398,6 +410,7 @@ export class CodexAppServerClient implements
   }
 
   async unsubscribeThread(threadId: string): Promise<void> {
+    this.cancelPendingInput(threadId);
     await this.rpc.request<ThreadUnsubscribeResponse>({
       method: "thread/unsubscribe",
       params: { threadId },
@@ -433,34 +446,36 @@ export class CodexAppServerClient implements
     cwd: string,
     overrides: TurnOverrides = {},
   ): Promise<TurnStarted> {
-    const response = await this.rpc.request<TurnStartResponse>({
-      method: "turn/start",
-      params: {
-        threadId,
-        clientUserMessageId,
-        input: toProtocolTurnInput(input),
-        cwd,
-        ...(overrides.model ? { model: overrides.model } : {}),
-        ...(overrides.effort ? { effort: overrides.effort } : {}),
-        ...(Object.hasOwn(overrides, "serviceTier")
-          ? { serviceTier: overrides.serviceTier ?? null }
-          : {}),
-        ...(overrides.collaborationMode
-          ? {
-              collaborationMode: {
-                mode: overrides.collaborationMode.mode,
-                settings: {
-                  model: overrides.collaborationMode.settings.model,
-                  reasoning_effort: overrides.collaborationMode.settings.effort,
-                  developer_instructions:
-                    overrides.collaborationMode.settings.developerInstructions,
+    return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      const response = await this.rpc.request<TurnStartResponse>({
+        method: "turn/start",
+        params: {
+          threadId,
+          clientUserMessageId,
+          input: protocolInput,
+          cwd,
+          ...(overrides.model ? { model: overrides.model } : {}),
+          ...(overrides.effort ? { effort: overrides.effort } : {}),
+          ...(Object.hasOwn(overrides, "serviceTier")
+            ? { serviceTier: overrides.serviceTier ?? null }
+            : {}),
+          ...(overrides.collaborationMode
+            ? {
+                collaborationMode: {
+                  mode: overrides.collaborationMode.mode,
+                  settings: {
+                    model: overrides.collaborationMode.settings.model,
+                    reasoning_effort: overrides.collaborationMode.settings.effort,
+                    developer_instructions:
+                      overrides.collaborationMode.settings.developerInstructions,
+                  },
                 },
-              },
-            }
-          : {}),
-      },
-    }, { retryOverload: false });
-    return toTurnStarted(response);
+              }
+            : {}),
+        },
+      }, { retryOverload: false });
+      return toTurnStarted(response);
+    });
   }
 
   async addQueueItem(
@@ -556,19 +571,36 @@ export class CodexAppServerClient implements
     input: TurnInput[],
     clientUserMessageId: string,
   ): Promise<TurnStarted> {
-    const response = await this.rpc.request<TurnSteerResponse>({
-      method: "turn/steer",
-      params: {
-        threadId,
-        expectedTurnId: turnId,
-        clientUserMessageId,
-        input: toProtocolTurnInput(input),
-      },
-    }, { retryOverload: false });
-    return toTurnStarted(response);
+    return this.submitTurnInput(threadId, input, async (protocolInput) => {
+      const response = await this.rpc.request<TurnSteerResponse>({
+        method: "turn/steer",
+        params: {
+          threadId,
+          expectedTurnId: turnId,
+          clientUserMessageId,
+          input: protocolInput,
+        },
+      }, { retryOverload: false });
+      return toTurnStarted(response);
+    });
+  }
+
+  cancelPendingInput(threadId: string): boolean {
+    return this.imageUpload?.cancel(threadId) ?? false;
+  }
+
+  private async submitTurnInput(
+    threadId: string,
+    input: TurnInput[],
+    submit: (input: ReturnType<typeof toProtocolTurnInput>) => Promise<TurnStarted>,
+  ): Promise<TurnStarted> {
+    const protocolInput = toProtocolTurnInput(input);
+    if (!this.imageUpload || !input.some(item => item.type === "image")) return submit(protocolInput);
+    return this.imageUpload.submit(threadId, protocolInput, submit);
   }
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
+    this.cancelPendingInput(threadId);
     await this.rpc.request({
       method: "turn/interrupt",
       params: { threadId, turnId },

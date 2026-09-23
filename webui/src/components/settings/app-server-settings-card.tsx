@@ -18,7 +18,6 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   const [planEffort, setPlanEffort] = useState("")
   const [reasoningSummary, setReasoningSummary] = useState("none")
   const [verbosity, setVerbosity] = useState("medium")
-  const [personality, setPersonality] = useState("none")
   const [startupUpdate, setStartupUpdate] = useState("true")
   const [historyPersistence, setHistoryPersistence] = useState("save-all")
   const [localError, setLocalError] = useState<string | null>(null)
@@ -31,7 +30,6 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
     setPlanEffort(settings.defaults.planModeReasoningEffort ?? selected?.defaultReasoningEffort ?? "")
     setReasoningSummary(settings.defaults.reasoningSummary ?? "none")
     setVerbosity(settings.defaults.verbosity ?? "medium")
-    setPersonality(settings.defaults.personality ?? "none")
     setStartupUpdate(String(settings.defaults.checkForUpdateOnStartup ?? true))
     setHistoryPersistence(settings.defaults.historyPersistence ?? "save-all")
     setLocalError(null)
@@ -78,7 +76,6 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
       planModeReasoningEffort: planEffort,
       reasoningSummary,
       verbosity,
-      personality,
       checkForUpdateOnStartup: startupUpdate === "true",
       historyPersistence,
     }, "其他用户偏好")
@@ -120,7 +117,6 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
             <ManagedSelect label="Plan 思考等级" value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={setPlanEffort} />
             <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭（未配置默认，none）"]]} disabled={officialDisabled} onChange={setReasoningSummary} />
             <ManagedSelect label="输出详细程度" value={verbosity} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} disabled={officialDisabled} onChange={setVerbosity} />
-            <ManagedSelect label="模型人格" value={personality} options={[["none", "无"], ["friendly", "友好"], ["pragmatic", "务实"]]} disabled={officialDisabled} onChange={setPersonality} />
             <ManagedSelect label="启动时检查更新" value={startupUpdate} options={[["true", "开启"], ["false", "关闭"]]} disabled={officialDisabled} onChange={setStartupUpdate} />
             <ManagedSelect label="历史记录保存" value={historyPersistence} options={[["save-all", "保存"], ["none", "不保存"]]} disabled={officialDisabled} onChange={setHistoryPersistence} />
           </FieldGroup>

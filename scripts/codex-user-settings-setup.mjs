@@ -16,11 +16,9 @@ const reasoningSummaryLabels = {
   none: "关闭（未配置默认，none）",
 };
 const verbosityLabels = { low: "简短", medium: "适中", high: "详细" };
-const personalityLabels = { none: "默认", friendly: "友好", pragmatic: "务实" };
 const historyPersistenceLabels = { "save-all": "保存", none: "不保存" };
 const reasoningSummaryHints = { auto: "由 Codex 自动选择摘要方式", concise: "优先压缩为简短摘要", detailed: "保留更多推理摘要内容", none: "不生成推理摘要；未配置时默认选择" };
 const verbosityHints = { low: "回复更简洁", medium: "在简洁和细节之间平衡", high: "提供更完整的解释" };
-const personalityHints = { none: "使用 Codex 默认人格", friendly: "语气更友好自然", pragmatic: "更直接、注重执行" };
 const historyPersistenceHints = { "save-all": "保存会话历史，便于恢复和接续", none: "不保存新的会话历史" };
 
 function compactHint(compact) {
@@ -88,7 +86,7 @@ export async function runCodexUserSettingsSetup({
       ...(settings.defaultsEditable ? [{
         value: "preferences",
         label: "其他用户偏好",
-        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、人格、更新检查与历史",
+        hint: "Plan、推理摘要（未配置默认 none）、输出详细程度、更新检查与历史",
       }] : []),
       {
         value: "permissions",
@@ -491,7 +489,7 @@ async function runModelCompactSetting({
 async function runPreferencesSetting({ environment, output, prompts, settings, updateSetting, createClient, primaryProvider }) {
   const preferences = await promptPreferences(prompts, settings);
   if (preferences === null) return { action: "back" };
-  const confirmed = await prompts.confirm({ message: `保存其他用户偏好：Plan 思考等级 ${preferences.planModeReasoningEffort} · 摘要 ${reasoningSummaryLabels[preferences.reasoningSummary]} · 输出详细程度 ${verbosityLabels[preferences.verbosity]} · 人格 ${personalityLabels[preferences.personality]} · 更新检查 ${preferences.checkForUpdateOnStartup ? "开启" : "关闭"} · 历史记录 ${historyPersistenceLabels[preferences.historyPersistence]}？`, initialValue: true });
+  const confirmed = await prompts.confirm({ message: `保存其他用户偏好：Plan 思考等级 ${preferences.planModeReasoningEffort} · 摘要 ${reasoningSummaryLabels[preferences.reasoningSummary]} · 输出详细程度 ${verbosityLabels[preferences.verbosity]} · 更新检查 ${preferences.checkForUpdateOnStartup ? "开启" : "关闭"} · 历史记录 ${historyPersistenceLabels[preferences.historyPersistence]}？`, initialValue: true });
   if (prompts.isCancel(confirmed) || confirmed !== true) { output.write("已取消，未修改其他用户偏好。\n"); return undefined; }
   const result = await updateSetting({ kind: "preferences", ...preferences }, { environment, expectedVersion: settings.version, ...(createClient === undefined ? {} : { createClient }), ...(primaryProvider === undefined ? {} : { primaryProvider }) });
   output.write("Codex 其他用户偏好已更新。\n");
@@ -512,13 +510,11 @@ async function promptPreferences(prompts, settings) {
   if (reasoningSummary === null) return null;
   const verbosity = await pick("输出详细程度", settings.defaults.verbosity ?? "medium", Object.entries(verbosityLabels).map(([value, label]) => ({ value, label, hint: verbosityHints[value] })));
   if (verbosity === null) return null;
-  const personality = await pick("模型人格", settings.defaults.personality ?? "none", Object.entries(personalityLabels).map(([value, label]) => ({ value, label, hint: personalityHints[value] })));
-  if (personality === null) return null;
   const checkForUpdateOnStartup = await pick("启动时检查更新", settings.defaults.checkForUpdateOnStartup ?? true, [{ value: true, label: "开启" }, { value: false, label: "关闭" }]);
   if (checkForUpdateOnStartup === null) return null;
   const historyPersistence = await pick("历史记录保存", settings.defaults.historyPersistence ?? "save-all", Object.entries(historyPersistenceLabels).map(([value, label]) => ({ value, label, hint: historyPersistenceHints[value] })));
   if (historyPersistence === null) return null;
-  return { reasoningSummary, planModeReasoningEffort, verbosity, personality, checkForUpdateOnStartup, historyPersistence };
+  return { reasoningSummary, planModeReasoningEffort, verbosity, checkForUpdateOnStartup, historyPersistence };
 }
 
 async function runPermissionSettings({

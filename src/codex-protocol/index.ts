@@ -2,6 +2,7 @@ import version from "./version.json" with { type: "json" };
 
 export type { ClientNotification } from "./generated/ClientNotification.js";
 export type { ClientRequest } from "./generated/ClientRequest.js";
+export type { GetAuthStatusResponse } from "./generated/GetAuthStatusResponse.js";
 export type { InitializeResponse } from "./generated/InitializeResponse.js";
 export type { RequestId } from "./generated/RequestId.js";
 export type { JsonValue } from "./generated/serde_json/JsonValue.js";

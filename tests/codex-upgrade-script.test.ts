@@ -130,7 +130,7 @@ describe("Codex CLI upgrade preparation", () => {
     })).toThrow("本次不采用");
   });
 
-  it("requires added, fixed, and changed sections for every ready PR", () => {
+  it("validates present change sections without requiring unused categories", () => {
     const ready = {
       pull_request: {
         draft: false,
@@ -147,6 +147,15 @@ describe("Codex CLI upgrade preparation", () => {
       },
     };
     expect(checkPullRequestDescription(ready)).toEqual({ checked: true });
+
+    expect(checkPullRequestDescription({
+      pull_request: { draft: false, title: "修正文档", body: "## 修复\n\n修正安装命令的拼写错误。" },
+    })).toEqual({ checked: true });
+    for (const body of ["", "## 验证\n\n检查通过。", "## 改动\n\n无", "## 修复\n\nTODO"]) {
+      expect(() => checkPullRequestDescription({
+        pull_request: { draft: false, title: "修正文档", body },
+      })).toThrow();
+    }
 
     for (const section of ["新增", "修复", "改动"]) {
       expect(() => checkPullRequestDescription({

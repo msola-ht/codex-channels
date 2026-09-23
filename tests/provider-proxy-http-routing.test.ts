@@ -25,6 +25,33 @@ afterEach(async () => {
 });
 
 describe("ProviderProxy HTTP routing", () => {
+  it.each(["official", "independent", "unavailable"])("inspects the live %s image backend without upstream traffic", async mode => {
+    let host = mode === "independent" ? "independent.example.test" : "chatgpt.com";
+    const samples: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "unused.example.test", allowOpenAiApiPaths: true,
+      resolveUpstream: headers => {
+        expect(headers).toEqual({ "chatgpt-account-id": "route-inspection" });
+        if (mode === "unavailable") throw new Error("private route detail");
+        return { host, protocol: "https", basePath: "/backend-api/codex" };
+      },
+      onMetrics: sample => { samples.push(sample); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const response = await fetch(`http://${proxy.address()}/_codexc/image-upload-route`);
+    if (mode === "unavailable") {
+      expect(response.status).toBe(503);
+      expect(await response.text()).toBe("");
+    } else {
+      expect(await response.json()).toEqual({ supported: mode === "official", backendOrigin: mode === "official" ? "https://chatgpt.com" : null });
+      host = "changed.example.test";
+      const changed = await fetch(`http://${proxy.address()}/_codexc/image-upload-route`);
+      expect(await changed.json()).toEqual({ supported: false, backendOrigin: null });
+    }
+    expect(samples).toHaveLength(0);
+  });
+
   it("preserves account and compaction metadata on route failure without counting model listings", async () => {
     const samples: Array<{ sample: ProviderProxyMetrics; account: string | undefined }> = [];
     const proxy = new ProviderProxy("127.0.0.1:0", {

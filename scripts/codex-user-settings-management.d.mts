@@ -28,7 +28,6 @@ export type CodexUserSettingInput =
       reasoningSummary: "auto" | "concise" | "detailed" | "none";
       planModeReasoningEffort: string;
       verbosity: "low" | "medium" | "high";
-      personality: "none" | "friendly" | "pragmatic";
       checkForUpdateOnStartup: boolean;
       historyPersistence: "save-all" | "none";
     }
@@ -61,7 +60,6 @@ export interface CodexUserSettingsState {
     reasoningSummary?: "auto" | "concise" | "detailed" | "none" | null;
     planModeReasoningEffort?: string | null;
     verbosity?: "low" | "medium" | "high" | null;
-    personality?: "none" | "friendly" | "pragmatic" | null;
     checkForUpdateOnStartup?: boolean | null;
     historyPersistence?: "save-all" | "none" | null;
   };

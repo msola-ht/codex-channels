@@ -62,7 +62,8 @@ type ProviderClientMethod =
   | "setGoal"
   | "clearGoal";
 
-export type ProviderClientInstance = Pick<CodexAppServerClient, ProviderClientMethod>;
+export type ProviderClientInstance = Pick<CodexAppServerClient, ProviderClientMethod>
+  & Partial<Pick<CodexAppServerClient, "cancelPendingInput">>;
 
 type ThreadSnapshot = Awaited<ReturnType<ProviderClientInstance["readThread"]>>;
 type ProviderOperationMode = "activity" | "operation";
@@ -447,6 +448,11 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["revertThread"]>
   ): ReturnType<ProviderClientInstance["revertThread"]> {
     return this.callForThread(args[0], (client) => client.revertThread(...args));
+  }
+
+  cancelPendingInput(threadId: string): boolean {
+    const provider = this.threadProviders.get(threadId);
+    return provider === undefined ? false : (this.clientForProvider(provider).cancelPendingInput?.(threadId) ?? false);
   }
 
   interruptTurn(

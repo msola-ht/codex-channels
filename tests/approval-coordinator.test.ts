@@ -843,6 +843,7 @@ describe("ApprovalCoordinator", () => {
         turnId: "turn-1",
         serverName: "codex_apps",
         mode: "openai/userVerification",
+        _meta: { privateVerificationData: "must-not-escape" },
         title: "Verify identity",
         description: "Use a device-bound credential",
         challenge: "untrusted-challenge",

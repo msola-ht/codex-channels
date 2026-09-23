@@ -257,6 +257,7 @@ export abstract class GatewayComponentGraph {
       sandbox: config.codexSandbox,
       ...(config.codexModel ? { model: config.codexModel } : {}),
       },
+      primaryProvider === "openai" ? { upload: createProxyFetch(config.networkProxy) } : undefined,
     ));
     for (const managedProvider of managedProviders) {
       const providerTransport = createTransport(

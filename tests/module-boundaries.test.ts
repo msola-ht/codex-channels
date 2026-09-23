@@ -271,6 +271,9 @@ function runtimeImportViolations(): string[] {
       }
       const target = resolve(dirname(file), specifier);
       if (isInside(runtimeRoot, target)) {
+        // Transport and service supervision share the same platform socket validation.
+        if (file === resolve(sourceRoot, "codex-client/unix-websocket-transport.ts")
+          && target === resolve(runtimeRoot, "app-server-unix-socket.mjs")) continue;
         found.push(`${relative(sourceRoot, file)} -> ${relative(sourceRoot, target)}`);
       }
     }

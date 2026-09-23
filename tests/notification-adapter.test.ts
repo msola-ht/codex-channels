@@ -7,6 +7,19 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it("maps an async plain message to commentary without inventing questions", () => {
+    expect(toConversationInputEvent({
+      method: "item/completed",
+      params: { threadId: "thread-1", turnId: "turn-1", item: {
+        type: "agentMessage", id: "message-1", phase: "final_answer",
+        text: "Progress", delivery: "async", questions: null,
+      } },
+    })).toEqual({
+      type: "item.agentMessage.completed", threadId: "thread-1", turnId: "turn-1",
+      itemId: "message-1", phase: "commentary", text: "Progress", delivery: "async",
+    });
+  });
+
   it("preserves async questions without treating the tool message as a final answer", () => {
     const notification = {
       method: "item/completed",

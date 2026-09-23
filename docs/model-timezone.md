@@ -15,7 +15,7 @@ Responses 请求 `input` 的一部分发给模型：
 </environment_context>
 ```
 
-- 时区名来自 `iana_time_zone`，日期来自本地时间（[`turn_context.rs`](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/session/turn_context.rs)）。
+- 时区名来自 `iana_time_zone`，日期来自本地时间（[`turn_context.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/src/session/turn_context.rs)）。
 - 它是 prompt 内容，不是协议字段：请求头、`client_metadata`、时间戳都不含时区。
 - 未配置 `[codex].timezone` 时，App Server 子进程继承服务环境的时区，即系统时区。
 

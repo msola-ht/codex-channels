@@ -37,7 +37,6 @@ function currentValue(settings: CodexUserSettingsResponse, setting: CodexUserSet
     planModeReasoningEffort: settings.defaults.planModeReasoningEffort,
     reasoningSummary: settings.defaults.reasoningSummary,
     verbosity: settings.defaults.verbosity,
-    personality: settings.defaults.personality,
     checkForUpdateOnStartup: settings.defaults.checkForUpdateOnStartup,
     historyPersistence: settings.defaults.historyPersistence,
   }

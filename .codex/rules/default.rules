@@ -27,17 +27,6 @@ prefix_rule(
 )
 
 prefix_rule(
-    pattern = ["git", ["branch", "remote"]],
-    decision = "allow",
-    justification = "Read-only branch and remote inspection is safe in this project",
-    match = [
-        "git branch --list",
-        "git branch -a",
-        "git remote -v",
-    ],
-)
-
-prefix_rule(
     pattern = ["codexc", "channel", "send-image"],
     decision = "allow",
     justification = "Send a validated local image to the bound Feishu/WeChat/Telegram conversation through the gateway spool",

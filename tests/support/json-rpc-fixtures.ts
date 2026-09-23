@@ -287,6 +287,7 @@ export class FakeTransport extends BaseTransport {
               sandbox: { type: params.sandbox === "workspace-write" ? "workspaceWrite"
                 : params.sandbox === "danger-full-access" ? "dangerFullAccess" : "readOnly" },
               activePermissionProfile: params.permissions ? { id: params.permissions, extends: null } : null,
+              collaborationMode: { mode: "default", settings: { model: "gpt-default", reasoning_effort: "medium", developer_instructions: null } },
               ...this.resumeSettings,
               model: "gpt-default",
               reasoningEffort: "medium",
