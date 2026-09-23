@@ -1339,8 +1339,10 @@ export class ConversationService implements
 
   async stop(target: ConversationTarget): Promise<boolean> {
     const active = this.core.activeTurn(target);
+    const threadId = active?.threadId ?? (this.codex.cancelPendingInput ? this.router.current(target)?.threadId : undefined);
+    const cancelled = threadId ? (this.codex.cancelPendingInput?.(threadId) ?? false) : false;
     if (!active) {
-      return false;
+      return cancelled;
     }
     await this.codex.interruptTurn(active.threadId, active.turnId);
     return true;

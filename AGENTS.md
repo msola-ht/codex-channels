@@ -89,7 +89,7 @@ Surface -> Application/Core <- Codex Client
 - 协议类型由受支持的 Codex CLI 生成；不得凭记忆手写协议字段。
 - 仓库必须记录并校验生成类型对应的精确 Codex CLI 版本。
 - 升级协议时先审查生成差异，再更新 `codex-protocol` 的受控导出、实现和测试。
-- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许四类
+- 稳定业务代码不得依赖实验生成参数才会出现的字段。当前锁定 `codex-cli 0.156.1` 只允许五类
   受控协议例外。官方 Plan 模式只允许使用
   `collaborationMode/list` 和 `turn/start.collaborationMode`；Luna Reserve 自动回退为原样保留当前
   Default/Plan 模式，还允许 `thread/settings/update.collaborationMode`。这些字段必须通过
@@ -106,6 +106,9 @@ Surface -> Application/Core <- Codex Client
   受控导出，并由真实 App Server 合同覆盖注册与回调。调用必须关联已绑定的前台 Thread
   与唯一授权 Actor，创建和删除仍须用户确认；后台计划任务 Thread 不注册工具并拒绝递归调用。
   不向已有 Thread 注入工具，不接入 `additionalContext`、任意动态工具或其他命名空间。
+  图片引用上传只允许额外读取 `account/read.workspaceRouting`，用于核对当前 ChatGPT 账户、
+  后端与路由约束；通过官方 `getAuthStatus` 获取当前可导出的令牌，不读取磁盘凭据。
+  该字段必须使用受控生成类型并由真实 App Server 合同覆盖，不得用于其他账户或路由功能。
   开发中 Plugin 调试只允许在 `[experimental].plugin_api` 开启时使用稳定 `plugin/installed` 查询已安装项，
   并通过 `turn/start` / `turn/steer` 的官方 `mention` 输入调用；开关默认关闭且必须在 Doctor、
   命令输出和文档中标明开发中，只支持 OpenAI Thread。不得借这些例外或开发中入口接入、暴露其他

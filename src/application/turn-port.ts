@@ -44,6 +44,8 @@ export interface ReviewStarted extends TurnStarted {
 export type { GoalStatus, ThreadGoal };
 
 export interface TurnExecutionPort {
+  /** Cancels client-side preparation before an App Server Turn exists. */
+  cancelPendingInput?(threadId: string): boolean;
   startTurn(
     threadId: string,
     input: TurnInput[],

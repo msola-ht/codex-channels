@@ -251,6 +251,22 @@ export class ProviderProxy {
   }
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (request.method === "GET" && request.url === "/_codexc/image-upload-route" && this.allowOpenAiApiPaths) {
+      request.resume();
+      try {
+        // Query the same live resolver as model traffic. No upstream request or
+        // credentials are needed: this header selects the ChatGPT route.
+        const upstream = await this.upstreamFor({ "chatgpt-account-id": "route-inspection" });
+        const supported = upstream.protocol === "https" && upstream.host === "chatgpt.com"
+          && (upstream.port === undefined || upstream.port === 443)
+          && upstream.basePath === "/backend-api/codex";
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ supported, backendOrigin: supported ? "https://chatgpt.com" : null }));
+      } catch {
+        response.writeHead(503).end();
+      }
+      return;
+    }
     const startedAtMonotonicMs = performance.now();
     const startedAtMs = Date.now();
     const route = resolveProxyRoute(

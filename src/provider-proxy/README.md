@@ -7,6 +7,8 @@
 
 - `proxy.ts`：HTTP/SSE 与 WebSocket 转发、背压和连接生命周期协调。监听自动分配的回环地址，把精确
   `/responses` 与只读 `/models` 路径转发到上游；官方 OpenAI
+  主代理提供只读 `GET /_codexc/image-upload-route`，通过正在运行的路由解析器核验默认
+  ChatGPT 图片引用后端，不转发上游、不读取凭据、不生成模型指标；独立后端返回不支持。
   主代理还按当前锁定 Codex 0.156.1 的固定端点清单接受 POST `/alpha/search`、
   `/memories/trace_summarize`、`/images/generations`、`/images/edits`、
   `/realtime/calls`、`/live`，以及透明转发 `/v1/realtime`、`/v1/live` 和单段受限

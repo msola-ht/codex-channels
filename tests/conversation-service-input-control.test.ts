@@ -54,6 +54,21 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService conversation service input control", () => {
+  it("stops pending image preparation before a Turn exists", async () => {
+    const cancelPendingInput = vi.fn(() => true);
+    const interruptTurn = vi.fn();
+    const service = new ConversationService(
+      turnPort({ cancelPendingInput, interruptTurn }),
+      { current: () => ({ threadId: "thread-1" }) } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      {} as ModelSelectionService,
+      queryPort(),
+    );
+    await expect(service.stop(target)).resolves.toBe(true);
+    expect(cancelPendingInput).toHaveBeenCalledWith("thread-1");
+    expect(interruptTurn).not.toHaveBeenCalled();
+  });
+
   it("answers on the original Thread using steer while active and start after completion", async () => {
     let active = true;
     let current = "thread-1";

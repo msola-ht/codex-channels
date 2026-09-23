@@ -5,6 +5,7 @@ export type UserFacingErrorCode =
   | "conversation.busy"
   | "conversation.background-limit"
   | "conversation.background-queued"
+  | "image.reference.failed"
   | "image.url.invalid"
   | "image.too-large"
   | "image.too-many"

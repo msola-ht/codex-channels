@@ -29,6 +29,7 @@
   恢复结果保留响应的实际 Default/Plan 模式、目录和权限，以及与请求配置的一致性，供 Router 在绑定前校验；
   缺少必需字段时失败关闭。`parentThreadId` 只映射官方派生关系；`listThreadDescendants` 以明确祖先查询所有来源及指定归档状态，不用父目录截断后代，供本机归档预览和核验。固定状态写入由 Client 原样回写当前 Git SHA 以无损协调加载中 Thread，
   再移动到官方分区并读回验证。
+- `image-reference-upload.ts`：通过 `config/read` 定位当前 App Server 的回环模型代理并查询实际路由，再经官方账户路由和令牌校验，为 OpenAI ChatGPT 图片执行创建、无凭据字节上传和完成确认，再提交官方 fileId；管理有界并发、超时和取消；账户通知异步合并复核，身份未变不取消，变化或核验失败才取消；失败不回退或自动重传。
 - `turn-adapter.ts`：把 Application 的文本、内联 PNG/JPEG/WebP/非动画 GIF 图片、本地音频与已解析 Skill 输入编码为官方 `UserInput`，并映射
   Turn、Review 和 Goal 响应；缺少稳定结果必需字段时失败关闭。
 - `queue-adapter.ts`：把官方 Queue 条目裁剪为 Application 的稳定种类、可编辑标记和有界文本预览；

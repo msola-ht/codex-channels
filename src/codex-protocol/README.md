@@ -16,6 +16,7 @@
   `collaborationMode/list`、`turn/start.collaborationMode`、Luna Reserve 保留当前模式所需的
   `thread/settings/update.collaborationMode`、Thread Queue、分页历史与 Revert，以及前台计划任务的
   `thread/start.dynamicTools` 与对应 `item/tool/call` 回调（仅顶层 `schedule_task`），
+  图片上传账户与路由校验使用的 `account/read.workspaceRouting`，
   以及受默认关闭配置开关约束的 `plugin/installed` 和 Turn `mention` 调试；其余实验类型不构成支持能力。
 
 升级协议时先阅读 [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)，在工作区干净且

@@ -23,6 +23,7 @@
   并通过注入端口把项目规则操作限制
   到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
+  `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
   通过 Core 跟踪恢复期间的 Turn 通知，在绑定成功后恢复仍有效的活动状态。
   恢复已由其他渠道绑定的空闲 Thread 时，同时锁定新旧 Conversation，确认双方无活动 Turn、

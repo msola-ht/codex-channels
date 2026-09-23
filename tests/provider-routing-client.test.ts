@@ -11,6 +11,21 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("cancels pending image input only on the owning connected Provider", async () => {
+    const cancelPendingInput = vi.fn(() => true);
+    const openai = Object.assign(client(), { cancelPendingInput });
+    openai.startThread.mockResolvedValue(session("thread-openai", "openai", "idle"));
+    const deepseek = Object.assign(client(), { cancelPendingInput: vi.fn(() => false) });
+    const routed = new ProviderRoutingClient("openai", new Map([
+      ["openai", openai], ["deepseek", deepseek],
+    ]));
+    await routed.startThread(cwd);
+    expect(routed.cancelPendingInput("thread-openai")).toBe(true);
+    expect(cancelPendingInput).toHaveBeenCalledWith("thread-openai");
+    expect(routed.cancelPendingInput("unknown")).toBe(false);
+    expect(deepseek.cancelPendingInput).not.toHaveBeenCalled();
+  });
+
   it("reports configured Providers without starting their App Server", () => {
     const openai = client();
     const deepseek = client();

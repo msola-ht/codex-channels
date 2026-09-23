@@ -12,7 +12,8 @@
 `thread/queue/changed`、Thread 分页历史与 Revert 所需的
 `thread/turns/list`、`thread/revert`、`thread/reverted`，以及前台计划任务工具所需的
 `thread/start.dynamicTools` 与对应 `item/tool/call` 回调。动态工具仅注册顶层 `schedule_task`，
-不接入 `additionalContext` 或任意其他动态工具。四类受控例外均须有真实 App Server 合同。
+不接入 `additionalContext` 或任意其他动态工具。图片上传另允许读取 `account/read.workspaceRouting`，只用于账户与后端路由校验；
+五类受控例外均须有真实 App Server 合同。
 此外，配置开关控制的开发中 Plugin
 调试使用稳定 `plugin/installed` 与 Turn `mention` 输入；其他生成类型不表示已支持。
 
@@ -26,8 +27,8 @@
 | 84 | App Server 发给客户端的 Notification 方法 | [`ServerNotification.ts`](../src/codex-protocol/generated/ServerNotification.ts) |
 | 11 | App Server 发给客户端、需要回应的 Request 方法 | [`ServerRequest.ts`](../src/codex-protocol/generated/ServerRequest.ts) |
 | 1 | 客户端发给 App Server 的 Notification，即 `initialized` | [`ClientNotification.ts`](../src/codex-protocol/generated/ClientNotification.ts) |
-| 69 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
-| 44 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
+| 70 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
+| 45 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
 | 15 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
@@ -46,17 +47,20 @@ DeepSeek 运行实例采用 `ds-<账户>` 与 `sf-ds-<账户>`，账户共享官
 
 本次基线从 0.155.1 升至 0.156.1，包含 0.156.0 与 0.156.1 两次正式发布。
 采用稳定的 `thread/resume.collaborationMode` 恢复实际模式，并移除已停用的人格设置；
-Gateway 保持官方内联图片输入路径，自动上传转换尚未接入；
-隔离探测已证实固定版 App Server 可将引用直传模型端，
-并在历史、Queue 和重启恢复中保留。当前账户的 Apps 上传与即时下载已实测，模型后端接受编号，
-较大图片的 fileId 与 Data URL 对照均正确识图；首轮小图误识别根因未定。
-默认内联存储与现有 RPC 尚不提供完整的原生文件上传、解析通路。
-转发、分页历史保留与后端拒绝由 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)
-的离线真实合同覆盖；外部输入仍只接受已校验的内联图片，不接受用户传入文件编号。
+Gateway 为 OpenAI ChatGPT 图片上传原图并提交官方 fileId，历史和后续引用由 App Server 管理；
+API Key、第三方 Provider 和独立自定义 OpenAI 后端保留内联图片输入。通过 `config/read`
+定位运行中的模型代理并核对后端；仅默认 ChatGPT 后端一致且策略为 `NO_CONSTRAINT` 时转换，`us`、`us_cr` 或后端不一致拒绝上传。
+上传原图跳过官方本地缩放，见图片决策中的限制。
+通过稳定 `getAuthStatus` 和受控 `account/read.workspaceRouting` 读取同一 App Server 的认证与路由，
+不读取磁盘凭据；实现见 [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts)。
+账户路由、令牌读取、编号转发、分页历史保留与后端拒绝由
+[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 覆盖；
+上传和取消见 [`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)。
+此前在线探测支持当前账户编号识图，新增自动链路仍待真实渠道和模型验收。
 原生文件引用需求及阻塞、Apps 工具上传与普通图片输入的区别见[图片决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
-`disabledPluginIds`、MCP App UI、设备验证扩展与账户路由信息
+`disabledPluginIds`、MCP App UI、设备验证扩展
 不增加 Gateway 写入或交互入口。新增 `rollout/compress` 与删除 `thread/rollback` 均不影响当前业务调用。
-受控导出、当前调用方法和审批种类没有增加；具体取舍见[升级决策记录](codex-cli-upgrade-decisions.md#01561)。
+本次图片接入增加一个认证响应导出和一个请求方法，审批种类没有增加；具体取舍见[升级决策记录](codex-cli-upgrade-decisions.md#01561)。
 本地构建或 Registry 包的 `codexc update` 由 [`source-update.mjs`](../scripts/source-update.mjs)
 按已安装包的精确 CLI 基线完成临时候选公开合同校验、确认安装与服务恢复，验证见
 [`source-update.test.ts`](../tests/source-update.test.ts)。
@@ -91,7 +95,7 @@ Gateway 保持官方内联图片输入路径，自动上传转换尚未接入；
 | 普通图片准备与原生 TUI 输入 | [`image_preparation.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/src/image_preparation.rs)、[`image_submission.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/tui/src/chatwidget/image_submission.rs) | 本地图片快照转内联输入；Core 图片处理调用注入的存储实现 |
 | Apps 工具文件上传 | [`mcp_openai_file.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/src/mcp_openai_file.rs)、[`files.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/files.rs) | ChatGPT 认证下为工具参数上传；当前账户上传、即时下载与模型后端接受编号已探测，较大图片识图对照通过，独立按编号取回与地址刷新仍未验收 |
 | 本地 Rollout 文件压缩 | [`rollout.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server/src/request_processors/rollout.rs)、[`RolloutCompressResponse.ts`](../src/codex-protocol/generated/v2/RolloutCompressResponse.ts) | 实验后台维护触发，仅适用于本地存储；不是 Thread 上下文压缩，也不返回完成状态；本项目未接入 |
-| 模型访问计划与账户路由元数据 | [`model.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server-protocol/src/protocol/v2/model.rs)、[`account.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server-protocol/src/protocol/v2/account.rs)、[`workspace_routing.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs) | 目录展示与实验显式选择、账户后端路由分别审查；字段存在不授予权益；本项目不增加对应入口 |
+| 模型访问计划与账户路由元数据 | [`model.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server-protocol/src/protocol/v2/model.rs)、[`account.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server-protocol/src/protocol/v2/account.rs)、[`workspace_routing.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs) | 目录展示与实验显式选择、账户后端路由分别审查；字段存在不授予权益；账户路由仅供图片上传核验，不开放选择器 |
 | 图片生成 Item 与产物 | [`image_generation.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/ext/items/src/image_generation.rs)、[`artifact.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/ext/image-generation/src/artifact.rs) | `ImageGenerationItem.savedPath` 与生成图片落盘目录 |
 | 官方模型 API 端点 | [`search.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/endpoint/search.rs)、[`images.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/endpoint/images.rs)、[`memories.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/endpoint/memories.rs)、[`realtime_call.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/endpoint/realtime_call.rs)、[`realtime_websocket/methods.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs) | OpenAI 搜索、图片、记忆摘要、Realtime HTTP 与 WebSocket 的固定请求后缀；Provider Proxy 只按该版本显式放行，不接受任意 OpenAI API 路径 |
 | 权限协议 | [`permissions.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server-protocol/src/protocol/v2/permissions.rs) | 临时权限、命令网络上下文与持久规则结构 |
@@ -334,14 +338,14 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | --- | --- | --- | --- |
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
 | 内联图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.image`（`url`） | 三渠道受限 PNG/JPEG/WebP/非动画 GIF Data URL 已支持；仅当前模型声明 `image` 输入能力时可用 | Surface 完成下载、签名、格式、数量和大小校验后，共享批处理器按 [OpenAI 图片输入要求](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)在提交边界读取为有界 Base64 Data URL；Gateway 统一限制为单张 10 MiB、每批最多四张且合计 20 MiB，这是跨渠道安全边界，不代表三平台具有相同官方上限，并低于当前已知 Provider 上限。Application 拒绝 HTTP(S)、空值和非法 Base64，Gateway 不把本地路径或 Base64 写入自身日志或独立存储，并在创建或追加 Turn 前按模型目录检查 `image` 能力；支持时提交官方 `image`，不支持时提示使用 `/model` 切换模型，不调用外部视觉 API，也不建立第二套识图会话；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`surface-input-coalescer.test.ts`](../tests/surface-input-coalescer.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts)、[`deepseek-catalog.test.ts`](../tests/deepseek-catalog.test.ts) |
-| 图片引用协议（自动转换未接入） | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；默认 App Server 使用内联存储 | 渠道继续提交已校验内联图片；已有引用仅在历史与 Queue 中作安全摘要，不提供用户编号输入或文件管理入口 | [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 验证编号转发、分页历史、后续轮次复用及拒绝路径；[决策与未完成项](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界) |
+| 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting` | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝；历史由官方保留 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts)、[`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)、[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)；[决策与限制](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界) |
 | 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |
-| 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | Realtime 不在 Plan、Queue、Revert、前台计划任务动态工具四类受控例外中；不得导出、调用或消费 Realtime 业务能力 |
+| 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | Realtime 不在 Plan、Queue、Revert、前台计划任务动态工具及图片上传账户路由五类受控例外中；不得导出、调用或消费 Realtime 业务能力 |
 | ChatGPT Voice / 语音听写 | 官方桌面应用产品能力，不是当前 CLI 命令入口 | 不属于 Gateway | 不用平台模拟实现第二套 Codex 实时会话或语音输出 |
 
 Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` 的封闭联合；模型目录
 只把 `text`、`image`、`audio` 三种官方输入能力映射为稳定类型，包含 `localAudio` 的提交必须
-先通过当前模型能力检查。Codex Client 映射这些稳定输入，图片保持官方内联输入路径；自动引用转换已撤除，已有引用仅保留协议验证与安全摘要支持。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
+先通过当前模型能力检查。Codex Client 映射这些稳定输入，OpenAI ChatGPT 图片经账户校验和上传转换为官方 fileId，其他 Provider 保持内联路径。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
 不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
 会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。

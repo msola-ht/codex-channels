@@ -11,7 +11,7 @@ import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
-import type { ThreadStartResponse, ThreadTurnsListResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
+import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, ThreadStartResponse, ThreadTurnsListResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
@@ -21,6 +21,66 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server tools", () => {
+    it("exposes current ChatGPT credentials and workspace routing for image upload", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "codex-image-auth-contract-"));
+      const accountId = "123e4567-e89b-42d3-a456-426614174000";
+      const requests: string[] = [];
+      const backend = createServer((request, response) => {
+        requests.push(request.url ?? "");
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify(request.url?.includes("accounts/check") ? {
+          accounts: [{ id: accountId, workspace_backend_origin: "https://chatgpt.com", account_routing_override: "us" }],
+        } : request.url?.includes("models") ? { models: [] } : {}));
+      });
+      let rpc: JsonRpcClient | undefined;
+      let proxy: ProviderProxy | undefined;
+      try {
+        await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+        const address = backend.address();
+        if (!address || typeof address === "string") throw new Error("Missing auth fixture address");
+        proxy = new ProviderProxy("127.0.0.1:0", {
+          upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http",
+          upstreamBasePath: "/backend-api/codex", allowOpenAiApiPaths: true,
+        });
+        await proxy.start();
+        const modelBaseUrl = `http://${proxy.address()}`;
+        const payload = Buffer.from(JSON.stringify({
+          email: "fixture@example.test",
+          "https://api.openai.com/auth": { chatgpt_account_id: accountId, chatgpt_plan_type: "pro", chatgpt_user_id: "fixture-user" },
+        })).toString("base64url");
+        writeFileSync(join(directory, "auth.json"), JSON.stringify({ auth_mode: "chatgpt", tokens: {
+          id_token: `eyJhbGciOiJub25lIn0.${payload}.fixture`, access_token: "fixture-access-token",
+          refresh_token: "fixture-refresh-token", account_id: accountId,
+        }, last_refresh: new Date().toISOString() }), { mode: 0o600 });
+        writeFileSync(join(directory, "config.toml"), `chatgpt_base_url = "http://127.0.0.1:${address.port}/backend-api"\nopenai_base_url = "${modelBaseUrl}"\n`);
+        rpc = new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { PATH: process.env.PATH, CODEX_HOME: directory },
+        }));
+        await rpc.connect();
+        const config = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { cwd: directory, includeLayers: false } });
+        expect(config.config.openai_base_url).toBe(modelBaseUrl);
+        // A live proxy configured for an independent backend cannot certify
+        // ChatGPT file references even though account/read reports ChatGPT.
+        const inspected = await fetch(`${modelBaseUrl}/_codexc/image-upload-route`);
+        expect(await inspected.json()).toEqual({ supported: false, backendOrigin: null });
+        const account = await rpc.request<GetAccountResponse>({ method: "account/read", params: { refreshToken: false } });
+        expect(account.workspaceRouting).toEqual({ chatgptAccountId: accountId, backendOrigin: "https://chatgpt.com", accountRoutingOverride: "us" });
+        expect(account.account?.type).toBe("chatgpt");
+        const auth = await rpc.request<GetAuthStatusResponse>({ method: "getAuthStatus", params: { includeToken: true, refreshToken: false } });
+        expect(auth).toMatchObject({ authMethod: "chatgpt", authToken: "fixture-access-token" });
+        expect(requests.some(path => path.includes("accounts/check"))).toBe(true);
+        const hidden = await rpc.request<GetAuthStatusResponse>({ method: "getAuthStatus", params: { includeToken: false, refreshToken: false } });
+        expect(hidden.authToken).toBeNull();
+      } finally {
+        await rpc?.close();
+        await proxy?.close();
+        backend.closeAllConnections();
+        await new Promise<void>(resolve => backend.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }, 30_000);
+
     it("forwards image fileId, preserves history and reports backend rejection", async () => {
       const directory = mkdtempSync(join(tmpdir(), "codex-image-reference-contract-"));
       const codexHome = join(directory, "home");
