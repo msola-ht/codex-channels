@@ -399,6 +399,23 @@ API Key、第三方 Provider 和独立自定义 OpenAI 后端保持内联图片�
 此功能不提供文件管理、按编号下载或用户手动编号输入。
 实现、验证范围与限制见[图片引用决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
 
+部署后需要确认自动引用时，先按[模型请求转储](#模型请求转储)开启调用详情记录。为避免历史条目或
+长字段被裁剪，可临时把 `model_traffic_input_items` 和 `model_traffic_item_max_bytes` 都设为 `0`，
+重启 App Server 后在新会话中发送一张图片，再发送一条只引用前图的纯文本追问。用下面的命令分别
+展开首次发图和后续追问对应的模型调用：
+
+```bash
+codexc traffic
+codexc traffic --exchange <首次发图编号>
+codexc traffic --exchange <后续追问编号>
+```
+
+首次请求应包含 `input_image.file_id`，且不包含该图片的 `data:image/...;base64`。后续请求可能在
+完整历史中继续携带同一 `file_id`，也可能通过 `previous_response_id` 增量接续而完全不再携带图片；
+两者都属于官方历史复用。后续请求重新出现该图片的 Base64 才表示自动引用未生效。模型能够回答
+后续追问只能证明上下文可用，不能单独证明首次请求已经使用 `fileId`。转储包含未脱敏的会话正文、
+工具输出和代码，验证后恢复原来的裁剪配置并关闭转储，不要分享原始文件。
+
 从本机向绑定渠道发送图片：
 
 ```bash
@@ -500,8 +517,9 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 后永�
 
 ### 转储体积控制
 
-每次请求都会重发完整会话历史，长会话一轮就有几 MB；转储默认按下面的规则裁剪后落盘，不需要额外
-配置：
+首个请求或未采用增量接续的请求可能携带完整会话历史，长会话一轮就有几 MB；使用 WebSocket
+`previous_response_id` 接续时，后续请求也可能只携带本轮增量。转储对实际出现的 `input` 按下面的
+规则裁剪后落盘，不需要额外配置：
 
 ```toml
 [debug]

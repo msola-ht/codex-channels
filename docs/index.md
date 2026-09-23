@@ -56,7 +56,10 @@ API Key、第三方 Provider 和独立自定义 OpenAI 后端保留内联图片�
 账户路由、令牌读取、编号转发、分页历史保留与后端拒绝由
 [`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts) 覆盖；
 上传和取消见 [`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)。
-此前在线探测支持当前账户编号识图，新增自动链路仍待真实渠道和模型验收。
+此前在线探测支持当前账户编号识图；2026-09-23 的飞书实机验收进一步确认，自动链路首次请求向
+OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请求通过 `previous_response_id`
+接续且没有重复图片。该结论限定当前账户、`NO_CONSTRAINT` 路由和当次模型，其他渠道、账户、路由
+与模型仍按各自验收状态记录。
 原生文件引用需求及阻塞、Apps 工具上传与普通图片输入的区别见[图片决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
 `disabledPluginIds`、MCP App UI、设备验证扩展
 不增加 Gateway 写入或交互入口。新增 `rollout/compress` 与删除 `thread/rollback` 均不影响当前业务调用。
@@ -338,7 +341,7 @@ Remote Control、动态工具、Attestation 和实验能力等类型；它们没
 | --- | --- | --- | --- |
 | 文本 | `turn/start`、`turn/steer` 的稳定 `UserInput.text` | Telegram、飞书、微信已支持 | 由 Application 的 `TurnInput.text` 进入统一 Turn |
 | 内联图片 | `turn/start`、`turn/steer` 的稳定 `UserInput.image`（`url`） | 三渠道受限 PNG/JPEG/WebP/非动画 GIF Data URL 已支持；仅当前模型声明 `image` 输入能力时可用 | Surface 完成下载、签名、格式、数量和大小校验后，共享批处理器按 [OpenAI 图片输入要求](https://developers.openai.com/api/docs/guides/images-vision#image-input-requirements)在提交边界读取为有界 Base64 Data URL；Gateway 统一限制为单张 10 MiB、每批最多四张且合计 20 MiB，这是跨渠道安全边界，不代表三平台具有相同官方上限，并低于当前已知 Provider 上限。Application 拒绝 HTTP(S)、空值和非法 Base64，Gateway 不把本地路径或 Base64 写入自身日志或独立存储，并在创建或追加 Turn 前按模型目录检查 `image` 能力；支持时提交官方 `image`，不支持时提示使用 `/model` 切换模型，不调用外部视觉 API，也不建立第二套识图会话；[`conversation-service.test.ts`](../tests/conversation-service.test.ts)、[`surface-input-coalescer.test.ts`](../tests/surface-input-coalescer.test.ts)、[`real-app-server.test.ts`](../tests/real-app-server.test.ts)、[`deepseek-catalog.test.ts`](../tests/deepseek-catalog.test.ts) |
-| 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting` | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝；历史由官方保留 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts)、[`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)、[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)；[决策与限制](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界) |
+| 图片自动引用 | 稳定 `turn/start`、`turn/steer` 的 `UserInput.image.fileId`；`getAuthStatus` 与受控 `account/read.workspaceRouting` | OpenAI ChatGPT Thread 经当前模型代理后端核验后上传原图并提交编号；仅默认后端一致且策略为 `NO_CONSTRAINT` 时转换，自定义独立后端保留内联，`us`、`us_cr` 或后端不一致拒绝；历史由官方保留。飞书实机已验证首次 `file_id` 与后续 `previous_response_id` 接续不重复 Base64 | [`image-reference-upload.ts`](../src/codex-client/image-reference-upload.ts)、[`image-reference-upload.test.ts`](../tests/image-reference-upload.test.ts)、[`real-app-server-supervised-tools.test.ts`](../tests/real-app-server-supervised-tools.test.ts)；[决策与限制](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)、[脱敏实测记录](codex-image-fileid-probe.md#gateway-生产链路验收) |
 | 一次性音频 | 稳定 `UserInput.audio` / `UserInput.localAudio`；模型目录用 `inputModalities` 声明实际能力；固定源码支持 WAV、MP3、M4A、WebM 与 OGG 本地音频 | 三渠道平台接收与受限转换已实现；当前可见模型均未声明 `audio`，原始音频不属于当前端到端支持 | Surface 先验证可信时长、最长 5 分钟、最大 20 MiB 与格式并写入一小时私有临时文件；Application 再按当前或下一 Turn 模型的 `inputModalities` 检查 `audio`，缺失时在 `turn/start` / `turn/steer` 前明确拒绝。微信可信转写仍作为文本提交；SILK 明确拒绝 |
 | 实时语音 | 实验 `thread/realtime/start`、`appendAudio`、`appendSpeech`、`stop` 及 Realtime 通知 | 禁止接入 | Realtime 不在 Plan、Queue、Revert、前台计划任务动态工具及图片上传账户路由五类受控例外中；不得导出、调用或消费 Realtime 业务能力 |
 | ChatGPT Voice / 语音听写 | 官方桌面应用产品能力，不是当前 CLI 命令入口 | 不属于 Gateway | 不用平台模拟实现第二套 Codex 实时会话或语音输出 |
