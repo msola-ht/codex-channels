@@ -51,7 +51,6 @@ import {
   formatConversationCollaborationMode,
   formatConversationGoal,
   formatConversationPermissions,
-  formatConversationProjectRules,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
@@ -207,12 +206,6 @@ export async function renderTelegramCommandResult(
         context,
         formatConversationPermissions(result),
         workspacePermissionKeyboard(),
-      );
-      return;
-    case "project-rules":
-      await replyTelegramPanel(
-        context,
-        formatConversationProjectRules(result),
       );
       return;
     case "artifacts":

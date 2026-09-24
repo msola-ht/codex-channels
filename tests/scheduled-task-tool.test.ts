@@ -192,7 +192,6 @@ describe("ConversationService scheduled task input", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
     );
 
     await service.submit(target, "每天 09:00 检查 CI");

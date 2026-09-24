@@ -203,7 +203,6 @@ function serviceWithQueue(
     { ...options.models } as ModelSelectionService,
     queryPort(),
     undefined,
-    undefined,
     options.collaborationModes as unknown as CollaborationModeSelectionService | undefined,
     undefined,
     undefined,

@@ -20,8 +20,7 @@
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
-  并通过注入端口把项目规则操作限制
-  到当前授权 Workspace；Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
+  Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
   并通过组合根注入的只读端口取得当前 Workspace Git 分支；
   `/stop` 同时取消当前 Thread 尚未提交的图片准备；已提交 Turn 继续使用官方中断。
   所有历史选择器限定当前工作区，选择和恢复前的上下文复核在 Conversation 锁内执行；
@@ -182,6 +181,4 @@ URL 校验、资源限长与响应裁剪由 Client 适配器处理，渠道查�
 `PluginQueryPort`，开关和 Provider 限制由 Application 执行。
 Permission Profile 查询只依赖 `PermissionQueryPort`；CWD、分页和官方响应裁剪由 Client 处理。
 命令成功文案、命令菜单说明和平台交互形式由各 Surface 维护，并通过类型穷尽检查保持完整。
-项目规则命令只接受 `init` 或 `check`；Application 负责选择 Workspace，具体文件与进程操作由
-Bootstrap 注入的运行时实现完成。远程入口不得提供强制覆盖。
 `/whoami`、交互取消、图片下载等平台能力不属于通用会话命令，继续由具体 Surface 实现。

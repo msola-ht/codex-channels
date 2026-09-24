@@ -141,7 +141,7 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `collaboration-mode.unavailable` | Plan 模式服务不可用 | Plan 模式不可用 |
 | `plan.prompt.empty` | Plan 需求不能为空 | Plan 输入为空 |
 
-### Skill、命令与项目规则
+### Skill 与命令
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
@@ -149,12 +149,6 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `skill.not-found` | Skill 不存在、未启用或不属于当前 Workspace | Skill 选择器无匹配 |
 | `command.unsupported` | 不支持该渠道命令，请发送 /help | 未知聊天命令 |
 | `review.usage` | /review 用法提示 | 参数格式错误 |
-| `rules.usage` | /rules 用法提示 | 参数格式错误 |
-| `rules.exists` | 当前 Workspace 已有项目规则 | 重复初始化规则 |
-| `rules.missing` | 当前 Workspace 尚未生成项目规则 | 未初始化时检查规则 |
-| `rules.unsafe-path` | 项目规则路径包含符号链接，已拒绝写入 | 规则路径使用符号链接 |
-| `rules.check-failed` | 项目规则检查失败 | Codex CLI 规则校验失败 |
-| `rules.unavailable` | 项目规则服务当前不可用 | 规则服务未装配 |
 
 ### MCP、Plugin 与 Agents
 

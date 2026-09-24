@@ -17,10 +17,6 @@ import {
   resolveExecutable,
 } from "../../runtime/executable.mjs";
 import {
-  checkProjectRulesAtRoot,
-  initializeProjectRulesAtRoot,
-} from "../../runtime/project-rules.mjs";
-import {
   loadManagedModelProviderDefinitions,
 } from "../../runtime/model-provider-definitions.mjs";
 import {
@@ -552,13 +548,6 @@ export abstract class GatewayComponentGraph {
       this.core,
       models,
       this.codex,
-      {
-        initialize: (projectRoot) => initializeProjectRulesAtRoot({ projectRoot }),
-        check: (projectRoot) => checkProjectRulesAtRoot({
-          projectRoot,
-          codexBinary: effectiveCodexBinary(config.codexBinary),
-        }),
-      },
       {
         currentGitBranch,
       },

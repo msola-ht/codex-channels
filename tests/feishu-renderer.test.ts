@@ -243,12 +243,6 @@ describe("Feishu output renderer", () => {
       },
       { kind: "permissions", profiles: [] },
       {
-        kind: "project-rules",
-        action: "checked",
-        projectRoot: "/workspace",
-        rulesPath: "/workspace/.codex/rules/default.rules",
-      },
-      {
         kind: "artifacts",
         view: "diff",
         artifacts: undefined,
@@ -268,7 +262,6 @@ describe("Feishu output renderer", () => {
       "usage",
       "limits",
       "permissions",
-      "project-rules",
       "artifacts",
       "goal",
     ]);
@@ -284,7 +277,6 @@ describe("Feishu output renderer", () => {
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
-      expect.stringContaining("项目规则检查通过"),
       "当前 Session 暂无 Turn Diff。",
       "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);
@@ -689,12 +681,6 @@ describe("Feishu output renderer", () => {
         description: "允许工作区写入",
       }],
     })).toContain("- workspace-write · 可选择 · 允许工作区写入");
-    expect(renderFeishuCommandResult({
-      kind: "project-rules",
-      action: "initialized",
-      projectRoot: "/workspace",
-      rulesPath: "/workspace/.codex/rules/default.rules",
-    })).toContain("重启 Codex/App Server 后生效");
 
     const state: ModelSelectionState = {
       models: [{

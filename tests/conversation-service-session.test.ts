@@ -244,7 +244,6 @@ describe("ConversationService conversation service session", () => {
       queryPort(),
       undefined,
       undefined,
-      undefined,
       {
         hasPendingInteraction: () => false,
         notifyTransferred,
@@ -295,7 +294,6 @@ describe("ConversationService conversation service session", () => {
       { activeTurn: () => undefined } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       {
@@ -351,7 +349,6 @@ describe("ConversationService conversation service session", () => {
       } as unknown as ConversationCore,
       { clear: vi.fn() } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       {
@@ -627,7 +624,6 @@ describe("ConversationService conversation service session", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       {
         listThreadTurns: vi.fn(async (threadId: string) => ({
           turns: Array.from({ length: threadId === "thread-a" ? 2 : 4 }, (_, index) => ({
@@ -852,7 +848,7 @@ describe("ConversationService conversation service session", () => {
     const service = new ConversationService(
       turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
       {} as ModelSelectionService, queryPort(),
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, history, undefined,
       sessionDisplayCache as unknown as import("../src/conversation-core/index.js").SessionDisplayCachePort,
     );
@@ -914,7 +910,7 @@ describe("ConversationService conversation service session", () => {
     const service = new ConversationService(
       turnPort(), router, { activeTurn: () => undefined } as unknown as ConversationCore,
       {} as ModelSelectionService, queryPort(),
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined,
       { listThreadTurns } as unknown as ThreadHistoryPort, undefined,
       sessionDisplayCache,

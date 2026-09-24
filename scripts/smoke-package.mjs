@@ -38,7 +38,6 @@ try {
   const help = run(command, ["--help"], temporaryDirectory, environment, true).stdout;
   const workspaceHelp = run(command, ["work", "-h"], temporaryDirectory, environment, true).stdout;
   const metricsHelp = run(command, ["metrics", "-h"], temporaryDirectory, environment, true).stdout;
-  const rulesHelp = run(command, ["rules", "init", "-h"], temporaryDirectory, environment, true).stdout;
   const serviceHelp = run(
     command,
     ["service", "-h"],
@@ -63,7 +62,6 @@ try {
     "doctor",
     "remote",
     "work",
-    "rules",
     "metrics",
     "channel",
     "webui",
@@ -79,7 +77,6 @@ try {
   if (
     !workspaceHelp.includes("用法：codexc work")
     || !metricsHelp.includes("用法：codexc metrics")
-    || !rulesHelp.includes("用法：codexc rules init")
     || !serviceHelp.includes("install")
     || !serviceHelp.includes("reload")
     || !serviceHelp.includes("logs")
@@ -133,7 +130,6 @@ try {
     "scripts/source-shell-path.mjs",
     "scripts/cli-status.mjs",
     "scripts/service-target-query.mjs",
-    "scripts/codex-rules.mjs",
     "scripts/telegram-setup-session.d.mts",
     "scripts/telegram-setup-session.mjs",
     "scripts/telegram-setup.mjs",

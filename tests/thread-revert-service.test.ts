@@ -157,7 +157,6 @@ function makeService(options: {
     undefined,
     undefined,
     undefined,
-    undefined,
     { pluginApiEnabled: false },
     undefined,
     queue,

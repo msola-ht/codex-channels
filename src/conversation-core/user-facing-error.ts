@@ -104,13 +104,7 @@ export type UserFacingErrorCode =
   | "agents.not-found"
   | "agents.config-unreadable"
   | "command.unsupported"
-  | "review.usage"
-  | "rules.usage"
-  | "rules.exists"
-  | "rules.missing"
-  | "rules.unsafe-path"
-  | "rules.check-failed"
-  | "rules.unavailable";
+  | "review.usage";
 
 export type UserFacingErrorDetails = Readonly<
   Record<string, string | readonly string[]>

@@ -96,8 +96,6 @@ export {
   type ConversationTurnUseCases,
   type ThreadQueueListResult,
   type ThreadQueueReorderResult,
-  type ProjectRulesPort,
-  type ProjectRulesResult,
   type Submission,
   type WorkspaceStatusPort,
 } from "./conversation-service.js";

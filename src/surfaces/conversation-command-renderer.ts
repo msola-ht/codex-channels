@@ -36,7 +36,6 @@ import {
   formatConversationCollaborationMode,
   formatConversationGoal,
   formatConversationPermissions,
-  formatConversationProjectRules,
   formatConversationStatus,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
@@ -107,8 +106,6 @@ export function renderConversationCommandResult(
       return formatConversationLimits(result);
     case "permissions":
       return formatConversationPermissions(result);
-    case "project-rules":
-      return formatConversationProjectRules(result);
     case "artifacts":
       return formatConversationArtifacts(result);
     case "goal":

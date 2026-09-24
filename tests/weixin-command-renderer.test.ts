@@ -248,12 +248,6 @@ describe("Weixin command renderer", () => {
       },
       { kind: "permissions", profiles: [] },
       {
-        kind: "project-rules",
-        action: "checked",
-        projectRoot: "/workspace",
-        rulesPath: "/workspace/.codex/rules/default.rules",
-      },
-      {
         kind: "artifacts",
         view: "diff",
         artifacts: undefined,
@@ -273,7 +267,6 @@ describe("Weixin command renderer", () => {
       expect.stringContaining("OpenAI Codex 账户用量摘要"),
       expect.stringContaining("Codex 额度"),
       expect.stringContaining("本次为只读查询"),
-      expect.stringContaining("项目规则检查通过"),
       "当前 Session 暂无 Turn Diff。",
       "当前 Session 没有 Goal。使用 /goal set <目标> 设置。",
     ]);

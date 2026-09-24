@@ -628,12 +628,6 @@ describe("shared surface copy contract", () => {
         }],
       },
       {
-        kind: "project-rules",
-        action: "initialized",
-        projectRoot: "/workspace/main",
-        rulesPath: "/workspace/main/.codex/rules/default.rules",
-      },
-      {
         kind: "collaboration-mode",
         state: {
           mode: "plan",

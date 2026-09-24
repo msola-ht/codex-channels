@@ -65,7 +65,7 @@ describe("TelegramLifecycle", () => {
     expect(registeredCommands.some((command) => command.command === "queue")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "sessions")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "diff")).toBe(true);
-    expect(registeredCommands.some((command) => command.command === "rules")).toBe(true);
+    expect(registeredCommands.some((command) => command.command === "rules")).toBe(false);
     expect(registeredCommands.some((command) => command.command === "stop")).toBe(true);
     expect(registeredCommands.some((command) => command.command === "workspaceperm")).toBe(true);
     expect(registeredCommands.every((command) => /^[a-z0-9_]{1,32}$/u.test(command.command)))

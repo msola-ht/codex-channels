@@ -83,7 +83,7 @@ describe("ConversationCommandService", () => {
     expect(conversationCommandNames).toContain("goal");
     expect(conversationCommandNames).toContain("agents");
     expect(conversationCommandNames).toContain("pin");
-    expect(conversationCommandNames).toContain("rules");
+    expect(conversationCommandNames).not.toContain("rules");
     expect(conversationCommandNames).toContain("plugin");
     expect(conversationCommandNames).toContain("release");
     expect(isConversationCommandName("status")).toBe(true);
@@ -151,34 +151,6 @@ describe("ConversationCommandService", () => {
       state,
     });
     expect(clearModelSelection).toHaveBeenCalledWith(target);
-  });
-
-  it("routes project rule generation and checks through the application boundary", async () => {
-    const result = {
-      projectRoot: "/workspace/project",
-      rulesPath: "/workspace/project/.codex/rules/default.rules",
-    };
-    const initializeProjectRules = vi.fn(async () => result);
-    const checkProjectRules = vi.fn(async () => result);
-    const commands = new ConversationCommandService({
-      initializeProjectRules,
-      checkProjectRules,
-    });
-
-    await expect(commands.execute(target, "rules", "init")).resolves.toEqual({
-      kind: "project-rules",
-      action: "initialized",
-      ...result,
-    });
-    await expect(commands.execute(target, "rules", "check")).resolves.toEqual({
-      kind: "project-rules",
-      action: "checked",
-      ...result,
-    });
-    await expect(commands.execute(target, "rules", "--force"))
-      .rejects.toMatchObject({ code: "rules.usage" });
-    expect(initializeProjectRules).toHaveBeenCalledWith(target);
-    expect(checkProjectRules).toHaveBeenCalledWith(target);
   });
 
   it("routes session search and returns typed presentation data", async () => {
@@ -1176,10 +1148,6 @@ describe("ConversationCommandService", () => {
         provider: "test",
       })),
       listPermissionProfiles: vi.fn(async () => []),
-      initializeProjectRules: vi.fn(async () => ({
-        projectRoot: "/workspace",
-        rulesPath: "/workspace/.codex/rules/default.rules",
-      })),
       artifacts: vi.fn(() => undefined),
       togglePlanMode: vi.fn(async () => ({ mode: "plan" as const, pending: true })),
       setGoal: vi.fn(async () => goal),
@@ -1228,7 +1196,6 @@ describe("ConversationCommandService", () => {
       ["metrics", "", "requestMetrics"],
       ["limits", "", "providerAccountLimits"],
       ["permissions", "", "listPermissionProfiles"],
-      ["rules", "init", "initializeProjectRules"],
       ["diff", "", "artifacts"],
       ["plan", "", "togglePlanMode"],
       ["goal", "set ship", "setGoal"],
