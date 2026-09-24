@@ -61,6 +61,7 @@ function fixture() {
   homes.push(home);
   const environment = {
     ...process.env, CODEX_HOME: join(home, "codex"), CODEX_CONNECT_HOME: join(home, "connect"),
+    CODEX_CONNECT_CONFIG_FILE: "",
     ...(process.env.RUN_CODEX_CONTRACT === "1" ? {} : { CODEX_BINARY: process.execPath }),
   };
   const paths = ccgSetupPaths(environment, "main");

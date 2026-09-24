@@ -9,12 +9,12 @@
 
 ## 命令范围
 
-交互终端无参数运行 `codexc` 打开主菜单，调用现有命令；非交互终端显示帮助。主菜单、服务、工作区、指标和清理菜单在单项完成、取消或操作失败后可继续选择，退出当前菜单返回上层；进程终止信号仍结束命令。
+交互终端无参数运行 `codexc` 打开主菜单，调用现有命令；非交互终端显示帮助。主菜单、运行与连接、服务、工作区、指标和清理菜单在单项完成、取消或操作失败后可继续选择，退出当前菜单返回上层；进程终止信号仍结束命令。
 
 - `init`、`setup`、`config`：初始化用户目录；通过 Setup 接入 Provider、通讯渠道和项目技能；
-  通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
+  Setup 和 Config 操作失败后保留分类菜单；通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
   审批超时、Sandbox、默认工作区、模型覆盖、WebUI、指标、Telegram 消息格式和配置路径。
-  `setup --json` 保留交互并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
+  `setup` 在初始化前校验交互终端；`setup --json` 使用终端 stderr 提示并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
   `.codex-connect` 配置路径，`config --json` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，

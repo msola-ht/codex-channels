@@ -22,17 +22,11 @@ export async function runSystemSettings({
   output,
   prompts,
   writeConfig = writeGatewayConfig,
-  debugSetup,
 }) {
   const section = await prompts.select({
     message: "选择系统设置",
     showInstructions: false,
     options: [
-      {
-        value: "debug",
-        label: "调试模式（快捷开关）",
-        hint: "在 info / debug 间切换；其他等级在高级设置中选择",
-      },
       {
         value: "model_traffic_dump",
         label: "调用详情记录",
@@ -84,7 +78,6 @@ export async function runSystemSettings({
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
-  if (section === "debug") return debugSetup({ environment, input, output, prompts });
   if (section === "model_traffic_dump") {
     return runModelTrafficDump({ environment, output, prompts, writeConfig });
   }

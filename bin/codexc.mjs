@@ -123,7 +123,8 @@ const helpText = {
 
 打开脱敏接入状态总览，以及模型与提供商、通讯渠道和项目技能设置菜单。
 
-默认模式输出中文交互文本；--json 保留交互输入，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
+需要终端标准输入与提示输出，非交互调用在初始化前报错。
+默认模式输出中文交互文本；--json 保留交互输入并要求 stderr 为终端，将提示和进度写入 stderr，并将每次完成的设置以 JSON Lines 写入 stdout。
 
 常用入口：
   codexc setup → 模型与提供商 → OpenAI 官方 → 登录并恢复官方
@@ -618,6 +619,11 @@ function opencodeGoAccount(args) {
 }
 
 function runSetup(args = []) {
+  const promptOutput = args.includes("--json") ? process.stderr : process.stdout;
+  if (!process.stdin.isTTY || !promptOutput.isTTY) {
+    runStandaloneScript("scripts/setup.mjs", args);
+    return;
+  }
   initializeUserData({ cwd: process.cwd() });
   runScript("scripts/setup.mjs", args, { failureReportedByChild: true });
 }

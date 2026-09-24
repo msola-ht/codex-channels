@@ -20,11 +20,22 @@ describe("CLI navigation", () => {
     expect(prompts.select).toHaveBeenCalledTimes(3);
   });
 
+  it("groups launch actions and returns through both menu levels", async () => {
+    const prompts = fixture(["launch", "remote", "webui", "back", "doctor", "cancel"]);
+    const runCommand = vi.fn().mockResolvedValue(undefined);
+    await runCliMenu({ prompts, runCommand });
+    expect(runCommand.mock.calls).toEqual([[["remote"]], [["webui"]], [["doctor"]]]);
+    expect(prompts.select.mock.calls[0]?.[0]).toMatchObject({
+      options: expect.arrayContaining([expect.objectContaining({ value: "launch" })]),
+    });
+    expect(prompts.select).toHaveBeenCalledTimes(6);
+  });
+
   it("does not turn a forwarded process signal into another prompt", async () => {
     const signal = new ForwardedChildSignalError("SIGINT");
-    const prompts = fixture(["remote"]);
+    const prompts = fixture(["launch", "remote"]);
     await expect(runCliMenu({ prompts, runCommand: async () => { throw signal; } })).rejects.toBe(signal);
-    expect(prompts.select).toHaveBeenCalledTimes(1);
+    expect(prompts.select).toHaveBeenCalledTimes(2);
   });
 
   it("does not dispatch cancelled or unsupported menu values", async () => {

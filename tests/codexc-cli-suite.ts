@@ -2119,6 +2119,20 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
   });
 
 
+  it.each([{ args: [] }, { args: ["--json"] }])("rejects noninteractive setup $args before initializing user data", ({ args }) => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-setup-no-tty-"));
+    temporaryDirectories.push(root);
+    const home = join(root, "uninitialized");
+    const result = spawnSync(process.execPath, [cli, "setup", ...args], {
+      encoding: "utf8", timeout: 5000,
+      env: { ...process.env, CODEX_CONNECT_HOME: home, CODEX_CONNECT_CONFIG_FILE: "" },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("交互终端");
+    expect(existsSync(home)).toBe(false);
+    if (args.length > 0) expect(JSON.parse(result.stdout)).toMatchObject({ event: "error" });
+  });
+
   it("validates command syntax before requiring user configuration", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-syntax-"));
     temporaryDirectories.push(root);

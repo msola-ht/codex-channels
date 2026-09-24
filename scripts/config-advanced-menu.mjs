@@ -16,21 +16,6 @@ const proxyFields = [
   ["no_proxy", "直连规则（NO_PROXY）"],
 ];
 
-export async function runAutomationSettings(options) {
-  const { prompts } = options;
-  const section = await prompts.select({
-    message: "选择自动化设置",
-    showInstructions: false,
-    options: [
-      { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭 Gateway 无人值守计划任务" },
-      { value: "back", label: "返回", hint: "返回配置菜单" },
-    ],
-  });
-  if (prompts.isCancel(section) || section === "back") return { action: "back" };
-  if (section === "scheduled_tasks") return runScheduledTasks(options);
-  throw new Error(`未知自动化设置：${String(section)}`);
-}
-
 export async function runNetworkSettings({
   environment,
   output,
@@ -145,7 +130,7 @@ export async function runAdvancedSettings(options) {
   throw new Error(`未知高级设置：${String(section)}`);
 }
 
-async function runScheduledTasks({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
+export async function runScheduledTasks({ environment, output, prompts, writeConfig = writeGatewayConfig }) {
   const settings = loadGatewaySettings(environment);
   const selected = await prompts.select({
     message: "Gateway 计划任务",

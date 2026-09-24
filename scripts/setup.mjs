@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
 
+import { ForwardedChildSignalError } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runFeishuSetup } from "./feishu-setup.mjs";
 import { runDeepseekSetup } from "./deepseek-setup.mjs";
@@ -36,6 +37,9 @@ export async function runSetup({
   stayOnMenu = false,
   onResult,
 } = {}) {
+  if (!input.isTTY || !output.isTTY) {
+    throw new Error("Setup 需要交互终端；请将标准输入和提示输出连接终端。--json 仅改变结果输出格式。");
+  }
   prompts.intro("Codex Connect Setup");
   while (true) {
     const section = await prompts.select({
@@ -74,58 +78,69 @@ export async function runSetup({
       emitSetupResult(onResult, undefined, undefined, "cancelled");
       return undefined;
     }
-    switch (section) {
-      case "summary":
-        await setupSummary({ output });
-        continue;
-      case "channels": {
-        const result = await runChannelSetup({
-          input,
-          output,
-          prompts,
-          feishuSetup,
-          telegramSetup,
-          weixinSetup,
-        });
-        if (isBackResult(result)) continue;
-        const enriched = enrichSetupResult(result, "restart-gateway");
-        emitSetupResult(onResult, "channels", enriched);
-        if (stayOnMenu) continue;
-        return enriched;
+    if (!["summary", "channels", "models", "skills"].includes(section)) {
+      throw new Error(`未知 Setup 类别：${String(section)}`);
+    }
+    try {
+      switch (section) {
+        case "summary":
+          await setupSummary({ output });
+          continue;
+        case "channels": {
+          const result = await runChannelSetup({
+            input,
+            output,
+            prompts,
+            feishuSetup,
+            telegramSetup,
+            weixinSetup,
+          });
+          if (isBackResult(result)) continue;
+          const enriched = enrichSetupResult(result, "restart-gateway");
+          emitSetupResult(onResult, "channels", enriched);
+          if (stayOnMenu) continue;
+          return enriched;
+        }
+        case "models": {
+          const result = await runModelSetup({
+            input,
+            output,
+            prompts,
+            deepseekSetup,
+            ccgSetup,
+            openCodeGoSetup,
+            modelProviderDefaultSetup,
+            modelWindowSetup,
+            customPrimarySetup,
+            officialLoginSetup,
+          });
+          if (isBackResult(result)) continue;
+          const enriched = enrichSetupResult(result);
+          emitSetupResult(onResult, "models", enriched);
+          if (stayOnMenu) continue;
+          return enriched;
+        }
+        case "skills": {
+          const result = await skillSetup({
+            input,
+            output,
+            prompts,
+          });
+          if (isBackResult(result)) continue;
+          const enriched = enrichSetupResult(result);
+          emitSetupResult(onResult, "skills", enriched);
+          if (stayOnMenu) continue;
+          return enriched;
+        }
       }
-      case "models": {
-        const result = await runModelSetup({
-          input,
-          output,
-          prompts,
-          deepseekSetup,
-          ccgSetup,
-          openCodeGoSetup,
-          modelProviderDefaultSetup,
-          modelWindowSetup,
-          customPrimarySetup,
-          officialLoginSetup,
-        });
-        if (isBackResult(result)) continue;
-        const enriched = enrichSetupResult(result);
-        emitSetupResult(onResult, "models", enriched);
-        if (stayOnMenu) continue;
-        return enriched;
-      }
-      case "skills": {
-        const result = await skillSetup({
-          input,
-          output,
-          prompts,
-        });
-        if (isBackResult(result)) continue;
-        const enriched = enrichSetupResult(result);
-        emitSetupResult(onResult, "skills", enriched);
-        if (stayOnMenu) continue;
-        return enriched;
-      }
-      default:
-        throw new Error(`未知 Setup 类别：${String(section)}`);
+    } catch (error) {
+      if (!stayOnMenu || error instanceof ForwardedChildSignalError) throw error;
+      const event = sanitizeSetupEvent({
+        event: "error", category: section,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      onResult?.(event);
+      output.write(`[失败] ${event.message}\n`);
     }
   }
 }
@@ -245,7 +260,7 @@ async function runThirdPartyModelSetup({
         {
           value: "deepseek",
           label: "DeepSeek 官方",
-          hint: "安装、切换、删除（恢复安装前配置）或修改模型设置",
+          hint: "管理账户、运行模式、默认账户与模型设置",
         },
         {
           value: "opencode-go",

@@ -21,15 +21,33 @@ export async function runCliMenu({ prompts = clackPrompts, runCommand }) {
     { value: "metrics", label: "指标查询与导出" },
     { value: "cleanup", label: "清理与归档" },
     { value: "doctor", label: "诊断", hint: "只读检查安装、配置与服务" },
-    { value: "remote", label: "打开 Codex TUI", hint: "连接当前工作区对应的共享 App Server" },
-    { value: "webui", label: "启动 WebUI", hint: "前台运行，退出后结束服务" },
-    { value: "start", label: "前台启动核心服务", hint: "App Server 与 Gateway" },
+    { value: "launch", label: "运行与连接", hint: "Codex TUI、WebUI 与前台核心服务" },
     { value: "cancel", label: "退出" },
   ];
   while (true) {
     const action = await prompts.select({ message: "选择操作", showInstructions: false, options });
     if (prompts.isCancel(action) || action === "cancel") return;
     if (!options.some((option) => option.value === action)) throw new Error("未知 CLI 菜单操作");
+    try {
+      if (action === "launch") await runLaunchMenu({ prompts, runCommand });
+      else await runCommand([action]);
+    } catch (error) {
+      reportMenuError(error);
+    }
+  }
+}
+
+async function runLaunchMenu({ prompts, runCommand }) {
+  const options = [
+    { value: "remote", label: "打开 Codex TUI", hint: "连接当前工作区对应的共享 App Server" },
+    { value: "webui", label: "启动 WebUI", hint: "前台运行，退出后结束服务" },
+    { value: "start", label: "前台启动核心服务", hint: "App Server 与 Gateway" },
+    { value: "back", label: "返回" },
+  ];
+  while (true) {
+    const action = await prompts.select({ message: "选择运行或连接方式", showInstructions: false, options });
+    if (prompts.isCancel(action) || action === "back") return;
+    if (!options.some((option) => option.value === action)) throw new Error("未知运行方式");
     try {
       await runCommand([action]);
     } catch (error) {

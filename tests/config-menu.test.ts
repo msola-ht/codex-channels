@@ -48,6 +48,22 @@ afterEach(() => {
 });
 
 describe("Codex Connect config menu", () => {
+  it("keeps paths accessible after a config read failure in the interactive loop", async () => {
+    const fixture = createFixture();
+    writeFileSync(fixture.configPath, "[broken");
+    const write = vi.fn();
+    const select = vi.fn().mockResolvedValueOnce("summary")
+      .mockResolvedValueOnce("paths").mockResolvedValueOnce("cancel");
+    await runConfig({
+      environment: fixture.environment, input: { isTTY: true },
+      output: { isTTY: true, write }, stayOnMenu: true,
+      prompts: { intro: vi.fn(), select, isCancel: () => false, cancel: vi.fn() },
+    });
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(write).toHaveBeenCalledWith(expect.stringContaining(fixture.configPath));
+    expect(readFileSync(fixture.configPath, "utf8")).toBe("[broken");
+  });
+
   it("shows paths without prompting when stdin is redirected and stdout is a terminal", async () => {
     const select = vi.fn();
     await expect(runConfig({
@@ -233,7 +249,7 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("WebUI：[::1]:8787");
   });
 
-  it("toggles Gateway scheduled tasks through the automation menu", async () => {
+  it("toggles Gateway scheduled tasks directly from Config", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const result = await runConfig({
@@ -243,7 +259,6 @@ describe("Codex Connect config menu", () => {
       prompts: {
         intro: vi.fn(),
         select: vi.fn()
-          .mockResolvedValueOnce("automation")
           .mockResolvedValueOnce("scheduled_tasks")
           .mockResolvedValueOnce("enabled"),
         isCancel: () => false,
@@ -259,7 +274,6 @@ describe("Codex Connect config menu", () => {
   it("labels the scheduled task back button with its actual Config destination", async () => {
     const fixture = createFixture();
     const select = vi.fn()
-      .mockResolvedValueOnce("automation")
       .mockResolvedValueOnce("scheduled_tasks")
       .mockImplementationOnce(async (options: {
         options: Array<{ value: string; label: string }>;
@@ -511,33 +525,6 @@ describe("Codex Connect config menu", () => {
         cancel: vi.fn(),
       },
     });
-  });
-
-    it("delegates the debug mode entry under system settings", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const debugSetup = vi.fn(async () => "debug-configured");
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("system")
-        .mockResolvedValueOnce("debug"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    const result = await runConfig({
-      input: { isTTY: true },
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-      debugSetup,
-    });
-
-    expect(result).toBe("debug-configured");
-    expect(debugSetup).toHaveBeenCalledWith(expect.objectContaining({
-      environment: fixture.environment,
-    }));
   });
 
   it("toggles the model traffic dump through the system settings", async () => {
@@ -1112,6 +1099,7 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
+        .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("message_format")
         .mockResolvedValueOnce("rich"),
       isCancel: () => false,
@@ -1130,9 +1118,38 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it.each(
+    ["message_format", "operation_updates", "plan_updates", "reasoning"].flatMap((action) =>
+      ["back", Symbol("cancel")].map((cancel) => ({ action, cancel }))),
+  )("returns from $action to Display before leaving Config ($cancel)", async ({ action, cancel }) => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = { bot_token: "fixture", allowed_user_ids: [1], message_format: "html" };
+    writeGatewayConfig(fixture.configPath, document);
+    const before = readFileSync(fixture.configPath, "utf8");
+    const select = vi.fn()
+      .mockResolvedValueOnce("display")
+      .mockResolvedValueOnce(action)
+      .mockResolvedValueOnce(cancel)
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("cancel");
+    await runConfig({
+      environment: fixture.environment, input: { isTTY: true },
+      output: { isTTY: true, write: vi.fn() }, stayOnMenu: true,
+      prompts: {
+        intro: vi.fn(), select, cancel: vi.fn(),
+        isCancel: (value: unknown) => typeof value === "symbol",
+      },
+    });
+    expect(select).toHaveBeenCalledTimes(5);
+    expect(select.mock.calls[3]?.[0]).toMatchObject({ message: "选择显示设置" });
+    expect(select.mock.calls[4]?.[0]).toMatchObject({ message: "选择配置项" });
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+  });
+
   it("hides Telegram-only settings until a Bot token is configured", async () => {
     const fixture = createFixture();
-    const select = vi.fn().mockResolvedValueOnce("cancel");
+    const select = vi.fn().mockResolvedValueOnce("display").mockResolvedValueOnce("back").mockResolvedValueOnce("cancel");
 
     await runConfig({
       input: { isTTY: true },
@@ -1146,7 +1163,7 @@ describe("Codex Connect config menu", () => {
       },
     });
 
-    const options = select.mock.calls[0]?.[0]?.options ?? [];
+    const options = select.mock.calls[1]?.[0]?.options ?? [];
     expect(options.map((option: { value: string }) => option.value))
       .not.toContain("message_format");
   });
@@ -1176,7 +1193,7 @@ describe("Codex Connect config menu", () => {
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("summary");
     expect(values).toContain("codex_user");
-    expect(values).toContain("automation");
+    expect(values).toContain("scheduled_tasks");
     expect(values).toContain("network");
     expect(values).toContain("advanced");
     expect(values).toContain("paths");
