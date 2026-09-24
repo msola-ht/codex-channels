@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeServiceDefinitions } from "../scripts/service-install-management.mjs";
 
 const temporaryDirectories: string[] = [];
 const zshIt = existsSync("/bin/zsh") ? it : it.skip;
@@ -42,14 +43,12 @@ describe("launchd installer", () => {
       no_proxy: "localhost,127.0.0.1",
     }));
 
-    execFileSync(process.execPath, [resolve("scripts/install-launchd.mjs")], {
-      env: {
-        ...process.env,
-        HOME: root,
-        CODEX_CONNECT_HOME: configDir,
-        CODEX_CONNECT_CONFIG_FILE: configPath,
-      },
-    });
+    writeServiceDefinitions({
+      ...process.env,
+      HOME: root,
+      CODEX_CONNECT_HOME: configDir,
+      CODEX_CONNECT_CONFIG_FILE: configPath,
+    }, { operatingSystem: "darwin" });
 
     const appServer = readFileSync(
       join(root, "Library/LaunchAgents/com.hegenai.codex-app-server.plist"),

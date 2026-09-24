@@ -10,10 +10,7 @@ import { dirname, join } from "node:path";
 
 import { parse } from "smol-toml";
 
-import {
-  colorizeCliText,
-  formatCliStatus,
-} from "../runtime/cli-presentation.mjs";
+import { createDoctorReport, renderDoctorText } from "./doctor-output.mjs";
 import {
   executableInvocation,
   resolveExecutable,
@@ -600,45 +597,11 @@ if (process.platform === "darwin") {
   note("系统服务", "当前平台尚未提供系统服务适配");
 }
 
-const failures = checks.filter((check) => check.kind === "failure").length;
-const successes = checks.filter((check) => check.kind === "success").length;
-const notes = checks.filter((check) => check.kind === "note").length;
-if (jsonOutput) {
-  process.stdout.write(`${JSON.stringify({
-    healthy: failures === 0,
-    counts: {
-      success: successes,
-      failure: failures,
-      note: notes,
-    },
-    checks: checks.map((check) => ({
-      section: check.section,
-      kind: check.kind,
-      name: check.name,
-      detail: check.detail,
-      remediation: check.remediation ?? null,
-    })),
-  }, null, 2)}\n`);
-} else {
-  const visibleChecks = checks.filter((check) => check.kind !== "success");
-  console.log("Codex Connect Doctor");
-  let renderedSection;
-  for (const check of visibleChecks) {
-    if (check.section !== renderedSection) {
-      renderedSection = check.section;
-      console.log(`\n=== ${renderedSection} ===`);
-    }
-    console.log(formatCliStatus(check.kind, check.name, check.detail));
-    if (check.remediation) {
-      console.log(formatCliStatus("remediation", check.name, check.remediation));
-    }
-  }
-  const summary = failures === 0
-    ? `诊断通过：${successes} 项通过，${notes} 项提示。`
-    : `诊断发现 ${failures} 项问题：${successes} 项通过，${notes} 项提示。`;
-  console.log(`\n${colorizeCliText(failures === 0 ? "success" : "failure", summary)}`);
-}
-process.exitCode = failures === 0 ? 0 : 1;
+const report = createDoctorReport(checks);
+process.stdout.write(jsonOutput
+  ? `${JSON.stringify(report, null, 2)}\n`
+  : renderDoctorText(report));
+process.exitCode = report.healthy ? 0 : 1;
 
 function setSection(section) {
   checkSection = section;

@@ -9,7 +9,7 @@
 - `codex-connect-gateway.service.template`：启动连接该 Socket 的 Gateway。
 - `codex-connect-webui.service.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
 
-模板由 `scripts/install-systemd.mjs` 渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
+模板由 `codexc service install` 调用的服务安装管理接口渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
 服务都通过 CLI 服务入口启动，并在每次启动时按 TOML、systemd 用户管理器继承的标准
 代理环境变量和 GNOME 手动代理的顺序解析代理，不把自动发现的地址固化到 unit。安装、启停和
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
