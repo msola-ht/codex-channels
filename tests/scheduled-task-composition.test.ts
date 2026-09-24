@@ -46,7 +46,11 @@ describe("ScheduledTaskComposition", () => {
       "scheduled-task-run-coordinator",
       expect.any(Function),
     );
-    await composition.prepareRecovery();
+    const initialize = vi.spyOn(composition.coordinator, "initialize");
+    await composition.prepareRecovery(AbortSignal.abort());
+    expect(initialize).not.toHaveBeenCalled();
+    await composition.prepareRecovery(new AbortController().signal);
+    expect(initialize).toHaveBeenCalledTimes(1);
     composition.start();
     await composition.stop();
     composition.close();

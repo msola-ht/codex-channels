@@ -285,7 +285,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   });
 
-  it.each(["disconnect", "restore failure"])("recovers through the Gateway coordinator after %s during binding restoration", async (failure) => {
+  it.each(["disconnect", "restore failure", "shutdown"])("handles %s through the Gateway coordinator during binding restoration", async (failure) => {
     const started = await ownerClient.startThread(workdir, { modelProvider: "reconnect_fixture" });
     const transport = new UnixWebSocketTransport(socketPath);
     const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
@@ -320,12 +320,22 @@ contractSuite("isolated Codex App Server state contract", () => {
     const gate = new Promise<void>((resolveGate) => { releaseRestore = resolveGate; });
     let restoring = false;
     const restore = bindings.restore.bind(bindings);
-    vi.spyOn(bindings, "restore").mockImplementationOnce(async (...args) => {
-      await restore(...args);
-      restoring = true;
-      await gate;
-      if (failure === "restore failure") throw new Error("temporary binding recovery failure");
-    });
+    if (failure === "shutdown") {
+      const read = routing.readThread.bind(routing);
+      vi.spyOn(routing, "readThread").mockImplementationOnce(async (...args) => {
+        const thread = await read(...args);
+        restoring = true;
+        await gate;
+        return thread;
+      });
+    } else {
+      vi.spyOn(bindings, "restore").mockImplementationOnce(async (...args) => {
+        await restore(...args);
+        restoring = true;
+        await gate;
+        if (failure === "restore failure") throw new Error("temporary binding recovery failure");
+      });
+    }
     let disconnects = 0;
     const removeDisconnect = routing.onDisconnect((error, provider) => {
       disconnects += 1;
@@ -346,9 +356,23 @@ contractSuite("isolated Codex App Server state contract", () => {
       }
       await routing.connect();
       await routing.resumeThread(started.thread.id, workdir);
+      const resume = vi.spyOn(routing, "resumeThread");
       store.bind({ target, workspaceId: "contract", threadId: started.thread.id, sessionId: started.thread.id });
       await transport.close();
       await waitFor(() => restoring, 5_000);
+      if (failure === "shutdown") {
+        const stopping = coordinator.stop();
+        const closingBindings = bindings.close();
+        await routing.close();
+        releaseRestore();
+        await closingBindings;
+        await stopping;
+        expect(resume).not.toHaveBeenCalled();
+        expect(restored).not.toHaveBeenCalled();
+        expect(store.get(target)?.threadId).toBe(started.thread.id);
+        expect((await ownerClient.readThread(started.thread.id)).id).toBe(started.thread.id);
+        return;
+      }
       if (failure === "disconnect") {
         await transport.close();
         await waitFor(() => disconnects === 2, 5_000);
@@ -370,6 +394,54 @@ contractSuite("isolated Codex App Server state contract", () => {
       await output.close();
     }
   }, 15_000);
+
+  it.each(["supervisor", "initialize", "reconnect cleanup"])("closes a Provider while its %s is pending without stopping the shared server", async (stage) => {
+    const transport = new UnixWebSocketTransport(socketPath);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    let deliver: (() => void) | undefined;
+    if (stage === "initialize") {
+      const onMessage = transport.onMessage.bind(transport);
+      vi.spyOn(transport, "onMessage").mockImplementation((handler) => onMessage((message) => {
+        deliver = () => handler(message);
+        entered();
+      }));
+    }
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+    const connect = vi.spyOn(transport, "connect");
+    const close = vi.spyOn(client, "close");
+    const routing = new ProviderRoutingClient("openai", new Map([["openai", client]]), async () => {
+      if (stage === "supervisor") { entered(); await gate; }
+    });
+    if (stage === "reconnect cleanup") {
+      await routing.connect();
+      await transport.close();
+      vi.spyOn(transport, "close").mockImplementationOnce(async () => { entered(); await gate; });
+      connect.mockClear();
+    }
+    const connecting = stage === "reconnect cleanup" ? routing.reconnectProvider("openai") : routing.connect();
+    const rejected = expect(connecting).rejects.toThrow("已关闭");
+    try {
+      await ready;
+      const closing = routing.close();
+      if (stage === "reconnect cleanup") release();
+      await closing;
+      await rejected;
+      release();
+      deliver?.();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(routing.connectedProviderIds()).toEqual([]);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(connect).toHaveBeenCalledTimes(stage === "initialize" ? 1 : 0);
+      await expect(routing.ensureProviderAvailable("openai")).rejects.toThrow("已关闭");
+      expect(Array.isArray(await ownerClient.listModels())).toBe(true);
+    } finally {
+      release();
+      await routing.close();
+    }
+  });
 
   describe("capability discovery", () => {
   it("maps the isolated App Server Skill list to stable installed entries", async () => {

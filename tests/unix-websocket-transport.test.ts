@@ -95,6 +95,18 @@ describe("UnixWebSocketTransport", () => {
       expect(headers).not.toHaveProperty("authorization");
       expect(headers).not.toHaveProperty("cookie");
       expect(headers?.["sec-websocket-key"]).toMatch(/^[A-Za-z0-9+/]+=*$/);
+      const previous = Reflect.get(transport, "socket") as { emit(event: string, ...args: unknown[]): boolean };
+      await transport.close();
+      await transport.connect();
+      const staleEvents: unknown[] = [];
+      const removeMessage = transport.onMessage((message) => staleEvents.push(message));
+      const removeClose = transport.onClose((error) => staleEvents.push(error));
+      previous.emit("message", Buffer.from("obsolete"), false);
+      previous.emit("error", new Error("obsolete socket error"));
+      previous.emit("close");
+      expect(staleEvents).toEqual([]);
+      removeMessage();
+      removeClose();
     } finally {
       await transport.close();
       for (const client of webSocketServer.clients) {

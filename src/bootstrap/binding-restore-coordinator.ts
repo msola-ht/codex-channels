@@ -26,7 +26,7 @@ export interface PendingBindingRestore {
 export interface ScheduledBindingRecoveryPort {
   runningThreadIds(): ReadonlySet<string>;
   taskForThread(threadId: string): { modelProvider?: string | null } | undefined;
-  recoverRunning(threadIds: ReadonlySet<string>): Promise<void>;
+  recoverRunning(threadIds: ReadonlySet<string>, signal: AbortSignal): Promise<void>;
 }
 
 export interface BindingRestoreCoordinatorOptions {
@@ -52,6 +52,7 @@ export class BindingRestoreCoordinator {
   private readonly restoreTasks = new Set<Promise<void>>();
   private restoreAttempt: number;
   private stopped = false;
+  private readonly recoveryAbort = new AbortController();
 
   constructor(
     private readonly options: BindingRestoreCoordinatorOptions,
@@ -160,7 +161,7 @@ export class BindingRestoreCoordinator {
     );
     if (candidateThreadIds.size === 0) {
       if (provider === undefined && requestedThreadIds === undefined) {
-        await scheduledRecovery?.recoverRunning(scheduledThreadIds);
+        await scheduledRecovery?.recoverRunning(scheduledThreadIds, this.recoveryAbort.signal);
       }
       return;
     }
@@ -171,8 +172,9 @@ export class BindingRestoreCoordinator {
     let failures: SubscriptionRestoreFailure[];
     try {
       failures = await this.options.router.restoreSubscriptions(
-        (_target, binding) => candidateThreadIds.has(binding.threadId),
+        (_target, binding) => !this.stopped && candidateThreadIds.has(binding.threadId),
         (binding, thread) => {
+          if (this.stopped) return;
           restoredThreadIds.add(binding.threadId);
           if (thread.status.type !== "active") {
             if (
@@ -220,6 +222,7 @@ export class BindingRestoreCoordinator {
         this.restoringThreadIds.delete(threadId);
       }
     }
+    if (this.stopped) return;
     for (const threadId of restoredThreadIds) {
       const pending = this.pendingBindingRestores.get(threadId);
       if (!pending) continue;
@@ -228,7 +231,8 @@ export class BindingRestoreCoordinator {
         this.publishAvailability(pending.binding, "available");
       }
     }
-    await scheduledRecovery?.recoverRunning(restoredThreadIds);
+    await scheduledRecovery?.recoverRunning(restoredThreadIds, this.recoveryAbort.signal);
+    if (this.stopped) return;
     for (const failure of failures) {
       if (!failure.bindingRemoved && !this.isCurrentBinding(failure.binding)) continue;
       this.options.logger.warn(
@@ -313,6 +317,7 @@ export class BindingRestoreCoordinator {
 
   close(): Promise<void> | undefined {
     this.stopped = true;
+    this.recoveryAbort.abort();
     if (this.restoreTimer) {
       clearTimeout(this.restoreTimer);
       this.restoreTimer = undefined;

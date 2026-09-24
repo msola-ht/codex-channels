@@ -90,7 +90,7 @@ export class ScheduledTaskComposition {
       options.router,
       options.codex,
       {
-        validateRun: (task) => executor.validateRun(task),
+        validateRun: (task, signal) => executor.validateRun(task, signal),
         logger: options.logger,
       },
     );
@@ -125,10 +125,11 @@ export class ScheduledTaskComposition {
     });
   }
 
-  async prepareRecovery(): Promise<void> {
+  async prepareRecovery(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return;
     this.scheduler.recoverAfterCrash();
     this.coordinator.initialize();
-    await this.coordinator.prepareRecovery();
+    await this.coordinator.prepareRecovery(signal);
   }
 
   start(): void {

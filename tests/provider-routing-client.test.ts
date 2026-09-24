@@ -11,6 +11,124 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("cancels a Provider opening when close is requested in the same tick", async () => {
+    const openai = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]), async () => undefined);
+    const opening = routed.ensureProviderAvailable("openai");
+    const rejected = expect(opening).rejects.toThrow("已关闭");
+    await routed.closeProvider("openai");
+    await rejected;
+    expect(openai.connect).not.toHaveBeenCalled();
+    await routed.ensureProviderAvailable("openai");
+    expect(openai.connect).toHaveBeenCalledTimes(1);
+    await routed.close();
+  });
+
+  it.each(["supervisor", "handshake"])("cancels one Provider's pending %s and allows a fresh connection", async (stage) => {
+    const openai = client();
+    const deepseek = client();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    let paused = false;
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai], ["deepseek", deepseek]]), async (provider) => {
+      if (provider === "deepseek" && stage === "supervisor" && !paused) {
+        paused = true; entered(); await gate;
+      }
+    });
+    if (stage === "handshake") deepseek.connect.mockImplementationOnce(async () => {
+      entered(); await gate; return initializeResponse();
+    });
+    await routed.connect();
+    const pending = routed.ensureProviderAvailable("deepseek");
+    const rejected = expect(pending).rejects.toThrow("已关闭");
+    await ready;
+    const closing = routed.closeProvider("deepseek");
+    expect(routed.closeProvider("deepseek")).toBe(closing);
+    await closing;
+    await rejected;
+    await routed.ensureProviderAvailable("deepseek");
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(routed.connectedProviderIds()).toEqual(["openai", "deepseek"]);
+    expect(openai.close).not.toHaveBeenCalled();
+    expect(deepseek.close).toHaveBeenCalledTimes(1);
+    expect(deepseek.connect).toHaveBeenCalledTimes(stage === "handshake" ? 2 : 1);
+    await routed.close();
+  });
+
+  it.each(["supervisor", "handshake", "reconnect supervisor", "reconnect handshake", "eager handshake"])("invalidates pending %s on shutdown", async (stage) => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const pause = async () => { entered(); await gate; };
+    const openai = client();
+    let block = !stage.startsWith("reconnect");
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]),
+      stage === "eager handshake" ? undefined : async () => {
+        if (block && stage.endsWith("supervisor")) await pause();
+      });
+    if (stage.startsWith("reconnect")) {
+      await routed.connect();
+      openai.connect.mockClear();
+      block = true;
+    }
+    if (stage.endsWith("handshake")) {
+      const handshake = async () => { await pause(); return initializeResponse(); };
+      if (stage.startsWith("reconnect")) openai.reconnect.mockImplementation(handshake);
+      else openai.connect.mockImplementation(handshake);
+    }
+    const connecting = stage.startsWith("reconnect") ? routed.reconnectProvider("openai") : routed.connect();
+    const rejected = expect(connecting).rejects.toThrow("已关闭");
+    await ready;
+    await routed.close();
+    await rejected;
+    release();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(routed.connectedProviderIds()).toEqual([]);
+    expect(openai.close).toHaveBeenCalledTimes(1);
+    if (stage.endsWith("supervisor")) {
+      expect(openai.connect).not.toHaveBeenCalled();
+      expect(openai.reconnect).not.toHaveBeenCalled();
+    }
+    await expect(routed.ensureProviderAvailable("openai")).rejects.toThrow("已关闭");
+    await expect(routed.connect()).rejects.toThrow("已关闭");
+    await expect(routed.reconnectProvider("openai")).rejects.toThrow("已关闭");
+  });
+
+  it("shares concurrent shutdown and permits cleanup retry after failure", async () => {
+    const openai = client();
+    openai.close.mockRejectedValueOnce(new Error("close failed")).mockResolvedValue(undefined);
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]));
+    const first = routed.close();
+    expect(routed.close()).toBe(first);
+    await expect(first).rejects.toThrow("close failed");
+    await routed.close();
+    await routed.close();
+    expect(openai.close).toHaveBeenCalledTimes(2);
+    await expect(routed.listModels()).rejects.toThrow("已关闭");
+  });
+
+  it("rejects an activity queued before shutdown when the operation runner releases it later", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const openai = client();
+    const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]),
+      async () => undefined, new Set(), "openai", async (_provider, _mode, operation) => {
+        await gate;
+        return operation();
+      });
+    const query = routed.listModels();
+    const rejected = expect(query).rejects.toThrow("已关闭");
+    await routed.close();
+    release();
+    await rejected;
+    expect(openai.connect).not.toHaveBeenCalled();
+    expect(openai.listModels).not.toHaveBeenCalled();
+  });
+
   it("cancels pending image input only on the owning connected Provider", async () => {
     const cancelPendingInput = vi.fn(() => true);
     const openai = Object.assign(client(), { cancelPendingInput });

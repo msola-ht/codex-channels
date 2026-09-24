@@ -22,7 +22,8 @@
   初始化期间
   通过组合根注入 `clientInfo`；缺省声明官方 `codex --remote` 的 `codex-tui` 与当前锁定 Codex CLI
   版本，`[codex].client_identity` 可按字段覆盖 name/title/version；
-  已失效的连接不得重新进入 connected 状态；通过 `extensions` 显式声明已实现的 `openai/form`。
+  建连与重连共用连接代次，清理旧 Transport、握手与初始化响应后的每个异步边界均拒绝过期连接；
+  并发关闭及重连前清理共用 Transport 关闭任务，旧失败不清理替代连接。通过 `extensions` 显式声明已实现的 `openai/form`。
 - `thread-adapter.ts`：把当前版本生成的官方 Thread、内置 Pinned、运行状态、更新时间/最近活跃时间、来源（含稳定的
   `automation` 任务来源）、运行 Turn、
   上下文压缩 Item ID 和模型设置响应映射为 `session-routing` 拥有的稳定快照与恢复会话；
@@ -125,7 +126,10 @@
   到期仍空闲时先通知所有已知授权渠道，再关闭已连接 Client，并停止监管入口中全部未被租约占用的
   运行实例（含主实例与仅由 `codexc remote` 启动的实例）；该通知只在渠道会话空闲自动解除触发的
   全局释放轮次发送。检查由绑定变化、任务终态事件和周期复检触发。关闭先发生时，已排队请求在
-  Client 关闭后按需启动并重连。
+  Client 空闲关闭后按需启动并重连。整体 `close()` 是终止边界：取消在途 Provider 启动及握手等待，
+  关闭所有受管 Client 并拒绝后续连接；晚到的结果不能重新登记连接，不终止独立 App Server。
+  并发整体关闭共用清理任务，清理失败可再次关闭重试。
+  单 Provider 关闭也取消该侧在途建连，新的请求等待关闭结束后再建立连接；其他 Provider 不受影响。
   第三方 Provider 的账户通知不会进入 OpenAI 账户状态；
   无法关联 Thread 的 MCP 启动状态与 warning 全局通知携带 Provider 来源，只发送到对应 Provider
   会话；无法关联 Thread 的 OAuth 完成通知不进入渠道。

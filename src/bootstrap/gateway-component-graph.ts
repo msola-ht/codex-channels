@@ -184,6 +184,7 @@ export abstract class GatewayComponentGraph {
   private openAiConnectivity: OpenAiConnectivityStatus | "recovering" = "not-applicable";
   protected startupNetworkRecovery: StartupNetworkRecovery | undefined;
   protected openAiConnectivityAbort: AbortController | undefined;
+  protected startupAbort: AbortController | undefined;
   protected stopping = false;
 
   protected abstract requestStop(): Promise<void>;
@@ -1163,7 +1164,9 @@ export abstract class GatewayComponentGraph {
   protected async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      this.startupAbort = new AbortController();
       await this.providerMetrics.start();
+      this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
@@ -1198,7 +1201,8 @@ export abstract class GatewayComponentGraph {
         }
       }
       this.requireRunning();
-      await this.scheduledTasks?.prepareRecovery();
+      await this.scheduledTasks?.prepareRecovery(this.startupAbort.signal);
+      this.requireRunning();
       await this.restoreBindings();
       this.requireRunning();
       if (this.openAiConnectivity !== "recovering") {
@@ -1216,10 +1220,12 @@ export abstract class GatewayComponentGraph {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      this.requireRunning();
       void this.providerAccounts?.refreshSnapshots().catch((error) => {
         this.logger.warn({ err: error }, "账户快照异步预热失败");
       });
       await this.channelImageSpool.start();
+      this.requireRunning();
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
       this.providerIdleReleaser?.start();
@@ -1250,6 +1256,8 @@ export abstract class GatewayComponentGraph {
   }
 
   private async shutdownComponentsOnce(): Promise<void> {
+    this.startupAbort?.abort();
+    const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
     this.openAiConnectivityAbort = undefined;
     this.removeRpcNotification?.();
@@ -1272,6 +1280,11 @@ export abstract class GatewayComponentGraph {
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
+      ["Binding Recovery", async () => {
+        if (restoringBindings && !(await waitAtMost(restoringBindings, 5_000))) {
+          throw new Error("等待 Codex Thread 订阅恢复任务停止超时");
+        }
+      }],
       ["Binding Store", () => Promise.resolve(this.bindings.close())],
       ["Session Display Cache", () => Promise.resolve(this.sessionDisplayCache?.close())],
       ["Scheduled Task Store", () => Promise.resolve(this.scheduledTasks?.close())],

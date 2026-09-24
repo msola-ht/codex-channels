@@ -44,11 +44,12 @@ export class StdioTransport extends BaseTransport {
     });
     this.process = child;
     this.lines = createInterface({ input: child.stdout });
-    this.lines.on("line", (line) => this.emitMessage(line));
+    this.lines.on("line", (line) => { if (this.process === child) this.emitMessage(line); });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => this.options.onStderr?.(chunk));
-    child.on("error", (error) => this.emitClose(error));
+    child.on("error", (error) => { if (this.process === child) this.emitClose(error); });
     child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
       this.emitClose(new Error(`Codex App Server 已退出：code=${code} signal=${signal}`));
     });
 

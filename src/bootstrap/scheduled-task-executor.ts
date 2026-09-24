@@ -102,8 +102,8 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     return Math.max(0, 3 - this.router.backgroundBindings(toTarget(task)).length);
   }
 
-  async validateRun(task: ScheduledTask): Promise<ScheduledTaskRunValidation | undefined> {
-    return await this.validate(task, toTarget(task));
+  async validateRun(task: ScheduledTask, signal?: AbortSignal): Promise<ScheduledTaskRunValidation | undefined> {
+    return await this.validate(task, toTarget(task), signal);
   }
 
   async execute(
@@ -228,7 +228,9 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   private async validate(
     task: ScheduledTask,
     target: ConversationTarget,
+    signal?: AbortSignal,
   ): Promise<ValidationFailure | undefined> {
+    signal?.throwIfAborted();
     if (!isSupportedSurface(target.surface)) return permanent("authorization");
     if (!this.isSurfaceEnabled(target)) return permanent("authorization");
     if (!this.bindings.conversations().some((candidate) => sameTarget(candidate, target))) {
@@ -259,7 +261,9 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     }
     try {
       await this.models.ensureProvider(provider);
+      signal?.throwIfAborted();
     } catch {
+      signal?.throwIfAborted();
       return {
         category: "provider",
         blockTask: false,
@@ -267,8 +271,11 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     }
     if (task.model != null) {
       try {
-        if (!await this.models.isModelAvailable(provider, task.model)) return permanent("model");
+        const available = await this.models.isModelAvailable(provider, task.model);
+        signal?.throwIfAborted();
+        if (!available) return permanent("model");
       } catch {
+        signal?.throwIfAborted();
         return { category: "model", blockTask: false };
       }
     }

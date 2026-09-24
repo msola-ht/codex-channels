@@ -2,10 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import pino from "pino";
 import { secureTestDirectory } from "./support/windows-fixtures.js";
 
 import { ScheduledTaskRunCoordinator } from "../src/bootstrap/scheduled-task-run-coordinator.js";
+import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
+import { EventBus } from "../src/event-bus/index.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 import {
   SqliteScheduledTaskStore,
@@ -153,6 +157,81 @@ function setup(history: ThreadHistoryPort, options: { readonly markRunning?: boo
 }
 
 describe("ScheduledTaskRunCoordinator", () => {
+  it.each(["failure", "terminal", "next page", "no bindings"])("preserves running Runs when binding recovery closes during history %s", async (result) => {
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const reading = new Promise<void>((resolve) => { entered = resolve; });
+    const listThreadTurns = vi.fn(async () => {
+      entered();
+      await gate;
+      if (result === "failure") throw new Error("Client closed");
+      return { turns: result === "terminal" ? [turn("turn-1", "completed")] : [], nextCursor: "next" };
+    });
+    const history: ThreadHistoryPort = {
+      listThreadTurns, revertThread: async () => ({ thread: thread("thread-1") }),
+    };
+    const { store, router, coordinator } = setup(history);
+    coordinator.initialize();
+    if (result === "no bindings") vi.spyOn(router, "allBindings").mockReturnValue([]);
+    vi.spyOn(router, "restoreSubscriptions").mockImplementation(async (_shouldRestore, onRestored) => {
+      onRestored?.({ target, workspaceId: "main", threadId: "thread-1", sessionId: "thread-1" }, thread("thread-1"));
+      return [];
+    });
+    const logger = pino({ level: "silent" });
+    const output = new EventBus<OutputEvent>(logger);
+    const bindings = new BindingRestoreCoordinator({
+      codex: { knownProvider: () => "openai" }, router, output, logger,
+      enabledSurfaces: () => [target], scheduledRecovery: () => coordinator, markTurnStarted: () => undefined,
+    });
+    const restoring = bindings.restore();
+    try {
+      await reading;
+      const closing = bindings.close();
+      release();
+      await closing;
+      await restoring;
+      expect(store.listRuns("task-1")[0]?.state).toBe("running");
+      expect(coordinator.runningThreadIds()).toEqual(new Set(["thread-1"]));
+      expect(router.isBackgroundThread("thread-1")).toBe(true);
+      expect(listThreadTurns).toHaveBeenCalledTimes(1);
+      listThreadTurns.mockResolvedValue({ turns: [turn("turn-1", "completed")], nextCursor: "next" });
+      await coordinator.recoverRunning();
+      expect(store.listRuns("task-1")[0]?.state).toBe("completed");
+    } finally {
+      release();
+      await restoring;
+      await bindings.close();
+      await output.close();
+      store.close();
+    }
+  });
+
+  it("does not apply a validation failure returned after recovery cancellation", async () => {
+    const abort = new AbortController();
+    const history: ThreadHistoryPort = {
+      listThreadTurns: vi.fn(async () => ({ turns: [], nextCursor: null })),
+      revertThread: async () => ({ thread: thread("thread-1") }),
+    };
+    const { store, router } = setup(history);
+    const coordinator = new ScheduledTaskRunCoordinator(store, router, history, {
+      validateRun: async () => {
+        abort.abort();
+        return { category: "provider", blockTask: true };
+      },
+    });
+    try {
+      coordinator.initialize();
+      await coordinator.recoverRunning(undefined, abort.signal);
+      expect(store.listRuns("task-1")[0]?.state).toBe("running");
+      expect(store.getTask("task-1")?.status).toBe("active");
+      expect(history.listThreadTurns).not.toHaveBeenCalled();
+      expect(router.isBackgroundThread("thread-1")).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+
   it("fails closed when restart authorization validation is missing", () => {
     const history: ThreadHistoryPort = {
       listThreadTurns: async () => ({ turns: [], nextCursor: null }),

@@ -89,6 +89,8 @@ export class JsonRpcClient {
   private removeCloseHandler: (() => void) | undefined;
   private state: "idle" | "connecting" | "connected" | "closing" = "idle";
   private connectionGeneration = 0;
+  private closeTask: Promise<void> | undefined;
+  private transportCloseTask: Promise<void> | undefined;
 
   constructor(
     private readonly transport: CodexTransport,
@@ -99,15 +101,29 @@ export class JsonRpcClient {
   ) {}
 
   async connect(): Promise<InitializeResponse> {
+    return this.connectInternal(false);
+  }
+
+  async reconnect(): Promise<InitializeResponse> {
+    return this.connectInternal(true);
+  }
+
+  private async connectInternal(reconnect: boolean): Promise<InitializeResponse> {
     if (this.state !== "idle") {
       throw new Error(`Codex JSON-RPC Client 当前状态不允许连接：${this.state}`);
     }
     this.state = "connecting";
     this.connectionGeneration += 1;
     const generation = this.connectionGeneration;
-    this.installTransportHandlers();
     try {
+      if (reconnect) {
+        this.removeTransportHandlers();
+        await this.closeTransport().catch(() => undefined);
+        this.requireConnection(generation);
+      }
+      this.installTransportHandlers();
       await this.transport.connect();
+      this.requireConnection(generation);
       const response = await this.request<InitializeResponse>({
         method: "initialize",
         params: {
@@ -128,46 +144,55 @@ export class JsonRpcClient {
           },
         },
       }, { retryOverload: false });
+      this.requireConnection(generation);
       await this.notify({ method: "initialized" });
-      if (this.connectionGeneration !== generation) {
-        throw new Error("Codex App Server 连接在初始化期间已断开");
-      }
+      this.requireConnection(generation);
       this.state = "connected";
       return response;
     } catch (error) {
-      this.state = "idle";
-      this.failPending(asError(error));
-      await this.transport.close().catch(() => undefined);
+      if (this.connectionGeneration === generation) {
+        await this.close().catch(() => undefined);
+      }
       throw error;
     }
   }
 
-  async reconnect(): Promise<InitializeResponse> {
-    if (this.state !== "idle") {
-      throw new Error(`Codex JSON-RPC Client 当前状态不允许重连：${this.state}`);
+  private requireConnection(generation: number): void {
+    if (this.connectionGeneration !== generation || this.state !== "connecting") {
+      throw new Error("Codex App Server 连接在初始化期间已断开");
     }
-    await this.transport.close().catch(() => undefined);
-    return this.connect();
   }
 
-  async close(): Promise<void> {
-    if (this.state === "closing") {
-      return;
-    }
+  close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
     this.state = "closing";
     this.connectionGeneration += 1;
     this.serverRequestTasks.clear();
+    this.removeTransportHandlers();
+    this.failPending(new Error("Codex JSON-RPC Client 已关闭"));
+    const task = this.closeTransport().finally(() => {
+      // 关闭失败也必须回到可重连状态，否则后续全局空闲检查无法重试。
+      this.state = "idle";
+      if (this.closeTask === task) this.closeTask = undefined;
+    });
+    this.closeTask = task;
+    return task;
+  }
+
+  private closeTransport(): Promise<void> {
+    if (this.transportCloseTask) return this.transportCloseTask;
+    const task = this.transport.close().finally(() => {
+      if (this.transportCloseTask === task) this.transportCloseTask = undefined;
+    });
+    this.transportCloseTask = task;
+    return task;
+  }
+
+  private removeTransportHandlers(): void {
     this.removeMessageHandler?.();
     this.removeCloseHandler?.();
     this.removeMessageHandler = undefined;
     this.removeCloseHandler = undefined;
-    this.failPending(new Error("Codex JSON-RPC Client 已关闭"));
-    try {
-      await this.transport.close();
-    } finally {
-      // 关闭失败也必须回到可重连状态，否则后续全局空闲检查无法重试。
-      this.state = "idle";
-    }
   }
 
   onNotification(handler: (notification: RpcNotification) => void): () => void {
