@@ -365,8 +365,6 @@ contractSuite("real supervised App Server tools", () => {
         }] }));
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "async-contract"', 'model_provider = "async-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
-          // This process-lifecycle fixture does not exercise network isolation; hosted Linux rejects bwrap loopback setup.
-          ...(scenario === "background" ? ['[sandbox_workspace_write]', 'network_access = true'] : []),
           '[features]', `default_mode_request_user_input = ${scenario !== "disabled"}`, '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
           'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
         ].join("\n"));
@@ -386,7 +384,7 @@ contractSuite("real supervised App Server tools", () => {
             },
           });
         });
-        client = new CodexAppServerClient(rpc, { sandbox: scenario === "background" ? "workspace-write" : "read-only" });
+        client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
         await client.connect();
         const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "never" });
         removeNotification = client.onNotification((notification) => {
