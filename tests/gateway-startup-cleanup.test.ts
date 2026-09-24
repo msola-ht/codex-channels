@@ -491,7 +491,6 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       stopping: false,
-      reconnecting: undefined,
       codex: {
         onNotification: () => {
           calls.push("listen:notification");
@@ -1147,8 +1146,7 @@ describe("GatewayApplication startup cleanup", () => {
     await application.start();
 
     disconnect?.(new Error("connection lost"), "openai");
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(reconnectAttempts).toBe(1));
 
     await expect(application.stop()).resolves.toBeUndefined();
     expect(reconnectAttempts).toBe(1);

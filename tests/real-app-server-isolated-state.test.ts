@@ -11,6 +11,13 @@ import {
 import { join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
+import pino from "pino";
+
+import { GatewayReconnectCoordinator } from "../src/bootstrap/gateway-reconnect-coordinator.js";
+import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
+import { EventBus } from "../src/event-bus/index.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
@@ -81,6 +88,12 @@ contractSuite("isolated Codex App Server state contract", () => {
           expires_in: 3_600,
           refresh_token: "contract-refresh-token",
         }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/reconnect/responses") {
+        request.resume();
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "isolated reconnect fixture", type: "invalid_request_error" } }));
         return;
       }
       response.writeHead(404);
@@ -204,6 +217,12 @@ contractSuite("isolated Codex App Server state contract", () => {
         '[plugins."contract-plugin@contract-marketplace"]',
         "enabled = true",
         "",
+        "[model_providers.reconnect_fixture]",
+        'name = "reconnect_fixture"',
+        `base_url = ${JSON.stringify(`${oauthBaseUrl}/reconnect`)}`,
+        'wire_api = "responses"',
+        'experimental_bearer_token = "fixture"',
+        "",
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -265,6 +284,92 @@ contractSuite("isolated Codex App Server state contract", () => {
       });
     }
   });
+
+  it.each(["disconnect", "restore failure"])("recovers through the Gateway coordinator after %s during binding restoration", async (failure) => {
+    const started = await ownerClient.startThread(workdir, { modelProvider: "reconnect_fixture" });
+    const transport = new UnixWebSocketTransport(socketPath);
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+    const routing = new ProviderRoutingClient("reconnect_fixture", new Map([["reconnect_fixture", client]]));
+    const reconnect = vi.spyOn(routing, "reconnectProvider");
+    const store = new MemoryBindingStore();
+    const router = new SessionRouter(routing, store, new WorkspaceRegistry([
+      { id: "contract", name: "Contract", cwd: workdir, sandbox: "read-only" },
+    ], "contract"));
+    const logger = pino({ level: "silent" });
+    const output = new EventBus<OutputEvent>(logger);
+    const target = { surface: "feishu" as const, accountId: "contract", conversationId: "reconnect" };
+    const bindings = new BindingRestoreCoordinator({
+      codex: routing, router, output, logger,
+      enabledSurfaces: () => [{ surface: "feishu", accountId: "contract" }],
+      scheduledRecovery: () => undefined,
+      markTurnStarted: () => undefined,
+    });
+    const restored = vi.fn();
+    const stop = vi.fn(async () => undefined);
+    const coordinator = new GatewayReconnectCoordinator({
+      codex: routing, router, bindings, logger,
+      core: { connectionLost: () => undefined, connectionRestored: restored },
+      interactions: { cancelThreads: () => undefined },
+      cancelQuestions: () => undefined,
+      intentionallyReleased: async () => false,
+      connected: async () => undefined,
+      isStopping: () => false,
+      requestStop: stop,
+    });
+    let releaseRestore!: () => void;
+    const gate = new Promise<void>((resolveGate) => { releaseRestore = resolveGate; });
+    let restoring = false;
+    const restore = bindings.restore.bind(bindings);
+    vi.spyOn(bindings, "restore").mockImplementationOnce(async (...args) => {
+      await restore(...args);
+      restoring = true;
+      await gate;
+      if (failure === "restore failure") throw new Error("temporary binding recovery failure");
+    });
+    let disconnects = 0;
+    const removeDisconnect = routing.onDisconnect((error, provider) => {
+      disconnects += 1;
+      coordinator.disconnected(error, provider);
+    });
+    try {
+      let completed = false;
+      const removeTurn = ownerClient.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "turn.completed" && event.threadId === started.thread.id) completed = true;
+      });
+      try {
+        await ownerClient.startTurn(started.thread.id, [{ type: "text", text: "persist reconnect fixture" }],
+          "codex_connect:reconnect-contract", workdir);
+        await waitFor(() => completed, 5_000);
+      } finally {
+        removeTurn();
+      }
+      await routing.connect();
+      await routing.resumeThread(started.thread.id, workdir);
+      store.bind({ target, workspaceId: "contract", threadId: started.thread.id, sessionId: started.thread.id });
+      await transport.close();
+      await waitFor(() => restoring, 5_000);
+      if (failure === "disconnect") {
+        await transport.close();
+        await waitFor(() => disconnects === 2, 5_000);
+      }
+      releaseRestore();
+      await waitFor(() => restored.mock.calls.length === 1, 5_000);
+      expect(restored).toHaveBeenCalledWith(expect.stringContaining("已重新连接"), new Set([started.thread.id]));
+      expect(bindings.hasDisconnectedProviders()).toBe(false);
+      expect((await routing.readThread(started.thread.id)).id).toBe(started.thread.id);
+      expect(stop).not.toHaveBeenCalled();
+      expect(reconnect).toHaveBeenCalledTimes(failure === "disconnect" ? 2 : 1);
+    } finally {
+      releaseRestore();
+      removeDisconnect();
+      const stopping = coordinator.stop();
+      await bindings.close();
+      await routing.close();
+      await stopping;
+      await output.close();
+    }
+  }, 15_000);
 
   describe("capability discovery", () => {
   it("maps the isolated App Server Skill list to stable installed entries", async () => {
