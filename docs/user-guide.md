@@ -10,23 +10,7 @@ App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gatew
 
 ## 2. 安装
 
-### 已发布版本
-
-安装配套的 Codex CLI 与 Gateway：
-
-```bash
-npm install -g @openai/codex@0.155.1
-npm install -g @hegenai/codexc@0.155.1
-```
-
-安装或升级后，重启服务并检查：
-
-```bash
-codexc service restart all
-codexc doctor
-```
-
-### Git 源码安装
+项目不再发布新的 npm 版本。使用 Git 源码安装器构建并注册全局 `codexc` 命令；npm 仍用于依赖安装、本地打包和配套 Codex CLI 安装。
 
 Linux/macOS：
 

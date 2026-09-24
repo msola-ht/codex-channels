@@ -365,7 +365,7 @@
   和枚举变化生成独立影响报告，不把 App Server 内部枚举误当成公开 CLI 合同。
 - `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
   真实合同、Gateway/WebUI 构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
-  改稳定版文档，因此明确跳过文档索引检查和仅用于发布前的 README 同步测试。
+  改稳定版文档，因此明确跳过文档索引检查；测试阶段运行完整测试。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
   逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
@@ -455,15 +455,10 @@
   全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
   `codexc` 入口与配置预检。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
-- `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 发布版本及安装命令严格一致，
-  README 尚未完成对应发布提交时失败关闭。
-- `sync-published-readme.mjs`：把受控的 README 正式版、`-rc.N` 候选版或 `-fixN` 修复版及安装命令
-  渲染为对应发布状态；RC 独立保留当前正式安装说明并使用目标正式 Codex CLI，fix 独立保留正式
-  安装说明；拒绝其他预发布、降级、高于开发基线和缺少受控标记的文档。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础
-  版本以兼容旧版源码更新器；已发布版本的安装入口继续由 README 和 Release 保留。
+  版本以兼容旧版源码更新器；历史发布记录由对应 Release 保留，当前安装入口统一使用源码。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、

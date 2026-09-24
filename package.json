@@ -19,9 +19,7 @@
     "url": "https://github.com/msola-ht/codex-channels/issues"
   },
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "bin": {
     "codexc": "bin/codexc.mjs"
   },
@@ -204,7 +202,6 @@
     "codex:contract:check": "node scripts/codex-public-cli-contract.mjs --check",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "protocol:check": "node scripts/check-protocol.mjs && npm run codex:contract:check",
-    "release:check": "node scripts/check-release-tag.mjs",
     "lint": "eslint src tests bin runtime scripts",
     "test:coverage": "vitest run --config vitest.config.ts --coverage"
   },

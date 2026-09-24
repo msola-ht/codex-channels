@@ -79,6 +79,6 @@
 
 - [`AGENTS.md`](AGENTS.md)：项目开发约束。
 - [`.githooks/README.md`](.githooks/README.md)：提交前检查。
-- [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与发布工作流。
+- [`.github/workflows/README.md`](.github/workflows/README.md)：CI 与升级提案工作流。
 - [`.codex/rules/default.rules`](.codex/rules/default.rules)：项目安全命令预设。
 - [`LICENSE`](LICENSE)：MIT License。

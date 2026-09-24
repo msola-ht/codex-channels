@@ -1,24 +1,22 @@
 # Codex Connect Gateway
 
 [![CI](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml/badge.svg)](https://github.com/msola-ht/codex-channels/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@hegenai/codexc)](https://www.npmjs.com/package/@hegenai/codexc)
 ![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.13-339933?logo=nodedotjs&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20Preview-555555)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 在 Telegram、飞书或微信中使用本机 Codex。Gateway 与 `codexc remote` 共享同一个 Codex App Server，因此聊天渠道和原生 TUI 可以继续使用同一组 Thread、Workspace 和运行状态。
 
-当前 `main` 开发基线：`0.156.1`（尚未发布）；当前正式版：`0.155.1`。
+当前 `main` 开发基线：`0.156.1`。项目通过 Git 源码安装和更新，不再发布新的 npm 版本。
 
 完整安装、配置、渠道命令、服务管理、升级、排障和开发说明见[《Codex Connect 使用指导》](docs/user-guide.md)。
 
 ## 快速开始
 
-安装正式版配套 CLI：
+安装 Node.js 22.13+、Git 和 npm 后，从官方 `main` 安装：
 
 ```bash
-npm install -g @openai/codex@0.155.1
-npm install -g @hegenai/codexc@0.155.1
+curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
 初始化、配置并安装后台服务：
@@ -29,12 +27,6 @@ codexc setup
 codexc work add
 codexc service install
 codexc doctor
-```
-
-源码安装：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
 Windows PowerShell 7（开发验证入口，尚未纳入公开正式支持）：

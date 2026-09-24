@@ -292,7 +292,7 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 - 服务端只读查询复用 `codexc metrics` 的同一能力（`metrics-database-access.mjs` /
   `metrics-export-format.mjs`），不维护平行索引；
 - API 响应类型单一来源是 `scripts/webui-api.ts`，前端只做转出；
-- 前端构建产物随 npm 包发布，`codexc webui` 不依赖源码目录即可托管。
+- 前端构建产物随源码安装器构建并安装，`codexc webui` 不依赖源码目录即可托管。
 
 ## 边界与安全
 
@@ -348,7 +348,7 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 不一致”。还没有请求样本时不做判断。
 
 部署：仓库根目录 `npm run install:global` 会自动安装 webui 依赖并构建
-`webui/dist/`，产物随 npm 包发布，由 `codexc webui` 托管。
+`webui/dist/`，产物随本地打包安装，由 `codexc webui` 托管。
 
 开发：仓库根目录 `npm run webui:dev` 一键并行启动 `codexc webui`
 （API，默认 `127.0.0.1:8787`）与 Vite dev server（热更新，默认 `5173`）。
