@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { runSessionMenu } from "../scripts/session-menu.mjs";
+import { runSessionCleanupMenu } from "../scripts/session-menu.mjs";
 
 describe("session menu", () => {
   it("collects cleanup settings and delegates to the CLI", async () => {
     const runCleanup = vi.fn(async () => undefined);
-    const values = ["cleanup", "3", "7"];
+    const values = ["3", "7"];
     const textOptions: Array<Record<string, unknown>> = [];
     const prompts = {
       intro: vi.fn(),
@@ -18,7 +18,7 @@ describe("session menu", () => {
       cancel: vi.fn(),
     };
 
-    await runSessionMenu({ prompts, runCleanup });
+    await runSessionCleanupMenu({ prompts, runCleanup });
 
     expect(runCleanup).toHaveBeenCalledWith(["3", "--idle-days", "7", "--confirm"]);
     expect(textOptions[0]).toMatchObject({ initialValue: "3" });

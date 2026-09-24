@@ -113,10 +113,10 @@ export async function runSystemSettings({
     return runOfficialTuiTerminal({ environment, output, prompts, writeConfig });
   }
   if (section === "app_server_timezone") {
-    return runAppServerTimezone({ environment, output, prompts, writeConfig });
+    return runAppServerTimezone({ environment, input, output, prompts, writeConfig });
   }
   if (section === "gateway_timezone") {
-    const result = await runTimezoneCommand(["--gateway"], { environment, output, prompts, writeConfig });
+    const result = await runTimezoneCommand(["--gateway"], { environment, input, output, prompts, writeConfig });
     return result.action === "cancelled" ? { action: "back" } : result;
   }
   throw new Error(`未知系统设置：${String(section)}`);
@@ -426,8 +426,9 @@ async function runOfficialTuiTerminal({ environment, output, prompts, writeConfi
 }
 
 /** 与 `codexc timezone` 共用同一实现，两处入口保持一致的校验与写入路径。 */
-async function runAppServerTimezone({ environment, output, prompts, writeConfig }) {
+async function runAppServerTimezone({ environment, input, output, prompts, writeConfig }) {
   const result = await runTimezoneCommand([], {
+    input,
     environment,
     output,
     prompts,

@@ -147,6 +147,7 @@ export function normalizeTimezoneInput(value, { exists = existsSync, root = zone
 
 export async function runTimezoneCommand(args = [], {
   environment = process.env,
+  input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
@@ -163,7 +164,7 @@ export async function runTimezoneCommand(args = [], {
     })}\n`);
     return { action: "status", timezone: current, configPath: settings.configPath };
   }
-  if (parsed.action === "prompt" && (!output.isTTY || !prompts)) {
+  if (parsed.action === "prompt" && (!input.isTTY || !output.isTTY || !prompts)) {
     writeCurrentTimezone({ environment, output, current, configPath: settings.configPath, gateway });
     return { action: "status", timezone: current, configPath: settings.configPath };
   }

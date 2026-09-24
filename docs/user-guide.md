@@ -44,6 +44,12 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 ## 3. 初始化与配置
 
+在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及 TUI、WebUI 和前台服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 仅显示路径，`timezone` 仅显示当前时区。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
+
+`codexc service` 无参数时可选择操作和目标；核心服务 `all` 仅包含 App Server 与 Gateway，WebUI 单独选择。菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
+
+`codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择，取消子操作返回本层；退出子菜单返回主菜单。
+
 ```bash
 codexc init
 codexc setup
@@ -56,7 +62,7 @@ Gateway 配置位于：
 ~/.codex-connect/config.toml
 ```
 
-`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、服务、代理、Workspace、WebUI 和本地指标存储。配置示例见 [`config.example.toml`](../config.example.toml)。
+`codexc setup` 是接入向导，管理模型 Provider、渠道和项目技能；`codexc config` 是日常设置入口，统一管理 Codex 新会话与用户偏好，以及 Gateway 显示、运行参数、代理、WebUI 和本地指标存储；工作区和服务操作分别使用 `codexc work`、`codexc service`。配置示例见 [`config.example.toml`](../config.example.toml)。
 
 `codexc timezone` 设置模型可见时区，WebUI 同步跟随；网关默认也跟随，可用 `codexc timezone --gateway` 选择系统或自定义时区，细节见[`模型可见时区`](model-timezone.md)。
 
@@ -317,7 +323,7 @@ codexc cleanup
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
-`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并退出。
+`codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并返回清理菜单。
 
 会话归档示例：先停止 Gateway，保留 App Server，预览“主会话不超过 3 轮、整组可查询成员至少空闲 7 天”的候选：
 
@@ -333,7 +339,7 @@ codexc sessions cleanup 3 --idle-days 7 --confirm
 codexc service start gateway
 ```
 
-也可运行 `codexc sessions` 进入专门的会话归档菜单。不指定 `--idle-days` 就没有会话年龄限制。
+交互归档统一从 `codexc cleanup → 归档短会话及子会话` 进入；`codexc sessions` 无参数只显示帮助。不指定 `--idle-days` 就没有会话年龄限制。
 轮数阈值只计算主会话，子孙轮数不累加；派生子孙随官方归档，Fork 独立筛选。
 活动、固定、渠道绑定或状态无法确认的成员会使整组跳过。归档保留历史，不是永久删除；
 官方操作可能部分成功，执行期间不要在其他客户端操作候选会话。完整筛选及核验口径见[展示说明](display.md)。
@@ -345,6 +351,8 @@ codexc service start gateway
 ```bash
 codexc uninstall
 ```
+
+源码卸载不要求配置文件有效；仍会检查受管安装身份并保留用户配置和数据。
 
 npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall -g @hegenai/codexc`。
 

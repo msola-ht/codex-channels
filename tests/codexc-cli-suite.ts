@@ -120,6 +120,14 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(`Schema：${modelRequestMetricsSchemaVersion}`);
+    for (const extra of [[], ["--stdout"]]) {
+      const quota = spawnSync(cli, ["metrics", "quota", "--format", "json", ...extra], {
+        cwd: workspace, encoding: "utf8", env: environment,
+      });
+      expect(quota.status, quota.stderr).toBe(0);
+      expect(JSON.parse(quota.stdout)).toMatchObject({ format: "codex-connect-quota-history", periods: [] });
+    }
+
     expect(result.stderr).toBe("");
 
     const jsonResult = spawnSync(cli, ["metrics", "status", "--json"], {
@@ -136,6 +144,36 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       count: 0,
     });
     expect(jsonResult.stderr).toBe("");
+  });
+
+  it("validates help paths before loading configuration and reaches uninstall identity checks with broken config", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-help-boundary-"));
+    temporaryDirectories.push(root);
+    const configPath = join(root, "config.toml");
+    writeFileSync(configPath, "[broken");
+    const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
+    for (const flag of ["-h", "--help"]) {
+      for (const path of [["security", "repair"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])]) {
+        const result = spawnSync(process.execPath, [cli, ...path, flag], { env, encoding: "utf8" });
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toContain("用法");
+      }
+      for (const path of [
+        ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
+        ["deepseek", "nonsense"], ["ccg", "nonsense"],
+        ["primary-provider", "remove", "some-id"],
+        ["opencode-go", "account", "add", "some-id"],
+      ]) {
+        const result = spawnSync(process.execPath, [cli, ...path, flag], { env, encoding: "utf8" });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("用法");
+        expect(result.stderr).not.toContain("语法无效");
+      }
+    }
+    const uninstall = spawnSync(process.execPath, [cli, "uninstall"], { env, encoding: "utf8" });
+    expect(uninstall.status).toBe(1);
+    expect(uninstall.stderr).toContain("当前不是受管 Git 源码安装");
+    expect(readFileSync(configPath, "utf8")).toBe("[broken");
   });
 
   it("shows scoped help for every public command without requiring configuration", async () => {
@@ -2063,6 +2101,23 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "syntax") {
+  it.each([
+    [[], "交互终端无参数时打开主菜单"],
+    [["service"], "codexc service [命令]"],
+    [["sessions"], "交互归档请运行 codexc cleanup"],
+    [["metrics"], "交互清理和重置请用 codexc cleanup"],
+  ] as const)("shows help without prompting or requiring config for %j", (args, expected) => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-menu-no-tty-"));
+    temporaryDirectories.push(root);
+    const result = spawnSync(process.execPath, [cli, ...args], {
+      encoding: "utf8", timeout: 5000,
+      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: join(root, "missing.toml") },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(expected);
+    expect(result.stderr).toBe("");
+  });
+
 
   it("validates command syntax before requiring user configuration", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-syntax-"));

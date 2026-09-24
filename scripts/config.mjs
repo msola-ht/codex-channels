@@ -44,7 +44,7 @@ export async function runConfig({
     return { action: "paths", ...result };
   }
   if (!prompts) throw new Error("Config 菜单缺少交互实现");
-  if (!output.isTTY) {
+  if (!input.isTTY || !output.isTTY) {
     output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
     return { action: "paths", configPath, dataDir };
   }

@@ -17,13 +17,12 @@ export interface MetricsMenuThread {
 export function runMetricsMaintenanceMenu(action: "cleanup" | "reset", options: {
   prompts?: MetricsMenuPrompts;
   readStorage?: () => Record<string, unknown>;
-  runDatabaseCommand: (args: string[]) => void;
+  runDatabaseCommand: (args: string[]) => void | Promise<unknown>;
 }): Promise<void>;
 
 export function runMetricsMenu(options: {
   prompts?: MetricsMenuPrompts;
-  readStorage?: () => Record<string, unknown>;
   readThreads?: () => MetricsMenuThread[] | Promise<MetricsMenuThread[]>;
-  runDatabaseCommand: (args: string[]) => void;
-  runMetricsCommand: (args: string[]) => void;
+  runDatabaseCommand: (args: string[]) => void | Promise<unknown>;
+  runMetricsCommand: (args: string[]) => void | Promise<unknown>;
 }): Promise<void>;

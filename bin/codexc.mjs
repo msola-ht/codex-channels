@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+import { isCommandHelp } from "../scripts/cli-help.mjs";
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
 import {
@@ -56,9 +57,9 @@ import {
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
 import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
-import { runSessionMenu } from "../scripts/session-menu.mjs";
+import { runCliMenu, runServiceMenu } from "../scripts/cli-menu.mjs";
 import { cleanupUsage, runCleanupMenu } from "../scripts/cleanup-menu.mjs";
-import { configuredEnvironment } from "../scripts/runtime-environment.mjs";
+import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
 import {
   runAppServerServiceCommand,
   runGatewayServiceCommand,
@@ -76,7 +77,9 @@ const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 const helpText = {
   main: `Codex Connect CLI
 
-用法：codexc <命令>
+用法：codexc [命令]
+
+交互终端无参数时打开主菜单；非交互终端显示帮助。
 
 初始化与配置：
   init                         初始化用户目录和配置
@@ -138,7 +141,9 @@ DeepSeek、OpenCode Go 与 CCG 子菜单中的“修改模型设置”会打开�
 切换模式可用 --profile sf-ds-<账户>、sf-ocg-<账户>、sf-ccg-<账户> 或
 sf-custom-<Provider ID> 连接对应的隔离 App Server；与原生 Codex Profile 名称一致。`,
   desktop_app: desktopAppCommandUsage,
-  service: `用法：codexc service <命令>
+  service: `用法：codexc service [命令]
+
+交互终端无参数时选择操作和目标；非交互终端显示帮助。
 
   install                      生成全部后台服务定义，并启动 App Server 与 Gateway
   uninstall                    卸载全部后台服务并保留用户数据
@@ -204,7 +209,7 @@ config.toml、数据库、凭据、日志和输出。直接从 npm Registry 安�
 codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   metrics: `用法：codexc metrics
 
-无参数时进入交互菜单。查询、导出与维护模型请求指标：
+无参数时进入查询与导出菜单；交互清理和重置请用 codexc cleanup。直接命令：
   ${metricsCommandUsage.run.slice("用法：".length)}   本次运行汇总（最近 Turn + 会话累计）
   ${metricsCommandUsage.turns.slice("用法：".length)}   会话每次对话明细
   ${metricsCommandUsage.threads.slice("用法：".length)}   列出有指标的会话
@@ -262,7 +267,7 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 按配置 [metrics.storage] 或命令行覆盖值清理最旧请求指标。默认要求 Gateway 已停止；
 加 --restart-gateway 自动停止并重新启动。清理前创建 0600 备份；--vacuum 会立即回收文件空间。`,
   cleanup: cleanupUsage,
-  sessions: "用法：codexc sessions [cleanup <最大轮数> [--idle-days <天数>] [--confirm]]\n\n无子命令时进入交互菜单；清理默认只预览，交互终端确认后才归档。执行前必须停止 Gateway。",
+  sessions: "用法：codexc sessions [cleanup <最大轮数> [--idle-days <天数>] [--confirm]]\n\n交互归档请运行 codexc cleanup；清理默认只预览，交互终端确认后才归档。执行前必须停止 Gateway。",
   "sessions.cleanup": "用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]",
   "metrics.report": `${metricsCommandUsage.report}
 
@@ -285,6 +290,26 @@ provider 支持 openai、已配置的受管 Provider、OpenCode Go 账户，以�
 const [command, ...args] = process.argv.slice(2);
 
 try {
+  if (command === undefined && process.stdin.isTTY && process.stdout.isTTY) {
+    await runCliMenu({ runCommand: ([name, ...values]) => executeCommand(name, values) });
+  } else {
+    await executeCommand(command, args);
+  }
+} catch (error) {
+  if (
+    !(error instanceof ReportedChildExitError)
+    && !(error instanceof ForwardedChildSignalError)
+  ) {
+    printCliMessage("failure", error instanceof Error ? error.message : String(error));
+  }
+  if (error instanceof ReportedChildExitError) {
+    process.exitCode = error.exitCode;
+  } else if (!(error instanceof ForwardedChildSignalError)) {
+    process.exitCode = 1;
+  }
+}
+
+async function executeCommand(command, args) {
   switch (command) {
     case undefined:
       printHelp();
@@ -354,7 +379,7 @@ try {
       if (showRequestedHelp(args, "desktop_app")) {
         break;
       }
-      if (args.some(isHelpArgument)) {
+      if (isCommandHelp(args, [[], ["enable"], ["disable"], ["status"], ["open"]], desktopAppCommandUsage)) {
         console.log(desktopAppCommandUsage);
         break;
       }
@@ -397,7 +422,8 @@ try {
       security(args);
       break;
     case "primary-provider":
-      if (showRequestedHelp(args, "primary-provider")) {
+      if (isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"]], primaryProviderUsage)) {
+        console.log(primaryProviderUsage);
         break;
       }
       runScript("scripts/primary-provider-cli.mjs", args, {
@@ -434,7 +460,7 @@ try {
         break;
       }
       requireNoArguments(args, "用法：codexc uninstall");
-      runScript("scripts/source-uninstall.mjs", [], { failureReportedByChild: true });
+      runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
       break;
     case "metrics":
       await metrics(args);
@@ -466,14 +492,7 @@ try {
     case "sessions":
       if (showRequestedHelp(args, "sessions") || showSubcommandHelp(args, "cleanup", "sessions.cleanup")) break;
       if (args.length === 0) {
-        if (!process.stdout.isTTY) {
-          console.log(helpText.sessions);
-          break;
-        }
-        await runSessionMenu({
-          runCleanup: (cleanupArgs) =>
-            runScript("scripts/session-cleanup.mjs", cleanupArgs, { failureReportedByChild: true }),
-        });
+        console.log(helpText.sessions);
         break;
       }
       if (args[0] !== "cleanup") throw new Error("用法：codexc sessions cleanup <最大轮数> [--idle-days <天数>] [--confirm]");
@@ -494,18 +513,6 @@ try {
       break;
     default:
       throw new Error(`未知命令：${command}\n运行 codexc --help 查看用法`);
-  }
-} catch (error) {
-  if (
-    !(error instanceof ReportedChildExitError)
-    && !(error instanceof ForwardedChildSignalError)
-  ) {
-    printCliMessage("failure", error instanceof Error ? error.message : String(error));
-  }
-  if (error instanceof ReportedChildExitError) {
-    process.exitCode = error.exitCode;
-  } else if (!(error instanceof ForwardedChildSignalError)) {
-    process.exitCode = 1;
   }
 }
 
@@ -528,6 +535,11 @@ function initialize(args) {
 
 async function handleServiceCommand(args) {
   if (showRequestedHelp(args, "service")) return;
+  if (args.length === 0) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) console.log(helpText.service);
+    else await runServiceMenu({ runCommand: runServiceCommand });
+    return;
+  }
   const [action, ...rest] = args;
   if (
     serviceCommandActions.includes(action)
@@ -554,6 +566,10 @@ function runDoctor(args) {
 }
 
 function opencodeGoAccount(args) {
+  isCommandHelp(args, [
+    [], ["account"], ["legacy"], ["legacy", "remove"],
+    ...["add", "list", "remove", "default", "stop"].map((action) => ["account", action]),
+  ], helpText.opencode_go);
   if (args[0] === "legacy") {
     if (args.some(isHelpArgument)) runStandaloneScript("scripts/opencode-go-setup.mjs", args);
     else {
@@ -721,7 +737,7 @@ async function runForegroundScript(
 }
 
 function security(args) {
-  if (showRequestedHelp(args, "security")) return;
+  if (showRequestedHelp(args, "security") || showSubcommandHelp(args, "repair", "security")) return;
   if (args.length !== 1 || args[0] !== "repair") {
     throw new Error("用法：codexc security repair");
   }
@@ -803,7 +819,7 @@ async function metrics(args) {
   }
   const [subcommand, ...rest] = args;
   if (subcommand === undefined) {
-    if (!process.stdout.isTTY) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
       console.log(helpText.metrics);
       return;
     }
@@ -865,7 +881,9 @@ async function metrics(args) {
     runMetricsCommand([subcommand, ...rest]);
     return;
   }
-  runScript("scripts/metrics-database.mjs", [subcommand, ...rest], { failureReportedByChild: true });
+  runScript("scripts/metrics-database.mjs", [subcommand, ...(
+    subcommand === "quota" ? rest.filter((argument) => argument !== "--stdout") : rest
+  )], { failureReportedByChild: true });
 }
 
 async function channel(args) {

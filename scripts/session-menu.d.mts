@@ -6,11 +6,6 @@ export interface SessionMenuPrompts {
   text(options: Record<string, unknown>): Promise<unknown>;
 }
 
-export function runSessionMenu(options: {
-  prompts?: SessionMenuPrompts;
-  runCleanup: (args: string[]) => void | Promise<unknown>;
-}): Promise<unknown>;
-
 export function runSessionCleanupMenu(options: {
   prompts?: SessionMenuPrompts;
   runCleanup: (args: string[]) => void | Promise<unknown>;

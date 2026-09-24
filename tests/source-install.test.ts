@@ -157,7 +157,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(existsSync(join(home, ".zshrc"))).toBe(false);
   }, 15_000);
 
-  it("uninstalls the managed source and services while preserving user data", async () => {
+  it.each(["version = 1\n", "[broken"])("uninstalls the managed source and preserves user data with config %j", async (configContent) => {
     const root = temporaryDirectory("codexc-source-uninstall-");
     const installRoot = join(root, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
@@ -173,7 +173,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
       launcher,
       `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
     );
-    writeFileSync(config, "version = 1\n");
+    writeFileSync(config, configContent);
     writeFileSync(database, "preserved");
     writeFileSync(
       profile,
@@ -198,7 +198,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
     expect(existsSync(launcher)).toBe(false);
-    expect(readFileSync(config, "utf8")).toBe("version = 1\n");
+    expect(readFileSync(config, "utf8")).toBe(configContent);
     expect(readFileSync(database, "utf8")).toBe("preserved");
     expect(readFileSync(profile, "utf8")).toBe('export PATH="/custom/bin:$PATH"\n');
   });

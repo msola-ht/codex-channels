@@ -49,17 +49,19 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 ## 常用入口
 
 ```bash
+codexc                       # 交互主菜单（非交互终端显示帮助）
 codexc setup                 # Provider、渠道和项目技能接入
 codexc config                # Codex 新会话偏好与 Gateway 日常设置
 codexc cleanup               # 统一交互归档会话、清理转储和维护指标
 codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网关时区
+codexc work                  # 新建或注册已有工作区、管理权限
+codexc service               # 交互选择服务操作和目标
 codexc service status        # 查看服务状态
 codexc service restart all   # 重启 Gateway 与全部 App Server
 codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
 codexc traffic               # 查看模型请求与响应转储
 codexc webui                 # 启动本地指标与设置 WebUI
-codexc sessions              # 交互式会话归档菜单
 codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
 codexc remote                # 连接 Gateway 共享的原生 TUI
 codexc desktop-app status    # 检查 Desktop App 共享连接与 macOS 内置工具 Host（预览）

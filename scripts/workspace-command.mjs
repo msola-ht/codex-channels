@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
 
@@ -7,6 +7,7 @@ import { configEventQueuePath } from "../runtime/config-event-queue.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { gatewayConfigActivationNotice } from "./config-activation-notice.mjs";
+import { reportMenuError } from "./cli-menu.mjs";
 import { runWorkspaceSettings } from "./config-workspace-menu.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 import {
@@ -19,7 +20,7 @@ import {
 const helpText = {
   work: `用法：codexc work
 
-无子命令时进入交互菜单：列出、新增、删除、权限；新增创建在
+交互终端无子命令时进入菜单：列出、新建、注册当前或已有目录、删除、权限；新建目录位于
 ~/.codex-connect/<id>-work，不更改默认工作区。
 
 其他用法：
@@ -42,6 +43,7 @@ export async function runWorkspaceCommand(args, {
   environment = process.env,
   output = process.stdout,
   outputIsTTY = process.stdout.isTTY,
+  inputIsTTY = process.stdin.isTTY,
   prompts = clackPrompts,
 } = {}) {
   if (showRequestedHelp(args)) return;
@@ -107,8 +109,9 @@ export async function runWorkspaceCommand(args, {
     writeCliMessage("note", gatewayConfigActivationNotice);
     return;
   }
-  if (outputIsTTY && subcommand !== "list") {
+  if (inputIsTTY && outputIsTTY && subcommand !== "list") {
     await runWorkspaceMenu({
+      cwd,
       runtime,
       eventQueuePath,
       fallbackDefaultWorkspace,
@@ -141,6 +144,7 @@ function isHelpArgument(value) {
 }
 
 async function runWorkspaceMenu({
+  cwd,
   runtime,
   eventQueuePath,
   fallbackDefaultWorkspace,
@@ -156,6 +160,8 @@ async function runWorkspaceMenu({
       options: [
         { value: "list", label: "列出工作区", hint: "查看全部 Workspace 与默认项" },
         { value: "create", label: "新增工作区", hint: "在 ~/.codex-connect/<id>-work 下新建并注册" },
+        { value: "register-current", label: "注册当前目录", hint: cwd },
+        { value: "register-existing", label: "注册已有目录", hint: "输入目录路径，不创建或删除目录" },
         { value: "remove", label: "删除工作区", hint: "删除注册，不删除目录" },
         { value: "permissions", label: "工作区权限", hint: "沙箱、审批策略、权限 Profile" },
         { value: "cancel", label: "取消" },
@@ -165,35 +171,54 @@ async function runWorkspaceMenu({
       prompts.cancel("已取消");
       return;
     }
-    if (action === "list") return listWorkspaces(runtime.configPath);
-    if (action === "create") {
-      await createWorkspaceInteractively({
-        runtime,
-        eventQueuePath,
-        fallbackDefaultWorkspace,
-        prompts,
-      });
-      return;
+    try {
+      if (action === "list") {
+        listWorkspaces(runtime.configPath, { output });
+        continue;
+      }
+      if (action === "register-current" || action === "register-existing") {
+        const entered = action === "register-current" ? cwd : await prompts.text({
+          message: "已有目录路径", initialValue: cwd,
+          validate: (value) => String(value ?? "").trim() ? undefined : "目录不能为空",
+        });
+        if (prompts.isCancel(entered)) continue;
+        const directory = realpathSync(resolve(cwd, String(entered).trim()));
+        if (!statSync(directory).isDirectory()) throw new Error("Workspace 路径不是目录");
+        const confirmed = await prompts.confirm({ message: `确认注册已有目录 ${directory}？`, initialValue: true });
+        if (prompts.isCancel(confirmed) || confirmed !== true) continue;
+        await runWorkspaceCommand(["add", "--cwd", directory], { cwd, environment, output, outputIsTTY: false });
+        continue;
+      }
+      if (action === "create") {
+        await createWorkspaceInteractively({
+          runtime,
+          eventQueuePath,
+          fallbackDefaultWorkspace,
+          prompts,
+        });
+        continue;
+      }
+      if (action === "remove") {
+        await removeWorkspaceInteractively({
+          runtime,
+          eventQueuePath,
+          fallbackDefaultWorkspace,
+          prompts,
+        });
+        continue;
+      }
+      if (action === "permissions") {
+        await runWorkspaceSettings({
+          environment,
+          output,
+          prompts,
+        });
+        continue;
+      }
+      throw new Error(`未知 Workspace 操作：${String(action)}`);
+    } catch (error) {
+      reportMenuError(error);
     }
-    if (action === "remove") {
-      await removeWorkspaceInteractively({
-        runtime,
-        eventQueuePath,
-        fallbackDefaultWorkspace,
-        prompts,
-      });
-      return;
-    }
-    if (action === "permissions") {
-      const result = await runWorkspaceSettings({
-        environment,
-        output,
-        prompts,
-      });
-      if (result?.action === "back") continue;
-      return;
-    }
-    throw new Error(`未知 Workspace 操作：${String(action)}`);
   }
 }
 
