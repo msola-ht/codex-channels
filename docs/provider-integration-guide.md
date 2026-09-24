@@ -261,12 +261,12 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 严格校验每个 Profile，再把非敏感字段转换为 `-c` 启动参数；API Key 只进入目标子进程环境，
 不进入命令行。多个切换模式 Provider 通过私有显式注册表同时保留，并使用独立 Socket 与统计代理。
 
-当前不支持用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
+Codex 兼容 Provider 不接受用户自定义模型目录、第三方 `models.json` 或第三方 `/models` 刷新。服务启动时会用
 配置的 Codex CLI 执行 `debug models --bundled`，把 Codex 官方目录原子写入
 `~/.codex-connect/providers/custom/official-models.json`（0600），并通过 `model_catalog_json`
 注入固定/切换自定义 App Server；目录只随本机锁定的 Codex CLI 版本更新。
 自定义 Provider 切换模式可以与受管切换模式
-共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
+共存，但不能与任何受管固定模式同时启用。需要手填模型时使用下面的自定义 Responses Provider；需要账户能力时，仍按本指南前述的编译期
 受管 Provider 流程接入。
 
 可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → Codex 兼容 Provider”新增或编辑固定、切换模式 Provider：填写上游
@@ -295,3 +295,55 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；
 - [`docs/codex-cli-upgrade-decisions.md`](codex-cli-upgrade-decisions.md)：Provider 边界决策。
+
+
+## 7. 自定义 Responses Provider
+
+`codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider` 与
+`codexc primary-provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
+`primary-provider` 管理链路。WebUI 的 Provider 设置中选择“自定义 Responses Provider”。
+此类型使用 `responses-` 开头的 Provider ID（其后 1-54 位 ASCII 字母、数字、`-` 或 `_`），
+以便模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
+避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
+
+填写平台的 Responses 基础地址（例如 `https://www.zzshu.cc/v1`）、API Key 和一个或多个模型。
+每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级；默认模型必须属于目录。
+上下文窗口接受 1024–100000000 Token。思考等级仅接受锁定 Codex 支持的
+`none/minimal/low/medium/high/xhigh/max`；留空表示不声明可选等级，启动请求显式使用 `none`，
+避免继承官方主配置的思考等级。不会请求第三方 `/models` 或自动推断模型能力。
+
+上游必须兼容锁定版 Codex 的 Responses 流式事件、函数调用、工具结果接续及其请求字段；
+“提供 Responses 地址”不代表所有模型均兼容。此入口不转换 Chat Completions，不提供平台专用协议补丁。
+默认关闭这些实例的网页搜索，不声明远程压缩、免费额度、Fast、推理摘要、详细程度或官方模型生命周期能力。
+模型目录使用独立的通用编程指令模板，不复制某个官方模型的目录条目。当前目录合同没有可独立设置的最大输出 Token 字段。
+
+固定模式把 Provider、默认模型、思考等级及目录引用写入主配置；切换模式保持官方主配置，写入独立的
+`sf-custom-responses-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server
+获取目录，跨 Provider 选择仍在新 Thread 生效；已有 Thread 不迁移。切回官方后保留候选和自定义目录，
+再次启用候选时使用目录记录的默认模型；删除 Provider 成功且凭据备份清理成功后才清理模型目录和私有恢复快照。
+清理中断留下孤立目录时，可再次执行 `codexc primary-provider remove <Provider ID>` 按原 ID 清理残留。
+
+### 存储、备份与恢复
+
+每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 1 格式，
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。Codex 读取其中的
+`models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
+文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
+模型文件不含 Key。Key 仍写入现有私有 Profile／主配置；连接配置的恢复快照单独位于
+`~/.codex-connect/private/responses-providers/<Provider ID>.json`（0600，可能含凭据，勿分享）。
+
+保存前核对配置版本、Profile 与目录修订，并备份受影响配置；上一目录保存在同目录 `models.json.backup`。
+`models.json.pending` 标记未完成的保存；已知写入失败且主配置未改变时恢复目录和原 Profile。
+无法确认配置写入结果或发生进程中断时保留备份和 pending，拒绝启动，不自动重发写入。
+先停止服务、核对或恢复私有快照中的配置，再明确选择目录恢复方向：
+
+```bash
+codexc primary-provider recover responses-example rollback
+codexc primary-provider recover responses-example keep
+```
+
+`rollback` 使用上一目录；首次创建没有上一目录时删除未完成目录。`keep` 保留新目录。
+恢复会校验所选目录与当前配置的模型、路径及思考等级，并核对 Profile 与注册表是否一致、运行时能否加载；缺失注册项或 Profile 时须先恢复对应配置，不能仅保留目录。冲突时保留未完成标记并拒绝完成，不覆盖用户后来修改的配置。首次创建前主配置不存在时，可以回滚到无主配置、无模型目录的原始状态；配置损坏或权限错误不能按文件不存在处理。
+可在自定义 Responses Provider 交互菜单中执行同一恢复流程。完成后运行 `codexc service restart all`。
+回退到不支持此类型的 Gateway 版本前，先恢复官方主 Provider 并删除所有 Responses 切换 Provider，
+保留私有备份供重新安装支持版本后人工恢复；不通过删除数据库或静默迁移实现回退。

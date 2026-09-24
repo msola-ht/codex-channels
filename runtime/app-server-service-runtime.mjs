@@ -1,3 +1,4 @@
+import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -84,8 +85,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   const customSwitchingProviderIds = new Set(
     appServerRuntime.customSwitchingProviders.map((provider) => provider.provider),
   );
-  const officialCatalogPath = customPrimaryProvider !== undefined
-    || customSwitchingProviderIds.size > 0
+  const officialCatalogPath = (customPrimaryProvider !== undefined && customPrimaryProvider.catalogPath === undefined)
+    || [...customSwitchingProviderIds].some(id => !isResponsesProvider(id))
     ? writeCustomOfficialModelCatalog(
         runtime.environment,
         runtime.environment.CODEX_BINARY,
@@ -95,7 +96,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     ? appServerRuntime.customSwitchingProviders
     : appServerRuntime.customSwitchingProviders.map((provider) => ({
         ...provider,
-        arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+        arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
       }));
   const managedProviders = officialCatalogPath === undefined
     ? appServerRuntime.managedProviders
@@ -103,7 +104,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         customSwitchingProviderIds.has(provider.provider)
           ? {
               ...provider,
-              arguments: withOfficialModelCatalog(provider.arguments, officialCatalogPath),
+              arguments: withOfficialModelCatalog(provider.arguments, isResponsesProvider(provider.provider) ? responsesProviderCatalogPath(runtime.environment, provider.provider) : officialCatalogPath),
             }
           : provider);
   const {
@@ -560,7 +561,8 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         customPrimaryProvider.id,
         localBaseUrl,
       );
-      primaryArguments = withOfficialModelCatalog(primaryArguments, officialCatalogPath);
+      primaryArguments = withOfficialModelCatalog(primaryArguments, customPrimaryProvider.catalogPath ?? officialCatalogPath);
+      if (customPrimaryProvider.catalogPath) primaryArguments.push("-c", 'web_search="disabled"');
     } else if (primaryProvider === "openai") {
       const configuredOpenAiBaseUrl = loadOpenAiBaseUrl(runtime.environment);
       const configuredOpenAiUrl = configuredOpenAiBaseUrl

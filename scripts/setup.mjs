@@ -258,6 +258,11 @@ async function runThirdPartyModelSetup({
           hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
         },
         {
+          value: "custom_responses",
+          label: "自定义 Responses Provider",
+          hint: "手填模型 ID、上下文与能力；使用独立模型目录",
+        },
+        {
           value: "deepseek",
           label: "DeepSeek 官方",
           hint: "管理账户、运行模式、默认账户与模型设置",
@@ -293,6 +298,8 @@ async function runThirdPartyModelSetup({
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "custom_responses") {
+      result = await customPrimarySetup({ input, output, prompts, allowBack: true, catalogKind: "custom" });
     } else if (module === "custom_primary") {
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {

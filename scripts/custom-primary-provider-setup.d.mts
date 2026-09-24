@@ -17,6 +17,7 @@ export interface CustomPrimaryProviderSetupPrompts {
 
 export interface CustomPrimaryProviderSetupOptions {
   allowBack?: boolean;
+  catalogKind?: "official" | "custom";
   environment?: NodeJS.ProcessEnv;
   output?: { write(value: string): unknown };
   prompts?: CustomPrimaryProviderSetupPrompts;

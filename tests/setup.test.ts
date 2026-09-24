@@ -743,4 +743,11 @@ describe("Codex Connect setup", () => {
     expect(telegramSetup).not.toHaveBeenCalled();
     expect(feishuSetup).not.toHaveBeenCalled();
   });
+  it("routes the custom Responses entry to the shared menu with an explicit catalog kind", async () => {
+    const prompts={intro:vi.fn(),select:vi.fn().mockResolvedValueOnce("models").mockResolvedValueOnce("third_party").mockResolvedValueOnce("custom_responses"),isCancel:()=>false,cancel:vi.fn()};
+    const customPrimarySetup=vi.fn(async()=>"configured");
+    await runInteractiveSetup({input:{isTTY:true},output:{isTTY:true},prompts,customPrimarySetup});
+    expect(customPrimarySetup).toHaveBeenCalledWith(expect.objectContaining({catalogKind:"custom"}));
+  });
+
 });

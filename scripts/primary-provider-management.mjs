@@ -1,3 +1,5 @@
+import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
+import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath, responsesProviderBackupPath, removeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { existsSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 
@@ -112,7 +114,9 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     createClient = createCodexUserConfigClient,
   } = options;
   let backupCleaned = true;
-  if (plan.target.state === "stale-switching") {
+  if (plan.target.state === "orphan-catalog") {
+    removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
+  } else if (plan.target.state === "stale-switching") {
     removeCustomPrimaryProviderSwitchingProfile(environment, plan.target.id);
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   } else if (plan.target.state === "switching") {
@@ -146,6 +150,7 @@ async function applyPrimaryProviderRemovalPlan(plan, options) {
     });
     backupCleaned = removeBackupCandidateSafely(plan.target.id, environment);
   }
+  if (backupCleaned && isResponsesProvider(plan.target.id)) removeResponsesModelCatalog(environment, plan.target.id);
   return {
     action: "removed",
     target: plan.target,
@@ -235,6 +240,10 @@ async function removalPlanForExecution(input, preview, options) {
           ? [
               { keyPath: "model_provider", value: "openai" },
               { keyPath: "model", value: null },
+            ...(isResponsesProvider(normalizedId) ? [
+              { keyPath: "model_catalog_json", value: null },
+              { keyPath: "model_reasoning_effort", value: null },
+            ] : []),
             ]
           : []),
       ],
@@ -262,10 +271,11 @@ async function buildSwitchPlan(
   const { snapshot, officialModels } = await loadSwitchContext(
     environment,
     createClient,
-    normalizedModel !== undefined,
+    normalizedModel !== undefined && !isResponsesProvider(normalizedId),
   );
   if (
     normalizedModel !== undefined
+    && !isResponsesProvider(normalizedId)
     && !officialModels.some(
       (candidate) => candidate.available !== false && candidate.model === normalizedModel,
     )
@@ -299,6 +309,11 @@ async function buildSwitchPlan(
           ? [{ keyPath: "openai_base_url", value: null }]
           : []),
         { keyPath: "model_provider", value: "openai" },
+        ...(isResponsesProvider(currentProvider) ? [
+          { keyPath: "model_catalog_json", value: null },
+          { keyPath: "model_reasoning_effort", value: null },
+        ] : []),
+
         ...(normalizedModel !== undefined
           ? [{ keyPath: "model", value: normalizedModel }]
           : clearsCustomModel
@@ -362,6 +377,7 @@ async function buildSwitchPlan(
     name: switching.name,
     base_url: switching.baseUrl,
   } : source === "configured" ? configured : backup;
+  const custom = isResponsesProvider(normalizedId) ? responsesModelSettings(environment, normalizedId, normalizedModel ?? switching?.model) : undefined;
   const removesTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   return {
     target: {
@@ -369,7 +385,7 @@ async function buildSwitchPlan(
       displayName: optionalString(provider.name) ?? normalizedId,
       source,
       baseUrl: optionalString(provider.base_url) ?? "",
-      model: normalizedModel ?? switching?.model ?? optionalString(config.model) ?? null,
+      model: custom?.model ?? normalizedModel ?? switching?.model ?? optionalString(config.model) ?? null,
     },
     providers,
     expectedVersion: snapshot.version,
@@ -381,7 +397,15 @@ async function buildSwitchPlan(
         ? [{ keyPath: "openai_base_url", value: null }]
         : []),
       { keyPath: "model_provider", value: normalizedId },
-      ...(normalizedModel === undefined && switching === undefined
+      ...(custom ? [
+        { keyPath: "model_catalog_json", value: custom.catalog.path },
+        { keyPath: "model_reasoning_effort", value: custom.reasoningEffort ?? "none" },
+        { keyPath: "model", value: custom.model },
+      ] : isResponsesProvider(currentProvider) ? [
+        { keyPath: "model_catalog_json", value: null },
+        { keyPath: "model_reasoning_effort", value: null },
+      ] : []),
+      ...(custom || (normalizedModel === undefined && switching === undefined)
         ? []
         : [{ keyPath: "model", value: normalizedModel ?? switching?.model }]),
     ],
@@ -404,7 +428,9 @@ async function loadSwitchContext(environment, createClient, includeModels) {
       client.readUserConfigSnapshot(),
       includeModels ? client.listModels() : [],
     ]);
-    return { snapshot, officialModels };
+    return { snapshot, officialModels: includeModels && isResponsesProvider(record(snapshot.config).model_provider)
+      ? readOfficialModelCatalog(environment).models.filter(model => model.supported_in_api && model.visibility === "list").map(model => ({model: model.slug, available:true}))
+      : officialModels };
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -444,6 +470,16 @@ async function buildRemovalPlan(
     .find(({ id }) => id === normalizedId);
   const configured = candidateIds.includes(normalizedId);
   const backedUp = Object.prototype.hasOwnProperty.call(backup, normalizedId);
+  if (!configured && !backedUp && switching === undefined && isResponsesProvider(normalizedId)) {
+    const path = responsesProviderCatalogPath(environment, normalizedId);
+    if ([path, `${path}.backup`, `${path}.pending`, responsesProviderBackupPath(environment, normalizedId), customPrimaryProviderProfilePath(environment, normalizedId)].some(path => existsSync(path))) {
+      return {
+        target: {id: normalizedId, displayName: normalizedId, baseUrl: "", state: "orphan-catalog", active: false},
+        activation: "none",
+        effects: {restoresOfficial: false},
+      };
+    }
+  }
   if (!configured && !backedUp && switching === undefined) {
     throw invalid(
       "provider-not-found",
@@ -479,6 +515,10 @@ async function buildRemovalPlan(
         ? [
             { keyPath: "model_provider", value: "openai" },
             { keyPath: "model", value: null },
+            ...(isResponsesProvider(normalizedId) ? [
+              { keyPath: "model_catalog_json", value: null },
+              { keyPath: "model_reasoning_effort", value: null },
+            ] : []),
           ]
         : []),
     ] : [],

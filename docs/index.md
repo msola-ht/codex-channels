@@ -288,6 +288,11 @@ HTTP 429/5xx 与传输失败继续使用剩余预算，路径与其他响应错�
 Codex 兼容 Provider Setup 的官方模型目录复用、手工模型 ID、固定/切换双模式、直接 API Key、
 独立 Profile、候选编辑、统计代理接入，以及私有备份事务边界见
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)；该本地 Setup 能力不新增 App Server RPC。
+自定义 Responses Provider 使用 [`model-provider-responses-catalog.mjs`](../runtime/model-provider-responses-catalog.mjs)
+生成逐 Provider 的版本化目录，通过同一 `model/list`、`config/batchWrite`、Thread/Turn 路由接入；
+目录字段与指令模板要求以锁定源码 `protocol/src/openai_models.rs` 的 `ModelInfo` / `ModelsResponse` 为准，
+验证见 [`model-provider-responses-catalog.test.ts`](../tests/model-provider-responses-catalog.test.ts) 和
+[`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。
 
 上表“全 Provider 模型代理与请求统计”还包括仅官方 OpenAI 主代理启用的 0.156.1 固定端点清单：
 搜索、图片、记忆摘要与 Realtime HTTP/WS 请求透明转发且不计入 Responses 指标；DeepSeek、

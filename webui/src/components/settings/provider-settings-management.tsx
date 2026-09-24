@@ -36,6 +36,8 @@ function ProviderSettingsCard({
   const [baseUrl, setBaseUrl] = useState("")
   const [mode, setMode] = useState<"switching" | "exclusive">("switching")
   const [model, setModel] = useState("")
+  const [catalogKind, setCatalogKind] = useState("official")
+  const [customModels, setCustomModels] = useState<Array<{ id: string; name: string; contextWindow: number; reasoningEfforts: string[]; defaultReasoningEffort: string | null; supportsImages: boolean }>>([])
   const [supportsWebsockets, setSupportsWebsockets] = useState("true")
   const [apiKey, setApiKey] = useState("")
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
@@ -77,12 +79,16 @@ function ProviderSettingsCard({
     setBaseUrl("")
     setMode("switching")
     setModel("")
+    setCatalogKind("official")
+    setCustomModels([])
     setSupportsWebsockets("true")
     setApiKey("")
     setConfirmRemoveBaseUrl(false)
   }
 
   const edit = (candidate: typeof candidates[number]) => {
+    setCatalogKind(candidate.catalog === "custom" ? "custom" : "official")
+    setCustomModels(candidate.models?.map(entry => ({ ...entry, reasoningEfforts: [...entry.reasoningEfforts] })) ?? [])
     setEditingId(candidate.id)
     setProviderId(candidate.id)
     setProviderName(candidate.displayName)
@@ -108,6 +114,7 @@ function ProviderSettingsCard({
         baseUrl: baseUrl.trim(),
         mode,
         model: model.trim(),
+        ...(catalogKind === "custom" ? { catalog: { kind: "custom" as const, models: customModels } } : {}),
         supportsWebsockets: supportsWebsockets === "true",
         credential,
         ...(confirmRemoveBaseUrl ? { confirmRemoveTopLevelBaseUrl: true } : {}),
@@ -204,19 +211,36 @@ function ProviderSettingsCard({
       </section>
       <Separator />
       <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">Codex 兼容 Provider</h3><p className="text-xs text-muted-foreground">使用 Responses 接口和 Codex 官方模型目录。可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
-        {candidates.length === 0 ? <SettingsEmpty>当前没有Codex 兼容 Provider。</SettingsEmpty> : candidates.map((candidate) => <div key={`${candidate.id}:${candidate.baseUrl}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{candidate.displayName} {"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : null}</div><div className="truncate text-xs text-muted-foreground">{candidate.id} · {candidate.baseUrl || "地址未返回"}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></div>)}
+        <div><h3 className="font-medium">自定义提供商</h3><p className="text-xs text-muted-foreground">Codex 兼容 Provider 使用官方目录；自定义 Responses Provider 使用下方声明的模型与能力。可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
+        {candidates.length === 0 ? <SettingsEmpty>当前没有自定义提供商。</SettingsEmpty> : candidates.map((candidate) => <div key={`${candidate.id}:${candidate.baseUrl}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{candidate.displayName} {"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : null}</div><div className="truncate text-xs text-muted-foreground">{candidate.id} · {candidate.baseUrl || "地址未返回"}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></div>)}
+        <ManagedSelect label="提供商类型" value={catalogKind} options={[["official", "Codex 兼容 Provider"], ["custom", "自定义 Responses Provider"]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "responses-" : ""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
-          <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">Provider ID</FieldLabel><Input id="custom-provider-id" placeholder="例如 my-provider" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? "Provider ID（responses- 开头）" : "Provider ID"}</FieldLabel><Input id="custom-provider-id" placeholder="例如 my-provider" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
           <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-name">显示名称</FieldLabel><Input id="custom-provider-name" placeholder="显示名称" value={providerName} disabled={busy || pending !== null} onChange={(event) => setProviderName(event.target.value)} /></Field>
-          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">Responses Endpoint（HTTPS）</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1/responses" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
-          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">模型 ID（Codex 官方目录）</FieldLabel><Input id="custom-provider-model" placeholder="模型 ID" value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>
+          <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-endpoint">Responses 基础地址（HTTPS）</FieldLabel><Input id="custom-provider-endpoint" placeholder="https://example.com/v1" value={baseUrl} disabled={busy || pending !== null} onChange={(event) => setBaseUrl(event.target.value)} /></Field>
+          <Field data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-model">{catalogKind === "custom" ? "默认模型 ID（须在下方列表中）" : "模型 ID（Codex 官方目录）"}</FieldLabel><Input id="custom-provider-model" placeholder="模型 ID" value={model} disabled={busy || pending !== null} onChange={(event) => setModel(event.target.value)} /></Field>
           <ManagedSelect label="运行模式" value={mode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={busy || pending !== null} onChange={(value) => setMode(value as "switching" | "exclusive")} />
           <ManagedSelect label="WebSocket" value={supportsWebsockets} options={[["true", "支持"], ["false", "不支持"]]} disabled={busy || pending !== null} onChange={setSupportsWebsockets} />
           <Field className="md:col-span-2" data-disabled={busy || pending !== null}><FieldLabel htmlFor="custom-provider-api-key">API Key</FieldLabel><Input id="custom-provider-api-key" type="password" autoComplete="new-password" placeholder="留空沿用已有凭据" value={apiKey} disabled={busy || pending !== null} onChange={(event) => setApiKey(event.target.value)} /></Field>
         </FieldGroup>
+        {catalogKind === "custom" ? <div className="flex flex-col gap-3">
+          <p className="text-xs text-muted-foreground">请按平台文档声明能力。上游须兼容 Codex 的 Responses 流式请求与工具调用；不推理时发送 none，网页搜索默认关闭。</p>
+          {customModels.map((entry, index) => {
+            const patch = (changes: Partial<typeof entry>) => setCustomModels(current => current.map((value, position) => position === index ? { ...value, ...changes } : value))
+            return <FieldGroup key={index} className="rounded-md border p-3">
+              <Field><FieldLabel htmlFor={`responses-model-${index}`}>模型 ID</FieldLabel><Input id={`responses-model-${index}`} value={entry.id} disabled={busy || pending !== null} onChange={event => patch({ id: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-name-${index}`}>显示名称</FieldLabel><Input id={`responses-name-${index}`} value={entry.name} disabled={busy || pending !== null} onChange={event => patch({ name: event.target.value })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-context-${index}`}>上下文窗口（Token）</FieldLabel><Input id={`responses-context-${index}`} type="number" min={1024} max={100000000} value={entry.contextWindow || ""} disabled={busy || pending !== null} onChange={event => patch({ contextWindow: Number(event.target.value) })} /></Field>
+              <Field><FieldLabel htmlFor={`responses-reasoning-${index}`}>思考等级（逗号分隔；留空表示不支持）</FieldLabel><Input id={`responses-reasoning-${index}`} value={entry.reasoningEfforts.join(",")} placeholder="low,medium,high" disabled={busy || pending !== null} onChange={event => { const values = event.target.value === "" ? [] : event.target.value.split(","); patch({ reasoningEfforts: values, defaultReasoningEffort: values.includes(entry.defaultReasoningEffort ?? "") ? entry.defaultReasoningEffort : values[0] ?? null }) }} /></Field>
+              {entry.reasoningEfforts.length > 0 ? <Field><FieldLabel htmlFor={`responses-default-${index}`}>默认思考等级</FieldLabel><Input id={`responses-default-${index}`} value={entry.defaultReasoningEffort ?? ""} disabled={busy || pending !== null} onChange={event => patch({ defaultReasoningEffort: event.target.value })} /></Field> : null}
+              <Field orientation="horizontal"><Checkbox id={`responses-images-${index}`} checked={entry.supportsImages} disabled={busy || pending !== null} onCheckedChange={value => patch({ supportsImages: value === true })} /><FieldLabel htmlFor={`responses-images-${index}`}>支持图片输入</FieldLabel></Field>
+              <Button variant="outline" disabled={busy || pending !== null} onClick={() => setCustomModels(current => current.filter((_, position) => position !== index))}>移除此模型</Button>
+            </FieldGroup>
+          })}
+          <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>添加模型</Button>
+        </div> : null}
         {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">确认固定模式需要时移除顶层 openai_base_url</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Codex 兼容 Provider" : "保存 Codex 兼容 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Provider" : "保存 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
       </section>
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
@@ -237,6 +261,7 @@ function ProviderSettingsConfirmationDialog({
 }) {
   const lines = [`操作：${pending.operation}`]
   if (pending.provider !== undefined) lines.push(`Provider：${pending.provider.displayName ?? pending.provider.name ?? pending.provider.id}`)
+  if (pending.provider?.models !== undefined) for (const model of pending.provider.models) lines.push(`模型：${model.name}（${model.id}），上下文 ${model.contextWindow} Token，图片 ${model.supportsImages ? "支持" : "不支持"}，思考等级 ${model.reasoningEfforts.join("/") || "不支持"}，默认 ${model.defaultReasoningEffort ?? "none"}`)
   if (pending.target !== undefined) lines.push(`目标：${pending.target.displayName}（${pending.target.id}）`)
   if (pending.model !== undefined) lines.push(`模型：${pending.model.displayName}（${pending.model.id}）`)
   if (pending.providers !== undefined && pending.providers.length > 0) lines.push(`应用 Provider：${pending.providers.join("、")}`)

@@ -1,3 +1,4 @@
+import { isResponsesProvider, responsesModelSettings, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
@@ -167,9 +168,13 @@ export function loadConfiguredCustomPrimaryModelProvider(environment = process.e
   ) {
     throw new Error(`Codex 主模型 Provider ${id} 的 requires_openai_auth 无效`);
   }
+  if (isResponsesProvider(id) && provider.name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
+  const custom = isResponsesProvider(id) ? responsesModelSettings(environment, id, document.model) : undefined;
+  if (custom && document.model_catalog_json !== custom.catalog.path) throw new Error("Responses Provider 模型目录引用无效");
   return {
     id,
     baseUrl: normalizedBaseUrl,
+    ...(custom ? { catalogPath: custom.catalog.path } : {}),
   };
 }
 
@@ -241,7 +246,7 @@ export function isCustomSwitchingModelProviderConfigCompatible(config, providerI
   return !Object.prototype.hasOwnProperty.call(record(source.model_providers), providerId);
 }
 
-export function loadConfiguredCustomSwitchingModelProviders(environment = process.env) {
+export function loadConfiguredCustomSwitchingModelProviders(environment = process.env, providerId) {
   const providers = loadCustomSwitchingProviderIds(environment);
   if (providers.length === 0) return [];
   if (exclusiveManagedProviders(environment).length > 0) {
@@ -267,7 +272,8 @@ export function loadConfiguredCustomSwitchingModelProviders(environment = proces
       throw new Error(`自定义切换 Provider ${id} 不得写入 Codex 主配置`);
     }
   }
-  return providers.map((provider) => loadCustomSwitchingProfile(environment, provider));
+  return providers.filter((provider) => providerId === undefined || provider === providerId)
+    .map((provider) => loadCustomSwitchingProfile(environment, provider));
 }
 
 function loadCustomSwitchingProfile(environment, registeredProvider) {
@@ -303,10 +309,15 @@ function configuredCustomSwitchingProfileFromContent(
   } catch {
     throw new Error("Codex 自定义切换 Provider Profile 无法安全读取");
   }
-  if (profile.model_catalog_json !== undefined) {
+  if (!isResponsesProvider(registeredProvider) && profile.model_catalog_json !== undefined) {
     throw new Error("自定义切换 Provider 当前只支持 Codex 官方模型目录");
   }
+  const custom = isResponsesProvider(registeredProvider)
+    ? responsesModelSettings(environment, registeredProvider, profile.model) : undefined;
+  const reasoningEffort = custom ? custom.reasoningEffort ?? "none" : customSwitchingDefaultReasoningEffort;
+  if (custom && profile.model_catalog_json !== custom.catalog.path) throw new Error("Responses Provider 模型目录引用无效");
   const supportedProfileKeys = new Set([
+    ...(custom ? ["model_catalog_json", "web_search"] : []),
     "model",
     "model_provider",
     "model_reasoning_effort",
@@ -316,7 +327,8 @@ function configuredCustomSwitchingProfileFromContent(
   if (
     Object.keys(profile).some((key) => !supportedProfileKeys.has(key))
     || profile.service_tier !== "default"
-    || profile.model_reasoning_effort !== customSwitchingDefaultReasoningEffort
+    || profile.model_reasoning_effort !== (reasoningEffort ?? undefined)
+    || (custom && profile.web_search !== "disabled")
   ) {
     throw new Error("Codex 自定义切换 Provider Profile 包含不受支持的配置");
   }
@@ -389,6 +401,7 @@ function configuredCustomSwitchingProfileFromContent(
   const name = typeof provider.name === "string" && provider.name.trim() !== ""
     ? provider.name.trim()
     : id;
+  if (custom && name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
   const supportsWebsockets = provider.supports_websockets === true;
   const environmentKey = customSwitchingProviderEnvironmentKey(id);
   const profileName = `${customPrimaryProviderProfileName}-${id}`;
@@ -402,13 +415,14 @@ function configuredCustomSwitchingProfileFromContent(
     supportsWebsockets,
     profileName,
     profileContent,
-    reasoningEffort: customSwitchingDefaultReasoningEffort,
-    catalogSource: { kind: "official" },
+    reasoningEffort: reasoningEffort ?? undefined,
+    catalogSource: custom ? { kind: "custom", path: custom.catalog.path } : { kind: "official" },
     arguments: [
       "-c", `model=${JSON.stringify(model.trim())}`,
       "-c", `model_provider=${JSON.stringify(id)}`,
       "-c", 'service_tier="default"',
-      "-c", `model_reasoning_effort=${JSON.stringify(customSwitchingDefaultReasoningEffort)}`,
+      ...(reasoningEffort === null ? [] : ["-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]),
+      ...(custom ? ["-c", `model_catalog_json=${JSON.stringify(custom.catalog.path)}`, "-c", 'web_search="disabled"'] : []),
       "-c", `model_providers.${id}.name=${JSON.stringify(name)}`,
       "-c", `model_providers.${id}.base_url=${JSON.stringify(validProviderBaseUrl(provider.base_url, `Codex 自定义切换 Provider ${id}`))}`,
       "-c", `model_providers.${id}.wire_api="responses"`,
@@ -453,9 +467,11 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
   if (typeof model !== "string" || model.trim() === "") {
     throw new Error("自定义 Provider 默认模型不能为空");
   }
-  if (catalogSource?.kind !== "official") {
+  if (catalogSource?.kind !== "official" && !(isResponsesProvider(provider) && catalogSource?.kind === "custom")) {
     throw new Error("自定义 Provider 当前只支持 Codex 官方模型目录");
   }
+  if (isResponsesProvider(provider) && name === "OpenAI") throw new Error("Responses Provider 不能使用 OpenAI 名称");
+  if (isResponsesProvider(provider) !== (catalogSource.kind === "custom")) throw new Error("Provider 类型与模型目录来源不一致");
   const normalizedBaseUrl = validProviderBaseUrl(
     baseUrl,
     `Codex 自定义切换 Provider ${provider}`,
@@ -486,7 +502,11 @@ function writeCustomPrimaryProviderSwitchingProfileUnlocked(
     stringify({
       model: model.trim(),
       model_provider: provider,
-      model_reasoning_effort: customSwitchingDefaultReasoningEffort,
+      ...(catalogSource.kind === "custom" ? {
+        model_catalog_json: responsesProviderCatalogPath(environment, provider),
+        web_search: "disabled",
+        model_reasoning_effort: catalogSource.reasoningEffort ?? "none",
+      } : { model_reasoning_effort: customSwitchingDefaultReasoningEffort }),
       service_tier: "default",
       model_providers: {
         [provider]: {

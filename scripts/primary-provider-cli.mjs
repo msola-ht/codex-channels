@@ -1,3 +1,4 @@
+import { recoverResponsesProviderCatalog } from "./responses-provider-recovery.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import * as clackPrompts from "@clack/prompts";
 import { pathToFileURL } from "node:url";
@@ -99,7 +100,7 @@ export async function listPrimaryProviders({
     return;
   }
 
-  output.write("\nCodex Connect Codex 兼容 Provider\n");
+  output.write("\nCodex Connect 自定义 Provider（Codex 兼容 / Responses）\n");
   output.write(`当前主实例：${activeLabel}\n`);
   if (state.customProviders.fixedCandidates.length === 0) {
     output.write("自定义固定候选：无\n");
@@ -228,7 +229,9 @@ export async function removePrimaryProvider(
     { providerId },
     { environment, createClient, preview },
   );
-  if (result.target.state === "stale-switching") {
+  if (result.target.state === "orphan-catalog") {
+    output.write(`已清理 ${result.target.id} 的残留模型目录、私有 Profile 与恢复备份。\n`);
+  } else if (result.target.state === "stale-switching") {
     output.write(`已清理缺失 Profile 的自定义切换 Provider ${result.target.id}。\n`);
   } else if (result.target.state === "switching") {
     output.write(`已删除自定义切换 Provider ${result.target.id}，保留官方 OpenAI 主 Provider。\n`);
@@ -274,14 +277,16 @@ export async function runCustomPrimaryProviderMenu({
   prompts = clackPrompts,
   allowBack = false,
   createClient = createCodexUserConfigClient,
+  catalogKind = "official",
 } = {}) {
   while (true) {
     const action = await prompts.select({
-      message: "Codex 兼容 Provider",
+      message: catalogKind === "custom" ? "自定义 Responses Provider" : "Codex 兼容 Provider",
       showInstructions: false,
       options: [
         { value: "add", label: "新增", hint: "新增固定或切换 Provider" },
         { value: "edit", label: "编辑", hint: "修改已有 Provider；Provider ID 保持不变" },
+        ...(catalogKind === "custom" ? [{ value: "recover", label: "恢复未完成的模型目录保存", hint: "先停止服务；核对当前配置后恢复" }] : []),
         { value: "list", label: "列表", hint: "查看主实例、切换 Provider、固定候选与备份" },
         { value: "switch", label: "设为固定主 Provider", hint: "切换模式将转换为固定模式" },
         { value: "official", label: "恢复官方主 Provider", hint: "固定候选移入备份；切换 Provider 保持启用" },
@@ -294,8 +299,17 @@ export async function runCustomPrimaryProviderMenu({
     if (prompts.isCancel(action) || action === "back") {
       return { action: allowBack ? "back" : "cancel" };
     }
+    if (action === "recover") {
+      const id = await prompts.text({ message: "Responses Provider ID" });
+      if (prompts.isCancel(id)) continue;
+      const recovery = await prompts.select({ message: "选择恢复方式", options: [{ value: "rollback", label: "回滚上一目录" }, { value: "keep", label: "保留新目录" }] });
+      if (prompts.isCancel(recovery)) continue;
+      await runPrimaryProviderCli(["recover", String(id), String(recovery)], { environment, output, prompts, createClient });
+      continue;
+    }
     if (action === "add") {
       const result = await addPrimaryProvider({
+        catalogKind,
         environment,
         output,
         prompts,
@@ -487,11 +501,22 @@ export async function runPrimaryProviderCli(
     await listPrimaryProviders({ environment, output, createClient, json });
     return;
   }
-  if (subcommand === "add") {
-    if (rest.length > 0) {
-      throw new Error("用法：codexc primary-provider add");
+  if (subcommand === "recover") {
+    const [id, action, yes] = rest;
+    if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc primary-provider recover <Provider ID> <keep|rollback> [--yes]");
+    if (yes !== "--yes") {
+      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
+      if (prompts.isCancel(confirmed) || confirmed !== true) return;
     }
-    await addPrimaryProvider({ environment, output, prompts, createClient });
+    await recoverResponsesProviderCatalog(id, action, environment);
+    output.write(`已恢复 ${id} 模型目录，请运行 codexc service restart all。\n`);
+    return;
+  }
+  if (subcommand === "add") {
+    if (rest.length > 1 || (rest[0] !== undefined && rest[0] !== "--custom-models")) {
+      throw new Error("用法：codexc primary-provider add [--custom-models]");
+    }
+    await addPrimaryProvider({ environment, output, prompts, createClient, catalogKind: args[1] === "--custom-models" ? "custom" : "official" });
     return;
   }
   if (subcommand === "switch") {

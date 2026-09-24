@@ -1,3 +1,5 @@
+import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { promptResponsesModels } from "./responses-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
 
 import {
@@ -10,6 +12,7 @@ import {
   createCodexUserConfigClient,
 } from "./codex-user-config.mjs";
 import {
+  bundledOfficialModelOptions,
   customPrimaryProviderIdFromBaseUrl,
   customPrimaryProviderUrlsShareOrigin,
   prepareCustomPrimaryProviderSave,
@@ -66,7 +69,10 @@ export async function runCustomPrimaryProviderSetup({
   allowBack = false,
   createClient = createCodexUserConfigClient,
   providerId: editingProviderId,
+  catalogKind = "official",
 } = {}) {
+  const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
+  const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
   const client = await createClient({ environment });
   let snapshot;
   let officialModels;
@@ -74,17 +80,18 @@ export async function runCustomPrimaryProviderSetup({
     await client.connect();
     [snapshot, officialModels] = await Promise.all([
       client.readUserConfigSnapshot(),
-      client.listModels(),
+      custom ? [] : client.listModels(),
     ]);
   } finally {
     await client.close().catch(() => undefined);
   }
   const config = record(snapshot.config);
+  if (!custom && isResponsesProvider(config.model_provider)) officialModels = bundledOfficialModelOptions(environment);
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
       .map((candidate) => candidate.model),
   );
-  if (officialModelIds.size === 0) {
+  if (!custom && officialModelIds.size === 0) {
     throw new Error("Codex App Server 没有返回可用的官方模型");
   }
   const activeProviderId = optionalString(config.model_provider);
@@ -147,7 +154,7 @@ export async function runCustomPrimaryProviderSetup({
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
-  output.write("\nCodex Connect Codex 兼容 Provider Setup\n\n");
+  output.write(`\nCodex Connect ${custom ? "自定义 Responses Provider" : "Codex 兼容 Provider"} Setup\n\n`);
   output.write(`当前主实例：${currentMainLabel}\n`);
   output.write(fixedProviderId === undefined
     ? "当前操作：新增 Provider\n"
@@ -178,7 +185,8 @@ export async function runCustomPrimaryProviderSetup({
   const normalizedBaseUrl = validCustomPrimaryProviderBaseUrl(String(baseUrl).trim());
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
-    const derivedProviderId = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
+    const derived = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
+    const derivedProviderId = custom ? `responses-${derived.slice(0, 54)}` : derived;
     const providerId = await prompts.select({
       message: "Provider ID",
       options: [
@@ -187,25 +195,25 @@ export async function runCustomPrimaryProviderSetup({
           label: derivedProviderId,
           hint: "从上游 URL 主机名提取",
         },
-        {
+        ...(!custom ? [{
           value: primaryProviderId,
           label: `${primaryProviderId}（推荐；允许 Codex 使用远程压缩）`,
           hint: "上游仍需兼容远程压缩接口",
-        },
+        }] : []),
         {
           value: "__custom__",
           label: "自定义标识符",
           hint: "不使用上游地址作为 Provider ID",
         },
       ],
-      initialValue: activeProviderId === derivedProviderId ? derivedProviderId : primaryProviderId,
+      initialValue: custom || activeProviderId === derivedProviderId ? derivedProviderId : primaryProviderId,
     });
     if (prompts.isCancel(providerId) || providerId === "back") {
       return { action: allowBack ? "back" : "cancel" };
     }
     if (providerId === "__custom__") {
       const customId = await prompts.text({
-        message: "自定义 Provider ID",
+        message: custom ? "Provider ID（必须以 responses- 开头）" : "自定义 Provider ID",
         validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
           ?? undefined,
       });
@@ -307,12 +315,12 @@ export async function runCustomPrimaryProviderSetup({
   }
 
   const model = await prompts.text({
-    message: "上游模型 ID（必须存在于 Codex 官方模型目录）",
-    initialValue: currentModel ?? "",
+    message: custom ? "默认模型 ID（平台提供的准确名称）" : "上游模型 ID（必须存在于 Codex 官方模型目录）",
+    initialValue: currentModel ?? previousCatalog?.defaultModel ?? "",
     validate: (value) => {
       const normalized = String(value).trim();
       if (normalized === "") return "模型 ID 不能为空";
-      return officialModelIds.has(normalized)
+      return custom || officialModelIds.has(normalized)
         ? undefined
         : "模型 ID 不在 Codex 官方模型目录中";
     },
@@ -321,9 +329,12 @@ export async function runCustomPrimaryProviderSetup({
     return { action: allowBack ? "back" : "cancel" };
   }
   const normalizedModel = String(model).trim();
-  if (!officialModelIds.has(normalizedModel)) {
+  if (!custom && !officialModelIds.has(normalizedModel)) {
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
+
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, previousCatalog?.definitions) : undefined;
+  if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
     && customPrimaryProviderUrlsShareOrigin(currentBaseUrl, normalizedBaseUrl);
@@ -362,6 +373,7 @@ export async function runCustomPrimaryProviderSetup({
     baseUrl: normalizedBaseUrl,
     mode,
     model: normalizedModel,
+    ...(custom ? { catalog: { kind: "custom", models } } : {}),
     supportsWebsockets,
     credential: replacementApiKey === ""
       ? { action: "preserve" }
@@ -383,11 +395,11 @@ export async function runCustomPrimaryProviderSetup({
     `- 上游：${preview.provider.baseUrl}`,
     `- 默认模型：${preview.provider.model}`,
     `- 运行模式：${preview.provider.mode === "switching" ? "OpenAI + 自定义切换" : "仅自定义固定"}`,
-    "- 模型目录：Codex 官方",
+    `- 模型目录：${custom ? "自定义 Responses；仅声明的模型与能力" : "Codex 官方"}`,
     ...(preview.provider.mode === "switching"
       ? [
           "- 主配置：保持官方 OpenAI",
-          "- 默认思考等级：medium",
+          `- 默认思考等级：${custom ? models.find(entry => entry.id === normalizedModel).defaultReasoningEffort ?? "none" : "medium"}`,
           "- 服务层级：default",
           "- 认证：API Key 将明文写入 0600 私有 Profile（不回显、不进入命令行和日志）",
         ]
@@ -395,6 +407,7 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入 0600 主配置（不回显、不进入命令行和日志）",
         ]),
+    ...(custom ? models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
   ];
   if (preview.provider.id === primaryProviderId) {

@@ -1,0 +1,72 @@
+import { createServer } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { StdioTransport } from "../src/codex-client/stdio-transport.js";
+import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { writeCustomPrimaryProviderSwitchingProfile, loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
+import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
+import { waitFor } from "./support/real-app-server-helpers.js";
+
+const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
+describe("real custom Responses provider", () => {
+  contract("isolates arbitrary model catalogs, sends declared capabilities and completes a tool round trip", async () => {
+    const root = mkdtempSync(join(tmpdir(), "custom-responses-contract-"));
+    const environment = { ...process.env, CODEX_HOME: join(root,"codex"), CODEX_CONNECT_HOME: join(root,"connect") };
+    type RequestBody = { model: string; reasoning: {effort?: string; summary?: string}; input: Array<{type:string; call_id?:string; output?:unknown}> };
+    const bodies: RequestBody[] = [];
+    const backend = createServer((request,response) => {
+      const chunks: Buffer[]=[];request.on("data",(chunk:Buffer)=>chunks.push(chunk));
+      request.on("end",()=>{
+        if(request.url!=="/responses" || request.method!=="POST") {response.writeHead(404).end();return;}
+        const body=JSON.parse(Buffer.concat(chunks).toString()) as RequestBody; bodies.push(body);
+        const count=bodies.filter(entry=>entry.model===body.model).length;
+        const id=`responses-${bodies.length}`;
+        const item=count===1 ? {type:"function_call",id:`call-${id}`,call_id:`tool-${body.model}`,name:"exec_command",arguments:JSON.stringify({cmd:"printf custom-response-ok",login:false,max_output_tokens:100})} : {type:"message",role:"assistant",id:`answer-${id}`,content:[{type:"output_text",text:"Tool round trip complete"}]};
+        response.writeHead(200,{"content-type":"text/event-stream"});
+        for(const event of [{type:"response.created",response:{id}},{type:"response.output_item.done",item},completedResponseEvent(id)]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        response.end();
+      });
+    });
+    let rpc:JsonRpcClient|undefined;
+    try {
+      await new Promise<void>(resolve=>backend.listen(0,"127.0.0.1",resolve));
+      const address=backend.address();if(!address||typeof address==="string")throw new Error("Missing fixture listener");
+      writePrivateFileAtomicSync(join(environment.CODEX_HOME,"config.toml"),'model_provider = "openai"\nmodel_reasoning_effort = "high"\n');
+      for(const [id,model,reasoning] of [["responses-first","vendor/model-a",null],["responses-second","vendor/model-b","low"]] as const) {
+        const transaction=writeResponsesModelCatalog(environment,id,[{id:model,name:model,contextWindow:64000,reasoningEfforts:reasoning===null?[]:[reasoning],defaultReasoningEffort:reasoning,supportsImages:false}],model);
+        finishResponsesModelCatalogWrite(transaction);
+        writeCustomPrimaryProviderSwitchingProfile({provider:id,model,name:"Custom Responses fixture",baseUrl:`http://127.0.0.1:${address.port}`,apiKey:"fixture-key",supportsWebsockets:false,catalogSource:{kind:"custom",reasoningEffort:reasoning}},environment);
+      }
+      for(const runtime of loadConfiguredCustomSwitchingModelProviders(environment)) {
+        rpc=new JsonRpcClient(new StdioTransport({codexBinary:process.env.CODEX_BINARY??"codex",cwd:root,environment:{...environment,...runtime.childEnvironment},createCodexProcessInvocation:args=>({file:process.env.CODEX_BINARY??"codex",args:[...args,...runtime.arguments]})}),15000);
+        const turns:Array<{id:string;status:string}>=[];
+        rpc.onNotification(notification=>{if(notification.method==="turn/completed") turns.push((notification.params as {turn:{id:string;status:string}}).turn);});
+        rpc.setServerRequestHandler(async()=>{throw new Error("Unexpected privileged request");});
+        await rpc.connect();
+        const config=await rpc.request<ConfigReadResponse>({method:"config/read",params:{includeLayers:false}});
+        expect(config.config.model_provider).toBe(runtime.id);
+        const listed=await rpc.request<ModelListResponse>({method:"model/list",params:{}});
+        expect(listed.data.map(model=>model.model)).toEqual([runtime.model]);
+        const {thread}=await rpc.request<ThreadStartResponse>({method:"thread/start",params:{cwd:root,sandbox:"read-only",approvalPolicy:"never",ephemeral:true}});
+        expect(thread.modelProvider).toBe(runtime.id);
+        const {turn}=await rpc.request<TurnStartResponse>({method:"turn/start",params:{threadId:thread.id,input:[{type:"text",text:"Run the fixture command",text_elements:[]}]}});
+        await waitFor(()=>turns.some(entry=>entry.id===turn.id),15000);
+        expect(turns).toContainEqual(expect.objectContaining({id:turn.id,status:"completed"}));
+        const requests=bodies.filter(body=>body.model===runtime.model);
+        expect(requests).toHaveLength(2);
+        expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
+        expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));
+        await rpc.close();rpc=undefined;
+      }
+    } finally {
+      await rpc?.close();backend.closeAllConnections();await new Promise<void>(resolve=>backend.close(()=>resolve()));
+      rmSync(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+    }
+  },30000);
+});

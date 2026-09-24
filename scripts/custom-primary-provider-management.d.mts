@@ -13,6 +13,7 @@ export interface CustomPrimaryProviderSaveInput {
   baseUrl: string;
   mode: "switching" | "exclusive";
   model: string;
+  catalog?: { kind: "custom"; models: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[] };
   supportsWebsockets: boolean;
   credential:
     | { action: "preserve" }
@@ -43,7 +44,8 @@ export interface CustomPrimaryProviderSaveSummary {
   mode: "switching" | "exclusive";
   model: string;
   supportsWebsockets: boolean;
-  catalog: "official";
+  catalog: "official" | "custom";
+  models?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
   hasApiKey: true;
 }
 

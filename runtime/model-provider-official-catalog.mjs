@@ -32,7 +32,7 @@ export function withOfficialModelCatalog(argumentsList, catalogPath) {
   return [...kept, "-c", `model_catalog_json=${JSON.stringify(catalogPath)}`];
 }
 
-export function writeCustomOfficialModelCatalog(environment = process.env, codexBinary) {
+export function readOfficialModelCatalog(environment = process.env, codexBinary = environment.CODEX_BINARY ?? "codex") {
   if (typeof codexBinary !== "string" || codexBinary.trim() === "") {
     throw new Error("Codex CLI 路径无效");
   }
@@ -56,7 +56,12 @@ export function writeCustomOfficialModelCatalog(environment = process.env, codex
   if (result.error || result.status !== 0 || typeof result.stdout !== "string") {
     throw new Error("Codex 官方模型目录导出失败；请运行 codexc doctor 检查 Codex CLI 安装");
   }
-  const catalog = parseOfficialModelCatalog(result.stdout);
+  return parseOfficialModelCatalog(result.stdout);
+}
+
+export function writeCustomOfficialModelCatalog(environment = process.env, codexBinary) {
+  if (typeof codexBinary !== "string" || codexBinary.trim() === "") throw new Error("Codex CLI 路径无效");
+  const catalog = readOfficialModelCatalog(environment, codexBinary);
   const path = customOfficialModelCatalogPath(environment);
   writePrivateFileAtomicSync(path, `${JSON.stringify(catalog)}\n`);
   return path;

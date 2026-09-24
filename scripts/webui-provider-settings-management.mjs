@@ -66,6 +66,7 @@ export function normalizeProviderSettingsMutation(input) {
           baseUrl: input.provider?.baseUrl,
           mode: input.provider?.mode,
           model: input.provider?.model,
+          ...(input.provider?.catalog === undefined ? {} : { catalog: input.provider.catalog }),
           supportsWebsockets: input.provider?.supportsWebsockets,
           credential: input.provider?.credential,
           ...(input.provider?.confirmRemoveTopLevelBaseUrl === undefined
@@ -252,6 +253,8 @@ export function projectProviderSettings(state) {
         model: provider.model ?? "",
         reasoningEffort: provider.reasoningEffort ?? null,
         baseUrl: provider.baseUrl ?? "",
+        supportsWebsockets: provider.supportsWebsockets === true,
+        ...redactCatalog(provider),
       })),
       backupCandidates: state.customProviders.backupCandidates.map(redactTarget),
     },
@@ -262,6 +265,7 @@ function redactTarget(target) {
   return {
     id: target.id,
     displayName: target.displayName ?? target.id,
+    ...redactCatalog(target),
     ...(target.kind === undefined ? {} : { kind: target.kind }),
     ...(target.source === undefined ? {} : { source: target.source }),
     ...(target.state === undefined ? {} : { state: target.state }),
@@ -281,7 +285,7 @@ function redactProvider(provider) {
     ...(provider.name === undefined ? {} : { name: provider.name }),
     ...(provider.baseUrl === undefined ? {} : { baseUrl: provider.baseUrl }),
     ...(provider.mode === undefined ? {} : { mode: provider.mode }),
-    ...(provider.catalog === undefined ? {} : { catalog: provider.catalog }),
+    ...redactCatalog(provider),
     ...(provider.hasApiKey === undefined ? {} : { hasApiKey: provider.hasApiKey }),
   };
 }
@@ -302,4 +306,13 @@ function toManagementError(error) {
     error instanceof Error ? error.message : "Provider 设置操作失败",
     error?.field,
   );
+}
+
+function redactCatalog(provider) {
+  if (provider.catalog !== "custom") return provider.catalog === undefined ? {} : { catalog: provider.catalog };
+  return { catalog: "custom", models: (provider.models ?? []).map((model) => ({
+    id: model.id, name: model.name, contextWindow: model.contextWindow,
+    reasoningEfforts: model.reasoningEfforts, defaultReasoningEffort: model.defaultReasoningEffort,
+    supportsImages: model.supportsImages,
+  })) };
 }
