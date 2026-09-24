@@ -77,7 +77,7 @@ contractSuite("real supervised App Server tools", () => {
         await proxy?.close();
         backend.closeAllConnections();
         await new Promise<void>(resolve => backend.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 30_000);
 
@@ -194,7 +194,7 @@ contractSuite("real supervised App Server tools", () => {
         await rpc?.close();
         apiServer.closeAllConnections();
         await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 45_000);
 
@@ -294,7 +294,7 @@ contractSuite("real supervised App Server tools", () => {
         removeNotification?.();
         await client?.close();
         await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 45_000);
 
@@ -383,7 +383,7 @@ contractSuite("real supervised App Server tools", () => {
         removeNotification?.();
         await client?.close();
         await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
-        rmSync(testRuntime, { recursive: true, force: true });
+        rmSync(testRuntime, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 30_000);
 
