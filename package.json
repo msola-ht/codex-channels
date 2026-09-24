@@ -85,6 +85,7 @@
     "scripts/managed-provider-account-runtime.mjs",
     "scripts/provider-model-catalog.mjs",
     "scripts/responses-model-setup.mjs",
+    "scripts/responses-model-templates.mjs",
     "scripts/responses-provider-recovery.mjs",
     "scripts/management-access.mjs",
     "scripts/management-audit.mjs",

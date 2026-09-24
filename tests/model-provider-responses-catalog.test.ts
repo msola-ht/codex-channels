@@ -37,11 +37,28 @@ function fixture() {
     },
   };
   const options = { environment, createClient: async () => client };
-  const input = { operation: "create" as const, providerId: "responses-demo", name: "Demo", baseUrl: "https://example.test/v1", mode: "switching" as const, model: model.id, supportsWebsockets: false, catalog: {kind:"custom" as const, models:[model]}, credential: {action:"replace" as const, apiKey:"fixture-key"} };
+  const input = { operation: "create" as const, providerId: "rs-demo", name: "Demo", baseUrl: "https://example.test/v1", mode: "switching" as const, model: model.id, supportsWebsockets: false, catalog: {kind:"custom" as const, models:[model]}, credential: {action:"replace" as const, apiKey:"fixture-key"} };
   return { options, input, client, configPath };
 }
 
 describe("Responses provider catalog and lifecycle", () => {
+  it("accepts only the rs prefix and enforces the 64-character Provider ID limit", () => {
+    const {options}=fixture();
+    expect(responsesProviderCatalogPath(options.environment,`rs-${"a".repeat(61)}`)).toContain("models.json");
+    for(const id of ["responses-demo","rs-",`rs-${"a".repeat(62)}`]) {
+      expect(()=>responsesProviderCatalogPath(options.environment,id)).toThrow("rs- 加 1-61");
+    }
+  });
+
+  it("rejects unsupported catalog versions and invalid template links", () => {
+    const {options,input}=fixture();
+    const catalog=createResponsesModelCatalog([model],model.id);
+    expect(catalog.schemaVersion).toBe(2);
+    writePrivateFileAtomicSync(responsesProviderCatalogPath(options.environment,input.providerId),JSON.stringify({...catalog,schemaVersion:1}));
+    expect(()=>readResponsesModelCatalog(options.environment,input.providerId)).toThrow("版本");
+    expect(()=>validateResponsesModels([{...model,template:{source:"official",model:"source",followContext:true}}],model.id)).toThrow("模板关联");
+  });
+
   it("generates explicit metadata without copying official model capabilities", () => {
     const catalog = createResponsesModelCatalog([model], model.id);
     expect(catalog.models[0]).toMatchObject({ slug: model.id, context_window: 64000, input_modalities: ["text"], default_reasoning_level: null, supports_reasoning_summary_parameter: false, model_messages: {instructions_template: expect.any(String)} });
@@ -157,7 +174,7 @@ describe("Responses provider catalog and lifecycle", () => {
 
   it("recovers providers independently when two catalogs are pending", async () => {
     const {options,input}=fixture();
-    const ids=[input.providerId,"responses-other"];
+    const ids=[input.providerId,"rs-other"];
     for(const providerId of ids) await applyCustomPrimaryProviderSave({...input,providerId},options);
     for(const providerId of ids) {
       const old=readResponsesModelCatalog(options.environment,providerId);

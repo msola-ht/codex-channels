@@ -1,3 +1,4 @@
+import { recoverResponsesContextSync } from "../runtime/responses-context-sync.mjs";
 import { existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
@@ -17,6 +18,7 @@ import { withModelProviderManagementTransaction } from "./model-provider-managem
 export async function recoverResponsesProviderCatalog(id, action, environment = process.env) {
   if (action !== "keep" && action !== "rollback") throw new Error("恢复操作必须是 keep 或 rollback");
   return withModelProviderManagementTransaction(environment, async () => {
+    if (recoverResponsesContextSync(environment,id,action)) return {providerId:id,action};
     const path = responsesProviderCatalogPath(environment, id);
     let pending;
     try { pending = JSON.parse(readPrivateFileSync(`${path}.pending`)); } catch {

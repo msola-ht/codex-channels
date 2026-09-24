@@ -1,3 +1,4 @@
+import { listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import {
   loadManagedModelWindow,
   writeManagedModelWindowGlobal,
@@ -20,7 +21,7 @@ export function previewModelWindowChange(
     loadWindow = loadManagedModelWindow,
   } = {},
 ) {
-  return publicPreview(buildPlan(input, loadWindow(environment)));
+  return publicPreview(withFollowers(buildPlan(input, loadWindow(environment)),environment));
 }
 
 export async function applyModelWindowChange(
@@ -35,7 +36,7 @@ export async function applyModelWindowChange(
   return withModelProviderManagementTransaction(
     environment,
     () => {
-      const plan = buildPlan(input, loadWindow(environment));
+      const plan = withFollowers(buildPlan(input, loadWindow(environment)),environment);
       try {
         writeWindow({
           model: plan.model.model,
@@ -175,4 +176,10 @@ export function projectModelWindow(models) {
           ),
         }),
   }));
+}
+
+function withFollowers(plan,environment) {
+  if (!plan.model.providers.some(provider=>provider === "deepseek" || provider.startsWith("ds-"))) return plan;
+  const followers=listResponsesContextFollowers(environment,plan.model.model);
+  return {...plan, willChange:plan.willChange || followers.some(entry=>entry.contextWindow !== plan.contextWindow), model:{...plan.model,providers:[...new Set([...plan.model.providers,...followers.map(entry=>entry.providerId)])]}};
 }

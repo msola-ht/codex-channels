@@ -302,11 +302,15 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 `codexc setup → 模型与提供商 → 第三方 Provider → 自定义 Responses Provider` 与
 `codexc primary-provider add --custom-models` 提供相同的新增入口；编辑、列表、切换、删除复用
 `primary-provider` 管理链路。WebUI 的 Provider 设置中选择“自定义 Responses Provider”。
-此类型使用 `responses-` 开头的 Provider ID（其后 1-54 位 ASCII 字母、数字、`-` 或 `_`），
+此类型使用 `rs-` 开头的 Provider ID（其后 1-61 位 ASCII 字母、数字、`-` 或 `_`），
 以便模型目录缺失时明确报错，不回退到官方目录。显示名称禁止使用上游具有特殊语义的 `OpenAI`，
 避免启用官方专用协议能力。已有 Codex 兼容 Provider 不自动转换或迁移。
 
 填写平台的 Responses 基础地址（例如 `https://www.zzshu.cc/v1`）、API Key 和一个或多个模型。
+CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，勾选平台支持的条目后，逐项填写平台模型 ID，确认“模板 ID → 平台 ID”。两类均可导入，也可跳过后手填。
+官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 RS 校验，不能转换时明确报错并使用手填入口；DeepSeek 优先读取现有本地共享目录，没有时复用官方脚本下载与提取流程，不执行脚本。读取失败明确报错，不回退其他来源。
+导入仅复制名称、上下文窗口、思考等级和图片能力；请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。
+模板副本独立保存。DS 模型可选择“跟随模板上下文”，须先配置本地 DS 目录；CLI 或 WebUI 修改 DS 上下文时，现有受管目录事务会同步关联的 RS 模型，平台 ID 与其他能力保持独立。CLI 编辑及 WebUI 可关闭跟随，关闭后保留当前窗口。删除最后一个 DS 账户或重建缺失的 DS 目录前，必须先关闭关联 RS 模型的跟随，避免留下失效关联；同一窗口值再次应用时也会修正跟随副本的差异。没有启用跟随的副本不受源目录变化影响；模型 ID、能力仍须符合平台实际支持情况。WebUI 可编辑保存后的平台 ID 和能力，目前模板勾选入口在 CLI。
 每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级；默认模型必须属于目录。
 上下文窗口接受 1024–100000000 Token。思考等级仅接受锁定 Codex 支持的
 `none/minimal/low/medium/high/xhigh/max`；留空表示不声明可选等级，启动请求显式使用 `none`，
@@ -318,15 +322,15 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 模型目录使用独立的通用编程指令模板，不复制某个官方模型的目录条目。当前目录合同没有可独立设置的最大输出 Token 字段。
 
 固定模式把 Provider、默认模型、思考等级及目录引用写入主配置；切换模式保持官方主配置，写入独立的
-`sf-custom-responses-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server
+`sf-custom-rs-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server
 获取目录，跨 Provider 选择仍在新 Thread 生效；已有 Thread 不迁移。切回官方后保留候选和自定义目录，
 再次启用候选时使用目录记录的默认模型；删除 Provider 成功且凭据备份清理成功后才清理模型目录和私有恢复快照。
 清理中断留下孤立目录时，可再次执行 `codexc primary-provider remove <Provider ID>` 按原 ID 清理残留。
 
 ### 存储、备份与恢复
 
-每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 1 格式，
-包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。Codex 读取其中的
+每个 Provider 的 `~/.codex-connect/providers/responses/<Provider ID>/models.json` 使用版本 2 格式，
+包含 `schemaVersion`、`defaultModel`、`definitions` 及由定义生成的 `models`。模型定义可携带 `template: { source, model, followContext }` 关联。只接受当前版本，不自动升级旧目录或给已有模型推断关联；旧目录需保留备份后按新格式重新配置。Codex 读取其中的
 `models`，Gateway 严格核对版本与生成结果；不接受未知字段、重复 ID、任意外部路径或手写的第三方目录。
 文件通过现有私有文件工具原子写入，目录 0700、文件 0600，Windows 使用现有私有 ACL 工具。
 模型文件不含 Key。Key 仍写入现有私有 Profile／主配置；连接配置的恢复快照单独位于
@@ -335,11 +339,12 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 保存前核对配置版本、Profile 与目录修订，并备份受影响配置；上一目录保存在同目录 `models.json.backup`。
 `models.json.pending` 标记未完成的保存；已知写入失败且主配置未改变时恢复目录和原 Profile。
 无法确认配置写入结果或发生进程中断时保留备份和 pending，拒绝启动，不自动重发写入。
+DS/RS 窗口联动在写入前将本次全局设置涉及的 DS、OCG、CCG 目录、Profile 和关联 RS 目录按路径去重，把前后内容一并备份到 `~/.codex-connect/private/responses-context-sync.json.backup`，事务期间使用同名无 `.backup` 后缀的恢复记录。文件为 0600，可能含 Profile 凭据，不可分享。失败时核对当前内容并回滚；无法确认时保留记录并阻止加载。恢复命令指定该事务内任一 RS ID，将整批恢复所有关联文件，拒绝覆盖后来修改的内容。
 先停止服务、核对或恢复私有快照中的配置，再明确选择目录恢复方向：
 
 ```bash
-codexc primary-provider recover responses-example rollback
-codexc primary-provider recover responses-example keep
+codexc primary-provider recover rs-example rollback
+codexc primary-provider recover rs-example keep
 ```
 
 `rollback` 使用上一目录；首次创建没有上一目录时删除未完成目录。`keep` 保留新目录。

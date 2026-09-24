@@ -1,4 +1,5 @@
 import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
 import * as clackPrompts from "@clack/prompts";
 
@@ -70,6 +71,7 @@ export async function runCustomPrimaryProviderSetup({
   createClient = createCodexUserConfigClient,
   providerId: editingProviderId,
   catalogKind = "official",
+  loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
@@ -186,7 +188,7 @@ export async function runCustomPrimaryProviderSetup({
   let normalizedId = fixedProviderId;
   if (normalizedId === undefined) {
     const derived = customPrimaryProviderIdFromBaseUrl(normalizedBaseUrl);
-    const derivedProviderId = custom ? `responses-${derived.slice(0, 54)}` : derived;
+    const derivedProviderId = custom ? `rs-${derived.slice(0, 61)}` : derived;
     const providerId = await prompts.select({
       message: "Provider ID",
       options: [
@@ -213,7 +215,7 @@ export async function runCustomPrimaryProviderSetup({
     }
     if (providerId === "__custom__") {
       const customId = await prompts.text({
-        message: custom ? "Provider ID（必须以 responses- 开头）" : "自定义 Provider ID",
+        message: custom ? "Provider ID（必须以 rs- 开头）" : "自定义 Provider ID",
         validate: (value) => validateCustomPrimaryModelProviderId(String(value).trim(), environment)
           ?? undefined,
       });
@@ -314,7 +316,19 @@ export async function runCustomPrimaryProviderSetup({
     }
   }
 
-  const model = await prompts.text({
+  const imported = custom ? await promptResponsesModelImport(prompts, previousCatalog?.definitions, loadModelTemplates) : [];
+  if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
+  const definitions = [...(previousCatalog?.definitions ?? []), ...imported];
+  let selectedModel;
+  if (imported.length > 0) {
+    selectedModel = await prompts.select({
+      message: "选择默认模型",
+      options: [...definitions.map(entry => ({value: entry.id, label: `${entry.name}（${entry.id}）`})), {value:"__manual__",label:"手动添加其他模型"}],
+      initialValue: currentModel ?? previousCatalog?.defaultModel ?? imported[0].id,
+    });
+    if (prompts.isCancel(selectedModel)) return { action: allowBack ? "back" : "cancel" };
+  }
+  const model = selectedModel && selectedModel !== "__manual__" ? selectedModel : await prompts.text({
     message: custom ? "默认模型 ID（平台提供的准确名称）" : "上游模型 ID（必须存在于 Codex 官方模型目录）",
     initialValue: currentModel ?? previousCatalog?.defaultModel ?? "",
     validate: (value) => {
@@ -333,7 +347,7 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error(`模型 ID 不在 Codex 官方模型目录中：${normalizedModel}`);
   }
 
-  const models = custom ? await promptResponsesModels(prompts, normalizedModel, previousCatalog?.definitions) : undefined;
+  const models = custom ? await promptResponsesModels(prompts, normalizedModel, definitions, imported.map(entry => entry.id)) : undefined;
   if (custom && models === undefined) return { action: allowBack ? "back" : "cancel" };
 
   const canPreserveCurrentBearerToken = hasCurrentBearerToken
@@ -407,7 +421,7 @@ export async function runCustomPrimaryProviderSetup({
           "- 主配置：写入并启用该固定 Provider",
           "- 认证：API Key 将明文写入 0600 主配置（不回显、不进入命令行和日志）",
         ]),
-    ...(custom ? models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}`) : []),
+    ...(custom ? preview.provider.models.map(entry => `- 模型 ${entry.id}：${entry.contextWindow} Token；图片 ${entry.supportsImages ? "支持" : "不支持"}；思考 ${entry.reasoningEfforts.join("/") || "不支持"}；默认 ${entry.defaultReasoningEffort ?? "none"}${entry.template ? `；模板 ${entry.template.source}/${entry.template.model}；上下文${entry.template.followContext ? "跟随" : "独立"}` : ""}`) : []),
     `- WebSocket：${preview.provider.supportsWebsockets ? "是" : "否"}`,
   ];
   if (preview.provider.id === primaryProviderId) {

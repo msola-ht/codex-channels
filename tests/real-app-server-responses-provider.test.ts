@@ -1,3 +1,4 @@
+import { loadResponsesModelTemplates } from "../scripts/responses-model-templates.mjs";
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +16,11 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 describe("real custom Responses provider", () => {
+  contract("imports the real bundled official catalog including current reasoning levels", async () => {
+    const models=await loadResponsesModelTemplates("official");
+    expect(models.length).toBeGreaterThan(0);
+    expect(models.every(model=>!model.reasoningEfforts.includes("ultra") && !model.reasoningEfforts.includes("persistent"))).toBe(true);
+  });
   contract("isolates arbitrary model catalogs, sends declared capabilities and completes a tool round trip", async () => {
     const root = mkdtempSync(join(tmpdir(), "custom-responses-contract-"));
     const environment = { ...process.env, CODEX_HOME: join(root,"codex"), CODEX_CONNECT_HOME: join(root,"connect") };
@@ -38,7 +44,7 @@ describe("real custom Responses provider", () => {
       await new Promise<void>(resolve=>backend.listen(0,"127.0.0.1",resolve));
       const address=backend.address();if(!address||typeof address==="string")throw new Error("Missing fixture listener");
       writePrivateFileAtomicSync(join(environment.CODEX_HOME,"config.toml"),'model_provider = "openai"\nmodel_reasoning_effort = "high"\n');
-      for(const [id,model,reasoning] of [["responses-first","vendor/model-a",null],["responses-second","vendor/model-b","low"]] as const) {
+      for(const [id,model,reasoning] of [["rs-first","vendor/model-a",null],["rs-second","vendor/model-b","max"]] as const) {
         const transaction=writeResponsesModelCatalog(environment,id,[{id:model,name:model,contextWindow:64000,reasoningEfforts:reasoning===null?[]:[reasoning],defaultReasoningEffort:reasoning,supportsImages:false}],model);
         finishResponsesModelCatalogWrite(transaction);
         writeCustomPrimaryProviderSwitchingProfile({provider:id,model,name:"Custom Responses fixture",baseUrl:`http://127.0.0.1:${address.port}`,apiKey:"fixture-key",supportsWebsockets:false,catalogSource:{kind:"custom",reasoningEffort:reasoning}},environment);

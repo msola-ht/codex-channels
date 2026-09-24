@@ -145,6 +145,7 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
+- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex 与 DeepSeek 模板，交互勾选并映射平台模型 ID，仅复制 RS 支持的能力字段。
 - `responses-model-setup.mjs` / `responses-model-setup.d.mts`：交互收集自定义 Responses 模型列表与能力。
 - `responses-provider-recovery.mjs` / `responses-provider-recovery.d.mts`：在共享管理锁内校验当前配置，完成未结束的模型目录保存或回滚目录备份。
 - `custom-primary-provider-management.mjs` / `custom-primary-provider-management.d.mts`：提供自定义主

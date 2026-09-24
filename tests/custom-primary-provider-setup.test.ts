@@ -848,18 +848,33 @@ describe("custom primary Provider setup", () => {
     expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(true);
     expect(output.write.mock.calls.flat().join("")).toContain("私有备份清理失败");
   });
+  it("imports a selected template and persists the mapped platform model", async () => {
+    const environment=testEnvironment();
+    writePrivate(join(environment.CODEX_HOME!,"config.toml"),'model_provider = "openai"\n');
+    const {createClient}=clientFixture({model_provider:"openai"});
+    const template={id:"source-model",name:"Source model",contextWindow:64000,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false};
+    const prompts={...promptFixture({
+      texts:["https://api.example.test/v1","Custom","platform-model"],
+      selects:["rs-api-example-test","switching","platform-model","no"],
+      confirms:[true,true,false,false,false,true],
+    }),multiselect:vi.fn(async()=>[template.id])};
+    await runCustomPrimaryProviderSetup({environment,createClient,prompts,catalogKind:"custom",loadModelTemplates:async()=>[template],output:{write:()=>{}}});
+    expect(loadConfiguredCustomSwitchingModelProviders(environment)[0]).toMatchObject({model:"platform-model",catalogSource:{kind:"custom"}});
+    expect(template.id).toBe("source-model");
+  });
+
   it("configures a Responses model without querying the official model list", async () => {
     const environment = testEnvironment();
     writePrivate(join(environment.CODEX_HOME!, "config.toml"), 'model_provider = "openai"\n');
     const {client,createClient}=clientFixture({model_provider:"openai"});
     const prompts=promptFixture({
       texts:["https://api.example.test/v1","Custom", "vendor/custom", "Custom model", "64000", ""],
-      selects:["responses-api-example-test","switching","no"],
-      confirms:[false,false,true],
+      selects:["rs-api-example-test","switching","no"],
+      confirms:[false,false,false,false,true],
     });
     await runCustomPrimaryProviderSetup({environment,createClient,prompts,catalogKind:"custom",output:{write:()=>{}}});
     expect(client.listModels).not.toHaveBeenCalled();
-    expect(loadConfiguredCustomSwitchingModelProviders(environment)[0]).toMatchObject({id:"responses-api-example-test",model:"vendor/custom",catalogSource:{kind:"custom"}});
+    expect(loadConfiguredCustomSwitchingModelProviders(environment)[0]).toMatchObject({id:"rs-api-example-test",model:"vendor/custom",catalogSource:{kind:"custom"}});
   });
 
 });

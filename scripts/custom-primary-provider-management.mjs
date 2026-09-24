@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
 
@@ -120,6 +120,7 @@ export async function applyCustomPrimaryProviderSave(input, options = {}) {
 async function applySavePlan(input, plan, options) {
   if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
   const environment = options.environment ?? process.env;
+  if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
   const configPath = join(codexHomePath(environment), "config.toml");
   const beforeConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
@@ -270,12 +271,12 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   }
   const custom = input.catalog?.kind === "custom";
   if (input.catalog !== undefined && (input.catalog?.kind !== "custom" || Object.keys(input.catalog).some(key => !["kind", "models"].includes(key)))) throw invalid("invalid-catalog", "catalog", "模型目录来源不受支持");
-  if (custom !== isResponsesProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义 Responses Provider 必须使用 responses- 前缀；Codex 兼容 Provider 不使用该前缀");
+  if (custom !== isResponsesProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义 Responses Provider 必须使用 rs- 前缀；Codex 兼容 Provider 不使用该前缀");
   if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义 Responses Provider 不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
   const previousCatalog = custom && input.operation === "update" ? readResponsesModelCatalog(environment, providerId) : undefined;
   if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
   const model = requiredString(input.model, "model", "模型 ID 不能为空");
-  const models = custom ? validateResponsesModels(input.catalog.models, model) : undefined;
+  const models = custom ? resolveResponsesTemplateContexts(validateResponsesModels(input.catalog.models, model),environment) : undefined;
   const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)

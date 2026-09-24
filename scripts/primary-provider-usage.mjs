@@ -20,6 +20,6 @@ export const primaryProviderUsage = `用法：codexc primary-provider <list|add|
     删除配置或私有备份中的候选；若删除的是当前激活项，将恢复官方 OpenAI 主 Provider。
 
   codexc primary-provider recover <Provider ID> <keep|rollback> [--yes]
-    恢复中断的自定义 Responses 模型目录保存；先停止服务并核对配置。keep 保留新目录，rollback 恢复备份。
+    恢复中断的自定义 Responses 模型目录保存；存在上下文联动事务时恢复整批 DS/RS 目录及 Profile；先停止服务并核对配置。keep 保留新目录，rollback 恢复备份。
 
 修改后运行 codexc service restart all 生效。`;

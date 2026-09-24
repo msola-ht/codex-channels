@@ -290,6 +290,9 @@ Codex 兼容 Provider Setup 的官方模型目录复用、手工模型 ID、固�
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)；该本地 Setup 能力不新增 App Server RPC。
 自定义 Responses Provider 使用 [`model-provider-responses-catalog.mjs`](../runtime/model-provider-responses-catalog.mjs)
 生成逐 Provider 的版本化目录，通过同一 `model/list`、`config/batchWrite`、Thread/Turn 路由接入；
+模板选择及平台模型 ID 映射复用本地目录；DS 上下文跟随接入既有受管模型窗口事务，
+实现见 [`responses-context-sync.mjs`](../runtime/responses-context-sync.mjs)，验证见 [`responses-context-sync.test.ts`](../tests/responses-context-sync.test.ts)。
+RS 模板不导入 Codex 专用 `ultra` / `persistent` 模式；其请求转换语义已核对锁定源码 `protocol/src/openai_models/reasoning_effort.rs` 及相应测试。
 目录字段与指令模板要求以锁定源码 `protocol/src/openai_models.rs` 的 `ModelInfo` / `ModelsResponse` 为准，
 验证见 [`model-provider-responses-catalog.test.ts`](../tests/model-provider-responses-catalog.test.ts) 和
 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。

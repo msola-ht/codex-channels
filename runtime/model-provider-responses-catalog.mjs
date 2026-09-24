@@ -13,12 +13,12 @@ const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "m
 const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
 
 export function isResponsesProvider(id) {
-  return typeof id === "string" && id.startsWith("responses-");
+  return typeof id === "string" && id.startsWith("rs-");
 }
 
 export function responsesProviderCatalogPath(environment, id) {
-  if (!/^responses-[A-Za-z0-9_-]{1,54}$/u.test(id)) {
-    throw new Error("自定义 Responses Provider ID 必须为 responses- 加 1-54 位字母、数字、- 或 _");
+  if (!/^rs-[A-Za-z0-9_-]{1,61}$/u.test(id)) {
+    throw new Error("自定义 Responses Provider ID 必须为 rs- 加 1-61 位字母、数字、- 或 _");
   }
   return join(providerStorageRoot(environment), "responses", id, "models.json");
 }
@@ -30,7 +30,7 @@ export function validateResponsesModels(values, defaultModel) {
   const seen = new Set();
   const models = values.map((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages"].includes(key))) {
+      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "template"].includes(key))) {
       throw new Error("自定义模型包含不受支持的字段");
     }
     const { id, name, contextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages } = value;
@@ -42,8 +42,15 @@ export function validateResponsesModels(values, defaultModel) {
     if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort)) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
     if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
     if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
+    const template = value.template;
+    if (template !== undefined && (!template || typeof template !== "object" || Array.isArray(template)
+      || Object.keys(template).length !== 3 || !["official", "deepseek"].includes(template.source)
+      || typeof template.model !== "string" || template.model.trim() !== template.model || template.model.length < 1 || template.model.length > 200 || /\p{Cc}/u.test(template.model)
+      || typeof template.followContext !== "boolean" || (template.source !== "deepseek" && template.followContext))) {
+      throw new Error("模型模板关联无效；只有 DeepSeek 模板可跟随上下文");
+    }
     seen.add(id);
-    return { id, name: name.trim(), contextWindow, reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages };
+    return { id, name: name.trim(), contextWindow, reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}) };
   });
   if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
   return models;
@@ -52,7 +59,7 @@ export function validateResponsesModels(values, defaultModel) {
 export function createResponsesModelCatalog(definitions, defaultModel) {
   const validated = validateResponsesModels(definitions, defaultModel);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     defaultModel,
     definitions: validated,
     models: validated.map((model, index) => ({
@@ -75,6 +82,7 @@ export function createResponsesModelCatalog(definitions, defaultModel) {
 }
 
 export function readResponsesModelCatalog(environment, id) {
+  assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
   if (existsSync(`${path}.pending`) && activeCatalogWrite.getStore() !== path) throw new Error(`Responses Provider ${id} 上次保存未完成；请先恢复目录事务`);
   let content;
@@ -83,10 +91,10 @@ export function readResponsesModelCatalog(environment, id) {
   }
   let parsed;
   try { parsed = JSON.parse(content); } catch { throw new Error("Responses 模型目录不是有效 JSON"); }
-  if (parsed?.schemaVersion !== 1 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持");
+  if (parsed?.schemaVersion !== 2 || Object.keys(parsed).some((key) => !["schemaVersion", "defaultModel", "definitions", "models"].includes(key))) throw new Error("Responses 模型目录版本或字段不受支持");
   const expected = createResponsesModelCatalog(parsed.definitions, parsed.defaultModel);
   if (JSON.stringify(parsed) !== JSON.stringify(expected)) throw new Error("Responses 模型目录与模型定义不一致，请重新生成");
-  return { ...expected, path, revision: createHash("sha256").update(content).digest("hex") };
+  return { ...expected, path, content, revision: createHash("sha256").update(content).digest("hex") };
 }
 
 export function responsesModelSettings(environment, id, model) {
@@ -97,6 +105,7 @@ export function responsesModelSettings(environment, id, model) {
 }
 
 export function writeResponsesModelCatalog(environment, id, definitions, model, expectedRevision) {
+  assertResponsesContextSyncComplete(environment);
   const path = responsesProviderCatalogPath(environment, id);
   if (existsSync(`${path}.pending`)) throw new Error("Responses 模型目录上次保存未完成，请先恢复");
   const previous = existsSync(path) ? readResponsesModelCatalog(environment, id) : undefined;
@@ -131,4 +140,25 @@ export function withResponsesModelCatalogWrite(transaction, operation) {
 export function responsesProviderBackupPath(environment, id) {
   responsesProviderCatalogPath(environment, id);
   return join(connectHomePath(environment), "private", "responses-providers", `${id}.json`);
+}
+
+export function responsesContextSyncPath(environment) {
+  return join(connectHomePath(environment), "private", "responses-context-sync.json");
+}
+
+export function assertResponsesContextSyncComplete(environment) {
+  if (existsSync(responsesContextSyncPath(environment))) throw new Error("DS/RS 上下文同步未完成，请停止服务并执行 primary-provider recover <RS ID> keep 或 rollback");
+}
+
+export function resolveResponsesTemplateContexts(definitions, environment) {
+  if (!definitions.some(model => model.template?.followContext)) return definitions;
+  let source;
+  try { source=JSON.parse(readPrivateFileSync(join(providerStorageRoot(environment),"deepseek","models.json"),maximumBytes)); } catch { throw new Error("跟随上下文需要可读取的本地 DS 模型目录，请先配置 DS 或关闭跟随"); }
+  return definitions.map(model=>{
+    if (!model.template?.followContext) return model;
+    const matches=source.models?.filter(entry=>entry.slug === model.template.model);
+    if (!Array.isArray(matches) || matches.length !== 1) throw new Error("跟随的 DS 模型不存在或不唯一，请重新选择模板或关闭跟随");
+    const next={...model,contextWindow:matches[0].context_window};
+    return validateResponsesModels([next],next.id)[0];
+  });
 }
