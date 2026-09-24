@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { formatMarkdownAsTelegramHtml } from "../src/surfaces/telegram/markdown-format.js";
 
 describe("Telegram Markdown compatibility formatter", () => {
+  it("preserves code blocks and links when excluding the reserved bold heading", () => {
+    expect(formatMarkdownAsTelegramHtml("```text\nCodex 交互回复\nexample\n```"))
+      .toBe('<pre><code class="language-text">Codex 交互回复\nexample</code></pre>');
+    expect(formatMarkdownAsTelegramHtml("**[Codex 交互回复](https://example.com)**\n\n正文"))
+      .toBe('<a href="https://example.com">Codex 交互回复</a>\n\n正文');
+  });
+
+  it.each(["## Codex 交互回复", "**Codex 交互回复**", "# **Codex 交互回复**"])("reserves the interaction marker when formatting %s", (heading) => {
+    expect(formatMarkdownAsTelegramHtml(`${heading}\n\n普通回答`)).toBe("Codex 交互回复\n\n普通回答");
+  });
+
   it("formats common Codex Markdown using traditional Telegram HTML", () => {
     expect(formatMarkdownAsTelegramHtml([
       "# 标题",

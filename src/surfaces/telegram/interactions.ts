@@ -18,6 +18,7 @@ import { TelegramApiExecutor } from "./api-executor.js";
 import {
   formatTelegramExpandableQuotePanelChunks,
   formatTelegramPanelChunks,
+  telegramInteractionReplyHeading,
 } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 
@@ -259,7 +260,10 @@ export class TelegramInteractionPort implements InteractionPort {
       const reply = context.message?.reply_to_message;
       const isOwnQuestion = reply?.from?.is_bot === true
         && reply.from.id === context.me?.id
-        && reply.text?.startsWith("异步问题（任务继续执行）") === true;
+        && !reply.forward_origin
+        && reply.text?.startsWith(`${telegramInteractionReplyHeading}\n\n`) === true
+        && reply.entities?.some((entity) => entity.type === "bold"
+          && entity.offset === 0 && entity.length === telegramInteractionReplyHeading.length) === true;
       if (reply && (this.textReplyMessages.has(`${chatId}:${reply.message_id}`) || isOwnQuestion)) {
         await this.queue.runOrdered(String(chatId), (signal) => this.executor.call(
           { chatId: String(chatId), operation: "sendMessage", critical: true },
@@ -803,9 +807,9 @@ function formatInputChunks(
   awaitingOther = false,
 ): string[] {
   const chunks = formatTelegramPanelChunks(formatInteraction(request, questionIndex, awaitingOther), 3_600);
-  // Keep the reply target identifiable after restart, including split long questions.
-  return request.type === "user-input" && request.asynchronous
-    ? chunks.map((chunk, index) => index === 0 ? chunk : `<b>异步问题（任务继续执行）</b>\n\n${chunk}`)
+  // Mark every fragment so replies remain identifiable after restart or cache eviction.
+  return acceptsTextReply(request)
+    ? chunks.map((chunk) => `<b>${telegramInteractionReplyHeading}</b>\n\n${chunk}`)
     : chunks;
 }
 

@@ -8,6 +8,10 @@ import {
 } from "../src/surfaces/telegram/html-format.js";
 
 describe("Telegram HTML formatter", () => {
+  it("does not turn an ordinary same-title panel into an interaction marker", () => {
+    expect(formatTelegramPanelChunks("Codex 交互回复\n\n普通说明")).toEqual(["Codex 交互回复\n\n普通说明"]);
+  });
+
   it("formats panels while escaping dynamic values", () => {
     expect(formatTelegramPanelChunks([
       "Codex 状态",

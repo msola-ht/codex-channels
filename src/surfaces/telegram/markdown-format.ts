@@ -1,3 +1,5 @@
+import { protectTelegramReplyHeading } from "./html-format.js";
+
 const maximumFormattedMarkdownCharacters = 3_500;
 const markdownBackslashEscapePattern = /\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])/gu;
 
@@ -97,7 +99,7 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
 
     output.push(formatInlineMarkdown(line));
   }
-  return output.join("\n");
+  return protectTelegramReplyHeading(output.join("\n"));
 }
 
 function formatInlineMarkdown(text: string): string {

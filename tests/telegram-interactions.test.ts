@@ -14,6 +14,77 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it("recognizes an evicted form prompt without consuming unrelated replies", async () => {
+    let messageId = 0;
+    const bot = { callbackQuery: vi.fn(), api: {
+      sendMessage: vi.fn(async () => ({ message_id: ++messageId })), editMessageText: vi.fn(async () => true),
+    } } as unknown as Bot;
+    const port = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    try {
+      for (let index = 0; index <= 1_000; index++) {
+        const decision = port.request(target, { type: "elicitation", mode: "form", requestId: `form-${index}`,
+          threadId: "thread", turnId: "turn", title: "Form", message: "Enter JSON", expiresInMs: 30_000 });
+        await settle();
+        port.resolved(`form-${index}`);
+        await decision;
+      }
+      // This reference lacks the marker: false proves the original ID has left the cache.
+      expect(await port.handleText(textContext("answer", 1))).toBe(false);
+      expect(await port.handleText({ me: { id: 7 }, chat: { id: 100 }, message: {
+        text: '{"late":"answer"}', reply_to_message: { message_id: 1, from: { id: 7, is_bot: true },
+          text: "Codex 交互回复\n\nForm", entities: [{ type: "bold", offset: 0, length: "Codex 交互回复".length }] },
+      } } as unknown as Context)).toBe(true);
+    } finally { await port.close(); }
+  });
+
+  it.each(["blocking", "async", "form"] as const)("recognizes all long %s reply fragments after restart", async (kind) => {
+    const messages: string[] = [];
+    const bot = { callbackQuery: vi.fn(), api: {
+      sendMessage: vi.fn(async (_chat: unknown, text: string) => { messages.push(text); return { message_id: messages.length }; }),
+      editMessageText: vi.fn(async () => true),
+    } } as unknown as Bot;
+    const before = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const request: InteractionRequest = kind === "form"
+      ? { type: "elicitation", mode: "form", requestId: "form", threadId: "thread", turnId: "turn", title: "MCP form", message: "long form ".repeat(900), expiresInMs: 30_000 }
+      : { ...userInputRequest(), ...(kind === "async" ? { asynchronous: true as const } : {}), questions: [{ ...userInputRequest().questions[0]!, question: "long question ".repeat(900) }] };
+    const decision = before.request(target, request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const prompts = [...messages];
+    expect(prompts.length).toBeGreaterThan(1);
+    await before.close();
+    await decision;
+    const after = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    try {
+      for (const [index, html] of prompts.entries()) {
+        expect(html).toMatch(/^<b>Codex 交互回复<\/b>\n\n/);
+        const context = {
+          me: { id: 7 }, chat: { id: 100 },
+          message: { text: '{"late":"answer"}', reply_to_message: {
+            message_id: index + 1, from: { id: 7, is_bot: true },
+            text: html.replace(/<[^>]+>/g, ""),
+            entities: [{ type: "bold", offset: 0, length: "Codex 交互回复".length }],
+          } },
+        } as unknown as Context;
+        expect(await after.handleText(context)).toBe(true);
+      }
+      expect(await after.handleText(textContext("ordinary quoted answer", 9000))).toBe(false);
+    } finally { await after.close(); }
+  });
+
+  it.each(["other-bot", "user", "forwarded", "plain-text", "embedded", "lookalike"])("does not mistake a %s message for its own reply prompt", async (kind) => {
+    const bot = { callbackQuery: vi.fn(), api: { sendMessage: vi.fn() } } as unknown as Bot;
+    const port = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const reply = {
+      message_id: 9, from: { id: kind === "other-bot" ? 8 : 7, is_bot: kind !== "user" },
+      text: kind === "embedded" ? "引用：Codex 交互回复\n\n正文" : kind === "lookalike" ? "Codex 交互回复示例\n\n正文" : "Codex 交互回复\n\n正文",
+      entities: kind === "plain-text" ? [] : [{ type: "bold", offset: 0, length: "Codex 交互回复".length }],
+      ...(kind === "forwarded" ? { forward_origin: { type: "user" } } : {}),
+    };
+    expect(await port.handleText({ me: { id: 7 }, chat: { id: 100 }, message: { text: "answer", reply_to_message: reply } } as unknown as Context)).toBe(false);
+    expect(bot.api.sendMessage).not.toHaveBeenCalled();
+    await port.close();
+  });
+
   it.each(["editing", "sending"] as const)("cancels a multi-question transition while %s and consumes stale replies", async (stage) => {
     let release!: () => void;
     let messageId = 0;
@@ -125,7 +196,7 @@ describe("TelegramInteractionPort", () => {
       vi.useRealTimers();
     }
   });
-  it("keeps the async title on the reply target when a long question is split", async () => {
+  it("keeps the reply marker on the reply target when a long async question is split", async () => {
     let id = 0;
     const sendMessage = vi.fn(async (_chatId: string, _text: string) => {
       void _chatId;
@@ -142,7 +213,7 @@ describe("TelegramInteractionPort", () => {
     const decision = interactions.request(target, request);
     await settle();
     expect(sendMessage.mock.calls.length).toBeGreaterThan(1);
-    expect(sendMessage.mock.calls.at(-1)?.[1]).toMatch(/^<b>异步问题（任务继续执行）<\/b>/);
+    expect(sendMessage.mock.calls.at(-1)?.[1]).toMatch(/^<b>Codex 交互回复<\/b>/);
     interactions.resolved(request.requestId);
     await decision;
     await interactions.close();
@@ -152,7 +223,7 @@ describe("TelegramInteractionPort", () => {
     const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
     const context = {
       me: { id: 7 }, chat: { id: 100 },
-      message: { text: "late", reply_to_message: { message_id: 9, text: "异步问题（任务继续执行）\nChoose", from: { id: 7, is_bot: true } } },
+      message: { text: "late", reply_to_message: { message_id: 9, text: "Codex 交互回复\n\nChoose", entities: [{ type: "bold", offset: 0, length: "Codex 交互回复".length }], from: { id: 7, is_bot: true } } },
     };
     expect(await interactions.handleText(context as unknown as Context)).toBe(true);
     context.message.reply_to_message.from.id = 8;

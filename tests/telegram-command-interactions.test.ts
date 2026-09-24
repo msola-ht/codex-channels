@@ -27,6 +27,39 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it("rejects an old marked form at the Bot entry point after restarting", async () => {
+    const submit = vi.fn();
+    const before = createSurface(submit, vi.fn());
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+    const decision = before.surface.interactions.request(target, {
+      type: "elicitation", mode: "form", requestId: "restart-form", threadId: "old-thread", turnId: "old-turn",
+      title: "MCP form", message: "Enter JSON", expiresInMs: 30_000,
+    });
+    let prompt: string;
+    try {
+      await vi.waitFor(() => expect(before.sentTexts.length).toBeGreaterThan(0));
+      prompt = before.sentTexts[0]!;
+    } finally {
+      await before.surface.stop();
+      await before.output.close();
+      await decision;
+    }
+    const after = createSurface(submit, vi.fn());
+    try {
+      await after.surface.bot.handleUpdate({ update_id: 1, message: {
+        message_id: 100, date: 1, chat: telegramChat(), from: telegramUser(), text: '{"field":"late"}',
+        reply_to_message: { message_id: 99, date: 1, chat: telegramChat(), from: { id: 999, is_bot: true, first_name: "Test Bot" },
+          text: prompt.replace(/<[^>]+>/g, ""), entities: [{ type: "bold", offset: 0, length: "Codex 交互回复".length }],
+          reply_to_message: undefined as never },
+      } });
+      expect(submit).not.toHaveBeenCalled();
+      expect(after.sentTexts.at(-1)).toContain("已失效");
+    } finally {
+      await after.surface.stop();
+      await after.output.close();
+    }
+  });
+
   it.each(["cancelled", "resolved", "expired", "completed", "preparing"] as const)(
     "keeps a %s MCP form reply out of ordinary input after switching sessions",
     async (ending) => {
