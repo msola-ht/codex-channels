@@ -47,19 +47,14 @@ afterEach(() => {
 });
 
 describe("Codex release upgrade preview", () => {
-  it("keeps release-only README synchronization outside the document-free preview", () => {
+  it("runs the full test suite during upgrade validation", () => {
     const unitTests = defaultUpgradeValidationStages.find(
       (stage: { id: string }) => stage.id === "unit-tests",
     );
 
     expect(unitTests).toMatchObject({
-      name: "测试（不含发布前 README 同步）",
-      args: [
-        "test",
-        "--",
-        "--exclude",
-        "tests/release-readme-sync.test.ts",
-      ],
+      name: "完整测试",
+      args: ["test"],
     });
   });
 

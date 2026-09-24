@@ -167,7 +167,7 @@ npm run verify:commit
 - 上述每项能力都先用一句非协议术语解释用途，确保不熟悉上游实现的人也能判断是否需要。
 - `风险与验证`：写明安全与兼容风险、本地完整门禁、真实 App Server 合同和 PR CI 结果。
 - 同步 [`Codex CLI 升级决策`](codex-cli-upgrade-decisions.md)的当前范围和重新评估条件。
-- 合并只更新开发基线，不创建 Tag、发布 npm 或部署服务。
+- 合并只更新开发基线，不创建 Tag、GitHub Release 或部署服务。项目不再发布 npm 包。
 
 自动 Draft 会预置上述四个章节和官方 Release 链接，但不会自动替项目做产品判断。PR 保持 Draft
 时允许暂留占位文字；转为 Ready 后，`Codex upgrade PR description` 工作流会拒绝缺少章节或仍含
@@ -183,100 +183,59 @@ npm run verify:commit
 合并升级 PR 只表示 `main` 进入目标 Codex CLI 的开发基线。此时：
 
 - `package.json`、Gateway、生成协议和 CI 已使用目标开发基线；如果尚未决定发布，README 继续
-  保留上一正式版。
+  记录当前源码基线，安装入口始终指向官方 `main`。
 - 后续修复和功能修改可以继续基于该版本进行。
 - 自动升级提案会把该版本视为已同步，不再重复创建同版本 PR。
-- 不创建 `v<版本>` Tag，不触发 npm Trusted Publishing，也不创建 GitHub Release 或部署服务。
+- 不创建 `v<版本>` Tag，也不创建 GitHub Release 或部署服务。
 
-合并到 `main` 后等待 push CI 全部通过。需要继续修改时按普通开发流程提交和验证；在准备正式发布
+合并前确认 PR 当前 merge ref 的 CI 全部通过，合并后同步 `main`。需要继续修改时按普通开发流程提交和验证；在准备正式发布
 之前，不要提前创建发布 Tag。
 
 ## 5. 正式发布
 
-只有明确决定对外发布时才执行本节。发布前确认：
+项目不再发布新的 Gateway npm 包。根目录 `package.json` 设置 `private: true`，仓库不提供
+npm 发布工作流、Trusted Publishing 或 npm dist-tag 操作。npm 仍用于依赖安装、本地打包、
+全局命令注册和安装官方 Codex CLI；不要因此删除源码安装链路或 tarball 冒烟验证。
+已发布的 npm 包、Tag 和历史发行说明保持原样；历史说明中的 npm 发布步骤不再适用于后续版本。
 
-1. `main` 已同步远端、工作区干净，目标提交的 GitHub CI 全部通过。
-2. `package.json` 与 `src/version.json` 一致；正式 Gateway 版本与
-   `src/codex-protocol/version.json`、`ci.yml` 的 Codex CLI 精确版本一致，`-fixN` Gateway
-   修复版本和 `-rc.N` 候选预发行版则必须保持相同基础版本。RC 只允许基于已经锁定的正式
-   Codex CLI，不采用上游 Codex Pre-release。
-3. npm Trusted Publisher 已绑定本仓库的 `publish.yml`。
-4. 使用仓库脚本把 README 的开发基线、当前正式版、运行要求和安装命令渲染为目标版本，审查
-   差异后直接提交并等待 `main` CI 全部通过：
+日常交付通过官方 `main` 源码与 `codexc update` 完成，无需为每次合并创建 Tag 或 Release。
+只有用户明确要求 GitHub 源码发行时才执行以下步骤：
 
-```bash
-RELEASE_VERSION=0.147.0
-node scripts/sync-published-readme.mjs "$RELEASE_VERSION"
-git diff -- README.md
-git add README.md
-git commit -m "同步正式发布版本 v$RELEASE_VERSION"
-git push
-```
+1. 确认 `main` 与远端同步、工作区干净，待发行提交已通过 PR CI 和完整 `verify:commit`。
+2. 校验 `package.json`、锁文件、`src/version.json`、生成协议与 CI 的版本基线一致；保持 README
+   的当前源码基线准确。受控的 `-fixN` / `-rc.N` 后缀继续对应同一正式 Codex CLI 基础版本。
+3. 运行 `npm run test:package`，验证本地 tarball 安装与干净源码全局安装。不得执行 npm 发布。
+4. 审查用户可见改动、风险、验证和安装边界后，在该提交创建新的 `v<版本>` Tag；不得移动旧 Tag。
+5. 经授权推送 Tag 并创建对应 GitHub Release。`-rc.N` 标记为 Pre-release，说明中明确该版本是
+   源码快照；默认安装器及 `codexc update` 跟随 `main`，不会自动选择此 Tag。不要提供 npm 安装命令。
 
-5. 发布 Tag 与包版本完全一致，并先在本地校验：
-
-```bash
-RELEASE_VERSION=0.147.0
-npm run release:check -- "v$RELEASE_VERSION"
-```
-
-确认无误后，在准备发布的 `main` 提交上创建并推送 Tag：
-
-```bash
-git tag -a "v$RELEASE_VERSION" -m "发布 v$RELEASE_VERSION"
-git push origin "v$RELEASE_VERSION"
-```
-
-`publish.yml` 只监听 `v*` Tag。它会再次校验 Tag、包版本和 Tag 所在提交中的 README 发布版本，
-运行完整 `verify:commit`，然后通过 npm Trusted Publishing 执行公开发布；README 仍带有“尚未发布”
-标记或安装命令未同步时失败关闭。正式版更新 npm `latest`，`-rc.N` 候选版发布到 `next`，
-`-fixN` 修复版发布到 `fix`；普通 push、合并 PR 和手动运行 CI 都不会发布 npm。修复版验证完成后
-可用 npm dist-tag 把同一版本提升为 `latest`，无需重新发布包；RC 验证完成后仍发布无后缀正式版，
-不把 RC 包提升为正式版。
-
-等待 `Publish npm package` 工作流成功后再创建对应的 GitHub Release；`-rc.N` 必须标记为
-Pre-release。Release 说明应基于升级
-PR 的实际改动、验证结果和发布边界整理，不能继续使用自动提案的通用占位描述。正式 Release
-不会再自动修改或提交 README；README 已在发布提交中接受完整门禁。当前工作流不会自动创建
-GitHub Release，也不会自动安装本机包、重启 Gateway 或部署服务。
+GitHub Release、全局安装、服务重启和部署都不自动执行。发布不需要修改 npm Registry 上的历史包
+或标签，也不得把本地 npm 打包成功表述为 npm 发行完成。
 
 ### 带后缀版本的强制收尾
 
-`-rc.N` 候选版或 `-fixN` 修复版必须完成以下闭环，缺少任一步都不算发布完成：
+如果明确发行 `-rc.N` 或 `-fixN` 源码快照，核验对应不可变 Tag 和 GitHub Release 后，立即通过独立
+PR 把 `package.json`、锁文件、`src/version.json` 和 README 的 `main` 开发基线恢复为无后缀基础版本。
+恢复 PR 通过 CI 并合并、确认源码更新器接受 `main` 版本后才算完成；恢复基线不创建新 Tag 或 Release。
 
-1. 在版本完全一致的不可变 Tag 提交上发布 npm 包，并核验 `next` 或 `fix` 指向目标版本。
-2. 创建并核验同版本 GitHub Pre-release 或 Release，不移动 Tag、不覆盖 npm 包。
-3. 立即通过独立 PR 把 `package.json`、锁文件、`src/version.json` 和 README 的 `main` 开发基线
-   恢复为无后缀基础版本；用户可见的 RC 或 fix 安装入口继续保留，当前正式版不得提前变化。
-4. 合并恢复 PR 后确认 `main` 工作区干净、四处版本一致，且旧版源码更新器的正式版规则接受
-   `package.json`；没有新 Tag 和 `Publish npm package` 工作流运行。
+旧版源码更新器可能不认识后来新增的后缀，让 `main` 长期停留在后缀版本可能导致旧设备更新失败。
+保留已存在的后缀版本解析和历史发行记录，不为停止 npm 发行额外改变协议或版本兼容边界。
 
-旧版源码更新器可能不认识后来新增的后缀；让 `main` 长期停留在 `-rc.N` 或 `-fixN` 会使旧设备在
-安装候选源码前失败，无法通过 `codexc update` 自举。恢复无后缀基础版本只代表源码开发基线，
-不等于正式发布；不得因此创建正式 Tag、移动 npm `latest` 或把 Pre-release 改为正式 Release。
-恢复 PR 合并和兼容检查完成前，不得宣告发行闭环或开始下一轮版本发布准备。
+## 6. 源码更新与本机验证
 
-## 6. 发布后验证与本机升级
-
-先核对 npm 和 GitHub Release，再安装精确版本：
+受管源码安装用户运行：
 
 ```bash
-RELEASE_VERSION=0.147.0
-npm view @hegenai/codexc version
-npm install -g "@openai/codex@$RELEASE_VERSION"
-npm install -g "@hegenai/codexc@$RELEASE_VERSION"
-codexc service install
-codexc service restart all
+codexc update
 codexc doctor
 codexc service status
 ```
 
-升级 npm 包不会替换已经运行的 Gateway 或 Provider App Server 进程；已有服务必须在 Doctor 前
-完整重启。首次安装时 `codexc service install` 已启动对应服务，后续显式重启保持同一验证流程。
+`codexc update` 的停止、重建、配套 CLI 同步和重启行为以[源码安装与更新](source-install.md)为准。
+安装器不会覆盖已有受管源码目录，已有安装直接使用更新命令。
 
-发布完成的判断标准是：npm 返回目标版本、GitHub Release 指向同一 Tag、本机诊断通过且所需服务
-状态正常。发布后发现仅文档有误时按普通修复提交处理，不移动已经发布的 Tag；包内容有误时不得
-覆盖同一 npm 版本，应先评估并准备新的正式版本。
+更新本机环境必须得到明确授权。完成后检查实际源码版本、诊断与所需服务状态；发现缺陷时通过新提交
+修复，不移动已经发布的 Tag 或覆盖历史 npm 包。
 
 ## 升级失败时
 

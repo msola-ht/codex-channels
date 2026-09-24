@@ -39,12 +39,13 @@
   Use official stable Codex CLI releases, review generated differences and complete business adaptations without retaining old-protocol compatibility layers.
 - Keep upgrade proposals in Draft. Do not mark Ready, merge, release or deploy without explicit authorization.
   Preserve complete validation, failure reports and minimal workflow permissions. Execution details are defined by the upgrade guide and `.github/workflows/README.md`.
-- Published tags and npm packages must not be overwritten. Restoring the development baseline after a candidate or fix release is part of release completion;
+- Do not publish new Gateway npm packages. Keep the root package private; npm remains required for dependencies and local source installation.
+- Published tags and historical npm packages must not be overwritten. Restoring the development baseline after a candidate or fix release is part of release completion;
   finish it under the upgrade guide before preparing the next release.
 
 ## Current Architecture
 
-- The repository contains one modular TypeScript Gateway. The official local entry point is the npm CLI `codexc`.
+- The repository contains one modular TypeScript Gateway. The official local entry point is `codexc`, installed from source through npm.
 - Codex App Server runs independently. Default or fixed mode uses one primary instance; switching mode may add Provider-isolated instances supervised by the same service entry point.
   Native Codex TUI and Gateway connect to the corresponding Provider instance and share its Threads and live state.
 - App Server is the sole source of truth for Thread, Turn, Item, Goal and conversation history.
@@ -216,7 +217,7 @@ Surface -> Application/Core <- Codex Client
 - `npm run verify:commit` is the shared full-check entry point for local commits and GitHub CI. In order, it covers staged diff formatting, types and versions,
   production and test Lint, WebUI build and Lint, documentation links and indexes, the full test suite, shell syntax,
   npm tarball installation smoke tests and service-template checks executable on the current platform.
-  Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, release workflows and Codex CLI upgrade validation.
+  Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
   Update the root README only when user-facing development entry points change.
 - Protocol, Transport or shared App Server behavior changes require real App Server smoke verification covering the change. Extend existing contracts if insufficient; mocks alone are not enough.

@@ -27,18 +27,7 @@
   至少在新增、修复、改动之一说明具体变化，无内容分类可省略，保留章节不得为空或仅有占位。正式 Codex CLI 升级 PR 还必须写清
   对本项目的收益、本次采用、本次不采用及风险与验证。Job 名 `Project benefits and tradeoffs`
   为兼容 main 的现有 Branch Protection 保留。
-- `publish.yml`：推送与 Codex CLI 协议基础版本一致的 `v*` Tag 后，先确认 Tag 所在提交已经把
-  README 发布版本与安装命令同步到同一版本，按当前包版本安装锁定的 `@openai/codex` CLI 后执行完整
-  提交检查和干净源码全局安装冒烟，再使用 npm Trusted Publishing 发布公开包，不保存长期 npm Token。正式版使用 npm `latest`，`-rc.N` 使用
-  `next`，`-fixN` 使用 `fix`；README 未完成对应发布提交时失败关闭，合并升级 PR 或普通 push 不会发布。
-- README 的正式版本与安装命令在发布提交中直接更新并接受 PR/CI 审查；GitHub Release 不再触发
-  自动写回 `main`。GitHub Release 创建、本机安装、服务重启和部署仍不由工作流执行。完整收尾步骤见
-  [`docs/codex-cli-upgrade.md`](../../docs/codex-cli-upgrade.md)。
-- `-rc.N` 或 `-fixN` 发布核验后必须立即创建独立恢复 PR，把 `main` 的包、锁文件、运行时版本和
-  开发基线恢复为无后缀基础版本，同时保留已发布后缀版本的安装入口。恢复 PR 不创建 Tag、不触发
-  `publish.yml`；合并并确认旧源码更新器接受 `main` 版本之前，发布流程不算闭环。
-
-启用发布工作流前，需要在 npm 包的 Trusted Publisher 设置中绑定 GitHub 仓库 `msola-ht/codex-channels`、工作流文件 `publish.yml`，并允许 `npm publish`。工作流使用 GitHub OIDC 和 `id-token: write` 获取短期凭据。
+项目不再发布 npm 包，也不提供 Tag 触发的发布工作流。`package.json` 设置 `private: true`；npm 仍用于依赖安装、源码构建和本地 tarball 安装验证。历史 Tag 和 npm 包保持不变。GitHub Release 如需创建，按[升级与发布指南](../../docs/codex-cli-upgrade.md)取得明确授权后手动处理。
 
 除 Codex 正式升级的 Draft PR Job 外，工作流只申请 `contents: read`，
 Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和 `pull-requests: write`，
