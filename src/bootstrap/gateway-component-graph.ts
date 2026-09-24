@@ -855,12 +855,10 @@ export abstract class GatewayComponentGraph {
           accountId,
           available,
           outcome,
-        ) => this.interactions.setAvailable(
-          surface,
-          accountId,
-          available,
-          outcome,
-        ),
+        ) => {
+          this.interactions.setAvailable(surface, accountId, available, outcome);
+          if (!available) this.asyncQuestions?.cancelSurface(surface, accountId);
+        },
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;

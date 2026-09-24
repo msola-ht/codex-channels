@@ -145,6 +145,10 @@ export class InteractionRouter implements InteractionPort {
     }
   }
 
+  resolvedMany(requestIds: ReadonlySet<string>): void {
+    this.cancelMatching((queued) => requestIds.has(queued.request.requestId));
+  }
+
   hasPendingForThread(threadId: string): boolean {
     for (const pending of this.pendingByRequestId.values()) {
       if (pending.request.threadId === threadId) {

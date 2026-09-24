@@ -17,6 +17,18 @@ const target = {
 } as const;
 
 describe("Feishu interaction port", () => {
+  it.each(["Codex 等待回答", "Codex 请求补充信息（可跳过）", "异步问题（任务继续执行）"])("preserves the upstream question presentation: %s", async (title) => {
+    const fixture = createConfiguredFixture();
+    const decision = fixture.interactions.request(target, { ...userInputRequest(), title });
+    try {
+      await settle();
+      expect(fixture.sentCards[0]!.card).toMatchObject({ header: { title: { content: title } } });
+    } finally {
+      fixture.interactions.resolved("input-1");
+      await decision;
+    }
+  });
+
   it("invalidates a late card after the shared router marks the channel unavailable", async () => {
     let completeSend!: (messageId: string) => void;
     let card!: FeishuCardDocument;

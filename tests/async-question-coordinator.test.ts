@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import pino from "pino";
 import { EventBus } from "../src/event-bus/index.js";
 import { AsyncQuestionCoordinator } from "../src/bootstrap/async-question-coordinator.js";
-import type { InteractionDecision, InteractionRequest } from "../src/approval/index.js";
+import { InteractionRouter, type InteractionDecision, type InteractionRequest } from "../src/approval/index.js";
 import type { ConversationInputEvent, OutputEvent } from "../src/conversation-core/index.js";
 
 const target = { surface: "telegram", accountId: "default", conversationId: "100" };
@@ -20,10 +20,10 @@ function fixture() {
     return new Promise<InteractionDecision>((resolve) => { answer = resolve; });
   });
   const resolved = vi.fn();
-  const submit = vi.fn(async () => undefined);
+  const submit = vi.fn<ConstructorParameters<typeof AsyncQuestionCoordinator>[0]["submit"]>(async () => undefined);
   const warn = vi.fn();
   const coordinator = new AsyncQuestionCoordinator({
-    interactions: { request, resolved }, timeoutMs: 1_000,
+    interactions: { request, resolvedMany: (ids) => { for (const id of ids) resolved(id); } }, timeoutMs: 1_000,
     currentThread: () => threadId, targetForThread: () => target, submit, warn,
   });
   return { coordinator, request, resolved, submit, warn,
@@ -35,6 +35,88 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe("AsyncQuestionCoordinator", () => {
+  it.each(["surface", "thread", "switch", "close"])("cancels %s questions atomically through the real interaction router", async (reason) => {
+    const router = new InteractionRouter();
+    const sent: string[] = [];
+    const port = {
+      request: async (_target: unknown, request: InteractionRequest): Promise<InteractionDecision> => {
+        if (request.type === "user-input") sent.push(request.itemId);
+        return new Promise(() => undefined);
+      },
+      resolved: vi.fn(),
+    };
+    router.register(target.surface, target.accountId, port);
+    let currentThread = event.threadId;
+    const coordinator = new AsyncQuestionCoordinator({
+      interactions: router, timeoutMs: 10_000,
+      currentThread: () => currentThread, targetForThread: () => target,
+      submit: vi.fn(), warn: vi.fn(),
+    });
+    try {
+      coordinator.handleInput(event);
+      coordinator.handleInput({ ...event, itemId: "queued" });
+      expect(sent).toEqual([event.itemId]);
+      if (reason === "surface") coordinator.cancelSurface(target.surface, target.accountId);
+      if (reason === "thread") coordinator.cancelThread(event.threadId);
+      if (reason === "switch") { currentThread = "new-thread"; coordinator.cancelStale(); }
+      if (reason === "close") await coordinator.close();
+      expect(sent).toEqual([event.itemId]);
+      expect(router.hasPendingForThread(event.threadId)).toBe(false);
+      expect(port.resolved).toHaveBeenCalledTimes(1);
+      if (reason !== "close") {
+        currentThread = event.threadId;
+        coordinator.handleInput({ ...event, itemId: "fresh" });
+        expect(sent).toEqual([event.itemId, "fresh"]);
+      }
+    } finally {
+      await coordinator.close();
+    }
+  });
+
+  it("keeps active identities through history eviction and remembers them after completion", async () => {
+    const f = fixture();
+    try {
+      f.coordinator.handleInput(event);
+      for (let i = 0; i < 1_001; i++) {
+        f.coordinator.handleInput({ ...event, threadId: "background", itemId: `rejected-${i}` });
+      }
+      f.coordinator.handleInput(event);
+      expect(f.request).toHaveBeenCalledTimes(1);
+      f.answer({ type: "user-input", answers: { q1: ["A"] } });
+      await vi.waitFor(() => expect(f.submit).toHaveBeenCalledTimes(1));
+      f.coordinator.handleInput(event);
+      expect(f.request).toHaveBeenCalledTimes(1);
+      f.coordinator.handleInput({ ...event, itemId: "new-question" });
+      expect(f.request).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.coordinator.close();
+    }
+  });
+
+  it("invalidates submitting groups only for the disconnected surface account", async () => {
+    const f = fixture();
+    let release!: () => void;
+    f.submit.mockImplementationOnce(() => new Promise<undefined>((resolve) => { release = () => resolve(undefined); }));
+    try {
+      f.coordinator.handleInput({ ...event, questions: Array.from({ length: 4 }, () => ({ title: "Choose", options: [] })) });
+      f.answer({ type: "user-input", answers: { q1: ["A"], q2: ["A"], q3: ["A"] } });
+      await vi.waitFor(() => expect(f.submit).toHaveBeenCalledTimes(1));
+      const isCurrent = f.submit.mock.calls[0]![3];
+      f.coordinator.cancelSurface("feishu", "default");
+      f.coordinator.cancelSurface("telegram", "other");
+      expect(isCurrent()).toBe(true);
+      f.coordinator.cancelSurface("telegram", "default");
+      expect(isCurrent()).toBe(false);
+      release();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(f.request).toHaveBeenCalledTimes(1);
+      expect(f.warn).not.toHaveBeenCalled();
+    } finally {
+      release?.();
+      await f.coordinator.close();
+    }
+  });
+
   it.each<ConversationInputEvent>([
     { type: "thread.reverted", threadId: "thread-1" },
     { type: "thread.closed", threadId: "thread-1" },

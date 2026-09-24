@@ -191,6 +191,18 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 不通过输出队列延迟登记；Core 只抑制重复正文及最终答复标记。回答提交失败独立于问题取消状态报告，
 由协调器测试覆盖输出积压、生命周期失效和提交期间断线的组合场景。
 
+Default 执行模式的等待提问只作隔离能力探测，不属于 Gateway 自动启用范围：固定版
+[`request_user_input.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/src/tools/handlers/request_user_input.rs)
+等待用户回答，但该模式的 `isBlocking` 为 `false`；
+[`features/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/features/src/lib.rs)
+将 `default_mode_request_user_input` 标记为开发中且默认关闭。
+Client 验证并保留 `isBlocking`，Approval 呈现阻塞或可跳过问题；渠道有效期使用现有配置，
+不再由已弃用的 `autoResolutionMs` 控制。原生 TUI 的非阻塞自动跳过及输入暂停机制见
+[`request_user_input/mod.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/tui/src/bottom_pane/request_user_input/mod.rs)，
+与渠道的差异见[等待式问题](display.md#等待式问题)。
+探测入口为 `RUN_CODEX_CONTRACT=1 npx vitest run tests/real-app-server-supervised-tools.test.ts -t 'probes Default-mode user input'`，
+仅使用临时 Codex Home 和本地模拟模型后端；Stdio 关闭场景不代表共享 WebSocket App Server 的断线恢复合同。
+
 Computer Use／浏览器过程展示复用已支持的 `item/started`、`item/completed` 和
 `ThreadItem.mcpToolCall.arguments`：[`operation-adapter.ts`](../src/codex-client/operation-adapter.ts)
 只对 `cua_repl.js` / `js_reset` 标记操作类别，并提取 `js` 的 `title`；飞书

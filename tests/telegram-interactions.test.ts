@@ -167,8 +167,10 @@ describe("TelegramInteractionPort", () => {
     const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
     const submit = vi.fn(async () => undefined);
     const warn = vi.fn();
+    const questionRouter = new InteractionRouter();
+    questionRouter.register(target.surface, target.accountId, interactions);
     const coordinator = new AsyncQuestionCoordinator({
-      interactions, timeoutMs: 100,
+      interactions: questionRouter, timeoutMs: 100,
       targetForThread: () => target, currentThread: () => "thread-1",
       submit, warn,
     });

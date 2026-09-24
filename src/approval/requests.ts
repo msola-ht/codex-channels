@@ -103,7 +103,7 @@ export type ApprovalRequest =
         allowOther: boolean;
         secret: boolean;
       }>;
-      autoResolutionMs: number | null;
+      isBlocking: boolean;
     })
   | (BaseApprovalRequest & {
       type: "elicitation";
