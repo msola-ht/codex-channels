@@ -37,6 +37,7 @@ Checkout 不保留写入凭据。Draft PR Job 单独申请 `contents: write` 和
 仓库 Settings → Actions → General 需要允许 GitHub Actions 创建 Pull Request；默认工作流权限
 继续保持只读。自动提案使用仓库 `GITHUB_TOKEN`，不保存长期 PAT。
 
+安装 WebUI 的任务将根目录和 `webui/package-lock.json` 一起纳入 npm 缓存键。
 GitHub Actions 分别对根目录和 `webui` 使用 `npm ci --ignore-scripts`，不会修改 Runner 的 Git
 hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`npm install` 或
 `npm run hooks:install` 则启用仓库内 `.githooks/pre-commit`，两端共享同一个检查入口。

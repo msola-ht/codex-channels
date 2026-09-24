@@ -109,7 +109,10 @@ export class ConversationDeliveryQueue {
   private worker(conversationId: string): ConversationWorker {
     let worker = this.workers.get(conversationId);
     if (!worker) {
-      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity);
+      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity, (state) => {
+        this.logger.warn({ component: this.options.component, conversationId, ...state },
+          "关键输出积压超过队列容量，继续保留待投递输出");
+      });
       const controller = new AbortController();
       worker = {
         queue,

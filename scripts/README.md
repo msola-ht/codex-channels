@@ -39,6 +39,7 @@
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
+  普通只读查询在同一连接上校验 Schema 并读取，诊断入口独立统计总行数。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用

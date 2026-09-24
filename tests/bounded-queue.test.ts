@@ -51,6 +51,35 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe("non-critical-2");
   });
 
+  it("reports critical overflow at growing thresholds and rearms after recovery", async () => {
+    const report = vi.fn();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const queue = new BoundedAsyncQueue<number>(2, report);
+      queue.push(1, true);
+      clock.mockReturnValue(1_500);
+      for (let i = 2; i <= 6; i++) queue.pushPriority(i);
+      expect(report.mock.calls.map(([state]) => state)).toEqual([
+        { capacity: 2, queued: 3, oldestWaitMs: 500 },
+        { capacity: 2, queued: 6, oldestWaitMs: 500 },
+      ]);
+      for (let i = 1; i <= 4; i++) expect(await queue.shift()).toBe(i);
+      queue.push(7, true);
+      expect(report).toHaveBeenCalledTimes(3);
+      expect(report).toHaveBeenLastCalledWith({ capacity: 2, queued: 3, oldestWaitMs: 0 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("keeps a large critical backlog when adding priority output", () => {
+    const queue = new BoundedAsyncQueue<number>(2);
+    for (let i = 0; i < 150_000; i++) queue.push(i, true);
+    expect(queue.pushPriority(150_000)).toBe(true);
+    expect(queue.size).toBe(150_001);
+    queue.close();
+  });
+
   it("drains accepted entries before completing a closed queue", async () => {
     const queue = new BoundedAsyncQueue<number>(1);
     queue.push(1);
