@@ -8,10 +8,8 @@ import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { packageDir } from "./runtime-config.mjs";
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-package-smoke-"));
-const environment = {
-  ...process.env,
-  npm_config_cache: join(temporaryDirectory, "npm-cache"),
-};
+// Reuse npm downloads while keeping the installed package and dependencies isolated.
+const environment = { ...process.env };
 let tarballPath;
 
 try {

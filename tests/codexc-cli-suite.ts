@@ -146,30 +146,29 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(jsonResult.stderr).toBe("");
   });
 
-  it("validates help paths before loading configuration and reaches uninstall identity checks with broken config", () => {
+  it("validates help paths before loading configuration and reaches uninstall identity checks with broken config", async () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-help-boundary-"));
     temporaryDirectories.push(root);
     const configPath = join(root, "config.toml");
     writeFileSync(configPath, "[broken");
     const env = { ...process.env, CODEX_CONNECT_HOME: root, CODEX_CONNECT_CONFIG_FILE: configPath, CODEX_HOME: join(root, "codex") };
-    for (const flag of ["-h", "--help"]) {
-      for (const path of [["security", "repair"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])]) {
-        const result = spawnSync(process.execPath, [cli, ...path, flag], { env, encoding: "utf8" });
-        expect(result.status, result.stderr).toBe(0);
-        expect(result.stdout).toContain("用法");
-      }
-      for (const path of [
-        ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
-        ["deepseek", "nonsense"], ["ccg", "nonsense"],
-        ["primary-provider", "remove", "some-id"],
-        ["opencode-go", "account", "add", "some-id"],
-      ]) {
-        const result = spawnSync(process.execPath, [cli, ...path, flag], { env, encoding: "utf8" });
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain("用法");
-        expect(result.stderr).not.toContain("语法无效");
-      }
-    }
+    const validPaths = [["security", "repair"], ...["add", "list", "switch", "remove"].map((action) => ["primary-provider", action])];
+    const invalidPaths = [
+      ["desktop-app", "nonsense"], ["opencode-go", "nonsense", "add"],
+      ["deepseek", "nonsense"], ["ccg", "nonsense"],
+      ["primary-provider", "remove", "some-id"],
+      ["opencode-go", "account", "add", "some-id"],
+    ];
+    const cases = ["-h", "--help"].flatMap((flag) => [
+      ...validPaths.map((path) => ({ args: [...path, flag], status: 0 })),
+      ...invalidPaths.map((path) => ({ args: [...path, flag], status: 1 })),
+    ]);
+    await forEachWithConcurrency(cases, 8, async ({ args, status }) => {
+      const result = await runCliProcess(args, { env });
+      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(status);
+      expect(status === 0 ? result.stdout : result.stderr).toContain("用法");
+      if (status !== 0) expect(result.stderr).not.toContain("语法无效");
+    });
     const uninstall = spawnSync(process.execPath, [cli, "uninstall"], { env, encoding: "utf8" });
     expect(uninstall.status).toBe(1);
     expect(uninstall.stderr).toContain("当前不是受管 Git 源码安装");
@@ -235,13 +234,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["version", "-h"], "用法：codexc version"],
     ] as const;
 
-    await forEachWithConcurrency(cases, 8, async ([args, expected]) => {
-      const result = await runCliProcess(args);
-      expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain(expected);
-      expect(result.stderr).toBe("");
-    });
-
     const detailedCases = [
       {
         args: ["config", "--help"],
@@ -289,11 +281,25 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
         includes: ["version, -v, --version"],
       },
     ];
-    await forEachWithConcurrency(detailedCases, 8, async ({ args, includes, excludes = [] }) => {
+    const helpCases = new Map<string, { args: readonly string[]; includes: string[]; excludes: string[] }>();
+    for (const entry of [
+      ...cases.map(([args, expected]) => ({ args, includes: [expected], excludes: [] as string[] })),
+      ...detailedCases,
+    ]) {
+      const key = JSON.stringify(entry.args);
+      const previous = helpCases.get(key);
+      helpCases.set(key, {
+        args: entry.args,
+        includes: [...(previous?.includes ?? []), ...entry.includes],
+        excludes: [...(previous?.excludes ?? []), ...(entry.excludes ?? [])],
+      });
+    }
+    await forEachWithConcurrency([...helpCases.values()], 8, async ({ args, includes, excludes }) => {
       const result = await runCliProcess(args);
       expect(result.status, `${args.join(" ")}\n${result.stderr}`).toBe(0);
       for (const expected of includes) expect(result.stdout).toContain(expected);
       for (const excluded of excludes) expect(result.stdout).not.toContain(excluded);
+      expect(result.stderr).toBe("");
     });
   }, 180_000);
 
@@ -2829,34 +2835,33 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     }
 
     if (shard === "doctor") {
-  it("rejects removed commands and Workspace aliases", () => {
-    for (const alias of ["workspace", "ws", "agents"]) {
-      const result = spawnSync(process.execPath, [cli, alias], { encoding: "utf8" });
+  it("rejects removed commands and Workspace aliases", async () => {
+    await forEachWithConcurrency(["workspace", "ws", "agents"], 3, async (alias) => {
+      const result = await runCliProcess([alias]);
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`未知命令：${alias}`);
-    }
+    });
   });
 
-  it("shows an explicitly configured Gateway config file", () => {
+  it("shows an explicitly configured Gateway config file", async () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-cli-"));
     temporaryDirectories.push(root);
     const configPath = join(root, "profile", "gateway.toml");
     mkdirSync(join(root, "profile"));
-
-    const output = execFileSync(process.execPath, [cli, "config"], {
+    const options = {
       env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
-      encoding: "utf8",
+      encoding: "utf8" as const,
+    };
+    const outputs = new Map<string, string>();
+    await forEachWithConcurrency([[], ["--json"]], 2, async (args) => {
+      const { stdout } = await execFileAsync(process.execPath, [cli, "config", ...args], options);
+      outputs.set(args.join(" "), stdout);
     });
 
-    expect(output).toContain(`用户目录：${join(root, "profile")}`);
-    expect(output).toContain(`配置文件：${configPath}`);
-
-    const jsonOutput = execFileSync(process.execPath, [cli, "config", "--json"], {
-      env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: configPath },
-      encoding: "utf8",
-    });
-    expect(JSON.parse(jsonOutput)).toEqual({
+    expect(outputs.get("")).toContain(`用户目录：${join(root, "profile")}`);
+    expect(outputs.get("")).toContain(`配置文件：${configPath}`);
+    expect(JSON.parse(outputs.get("--json")!)).toEqual({
       dataDir: join(root, "profile"),
       configPath,
       exists: false,
@@ -3619,7 +3624,9 @@ async function forEachWithConcurrency<T>(
       }
     },
   );
-  await Promise.all(workers);
+  const results = await Promise.allSettled(workers);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
 }
 
 function runCliProcess(

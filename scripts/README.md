@@ -454,7 +454,7 @@
 - `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
   全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
-  `codexc` 入口与配置预检。
+  `codexc` 入口与配置预检。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
 - `check-release-tag.mjs`：要求 Git Tag、`package.json` 与 README 发布版本及安装命令严格一致，
   README 尚未完成对应发布提交时失败关闭。
 - `sync-published-readme.mjs`：把受控的 README 正式版、`-rc.N` 候选版或 `-fixN` 修复版及安装命令
