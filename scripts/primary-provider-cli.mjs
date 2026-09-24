@@ -99,7 +99,7 @@ export async function listPrimaryProviders({
     return;
   }
 
-  output.write("\nCodex Connect 自定义 Responses Provider\n");
+  output.write("\nCodex Connect Codex 兼容 Provider\n");
   output.write(`当前主实例：${activeLabel}\n`);
   if (state.customProviders.fixedCandidates.length === 0) {
     output.write("自定义固定候选：无\n");
@@ -277,7 +277,7 @@ export async function runCustomPrimaryProviderMenu({
 } = {}) {
   while (true) {
     const action = await prompts.select({
-      message: "自定义 Responses Provider",
+      message: "Codex 兼容 Provider",
       showInstructions: false,
       options: [
         { value: "add", label: "新增", hint: "新增固定或切换 Provider" },

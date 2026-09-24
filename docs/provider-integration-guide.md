@@ -163,7 +163,8 @@ codexc doctor
 
 ## 6. 用户配置的主 Provider
 
-Gateway 支持 Codex 用户配置中的自定义 Responses Provider，并提供固定与切换两种运行模式。
+Gateway 将使用 Responses 接口、复用 Codex 官方模型目录的自定义提供商称为“Codex 兼容 Provider”，
+并提供固定与切换两种运行模式。此入口的模型 ID 必须来自官方目录，不支持任意第三方模型 ID。
 它读取 `~/.codex/config.toml` 的 `model_provider` 和 `[model_providers.<id>]`；若
 `model_provider` 显式配置为 `openai` 时锁定官方 OpenAI，不自动激活候选；未配置且只存在一个候选
 时沿用该候选兼容旧配置。自定义 Provider 只在 Gateway 监管的 App Server 子进程中选择。
@@ -268,7 +269,7 @@ Provider 的选择、地址、API Key、默认模型、`model_reasoning_effort =
 共存，但不能与任何受管固定模式同时启用。需要自定义目录或账户能力时，仍必须按本指南前述的编译期
 受管 Provider 流程接入。
 
-可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”新增或编辑固定、切换模式 Provider：填写上游
+可以通过 `codexc setup` 的“模型与提供商 → 第三方 Provider → Codex 兼容 Provider”新增或编辑固定、切换模式 Provider：填写上游
 `base_url`，从 URL 主机名派生的 Provider ID 与推荐的 `OpenAI` 中选择，只以直接写入 API Key
 （`experimental_bearer_token`）认证，再选择固定/切换模式、Responses WebSocket，并手工输入上游
 模型 ID。该 ID 必须存在于 Codex 官方模型目录；Setup 不请求第三方 `/models`，也不生成第三方
@@ -281,7 +282,7 @@ Codex 内置保留 ID。固定模式通过 Codex 的 `config/batchWrite` 原子�
 明确显示 Key 明文写入的 0600 配置位置。Key 输入不显示不回显；自定义固定模式不能保留其他自定义
 切换 Profile，从切换模式改为固定模式前必须先删除其他自定义切换 Provider；受管切换 Provider 可以
 共存，受管固定模式必须先恢复官方模式。写入后仍需运行
-`codexc service restart all` 生效。自定义 Responses Provider 入口只接受上述直接 API Key 字段，不接受额外
+`codexc service restart all` 生效。Codex 兼容 Provider 入口只接受上述直接 API Key 字段，不接受额外
 Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍是主配置候选，需先运行
 `codexc primary-provider switch openai` 将候选移入私有备份，再编辑为切换模式；Setup 不会留下
 同名主配置块和切换 Profile。

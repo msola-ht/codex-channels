@@ -126,7 +126,7 @@
   不依赖终端输出的结构化脱敏总览，再由 CLI 包装器渲染；汇总主 Provider、可切换 Provider、第三方模型默认值、
   原生子代理、已启用渠道和用户技能数量，不显示 API Key、Token、应用凭据、
   允许名单、代理值或 Provider URL。
-- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → 自定义 Responses Provider”；
+- `custom-primary-provider-setup.mjs` / `custom-primary-provider-setup.d.mts`：`codexc setup` 的“模型与提供商 → 第三方 Provider → Codex 兼容 Provider”；
   新增时可从 URL 主机名派生 Provider ID、输入自定义标识符或选择推荐的 `OpenAI`，编辑时保留所选候选 ID；引导填写
   上游 `base_url`、直接写入的 API Key、固定/切换模式、WebSocket 开关和上游模型 ID。模型 ID 当前
   必须属于 Codex 官方目录；不调用第三方 `/models`，不生成第三方 `models.json` 或自定义
@@ -172,7 +172,7 @@
   switch / remove 复用 Provider 管理接口并负责中文确认与结果渲染；所有 switch（含恢复官方、从备份恢复、
   切换 Provider 转固定）都会先经二次确认，并提示将改写主配置的 model_provider / model；命令行 switch
   传 --yes 跳过确认（仅命令行，Setup 菜单仍确认）；
-  add 复用自定义 Responses Provider Setup 的交互流程，
+  add 复用Codex 兼容 Provider Setup 的交互流程，
   Setup 菜单另提供候选选择编辑；`switch openai` 不运行登录直接恢复官方
   并把固定候选移入私有备份、保留切换 Provider，`switch <ID>` 把目标设为固定主 Provider；目标是切换
   Provider 时会移除其独立 Profile，已清理候选则从备份自动恢复并消费该备份项；Setup 可直接

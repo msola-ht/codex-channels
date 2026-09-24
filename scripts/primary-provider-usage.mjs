@@ -1,6 +1,6 @@
 export const primaryProviderUsage = `用法：codexc primary-provider <list|add|switch|remove> [参数]
 
-管理 OpenAI Responses 兼容 Provider：固定模式只使用一个主 Provider，切换模式可同时启用多个独立 Provider。
+管理 Codex 兼容 Provider（Responses 接口，使用 Codex 官方模型目录）：固定模式只使用一个主 Provider，切换模式可同时启用多个独立 Provider。
 
   codexc primary-provider list [--json]
     列出当前主实例、已启用的切换 Provider、固定模式候选与私有备份。

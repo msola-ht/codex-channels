@@ -350,8 +350,8 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "custom_primary",
-      label: "自定义 Responses Provider",
-      hint: "新增、编辑、切换或删除 OpenAI Responses 兼容 Provider",
+      label: "Codex 兼容 Provider",
+      hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
     });
   });
 

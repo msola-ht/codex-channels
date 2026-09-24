@@ -26,9 +26,6 @@ export {
   loadConfiguredCustomPrimaryModelProvider,
   customPrimaryProviderProfilePath,
   customSwitchingProviderRegistryPath,
-  customOfficialModelCatalogPath,
-  withOfficialModelCatalog,
-  writeCustomOfficialModelCatalog,
   loadCustomSwitchingProviderIds,
   isCustomSwitchingModelProviderConfigCompatible,
   loadConfiguredCustomSwitchingModelProviders,
@@ -53,3 +50,8 @@ export {
   loadOpencodeGoAccountCredentialFor,
   loadConfiguredProviderCredential,
 } from "./model-provider-startup-runtime.mjs";
+export {
+  customOfficialModelCatalogPath,
+  withOfficialModelCatalog,
+  writeCustomOfficialModelCatalog,
+} from "./model-provider-official-catalog.mjs";

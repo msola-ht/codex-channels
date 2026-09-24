@@ -147,7 +147,7 @@ export async function runCustomPrimaryProviderSetup({
   const hasTopLevelBaseUrl = optionalString(config.openai_base_url) !== undefined;
   const currentWebsockets = currentProvider?.supports_websockets === true ? "yes" : "no";
 
-  output.write("\nCodex Connect 自定义 Responses Provider Setup\n\n");
+  output.write("\nCodex Connect Codex 兼容 Provider Setup\n\n");
   output.write(`当前主实例：${currentMainLabel}\n`);
   output.write(fixedProviderId === undefined
     ? "当前操作：新增 Provider\n"
