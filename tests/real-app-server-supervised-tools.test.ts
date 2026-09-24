@@ -409,8 +409,8 @@ contractSuite("real supervised App Server tools", () => {
           expect(completeCount).toBe(0);
           if (scenario === "answer" || scenario === "background" || scenario === "skip") {
             if (scenario === "background") {
-              expect(backgroundId, "后台命令必须产生 started 事件").toBeDefined();
               expect(backgroundToolOutput, "后台命令必须保持运行并返回会话 ID").toMatch(/Process running with session ID/);
+              expect(backgroundId, "后台命令必须产生 started 事件").toBeDefined();
               expect(backgroundResult, "释放前后台命令不能完成").toBeUndefined();
               writeFileSync(releaseFile, "release");
               await waitFor(() => backgroundResult !== undefined, 10_000, undefined, "提问等待期间后台命令完成事件");
