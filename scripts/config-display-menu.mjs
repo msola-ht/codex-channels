@@ -9,32 +9,41 @@ export async function runDisplaySettings({
   environment,
   output,
   prompts,
+  telegramConfigured = false,
   writeConfig = writeGatewayConfig,
 }) {
-  const section = await prompts.select({
-    message: "选择显示设置",
-    showInstructions: false,
-    options: [
-      { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
-      { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
-      { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
-      { value: "back", label: "返回", hint: "返回配置菜单" },
-    ],
-  });
-  if (prompts.isCancel(section) || section === "back") return { action: "back" };
-  if (section === "operation_updates") {
-    return runOperationUpdatesToggle({ environment, output, prompts, writeConfig });
+  while (true) {
+    const section = await prompts.select({
+      message: "选择显示设置",
+      showInstructions: false,
+      options: [
+        { value: "operation_updates", label: "操作详情显示", hint: "full / compact / hidden" },
+        { value: "plan_updates", label: "计划更新显示", hint: "是否显示 Codex 计划" },
+        { value: "reasoning", label: "思考状态显示", hint: "默认关闭；是否显示“思考中”状态卡" },
+        ...(telegramConfigured ? [{ value: "message_format", label: "Telegram 消息格式", hint: "HTML 或富文本" }] : []),
+        { value: "back", label: "返回", hint: "返回配置菜单" },
+      ],
+    });
+    if (prompts.isCancel(section) || section === "back") return { action: "back" };
+    let result;
+    const options = { environment, output, prompts, writeConfig };
+    if (section === "message_format" && telegramConfigured) {
+      result = await runTelegramMessageFormat(options);
+    } else if (section === "operation_updates") {
+      result = await runOperationUpdatesToggle(options);
+    } else if (section === "plan_updates") {
+      result = await runPlanUpdatesToggle(options);
+    } else if (section === "reasoning") {
+      result = await runReasoningToggle(options);
+    } else {
+      throw new Error(`未知显示设置：${String(section)}`);
+    }
+    if (result?.action === "back") continue;
+    return result;
   }
-  if (section === "plan_updates") {
-    return runPlanUpdatesToggle({ environment, output, prompts, writeConfig });
-  }
-  if (section === "reasoning") {
-    return runReasoningToggle({ environment, output, prompts, writeConfig });
-  }
-  throw new Error(`未知显示设置：${String(section)}`);
 }
 
-export async function runTelegramMessageFormat({
+async function runTelegramMessageFormat({
   environment,
   output,
   prompts,

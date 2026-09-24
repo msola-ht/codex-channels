@@ -10,10 +10,44 @@ import {
   writeSetupConfigurationSummary,
 } from "../scripts/setup-summary.mjs";
 
+function runInteractiveSetup(options: Record<string, unknown>) {
+  return runSetup({ input: { isTTY: true }, output: { isTTY: true }, ...options });
+}
+
 describe("Codex Connect setup", () => {
+  it.each([
+    [{ isTTY: false }, { isTTY: true }],
+    [{ isTTY: true }, { isTTY: false }],
+  ])("requires interactive input and prompt output", async (input, output) => {
+    const intro = vi.fn();
+    await expect(runSetup({ input, output, prompts: { intro } })).rejects.toThrow("交互终端");
+    expect(intro).not.toHaveBeenCalled();
+  });
+
+  it("reports a sanitized operation error and allows another selection", async () => {
+    const events: unknown[] = [];
+    const write = vi.fn();
+    const select = vi.fn()
+      .mockResolvedValueOnce("channels").mockResolvedValueOnce("telegram")
+      .mockResolvedValueOnce("summary").mockResolvedValueOnce("cancel");
+    const setupSummary = vi.fn();
+    await runInteractiveSetup({
+      output: { isTTY: true, write },
+      prompts: { intro: vi.fn(), select, isCancel: () => false, cancel: vi.fn() },
+      telegramSetup: async () => { throw new Error("api_key=secret"); },
+      setupSummary, stayOnMenu: true, onResult: (event: unknown) => events.push(event),
+    });
+    expect(events).toEqual([
+      { event: "error", category: "channels", message: "api_key=[REDACTED]" },
+      { event: "cancelled" },
+    ]);
+    expect(write).toHaveBeenCalledWith("[失败] api_key=[REDACTED]\n");
+    expect(setupSummary).toHaveBeenCalledOnce();
+  });
+
   it("selects Telegram under the communication channels category", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const telegramSetup = vi.fn(async () => "telegram-configured");
     const feishuSetup = vi.fn();
     const weixinSetup = vi.fn();
@@ -23,7 +57,7 @@ describe("Codex Connect setup", () => {
       .mockResolvedValueOnce("channels")
       .mockResolvedValueOnce("telegram");
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       input,
       output,
       prompts: {
@@ -91,13 +125,13 @@ describe("Codex Connect setup", () => {
   });
 
   it("shows the redacted Setup summary and keeps the main menu open", async () => {
-    const output = {};
+    const output = { isTTY: true };
     const setupSummary = vi.fn();
     const select = vi.fn()
       .mockResolvedValueOnce("summary")
       .mockResolvedValueOnce("cancel");
 
-    await expect(runSetup({
+    await expect(runInteractiveSetup({
       output,
       prompts: {
         intro: vi.fn(),
@@ -119,8 +153,8 @@ describe("Codex Connect setup", () => {
       .mockResolvedValueOnce("telegram")
       .mockResolvedValueOnce("cancel");
 
-    await expect(runSetup({
-      output: {},
+    await expect(runInteractiveSetup({
+      output: { isTTY: true },
       prompts: {
         intro: vi.fn(),
         select,
@@ -158,7 +192,7 @@ describe("Codex Connect setup", () => {
     ]);
   });
 
-  it("keeps JSON-mode stdout parseable when the interactive process is cancelled", () => {
+  it("rejects redirected input with a structured JSON error", () => {
     const child = spawnSync(
       process.execPath,
       [resolve("scripts/setup.mjs"), "--json"],
@@ -172,22 +206,22 @@ describe("Codex Connect setup", () => {
     );
 
     expect(child.error).toBeUndefined();
-    expect(child.status).toBe(0);
+    expect(child.status).toBe(1);
     expect(child.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
-      { event: "cancelled" },
+      expect.objectContaining({ event: "error", message: expect.stringContaining("交互终端") }),
     ]);
-    expect(child.stderr).toContain("选择设置类别");
+    expect(child.stderr).toContain("交互终端");
     expect(child.stdout).not.toContain("选择设置类别");
   });
 
   it("selects Feishu under the communication channels category", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const telegramSetup = vi.fn();
     const feishuSetup = vi.fn(async () => "feishu-configured");
     const weixinSetup = vi.fn();
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       input,
       output,
       prompts: {
@@ -210,9 +244,9 @@ describe("Codex Connect setup", () => {
 
   it("selects Weixin under the communication channels category", async () => {
     const weixinSetup = vi.fn(async () => "weixin-configured");
-    const result = await runSetup({
-      input: {},
-      output: {},
+    const result = await runInteractiveSetup({
+      input: { isTTY: true },
+      output: { isTTY: true },
       prompts: {
         intro: vi.fn(),
         select: vi.fn()
@@ -231,8 +265,8 @@ describe("Codex Connect setup", () => {
   });
 
   it("selects the model provider setup category", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
@@ -244,7 +278,7 @@ describe("Codex Connect setup", () => {
     };
     const deepseekSetup = vi.fn(async () => "deepseek-configured");
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       input,
       output,
       prompts,
@@ -268,9 +302,9 @@ describe("Codex Connect setup", () => {
       isCancel: () => false,
       cancel: vi.fn(),
     };
-    const result = await runSetup({
-      input: {},
-      output: {},
+    const result = await runInteractiveSetup({
+      input: { isTTY: true },
+      output: { isTTY: true },
       prompts,
       officialLoginSetup: vi.fn(async () => ({ mode: "official" })),
     });
@@ -287,8 +321,8 @@ describe("Codex Connect setup", () => {
   });
 
   it("selects the custom primary Provider setup under models and providers", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
@@ -300,7 +334,7 @@ describe("Codex Connect setup", () => {
     };
     const customPrimarySetup = vi.fn(async () => "custom-primary-configured");
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       input,
       output,
       prompts,
@@ -322,8 +356,8 @@ describe("Codex Connect setup", () => {
   });
 
   it("selects the official login setup under models and providers", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
@@ -335,7 +369,7 @@ describe("Codex Connect setup", () => {
     };
     const officialLoginSetup = vi.fn(async () => "official-login-configured");
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       input,
       output,
       prompts,
@@ -359,8 +393,8 @@ describe("Codex Connect setup", () => {
   });
 
   it("selects managed third-party default model settings", async () => {
-    const input = {};
-    const output = {};
+    const input = { isTTY: true };
+    const output = { isTTY: true };
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
@@ -372,7 +406,7 @@ describe("Codex Connect setup", () => {
     };
     const modelProviderDefaultSetup = vi.fn(async () => "provider-default-configured");
 
-    await expect(runSetup({
+    await expect(runInteractiveSetup({
       input,
       output,
       prompts,
@@ -606,7 +640,7 @@ describe("Codex Connect setup", () => {
       .mockResolvedValueOnce("cancel");
     const telegramSetup = vi.fn();
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       prompts: {
         intro: vi.fn(),
         select,
@@ -636,9 +670,9 @@ describe("Codex Connect setup", () => {
       .mockResolvedValueOnce("back")
       .mockResolvedValueOnce("cancel");
 
-    const result = await runSetup({
-      input: {},
-      output: {},
+    const result = await runInteractiveSetup({
+      input: { isTTY: true },
+      output: { isTTY: true },
       prompts: {
         intro: vi.fn(),
         select,
@@ -663,7 +697,7 @@ describe("Codex Connect setup", () => {
     const weixinSetup = vi.fn();
     const cancel = vi.fn();
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       prompts: {
         intro: vi.fn(),
         select: async () => Symbol("cancel"),
@@ -691,7 +725,7 @@ describe("Codex Connect setup", () => {
       .mockResolvedValueOnce(Symbol("cancel"))
       .mockResolvedValueOnce("cancel");
 
-    const result = await runSetup({
+    const result = await runInteractiveSetup({
       prompts: {
         intro: vi.fn(),
         select,

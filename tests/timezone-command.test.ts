@@ -64,7 +64,7 @@ describe("codexc timezone", () => {
     writeGatewayConfig(fixture.configPath, {
       ...readGatewayConfig(fixture.configPath), gateway: { timezone: "Unknown/Zone" },
     });
-    const options = { environment: fixture.environment, output: captureOutput(true).stream };
+    const options = { environment: fixture.environment, input: { isTTY: true }, output: captureOutput(true).stream };
     await expect(runTimezoneCommand(["--gateway"], {
       ...options, prompts: { select: async () => "Unknown/Zone", isCancel: () => false },
     })).rejects.toThrow("[gateway]");
@@ -92,7 +92,7 @@ describe("codexc timezone", () => {
   it("defaults the gateway menu to following App Server and supports system and manual choices", async () => {
     const fixture = createFixture();
     const select = vi.fn().mockResolvedValue("__system__");
-    const options = { environment: fixture.environment, output: captureOutput(true).stream };
+    const options = { environment: fixture.environment, input: { isTTY: true }, output: captureOutput(true).stream };
     await runTimezoneCommand(["--gateway"], {
       ...options, prompts: { select, isCancel: () => false },
     });
@@ -142,12 +142,23 @@ describe("codexc timezone", () => {
       .toEqual([]);
   });
 
+  it("shows status without prompting when stdin is redirected and stdout is a terminal", async () => {
+    const fixture = createFixture();
+    const select = vi.fn();
+    await expect(runTimezoneCommand([], {
+      environment: fixture.environment, input: { isTTY: false },
+      output: captureOutput(true).stream, prompts: { select },
+    })).resolves.toMatchObject({ action: "status" });
+    expect(select).not.toHaveBeenCalled();
+  });
+
   it("writes the timezone picked from the interactive list", async () => {
     const fixture = createFixture();
     const select = vi.fn().mockResolvedValue("Asia/Tokyo");
 
     await expect(runTimezoneCommand([], {
       environment: fixture.environment,
+      input: { isTTY: true },
       output: captureOutput(true).stream,
       prompts: { select, isCancel: () => false },
     })).resolves.toMatchObject({ action: "saved", timezone: "Asia/Tokyo" });
@@ -156,6 +167,7 @@ describe("codexc timezone", () => {
 
     await expect(runTimezoneCommand([], {
       environment: fixture.environment,
+      input: { isTTY: true },
       output: captureOutput(true).stream,
       prompts: { select: vi.fn().mockResolvedValue("__system__"), isCancel: () => false },
     })).resolves.toMatchObject({ action: "saved", timezone: null });
@@ -168,6 +180,7 @@ describe("codexc timezone", () => {
 
     await expect(runTimezoneCommand([], {
       environment: fixture.environment,
+      input: { isTTY: true },
       output: captureOutput(true).stream,
       prompts: {
         select: vi.fn().mockResolvedValue("__custom__"),
@@ -185,6 +198,7 @@ describe("codexc timezone", () => {
 
     await expect(runTimezoneCommand([], {
       environment: fixture.environment,
+      input: { isTTY: true },
       output: output.stream,
       prompts: {
         select: vi.fn().mockResolvedValue(Symbol("cancel")),
@@ -201,6 +215,7 @@ describe("codexc timezone", () => {
 
     await expect(runTimezoneCommand([], {
       environment: fixture.environment,
+      input: { isTTY: true },
       output: output.stream,
       prompts: {
         select: vi.fn().mockResolvedValue("__custom__"),

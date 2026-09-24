@@ -1,3 +1,4 @@
+import { isCommandHelp } from "./cli-help.mjs";
 import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "./opencode-go-account-management.mjs";
 import {
   existsSync,
@@ -431,7 +432,7 @@ async function runLegacyOpencodeGoRemoval(accountId, {
 
 export async function runOpencodeGoAccountCli(args, options = {}) {
   const usage = "用法：codexc opencode-go account <add|list|remove|default|stop> [id]\ncodexc opencode-go legacy remove（确认后移除旧单账户）";
-  if (args.includes("--help") || args.includes("-h")) {
+  if (isCommandHelp(args, [[], ["account"], ["legacy"], ["legacy", "remove"], ["account", "add"], ["account", "list"], ["account", "remove"], ["account", "default"], ["account", "stop"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
   }

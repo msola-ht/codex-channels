@@ -32,11 +32,11 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(installer).not.toMatch(/\$[A-Za-z_][A-Za-z0-9_]*\P{ASCII}/u);
   });
 
-  it("clones main under .codex-connect and installs the command globally", () => {
+  it("clones main and installs globally without modifying Shell PATH when no terminal is attached", () => {
     const root = temporaryDirectory("codexc-source-install-");
     const repository = createFixtureRepository(root);
     const home = join(root, "home");
-    const result = runInstaller(root, repository, home);
+    const result = runInstaller(root, repository, home, { shell: "/bin/zsh" });
 
     expect(result.status, result.stderr || result.stdout).toBe(0);
     expect(result.stdout).toContain("npm 检测通过");
@@ -64,6 +64,9 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     }).trim()).toBe("0.147.0");
     expect(existsSync(join(installRoot, ".bin"))).toBe(false);
     expect(existsSync(join(home, ".profile"))).toBe(false);
+    expect(existsSync(join(home, ".zshrc"))).toBe(false);
+    expect(result.stdout).toContain("npm 全局命令已安装");
+    expect(result.stdout).not.toContain("export PATH");
     expect(existsSync(join(installRoot, "bin"))).toBe(false);
     expect(execFileSync("git", ["config", "--local", "--get", "codex-connect.managed-source"], {
       cwd: checkout,
@@ -144,20 +147,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(result.stdout).not.toContain("@openai/codex@0.147.0-fix1");
   }, 15_000);
 
-  it("does not modify Shell PATH when no terminal is attached", () => {
-    const root = temporaryDirectory("codexc-source-install-no-tty-");
-    const repository = createFixtureRepository(root);
-    const home = join(root, "home");
-
-    const result = runInstaller(root, repository, home, { shell: "/bin/zsh" });
-
-    expect(result.status, result.stderr || result.stdout).toBe(0);
-    expect(result.stdout).toContain("npm 全局命令已安装");
-    expect(result.stdout).not.toContain("export PATH");
-    expect(existsSync(join(home, ".zshrc"))).toBe(false);
-  }, 15_000);
-
-  it("uninstalls the managed source and services while preserving user data", async () => {
+  it.each(["version = 1\n", "[broken"])("uninstalls the managed source and preserves user data with config %j", async (configContent) => {
     const root = temporaryDirectory("codexc-source-uninstall-");
     const installRoot = join(root, ".codex-connect");
     const checkout = join(installRoot, "codex-channels");
@@ -173,7 +163,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
       launcher,
       `#!/bin/sh\nexec node "${checkout}/bin/codexc.mjs" "$@"\n`,
     );
-    writeFileSync(config, "version = 1\n");
+    writeFileSync(config, configContent);
     writeFileSync(database, "preserved");
     writeFileSync(
       profile,
@@ -198,7 +188,7 @@ describe.skipIf(process.platform === "win32")("Linux/macOS Git 源码安装", ()
     expect(globalUninstalls).toBe(1);
     expect(existsSync(checkout)).toBe(false);
     expect(existsSync(launcher)).toBe(false);
-    expect(readFileSync(config, "utf8")).toBe("version = 1\n");
+    expect(readFileSync(config, "utf8")).toBe(configContent);
     expect(readFileSync(database, "utf8")).toBe("preserved");
     expect(readFileSync(profile, "utf8")).toBe('export PATH="/custom/bin:$PATH"\n');
   });

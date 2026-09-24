@@ -12,17 +12,16 @@ import {
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import {
   runDisplaySettings,
-  runTelegramMessageFormat,
 } from "./config-display-menu.mjs";
 import { runSystemSettings } from "./config-system-menu.mjs";
 import { runWebuiSettings } from "./config-webui-menu.mjs";
-import { runDebugSetup } from "./debug-setup.mjs";
+import { reportMenuError } from "./cli-menu.mjs";
 import { runMetricsSettings } from "./metrics-config-menu.mjs";
 import { writeGatewayConfigSummary } from "./config-summary.mjs";
 import { runCodexUserSettingsSetup } from "./codex-user-settings-setup.mjs";
 import {
   runAdvancedSettings,
-  runAutomationSettings,
+  runScheduledTasks,
   runNetworkSettings,
 } from "./config-advanced-menu.mjs";
 
@@ -33,7 +32,6 @@ export async function runConfig({
   output = process.stdout,
   prompts = clackPrompts,
   writeConfig = writeGatewayConfig,
-  debugSetup = runDebugSetup,
   codexUserSettingsSetup = runCodexUserSettingsSetup,
   stayOnMenu = false,
 } = {}) {
@@ -44,7 +42,7 @@ export async function runConfig({
     return { action: "paths", ...result };
   }
   if (!prompts) throw new Error("Config 菜单缺少交互实现");
-  if (!output.isTTY) {
+  if (!input.isTTY || !output.isTTY) {
     output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
     return { action: "paths", configPath, dataDir };
   }
@@ -74,16 +72,13 @@ export async function runConfig({
         {
           value: "system",
           label: "系统设置",
-          hint: "调试、调用详情记录、审批超时、Sandbox、默认工作区与渠道模型覆盖",
+          hint: "调用详情记录、审批超时、Sandbox、默认工作区与渠道模型覆盖",
         },
-        { value: "automation", label: "自动化", hint: "计划任务" },
+        { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭无人值守任务" },
         { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
-        ...(telegramConfigured
-          ? [{ value: "message_format", label: "Telegram 消息格式", hint: "html 或 rich" }]
-          : []),
         { value: "paths", label: "查看配置路径", hint: "显示用户目录与配置文件位置" },
         { value: "cancel", label: "取消", hint: "退出 Config" },
       ],
@@ -92,82 +87,39 @@ export async function runConfig({
       prompts.cancel("Config 已取消");
       return undefined;
     }
-    if (
-      section !== "codex_user"
-      && section !== "paths"
-      && gatewayConfigError !== undefined
-    ) {
-      throw gatewayConfigError;
-    }
-    const common = {
-      environment,
-      output,
-      prompts,
-      writeConfig,
+    const handlers = {
+      codex_user: () => codexUserSettingsSetup({ environment, output, prompts }),
+      display: runDisplaySettings,
+      system: runSystemSettings,
+      scheduled_tasks: runScheduledTasks,
+      network: runNetworkSettings,
+      advanced: runAdvancedSettings,
+      webui: runWebuiSettings,
+      metrics: runMetricsSettings,
     };
-    switch (section) {
-      case "summary":
-        writeGatewayConfigSummary(output, document, configPath, environment);
-        continue;
-      case "codex_user": {
-        const result = await codexUserSettingsSetup({ environment, output, prompts });
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
+    if (!["summary", "paths"].includes(section) && !Object.hasOwn(handlers, section)) {
+      throw new Error(`未知 Config 类别：${String(section)}`);
+    }
+    try {
+      if (section !== "codex_user" && section !== "paths" && gatewayConfigError !== undefined) {
+        throw gatewayConfigError;
       }
-      case "display": {
-        const result = await runDisplaySettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "system": {
-        const result = await runSystemSettings({ ...common, input, debugSetup });
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "automation": {
-        const result = await runAutomationSettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "network": {
-        const result = await runNetworkSettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "advanced": {
-        const result = await runAdvancedSettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "webui": {
-        const result = await runWebuiSettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "metrics": {
-        const result = await runMetricsSettings(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "message_format": {
-        const result = await runTelegramMessageFormat(common);
-        if (isBackResult(result)) continue;
-        if (stayOnMenu) continue;
-        return result;
-      }
-      case "paths":
+      if (section === "paths") {
         output.write(`用户目录：${dataDir}\n配置文件：${configPath}\n`);
         continue;
-      default:
-        throw new Error(`未知 Config 类别：${String(section)}`);
+      }
+      if (section === "summary") {
+        writeGatewayConfigSummary(output, document, configPath, environment);
+        continue;
+      }
+      const result = await handlers[section]({
+        environment, input, output, prompts, writeConfig, telegramConfigured,
+      });
+      if (isBackResult(result) || stayOnMenu) continue;
+      return result;
+    } catch (error) {
+      if (!stayOnMenu) throw error;
+      reportMenuError(error);
     }
   }
 }

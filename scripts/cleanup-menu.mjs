@@ -1,5 +1,6 @@
 import * as clackPrompts from "@clack/prompts";
 
+import { reportMenuError } from "./cli-menu.mjs";
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { runMetricsMaintenanceMenu } from "./metrics-menu.mjs";
 import { runSessionCleanupMenu } from "./session-menu.mjs";
@@ -36,32 +37,37 @@ export async function runCleanupMenu({
       prompts.cancel("已退出清理菜单");
       return;
     }
-    if (action === "sessions") {
-      await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup });
-    } else if (action === "cleanup" || action === "reset") {
-      await runMetricsMaintenanceMenu(action, { prompts, readStorage, runDatabaseCommand });
-    } else if (action === "traffic") {
-      await runTrafficCleanup([]);
-      const confirmed = await prompts.confirm({
-        message: "确认永久删除当前配置目录中的全部请求与响应转储？执行前需停止全部 App Server。",
-        initialValue: false,
-      });
-      if (!prompts.isCancel(confirmed) && confirmed === true) await runTrafficCleanup(["--confirm"]);
-    } else if (action === "prune") {
-      const provider = await prompts.text({
-        message: "需要清理指标的精确 Provider ID（区分大小写）",
-        placeholder: "例如 openai 或 ds-account",
-        validate: (value) => isPrunableMetricsProviderId(String(value).trim()) ? undefined : "请输入合法的 Provider ID",
-      });
-      if (prompts.isCancel(provider)) continue;
-      const id = String(provider).trim();
-      const confirmed = await prompts.confirm({
-        message: `确认备份并清理 Provider ${id} 的请求指标？Gateway 将按原运行状态恢复。`,
-        initialValue: false,
-      });
-      if (!prompts.isCancel(confirmed) && confirmed === true) await runDatabaseCommand(["prune", id]);
-    } else {
+    if (!["sessions", "cleanup", "reset", "traffic", "prune"].includes(action)) {
       throw new Error(`未知清理项目：${String(action)}`);
+    }
+    try {
+      if (action === "sessions") {
+        await runSessionCleanupMenu({ prompts, runCleanup: runSessionCleanup });
+      } else if (action === "cleanup" || action === "reset") {
+        await runMetricsMaintenanceMenu(action, { prompts, readStorage, runDatabaseCommand });
+      } else if (action === "traffic") {
+        await runTrafficCleanup([]);
+        const confirmed = await prompts.confirm({
+          message: "确认永久删除当前配置目录中的全部请求与响应转储？执行前需停止全部 App Server。",
+          initialValue: false,
+        });
+        if (!prompts.isCancel(confirmed) && confirmed === true) await runTrafficCleanup(["--confirm"]);
+      } else if (action === "prune") {
+        const provider = await prompts.text({
+          message: "需要清理指标的精确 Provider ID（区分大小写）",
+          placeholder: "例如 openai 或 ds-account",
+          validate: (value) => isPrunableMetricsProviderId(String(value).trim()) ? undefined : "请输入合法的 Provider ID",
+        });
+        if (prompts.isCancel(provider)) continue;
+        const id = String(provider).trim();
+        const confirmed = await prompts.confirm({
+          message: `确认备份并清理 Provider ${id} 的请求指标？Gateway 将按原运行状态恢复。`,
+          initialValue: false,
+        });
+        if (!prompts.isCancel(confirmed) && confirmed === true) await runDatabaseCommand(["prune", id]);
+      }
+    } catch (error) {
+      reportMenuError(error);
     }
   }
 }

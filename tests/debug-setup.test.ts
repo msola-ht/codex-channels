@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
-import { runDebugSetup } from "../scripts/debug-setup.mjs";
+import { writeLoggingLevel } from "../scripts/debug-setup.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 
 const roots: string[] = [];
@@ -27,16 +27,12 @@ describe("Debug setup", () => {
     ["enabled", "debug", true],
     ["disabled", "info", false],
   ] as const)("writes %s as the global logging level", async (
-    selected,
+    _selected,
     expectedLevel,
     enabled,
   ) => {
     const fixture = createFixture();
     const output: string[] = [];
-    const prompts = {
-      select: vi.fn(async () => selected),
-      isCancel: () => false,
-    };
 
     const expectedActivation = enabled
       ? {
@@ -55,12 +51,12 @@ describe("Debug setup", () => {
             commands: [],
           },
         };
-    await expect(runDebugSetup({
+    expect(writeLoggingLevel({
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value) },
-      prompts,
-    })).resolves.toEqual({
-      enabled,
+      level: expectedLevel,
+    })).toEqual({
+      level: expectedLevel,
       configPath: fixture.configPath,
       ...expectedActivation,
     });
@@ -71,25 +67,18 @@ describe("Debug setup", () => {
     expect(readFileSync(fixture.configPath, "utf8")).toContain(
       `level = "${expectedLevel}"`,
     );
-    expect(output.join("")).toContain(enabled ? "已开启" : "已关闭");
+    expect(output.join("")).toContain(`日志等级已设为 ${expectedLevel}`);
     expect(output.join("")).toContain(
       enabled ? "需要重建 Gateway 连接" : "当前值未变化，配置文件未写入，无需重启服务",
     );
   });
 
-  it("returns without changing config when going back", async () => {
+  it("rejects unknown levels without changing config", () => {
     const fixture = createFixture();
     const before = readFileSync(fixture.configPath, "utf8");
-
-    await expect(runDebugSetup({
-      environment: fixture.environment,
-      output: { write: vi.fn() },
-      prompts: {
-        select: vi.fn(async () => "back"),
-        isCancel: () => false,
-      },
-    })).resolves.toEqual({ action: "back" });
-
+    expect(() => writeLoggingLevel({
+      environment: fixture.environment, output: { write: vi.fn() }, level: "unknown",
+    })).toThrow("未知日志等级");
     expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
   });
 });

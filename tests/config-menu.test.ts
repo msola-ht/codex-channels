@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -47,11 +48,37 @@ afterEach(() => {
 });
 
 describe("Codex Connect config menu", () => {
+  it("keeps paths accessible after a config read failure in the interactive loop", async () => {
+    const fixture = createFixture();
+    writeFileSync(fixture.configPath, "[broken");
+    const write = vi.fn();
+    const select = vi.fn().mockResolvedValueOnce("summary")
+      .mockResolvedValueOnce("paths").mockResolvedValueOnce("cancel");
+    await runConfig({
+      environment: fixture.environment, input: { isTTY: true },
+      output: { isTTY: true, write }, stayOnMenu: true,
+      prompts: { intro: vi.fn(), select, isCancel: () => false, cancel: vi.fn() },
+    });
+    expect(select).toHaveBeenCalledTimes(3);
+    expect(write).toHaveBeenCalledWith(expect.stringContaining(fixture.configPath));
+    expect(readFileSync(fixture.configPath, "utf8")).toBe("[broken");
+  });
+
+  it("shows paths without prompting when stdin is redirected and stdout is a terminal", async () => {
+    const select = vi.fn();
+    await expect(runConfig({
+      input: { isTTY: false }, output: { isTTY: true, write: vi.fn() },
+      prompts: { select },
+    })).resolves.toMatchObject({ action: "paths" });
+    expect(select).not.toHaveBeenCalled();
+  });
+
   it("prints configuration paths without prompts on a non-interactive output", async () => {
     const fixture = createFixture();
     const output: string[] = [];
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: false },
       prompts: {
@@ -76,6 +103,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
       json: true,
       output: { write: (value: string) => output.push(value), isTTY: true },
@@ -109,6 +137,7 @@ describe("Codex Connect config menu", () => {
     const codexUserSettingsSetup = vi.fn(async () => ({ action: "configured" }));
 
     await expect(runConfig({
+      input: { isTTY: true },
       environment: { CODEX_CONNECT_CONFIG_FILE: configPath },
       output,
       prompts,
@@ -140,6 +169,7 @@ describe("Codex Connect config menu", () => {
       .mockResolvedValueOnce("cancel");
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -175,6 +205,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -202,6 +233,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -217,16 +249,16 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("WebUI：[::1]:8787");
   });
 
-  it("toggles Gateway scheduled tasks through the automation menu", async () => {
+  it("toggles Gateway scheduled tasks directly from Config", async () => {
     const fixture = createFixture();
     const output: string[] = [];
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
         intro: vi.fn(),
         select: vi.fn()
-          .mockResolvedValueOnce("automation")
           .mockResolvedValueOnce("scheduled_tasks")
           .mockResolvedValueOnce("enabled"),
         isCancel: () => false,
@@ -242,7 +274,6 @@ describe("Codex Connect config menu", () => {
   it("labels the scheduled task back button with its actual Config destination", async () => {
     const fixture = createFixture();
     const select = vi.fn()
-      .mockResolvedValueOnce("automation")
       .mockResolvedValueOnce("scheduled_tasks")
       .mockImplementationOnce(async (options: {
         options: Array<{ value: string; label: string }>;
@@ -253,6 +284,7 @@ describe("Codex Connect config menu", () => {
       .mockResolvedValueOnce("cancel");
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -269,6 +301,7 @@ describe("Codex Connect config menu", () => {
     const output: string[] = [];
     const proxy = "http://proxy-user:proxy-secret@127.0.0.1:7890";
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -297,6 +330,7 @@ describe("Codex Connect config menu", () => {
       .mockResolvedValueOnce("http://127.0.0.1:7891")
       .mockResolvedValueOnce("http://127.0.0.1:7892");
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -349,6 +383,7 @@ describe("Codex Connect config menu", () => {
     const gatewayBefore = readFileSync(fixture.configPath, "utf8");
     const output: string[] = [];
     const result = await runConfig({
+      input: { isTTY: true },
       environment: { ...fixture.environment, CODEX_HOME: codexHome },
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: {
@@ -418,6 +453,7 @@ describe("Codex Connect config menu", () => {
       .mockResolvedValueOnce("cancel");
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -432,6 +468,7 @@ describe("Codex Connect config menu", () => {
   it("configures the full log level and development Plugin API", async () => {
     const fixture = createFixture();
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -445,6 +482,7 @@ describe("Codex Connect config menu", () => {
       },
     });
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -477,6 +515,7 @@ describe("Codex Connect config menu", () => {
       .mockResolvedValueOnce("cancel");
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -486,32 +525,6 @@ describe("Codex Connect config menu", () => {
         cancel: vi.fn(),
       },
     });
-  });
-
-    it("delegates the debug mode entry under system settings", async () => {
-    const fixture = createFixture();
-    const output: string[] = [];
-    const debugSetup = vi.fn(async () => "debug-configured");
-    const prompts = {
-      intro: vi.fn(),
-      select: vi.fn()
-        .mockResolvedValueOnce("system")
-        .mockResolvedValueOnce("debug"),
-      isCancel: () => false,
-      cancel: vi.fn(),
-    };
-
-    const result = await runConfig({
-      environment: fixture.environment,
-      output: { write: (value: string) => output.push(value), isTTY: true },
-      prompts,
-      debugSetup,
-    });
-
-    expect(result).toBe("debug-configured");
-    expect(debugSetup).toHaveBeenCalledWith(expect.objectContaining({
-      environment: fixture.environment,
-    }));
   });
 
   it("toggles the model traffic dump through the system settings", async () => {
@@ -528,6 +541,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -560,6 +574,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -591,6 +606,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -617,6 +633,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -642,6 +659,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -663,6 +681,7 @@ describe("Codex Connect config menu", () => {
       cancel: vi.fn(),
     };
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts,
@@ -685,6 +704,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -710,6 +730,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -741,6 +762,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -773,6 +795,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -790,6 +813,7 @@ describe("Codex Connect config menu", () => {
       cancel: vi.fn(),
     };
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts: tokenPrompts,
@@ -800,6 +824,74 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it.each(["register-current", "register-existing"])("registers an existing directory through %s and returns to the menu", async (action) => {
+    const fixture = createFixture();
+    const directory = join(fixture.dataDir, "Existing Project");
+    mkdirSync(directory);
+    writeFileSync(join(directory, "keep.txt"), "existing contents");
+    const actions = [action, "list", "cancel"];
+    const prompts = {
+      intro: vi.fn(), cancel: vi.fn(), isCancel: () => false,
+      select: vi.fn(async () => actions.shift()),
+      text: vi.fn(async () => directory), confirm: vi.fn(async () => true),
+    };
+    await runWorkspaceCommand([], {
+      cwd: action === "register-current" ? directory : fixture.dataDir,
+      environment: fixture.environment, output: { write: vi.fn() },
+      inputIsTTY: true, outputIsTTY: true, prompts,
+    });
+    const document = readGatewayConfig(fixture.configPath) as unknown as ConfigWithWorkspaces;
+    expect(document.workspaces).toEqual(expect.arrayContaining([expect.objectContaining({ cwd: realpathSync(directory) })]));
+    expect(readFileSync(join(directory, "keep.txt"), "utf8")).toBe("existing contents");
+    expect(prompts.select).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not change workspace registrations when directory confirmation is cancelled", async () => {
+    const fixture = createFixture();
+    const before = readFileSync(fixture.configPath, "utf8");
+    const actions = ["register-current", "cancel"];
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir, environment: fixture.environment,
+      inputIsTTY: true, outputIsTTY: true, output: { write: vi.fn() },
+      prompts: {
+        intro: vi.fn(), cancel: vi.fn(), isCancel: () => false,
+        select: vi.fn(async () => actions.shift()), confirm: vi.fn(async () => false),
+      },
+    });
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+  });
+
+  it("rejects missing directories without creating them and keeps the Workspace menu available", async () => {
+    const fixture = createFixture();
+    const before = readFileSync(fixture.configPath, "utf8");
+    const missing = join(fixture.dataDir, "missing-project");
+    const actions = ["register-existing", "list", "cancel"];
+    const confirm = vi.fn();
+    const select = vi.fn(async () => actions.shift());
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir, environment: fixture.environment,
+      inputIsTTY: true, outputIsTTY: true, output: { write: vi.fn() },
+      prompts: {
+        intro: vi.fn(), cancel: vi.fn(), isCancel: () => false,
+        select, confirm, text: vi.fn(async () => missing),
+      },
+    });
+    expect(existsSync(missing)).toBe(false);
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(select).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not prompt when Workspace stdin is redirected", async () => {
+    const fixture = createFixture();
+    const select = vi.fn();
+    await runWorkspaceCommand([], {
+      cwd: fixture.dataDir, environment: fixture.environment,
+      inputIsTTY: false, outputIsTTY: true, output: { write: vi.fn() }, prompts: { select },
+    });
+    expect(select).not.toHaveBeenCalled();
+  });
+
   it("sets workspace sandbox and approval policy through the menu", async () => {
     const fixture = createFixture();
     const output: string[] = [];
@@ -808,7 +900,8 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("sandbox")
-        .mockResolvedValueOnce("danger-full-access"),
+        .mockResolvedValueOnce("danger-full-access")
+        .mockResolvedValueOnce("cancel"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -818,6 +911,7 @@ describe("Codex Connect config menu", () => {
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value) },
       outputIsTTY: true,
+      inputIsTTY: true,
       prompts,
     });
 
@@ -834,7 +928,8 @@ describe("Codex Connect config menu", () => {
       select: vi.fn()
         .mockResolvedValueOnce("permissions")
         .mockResolvedValueOnce("approval_policy")
-        .mockResolvedValueOnce("never"),
+        .mockResolvedValueOnce("never")
+        .mockResolvedValueOnce("cancel"),
       isCancel: () => false,
       cancel: vi.fn(),
     };
@@ -844,6 +939,7 @@ describe("Codex Connect config menu", () => {
       environment: fixture.environment,
       output: { write: () => {} },
       outputIsTTY: true,
+      inputIsTTY: true,
       prompts,
     });
 
@@ -869,6 +965,7 @@ describe("Codex Connect config menu", () => {
       environment: fixture.environment,
       output: { write: vi.fn() },
       outputIsTTY: true,
+      inputIsTTY: true,
       prompts,
     });
 
@@ -905,6 +1002,7 @@ describe("Codex Connect config menu", () => {
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value) },
       outputIsTTY: true,
+      inputIsTTY: true,
       prompts,
     });
 
@@ -927,6 +1025,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -951,6 +1050,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -975,6 +1075,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -998,6 +1099,7 @@ describe("Codex Connect config menu", () => {
     const prompts = {
       intro: vi.fn(),
       select: vi.fn()
+        .mockResolvedValueOnce("display")
         .mockResolvedValueOnce("message_format")
         .mockResolvedValueOnce("rich"),
       isCancel: () => false,
@@ -1005,6 +1107,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -1015,11 +1118,41 @@ describe("Codex Connect config menu", () => {
     });
   });
 
+  it.each(
+    ["message_format", "operation_updates", "plan_updates", "reasoning"].flatMap((action) =>
+      ["back", Symbol("cancel")].map((cancel) => ({ action, cancel }))),
+  )("returns from $action to Display before leaving Config ($cancel)", async ({ action, cancel }) => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = { bot_token: "fixture", allowed_user_ids: [1], message_format: "html" };
+    writeGatewayConfig(fixture.configPath, document);
+    const before = readFileSync(fixture.configPath, "utf8");
+    const select = vi.fn()
+      .mockResolvedValueOnce("display")
+      .mockResolvedValueOnce(action)
+      .mockResolvedValueOnce(cancel)
+      .mockResolvedValueOnce("back")
+      .mockResolvedValueOnce("cancel");
+    await runConfig({
+      environment: fixture.environment, input: { isTTY: true },
+      output: { isTTY: true, write: vi.fn() }, stayOnMenu: true,
+      prompts: {
+        intro: vi.fn(), select, cancel: vi.fn(),
+        isCancel: (value: unknown) => typeof value === "symbol",
+      },
+    });
+    expect(select).toHaveBeenCalledTimes(5);
+    expect(select.mock.calls[3]?.[0]).toMatchObject({ message: "选择显示设置" });
+    expect(select.mock.calls[4]?.[0]).toMatchObject({ message: "选择配置项" });
+    expect(readFileSync(fixture.configPath, "utf8")).toBe(before);
+  });
+
   it("hides Telegram-only settings until a Bot token is configured", async () => {
     const fixture = createFixture();
-    const select = vi.fn().mockResolvedValueOnce("cancel");
+    const select = vi.fn().mockResolvedValueOnce("display").mockResolvedValueOnce("back").mockResolvedValueOnce("cancel");
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: vi.fn(), isTTY: true },
       prompts: {
@@ -1030,7 +1163,7 @@ describe("Codex Connect config menu", () => {
       },
     });
 
-    const options = select.mock.calls[0]?.[0]?.options ?? [];
+    const options = select.mock.calls[1]?.[0]?.options ?? [];
     expect(options.map((option: { value: string }) => option.value))
       .not.toContain("message_format");
   });
@@ -1049,6 +1182,7 @@ describe("Codex Connect config menu", () => {
     };
 
     await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,
@@ -1059,7 +1193,7 @@ describe("Codex Connect config menu", () => {
     const values = options.map((option: { value: string }) => option.value);
     expect(values).toContain("summary");
     expect(values).toContain("codex_user");
-    expect(values).toContain("automation");
+    expect(values).toContain("scheduled_tasks");
     expect(values).toContain("network");
     expect(values).toContain("advanced");
     expect(values).toContain("paths");
@@ -1083,6 +1217,7 @@ describe("Codex Connect config menu", () => {
     };
 
     const result = await runConfig({
+      input: { isTTY: true },
       environment: fixture.environment,
       output: { write: (value: string) => output.push(value), isTTY: true },
       prompts,

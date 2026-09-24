@@ -22,17 +22,11 @@ export async function runSystemSettings({
   output,
   prompts,
   writeConfig = writeGatewayConfig,
-  debugSetup,
 }) {
   const section = await prompts.select({
     message: "选择系统设置",
     showInstructions: false,
     options: [
-      {
-        value: "debug",
-        label: "调试模式（快捷开关）",
-        hint: "在 info / debug 间切换；其他等级在高级设置中选择",
-      },
       {
         value: "model_traffic_dump",
         label: "调用详情记录",
@@ -84,7 +78,6 @@ export async function runSystemSettings({
     ],
   });
   if (prompts.isCancel(section) || section === "back") return { action: "back" };
-  if (section === "debug") return debugSetup({ environment, input, output, prompts });
   if (section === "model_traffic_dump") {
     return runModelTrafficDump({ environment, output, prompts, writeConfig });
   }
@@ -113,10 +106,10 @@ export async function runSystemSettings({
     return runOfficialTuiTerminal({ environment, output, prompts, writeConfig });
   }
   if (section === "app_server_timezone") {
-    return runAppServerTimezone({ environment, output, prompts, writeConfig });
+    return runAppServerTimezone({ environment, input, output, prompts, writeConfig });
   }
   if (section === "gateway_timezone") {
-    const result = await runTimezoneCommand(["--gateway"], { environment, output, prompts, writeConfig });
+    const result = await runTimezoneCommand(["--gateway"], { environment, input, output, prompts, writeConfig });
     return result.action === "cancelled" ? { action: "back" } : result;
   }
   throw new Error(`未知系统设置：${String(section)}`);
@@ -426,8 +419,9 @@ async function runOfficialTuiTerminal({ environment, output, prompts, writeConfi
 }
 
 /** 与 `codexc timezone` 共用同一实现，两处入口保持一致的校验与写入路径。 */
-async function runAppServerTimezone({ environment, output, prompts, writeConfig }) {
+async function runAppServerTimezone({ environment, input, output, prompts, writeConfig }) {
   const result = await runTimezoneCommand([], {
+    input,
     environment,
     output,
     prompts,

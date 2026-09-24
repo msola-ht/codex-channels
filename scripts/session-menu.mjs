@@ -1,34 +1,5 @@
 import * as clackPrompts from "@clack/prompts";
 
-export async function runSessionMenu({
-  prompts = clackPrompts,
-  runCleanup,
-} = {}) {
-  if (typeof runCleanup !== "function") {
-    throw new Error("会话清理菜单缺少执行入口");
-  }
-  prompts.intro("Codex Connect Sessions");
-  const action = await prompts.select({
-    message: "选择会话操作",
-    showInstructions: false,
-    options: [
-      {
-        value: "cleanup",
-        label: "归档旧会话及子会话",
-        hint: "按主会话轮数预览，派生后代随官方归档",
-      },
-      { value: "cancel", label: "取消" },
-    ],
-  });
-  if (prompts.isCancel(action) || action === "cancel") {
-    prompts.cancel("已取消");
-    return;
-  }
-  if (action !== "cleanup") throw new Error(`未知会话操作：${String(action)}`);
-
-  return runSessionCleanupMenu({ prompts, runCleanup });
-}
-
 export async function runSessionCleanupMenu({ prompts = clackPrompts, runCleanup }) {
 
   const maxTurns = await prompts.text({

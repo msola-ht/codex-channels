@@ -9,10 +9,12 @@
 
 ## 命令范围
 
+交互终端无参数运行 `codexc` 打开主菜单，调用现有命令；非交互终端显示帮助。主菜单、运行与连接、服务、工作区、指标和清理菜单在单项完成、取消或操作失败后可继续选择，退出当前菜单返回上层；进程终止信号仍结束命令。
+
 - `init`、`setup`、`config`：初始化用户目录；通过 Setup 接入 Provider、通讯渠道和项目技能；
-  通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
+  Setup 和 Config 操作失败后保留分类菜单；通过 Config 统一管理 Codex 新会话与用户偏好，以及 Gateway 的操作详情、计划更新、调试模式、
   审批超时、Sandbox、默认工作区、模型覆盖、WebUI、指标、Telegram 消息格式和配置路径。
-  `setup --json` 保留交互并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
+  `setup` 在初始化前校验交互终端；`setup --json` 使用终端 stderr 提示并以 JSON Lines 输出脱敏事件；`config` 在非交互终端直接显示用户级
   `.codex-connect` 配置路径，`config --json` 只输出路径与文件存在状态，不读取或输出配置正文。
 - `doctor`：诊断当前 TOML 配置、安装、Linux `bubblewrap` 沙箱前置条件、主 App Server 与已配置
   Provider App Server 的监管拓扑、实际版本和连通性；完成全部检测后按领域只展示失败、提示与处理建议，
@@ -33,9 +35,9 @@
   就绪、单次子进程环境和令牌脱敏由 `scripts/desktop-app-command.mjs` 负责。macOS 通过受管 stdio
   Proxy 附加带生命周期保护的可信工具 Host，不再依赖桥端口或令牌，并由 `status` 单独报告；
   Windows 仍只承诺未实机验收的会话共享预览。
-- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；
+- `work`：把参数交给 `scripts/workspace-command.mjs`，列出、注册、移除 Workspace，或进入交互式权限菜单；菜单区分新建目录、注册当前目录和注册已有目录；
   `list --json` 供脚本读取稳定的 Workspace 注册摘要。
-- `sessions`：无子命令时进入会话清理交互菜单；也可使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
+- `sessions`：无子命令时显示帮助，交互归档集中在 `cleanup`；使用 `sessions cleanup <最大轮数>` 直接预览或确认归档旧会话。
 - `cleanup`：统一交互选择会话归档、转储删除、旧指标清理、Provider 指标清理与指标库重置；复用各自执行入口与服务状态检查，完成或取消单项后返回菜单，非交互终端只显示帮助。
 - `primary-provider`：新增、列出、切换或删除自定义主 Provider；`list --json` 只输出不含凭据的稳定摘要。
 - `deepseek account remove <id>`、`opencode-go account remove <id>`、`ccg account remove <id>`：确认后移除对应账户；三家均以 `legacy remove` 移除没有 ID 的旧单账户，保留备份与历史统计，之后重新添加。
@@ -45,7 +47,7 @@
 - `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。当前数据库入口只校验版本与结构；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
-- `metrics`：查询、导出、清理或显式维护独立模型指标库；`status --json` 返回稳定的路径、Schema
+- `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 JSON Lines 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
@@ -53,7 +55,7 @@
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
 - `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。
-- `service`：安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
+- `service`：交互终端无参数时选择操作及明确目标，日志菜单显示最近 100 行；卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。非交互终端无参数时显示帮助。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
   与 Gateway；启停、重启、状态和日志命令使用
   `gateway`、`app-server`、`webui` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
   `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、

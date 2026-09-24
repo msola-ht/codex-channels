@@ -1,3 +1,4 @@
+import { isCommandHelp } from "./cli-help.mjs";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -476,7 +477,7 @@ async function readInitialConfig(path) {
 
 export async function runCcgAccountCli(args, options = {}) {
   const usage = "用法：codexc ccg account remove <id>\ncodexc ccg legacy remove（确认后移除旧单账户）";
-  if (args.includes("--help") || args.includes("-h")) {
+  if (isCommandHelp(args, [[], ["account"], ["legacy"], ["legacy", "remove"], ["account", "remove"]], usage)) {
     (options.output ?? process.stdout).write(`${usage}\n`);
     return;
   }

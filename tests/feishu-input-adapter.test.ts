@@ -255,6 +255,12 @@ describe("Feishu input adapter", () => {
       { submit },
       fixture.outbox,
       { download },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0 },
     );
 
     await adapter.handle(createImageMessage());
@@ -444,6 +450,12 @@ describe("Feishu input adapter", () => {
       { submit },
       fixture.outbox,
       { download },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0 },
     );
 
     await adapter.handle(createImageMessage({
@@ -484,6 +496,12 @@ describe("Feishu input adapter", () => {
       { submit },
       fixture.outbox,
       { download },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0 },
     );
 
     await adapter.handleImageBatch([
@@ -533,6 +551,12 @@ describe("Feishu input adapter", () => {
       { submit },
       fixture.outbox,
       { download },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0 },
     );
 
     await adapter.handle(createImageMessage({
@@ -598,6 +622,12 @@ describe("Feishu input adapter", () => {
           bytes: 3,
         }),
       },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { quietWindowMs: 0 },
     );
 
     await adapter.handle(createImageMessage({

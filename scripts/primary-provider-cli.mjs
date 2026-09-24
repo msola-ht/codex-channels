@@ -1,3 +1,4 @@
+import { isCommandHelp } from "./cli-help.mjs";
 import * as clackPrompts from "@clack/prompts";
 import { pathToFileURL } from "node:url";
 
@@ -474,7 +475,7 @@ export async function runPrimaryProviderCli(
   } = {},
 ) {
   const [subcommand, ...rest] = args;
-  if (subcommand === undefined || subcommand === "-h" || subcommand === "--help") {
+  if (args.length === 0 || isCommandHelp(args, [[], ["add"], ["list"], ["switch"], ["remove"]], primaryProviderUsage)) {
     output.write(`${primaryProviderUsage}\n`);
     return;
   }

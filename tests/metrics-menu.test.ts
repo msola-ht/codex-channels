@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
+import { runMetricsMenu, runMetricsMaintenanceMenu } from "../scripts/metrics-menu.mjs";
 
 describe("metrics menu", () => {
   it("routes status through the database command boundary", async () => {
@@ -22,11 +22,10 @@ describe("metrics menu", () => {
       confirms: [true],
     });
 
-    await runMetricsMenu({
+    await runMetricsMaintenanceMenu("cleanup", {
       prompts,
       readStorage: () => ({ retention_days: 90, max_rows: 100_000 }),
       runDatabaseCommand,
-      runMetricsCommand: vi.fn(),
     });
 
     expect(runDatabaseCommand).toHaveBeenCalledWith([
@@ -38,6 +37,42 @@ describe("metrics menu", () => {
       "--vacuum",
     ]);
   });
+  it("offers query actions without duplicate maintenance entries and returns after each query", async () => {
+    const prompts = promptFixture({ selects: ["threads", "7d", "json", "quota", "30d", "markdown", "status", "cancel"] });
+    const runDatabaseCommand = vi.fn();
+    const runMetricsCommand = vi.fn();
+    await runMetricsMenu({ prompts, runDatabaseCommand, runMetricsCommand });
+    expect(runMetricsCommand).toHaveBeenCalledExactlyOnceWith(["threads", "--range", "7d", "--format", "json"]);
+    expect(runDatabaseCommand.mock.calls).toEqual([
+      [["quota", "--range", "30d", "--format", "markdown"]], [["status"]],
+    ]);
+    const options = prompts.select.mock.calls[0]?.[0]?.options as Array<{ value: string }>;
+    expect(options.map((option) => option.value)).not.toContain("cleanup");
+    expect(options.map((option) => option.value)).not.toContain("reset");
+  });
+
+  it("cancels a query without dispatching it and still permits another action", async () => {
+    const cancelled = Symbol("cancel");
+    const prompts = promptFixture({ selects: ["threads", cancelled, "status", "cancel"] });
+    const runDatabaseCommand = vi.fn();
+    const runMetricsCommand = vi.fn();
+    await runMetricsMenu({ prompts, runDatabaseCommand, runMetricsCommand });
+    expect(runMetricsCommand).not.toHaveBeenCalled();
+    expect(runDatabaseCommand).toHaveBeenCalledExactlyOnceWith(["status"]);
+  });
+
+  it("awaits asynchronous query completion before showing the next menu", async () => {
+    const prompts = promptFixture({ selects: ["status", "cancel"] });
+    let complete!: () => void;
+    const runDatabaseCommand = vi.fn(() => new Promise<void>((resolve) => { complete = resolve; }));
+    const task = runMetricsMenu({ prompts, runDatabaseCommand, runMetricsCommand: vi.fn() });
+    await vi.waitFor(() => expect(runDatabaseCommand).toHaveBeenCalledTimes(1));
+    expect(prompts.select).toHaveBeenCalledTimes(1);
+    complete();
+    await task;
+    expect(prompts.select).toHaveBeenCalledTimes(2);
+  });
+
 });
 
 function promptFixture({
@@ -52,8 +87,8 @@ function promptFixture({
   return {
     intro: vi.fn(),
     cancel: vi.fn(),
-    isCancel: () => false,
-    select: vi.fn(async () => selects.shift()),
+    isCancel: (value: unknown) => typeof value === "symbol",
+    select: vi.fn(async (options: Record<string, unknown>) => { void options; return selects.shift() ?? "cancel"; }),
     text: vi.fn(async () => texts.shift()),
     confirm: vi.fn(async () => confirms.shift()),
   };

@@ -2,68 +2,77 @@ import * as clackPrompts from "@clack/prompts";
 
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
+import { reportMenuError } from "./cli-menu.mjs";
 import { requireUserConfig } from "./runtime-config.mjs";
 
 export async function runMetricsMenu({
   prompts = clackPrompts,
-  readStorage = defaultReadStorage,
   readThreads = defaultReadThreads,
   runDatabaseCommand,
   runMetricsCommand,
 }) {
   prompts.intro("Codex Connect Metrics");
-  const action = await prompts.select({
-    message: "选择指标操作",
-    showInstructions: false,
-    options: [
-      {
-        value: "run",
-        label: "本次运行导出",
-        hint: "指定 Thread 输出最近运行与累计汇总（写入 output 目录）",
-      },
-      {
-        value: "turns",
-        label: "会话明细导出",
-        hint: "选择会话后导出每次对话汇总（写入 output 目录）",
-      },
-      {
-        value: "report",
-        label: "聚合汇报",
-        hint: "按时间范围与分组输出汇报（写入 output 目录）",
-      },
-      {
-        value: "export",
-        label: "明细导出",
-        hint: "导出脱敏请求记录（写入 output 目录）",
-      },
-      {
-        value: "status",
-        label: "数据库状态",
-        hint: "查看指标库路径、Schema 与记录数",
-      },
-      {
-        value: "cleanup",
-        label: "清理旧指标",
-        hint: "按自定天数和最大行数备份清理",
-      },
-      {
-        value: "reset",
-        label: "重置指标库",
-        hint: "备份并重建（需 Gateway 停止）",
-      },
-      { value: "cancel", label: "取消" },
-    ],
-  });
-  if (prompts.isCancel(action) || action === "cancel") {
-    prompts.cancel("已取消");
+  while (true) {
+    const action = await prompts.select({
+      message: "选择指标操作",
+      showInstructions: false,
+      options: [
+        {
+          value: "run",
+          label: "本次运行导出",
+          hint: "指定 Thread 输出最近运行与累计汇总（写入 output 目录）",
+        },
+        {
+          value: "turns",
+          label: "会话明细导出",
+          hint: "选择会话后导出每次对话汇总（写入 output 目录）",
+        },
+        {
+          value: "report",
+          label: "聚合汇报",
+          hint: "按时间范围与分组输出汇报（写入 output 目录）",
+        },
+        {
+          value: "export",
+          label: "明细导出",
+          hint: "导出脱敏请求记录（写入 output 目录）",
+        },
+        {
+          value: "status",
+          label: "数据库状态",
+          hint: "查看指标库路径、Schema 与记录数",
+        },
+        { value: "threads", label: "会话列表导出", hint: "按时间范围导出有指标的会话" },
+        { value: "quota", label: "历史额度窗口", hint: "只读查询已记录的额度周期" },
+        { value: "cancel", label: "取消" },
+      ],
+    });
+    if (prompts.isCancel(action) || action === "cancel") {
+      prompts.cancel("已取消");
+      return;
+    }
+    try {
+      await runMetricsMenuAction(action, { prompts, readThreads, runDatabaseCommand, runMetricsCommand });
+    } catch (error) {
+      reportMenuError(error);
+    }
+  }
+}
+
+async function runMetricsMenuAction(action, { prompts, readThreads, runDatabaseCommand, runMetricsCommand }) {
+  if (action === "threads" || action === "quota") {
+    const range = await selectMetricsRange(prompts);
+    if (prompts.isCancel(range)) return;
+    const format = await selectExportFormat(prompts);
+    if (prompts.isCancel(format)) return;
+    const args = [action, "--range", String(range), "--format", String(format)];
+    if (action === "quota") await runDatabaseCommand(args);
+    else await runMetricsCommand(args);
     return;
   }
   if (action === "status") {
-    runDatabaseCommand(["status"]);
+    await runDatabaseCommand(["status"]);
     return;
-  }
-  if (action === "reset" || action === "cleanup") {
-    return runMetricsMaintenanceMenu(action, { prompts, readStorage, runDatabaseCommand });
   }
   if (action === "run") {
     const threadId = await prompts.text({
@@ -80,7 +89,7 @@ export async function runMetricsMenu({
       prompts.cancel("已取消");
       return;
     }
-    runMetricsCommand(["run", String(threadId).trim(), "--format", String(format)]);
+    await runMetricsCommand(["run", String(threadId).trim(), "--format", String(format)]);
     return;
   }
   if (action === "turns") {
@@ -114,7 +123,7 @@ export async function runMetricsMenu({
       prompts.cancel("已取消");
       return;
     }
-    runMetricsCommand(["turns", String(selected), "--format", String(format)]);
+    await runMetricsCommand(["turns", String(selected), "--format", String(format)]);
     return;
   }
   if (action === "report") {
@@ -141,7 +150,7 @@ export async function runMetricsMenu({
       prompts.cancel("已取消");
       return;
     }
-    runMetricsCommand([
+    await runMetricsCommand([
       "report",
       "--range",
       String(range),
@@ -172,7 +181,7 @@ export async function runMetricsMenu({
       return;
     }
     const trimmedThreadId = String(threadId).trim();
-    runMetricsCommand([
+    await runMetricsCommand([
       "export",
       "--range",
       String(range),
@@ -199,7 +208,7 @@ export async function runMetricsMaintenanceMenu(action, {
       prompts.cancel("已取消");
       return;
     }
-    runDatabaseCommand(["reset"]);
+    await runDatabaseCommand(["reset"]);
     return;
   }
   if (action === "cleanup") {
@@ -230,7 +239,7 @@ export async function runMetricsMaintenanceMenu(action, {
       prompts.cancel("已取消");
       return;
     }
-    runDatabaseCommand([
+    await runDatabaseCommand([
       "cleanup-restart",
       "--keep-days",
       String(keepDays),

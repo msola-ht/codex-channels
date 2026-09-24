@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ReportedChildExitError } from "../runtime/process-lifecycle.mjs";
 import { runCleanupMenu } from "../scripts/cleanup-menu.mjs";
 
 function fixture(actions: unknown[], texts: unknown[] = [], confirms: unknown[] = []) {
@@ -21,6 +22,15 @@ function fixture(actions: unknown[], texts: unknown[] = [], confirms: unknown[] 
 }
 
 describe("unified cleanup menu", () => {
+  it("returns to the menu after a failed preview without deleting traffic", async () => {
+    const options = fixture(["traffic", "cancel"]);
+    options.runTrafficCleanup.mockRejectedValueOnce(new ReportedChildExitError(1));
+    await runCleanupMenu(options);
+    expect(options.runTrafficCleanup).toHaveBeenCalledExactlyOnceWith([]);
+    expect(options.prompts.confirm).not.toHaveBeenCalled();
+    expect(options.prompts.select).toHaveBeenCalledTimes(2);
+  });
+
   it("collects session parameters without another action menu and returns to the main menu", async () => {
     const options = fixture(["sessions", "cancel"], ["3", "7"]);
     await runCleanupMenu(options);
@@ -67,10 +77,12 @@ describe("unified cleanup menu", () => {
     expect(options.runSessionCleanup).not.toHaveBeenCalled();
   });
 
-  it("stops when traffic preview fails without offering deletion", async () => {
+  it("reports a failed traffic preview without offering deletion and returns to the menu", async () => {
     const options = fixture(["traffic"]);
     options.runTrafficCleanup.mockRejectedValue(new Error("preview failed"));
-    await expect(runCleanupMenu(options)).rejects.toThrow("preview failed");
+    await expect(runCleanupMenu(options)).resolves.toBeUndefined();
+    expect(options.runTrafficCleanup).toHaveBeenCalledExactlyOnceWith([]);
+    expect(options.prompts.select).toHaveBeenCalledTimes(2);
     expect(options.prompts.confirm).not.toHaveBeenCalled();
   });
 
