@@ -406,12 +406,14 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     validateWeeklyQuotaEstimateQuery(query);
     const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
     const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics
+      SELECT status, input_tokens, output_tokens, recorded_at_ms,
+        weekly_quota_limit_id, weekly_resets_at, weekly_used_percent_millionths
+      FROM model_request_metrics
       WHERE provider = ?
         AND recorded_at_ms >= ?
         AND recorded_at_ms <= ?
       ORDER BY id ASC
-    `).all(query.provider, startAtMs, query.nowMs) as unknown as MetricRow[];
+    `).iterate(query.provider, startAtMs, query.nowMs) as unknown as Iterable<WeeklyQuotaRow>;
     return estimateWeeklyQuotaRows(rows, query);
   }
 
@@ -464,7 +466,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT * FROM model_request_metrics
       WHERE recorded_at_ms >= ? AND recorded_at_ms < ?
       ORDER BY recorded_at_ms ASC, id ASC
-    `).all(query.startAtMs, query.endAtMs) as unknown as MetricRow[];
+    `).iterate(query.startAtMs, query.endAtMs) as unknown as Iterable<MetricRow>;
     const groups = new Map<string, StoredQuotaPeriod>();
     for (const row of rows) {
       const metric = toStoredMetric(row);
@@ -1503,8 +1505,12 @@ function validateWeeklyQuotaEstimateQuery(query: WeeklyQuotaEstimateQuery): void
   ) throw new Error("周额度估算查询无效");
 }
 
+type WeeklyQuotaRow = Pick<MetricRow,
+  "status" | "input_tokens" | "output_tokens" | "recorded_at_ms"
+  | "weekly_quota_limit_id" | "weekly_resets_at" | "weekly_used_percent_millionths">;
+
 function estimateWeeklyQuotaRows(
-  rows: MetricRow[],
+  rows: Iterable<WeeklyQuotaRow>,
   query: WeeklyQuotaEstimateQuery,
 ): StoredWeeklyQuotaEstimate | null {
   let baseline: number | null = null;
@@ -1603,7 +1609,7 @@ function emptyWeeklyInterval(): WeeklyIntervalAccumulator {
   };
 }
 
-function addWeeklyIntervalRow(target: WeeklyIntervalAccumulator, row: MetricRow): void {
+function addWeeklyIntervalRow(target: WeeklyIntervalAccumulator, row: WeeklyQuotaRow): void {
   target.requestCount += 1;
   if (row.status !== "completed") target.unsuccessfulRequestCount += 1;
   target.inputTokens += row.input_tokens ?? 0;

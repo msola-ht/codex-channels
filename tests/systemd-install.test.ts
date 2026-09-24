@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { writeServiceDefinitions } from "../scripts/service-install-management.mjs";
 
 const temporaryDirectories: string[] = [];
 const linuxIt = process.platform === "linux" ? it : it.skip;
@@ -43,15 +44,13 @@ describe("systemd installer", () => {
       no_proxy: "localhost,127.0.0.1",
     }));
 
-    execFileSync(process.execPath, [resolve("scripts/install-systemd.mjs")], {
-      env: {
-        ...process.env,
-        HOME: root,
-        XDG_CONFIG_HOME: configHome,
-        CODEX_CONNECT_HOME: configDir,
-        CODEX_CONNECT_CONFIG_FILE: configPath,
-      },
-    });
+    writeServiceDefinitions({
+      ...process.env,
+      HOME: root,
+      XDG_CONFIG_HOME: configHome,
+      CODEX_CONNECT_HOME: configDir,
+      CODEX_CONNECT_CONFIG_FILE: configPath,
+    }, { operatingSystem: "linux" });
 
     const unitsDir = join(configHome, "systemd/user");
     const appServerPath = join(unitsDir, "codex-connect-app-server.service");

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { InteractionPort, InteractionRequest } from "../approval/index.js";
+import type { InteractionRouter, InteractionRequest } from "../approval/index.js";
 import type { AsyncUserQuestion, ConversationInputEvent, ConversationTarget } from "../conversation-core/index.js";
 
 interface QuestionEvent {
@@ -19,7 +19,7 @@ interface PendingQuestion {
 }
 
 interface AsyncQuestionOptions {
-  interactions: InteractionPort;
+  interactions: Pick<InteractionRouter, "request" | "resolvedMany">;
   timeoutMs: number;
   targetForThread(threadId: string): ConversationTarget | undefined;
   currentThread(target: ConversationTarget): string | undefined;
@@ -31,6 +31,7 @@ interface AsyncQuestionOptions {
 export class AsyncQuestionCoordinator {
   private readonly pending = new Set<PendingQuestion>();
   private readonly seen = new Set<string>();
+  private readonly active = new Set<string>();
   private readonly tasks = new Set<Promise<void>>();
   private stopped = false;
 
@@ -51,9 +52,8 @@ export class AsyncQuestionCoordinator {
   private handle(event: QuestionEvent): void {
     if (this.stopped) return;
     const key = JSON.stringify([event.threadId, event.turnId, event.itemId]);
-    if (this.seen.has(key)) return;
-    this.seen.add(key);
-    if (this.seen.size > 1_000) this.seen.delete(this.seen.values().next().value!);
+    if (this.active.has(key) || this.seen.has(key)) return;
+    this.remember(key);
     if (this.options.currentThread(event.target) !== event.threadId) {
       this.options.warn(event, "异步问题未打开：问题所属会话不是当前前台会话。");
       return;
@@ -72,6 +72,7 @@ export class AsyncQuestionCoordinator {
     };
     pending.timer.unref();
     this.pending.add(pending);
+    this.active.add(key);
     const task = this.ask(pending, cancelled).catch(() => {
       if (!pending.cancelled) {
         this.options.warn(event, "异步回答未确认送达，请核对原会话后重新发送；Gateway 不会自动重发。");
@@ -79,26 +80,34 @@ export class AsyncQuestionCoordinator {
     }).finally(() => {
       clearTimeout(pending.timer);
       this.pending.delete(pending);
+      this.active.delete(key);
+      if (!this.stopped) this.remember(key);
       this.tasks.delete(task);
     });
     this.tasks.add(task);
   }
 
   cancelStale(): void {
-    for (const pending of this.pending) {
-      if (this.options.currentThread(pending.event.target) !== pending.event.threadId) this.cancel(pending);
-    }
+    this.cancelMatching((pending) => this.options.currentThread(pending.event.target) !== pending.event.threadId);
   }
 
   cancelThread(threadId: string): void {
-    for (const pending of this.pending) {
-      if (pending.event.threadId === threadId) this.cancel(pending);
-    }
+    this.cancelMatching((pending) => pending.event.threadId === threadId);
+  }
+
+  cancelSurface(surface: string, accountId: string): void {
+    this.cancelMatching(({ event: { target } }) => target.surface === surface && target.accountId === accountId);
+  }
+
+  private remember(key: string): void {
+    this.seen.delete(key);
+    this.seen.add(key);
+    if (this.seen.size > 1_000) this.seen.delete(this.seen.values().next().value!);
   }
 
   async close(): Promise<void> {
     this.stopped = true;
-    for (const pending of this.pending) this.cancel(pending);
+    this.cancelMatching(() => true);
     this.seen.clear();
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -112,10 +121,18 @@ export class AsyncQuestionCoordinator {
   }
 
   private cancel(pending: PendingQuestion): void {
-    if (pending.cancelled) return;
-    pending.cancelled = true;
-    pending.cancel();
-    if (pending.requestId) this.options.interactions.resolved?.(pending.requestId);
+    this.cancelMatching((candidate) => candidate === pending);
+  }
+
+  private cancelMatching(matches: (pending: PendingQuestion) => boolean): void {
+    const requestIds = new Set<string>();
+    for (const pending of this.pending) {
+      if (pending.cancelled || !matches(pending)) continue;
+      pending.cancelled = true;
+      pending.cancel();
+      if (pending.requestId) requestIds.add(pending.requestId);
+    }
+    this.options.interactions.resolvedMany(requestIds);
   }
 
   private async ask(pending: PendingQuestion, cancelled: Promise<undefined>): Promise<void> {

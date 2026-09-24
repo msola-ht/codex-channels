@@ -1,5 +1,21 @@
 import { splitTelegramText } from "./format.js";
 
+export const telegramInteractionReplyHeading = "Codex 交互回复";
+
+export function hasTelegramReplyHeading(html: string): boolean {
+  return html.split("\n", 1)[0]!.replace(/<[^>]+>/g, "") === telegramInteractionReplyHeading;
+}
+
+// Only the interaction sender may emit this heading in bold at the start of a message.
+// Preserve ordinary content while keeping it distinct from a reply prompt after restart.
+export function protectTelegramReplyHeading(html: string): string {
+  const boundary = html.indexOf("\n");
+  const firstLine = boundary < 0 ? html : html.slice(0, boundary);
+  return hasTelegramReplyHeading(html)
+    ? firstLine.replace(/<\/?b>/g, "") + (boundary < 0 ? "" : html.slice(boundary))
+    : html;
+}
+
 export function formatTelegramPanelChunks(text: string, limit = 3_600): string[] {
   const contentLimit = Math.max(1, limit - 128);
   return splitTelegramText(text, contentLimit).map((chunk, index) =>
@@ -129,7 +145,7 @@ export function formatTelegramPanelHtml(
     output.push(escaped);
   }
 
-  return output.join("\n");
+  return protectTelegramReplyHeading(output.join("\n"));
 }
 
 export function escapeTelegramHtml(value: string): string {

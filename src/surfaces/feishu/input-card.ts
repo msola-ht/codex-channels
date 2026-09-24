@@ -141,7 +141,7 @@ function renderUserInputCard(
   formElements.push(formSubmitButton("提交回答", interactionToken));
 
   return cardKit(
-    "Codex 需要补充信息",
+    request.title,
     [
       {
         tag: "form",

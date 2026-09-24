@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   inspectMetricsDatabase,
@@ -37,6 +37,34 @@ function fixture() {
 }
 
 describe("model request metrics database access", () => {
+  it("opens reports without diagnostic counts and still validates the schema", () => {
+    const { environment, databasePath } = fixture();
+    const store = new SqliteModelRequestMetricsStore(databasePath);
+    store.record(metricSample());
+    store.close();
+    const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
+    try {
+      readMetricsReport(environment);
+      const statements = prepare.mock.calls.map(([sql]) => sql);
+      expect(statements.some((sql) => sql.includes("PRAGMA table_info(model_request_metrics)"))).toBe(true);
+      expect(statements.filter((sql) => sql.includes("SELECT value FROM schema_metadata"))).toHaveLength(1);
+      expect(statements).not.toContain("SELECT COUNT(*) AS count FROM model_request_metrics");
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
+  it("rejects incompatible and incomplete databases when opening a report", () => {
+    for (const version of [3, modelRequestMetricsSchemaVersion]) {
+      const { environment, databasePath } = fixture();
+      createMetricsDatabase(databasePath, version, 1);
+      expect(() => readMetricsReport(environment)).toThrow(/不兼容/u);
+      const database = new DatabaseSync(databasePath);
+      expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1);
+      database.close();
+    }
+  });
+
   it("exports filtered Threads and Turns across all pages with the same request scope", () => {
     const { environment, databasePath } = fixture();
     const nowMs = Date.now() + 1;

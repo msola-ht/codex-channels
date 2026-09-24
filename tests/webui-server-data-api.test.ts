@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -597,6 +598,29 @@ describe("webui server data API", () => {
     expect(await invalidThread.json()).toMatchObject({
       error: { code: "invalid_thread_id" },
     });
+  });
+
+  it.each([
+    "UPDATE schema_metadata SET value = 0 WHERE name = 'schema_version'",
+    "DROP TABLE subagent_turns",
+  ])("returns a safe 503 for incompatible metrics databases: %s", async (sql) => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, metricSample());
+    const database = new DatabaseSync(fixture.databasePath);
+    try {
+      database.exec(sql);
+    } finally {
+      database.close();
+    }
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/overview`);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ error: {
+      code: "metrics_database_incompatible",
+      message: "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset",
+    } });
+    expect(JSON.stringify(body)).not.toContain(fixture.databasePath);
   });
 
   it("returns 503 when the metrics database is unavailable", async () => {

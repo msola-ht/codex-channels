@@ -1,10 +1,11 @@
-import { InputFile, type Api } from "grammy";
+import { InputFile, type Api, type Bot, type Context } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OutputEvent } from "../src/conversation-core/events.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
+import { TelegramInteractionPort } from "../src/surfaces/telegram/interactions.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 const turnStartedPanel = "<b>已开始处理。</b>";
@@ -140,6 +141,33 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it.each(["html", "rich"] as const)("keeps ordinary matching headings replyable through %s output and edits", async (format) => {
+    for (const streamed of [false, true]) {
+      vi.useFakeTimers();
+      const api = new FakeTelegramApi();
+      const outbox = createOutbox(api, format);
+      const markdown = "## Codex 交互回复\n\n这里解释交互回复的工作方式。";
+      if (streamed) {
+        outbox.handle(textDelta("final", "正在说明", "final_answer"));
+        await vi.advanceTimersByTimeAsync(1_000);
+        await settle();
+      }
+      outbox.handle(textCompleted("final", markdown, "final_answer"));
+      await outbox.close();
+      const html = streamed ? api.edits.at(-1)! : api.sent.at(-1)!;
+      expect(html).toBe("Codex 交互回复\n\n这里解释交互回复的工作方式。");
+      expect(api.richMessages).toHaveLength(0);
+      expect(api.richEdits).toHaveLength(0);
+      const bot = { callbackQuery: vi.fn(), api } as unknown as Bot;
+      const interactions = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+      expect(await interactions.handleText({ me: { id: 7 }, chat: { id: 100 }, message: {
+        text: "请继续解释", reply_to_message: { message_id: 1, from: { id: 7, is_bot: true }, text: html, entities: [] },
+      } } as unknown as Context)).toBe(false);
+      await interactions.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("shows one initial plan and one message for each completed step", async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(

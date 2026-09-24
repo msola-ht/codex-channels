@@ -29,6 +29,7 @@ export interface ScheduledTaskRunCoordinatorOptions {
   /** Revalidate the same authorization boundary used before a fresh Run. */
   validateRun: (
     task: ScheduledTask,
+    signal?: AbortSignal,
   ) => Promise<ScheduledTaskRunValidation | undefined>;
   logger?: Logger;
 }
@@ -106,9 +107,10 @@ export class ScheduledTaskRunCoordinator {
   }
 
   /** Revalidate persisted Runs before any Provider-specific subscription restore. */
-  async prepareRecovery(): Promise<void> {
+  async prepareRecovery(signal?: AbortSignal): Promise<void> {
     for (const reference of [...this.referencesByRun.values()]) {
-      await this.applyRecoveryValidation(reference);
+      if (signal?.aborted) return;
+      await this.applyRecoveryValidation(reference, signal);
     }
   }
 
@@ -199,14 +201,16 @@ export class ScheduledTaskRunCoordinator {
    * Idle is never treated as success: the exact Turn must be found in the
    * authoritative paginated history with a terminal status.
    */
-  async recoverRunning(threadIds?: ReadonlySet<string>): Promise<void> {
+  async recoverRunning(threadIds?: ReadonlySet<string>, signal?: AbortSignal): Promise<void> {
     const running = [...this.referencesByRun.values()].filter((reference) =>
       threadIds === undefined || threadIds.has(reference.threadId));
     for (const reference of running) {
+      if (signal?.aborted) return;
       const run = this.store.getRun(reference.runId);
       const task = this.store.getTask(reference.taskId);
       if (!run || run.state !== "running" || !task) continue;
-      if (await this.applyRecoveryValidation(reference)) continue;
+      if (await this.applyRecoveryValidation(reference, signal)) continue;
+      if (signal?.aborted) return;
       const binding = this.router.targetForThread(reference.threadId);
       if (!binding || !this.router.isBackgroundThread(reference.threadId)) {
         this.markUncertainIfRunning(run.runId);
@@ -228,7 +232,8 @@ export class ScheduledTaskRunCoordinator {
         continue;
       }
       try {
-        const turn = await this.findTurn(reference.threadId, reference.turnId);
+        const turn = await this.findTurn(reference.threadId, reference.turnId, signal);
+        if (signal?.aborted) return;
         if (!turn) {
           this.markUncertainIfRunning(run.runId);
           continue;
@@ -236,9 +241,11 @@ export class ScheduledTaskRunCoordinator {
         if (turn.status === "inProgress") continue;
         this.applyTerminal(run.runId, turn.status);
         await this.router.releaseBackground(reference.threadId).catch((error) => {
+          if (signal?.aborted) return;
           this.logger?.warn({ err: error, threadId: reference.threadId }, "恢复计划任务后台绑定清理失败");
         });
       } catch (error) {
+        if (signal?.aborted) return;
         this.logger?.warn(
           { err: error, threadId: reference.threadId, turnId: reference.turnId },
           "计划任务运行状态无法从权威 Turn 历史恢复",
@@ -248,16 +255,18 @@ export class ScheduledTaskRunCoordinator {
     }
   }
 
-  private async findTurn(threadId: string, turnId: string | null) {
+  private async findTurn(threadId: string, turnId: string | null, signal?: AbortSignal) {
     if (turnId === null) return undefined;
     let cursor: string | null = null;
     const cursors = new Set<string>();
     for (let page = 0; page < 100; page += 1) {
+      signal?.throwIfAborted();
       const result = await this.history.listThreadTurns(threadId, {
         cursor,
         limit: 100,
         sortDirection: "desc",
       });
+      signal?.throwIfAborted();
       const match = result.turns.find((turn) => turn.id === turnId);
       if (match) return match;
       if (result.nextCursor === null) return undefined;
@@ -268,7 +277,8 @@ export class ScheduledTaskRunCoordinator {
     throw new Error("Codex Turn 历史分页超过安全上限");
   }
 
-  private async applyRecoveryValidation(reference: ExecutionReference): Promise<boolean> {
+  private async applyRecoveryValidation(reference: ExecutionReference, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return true;
     const run = this.store.getRun(reference.runId);
     const task = this.store.getTask(reference.taskId);
     if (!run || run.state !== "running") return true;
@@ -276,7 +286,14 @@ export class ScheduledTaskRunCoordinator {
       this.markUncertainIfRunning(run.runId);
       return true;
     }
-    const validation = await this.validateRun(task);
+    let validation: ScheduledTaskRunValidation | undefined;
+    try {
+      validation = await this.validateRun(task, signal);
+    } catch (error) {
+      if (signal?.aborted) return true;
+      throw error;
+    }
+    if (signal?.aborted) return true;
     if (!validation) return false;
     if (!validation.blockTask) {
       this.markUncertainIfRunning(run.runId);
@@ -287,6 +304,7 @@ export class ScheduledTaskRunCoordinator {
     try {
       await this.router.releaseBackground(reference.threadId);
     } catch (error) {
+      if (signal?.aborted) return true;
       if (validation.category === "provider") {
         this.router.forgetThread(reference.threadId);
       }

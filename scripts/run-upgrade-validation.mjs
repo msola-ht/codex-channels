@@ -36,19 +36,28 @@ export const defaultUpgradeValidationStages = [
     skipReason: "协议预览不修改稳定版文档；完成正式业务适配后由 verify:commit 执行",
   },
   {
+    id: "build",
+    name: "生产构建",
+    command: "npm",
+    args: ["run", "build"],
+  },
+  {
     id: "unit-tests",
     name: "完整测试",
-    command: "npm",
-    args: ["test"],
+    dependsOn: ["build"],
+    command: process.execPath,
+    args: ["node_modules/vitest/vitest.mjs", "run", "--config", "vitest.config.ts"],
   },
   {
     id: "contract-tests",
     name: "真实 App Server 合同",
-    command: "npm",
+    dependsOn: ["build"],
+    command: process.execPath,
     args: [
-      "test",
-      "--",
-      "--run",
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "vitest.config.ts",
       "tests/real-app-server.test.ts",
       "tests/real-app-server-desktop-bridge.test.ts",
       "tests/real-app-server-isolated-state.test.ts",
@@ -63,12 +72,6 @@ export const defaultUpgradeValidationStages = [
     },
   },
   {
-    id: "build",
-    name: "生产构建",
-    command: "npm",
-    args: ["run", "build"],
-  },
-  {
     id: "webui-build",
     name: "WebUI 构建",
     command: "npm",
@@ -76,9 +79,16 @@ export const defaultUpgradeValidationStages = [
   },
   {
     id: "package-test",
-    name: "npm 打包与源码安装冒烟",
-    command: "npm",
-    args: ["run", "test:package"],
+    name: "npm tarball 安装冒烟",
+    dependsOn: ["build", "webui-build"],
+    command: process.execPath,
+    args: ["scripts/smoke-package.mjs"],
+  },
+  {
+    id: "source-install-test",
+    name: "干净源码安装冒烟",
+    command: process.execPath,
+    args: ["scripts/smoke-source-prepare.mjs"],
   },
 ];
 
@@ -93,7 +103,12 @@ export async function runUpgradeValidationStages(
   const results = [];
 
   for (const stage of stages) {
-    const result = stage.skipReason
+    const blockedBy = (stage.dependsOn ?? []).filter((id) =>
+      results.find((result) => result.id === id)?.status !== "passed");
+    const skipReason = stage.skipReason || (blockedBy.length > 0
+      ? `前置检查未通过：${blockedBy.join("、")}`
+      : undefined);
+    const result = skipReason
       ? {
           id: stage.id,
           name: stage.name,
@@ -101,7 +116,8 @@ export async function runUpgradeValidationStages(
           exitCode: null,
           durationMs: 0,
           log: null,
-          reason: stage.skipReason,
+          reason: skipReason,
+          ...(blockedBy.length > 0 ? { blockedBy } : {}),
         }
       : await runStage(stage, logs, options);
     results.push(result);
@@ -110,7 +126,7 @@ export async function runUpgradeValidationStages(
   const document = {
     schemaVersion: 1,
     result: results.every((stage) =>
-      stage.status === "passed" || stage.status === "skipped")
+      stage.status === "passed" || (stage.status === "skipped" && !stage.blockedBy))
       ? "success"
       : "failure",
     stages: results,

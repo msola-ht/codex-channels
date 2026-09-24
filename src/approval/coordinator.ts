@@ -155,7 +155,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
           threadId: request.threadId,
           turnId: request.turnId,
           itemId: request.itemId,
-          title: title("Codex 需要补充信息"),
+          title: title(request.isBlocking ? "Codex 等待回答" : "Codex 请求补充信息（可跳过）"),
           questions: request.questions.map((question) => ({
             id: question.id,
             header: question.header,
@@ -164,7 +164,7 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
             allowOther: question.allowOther,
             secret: question.secret,
           })),
-          expiresInMs: request.autoResolutionMs ?? this.timeoutMs,
+          expiresInMs: this.timeoutMs,
         });
         return {
           type: "user-input",

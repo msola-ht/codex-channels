@@ -15,6 +15,7 @@ export interface UnixWebSocketTransportOptions {
 export class UnixWebSocketTransport extends BaseTransport {
   readonly kind = "unix-websocket" as const;
   private socket: WebSocket | undefined;
+  private connectionGeneration = 0;
 
   private readonly connectTimeoutMs: number;
   private readonly maxPayloadBytes: number;
@@ -45,6 +46,7 @@ export class UnixWebSocketTransport extends BaseTransport {
     };
     const socket = new WebSocket("ws://localhost/", options);
     this.socket = socket;
+    const generation = ++this.connectionGeneration;
 
     await new Promise<void>((resolve, reject) => {
       let opened = false;
@@ -60,7 +62,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       };
       const onError = (error: Error): void => {
         if (opened) {
-          this.emitClose(error);
+          if (generation === this.connectionGeneration) this.emitClose(error);
         } else {
           clearTimeout(timeout);
           reject(error);
@@ -69,7 +71,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       const onClose = (): void => {
         clearTimeout(timeout);
         if (opened) {
-          this.emitClose();
+          if (generation === this.connectionGeneration) this.emitClose();
         } else {
           reject(new Error("Codex Unix WebSocket 在握手完成前关闭"));
         }
@@ -78,7 +80,7 @@ export class UnixWebSocketTransport extends BaseTransport {
       socket.on("error", onError);
       socket.on("close", onClose);
       socket.on("message", (data: RawData, isBinary: boolean) => {
-        if (!isBinary) {
+        if (!isBinary && generation === this.connectionGeneration) {
           this.emitMessage(decodeTextMessage(data));
         }
       });
@@ -102,14 +104,14 @@ export class UnixWebSocketTransport extends BaseTransport {
       return;
     }
     await new Promise<void>((resolve) => {
-      socket.once("close", resolve);
-      socket.close();
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         if (socket.readyState !== WebSocket.CLOSED) {
           socket.terminate();
         }
         resolve();
       }, 2_000).unref();
+      socket.once("close", () => { clearTimeout(timeout); resolve(); });
+      socket.close();
     });
   }
 }

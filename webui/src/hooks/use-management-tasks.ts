@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 
-import { useApi } from "@/hooks/use-api"
+import { useApi, useApiPolling } from "@/hooks/use-api"
 import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask } from "@/lib/api"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementTaskInput } from "@/lib/types"
@@ -11,11 +11,8 @@ export function useManagementTasks(): ManagementTaskController {
   const [actionError, setActionError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [pendingPreview, setPendingPreview] = useState<NonNullable<ManagementTaskController["pendingPreview"]> | null>(null)
-  useEffect(() => {
-    if (!data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
-    const timer = window.setInterval(refetch, 2_000)
-    return () => window.clearInterval(timer)
-  }, [data, refetch])
+  useApiPolling(refetch, request.loading,
+    data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)) ?? false)
   const run = useCallback(async (input: ManagementTaskInput) => {
     if (pendingPreview !== null || saving) return null
     setSaving(true)

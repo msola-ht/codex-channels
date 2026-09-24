@@ -740,6 +740,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   deliverCard(
     chatId: string,
     card: FeishuCardDocument,
+    requestSignal?: AbortSignal,
   ): Promise<string> {
     if (this.closed) {
       return Promise.reject(new Error("飞书输出队列已经关闭"));
@@ -747,6 +748,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return this.delivery.runOrdered(
       chatId,
       (signal) => this.messagePort.sendCard(chatId, card, signal),
+      requestSignal,
     );
   }
 

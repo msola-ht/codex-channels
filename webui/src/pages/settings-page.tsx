@@ -16,7 +16,7 @@ import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings
 import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
 import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/components/settings/settings-feedback"
 import type { UseApiState } from "@/hooks/use-api"
-import { useApi } from "@/hooks/use-api"
+import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
@@ -64,11 +64,8 @@ export function SettingsPage() {
     if (source !== "account") refetchAccountSettings()
   }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
 
-  useEffect(() => {
-    if (!tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))) return undefined
-    const timer = window.setInterval(services.refetch, 2_000)
-    return () => window.clearInterval(timer)
-  }, [services.refetch, tasks.tasks])
+  useApiPolling(services.refetch, services.loading,
+    tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)))
 
   const refreshVisibleSettings = useCallback(() => {
     if (!summaryLoaded || document.visibilityState !== "visible") return

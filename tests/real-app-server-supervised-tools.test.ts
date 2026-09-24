@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
+import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
 import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
@@ -77,7 +78,7 @@ contractSuite("real supervised App Server tools", () => {
         await proxy?.close();
         backend.closeAllConnections();
         await new Promise<void>(resolve => backend.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 30_000);
 
@@ -194,7 +195,7 @@ contractSuite("real supervised App Server tools", () => {
         await rpc?.close();
         apiServer.closeAllConnections();
         await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 45_000);
 
@@ -294,7 +295,153 @@ contractSuite("real supervised App Server tools", () => {
         removeNotification?.();
         await client?.close();
         await new Promise<void>((resolve) => apiServer.close(() => resolve()));
-        rmSync(directory, { recursive: true, force: true });
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 45_000);
+
+    it.each(["disabled", "answer", "interrupt", "disconnect", "background", "skip"] as const)("probes Default-mode user input: %s", async (scenario) => {
+      const directory = mkdtempSync(join(tmpdir(), "codex-async-contract-"));
+      const codexHome = join(directory, "home");
+      let count = 0;
+      let completeCount = 0;
+      let serverRequestCount = 0;
+      let answerRequest: (() => void) | undefined;
+      let requestParams: unknown;
+      const releaseFile = join(directory, "release-background");
+      let backgroundId: string | undefined;
+      let backgroundResult: { status?: string; exitCode?: number | null; aggregatedOutput?: string | null } | undefined;
+      let backgroundToolOutput: string | undefined;
+      const questionResponse = scenario === "background" ? 2 : 1;
+      const bodies: string[] = [];
+      const apiServer = createServer((request, response) => {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          if (request.method !== "POST" || request.url !== "/responses") {
+            response.writeHead(404).end();
+            return;
+          }
+          bodies.push(Buffer.concat(chunks).toString());
+          const number = ++count;
+          if (scenario === "background" && number === 2) {
+            const input = (JSON.parse(bodies[number - 1]!) as { input: Array<{ type: string; call_id?: string; output?: string }> }).input;
+            backgroundToolOutput = input.find((item) => item.type === "function_call_output" && item.call_id === "background-call")?.output;
+          }
+          const id = `async-response-${number}`;
+          const send = () => {
+            const item = scenario === "background" && number === 1
+              ? { type: "function_call", call_id: "background-call", namespace: "functions", name: "exec_command",
+                  arguments: JSON.stringify({ cmd: `while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
+              : number === questionResponse
+              ? { type: "function_call", call_id: "async-question-call", namespace: "functions", name: "request_user_input",
+                  arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Choose a scope", options: [{ label: "Small", description: "Minimal change" }, { label: "Full", description: "Full change" }] }] }) }
+              : { type: "message", role: "assistant", id: `answer-${number}`, content: [{ type: "output_text", text: "done" }] };
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            for (const event of [{ type: "response.created", response: { id } }, { type: "response.output_item.done", item }, completedResponseEvent(id)]) {
+              response.write(`data: ${JSON.stringify(event)}\n\n`);
+            }
+            response.end();
+          };
+          send();
+        });
+      });
+      let client: CodexAppServerClient | undefined;
+      let removeNotification: (() => void) | undefined;
+      try {
+        await new Promise<void>((resolve) => apiServer.listen(0, "127.0.0.1", resolve));
+        const address = apiServer.address();
+        if (!address || typeof address === "string") throw new Error("Missing fixture address");
+        mkdirSync(codexHome, { mode: 0o700 });
+        const catalog = join(codexHome, "models.json");
+        writeFileSync(catalog, JSON.stringify({ models: [{
+          slug: "async-contract", display_name: "Async fixture", description: "Async fixture",
+          context_window: 200_000, default_reasoning_level: "high",
+          supported_reasoning_levels: [{ effort: "high", description: "Fixture" }],
+          shell_type: "shell_command", visibility: "list", supported_in_api: true, priority: 1,
+          availability_nux: null, upgrade: null, base_instructions: "You are a coding agent.",
+          support_verbosity: true, default_verbosity: "low", apply_patch_tool_type: "freeform",
+          truncation_policy: { mode: "tokens", limit: 10_000 }, supports_parallel_tool_calls: true,
+          experimental_supported_tools: [],
+        }] }));
+        writeFileSync(join(codexHome, "config.toml"), [
+          'model = "async-contract"', 'model_provider = "async-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[features]', `default_mode_request_user_input = ${scenario !== "disabled"}`, '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
+          'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
+        ].join("\n"));
+        const rpc = new JsonRpcClient(new StdioTransport({
+          codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
+          environment: { ...process.env, CODEX_HOME: codexHome },
+        }));
+        rpc.setServerRequestHandler(async (request) => {
+          expect(request.method).toBe("item/tool/requestUserInput");
+          serverRequestCount++;
+          requestParams = request.params;
+          return handleApprovalServerRequest(request, {
+            handle: async (decoded) => {
+              expect(decoded).toMatchObject({ type: "user-input", isBlocking: false, threadId: (request.params as { threadId: string }).threadId });
+              await new Promise<void>((resolve) => { answerRequest = resolve; });
+              return { type: "user-input", answers: scenario === "skip" ? {} : { scope: ["Small"] } };
+            },
+          });
+        });
+        client = new CodexAppServerClient(rpc, { sandbox: "read-only" });
+        await client.connect();
+        const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "never" });
+        removeNotification = client.onNotification((notification) => {
+          const params = notification.params as { item?: { id?: string; type?: string; status?: string; exitCode?: number | null; aggregatedOutput?: string | null } } | undefined;
+          if (notification.method === "item/started" && params?.item?.type === "commandExecution") backgroundId = params.item.id;
+          if (notification.method === "item/completed" && backgroundId !== undefined && params?.item?.id === backgroundId) backgroundResult = params.item;
+          const event = toConversationInputEvent(notification);
+          if (event?.type === "turn.completed") completeCount++;
+        });
+        const turn = await client.startTurn(thread.id, [{ type: "text", text: "Ask while working" }], "codex_connect:async-start", directory);
+        if (scenario === "disabled") {
+          await waitFor(() => completeCount === 1, 15_000);
+          expect(serverRequestCount).toBe(0);
+          const input = (JSON.parse(bodies[1]!) as { input: Array<{ type: string; output?: string }> }).input;
+          expect(input.filter((item) => item.type === "function_call_output").map((item) => item.output).join("\n")).toContain("unavailable in Default mode");
+        } else {
+          await waitFor(() => answerRequest !== undefined, 15_000, undefined, `Default ${scenario} 用户输入请求`);
+          expect(requestParams).toMatchObject({ threadId: thread.id, turnId: turn.turnId, isBlocking: false });
+          // The real server must stay inside the tool call before it can request the next model response.
+          await new Promise<void>((resolve) => setTimeout(resolve, 150));
+          expect(count).toBe(questionResponse);
+          expect(completeCount).toBe(0);
+          if (scenario === "answer" || scenario === "background" || scenario === "skip") {
+            if (scenario === "background") {
+              expect(backgroundToolOutput, "后台命令必须保持运行并返回会话 ID").toMatch(/Process running with session ID/);
+              expect(backgroundId, "后台命令必须产生 started 事件").toBeDefined();
+              expect(backgroundResult, "释放前后台命令不能完成").toBeUndefined();
+              writeFileSync(releaseFile, "release");
+              await waitFor(() => backgroundResult !== undefined, 10_000, undefined, "提问等待期间后台命令完成事件");
+              expect(backgroundResult).toMatchObject({ status: "completed", exitCode: 0 });
+              expect(backgroundResult?.aggregatedOutput).toContain("background-completed");
+              expect(count).toBe(questionResponse);
+              expect(completeCount).toBe(0);
+            }
+            answerRequest!();
+            await waitFor(() => completeCount === 1, 15_000);
+            const inputs = (JSON.parse(bodies[questionResponse]!) as { input: Array<{ type: string; call_id?: string; output?: string }> }).input;
+            const answer = inputs.find((item) => item.type === "function_call_output" && item.call_id === "async-question-call");
+            expect(JSON.parse(answer?.output ?? "null")).toEqual({ answers: scenario === "skip" ? {} : { scope: { answers: ["Small"] } } });
+            expect(serverRequestCount).toBe(1);
+          } else if (scenario === "interrupt") {
+            await client.interruptTurn(thread.id, turn.turnId);
+            await waitFor(() => completeCount === 1, 15_000);
+            answerRequest!();
+            expect(count).toBe(questionResponse);
+          } else {
+            await client.close();
+            expect(count).toBe(questionResponse);
+          }
+        }
+      } finally {
+        writeFileSync(releaseFile, "release");
+        answerRequest?.();
+        removeNotification?.();
+        await client?.close();
+        await new Promise<void>((resolve) => apiServer.close(() => resolve()));
+        rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 45_000);
 
@@ -383,7 +530,7 @@ contractSuite("real supervised App Server tools", () => {
         removeNotification?.();
         await client?.close();
         await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
-        rmSync(testRuntime, { recursive: true, force: true });
+        rmSync(testRuntime, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }, 30_000);
 

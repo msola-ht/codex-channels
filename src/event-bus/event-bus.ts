@@ -30,7 +30,9 @@ export class EventBus<T> {
     if (this.closed) {
       throw new Error("事件总线已关闭");
     }
-    const queue = new BoundedAsyncQueue<T>(capacity);
+    const queue = new BoundedAsyncQueue<T>(capacity, (state) => {
+      this.logger.warn({ consumer: name, ...state }, "关键事件积压超过队列容量，继续保留待投递事件");
+    });
     const controller = new AbortController();
     const worker = this.runWorker(name, queue, handler, controller.signal);
     this.workers.add(worker);

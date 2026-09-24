@@ -54,8 +54,36 @@ describe("Codex release upgrade preview", () => {
 
     expect(unitTests).toMatchObject({
       name: "完整测试",
-      args: ["test"],
+      dependsOn: ["build"],
+      args: ["node_modules/vitest/vitest.mjs", "run", "--config", "vitest.config.ts"],
     });
+  });
+
+  it("builds the working tree once and keeps clean source installation independent", () => {
+    expect(defaultUpgradeValidationStages.filter(
+      (stage: { args?: string[] }) => stage.args?.join(" ") === "run build",
+    )).toHaveLength(1);
+    const build = defaultUpgradeValidationStages.findIndex(
+      (stage: { id: string }) => stage.id === "build",
+    );
+    for (const id of ["unit-tests", "contract-tests", "package-test"]) {
+      const index = defaultUpgradeValidationStages.findIndex(
+        (stage: { id: string }) => stage.id === id,
+      );
+      expect(index).toBeGreaterThan(build);
+      expect(defaultUpgradeValidationStages[index].dependsOn).toContain("build");
+    }
+    expect(defaultUpgradeValidationStages.find(
+      (stage: { id: string }) => stage.id === "package-test",
+    )).toMatchObject({
+      dependsOn: ["build", "webui-build"],
+      args: ["scripts/smoke-package.mjs"],
+    });
+    const source = defaultUpgradeValidationStages.find(
+      (stage: { id: string }) => stage.id === "source-install-test",
+    );
+    expect(source.args).toEqual(["scripts/smoke-source-prepare.mjs"]);
+    expect(source.dependsOn).toBeUndefined();
   });
 
   it("builds WebUI before the package smoke test", () => {
@@ -296,32 +324,56 @@ describe("Codex release upgrade preview", () => {
     expect(invalidSuccess.status).not.toBe(0);
   });
 
-  it("continues validation after a failed stage and writes structured results", async () => {
+  it.each([0, 2])("runs dependent checks only after a successful build (exit %i)", async (exitCode) => {
     const output = mkdtempSync(join(tmpdir(), "codexc-upgrade-validation-"));
     temporaryDirectories.push(output);
     const result = await runUpgradeValidationStages([
       {
-        id: "failure",
-        name: "预期失败",
+        id: "build",
+        name: "构建",
         command: process.execPath,
-        args: ["-e", "process.exit(2)"],
+        args: ["-e", `process.exit(${exitCode})`],
       },
       {
-        id: "success",
-        name: "后续成功",
+        id: "dependent",
+        name: "依赖构建的检查",
+        dependsOn: ["build"],
+        command: process.execPath,
+        args: ["-e", "console.log('verified')"],
+      },
+      {
+        id: "independent",
+        name: "独立检查",
         command: process.execPath,
         args: ["-e", "console.log('continued')"],
       },
     ], output);
 
-    expect(result.result).toBe("failure");
+    expect(result.result).toBe(exitCode === 0 ? "success" : "failure");
     expect(result.stages.map((stage: { status: string }) => stage.status))
-      .toEqual(["failed", "passed"]);
-    expect(readFileSync(join(output, "logs/success.log"), "utf8"))
-      .toContain("continued");
-    expect(JSON.parse(
-      readFileSync(join(output, "validation-results.json"), "utf8"),
-    )).toMatchObject({ result: "failure" });
+      .toEqual(exitCode === 0 ? ["passed", "passed", "passed"] : ["failed", "skipped", "passed"]);
+    if (exitCode !== 0) {
+      expect(result.stages[1]).toMatchObject({ blockedBy: ["build"], log: null });
+    } else {
+      expect(readFileSync(join(output, "logs/dependent.log"), "utf8")).toContain("verified");
+    }
+    expect(readFileSync(join(output, "logs/independent.log"), "utf8")).toContain("continued");
+    expect(JSON.parse(readFileSync(join(output, "validation-results.json"), "utf8")))
+      .toEqual(result);
+  });
+
+  it("fails closed when a prerequisite is missing instead of reporting success", async () => {
+    const output = mkdtempSync(join(tmpdir(), "codexc-upgrade-validation-"));
+    temporaryDirectories.push(output);
+    const result = await runUpgradeValidationStages([{
+      id: "dependent",
+      name: "依赖构建的检查",
+      dependsOn: ["missing-build"],
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+    }], output);
+    expect(result.result).toBe("failure");
+    expect(result.stages[0]).toMatchObject({ status: "skipped", blockedBy: ["missing-build"] });
   });
 
   it("reports RPC and required-field protocol changes against HEAD", () => {

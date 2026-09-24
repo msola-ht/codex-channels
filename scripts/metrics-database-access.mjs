@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   modelRequestMetricsSchemaVersion,
+  ModelRequestMetricsSchemaError,
   RequestMetricsQueryService,
   requestMetricsDatabasePath,
   requireCurrentModelRequestMetricsSchema,
@@ -75,16 +76,35 @@ export function validateMetricsDatabaseStructure(
   return status;
 }
 
+export class MetricsDatabaseAccessError extends Error {
+  constructor(code, message, cause) {
+    super(message, { cause });
+    this.code = code;
+  }
+}
+
+export function openReadOnlyMetricsDatabase(environment = process.env, nowMs = Date.now()) {
+  const { databasePath } = resolveMetricsDatabaseContext(environment);
+  if (!existsSync(databasePath)) {
+    throw new MetricsDatabaseAccessError("metrics_database_unavailable",
+      `指标数据库尚未创建：${databasePath}`);
+  }
+  try {
+    return new SqliteModelRequestMetricsStore(databasePath, nowMs, { readOnly: true });
+  } catch (error) {
+    if (error instanceof ModelRequestMetricsSchemaError) {
+      throw new MetricsDatabaseAccessError("metrics_database_incompatible",
+        "模型请求指标数据库版本或结构不兼容；请停止 Gateway 后运行 codexc metrics reset", error);
+    }
+    throw error;
+  }
+}
+
 export function readMetricsReport(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
   const filters = metricsFilterOptions(options);
   const dimension = metricsDimension(options.group ?? "models");
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    range.endAtMs,
-    { readOnly: true },
-  );
+  const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
     return {
@@ -105,12 +125,7 @@ export function readMetricsReport(environment = process.env, options = {}) {
 export function readMetricsExport(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
   const filters = metricsFilterOptions(options);
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    range.endAtMs,
-    { readOnly: true },
-  );
+  const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
     const records = [];
@@ -143,8 +158,7 @@ export function readMetricsExport(environment = process.env, options = {}) {
 
 export function readQuotaHistory(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now());
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(databasePath, range.endAtMs, { readOnly: true });
+  const store = openReadOnlyMetricsDatabase(environment, range.endAtMs);
   try {
     const queries = new RequestMetricsQueryService(store);
     return {
@@ -199,12 +213,7 @@ export function readWeeklyQuota(store, nowMs) {
 }
 
 export function readMetricsRun(environment = process.env, threadId) {
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
+  const store = openReadOnlyMetricsDatabase(environment);
   try {
     const summary = new RequestMetricsQueryService(store).threadSummary(threadId);
     return {
@@ -223,12 +232,7 @@ export function readMetricsRun(environment = process.env, threadId) {
 export function readMetricsThreads(environment = process.env, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now(), "all");
   const filters = metricsFilterOptions(options);
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
+  const store = openReadOnlyMetricsDatabase(environment);
   try {
     const queries = new RequestMetricsQueryService(store);
     const threads = [];
@@ -254,12 +258,7 @@ export function readMetricsThreads(environment = process.env, options = {}) {
 export function readMetricsTurns(environment = process.env, threadId, options = {}) {
   const range = metricsRangeOptions(options, options.nowMs ?? Date.now(), "all");
   const filters = metricsFilterOptions({ ...options, threadId });
-  const databasePath = requireCompatibleMetricsDatabase(environment);
-  const store = new SqliteModelRequestMetricsStore(
-    databasePath,
-    undefined,
-    { readOnly: true },
-  );
+  const store = openReadOnlyMetricsDatabase(environment);
   try {
     const queries = new RequestMetricsQueryService(store);
     const turns = [];

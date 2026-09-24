@@ -35,12 +35,12 @@ export class GatewayApplication extends GatewayComponentGraph {
   stop(): Promise<void> {
     if (this.stopTask) return this.stopTask;
     this.stopping = true;
+    this.startupAbort?.abort();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
-    this.reconnectAbort?.abort();
+    const reconnecting = this.stopReconnect();
     const startup = this.startTask;
-    const reconnecting = this.reconnecting;
-    const restoringBindings = this.bindingRestoreCoordinator().close();
+    void this.bindingRestoreCoordinator().close();
     this.stopTask = (async () => {
       const failures: unknown[] = [];
       if (startup && !this.startupSettled) {
@@ -59,17 +59,12 @@ export class GatewayApplication extends GatewayComponentGraph {
         }
       }
       await startup?.catch(() => undefined);
-      if (restoringBindings && !(await waitAtMost(restoringBindings, 5_000))) {
-        const error = new Error("等待 Codex Thread 订阅恢复任务停止超时");
-        failures.push(error);
-        this.logger.error({ err: error }, "Gateway 后台任务关闭失败");
-      }
       try {
         await this.shutdownComponents();
       } catch (error) {
         failures.push(error);
       }
-      if (reconnecting && !(await waitAtMost(reconnecting, 5_000))) {
+      if (!(await waitAtMost(reconnecting, 5_000))) {
         const error = new Error("等待 Codex App Server 重连任务停止超时");
         failures.push(error);
         this.logger.error({ err: error }, "Gateway 后台任务关闭失败");

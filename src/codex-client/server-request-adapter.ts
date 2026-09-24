@@ -179,7 +179,7 @@ function decodeUserInputRequest(
 ): Extract<ApprovalRequest, { type: "user-input" }> | undefined {
   const params = asRecord(request.params);
   const base = approvalIdentity(request, params);
-  if (!base || !Array.isArray(params?.questions)) {
+  if (!base || !Array.isArray(params?.questions) || typeof params.isBlocking !== "boolean") {
     return undefined;
   }
   const questions = params.questions.map(parseQuestion);
@@ -195,7 +195,7 @@ function decodeUserInputRequest(
           (question): question is NonNullable<typeof question> =>
             question !== undefined,
         ),
-        autoResolutionMs: autoResolutionMs.value,
+        isBlocking: params.isBlocking,
       }
     : undefined;
 }

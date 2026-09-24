@@ -39,6 +39,7 @@
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。
+  普通只读查询在同一连接上校验 Schema 并读取，诊断入口独立统计总行数。
 - `metrics-database.mjs` / `metrics-database.d.mts`：保留 `codexc metrics` 的兼容公开入口和 CLI，
   组合只读访问、输出渲染以及 `reset`、`cleanup`、`prune` 等显式维护命令；查询复用 Observability
   只读端口，`status --json` 返回稳定的路径、Schema、兼容性与记录数，渲染复用
@@ -113,7 +114,7 @@
   配置 `token`，API 以 `Authorization: Bearer` 校验并采用常数时间比较；令牌不通过命令行传入。
 - `metrics-config-menu.mjs`：本地指标存储设置的交互用例；集中管理保留天数和最大记录数，
   返回统一 `activationResult` 及自动激活状态
-  （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排与兼容重导出。
+  （`pending`/`applied`），`config.mjs` 只保留顶层配置菜单编排。
 - `metrics-menu.mjs` / `metrics-menu.d.mts`：`codexc metrics` 无参数时的交互用例及注入边界声明；负责循环收集查询与导出参数，包括会话列表和历史额度窗口；独立维护参数函数只由统一清理菜单使用，
   通过 CLI 注入的命令边界执行，不承载子进程或输出文件管理。
 - `setup.mjs`：使用 `@clack/prompts` 提供接入类别菜单和脱敏总览，并把“模型与提供商”“通讯渠道”
@@ -365,7 +366,7 @@
   和枚举变化生成独立影响报告，不把 App Server 内部枚举误当成公开 CLI 合同。
 - `run-upgrade-validation.mjs`：为正式升级提案独立运行协议、类型、Lint、测试、
   真实合同、Gateway/WebUI 构建和打包检查；单项失败后继续其他阶段，并保存逐项日志和结构化结果。预览阶段不
-  改稳定版文档，因此明确跳过文档索引检查；测试阶段运行完整测试。
+  改稳定版文档，因此明确跳过文档索引检查；测试与真实合同复用一次成功的 Gateway 构建，tarball 安装复用 Gateway/WebUI 产物，前置构建失败时跳过依赖检查并保留失败结果，干净源码安装独立执行。
 - `write-upgrade-report.mjs`：把 CI 中生成的升级工作树写成 Markdown 摘要、文件清单、统计和
   二进制安全 Patch，并分别比较 `HEAD` 生成协议的 RPC/顶层字段结构和受控公开 CLI 合同，合并
   逐阶段结果；生成或验证失败且没有差异时仍会输出报告。
@@ -459,6 +460,7 @@
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础
   版本以兼容旧版源码更新器；历史发布记录由对应 Release 保留，当前安装入口统一使用源码。
+- `doctor-output.mjs` / `doctor-output.d.mts`：把已收集的诊断项转换为结构化报告并渲染终端文本，不执行环境探测。
 - `doctor.mjs`：检查 npm 包、Node、Linux PATH 中的 `bubblewrap`、Codex CLI、当前 TOML 配置、
   OpenAI 主提供商使用的配置、环境变量或系统代理路由（不显示代理地址或凭据）、
   Workspace、飞书凭据/Bot 身份、
@@ -471,8 +473,6 @@
   监管身份与 Provider 拓扑、`initialize.userAgent` 中的运行中 App Server 版本与系统服务状态，
   `--json` 输出完整脱敏检查数组、分类计数与健康状态；不输出完整 User-Agent、飞书
   上游响应或敏感配置内容。
-- `install-launchd.mjs` / `install-systemd.mjs`：保留可直接生成平台服务定义的兼容脚本，实际模板计划、
-  转义与原子写入统一复用服务安装管理接口；代理仍由 App Server 服务 Runtime 在每次启动时解析。
 - `service-install-context.mjs` / `service-install-context.d.mts`：systemd 与 launchd 安装器共用的配置、
   默认 Workspace、主 Socket、Codex/Node 可执行文件及服务 PATH 解析；读取计划不修改磁盘，执行时才把
   运行目录创建为 `0700`。

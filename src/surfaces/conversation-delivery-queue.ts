@@ -26,6 +26,8 @@ export class ConversationDeliveryQueue {
   private readonly capacity: number;
   private readonly closeTimeoutMs: number;
   private closed = false;
+  private stopped = false;
+  private readonly orderedCancellations = new Set<() => void>();
   private closePromise: Promise<void> | undefined;
 
   constructor(
@@ -68,7 +70,11 @@ export class ConversationDeliveryQueue {
   runOrdered<T>(
     conversationId: string,
     run: (signal: AbortSignal) => Promise<T>,
+    requestSignal?: AbortSignal,
   ): Promise<T> {
+    if (requestSignal?.aborted) {
+      return Promise.reject(new Error(`${this.options.component} Conversation 输出操作已取消`));
+    }
     if (this.closed) {
       return Promise.reject(
         new Error(`${this.options.component} Conversation 输出队列已关闭`),
@@ -76,21 +82,46 @@ export class ConversationDeliveryQueue {
     }
     return new Promise<T>((resolve, reject) => {
       const worker = this.worker(conversationId);
-      const accepted = worker.queue.pushPriority({
+      let started = false;
+      let settled = false;
+      const cleanup = (): void => {
+        requestSignal?.removeEventListener("abort", cancelQueued);
+        this.orderedCancellations.delete(cancel);
+      };
+      const cancel = (): void => {
+        if (settled) return;
+        settled = true;
+        worker.queue.remove(operation);
+        cleanup();
+        reject(new Error(`${this.options.component} Conversation 输出操作已取消`));
+      };
+      const cancelQueued = (): void => { if (!started) cancel(); };
+      const operation: DeliveryOperation = {
         critical: true,
         run: async (signal) => {
+          if (settled) return;
+          started = true;
           try {
-            resolve(await run(signal));
+            const combined = requestSignal ? AbortSignal.any([signal, requestSignal]) : signal;
+            combined.throwIfAborted();
+            resolve(await run(combined));
           } catch (error) {
             reject(
               error instanceof Error
                 ? error
                 : new Error(`${this.options.component} Conversation 输出操作失败`),
             );
+          } finally {
+            settled = true;
+            cleanup();
           }
         },
-      });
+      };
+      this.orderedCancellations.add(cancel);
+      requestSignal?.addEventListener("abort", cancelQueued, { once: true });
+      const accepted = worker.queue.pushPriority(operation);
       if (!accepted) {
+        cleanup();
         this.logger.warn(
           {
             component: this.options.component,
@@ -109,7 +140,10 @@ export class ConversationDeliveryQueue {
   private worker(conversationId: string): ConversationWorker {
     let worker = this.workers.get(conversationId);
     if (!worker) {
-      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity);
+      const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity, (state) => {
+        this.logger.warn({ component: this.options.component, conversationId, ...state },
+          "关键输出积压超过队列容量，继续保留待投递输出");
+      });
       const controller = new AbortController();
       worker = {
         queue,
@@ -126,6 +160,7 @@ export class ConversationDeliveryQueue {
       return this.closePromise;
     }
     this.closed = true;
+    for (const cancel of [...this.orderedCancellations]) cancel();
     for (const worker of this.workers.values()) {
       worker.queue.close();
       worker.controller.abort();
@@ -141,6 +176,10 @@ export class ConversationDeliveryQueue {
       this.closeTimeoutMs,
     );
     if (!completed) {
+      this.stopped = true;
+      for (const worker of this.workers.values()) {
+        while (worker.queue.size > 0) await worker.queue.shift();
+      }
       this.logger.warn(
         {
           component: this.options.component,
@@ -160,7 +199,7 @@ export class ConversationDeliveryQueue {
   ): Promise<void> {
     while (true) {
       const operation = await queue.shift();
-      if (!operation) {
+      if (!operation || this.stopped) {
         return;
       }
       try {

@@ -80,6 +80,10 @@ export class ProviderRoutingClient {
   private readonly connectedProviders: Set<string>;
   private readonly providerConnections = new Map<string, Promise<void>>();
   private readonly initializationResponses = new Map<string, InitializeResponse>();
+  private readonly shutdown = new AbortController();
+  private closeTask: Promise<void> | undefined;
+  private readonly providerAborts = new Map<string, AbortController>();
+  private readonly providerCloseTasks = new Map<string, Promise<void>>();
 
   constructor(
     private readonly primaryProvider: string,
@@ -96,10 +100,12 @@ export class ProviderRoutingClient {
   }
 
   async connect(): ReturnType<ProviderClientInstance["connect"]> {
+    this.shutdown.signal.throwIfAborted();
     if (this.ensureProvider) {
       try {
         await this.ensureClient(this.primaryProvider);
       } catch (error) {
+        if (this.shutdown.signal.aborted) throw error;
         await Promise.allSettled(
           [...this.connectedProviders].map((provider) =>
             this.clientForProvider(provider).close()),
@@ -115,9 +121,11 @@ export class ProviderRoutingClient {
     const entries = [...this.clients.entries()].filter(([provider]) =>
       this.connectedProviders.has(provider));
     try {
-      const responses = await Promise.all(entries.map(([, client]) => client.connect()));
+      const responses = await this.untilClosed(() => Promise.all(entries.map(([, client]) => client.connect())));
+      this.shutdown.signal.throwIfAborted();
       return responses[entries.findIndex(([provider]) => provider === this.primaryProvider)]!;
     } catch (error) {
+      if (this.shutdown.signal.aborted) throw error;
       await Promise.allSettled(entries.map(([, client]) => client.close()));
       throw error;
     }
@@ -128,6 +136,9 @@ export class ProviderRoutingClient {
   ): ReturnType<ProviderClientInstance["reconnect"]> {
     const canonical = this.canonicalProvider(provider);
     return this.withProviderActivity(canonical, async () => {
+      const closing = this.providerCloseTasks.get(canonical);
+      if (closing) await closing;
+      this.shutdown.signal.throwIfAborted();
       if (!this.connectedProviders.has(canonical)) {
         await this.ensureClient(canonical);
         const initialized = this.initializationResponses.get(canonical);
@@ -136,32 +147,54 @@ export class ProviderRoutingClient {
         }
         return initialized;
       }
-      await this.ensureProvider?.(canonical);
-      const initialized = await this.clientForProvider(canonical).reconnect();
+      const signal = this.providerSignal(canonical);
+      await this.untilClosed(async () => { await this.ensureProvider?.(canonical); }, signal);
+      const initialized = await this.untilClosed(() => this.clientForProvider(canonical).reconnect(), signal);
+      signal.throwIfAborted();
       this.initializationResponses.set(canonical, initialized);
       return initialized;
     });
   }
 
-  async closeProvider(provider: string): Promise<void> {
+  closeProvider(provider: string): Promise<void> {
     const canonical = this.canonicalProvider(provider);
-    if (!this.connectedProviders.has(canonical)) return;
+    const existing = this.providerCloseTasks.get(canonical);
+    if (existing) return existing;
+    if (!this.connectedProviders.has(canonical) && !this.providerAborts.has(canonical)) return Promise.resolve();
+    this.providerAborts.get(canonical)?.abort(new Error("Provider Client 已关闭"));
+    this.providerConnections.delete(canonical);
     const client = this.clientForProvider(canonical);
-    // 仅在关闭成功后移除连接标记，失败时允许全局空闲协调器重试。
-    await client.close();
-    this.connectedProviders.delete(canonical);
-    this.initializationResponses.delete(canonical);
+    const task = (async () => {
+      // 仅在关闭成功后移除连接标记，失败时允许全局空闲协调器重试。
+      await client.close();
+      this.connectedProviders.delete(canonical);
+      this.initializationResponses.delete(canonical);
+      this.providerAborts.delete(canonical);
+    })().finally(() => {
+      if (this.providerCloseTasks.get(canonical) === task) this.providerCloseTasks.delete(canonical);
+    });
+    this.providerCloseTasks.set(canonical, task);
+    return task;
   }
 
   connectedProviderIds(): readonly string[] {
     return [...this.connectedProviders];
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
+    this.shutdown.abort(new Error("Provider 路由 Client 已关闭"));
+    const task = this.closeClients();
+    this.closeTask = task;
+    void task.catch(() => {
+      if (this.closeTask === task) this.closeTask = undefined;
+    });
+    return task;
+  }
+
+  private async closeClients(): Promise<void> {
     const results = await Promise.allSettled(
-      [...this.clients.entries()]
-        .filter(([provider]) => this.connectedProviders.has(provider))
-        .map(([, client]) => client.close()),
+      [...this.clients.entries()].map(([provider, client]) => this.providerCloseTasks.get(provider) ?? client.close()),
     );
     const failure = results.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") {
@@ -703,22 +736,61 @@ export class ProviderRoutingClient {
   }
 
   private async ensureClient(provider: string): Promise<ProviderClientInstance> {
+    this.shutdown.signal.throwIfAborted();
     const canonical = this.canonicalProvider(provider);
     const client = this.clientForProvider(canonical);
+    const closing = this.providerCloseTasks.get(canonical);
+    if (closing) await closing;
+    const signal = this.providerSignal(canonical);
+    signal.throwIfAborted();
     if (this.connectedProviders.has(canonical)) return client;
     let connection = this.providerConnections.get(canonical);
     if (!connection) {
       connection = (async () => {
-        await this.ensureProvider?.(canonical);
-        const initialized = await client.connect();
+        await this.untilClosed(async () => { await this.ensureProvider?.(canonical); }, signal);
+        const initialized = await this.untilClosed(() => client.connect(), signal);
+        signal.throwIfAborted();
         this.initializationResponses.set(canonical, initialized);
         this.connectedProviders.add(canonical);
       })();
       this.providerConnections.set(canonical, connection);
-      connection.finally(() => this.providerConnections.delete(canonical)).catch(() => undefined);
+      connection.finally(() => {
+        if (this.providerConnections.get(canonical) === connection) this.providerConnections.delete(canonical);
+      }).catch(() => undefined);
     }
     await connection;
+    signal.throwIfAborted();
     return client;
+  }
+
+  private providerSignal(provider: string): AbortSignal {
+    let abort = this.providerAborts.get(provider);
+    if (!abort) {
+      abort = new AbortController();
+      this.providerAborts.set(provider, abort);
+    }
+    return AbortSignal.any([this.shutdown.signal, abort.signal]);
+  }
+
+  /** Shutdown cancels our wait; it never stops the independently owned App Server. */
+  private async untilClosed<T>(operation: () => Promise<T>, signal = this.shutdown.signal): Promise<T> {
+    signal.throwIfAborted();
+    let cancel!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(signal.reason as Error);
+      signal.addEventListener("abort", cancel, { once: true });
+    });
+    try {
+      const running = Promise.resolve().then(() => {
+        signal.throwIfAborted();
+        return operation();
+      });
+      const result = await Promise.race([running, cancelled]);
+      signal.throwIfAborted();
+      return result;
+    } finally {
+      signal.removeEventListener("abort", cancel);
+    }
   }
 
   private canonicalProvider(provider: string): string {
@@ -765,7 +837,8 @@ export class ProviderRoutingClient {
     operation: () => Promise<T>,
   ): Promise<T> {
     const canonical = this.canonicalProvider(provider);
-    return this.runProviderOperation?.(canonical, "activity", operation) ?? operation();
+    const run = async () => { this.shutdown.signal.throwIfAborted(); return operation(); };
+    return this.runProviderOperation?.(canonical, "activity", run) ?? run();
   }
 
   private withProviderOperation<T>(
@@ -773,7 +846,8 @@ export class ProviderRoutingClient {
     operation: () => Promise<T>,
   ): Promise<T> {
     const canonical = this.canonicalProvider(provider);
-    return this.runProviderOperation?.(canonical, "operation", operation) ?? operation();
+    const run = async () => { this.shutdown.signal.throwIfAborted(); return operation(); };
+    return this.runProviderOperation?.(canonical, "operation", run) ?? run();
   }
 
   private rememberThread(thread: ThreadSnapshot): void {

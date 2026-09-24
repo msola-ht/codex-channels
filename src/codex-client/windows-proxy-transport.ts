@@ -142,7 +142,7 @@ export class WindowsProxyTransport extends BaseTransport {
     let opened = false;
     let closeEmitted = false;
     const emitUnexpectedClose = (error?: Error): void => {
-      if (closeEmitted || this.closing) return;
+      if (closeEmitted || this.closing || this.socket !== socket) return;
       closeEmitted = true;
       this.emitClose(error);
     };
@@ -162,7 +162,7 @@ export class WindowsProxyTransport extends BaseTransport {
       socket.terminate();
     });
     socket.on("message", (data: RawData, isBinary: boolean) => {
-      if (!isBinary) {
+      if (!isBinary && this.socket === socket) {
         this.emitMessage(decodeTextMessage(data));
       }
     });

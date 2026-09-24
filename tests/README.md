@@ -12,6 +12,8 @@
 - 协议、Transport 或共享 App Server 行为变化必须包含真实 App Server 合同，不能只依赖 Mock。
 - 不在测试索引中逐项复制断言；具体覆盖以测试文件和实现模块 README 为准。
 
+CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixture.ts` 只保存共享夹具，各测试文件独立清理临时目录。
+
 ## 覆盖范围
 
 - `codex-protocol`、`codex-client`：固定版本生成类型、初始化、请求与通知分流、超时和断线清理、Thread/Turn/Item/Goal、Queue、Revert、账户与工具能力。

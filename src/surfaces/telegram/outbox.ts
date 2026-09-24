@@ -57,7 +57,7 @@ import {
   decodeMarkdownBackslashEscapes,
   formatMarkdownAsTelegramHtml,
 } from "./markdown-format.js";
-import { formatTelegramPanelChunks } from "./html-format.js";
+import { formatTelegramPanelChunks, hasTelegramReplyHeading } from "./html-format.js";
 import {
   planLongFinalMessage,
   splitExpandableMessage,
@@ -744,11 +744,11 @@ export class TelegramOutbox {
     }
   }
 
-  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>, requestSignal?: AbortSignal): Promise<T> {
     if (this.closed) {
       return Promise.reject(new Error("Telegram Outbox 已关闭"));
     }
-    return this.delivery.runOrdered(chatId, run);
+    return this.delivery.runOrdered(chatId, run, requestSignal);
   }
 
   notifyPanel(
@@ -833,7 +833,9 @@ export class TelegramOutbox {
         }
       }
       if (state.phase === "final_answer") {
-        const format = this.options.finalMessageFormat ?? "html";
+        // Native Rich Markdown must not recreate the reserved interaction heading.
+        const reservedHeading = hasTelegramReplyHeading(formatMarkdownAsTelegramHtml(text.split("\n", 1)[0]!) ?? "");
+        const format = reservedHeading ? "html" : this.options.finalMessageFormat ?? "html";
         const formatted = format === "rich"
           ? canSendRichMarkdown(text) ? text : undefined
           : formatMarkdownAsTelegramHtml(text);

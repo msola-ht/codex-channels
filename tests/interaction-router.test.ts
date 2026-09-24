@@ -45,6 +45,101 @@ class ControlledInteraction implements InteractionPort {
 }
 
 describe("InteractionRouter", () => {
+  it("removes a whole cancellation batch before dispatching unaffected queued work", async () => {
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    const decisions = ["first", "second", "third"].map((requestId) => router.request(
+      target, approvalInteractionRequest({ requestId }),
+    ));
+    const unaffected = router.request(target, approvalInteractionRequest({
+      requestId: "unaffected", threadId: "other-thread",
+    }));
+
+    router.cancelThreads(new Set(["thread-1"]));
+
+    expect(port.requests.map((request) => request.requestId)).toEqual(["first", "unaffected"]);
+    await expect(Promise.all(decisions)).resolves.toEqual(Array(3).fill({ type: "approval", approved: false }));
+    port.resolveNext({ type: "approval", approved: true, scope: "once" });
+    await Promise.resolve();
+    expect(router.hasPendingForThread("other-thread")).toBe(true);
+    port.resolveNext({ type: "approval", approved: true, scope: "once" });
+    await expect(unaffected).resolves.toMatchObject({ approved: true });
+  });
+
+  it.each(["resolved", "cancelAll", "unregister"] as const)(
+    "settles active requests on %s even if Surface cleanup throws, ignoring late approval",
+    async (operation) => {
+      const port = new ControlledInteraction();
+      const logger = { info: vi.fn(), warn: vi.fn() };
+      const router = new InteractionRouter(logger);
+      const unregister = router.register("telegram", "default", port);
+      const brokenCleanup = () => { throw new Error("private upstream detail"); };
+      Object.assign(port, { resolved: brokenCleanup, cancelAll: brokenCleanup });
+      const decision = router.request(target, approvalInteractionRequest());
+      if (operation === "resolved") router.resolved("request-choice");
+      else if (operation === "cancelAll") router.cancelAll();
+      else unregister();
+
+      expect(router.hasPendingForThread("thread-1")).toBe(false);
+      await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+      port.resolveNext({ type: "approval", approved: true, scope: "session" });
+      await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("private upstream detail");
+    },
+  );
+
+  it("isolates cancellation cleanup failures across accounts and remains reusable", async () => {
+    const router = new InteractionRouter();
+    const first = new ControlledInteraction();
+    const second = new ControlledInteraction();
+    first.cancelAll = () => { throw new Error("cleanup failed"); };
+    router.register("telegram", "default", first);
+    router.register("feishu", "default", second);
+    const decisions = [
+      router.request(target, approvalInteractionRequest({ requestId: "one" })),
+      router.request({ ...target, surface: "feishu" }, approvalInteractionRequest({ requestId: "two" })),
+    ];
+    const cancelled = vi.spyOn(second, "cancelAll");
+    router.cancelAll();
+    expect(cancelled).toHaveBeenCalledOnce();
+    await expect(Promise.all(decisions)).resolves.toEqual(Array(2).fill({ type: "approval", approved: false }));
+    const next = router.request(target, approvalInteractionRequest({ requestId: "new" }));
+    first.resolveNext({ type: "approval", approved: true, scope: "once" });
+    await Promise.resolve();
+    expect(router.hasPendingForThread("thread-1")).toBe(true);
+    first.resolveNext({ type: "approval", approved: false });
+    await next;
+  });
+
+  it("releases the queue after a Surface request throws synchronously", async () => {
+    const router = new InteractionRouter();
+    const request = vi.fn<InteractionPort["request"]>()
+      .mockImplementationOnce(() => { throw new Error("send failed"); })
+      .mockResolvedValue({ type: "approval", approved: false });
+    router.register("telegram", "default", { request });
+    await expect(router.request(target, approvalInteractionRequest())).rejects.toThrow("send failed");
+    expect(router.hasPendingForThread("thread-1")).toBe(false);
+    await expect(router.request(target, approvalInteractionRequest())).resolves.toEqual({ type: "approval", approved: false });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a replacement request with the same ID when the old Surface finishes late", async () => {
+    const router = new InteractionRouter();
+    const port = new ControlledInteraction();
+    router.register("telegram", "default", port);
+    const request = approvalInteractionRequest();
+    const old = router.request(target, request);
+    router.cancelThreads(new Set([request.threadId]));
+    await old;
+    const replacement = router.request(target, request);
+    port.resolveNext({ type: "approval", approved: true, scope: "session" });
+    await Promise.resolve();
+    expect(router.hasPendingForThread(request.threadId)).toBe(true);
+    port.resolveNext({ type: "approval", approved: false });
+    await expect(replacement).resolves.toEqual({ type: "approval", approved: false });
+  });
+
   it("does not queue blocking approvals behind optional async questions", async () => {
     const port = new ControlledInteraction();
     const router = new InteractionRouter();

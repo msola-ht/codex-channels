@@ -4,7 +4,8 @@ import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
-  inspectMetricsDatabase,
+  MetricsDatabaseAccessError,
+  openReadOnlyMetricsDatabase,
   readWeeklyQuota,
 } from "./metrics-database-access.mjs";
 import { metricsRangeOptions } from "./metrics-command-options.mjs";
@@ -22,7 +23,6 @@ import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh
 import {
   RequestMetricsQueryService,
   parseRequestMetricsFilters,
-  SqliteModelRequestMetricsStore,
 } from "../dist/observability/index.js";
 import {
   ConfigManagementError,
@@ -481,24 +481,16 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
   throw new ApiError(404, "not_found", `未知 API：${apiPath}`);
 }
 function openMetricsStore(environment, endAtMs = Date.now()) {
-  const status = inspectMetricsDatabase(environment);
-  if (!status.exists) {
-    throw new ApiError(
-      503,
-      "metrics_database_unavailable",
-      "指标数据库尚未创建，请先运行 Gateway 收集模型请求",
-    );
+  try {
+    return openReadOnlyMetricsDatabase(environment, endAtMs);
+  } catch (error) {
+    if (error instanceof MetricsDatabaseAccessError) {
+      throw new ApiError(503, error.code, error.code === "metrics_database_unavailable"
+        ? "指标数据库尚未创建，请先运行 Gateway 收集模型请求"
+        : "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset");
+    }
+    throw error;
   }
-  if (!status.compatible) {
-    throw new ApiError(
-      503,
-      "metrics_database_incompatible",
-      "指标数据库版本不兼容，请停止 Gateway 后运行 codexc metrics reset",
-    );
-  }
-  return new SqliteModelRequestMetricsStore(status.databasePath, endAtMs, {
-    readOnly: true,
-  });
 }
 
 function resolveGatewayConfigPath(environment) {

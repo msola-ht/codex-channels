@@ -9,7 +9,7 @@
 - `com.hegenai.codex-gateway.plist.template`：启动连接该 Socket 的 Gateway。
 - `com.hegenai.codex-webui.plist.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
 
-模板中的占位符由 `scripts/install-launchd.mjs` 写入实际路径和运行环境。服务都通过 CLI
+模板中的占位符由 `codexc service install` 调用的服务安装管理接口写入实际路径和运行环境。服务都通过 CLI
 服务入口启动，并在每次启动时按 TOML、标准环境变量和 macOS 系统代理的顺序解析代理，不把
 自动发现的地址固化到 plist。安装流程加载 App Server 与 Gateway 服务，WebUI plist 只生成不
 自动加载；Gateway plist 显式标记为受监管进程，配置要求重启时由 launchd 自动拉起；若检测到

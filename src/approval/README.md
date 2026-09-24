@@ -19,6 +19,11 @@
   标记为异步的用户问题使用独立 Conversation 队列，等待可选回答不阻塞审批；这类问题由 Bootstrap
   协调普通输入回传，不经过 `ApprovalCoordinator` 或 Server Request 响应编码。
 
+批量取消先撤销整批请求，再通知 Surface 清理，最后推进未受影响的队列；不得在取消过程中发送同批待取消请求。
+组合根通过 `resolvedMany` 按请求 ID 批量撤销异步问题，覆盖渠道断线、Thread 失效、绑定切换及关闭。
+已开始但尚未送达的交互也必须标记失效。路由请求的取消不等待平台发送或清理完成，清理失败单独记录，
+迟到的 Surface 决定不能重新生效；端口注销同样取消该账号的活动及排队交互。
+
 审批必须绑定 Thread、协议提供的 Turn 与请求标识。MCP elicitation 无法关联活动 Turn 时允许
 `turnId` 为 `null`，此时 App Server 请求 ID 是该交互的协议身份。未知、缺少必需归属信息或
 无法路由的高权限请求默认拒绝或取消；Surface 只实现 `InteractionPort`，不复制审批状态机。
@@ -32,6 +37,8 @@
 普通 MCP form 仍按 JSON 输入处理，工具审批不得降级为要求用户手写 JSON。
 本模块不导入 `codex-client` 或 `codex-protocol`，也不接收原始 RPC method/params；畸形与未知
 Server Request 在 Client 适配边界安全拒绝，原始 params 不进入业务模块或错误消息。
+用户输入请求保留上游 `isBlocking` 用于呈现等待或可跳过语义；渠道有效期由现有配置管理，
+不采用已弃用的 `autoResolutionMs`。取消或过期返回空答案，回答始终响应原 Server Request。
 命令审批只接收缺省或明确的 `kind=command`；`kind=writeStdin` 需要独立输入预览与交互合同，当前在
 Client 边界失败关闭，不得降级成普通命令审批。
 命令审批携带实验性的额外网络或文件系统权限时，Client 适配器必须先按当前协议基线验证，

@@ -11,6 +11,13 @@ import {
 import { join, resolve } from "node:path";
 
 import { parse } from "smol-toml";
+import pino from "pino";
+
+import { GatewayReconnectCoordinator } from "../src/bootstrap/gateway-reconnect-coordinator.js";
+import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
+import { EventBus } from "../src/event-bus/index.js";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
@@ -18,7 +25,7 @@ import {
   loadCodexUserSettings,
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
-import type { ApprovalRequest } from "../src/approval/index.js";
+import { ApprovalCoordinator, InteractionRouter, type ApprovalRequest, type InteractionDecision } from "../src/approval/index.js";
 import { ModelSelectionService, type McpRuntimeStatus } from "../src/application/index.js";
 import { SessionRouter, type ThreadLifecyclePort } from "../src/session-routing/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
@@ -81,6 +88,12 @@ contractSuite("isolated Codex App Server state contract", () => {
           expires_in: 3_600,
           refresh_token: "contract-refresh-token",
         }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/reconnect/responses") {
+        request.resume();
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "isolated reconnect fixture", type: "invalid_request_error" } }));
         return;
       }
       response.writeHead(404);
@@ -204,6 +217,12 @@ contractSuite("isolated Codex App Server state contract", () => {
         '[plugins."contract-plugin@contract-marketplace"]',
         "enabled = true",
         "",
+        "[model_providers.reconnect_fixture]",
+        'name = "reconnect_fixture"',
+        `base_url = ${JSON.stringify(`${oauthBaseUrl}/reconnect`)}`,
+        'wire_api = "responses"',
+        'experimental_bearer_token = "fixture"',
+        "",
         "[model_providers.deepseek]",
         'name = "deepseek"',
         'base_url = "https://api.deepseek.com/"',
@@ -263,6 +282,164 @@ contractSuite("isolated Codex App Server state contract", () => {
         maxRetries: 5,
         retryDelay: 100,
       });
+    }
+  });
+
+  it.each(["disconnect", "restore failure", "shutdown"])("handles %s through the Gateway coordinator during binding restoration", async (failure) => {
+    const started = await ownerClient.startThread(workdir, { modelProvider: "reconnect_fixture" });
+    const transport = new UnixWebSocketTransport(socketPath);
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+    const routing = new ProviderRoutingClient("reconnect_fixture", new Map([["reconnect_fixture", client]]));
+    const reconnect = vi.spyOn(routing, "reconnectProvider");
+    const store = new MemoryBindingStore();
+    const router = new SessionRouter(routing, store, new WorkspaceRegistry([
+      { id: "contract", name: "Contract", cwd: workdir, sandbox: "read-only" },
+    ], "contract"));
+    const logger = pino({ level: "silent" });
+    const output = new EventBus<OutputEvent>(logger);
+    const target = { surface: "feishu" as const, accountId: "contract", conversationId: "reconnect" };
+    const bindings = new BindingRestoreCoordinator({
+      codex: routing, router, output, logger,
+      enabledSurfaces: () => [{ surface: "feishu", accountId: "contract" }],
+      scheduledRecovery: () => undefined,
+      markTurnStarted: () => undefined,
+    });
+    const restored = vi.fn();
+    const stop = vi.fn(async () => undefined);
+    const coordinator = new GatewayReconnectCoordinator({
+      codex: routing, router, bindings, logger,
+      core: { connectionLost: () => undefined, connectionRestored: restored },
+      interactions: { cancelThreads: () => undefined },
+      cancelQuestions: () => undefined,
+      intentionallyReleased: async () => false,
+      connected: async () => undefined,
+      isStopping: () => false,
+      requestStop: stop,
+    });
+    let releaseRestore!: () => void;
+    const gate = new Promise<void>((resolveGate) => { releaseRestore = resolveGate; });
+    let restoring = false;
+    const restore = bindings.restore.bind(bindings);
+    if (failure === "shutdown") {
+      const read = routing.readThread.bind(routing);
+      vi.spyOn(routing, "readThread").mockImplementationOnce(async (...args) => {
+        const thread = await read(...args);
+        restoring = true;
+        await gate;
+        return thread;
+      });
+    } else {
+      vi.spyOn(bindings, "restore").mockImplementationOnce(async (...args) => {
+        await restore(...args);
+        restoring = true;
+        await gate;
+        if (failure === "restore failure") throw new Error("temporary binding recovery failure");
+      });
+    }
+    let disconnects = 0;
+    const removeDisconnect = routing.onDisconnect((error, provider) => {
+      disconnects += 1;
+      coordinator.disconnected(error, provider);
+    });
+    try {
+      let completed = false;
+      const removeTurn = ownerClient.onNotification((notification) => {
+        const event = toConversationInputEvent(notification);
+        if (event?.type === "turn.completed" && event.threadId === started.thread.id) completed = true;
+      });
+      try {
+        await ownerClient.startTurn(started.thread.id, [{ type: "text", text: "persist reconnect fixture" }],
+          "codex_connect:reconnect-contract", workdir);
+        await waitFor(() => completed, 5_000);
+      } finally {
+        removeTurn();
+      }
+      await routing.connect();
+      await routing.resumeThread(started.thread.id, workdir);
+      const resume = vi.spyOn(routing, "resumeThread");
+      store.bind({ target, workspaceId: "contract", threadId: started.thread.id, sessionId: started.thread.id });
+      await transport.close();
+      await waitFor(() => restoring, 5_000);
+      if (failure === "shutdown") {
+        const stopping = coordinator.stop();
+        const closingBindings = bindings.close();
+        await routing.close();
+        releaseRestore();
+        await closingBindings;
+        await stopping;
+        expect(resume).not.toHaveBeenCalled();
+        expect(restored).not.toHaveBeenCalled();
+        expect(store.get(target)?.threadId).toBe(started.thread.id);
+        expect((await ownerClient.readThread(started.thread.id)).id).toBe(started.thread.id);
+        return;
+      }
+      if (failure === "disconnect") {
+        await transport.close();
+        await waitFor(() => disconnects === 2, 5_000);
+      }
+      releaseRestore();
+      await waitFor(() => restored.mock.calls.length === 1, 5_000);
+      expect(restored).toHaveBeenCalledWith(expect.stringContaining("已重新连接"), new Set([started.thread.id]));
+      expect(bindings.hasDisconnectedProviders()).toBe(false);
+      expect((await routing.readThread(started.thread.id)).id).toBe(started.thread.id);
+      expect(stop).not.toHaveBeenCalled();
+      expect(reconnect).toHaveBeenCalledTimes(failure === "disconnect" ? 2 : 1);
+    } finally {
+      releaseRestore();
+      removeDisconnect();
+      const stopping = coordinator.stop();
+      await bindings.close();
+      await routing.close();
+      await stopping;
+      await output.close();
+    }
+  }, 15_000);
+
+  it.each(["supervisor", "initialize", "reconnect cleanup"])("closes a Provider while its %s is pending without stopping the shared server", async (stage) => {
+    const transport = new UnixWebSocketTransport(socketPath);
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    let deliver: (() => void) | undefined;
+    if (stage === "initialize") {
+      const onMessage = transport.onMessage.bind(transport);
+      vi.spyOn(transport, "onMessage").mockImplementation((handler) => onMessage((message) => {
+        deliver = () => handler(message);
+        entered();
+      }));
+    }
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" });
+    const connect = vi.spyOn(transport, "connect");
+    const close = vi.spyOn(client, "close");
+    const routing = new ProviderRoutingClient("openai", new Map([["openai", client]]), async () => {
+      if (stage === "supervisor") { entered(); await gate; }
+    });
+    if (stage === "reconnect cleanup") {
+      await routing.connect();
+      await transport.close();
+      vi.spyOn(transport, "close").mockImplementationOnce(async () => { entered(); await gate; });
+      connect.mockClear();
+    }
+    const connecting = stage === "reconnect cleanup" ? routing.reconnectProvider("openai") : routing.connect();
+    const rejected = expect(connecting).rejects.toThrow("已关闭");
+    try {
+      await ready;
+      const closing = routing.close();
+      if (stage === "reconnect cleanup") release();
+      await closing;
+      await rejected;
+      release();
+      deliver?.();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(routing.connectedProviderIds()).toEqual([]);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(connect).toHaveBeenCalledTimes(stage === "initialize" ? 1 : 0);
+      await expect(routing.ensureProviderAvailable("openai")).rejects.toThrow("已关闭");
+      expect(Array.isArray(await ownerClient.listModels())).toBe(true);
+    } finally {
+      release();
+      await routing.close();
     }
   });
 
@@ -711,6 +888,44 @@ contractSuite("isolated Codex App Server state contract", () => {
     } finally {
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
+  it.each(["channel", "thread"] as const)("cancels a real MCP approval while the %s interaction is still preparing", async (scope) => {
+    const { thread } = await ownerClient.startThread(workdir);
+    const target = { surface: "telegram" as const, accountId: "contract", conversationId: "approval-cancel" };
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "contract", threadId: thread.id, sessionId: thread.id });
+    const router = new SessionRouter(ownerClient, store, new WorkspaceRegistry([
+      { id: "contract", name: "Contract", cwd: workdir, sandbox: "read-only" },
+    ], "contract"));
+    const interactions = new InteractionRouter();
+    let release!: (decision: InteractionDecision) => void;
+    const preparing = vi.fn(() => new Promise<InteractionDecision>((resolveDecision) => { release = resolveDecision; }));
+    const resolved = vi.fn();
+    interactions.register("telegram", "contract", { request: preparing, resolved });
+    const coordinator = new ApprovalCoordinator(router, interactions, 5_000);
+    ownerClient.setServerRequestHandler((request) => handleApprovalServerRequest(request, coordinator));
+    try {
+      const response = ownerRpc.request<{ content: Array<{ text?: unknown }>; isError?: boolean }>({
+        method: "mcpServer/tool/call",
+        params: { threadId: thread.id, server: "approval_probe", tool: "approval_probe", arguments: { pull_number: 146 } },
+      } as never);
+      await waitFor(() => preparing.mock.calls.length === 1, 5_000);
+      if (scope === "channel") interactions.setAvailable("telegram", "contract", false);
+      else interactions.cancelThreads(new Set([thread.id]));
+      const result = await response;
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(String(result.content[0]?.text)).action).toBe("cancel");
+      expect(resolved).toHaveBeenCalledOnce();
+      expect(interactions.hasPendingForThread(thread.id)).toBe(false);
+      release({ type: "elicitation", action: "accept", content: null, scope: "always" });
+      expect((await ownerClient.readThread(thread.id)).id).toBe(thread.id);
+    } finally {
+      interactions.cancelAll();
+      release?.({ type: "elicitation", action: "cancel", content: null });
+      await ownerClient.unsubscribeThread(thread.id).catch(() => undefined);
+      await ownerClient.deleteThread(thread.id);
     }
   }, 15_000);
 

@@ -723,7 +723,7 @@ describe("ApprovalCoordinator", () => {
     });
   });
 
-  it("preserves user-input ownership and maps answers back to App Server", async () => {
+  it.each([true, false])("preserves user-input ownership and blocking=%s without using the deprecated timeout", async (isBlocking) => {
     const interaction = new FakeInteraction({
       type: "user-input",
       answers: { choice: ["safe"] },
@@ -738,6 +738,7 @@ describe("ApprovalCoordinator", () => {
         turnId: "turn-1",
         itemId: "tool-1",
         autoResolutionMs: 60_000,
+        isBlocking,
         questions: [{
           id: "choice",
           header: "选择",
@@ -755,7 +756,8 @@ describe("ApprovalCoordinator", () => {
       threadId: "thread-1",
       turnId: "turn-1",
       itemId: "tool-1",
-      expiresInMs: 60_000,
+      expiresInMs: 30_000,
+      title: isBlocking ? "Codex 等待回答" : "Codex 请求补充信息（可跳过）",
       questions: [{
         id: "choice",
         header: "选择",
@@ -768,6 +770,17 @@ describe("ApprovalCoordinator", () => {
     expect(response).toEqual({
       answers: { choice: { answers: ["safe"] } },
     });
+  });
+
+  it.each([undefined, null, "true", 1])("declines invalid user-input blocking flags: %s", async (isBlocking) => {
+    const interaction = new FakeInteraction();
+    const coordinator = new ApprovalCoordinator(routerWithTarget(), interaction, 30_000);
+    await expect(handleRaw(coordinator, {
+      id: "invalid-blocking",
+      method: "item/tool/requestUserInput",
+      params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", questions: [], isBlocking },
+    })).resolves.toEqual({ answers: {} });
+    expect(interaction.requests).toHaveLength(0);
   });
 
   it("declines user input that is missing its turn or item identity", async () => {

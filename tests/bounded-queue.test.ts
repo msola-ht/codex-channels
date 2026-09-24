@@ -7,6 +7,22 @@ import {
 } from "../src/event-bus/index.js";
 
 describe("BoundedAsyncQueue", () => {
+  it("removes only the selected entry while preserving capacity and priority ordering", async () => {
+    const queue = new BoundedAsyncQueue<string>(3);
+    queue.push("first", true);
+    queue.push("cancelled");
+    queue.push("last");
+    expect(queue.remove("cancelled")).toBe(true);
+    expect(queue.remove("cancelled")).toBe(false);
+    queue.pushPriority("prompt");
+    expect(queue.remove("prompt")).toBe(true);
+    expect(queue.push("replacement")).toBe(true);
+    expect(queue.size).toBe(3);
+    expect(await queue.shift()).toBe("first");
+    expect(await queue.shift()).toBe("last");
+    expect(await queue.shift()).toBe("replacement");
+  });
+
   it("requires a positive integer capacity", () => {
     expect(() => new BoundedAsyncQueue<number>(0)).toThrow(
       "队列容量必须是正整数",
@@ -49,6 +65,35 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe("interaction");
     expect(await queue.shift()).toBe("non-critical-1");
     expect(await queue.shift()).toBe("non-critical-2");
+  });
+
+  it("reports critical overflow at growing thresholds and rearms after recovery", async () => {
+    const report = vi.fn();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const queue = new BoundedAsyncQueue<number>(2, report);
+      queue.push(1, true);
+      clock.mockReturnValue(1_500);
+      for (let i = 2; i <= 6; i++) queue.pushPriority(i);
+      expect(report.mock.calls.map(([state]) => state)).toEqual([
+        { capacity: 2, queued: 3, oldestWaitMs: 500 },
+        { capacity: 2, queued: 6, oldestWaitMs: 500 },
+      ]);
+      for (let i = 1; i <= 4; i++) expect(await queue.shift()).toBe(i);
+      queue.push(7, true);
+      expect(report).toHaveBeenCalledTimes(3);
+      expect(report).toHaveBeenLastCalledWith({ capacity: 2, queued: 3, oldestWaitMs: 0 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("keeps a large critical backlog when adding priority output", () => {
+    const queue = new BoundedAsyncQueue<number>(2);
+    for (let i = 0; i < 150_000; i++) queue.push(i, true);
+    expect(queue.pushPriority(150_000)).toBe(true);
+    expect(queue.size).toBe(150_001);
+    queue.close();
   });
 
   it("drains accepted entries before completing a closed queue", async () => {

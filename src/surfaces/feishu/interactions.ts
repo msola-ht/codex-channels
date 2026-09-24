@@ -18,7 +18,7 @@ import {
   interactionOutcome,
 } from "../interaction-copy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
-import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
+import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import type { Logger } from "pino";
 import {
   renderFeishuApprovalCard,
@@ -37,6 +37,7 @@ interface FeishuInteractionDelivery {
   deliverCard(
     chatId: string,
     card: FeishuCardDocument,
+    signal?: AbortSignal,
   ): Promise<string>;
   updateCard(
     chatId: string,
@@ -65,7 +66,6 @@ export type FeishuCardActionResult =
 export class FeishuInteractionPort implements InteractionPort {
   private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
   private readonly preparations = new Set<Promise<string | undefined>>();
-  private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
   private closed = false;
 
@@ -91,7 +91,7 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const resolution = this.pending.resolved(requestId);
+    const resolution = this.pending.resolved(requestId, interactionOutcome.resolvedElsewhere);
     if (resolution?.pending) {
       this.finish(
         resolution.token,
@@ -103,6 +103,7 @@ export class FeishuInteractionPort implements InteractionPort {
   }
 
   cancelAll(outcome = "连接已断开"): void {
+    this.pending.cancelPreparing(outcome);
     for (const [token, pending] of this.pending.entries()) {
       this.finish(
         token,
@@ -138,13 +139,8 @@ export class FeishuInteractionPort implements InteractionPort {
   async close(): Promise<void> {
     if (!this.closed) {
       this.closed = true;
-      for (const cancel of this.preparationCancellations) {
-        cancel();
-      }
-      this.preparationCancellations.clear();
     }
     this.cancelAll("Gateway 已停止");
-    this.pending.clearPreparingResolutions();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     await waitAtMost(Promise.allSettled([...this.statusUpdates]), 5_000);
   }
@@ -217,48 +213,35 @@ export class FeishuInteractionPort implements InteractionPort {
     }
 
     const token = randomBytes(18).toString("base64url");
-    if (!this.pending.reserve(request.requestId, token)) {
+    if (!this.pending.reserve(request.requestId, token, () => this.delivery?.finishInteraction?.(request, safeInteractionDecision(request)))) {
       return safeInteractionDecision(request);
     }
-    this.delivery.prepareInteraction?.(request);
+    const signal = this.pending.signal(token);
     const preparation = this.prepareInteractionCard(
       target,
       request,
       token,
+      signal,
     );
     this.preparations.add(preparation);
     void preparation.then(
       () => this.preparations.delete(preparation),
       () => this.preparations.delete(preparation),
     );
-    let cancelPreparation!: () => void;
-    const cancelled = new Promise<{ type: "closed" }>((resolve) => {
-      cancelPreparation = () => resolve({ type: "closed" });
-    });
-    this.preparationCancellations.add(cancelPreparation);
-    const result = await Promise.race([
-      preparation.then(
-        (messageId) => ({
-          type: "prepared" as const,
-          messageId,
-        }),
-        (error: unknown) => ({
-          type: "failed" as const,
-          error,
-        }),
-      ),
-      cancelled,
-    ]);
-    this.preparationCancellations.delete(cancelPreparation);
-    if (result.type !== "prepared") {
+    let messageId: Awaited<typeof preparation>;
+    try {
+      messageId = await waitForInteractionPreparation(signal, preparation);
+    } catch (error) {
+      const cancelled = signal.aborted;
       this.pending.release(request.requestId, token);
-      if (result.type === "failed") {
-        throw result.error;
-      }
+      if (!cancelled) throw error;
       return safeInteractionDecision(request);
     }
-    const messageId = result.messageId;
     if (!messageId) {
+      return safeInteractionDecision(request);
+    }
+    if (signal.aborted || this.closed) {
+      await this.updateCard(target, messageId, request, safeInteractionDecision(request), "请求已失效");
       return safeInteractionDecision(request);
     }
 
@@ -283,12 +266,6 @@ export class FeishuInteractionPort implements InteractionPort {
       if (activation === "missing") {
         clearTimeout(timer);
         resolve(safeInteractionDecision(request));
-      } else if (activation === "resolved-before-active") {
-        this.finish(
-          token,
-          safeInteractionDecision(request),
-          request.type === "user-input" && request.asynchronous ? "问题已失效" : interactionOutcome.resolvedElsewhere,
-        );
       }
     });
   }
@@ -297,16 +274,20 @@ export class FeishuInteractionPort implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
     token: string,
+    signal: AbortSignal,
   ): Promise<string | undefined> {
     let messageId: string;
     try {
+      this.delivery!.prepareInteraction?.(request);
       messageId = await this.delivery!.deliverCard(
         target.conversationId,
         request.type === "approval"
           ? renderFeishuApprovalCard(request, token)
           : renderFeishuInputCard(request, token),
+        signal,
       );
     } catch (error) {
+      if (signal.aborted) return undefined;
       this.logger?.warn(
         {
           ...interactionLogMetadata(target, request),
@@ -323,7 +304,7 @@ export class FeishuInteractionPort implements InteractionPort {
       },
       "飞书交互请求已送达",
     );
-    if (!this.closed) {
+    if (!this.closed && !signal.aborted) {
       return messageId;
     }
     this.pending.release(request.requestId, token);
@@ -332,7 +313,7 @@ export class FeishuInteractionPort implements InteractionPort {
       messageId,
       request,
       safeInteractionDecision(request),
-      "Gateway 已停止",
+      this.closed ? "Gateway 已停止" : (signal.reason as Error).message,
     );
     return undefined;
   }

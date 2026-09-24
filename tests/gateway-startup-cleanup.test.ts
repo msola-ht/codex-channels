@@ -7,6 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
 import { BindingRestoreCoordinator, type BindingRestoreCoordinatorOptions } from "../src/bootstrap/binding-restore-coordinator.js";
+import { ScheduledTaskComposition, type ScheduledTaskCompositionOptions } from "../src/bootstrap/scheduled-task-composition.js";
+import { SqliteScheduledTaskStore, type ScheduledRun } from "../src/scheduled-tasks/index.js";
+import { WorkspaceRegistry } from "../src/policy/index.js";
+import { secureTestDirectory } from "./support/windows-fixtures.js";
 import {
   inspectThreadWriterLock,
   terminateThreadWriterHolder,
@@ -208,6 +212,196 @@ function createRestoreApplication(options: {
 }
 
 describe("GatewayApplication startup cleanup", () => {
+  it.each(["provider success", "provider failure", "model missing", "model failure"])("preserves scheduled Runs when stopping startup during %s", async (stage) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-stop-preparation-"));
+    secureTestDirectory(directory);
+    const target = { surface: "feishu" as const, accountId: "default", conversationId: "scheduled-stop" };
+    let settle!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<boolean>((resolve, reject) => {
+      settle = () => stage.endsWith("failure") ? reject(new Error("Client closed")) : resolve(false);
+    });
+    const check = () => { entered(); return gate; };
+    const ensureProviderAvailable = vi.fn(async () => { if (stage.startsWith("provider")) await check(); });
+    const isModelAvailable = vi.fn(async () => stage.startsWith("model") ? await check() : true);
+    const surfaceStart = vi.fn(async () => undefined);
+    const application = createRestoreApplication({
+      binding: { target, workspaceId: "main", threadId: "thread-1", sessionId: "thread-1" },
+      published: [], restoreSubscriptions: vi.fn(async () => []),
+      overrides: { surfaceManager: { start: surfaceStart, stop: async () => undefined } },
+    });
+    const codex = Reflect.get(application, "codex");
+    Object.assign(codex, { ensureProviderAvailable, isModelAvailable, isProviderConfigured: () => true,
+      close: async () => { settle(); } });
+    const composition = new ScheduledTaskComposition({
+      stateDatabasePath: join(directory, "state.sqlite3"),
+      router: Reflect.get(application, "router"), codex,
+      bindings: { conversations: () => [target], actors: () => ["actor"] },
+      workspaces: new WorkspaceRegistry([{ id: "main", name: "Main", cwd: directory,
+        sandbox: "read-only", approvalPolicy: "never" }], "main"),
+      core: Reflect.get(application, "core"), output: { subscribe: () => undefined },
+      logger: pino({ level: "silent" }), isSurfaceEnabled: () => true,
+      creationContext: () => { throw new Error("unexpected creation"); }, presentConfirmation: () => undefined,
+    } as unknown as ScheduledTaskCompositionOptions);
+    Reflect.set(application, "scheduledTasks", composition);
+    const store = Reflect.get(composition, "store") as SqliteScheduledTaskStore;
+    const runIds: string[] = [];
+    for (const id of ["first", "second"]) {
+      const task = store.createTask({ taskId: id, name: id, ...target, actorId: "actor", workspaceId: "main",
+        prompt: "read", schedule: { type: "daily", time: "09:00" }, timezone: "UTC", createdAt: 1,
+        modelProvider: "openai", model: "fixture", sandbox: "read-only", approvalPolicy: "never" });
+      const claim = store.claimDue(id, task.nextRunAt!, "claimed", task.nextRunAt! + 1);
+      if (claim.kind !== "claimed") throw new Error("fixture claim failed");
+      store.markRunning(claim.run.runId, task.nextRunAt! + 2, { threadId: `thread-${id}`, turnId: `turn-${id}` });
+      runIds.push(claim.run.runId);
+    }
+    let saved: Array<ScheduledRun | undefined> = [];
+    const closeStore = store.close.bind(store);
+    vi.spyOn(store, "close").mockImplementation(() => { saved = runIds.map((id) => store.getRun(id)); closeStore(); });
+    const starting = application.start();
+    const rejected = expect(starting).rejects.toThrow("Gateway 正在停止");
+    try {
+      await ready;
+      await application.stop();
+      await rejected;
+      expect(saved.map((run) => run?.state)).toEqual(["running", "running"]);
+      expect(composition.coordinator.runningThreadIds().size).toBe(2);
+      expect(ensureProviderAvailable).toHaveBeenCalledTimes(1);
+      expect(isModelAvailable).toHaveBeenCalledTimes(stage.startsWith("model") ? 1 : 0);
+      expect(surfaceStart).not.toHaveBeenCalled();
+    } finally {
+      settle();
+      await application.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["metrics", "surface", "spool"])("stops startup after the pending %s stage", async (stage) => {
+    let release!: () => void;
+    let entered!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { entered = resolve; });
+    const pause = async () => { entered(); await pending; };
+    const connect = vi.fn(async () => ({ userAgent: "test", platformFamily: "unix", platformOs: "linux" }));
+    const surfaceStart = vi.fn(stage === "surface" ? pause : async () => undefined);
+    const spoolStart = vi.fn(stage === "spool" ? pause : async () => undefined);
+    const idleStart = vi.fn();
+    const application = createRestoreApplication({
+      binding: { target: { surface: "feishu", accountId: "default", conversationId: "stop" },
+        workspaceId: "default", threadId: "thread", sessionId: "thread" },
+      published: [],
+      restoreSubscriptions: async () => [],
+      overrides: {
+        providerMetrics: { start: stage === "metrics" ? pause : async () => undefined, close: async () => undefined },
+        surfaceManager: { start: surfaceStart, stop: async () => undefined },
+        channelImageSpool: { start: spoolStart, stop: async () => undefined },
+        conversationIdleReleaser: { start: idleStart, stop: async () => undefined },
+      },
+    });
+    Object.assign(Reflect.get(application, "codex") as object, { connect });
+    const starting = application.start();
+    const rejected = expect(starting).rejects.toThrow("Gateway 正在停止");
+    await ready;
+    const stopping = application.stop();
+    release();
+    await rejected;
+    await stopping;
+    if (stage === "metrics") expect(connect).not.toHaveBeenCalled();
+    if (stage !== "spool") expect(spoolStart).not.toHaveBeenCalled();
+    expect(idleStart).not.toHaveBeenCalled();
+  });
+
+  it("cancels binding recovery when startup fails without an explicit stop", async () => {
+    vi.useFakeTimers();
+    const binding: RestoreTestBinding = {
+      target: { surface: "feishu", accountId: "default", conversationId: "failure" },
+      workspaceId: "default", threadId: "thread", sessionId: "thread",
+    };
+    const restoreSubscriptions = vi.fn(async () => [{
+      binding, bindingRemoved: false, reason: "active-writer", error: new Error("occupied"),
+    }]);
+    const application = createRestoreApplication({
+      binding,
+      published: [], restoreSubscriptions,
+      overrides: { surfaceManager: {
+        start: async () => {
+          coordinator.schedule();
+          expect(vi.getTimerCount()).toBe(1);
+          throw new Error("surface failed");
+        }, stop: async () => undefined,
+      } },
+    });
+    const coordinator = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    try {
+      await expect(application.start()).rejects.toThrow("surface failed");
+      await coordinator.restore();
+      expect(restoreSubscriptions).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await application.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores in-flight binding recovery results after close", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const published: unknown[] = [];
+    const binding: RestoreTestBinding = {
+      target: { surface: "feishu", accountId: "default", conversationId: "late" },
+      workspaceId: "default", threadId: "thread", sessionId: "thread",
+    };
+    const recoverRunning = vi.fn(async () => undefined);
+    const application = createRestoreApplication({
+      binding, published,
+      restoreSubscriptions: async (shouldRestore, onRestored) => {
+        expect(shouldRestore(binding.target, binding)).toBe(true);
+        await pending;
+        expect(shouldRestore(binding.target, binding)).toBe(false);
+        onRestored(binding, { id: binding.threadId, status: { type: "idle" }, activeTurnId: null });
+        return [];
+      },
+      overrides: { scheduledTasks: { coordinator: {
+        runningThreadIds: () => new Set(), recoverRunning,
+      } } },
+    });
+    const coordinator = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    const restoring = coordinator.restore();
+    const closing = coordinator.close();
+    release();
+    await restoring;
+    await closing;
+    expect(recoverRunning).not.toHaveBeenCalled();
+    expect(published).toEqual([]);
+  });
+
+  it("closes the Client to settle recovery before closing the binding store", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const calls: string[] = [];
+    const application = createRestoreApplication({
+      binding: { target: { surface: "feishu", accountId: "default", conversationId: "order" },
+        workspaceId: "default", threadId: "thread", sessionId: "thread" },
+      published: [],
+      restoreSubscriptions: async () => {
+        await pending;
+        calls.push("recovery:settled");
+        return [];
+      },
+      overrides: { bindings: { close: () => { calls.push("store:closed"); } } },
+    });
+    Object.assign(Reflect.get(application, "codex") as object, { close: async () => {
+      calls.push("client:closed");
+      release();
+    } });
+    const coordinator = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    const restoring = coordinator.restore();
+    await application.stop();
+    await restoring;
+    expect(calls).toEqual(["client:closed", "recovery:settled", "store:closed"]);
+  });
+
   it("cancels connectivity before waiting for startup to settle", async () => {
     const controller = new AbortController();
     let settle!: () => void;
@@ -316,7 +510,7 @@ describe("GatewayApplication startup cleanup", () => {
 
     expect(restoredOptions).toEqual({ modelProvider: "deepseek" });
     expect(retained).toBe(true);
-    expect(recoverRunning).toHaveBeenCalledWith(new Set([binding.threadId]));
+    expect(recoverRunning).toHaveBeenCalledWith(new Set([binding.threadId]), expect.any(AbortSignal));
   });
 
   it("reconciles scheduled Runs even when their persisted background binding is missing", async () => {
@@ -342,7 +536,7 @@ describe("GatewayApplication startup cleanup", () => {
 
     await restoreBindings.call(application);
 
-    expect(recoverRunning).toHaveBeenCalledWith(new Set(["missing-thread"]));
+    expect(recoverRunning).toHaveBeenCalledWith(new Set(["missing-thread"]), expect.any(AbortSignal));
   });
 
   it("starts scheduled claiming only after binding recovery and stops it before stores", async () => {
@@ -491,7 +685,6 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       stopping: false,
-      reconnecting: undefined,
       codex: {
         onNotification: () => {
           calls.push("listen:notification");
@@ -1147,8 +1340,7 @@ describe("GatewayApplication startup cleanup", () => {
     await application.start();
 
     disconnect?.(new Error("connection lost"), "openai");
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(reconnectAttempts).toBe(1));
 
     await expect(application.stop()).resolves.toBeUndefined();
     expect(reconnectAttempts).toBe(1);

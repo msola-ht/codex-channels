@@ -1,11 +1,11 @@
 import type { ChildProcess } from "node:child_process";
 
-export async function waitFor(predicate: () => boolean, timeoutMs: number, failure?: () => Error | undefined): Promise<void> {
+export async function waitFor(predicate: () => boolean, timeoutMs: number, failure?: () => Error | undefined, description = "App Server 条件"): Promise<void> {
   const started = Date.now();
   while (!predicate()) {
     const currentFailure = failure?.();
     if (currentFailure) throw currentFailure;
-    if (Date.now() - started > timeoutMs) throw new Error("等待 Codex App Server Unix Socket 超时；请检查 App Server stderr");
+    if (Date.now() - started > timeoutMs) throw new Error(`等待 ${description} 超时（${timeoutMs} ms）`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }

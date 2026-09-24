@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
+import { scheduleApiRefresh } from "../lib/api-polling"
+
 export interface UseApiState<T> {
   data: T | null
   loading: boolean
@@ -45,4 +47,9 @@ export function useApi<T>(
     setState({ data, loading: false, error: null })
   }, [])
   return { ...state, refetch, replaceData }
+}
+
+/** 自动刷新只在请求结束后计时，不取消正在执行的请求。 */
+export function useApiPolling(refetch: () => void, loading: boolean, enabled: boolean) {
+  useEffect(() => scheduleApiRefresh(refetch, loading, enabled, document), [refetch, loading, enabled])
 }

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import type { Logger } from "pino";
 import startupNetworkPolicy from "../../startup-network-policy.json" with { type: "json" };
+import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
@@ -172,8 +173,7 @@ export abstract class GatewayComponentGraph {
   protected removeRpcNotification: (() => void) | undefined;
   protected removeRpcDisconnect: (() => void) | undefined;
   private shutdownTask: Promise<void> | undefined;
-  protected reconnecting: Promise<void> | undefined;
-  protected reconnectAbort: AbortController | undefined;
+  private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
   private readonly disconnectedProviders = new Set<string>();
   private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
   private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
@@ -184,6 +184,7 @@ export abstract class GatewayComponentGraph {
   private openAiConnectivity: OpenAiConnectivityStatus | "recovering" = "not-applicable";
   protected startupNetworkRecovery: StartupNetworkRecovery | undefined;
   protected openAiConnectivityAbort: AbortController | undefined;
+  protected startupAbort: AbortController | undefined;
   protected stopping = false;
 
   protected abstract requestStop(): Promise<void>;
@@ -854,12 +855,10 @@ export abstract class GatewayComponentGraph {
           accountId,
           available,
           outcome,
-        ) => this.interactions.setAvailable(
-          surface,
-          accountId,
-          available,
-          outcome,
-        ),
+        ) => {
+          this.interactions.setAvailable(surface, accountId, available, outcome);
+          if (!available) this.asyncQuestions?.cancelSurface(surface, accountId);
+        },
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
@@ -1163,12 +1162,14 @@ export abstract class GatewayComponentGraph {
   protected async startInternal(): Promise<void> {
     try {
       this.requireRunning();
+      this.startupAbort = new AbortController();
       await this.providerMetrics.start();
+      this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
       });
       this.removeRpcDisconnect = this.codex.onDisconnect((error, provider) => {
-        void this.handleCodexDisconnect(error, provider);
+        this.gatewayReconnectCoordinator().disconnected(error, provider);
       });
       const initialized = await this.codex.connect();
       this.requireRunning();
@@ -1198,7 +1199,8 @@ export abstract class GatewayComponentGraph {
         }
       }
       this.requireRunning();
-      await this.scheduledTasks?.prepareRecovery();
+      await this.scheduledTasks?.prepareRecovery(this.startupAbort.signal);
+      this.requireRunning();
       await this.restoreBindings();
       this.requireRunning();
       if (this.openAiConnectivity !== "recovering") {
@@ -1216,10 +1218,12 @@ export abstract class GatewayComponentGraph {
         "Codex App Server 已连接",
       );
       await this.surfaceManager.start();
+      this.requireRunning();
       void this.providerAccounts?.refreshSnapshots().catch((error) => {
         this.logger.warn({ err: error }, "账户快照异步预热失败");
       });
       await this.channelImageSpool.start();
+      this.requireRunning();
       this.scheduledTasks?.start();
       this.conversationIdleReleaser?.start();
       this.providerIdleReleaser?.start();
@@ -1233,10 +1237,13 @@ export abstract class GatewayComponentGraph {
       this.requireRunning();
     } catch (error) {
       this.stopping = true;
-      this.reconnectAbort?.abort();
+      const reconnecting = this.stopReconnect();
       await this.shutdownComponents().catch((cleanupError) => {
         this.logger.error({ err: cleanupError }, "Gateway 启动失败后的资源清理不完整");
       });
+      if (!(await waitAtMost(reconnecting, 5_000))) {
+        this.logger.error("Gateway 启动失败后等待重连任务停止超时");
+      }
       throw error;
     }
   }
@@ -1247,6 +1254,8 @@ export abstract class GatewayComponentGraph {
   }
 
   private async shutdownComponentsOnce(): Promise<void> {
+    this.startupAbort?.abort();
+    const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
     this.openAiConnectivityAbort = undefined;
     this.removeRpcNotification?.();
@@ -1269,6 +1278,11 @@ export abstract class GatewayComponentGraph {
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
+      ["Binding Recovery", async () => {
+        if (restoringBindings && !(await waitAtMost(restoringBindings, 5_000))) {
+          throw new Error("等待 Codex Thread 订阅恢复任务停止超时");
+        }
+      }],
       ["Binding Store", () => Promise.resolve(this.bindings.close())],
       ["Session Display Cache", () => Promise.resolve(this.sessionDisplayCache?.close())],
       ["Scheduled Task Store", () => Promise.resolve(this.scheduledTasks?.close())],
@@ -1325,160 +1339,36 @@ export abstract class GatewayComponentGraph {
     });
   }
 
-  private beginReconnect(): void {
-    if (this.reconnecting) {
-      return;
-    }
-    const controller = new AbortController();
-    this.reconnectAbort = controller;
-    const task = this.reconnect(controller.signal)
-      .catch((error) => {
-        if (this.stopping || controller.signal.aborted) {
-          return;
-        }
-        this.logger.fatal({ err: error }, "Codex App Server 重连次数耗尽，Gateway 将停止");
-        process.exitCode = 1;
-        void this.requestStop().catch((stopError) => {
-          this.logger.error({ err: stopError }, "Codex 重连失败后停止 Gateway 失败");
-        });
-      })
-      .finally(() => {
-        if (this.reconnecting === task) {
-          this.reconnecting = undefined;
-        }
-        if (this.reconnectAbort === controller) {
-          this.reconnectAbort = undefined;
-        }
-        if (!this.stopping && this.bindingRestoreCoordinator().hasDisconnectedProviders()) {
-          queueMicrotask(() => this.beginReconnect());
-        }
-      });
-    this.reconnecting = task;
+  protected stopReconnect(): Promise<void> {
+    return this.reconnectCoordinator?.stop() ?? Promise.resolve();
   }
 
-  private async reconnect(signal: AbortSignal): Promise<void> {
-    while (
-      this.bindingRestoreCoordinator().hasDisconnectedProviders()
-      && !this.stopping
-      && !signal.aborted
-    ) {
-      const provider = this.bindingRestoreCoordinator().nextDisconnectedProvider();
-      if (provider === undefined) return;
-      await this.reconnectProvider(provider, signal);
-    }
-  }
-
-  private async handleCodexDisconnect(error: Error, provider: string): Promise<void> {
-    if (this.stopping) return;
-    const affectedThreadIds = new Set(
-      this.router.allBindings()
-        .map((binding) => binding.threadId)
-        .filter((threadId) => this.codex.knownProvider(threadId) === provider),
-    );
-    for (const threadId of affectedThreadIds) this.asyncQuestions.cancelThread(threadId);
-    let intentionallyReleased = false;
-    try {
-      const topology = await inspectAppServerSupervisor(this.config.codexSocketPath);
-      intentionallyReleased = topology?.releasedProviders.some(
-        (releasedProvider) => releasedProvider === provider,
-      ) === true;
-    } catch (inspectError) {
-      this.logger.warn(
-        { err: inspectError, provider },
-        "无法确认模型 Provider 是否主动停止，将按意外断线恢复",
-      );
-    }
-    if (this.stopping) return;
-    if (intentionallyReleased) {
-      try {
-        await this.codex.closeProvider(provider);
-      } catch (closeError) {
-        this.logger.warn({ err: closeError, provider }, "主动停止的 Provider Client 清理失败");
-      }
-      this.interactions.cancelThreads(affectedThreadIds);
-      this.core.connectionLost(
-        `${provider} App Server 已主动停止；再次使用时将自动启动`,
-        affectedThreadIds,
-      );
-      this.logger.info({ provider }, "模型 Provider App Server 已主动停止");
-      return;
-    }
-    this.bindingRestoreCoordinator().markProviderDisconnected(provider, affectedThreadIds);
-    this.logger.warn({ err: error, provider }, "Codex App Server 连接已断开");
-    this.interactions.cancelThreads(affectedThreadIds);
-    this.core.connectionLost(
-      `${provider} App Server 连接已断开，正在恢复连接`,
-      affectedThreadIds,
-    );
-    this.beginReconnect();
-  }
-
-  private async reconnectProvider(provider: string, signal: AbortSignal): Promise<void> {
-    const maximumAttempts = 12;
-    for (
-      let attempt = 1;
-      attempt <= maximumAttempts && !this.stopping && !signal.aborted;
-      attempt += 1
-    ) {
-      if (attempt > 1) {
-        const ceiling = Math.min(30_000, 500 * 2 ** (attempt - 2));
-        await abortableDelay(
-          Math.floor(ceiling / 2 + Math.random() * ceiling / 2),
-          signal,
-        );
-      }
-      if (this.stopping || signal.aborted) {
-        return;
-      }
-      try {
-        const initialized = await this.codex.reconnectProvider(provider);
-        if (this.stopping || signal.aborted) {
-          return;
-        }
+  private gatewayReconnectCoordinator(): GatewayReconnectCoordinator {
+    this.reconnectCoordinator ??= new GatewayReconnectCoordinator({
+      codex: this.codex,
+      router: this.router,
+      core: this.core,
+      interactions: this.interactions,
+      bindings: this.bindingRestoreCoordinator(),
+      logger: this.logger,
+      isStopping: () => this.stopping,
+      cancelQuestions: (threadId) => this.asyncQuestions.cancelThread(threadId),
+      intentionallyReleased: async (provider) => {
+        const topology = await inspectAppServerSupervisor(this.config.codexSocketPath);
+        return topology?.releasedProviders.includes(provider) === true;
+      },
+      connected: async (provider, initialized, signal) => {
         this.codexUpstreamUserAgent = initialized.userAgent;
         if (provider === "openai" && this.customPrimaryProviderId === undefined) {
-          await this.refreshRateLimits();
+          await this.refreshRateLimits(signal);
         }
-        if (this.stopping || signal.aborted) {
-          return;
-        }
-        await this.restoreBindings(provider);
-        this.scheduleBindingRestore();
-        if (this.stopping || signal.aborted) {
-          return;
-        }
-        const restoredThreadIds = this.bindingRestoreCoordinator()
-          .affectedThreadsForProvider(provider);
-        if (restoredThreadIds !== undefined && restoredThreadIds.size > 0) {
-          this.core.connectionRestored(
-            `${provider} App Server 已重新连接`,
-            restoredThreadIds,
-          );
-        }
-        this.bindingRestoreCoordinator().completeProviderReconnect(provider);
-        this.logger.info(
-          {
-            attempt,
-            provider,
-            platformFamily: initialized.platformFamily,
-            platformOs: initialized.platformOs,
-          },
-          "模型 Provider App Server 已重新连接",
-        );
-        return;
-      } catch (error) {
-        if (this.stopping || signal.aborted) {
-          return;
-        }
-        this.logger.warn(
-          { err: error, provider, attempt, maximumAttempts },
-          "模型 Provider App Server 重连失败",
-        );
-      }
-    }
-    if (!this.stopping && !signal.aborted) {
-      throw new Error(`${provider} App Server 重连 ${maximumAttempts} 次后仍然失败`);
-    }
+      },
+      requestStop: () => {
+        process.exitCode = 1;
+        return this.requestStop();
+      },
+    });
+    return this.reconnectCoordinator;
   }
 
   private requireRunning(): void {
@@ -1732,22 +1622,6 @@ export async function waitAtMost(task: Promise<void>, timeoutMs: number): Promis
       clearTimeout(timeout);
     }
   }
-}
-
-async function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    const finish = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, milliseconds);
-    timer.unref();
-    signal.addEventListener("abort", finish, { once: true });
-  });
 }
 
 function verifyCodexVersion(config: GatewayConfig): void {
