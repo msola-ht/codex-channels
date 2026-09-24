@@ -50,6 +50,7 @@ export class InteractionRouter implements InteractionPort {
     this.ports.set(key, port);
     return () => {
       if (this.ports.get(key) === port) {
+        this.setAvailable(surface, accountId, false, "渠道交互端口已注销");
         this.ports.delete(key);
         this.unavailablePorts.delete(key);
       }
@@ -68,33 +69,10 @@ export class InteractionRouter implements InteractionPort {
       return;
     }
     this.unavailablePorts.add(key);
-    for (const queued of [...this.pendingByRequestId.values()]) {
-      if (this.key(queued.target.surface, queued.target.accountId) !== key) {
-        continue;
-      }
-      const queue = this.queues.get(queued.queueKey);
-      if (queue?.active === queued) {
-        delete queue.active;
-      } else if (queue) {
-        const index = queue.entries.indexOf(queued);
-        if (index >= 0) {
-          queue.entries.splice(index, 1);
-        }
-      }
-      this.pendingByRequestId.delete(queued.request.requestId);
-      queued.resolve(safeInteractionDecision(queued.request));
-      if (queue && queue.active === undefined && queue.entries.length === 0) {
-        this.queues.delete(queued.queueKey);
-      }
-    }
-    try {
-      this.ports.get(key)?.cancelAll?.(outcome);
-    } catch (error) {
-      this.logger?.warn(
-        { surface, accountId, errorType: error instanceof Error ? error.name : typeof error },
-        "不可用 Surface 的交互清理失败",
-      );
-    }
+    this.cancelMatching(
+      (queued) => this.key(queued.target.surface, queued.target.accountId) === key,
+      () => this.cleanup(() => this.ports.get(key)?.cancelAll?.(outcome)),
+    );
   }
 
   request(
@@ -159,23 +137,11 @@ export class InteractionRouter implements InteractionPort {
   resolved(requestId: string): void {
     const queued = this.pendingByRequestId.get(requestId);
     if (queued) {
-      if (queued.active) {
-        queued.port.resolved?.(requestId);
-        return;
-      }
-      const queue = this.queues.get(queued.queueKey);
-      if (queue) {
-        const index = queue.entries.indexOf(queued);
-        if (index >= 0) {
-          queue.entries.splice(index, 1);
-        }
-      }
-      this.pendingByRequestId.delete(requestId);
-      queued.resolve(safeInteractionDecision(queued.request));
+      this.cancelMatching((candidate) => candidate === queued);
       return;
     }
     for (const port of this.ports.values()) {
-      port.resolved?.(requestId);
+      this.cleanup(() => port.resolved?.(requestId));
     }
   }
 
@@ -189,35 +155,54 @@ export class InteractionRouter implements InteractionPort {
   }
 
   cancelThreads(threadIds: ReadonlySet<string>): void {
-    for (const queued of [...this.pendingByRequestId.values()]) {
-      if (!threadIds.has(queued.request.threadId)) {
-        continue;
-      }
-      const queue = this.queues.get(queued.queueKey);
-      this.pendingByRequestId.delete(queued.request.requestId);
-      if (queue?.active === queued) {
-        delete queue.active;
-        queued.port.resolved?.(queued.request.requestId);
-      } else if (queue) {
-        const index = queue.entries.indexOf(queued);
-        if (index >= 0) queue.entries.splice(index, 1);
-      }
-      queued.resolve(safeInteractionDecision(queued.request));
-      if (queue) {
-        this.dispatchNext(queued.queueKey, queue);
-      }
-    }
+    this.cancelMatching((queued) => threadIds.has(queued.request.threadId));
   }
 
   cancelAll(outcome?: string): void {
-    for (const queue of this.queues.values()) {
-      for (const queued of queue.entries.splice(0)) {
-        this.pendingByRequestId.delete(queued.request.requestId);
-        queued.resolve(safeInteractionDecision(queued.request));
+    this.cancelMatching(() => true, () => {
+      for (const port of this.ports.values()) {
+        this.cleanup(() => port.cancelAll?.(outcome));
       }
+    });
+  }
+
+  private cancelMatching(
+    matches: (queued: QueuedInteraction) => boolean,
+    cancelPorts?: () => void,
+  ): void {
+    const cancelled = [...this.pendingByRequestId.values()].filter(matches);
+    const queues = new Map<string, ConversationInteractionQueue>();
+    // Remove the entire batch before advancing any Conversation or calling a Surface.
+    for (const queued of cancelled) {
+      this.pendingByRequestId.delete(queued.request.requestId);
+      const queue = this.queues.get(queued.queueKey);
+      if (queue) {
+        queues.set(queued.queueKey, queue);
+        if (queue.active === queued) {
+          delete queue.active;
+        } else {
+          const index = queue.entries.indexOf(queued);
+          if (index >= 0) queue.entries.splice(index, 1);
+        }
+      }
+      queued.resolve(safeInteractionDecision(queued.request));
     }
-    for (const port of this.ports.values()) {
-      port.cancelAll?.(outcome);
+    cancelPorts?.();
+    for (const queued of cancelled) {
+      // Preparing cards are not yet covered by the Surface's active-interaction list.
+      if (queued.active) this.cleanup(() => queued.port.resolved?.(queued.request.requestId));
+    }
+    for (const [key, queue] of queues) this.dispatchNext(key, queue);
+  }
+
+  private cleanup(run: () => void): void {
+    try {
+      run();
+    } catch {
+      this.logger?.warn(
+        { reason: "surface-cleanup-failed" },
+        "Surface 交互清理失败，请求已安全取消",
+      );
     }
   }
 
@@ -258,30 +243,29 @@ export class InteractionRouter implements InteractionPort {
     }
     const next = queue.entries.shift();
     if (!next) {
-      this.queues.delete(queueKey);
+      if (this.queues.get(queueKey) === queue) this.queues.delete(queueKey);
       return;
     }
     queue.active = next;
     next.active = true;
-    void next.port.request(next.target, next.request).then(
-      (decision) => {
-        if (this.pendingByRequestId.get(next.request.requestId) === next) {
-          this.pendingByRequestId.delete(next.request.requestId);
-        }
-        next.resolve(decision);
-      },
-      (error: unknown) => {
-        next.reject(error);
-      },
-    ).finally(() => {
+    const complete = (settle: () => void): void => {
       if (this.pendingByRequestId.get(next.request.requestId) === next) {
         this.pendingByRequestId.delete(next.request.requestId);
+        settle();
       }
       if (queue.active === next) {
         delete queue.active;
         this.dispatchNext(queueKey, queue);
       }
-    });
+    };
+    try {
+      void next.port.request(next.target, next.request).then(
+        (decision) => complete(() => next.resolve(decision)),
+        (error: unknown) => complete(() => next.reject(error)),
+      );
+    } catch (error) {
+      complete(() => next.reject(error));
+    }
   }
 }
 

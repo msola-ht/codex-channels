@@ -22,7 +22,7 @@ import {
 } from "../interaction-copy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
-import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
+import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { sanitizeWeixinMarkdownText } from "./operation-format.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
@@ -34,6 +34,7 @@ interface WeixinInteractionDelivery {
   deliverTextSequence(
     target: ConversationTarget,
     texts: readonly string[],
+    signal?: AbortSignal,
   ): Promise<void>;
   prepareInteraction?(request: InteractionRequest): void;
   finishInteraction?(request: InteractionRequest, decision: InteractionDecision): void;
@@ -121,7 +122,7 @@ export class WeixinInteractionPort implements InteractionPort {
   }
 
   resolved(requestId: string): void {
-    const resolution = this.pending.resolved(requestId);
+    const resolution = this.pending.resolved(requestId, interactionOutcome.resolvedElsewhere);
     if (!resolution?.pending) {
       return;
     }
@@ -136,6 +137,7 @@ export class WeixinInteractionPort implements InteractionPort {
   }
 
   cancelAll(outcome = "Gateway 已停止"): void {
+    this.pending.cancelPreparing(outcome);
     for (const [token, pending] of this.pending.entries()) {
       void this.finish(
         token,
@@ -172,10 +174,16 @@ export class WeixinInteractionPort implements InteractionPort {
     if (!interactionTokenPattern.test(token)) {
       return safeInteractionDecision(request);
     }
-    if (!this.pending.reserve(request.requestId, token)) {
+    if (!this.pending.reserve(request.requestId, token, () => this.delivery?.finishInteraction?.(request, safeInteractionDecision(request)))) {
       return safeInteractionDecision(request);
     }
-    this.delivery.prepareInteraction?.(request);
+    const signal = this.pending.signal(token);
+    try {
+      this.delivery.prepareInteraction?.(request);
+    } catch (error) {
+      this.pending.release(request.requestId, token);
+      throw error;
+    }
     const prompt = renderInteractionPrompt(request, token);
     const promptCharacters = request.type === "user-input"
       ? request.questions.reduce(
@@ -229,8 +237,9 @@ export class WeixinInteractionPort implements InteractionPort {
     }
 
     try {
-      await this.delivery.deliverTextSequence(target, prompt);
+      await waitForInteractionPreparation(signal, this.delivery.deliverTextSequence(target, prompt, signal));
     } catch (error) {
+      if (signal.aborted) return decision;
       await this.finish(
         token,
         safeInteractionDecision(request),
@@ -250,6 +259,7 @@ export class WeixinInteractionPort implements InteractionPort {
       );
       throw error;
     }
+    if (signal.aborted) return decision;
     this.logger?.info(
       {
         requestId: request.requestId,
@@ -361,8 +371,10 @@ export class WeixinInteractionPort implements InteractionPort {
         await this.delivery?.deliverTextSequence(
           pending.target,
           renderUserInputPrompt(request, token, next, false),
+          this.pending.signal(token),
         );
       } catch (error) {
+        if (this.pending.get(token) !== pending) return;
         this.logger?.warn(
           {
             requestId: pending.requestId,

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelSelectionService, type ScheduledTaskUseCases } from "../src/application/index.js";
 import type { SessionRouter } from "../src/session-routing/index.js";
 import { UserFacingError } from "../src/conversation-core/index.js";
+import { InteractionRouter } from "../src/approval/index.js";
 import { modelProviderSelectionKeyboard, modelSelectionKeyboard, telegramModelSelectionToken } from "../src/surfaces/telegram/command-renderer.js";
 import {
   conversationStatus,
@@ -26,6 +27,65 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it.each(["cancelled", "resolved", "expired", "completed", "preparing"] as const)(
+    "keeps a %s MCP form reply out of ordinary input after switching sessions",
+    async (ending) => {
+      const submit = vi.fn();
+      const newSession = vi.fn().mockResolvedValue({});
+      const { surface, output, apiPayloads, sentTexts } = createSurface(submit, vi.fn(), { newSession });
+      const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
+      const router = new InteractionRouter();
+      router.register("telegram", "default", surface.interactions);
+      let release: (() => void) | undefined;
+      if (ending === "preparing") {
+        surface.bot.api.config.use(async (previous, method, payload, signal) => {
+          if (method === "sendMessage" && !release) {
+            await new Promise<void>((resolve) => { release = resolve; });
+          }
+          return previous(method, payload, signal);
+        });
+      }
+      const reply = (updateId: number, text: string) => surface.bot.handleUpdate({
+        update_id: updateId,
+        message: {
+          message_id: updateId, date: 1, chat: telegramChat(), from: telegramUser(), text,
+          reply_to_message: { message_id: 99, date: 1, chat: telegramChat(), text: "MCP form", reply_to_message: undefined as never },
+        },
+      });
+      try {
+        const decision = router.request(target, {
+          type: "elicitation", mode: "form", requestId: "form-review", threadId: "old-thread", turnId: "old-turn",
+          title: "MCP 请求输入", message: "请回复 JSON", expiresInMs: ending === "expired" ? 20 : 30_000,
+        });
+        if (ending === "preparing") await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+        else await vi.waitFor(() => expect(apiPayloads.some(({ method }) => method === "sendMessage")).toBe(true));
+        if (ending === "completed") await reply(1, '{"field":"accepted"}');
+        else if (ending === "resolved") router.resolved("form-review");
+        else if (ending !== "expired") router.cancelThreads(new Set(["old-thread"]));
+        await expect(decision).resolves.toEqual({
+          type: "elicitation", action: ending === "completed" ? "accept" : "cancel",
+          content: ending === "completed" ? { field: "accepted" } : null,
+        });
+        release?.();
+        await vi.waitFor(() => expect(apiPayloads.some(({ method }) => method === "editMessageText")).toBe(true));
+        await surface.bot.handleUpdate({
+          update_id: 2,
+          message: { message_id: 2, date: 1, chat: telegramChat(), from: telegramUser(), text: "/new",
+            entities: [{ type: "bot_command", offset: 0, length: 4 }] },
+        });
+        expect(newSession).toHaveBeenCalledWith(target);
+        await reply(3, '{"field":"must-not-reach-new-thread"}');
+        expect(submit).not.toHaveBeenCalled();
+        expect(sentTexts.at(-1)).toContain("已失效");
+      } finally {
+        release?.();
+        router.cancelAll();
+        await surface.stop();
+        await output.close();
+      }
+    },
+  );
+
   it("does not select another account's same-name model when subscription changes during callback acknowledgement", async () => {
     const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
     const option = (model: string, provider: string) => ({

@@ -1,11 +1,56 @@
 import pino from "pino";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("removes a cancelled ordered operation without blocking later work", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    let release!: () => void;
+    delivery.enqueue("a", () => new Promise<void>((resolve) => { release = resolve; }), true);
+    await settle();
+    const controller = new AbortController();
+    const cancelled = vi.fn(async () => 1);
+    const first = delivery.runOrdered("a", cancelled, controller.signal);
+    const rejected = expect(first).rejects.toThrow("已取消");
+    controller.abort();
+    await rejected;
+    const next = delivery.runOrdered("a", async () => 2);
+    release();
+    await expect(next).resolves.toBe(2);
+    expect(cancelled).not.toHaveBeenCalled();
+    await delivery.close();
+  });
+
+  it("settles ordered waiters and never starts queued work after the close deadline", async () => {
+    vi.useFakeTimers();
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", closeTimeoutMs: 10 });
+    let release!: () => void;
+    const inFlight = delivery.runOrdered("a", () => new Promise<void>((resolve) => { release = resolve; }));
+    const rejectedInFlight = expect(inFlight).rejects.toThrow("已取消");
+    await settle();
+    const queued = vi.fn(async () => 42);
+    const ordered = delivery.runOrdered("a", queued);
+    const rejectedOrdered = expect(ordered).rejects.toThrow("已取消");
+    const output = vi.fn(async () => undefined);
+    delivery.enqueue("a", output, true);
+    try {
+      const close = delivery.close();
+      await vi.advanceTimersByTimeAsync(10);
+      await close;
+      await Promise.all([rejectedInFlight, rejectedOrdered]);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queued).not.toHaveBeenCalled();
+      expect(output).not.toHaveBeenCalled();
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+  });
+
   it("serializes one Conversation while allowing different Conversations to progress", async () => {
     const delivery = new ConversationDeliveryQueue(logger, {
       component: "Test",

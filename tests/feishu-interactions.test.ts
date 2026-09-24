@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import type {
   InteractionRequest,
 } from "../src/approval/index.js";
+import { InteractionRouter } from "../src/approval/index.js";
 import {
   FeishuInteractionPort,
   type FeishuCardDocument,
@@ -16,6 +17,33 @@ const target = {
 } as const;
 
 describe("Feishu interaction port", () => {
+  it("invalidates a late card after the shared router marks the channel unavailable", async () => {
+    let completeSend!: (messageId: string) => void;
+    let card!: FeishuCardDocument;
+    const updateCard = vi.fn(async () => undefined);
+    const port = new FeishuInteractionPort({
+      deliverCard: (_chatId, document) => {
+        card = document;
+        return new Promise<string>((resolve) => { completeSend = resolve; });
+      },
+      updateCard,
+    }, { actors: () => ["ou_actor"], rememberActor: () => {} }, { isAllowed: () => true });
+    const router = new InteractionRouter();
+    router.register(target.surface, target.accountId, port);
+    const decision = router.request(target, approvalRequest());
+    await settle();
+    router.setAvailable(target.surface, target.accountId, false);
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+    completeSend("om_late");
+    await settle();
+    expect(updateCard).toHaveBeenCalledOnce();
+    expect(port.handleCardAction({
+      messageId: "om_late", chatId: target.conversationId, actorOpenId: "ou_actor", tag: "button",
+      value: { interaction_token: interactionToken(card, "approve-once"), decision: "approve-once" },
+    })).toBe("stale");
+    await port.close();
+  });
+
   it("binds an approval to the exact chat, message, actor, and one-use token", async () => {
     const logger = {
       info: vi.fn(),

@@ -25,7 +25,7 @@ import {
   loadCodexUserSettings,
   updateCodexUserSetting,
 } from "../scripts/codex-user-settings-management.mjs";
-import type { ApprovalRequest } from "../src/approval/index.js";
+import { ApprovalCoordinator, InteractionRouter, type ApprovalRequest, type InteractionDecision } from "../src/approval/index.js";
 import { ModelSelectionService, type McpRuntimeStatus } from "../src/application/index.js";
 import { SessionRouter, type ThreadLifecyclePort } from "../src/session-routing/index.js";
 import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
@@ -888,6 +888,44 @@ contractSuite("isolated Codex App Server state contract", () => {
     } finally {
       await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
       await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
+  it.each(["channel", "thread"] as const)("cancels a real MCP approval while the %s interaction is still preparing", async (scope) => {
+    const { thread } = await ownerClient.startThread(workdir);
+    const target = { surface: "telegram" as const, accountId: "contract", conversationId: "approval-cancel" };
+    const store = new MemoryBindingStore();
+    store.bind({ target, workspaceId: "contract", threadId: thread.id, sessionId: thread.id });
+    const router = new SessionRouter(ownerClient, store, new WorkspaceRegistry([
+      { id: "contract", name: "Contract", cwd: workdir, sandbox: "read-only" },
+    ], "contract"));
+    const interactions = new InteractionRouter();
+    let release!: (decision: InteractionDecision) => void;
+    const preparing = vi.fn(() => new Promise<InteractionDecision>((resolveDecision) => { release = resolveDecision; }));
+    const resolved = vi.fn();
+    interactions.register("telegram", "contract", { request: preparing, resolved });
+    const coordinator = new ApprovalCoordinator(router, interactions, 5_000);
+    ownerClient.setServerRequestHandler((request) => handleApprovalServerRequest(request, coordinator));
+    try {
+      const response = ownerRpc.request<{ content: Array<{ text?: unknown }>; isError?: boolean }>({
+        method: "mcpServer/tool/call",
+        params: { threadId: thread.id, server: "approval_probe", tool: "approval_probe", arguments: { pull_number: 146 } },
+      } as never);
+      await waitFor(() => preparing.mock.calls.length === 1, 5_000);
+      if (scope === "channel") interactions.setAvailable("telegram", "contract", false);
+      else interactions.cancelThreads(new Set([thread.id]));
+      const result = await response;
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(String(result.content[0]?.text)).action).toBe("cancel");
+      expect(resolved).toHaveBeenCalledOnce();
+      expect(interactions.hasPendingForThread(thread.id)).toBe(false);
+      release({ type: "elicitation", action: "accept", content: null, scope: "always" });
+      expect((await ownerClient.readThread(thread.id)).id).toBe(thread.id);
+    } finally {
+      interactions.cancelAll();
+      release?.({ type: "elicitation", action: "cancel", content: null });
+      await ownerClient.unsubscribeThread(thread.id).catch(() => undefined);
+      await ownerClient.deleteThread(thread.id);
     }
   }, 15_000);
 

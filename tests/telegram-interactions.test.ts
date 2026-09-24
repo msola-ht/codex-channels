@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
 import type { InteractionRequest } from "../src/approval/types.js";
+import { InteractionRouter } from "../src/approval/index.js";
 import { AsyncQuestionCoordinator } from "../src/bootstrap/async-question-coordinator.js";
 import {
   TelegramInteractionPort,
@@ -13,6 +14,76 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it.each(["editing", "sending"] as const)("cancels a multi-question transition while %s and consumes stale replies", async (stage) => {
+    let release!: () => void;
+    let messageId = 0;
+    const editMessageText = vi.fn(async () => true as const);
+    const sendMessage = vi.fn(async () => ({ message_id: ++messageId }));
+    if (stage === "editing") editMessageText.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return true;
+    });
+    else sendMessage.mockImplementationOnce(async () => ({ message_id: ++messageId }))
+      .mockImplementationOnce(async () => {
+        const id = ++messageId;
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { message_id: id };
+      });
+    const bot = { callbackQuery: vi.fn(), api: { sendMessage, editMessageText } } as unknown as Bot;
+    const port = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    const request = userInputRequest();
+    request.questions.push({ ...request.questions[0]!, id: "second", question: "Second question" });
+    const decision = router.request(target, request);
+    await settle();
+    const moving = port.handleText(textContext("first answer", 1));
+    await settle();
+    router.resolved(request.requestId);
+    await expect(decision).resolves.toEqual({ type: "user-input", answers: {} });
+    release();
+    await moving;
+    const promptCount = stage === "editing" ? 1 : 2;
+    expect(sendMessage).toHaveBeenCalledTimes(promptCount);
+    if (stage === "sending") {
+      expect(editMessageText).toHaveBeenCalledWith("100", 2, expect.stringContaining("请求已失效"), expect.any(Object), expect.any(AbortSignal));
+    }
+    expect(await port.handleText(textContext("late answer", promptCount))).toBe(true);
+    await port.close();
+  });
+
+  it.each(["unavailable", "cancelAll", "resolved", "cancelThreads"] as const)(
+    "invalidates a preparing approval through the shared router on %s",
+    async (operation) => {
+      let completeSend!: (message: { message_id: number }) => void;
+      const sendMessage = vi.fn(() => new Promise<{ message_id: number }>((resolve) => {
+        completeSend = resolve;
+      }));
+      const editMessageText = vi.fn(async () => true as const);
+      const bot = { callbackQuery: vi.fn(), api: { sendMessage, editMessageText } } as unknown as Bot;
+      const port = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+      const router = new InteractionRouter();
+      router.register("telegram", "default", port);
+      const request = approvalRequest();
+      const decision = router.request(target, request);
+      await settle();
+      if (operation === "unavailable") router.setAvailable("telegram", "default", false);
+      else if (operation === "cancelAll") router.cancelAll();
+      else if (operation === "resolved") router.resolved(request.requestId);
+      else router.cancelThreads(new Set([request.threadId]));
+
+      await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+      expect(router.hasPendingForThread(request.threadId)).toBe(false);
+      completeSend({ message_id: 7 });
+      await settle();
+      expect(editMessageText).toHaveBeenCalledWith(
+        "100", 7, expect.any(String),
+        { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }, expect.any(AbortSignal),
+      );
+      await port.close();
+    },
+  );
+
   it("submits an async answer before a delayed card update crosses the question deadline", async () => {
     vi.useFakeTimers();
     let releaseUpdate!: () => void;

@@ -7,6 +7,22 @@ import {
 } from "../src/event-bus/index.js";
 
 describe("BoundedAsyncQueue", () => {
+  it("removes only the selected entry while preserving capacity and priority ordering", async () => {
+    const queue = new BoundedAsyncQueue<string>(3);
+    queue.push("first", true);
+    queue.push("cancelled");
+    queue.push("last");
+    expect(queue.remove("cancelled")).toBe(true);
+    expect(queue.remove("cancelled")).toBe(false);
+    queue.pushPriority("prompt");
+    expect(queue.remove("prompt")).toBe(true);
+    expect(queue.push("replacement")).toBe(true);
+    expect(queue.size).toBe(3);
+    expect(await queue.shift()).toBe("first");
+    expect(await queue.shift()).toBe("last");
+    expect(await queue.shift()).toBe("replacement");
+  });
+
   it("requires a positive integer capacity", () => {
     expect(() => new BoundedAsyncQueue<number>(0)).toThrow(
       "队列容量必须是正整数",

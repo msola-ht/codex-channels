@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   InteractionRequest,
 } from "../src/approval/index.js";
+import { InteractionRouter } from "../src/approval/index.js";
 import type { ConversationTarget } from "../src/conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -19,6 +20,21 @@ const target: ConversationTarget = {
 };
 
 describe("WeixinInteractionPort", () => {
+  it("settles router cancellation without waiting for an in-flight prompt delivery", async () => {
+    const delivery = deliveryFixture();
+    let completeSend!: () => void;
+    delivery.deliverTextSequence.mockImplementationOnce(() => new Promise<void>((resolve) => { completeSend = resolve; }));
+    const port = new WeixinInteractionPort(delivery, actorRegistryFixture([actorId]), accessFixture(true));
+    const router = new InteractionRouter();
+    router.register(target.surface, target.accountId, port);
+    const decision = router.request(target, approvalRequest());
+    router.setAvailable(target.surface, target.accountId, false);
+    await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+    expect(router.hasPendingForThread("thread-1")).toBe(false);
+    completeSend();
+    port.close();
+  });
+
   it("remains reusable after transient interactions are cancelled", async () => {
     const delivery = deliveryFixture();
     const port = new WeixinInteractionPort(
@@ -70,6 +86,7 @@ describe("WeixinInteractionPort", () => {
             "```text\n/批准一次 opaque-token\n```",
           ),
         ]),
+        expect.any(AbortSignal),
       );
     });
 
@@ -427,6 +444,7 @@ describe("WeixinInteractionPort", () => {
         expect.arrayContaining([
           expect.stringContaining("/选择 input-token 1 1"),
         ]),
+        expect.any(AbortSignal),
       );
     });
     expect(JSON.stringify(
@@ -456,6 +474,7 @@ describe("WeixinInteractionPort", () => {
         expect.stringContaining("问题 2/2：分支"),
         expect.stringContaining("/填写 input-token 2 在这里输入答案"),
       ]),
+      expect.any(AbortSignal),
     );
 
     await port.handleText(
@@ -607,6 +626,7 @@ describe("WeixinInteractionPort", () => {
         expect.arrayContaining([
           expect.stringContaining("/提交表单 form-token"),
         ]),
+        expect.any(AbortSignal),
       );
     });
 
@@ -651,6 +671,7 @@ describe("WeixinInteractionPort", () => {
           expect.stringContaining("/批准会话 mcp-tool-token"),
           expect.stringContaining("/始终允许 mcp-tool-token"),
         ]),
+        expect.any(AbortSignal),
       );
     });
     expect(JSON.stringify(delivery.deliverTextSequence.mock.calls))
@@ -686,6 +707,7 @@ describe("WeixinInteractionPort", () => {
           expect.stringContaining("https://example.com/"),
           expect.stringContaining("/完成 url-token"),
         ]),
+        expect.any(AbortSignal),
       );
     });
     await port.handleText(target, actorId, "/完成 url-token");

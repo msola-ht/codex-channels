@@ -744,11 +744,11 @@ export class TelegramOutbox {
     }
   }
 
-  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>, requestSignal?: AbortSignal): Promise<T> {
     if (this.closed) {
       return Promise.reject(new Error("Telegram Outbox 已关闭"));
     }
-    return this.delivery.runOrdered(chatId, run);
+    return this.delivery.runOrdered(chatId, run, requestSignal);
   }
 
   notifyPanel(

@@ -13,7 +13,7 @@ import {
 } from "../../approval/index.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import { interactionOutcome } from "../interaction-copy.js";
-import { PendingInteractionRegistry } from "../pending-interaction-registry.js";
+import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import {
   formatTelegramExpandableQuotePanelChunks,
@@ -41,23 +41,25 @@ export interface TelegramInteractionQueue {
     request: InteractionRequest,
     decision: InteractionDecision,
   ): void;
-  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  runOrdered<T>(chatId: string, run: (signal: AbortSignal) => Promise<T>, requestSignal?: AbortSignal): Promise<T>;
 }
 
 const directInteractionQueue: TelegramInteractionQueue = {
   prepareInteraction: () => undefined,
   finishInteraction: () => undefined,
-  runOrdered: (_chatId, run) => run(new AbortController().signal),
+  runOrdered: (_chatId, run, signal) => {
+    signal?.throwIfAborted();
+    return run(signal ?? new AbortController().signal);
+  },
 };
 
 export class TelegramInteractionPort implements InteractionPort {
   private readonly pending = new PendingInteractionRegistry<PendingInteraction>();
-  private readonly asyncQuestionMessages = new Set<string>();
+  private readonly textReplyMessages = new Set<string>();
   private readonly latestTokenByChat = new Map<string, string>();
   private readonly preparations = new Set<Promise<
     Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined
   >>();
-  private readonly preparationCancellations = new Set<() => void>();
   private readonly statusUpdates = new Set<Promise<void>>();
   private closed = false;
 
@@ -78,57 +80,47 @@ export class TelegramInteractionPort implements InteractionPort {
       return safeInteractionDecision(request);
     }
     const token = randomBytes(12).toString("base64url");
-    if (!this.pending.reserve(request.requestId, token)) {
-      return safeInteractionDecision(request);
-    }
     const keyboard = this.keyboard(request, token, 0);
     const chunks = request.type === "approval"
       ? formatTelegramExpandableQuotePanelChunks(request.title, request.detail, 3_600)
       : formatInputChunks(request, 0);
-    this.queue.prepareInteraction(target.conversationId, request);
+    if (!this.pending.reserve(request.requestId, token, () => this.queue.finishInteraction(target.conversationId, request, safeInteractionDecision(request)))) {
+      return safeInteractionDecision(request);
+    }
+    const signal = this.pending.signal(token);
     const preparation = this.prepareInteraction(
       target,
       request,
       token,
       chunks,
       keyboard,
+      signal,
     );
     this.preparations.add(preparation);
     void preparation.then(
       () => this.preparations.delete(preparation),
       () => this.preparations.delete(preparation),
     );
-    let cancelPreparation!: () => void;
-    const cancelled = new Promise<{ type: "closed" }>((resolve) => {
-      cancelPreparation = () => resolve({ type: "closed" });
-    });
-    this.preparationCancellations.add(cancelPreparation);
-    const result = await Promise.race([
-      preparation.then(
-        (message) => ({ type: "prepared" as const, message }),
-        (error: unknown) => ({ type: "failed" as const, error }),
-      ),
-      cancelled,
-    ]);
-    this.preparationCancellations.delete(cancelPreparation);
-    if (result.type !== "prepared") {
+    let message: Awaited<typeof preparation>;
+    try {
+      message = await waitForInteractionPreparation(signal, preparation);
+    } catch (error) {
+      const cancelled = signal.aborted;
       this.pending.release(request.requestId, token);
-      if (result.type === "failed") {
-        throw result.error;
-      }
+      if (!cancelled) throw error;
       return safeInteractionDecision(request);
     }
-    const message = result.message;
     if (!message) {
       return safeInteractionDecision(request);
     }
-    if (this.closed) {
+    if (this.closed || signal.aborted) {
       await this.finishPreparedAfterClose(
         target,
         request,
         token,
         message.message_id,
         chunks.at(-1)!,
+        (signal.reason as Error | undefined)?.message,
       );
       return safeInteractionDecision(request);
     }
@@ -150,17 +142,11 @@ export class TelegramInteractionPort implements InteractionPort {
         questionIndex: 0,
         awaitingOther: false,
       });
-      this.latestTokenByChat.set(target.conversationId, token);
-      this.rememberAsyncMessage(target, request, message.message_id);
       if (activation === "missing") {
         clearTimeout(timer);
         resolve(safeInteractionDecision(request));
-      } else if (activation === "resolved-before-active") {
-        this.finish(
-          token,
-          safeInteractionDecision(request),
-          request.type === "user-input" && request.asynchronous ? "问题已失效" : interactionOutcome.resolvedElsewhere,
-        );
+      } else {
+        this.latestTokenByChat.set(target.conversationId, token);
       }
     });
   }
@@ -171,12 +157,16 @@ export class TelegramInteractionPort implements InteractionPort {
     token: string,
     chunks: string[],
     keyboard: InlineKeyboard | undefined,
+    requestSignal: AbortSignal,
   ): Promise<Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined> {
     let message: Awaited<ReturnType<Bot["api"]["sendMessage"]>> | undefined;
     try {
+      this.queue.prepareInteraction(target.conversationId, request);
       message = await this.queue.runOrdered(target.conversationId, async (signal) => {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>> | undefined;
         for (const [index, chunk] of chunks.entries()) {
+          requestSignal.throwIfAborted();
+          signal.throwIfAborted();
           const isLast = index === chunks.length - 1;
           const options = isLast
             ? interactionOptions(request, keyboard)
@@ -188,9 +178,9 @@ export class TelegramInteractionPort implements InteractionPort {
           );
         }
         return sent;
-      });
+      }, requestSignal);
     } catch (error) {
-      this.pending.release(request.requestId, token);
+      if (requestSignal.aborted) return undefined;
       this.logger.warn(
         {
           ...interactionLogMetadata(target, request),
@@ -210,7 +200,8 @@ export class TelegramInteractionPort implements InteractionPort {
       },
       "Telegram 交互请求已送达",
     );
-    if (!this.closed) {
+    this.rememberTextReplyMessage(target, request, message.message_id);
+    if (!this.closed && !requestSignal.aborted) {
       return message;
     }
     await this.finishPreparedAfterClose(
@@ -219,6 +210,7 @@ export class TelegramInteractionPort implements InteractionPort {
       token,
       message.message_id,
       chunks.at(-1)!,
+      (requestSignal.reason as Error | undefined)?.message,
     );
     return undefined;
   }
@@ -229,6 +221,7 @@ export class TelegramInteractionPort implements InteractionPort {
     token: string,
     messageId: number,
     messageText: string,
+    outcome = "请求已失效",
   ): Promise<void> {
     this.pending.release(request.requestId, token);
     await this.updateInteractionMessage(
@@ -236,17 +229,12 @@ export class TelegramInteractionPort implements InteractionPort {
       request.requestId,
       messageId,
       messageText,
-      "Gateway 已停止",
-    );
-    this.queue.finishInteraction(
-      target.conversationId,
-      request,
-      safeInteractionDecision(request),
+      this.closed ? "Gateway 已停止" : outcome,
     );
   }
 
   resolved(requestId: string): void {
-    const resolution = this.pending.resolved(requestId);
+    const resolution = this.pending.resolved(requestId, interactionOutcome.resolvedElsewhere);
     if (resolution?.pending) {
       this.finish(
         resolution.token,
@@ -272,7 +260,7 @@ export class TelegramInteractionPort implements InteractionPort {
       const isOwnQuestion = reply?.from?.is_bot === true
         && reply.from.id === context.me?.id
         && reply.text?.startsWith("异步问题（任务继续执行）") === true;
-      if (reply && (this.asyncQuestionMessages.has(`${chatId}:${reply.message_id}`) || isOwnQuestion)) {
+      if (reply && (this.textReplyMessages.has(`${chatId}:${reply.message_id}`) || isOwnQuestion)) {
         await this.queue.runOrdered(String(chatId), (signal) => this.executor.call(
           { chatId: String(chatId), operation: "sendMessage", critical: true },
           (requestSignal) => this.bot.api.sendMessage(
@@ -389,19 +377,15 @@ export class TelegramInteractionPort implements InteractionPort {
   async close(): Promise<void> {
     if (!this.closed) {
       this.closed = true;
-      for (const cancel of this.preparationCancellations) {
-        cancel();
-      }
-      this.preparationCancellations.clear();
     }
     this.cancelAll("Gateway 已停止");
-    this.pending.clearPreparingResolutions();
     await waitAtMost(Promise.allSettled([...this.preparations]), 5_000);
     const updates = Promise.allSettled([...this.statusUpdates]);
     await waitAtMost(updates, 5_000);
   }
 
   cancelAll(outcome = "连接已断开"): void {
+    this.pending.cancelPreparing(outcome);
     for (const [token, pending] of this.pending.entries()) {
       this.finish(token, safeInteractionDecision(pending.request), outcome);
     }
@@ -608,6 +592,7 @@ export class TelegramInteractionPort implements InteractionPort {
         outcome,
       );
     } catch (error) {
+      if (this.pending.get(token) !== pending) return;
       this.logger.warn(
         {
           surface: pending.target.surface,
@@ -639,6 +624,8 @@ export class TelegramInteractionPort implements InteractionPort {
     if (pending.request.type !== "user-input") {
       throw new Error("Telegram 用户输入状态不匹配");
     }
+    if (this.pending.get(token) !== pending) return;
+    const signal = this.pending.signal(token);
     await this.updateInteractionMessage(
       pending.target,
       pending.requestId,
@@ -646,15 +633,21 @@ export class TelegramInteractionPort implements InteractionPort {
       pending.messageText,
       outcome,
     );
+    if (signal.aborted) return;
     const { message, messageText } = await this.sendUserInputQuestion(
       pending.target,
       pending.request,
       token,
       questionIndex,
       awaitingOther,
+      signal,
     );
+    this.rememberTextReplyMessage(pending.target, pending.request, message.message_id);
+    if (signal.aborted) {
+      await this.updateInteractionMessage(pending.target, pending.requestId, message.message_id, messageText, "请求已失效");
+      return;
+    }
     pending.messageId = message.message_id;
-    this.rememberAsyncMessage(pending.target, pending.request, message.message_id);
     pending.messageText = messageText;
     pending.questionIndex = questionIndex;
     pending.awaitingOther = awaitingOther;
@@ -666,6 +659,7 @@ export class TelegramInteractionPort implements InteractionPort {
     token: string,
     questionIndex: number,
     awaitingOther: boolean,
+    requestSignal: AbortSignal,
   ): Promise<{
     message: Awaited<ReturnType<Bot["api"]["sendMessage"]>>;
     messageText: string;
@@ -683,6 +677,8 @@ export class TelegramInteractionPort implements InteractionPort {
         let sent: Awaited<ReturnType<typeof this.bot.api.sendMessage>>
           | undefined;
         for (const [index, chunk] of chunks.entries()) {
+          requestSignal.throwIfAborted();
+          signal.throwIfAborted();
           const isLast = index === chunks.length - 1;
           sent = await this.executor.call(
             {
@@ -703,6 +699,7 @@ export class TelegramInteractionPort implements InteractionPort {
         }
         return sent;
       },
+      requestSignal,
     );
     if (!message) {
       throw new Error("Telegram 用户输入消息为空");
@@ -713,11 +710,11 @@ export class TelegramInteractionPort implements InteractionPort {
     };
   }
 
-  private rememberAsyncMessage(target: ConversationTarget, request: InteractionRequest, messageId: number): void {
-    if (request.type !== "user-input" || !request.asynchronous) return;
-    this.asyncQuestionMessages.add(`${target.conversationId}:${messageId}`);
-    if (this.asyncQuestionMessages.size > 1_000) {
-      this.asyncQuestionMessages.delete(this.asyncQuestionMessages.values().next().value!);
+  private rememberTextReplyMessage(target: ConversationTarget, request: InteractionRequest, messageId: number): void {
+    if (!acceptsTextReply(request)) return;
+    this.textReplyMessages.add(`${target.conversationId}:${messageId}`);
+    if (this.textReplyMessages.size > 1_000) {
+      this.textReplyMessages.delete(this.textReplyMessages.values().next().value!);
     }
   }
 
@@ -738,10 +735,6 @@ export class TelegramInteractionPort implements InteractionPort {
         this.latestTokenByChat.delete(pending.target.conversationId);
       }
     }
-    const finishDecision = () => {
-      this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
-      pending.resolve(decision);
-    };
     const asynchronous = pending.request.type === "user-input" && pending.request.asynchronous;
     const statusUpdate = this.updateInteractionMessage(
       pending.target,
@@ -750,10 +743,13 @@ export class TelegramInteractionPort implements InteractionPort {
       pending.messageText,
       outcome,
     ).then(() => {
-      if (!asynchronous) finishDecision();
+      if (!asynchronous) pending.resolve(decision);
     });
+    // Queue the status update before releasing held output, but release request ownership now.
+    // A slow edit must not later finish a replacement request with the same ID.
+    this.queue.finishInteraction(pending.target.conversationId, pending.request, decision);
     // Optional answers must reach the coordinator before their deadline, even when card edits are slow.
-    if (asynchronous) finishDecision();
+    if (asynchronous) pending.resolve(decision);
     this.statusUpdates.add(statusUpdate);
     void statusUpdate.finally(() => this.statusUpdates.delete(statusUpdate));
   }
@@ -948,6 +944,11 @@ function nextUnansweredQuestion(
   return index < 0 ? undefined : index;
 }
 
+function acceptsTextReply(request: InteractionRequest): boolean {
+  return request.type === "user-input"
+    || (request.type === "elicitation" && request.mode === "form");
+}
+
 function interactionOptions(
   request: InteractionRequest,
   keyboard: InlineKeyboard | undefined,
@@ -955,7 +956,7 @@ function interactionOptions(
   if (keyboard) {
     return { parse_mode: "HTML", reply_markup: keyboard };
   }
-  if (request.type === "user-input" || (request.type === "elicitation" && request.mode === "form")) {
+  if (acceptsTextReply(request)) {
     return {
       parse_mode: "HTML",
       reply_markup: {

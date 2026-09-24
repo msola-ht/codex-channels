@@ -321,6 +321,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   deliverTextSequence(
     target: ConversationTarget,
     texts: readonly string[],
+    requestSignal?: AbortSignal,
   ): Promise<void> {
     if (this.closed || !this.matches(target)) {
       return Promise.reject(new Error("微信输出目标无效或队列已关闭"));
@@ -329,6 +330,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       target.conversationId,
       async (signal) => {
         for (const text of texts) {
+          signal.throwIfAborted();
           await this.send(
             target,
             text,
@@ -338,6 +340,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
           );
         }
       },
+      requestSignal,
     );
   }
 

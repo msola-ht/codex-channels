@@ -105,6 +105,15 @@ export class BoundedAsyncQueue<T> {
     return new Promise<T | undefined>((resolve) => this.waiters.push({ resolve }));
   }
 
+  remove(value: T): boolean {
+    const index = this.entries.findIndex((entry) => entry.value === value);
+    if (index < 0) return false;
+    const [entry] = this.entries.splice(index, 1);
+    if (!entry!.critical) this.nonCriticalCount -= 1;
+    if (this.size <= this.capacity) this.nextOverflowWarning = this.capacity + 1;
+    return true;
+  }
+
   private reportOverflow(): void {
     if (this.size < this.nextOverflowWarning) return;
     this.nextOverflowWarning = this.size * 2;
