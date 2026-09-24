@@ -307,7 +307,10 @@ contractSuite("real supervised App Server tools", () => {
       let serverRequestCount = 0;
       let answerRequest: (() => void) | undefined;
       let requestParams: unknown;
-      let backgroundCompleted = false;
+      const releaseFile = join(directory, "release-background");
+      let backgroundId: string | undefined;
+      let backgroundResult: { status?: string; exitCode?: number | null; aggregatedOutput?: string | null } | undefined;
+      let backgroundToolOutput: string | undefined;
       const questionResponse = scenario === "background" ? 2 : 1;
       const bodies: string[] = [];
       const apiServer = createServer((request, response) => {
@@ -320,11 +323,15 @@ contractSuite("real supervised App Server tools", () => {
           }
           bodies.push(Buffer.concat(chunks).toString());
           const number = ++count;
+          if (scenario === "background" && number === 2) {
+            const input = (JSON.parse(bodies[number - 1]!) as { input: Array<{ type: string; call_id?: string; output?: string }> }).input;
+            backgroundToolOutput = input.find((item) => item.type === "function_call_output" && item.call_id === "background-call")?.output;
+          }
           const id = `async-response-${number}`;
           const send = () => {
             const item = scenario === "background" && number === 1
               ? { type: "function_call", call_id: "background-call", namespace: "functions", name: "exec_command",
-                  arguments: JSON.stringify({ cmd: "sleep 2", yield_time_ms: 1, max_output_tokens: 100 }) }
+                  arguments: JSON.stringify({ cmd: `while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
               : number === questionResponse
               ? { type: "function_call", call_id: "async-question-call", namespace: "functions", name: "request_user_input",
                   arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Choose a scope", options: [{ label: "Small", description: "Minimal change" }, { label: "Full", description: "Full change" }] }] }) }
@@ -381,8 +388,9 @@ contractSuite("real supervised App Server tools", () => {
         await client.connect();
         const { thread } = await client.startThread(directory, { ephemeral: true, approvalPolicy: "never" });
         removeNotification = client.onNotification((notification) => {
-          const params = notification.params as { item?: { id?: string; type?: string } } | undefined;
-          if (notification.method === "item/completed" && params?.item?.id === "background-call") backgroundCompleted = true;
+          const params = notification.params as { item?: { id?: string; type?: string; status?: string; exitCode?: number | null; aggregatedOutput?: string | null } } | undefined;
+          if (notification.method === "item/started" && params?.item?.type === "commandExecution") backgroundId = params.item.id;
+          if (notification.method === "item/completed" && backgroundId !== undefined && params?.item?.id === backgroundId) backgroundResult = params.item;
           const event = toConversationInputEvent(notification);
           if (event?.type === "turn.completed") completeCount++;
         });
@@ -393,7 +401,7 @@ contractSuite("real supervised App Server tools", () => {
           const input = (JSON.parse(bodies[1]!) as { input: Array<{ type: string; output?: string }> }).input;
           expect(input.filter((item) => item.type === "function_call_output").map((item) => item.output).join("\n")).toContain("unavailable in Default mode");
         } else {
-          await waitFor(() => answerRequest !== undefined, 15_000);
+          await waitFor(() => answerRequest !== undefined, 15_000, undefined, `Default ${scenario} 用户输入请求`);
           expect(requestParams).toMatchObject({ threadId: thread.id, turnId: turn.turnId, isBlocking: false });
           // The real server must stay inside the tool call before it can request the next model response.
           await new Promise<void>((resolve) => setTimeout(resolve, 150));
@@ -401,7 +409,13 @@ contractSuite("real supervised App Server tools", () => {
           expect(completeCount).toBe(0);
           if (scenario === "answer" || scenario === "background" || scenario === "skip") {
             if (scenario === "background") {
-              await waitFor(() => backgroundCompleted, 10_000);
+              expect(backgroundId, "后台命令必须产生 started 事件").toBeDefined();
+              expect(backgroundToolOutput, "后台命令必须保持运行并返回会话 ID").toMatch(/Process running with session ID/);
+              expect(backgroundResult, "释放前后台命令不能完成").toBeUndefined();
+              writeFileSync(releaseFile, "release");
+              await waitFor(() => backgroundResult !== undefined, 10_000, undefined, "提问等待期间后台命令完成事件");
+              expect(backgroundResult).toMatchObject({ status: "completed", exitCode: 0 });
+              expect(backgroundResult?.aggregatedOutput).toContain("background-completed");
               expect(count).toBe(questionResponse);
               expect(completeCount).toBe(0);
             }
@@ -422,6 +436,7 @@ contractSuite("real supervised App Server tools", () => {
           }
         }
       } finally {
+        writeFileSync(releaseFile, "release");
         answerRequest?.();
         removeNotification?.();
         await client?.close();
