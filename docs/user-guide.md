@@ -357,7 +357,7 @@ npm 安装版也可以使用 `codexc service uninstall` 后执行 `npm uninstall
 - 运行：`/status`、`/stop`、`/queue`、`/revert`、`/compact`、`/fork`、`/review`、`/release`
 - 模型：`/model`、`/effort`、`/fast`、`/plan`
 - 状态：`/diff`、`/usage`、`/metrics`、`/limits`、`/permissions`、`/goal`
-- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`、`/rules`
+- 扩展：`/agents`、`/skill`、`/plugin`、`/mcp`
 - 帮助：`/help`、`/whoami`
 
 `/stop` 会优先中断当前活动 Turn；`/resume` 和 `/new` 切换时，旧任务仍可在后台运行，结果与审批继续返回原聊天。Queue 由 App Server 持久保存，不由 Gateway 建立第二套消息正文队列。

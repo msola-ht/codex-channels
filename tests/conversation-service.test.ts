@@ -208,7 +208,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       metrics,
     );
 
@@ -237,7 +236,6 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -377,7 +375,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       {
         accountUsage: vi.fn(),
         accountLimits: vi.fn(async () => ({
@@ -494,7 +491,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
     );
 
@@ -530,7 +526,6 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -572,7 +567,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { accountUsage: providerAccountUsage, accountLimits: vi.fn() },
     );
 
@@ -596,7 +590,6 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       { status: () => ({ modelProvider: "openai" }) } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -714,7 +707,6 @@ describe("ConversationService model selection", () => {
         }),
       } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       { currentGitBranch },
     );
 
@@ -725,51 +717,6 @@ describe("ConversationService model selection", () => {
       gitBranch: "feature/weixin-surface",
     });
     expect(currentGitBranch).toHaveBeenCalledWith(main.cwd);
-  });
-
-  it("applies project rules only to the selected authorized Workspace", async () => {
-    const result = {
-      projectRoot: main.cwd,
-      rulesPath: `${main.cwd}/.codex/rules/default.rules`,
-    };
-    const initialize = vi.fn(async () => result);
-    const check = vi.fn(async () => result);
-    const service = new ConversationService(
-      turnPort(),
-      { workspace: () => main } as unknown as SessionRouter,
-      {} as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-      { initialize, check },
-    );
-
-    await expect(service.initializeProjectRules(target)).resolves.toEqual(result);
-    await expect(service.checkProjectRules(target)).resolves.toEqual(result);
-    expect(initialize).toHaveBeenCalledWith(main.cwd);
-    expect(check).toHaveBeenCalledWith(main.cwd);
-  });
-
-  it("maps project rule runtime failures to stable user-facing errors", async () => {
-    const service = new ConversationService(
-      turnPort(),
-      { workspace: () => main } as unknown as SessionRouter,
-      {} as ConversationCore,
-      {} as ModelSelectionService,
-      queryPort(),
-      {
-        initialize: () => {
-          throw Object.assign(new Error("internal path"), { code: "exists" });
-        },
-        check: () => {
-          throw Object.assign(new Error("internal command"), { code: "check-failed" });
-        },
-      },
-    );
-
-    await expect(service.initializeProjectRules(target))
-      .rejects.toMatchObject({ code: "rules.exists" });
-    await expect(service.checkProjectRules(target))
-      .rejects.toMatchObject({ code: "rules.check-failed" });
   });
 
   it("starts an inline Plan prompt with the selected collaboration mode override", async () => {
@@ -797,7 +744,6 @@ describe("ConversationService model selection", () => {
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       {
         select,
@@ -849,7 +795,6 @@ describe("ConversationService model selection", () => {
       } as unknown as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       { toggle } as unknown as CollaborationModeSelectionService,
     );
@@ -932,7 +877,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       recorder,
     );
 
@@ -957,7 +901,6 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -1004,7 +947,6 @@ describe("ConversationService model selection", () => {
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -1070,7 +1012,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       {
         listAgentRoles: () => [{ name: "external", description: "第三方模型子代理" }],
       },
@@ -1099,7 +1040,6 @@ describe("ConversationService model selection", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       {
         listAgentRoles: () => [],
       },
@@ -1116,7 +1056,6 @@ describe("ConversationService model selection", () => {
       {} as ConversationCore,
       {} as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,

@@ -194,10 +194,7 @@ Surface -> Application/Core <- Codex Client
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
   and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.
   Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.
-- Generate the file from the current Git/Node project root using `codexc rules init`; validate it through Codex CLI using `codexc rules check`.
-  Rules belong to the on-disk project and must not be stored in or depend on Workspace Registry.
-- Surface project-rule commands may operate only on the exact root of the authorized Workspace and expose only generation or checking, never forced overwrite.
-  Fail closed if `.codex`, `rules` or the rule file is a symbolic link.
+- Rules belong to the on-disk project and must not be stored in or depend on Workspace Registry.
 
 ## Verification
 

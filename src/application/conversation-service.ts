@@ -145,16 +145,6 @@ export interface ConversationSessionQuery {
   turnCountMode?: "scan" | "cached";
 }
 
-export interface ProjectRulesResult {
-  projectRoot: string;
-  rulesPath: string;
-}
-
-export interface ProjectRulesPort {
-  initialize(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
-  check(projectRoot: string): Promise<ProjectRulesResult> | ProjectRulesResult;
-}
-
 export interface WorkspaceStatusPort {
   currentGitBranch(projectRoot: string): string | undefined;
 }
@@ -335,8 +325,6 @@ export interface ConversationSessionUseCases {
     target: ConversationTarget,
     update: WorkspacePermissionUpdate,
   ): Promise<Workspace>;
-  initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
-  checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult>;
   releaseThread(
     target: ConversationTarget,
     force?: boolean,
@@ -390,7 +378,6 @@ export class ConversationService implements
     private readonly core: ConversationCore,
     private readonly models: ModelSelectionService,
     private readonly queries: ConversationQueryPort,
-    private readonly projectRules?: ProjectRulesPort,
     private readonly workspaceStatus?: WorkspaceStatusPort,
     private readonly collaborationModes?: CollaborationModeSelectionService,
     private readonly transfers?: ConversationTransferPort,
@@ -1595,28 +1582,6 @@ export class ConversationService implements
     return this.extensionQueries.listPermissionProfiles(target);
   }
 
-  async initializeProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
-    if (!this.projectRules) {
-      throw new UserFacingError("rules.unavailable", "项目规则服务不可用");
-    }
-    try {
-      return await this.projectRules.initialize(this.router.workspace(target).cwd);
-    } catch (error) {
-      throw projectRulesUserError(error, "init");
-    }
-  }
-
-  async checkProjectRules(target: ConversationTarget): Promise<ProjectRulesResult> {
-    if (!this.projectRules) {
-      throw new UserFacingError("rules.unavailable", "项目规则服务不可用");
-    }
-    try {
-      return await this.projectRules.check(this.router.workspace(target).cwd);
-    } catch (error) {
-      throw projectRulesUserError(error, "check");
-    }
-  }
-
   getGoal(target: ConversationTarget): Promise<ThreadGoal | null> {
     return this.locked(target, async () => {
       const binding = await this.ensureSession(target);
@@ -1932,29 +1897,6 @@ export class ConversationService implements
     action: () => Promise<T> | T,
   ): Promise<T> {
     return this.locks.forConversations(targets, action);
-  }
-}
-
-function projectRulesUserError(error: unknown, operation: "init" | "check"): Error {
-  const code = typeof error === "object" && error !== null && "code" in error
-    ? String(error.code)
-    : undefined;
-  switch (code) {
-    case "exists":
-      return new UserFacingError("rules.exists", "当前 Workspace 已有项目规则");
-    case "missing":
-      return new UserFacingError("rules.missing", "当前 Workspace 尚未生成项目规则");
-    case "unsafe-path":
-      return new UserFacingError("rules.unsafe-path", "项目规则路径不能使用符号链接");
-    case "check-failed":
-      return new UserFacingError("rules.check-failed", "项目规则检查失败");
-    default:
-      return error instanceof UserFacingError
-        ? error
-        : new Error(
-            `项目规则${operation === "init" ? "生成" : "检查"}失败`,
-            { cause: error },
-          );
   }
 }
 

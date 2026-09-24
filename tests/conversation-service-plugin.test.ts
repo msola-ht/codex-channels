@@ -109,7 +109,6 @@ describe("ConversationService conversation service plugin", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { pluginApiEnabled: true },
     );
 
@@ -193,7 +192,6 @@ describe("ConversationService conversation service plugin", () => {
         markApplied: vi.fn(),
       } as unknown as ModelSelectionService,
       queryPort({ listPlugins, resolvePlugin }),
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -300,7 +298,6 @@ describe("ConversationService conversation service plugin", () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { pluginApiEnabled: true },
     );
 
@@ -333,7 +330,6 @@ describe("ConversationService conversation service plugin", () => {
       {} as ConversationCore,
       { status: () => ({ modelProvider: "deepseek" }) } as unknown as ModelSelectionService,
       queryPort(),
-      undefined,
       undefined,
       undefined,
       undefined,

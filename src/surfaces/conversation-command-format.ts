@@ -42,7 +42,6 @@ export {
   formatConversationWorkspaces,
   formatConversationWorkspacePermissions,
   formatConversationPermissions,
-  formatConversationProjectRules,
   formatConversationArtifacts,
   formatConversationCollaborationMode,
   formatConversationGoal,

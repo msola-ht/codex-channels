@@ -85,7 +85,6 @@ function createService({
     models,
     queryPort(),
     undefined,
-    undefined,
     collaborationModes,
     transfers,
     undefined,

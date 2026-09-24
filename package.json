@@ -45,7 +45,6 @@
     "scripts/codex-public-cli-contract.mjs",
     "scripts/codex-remote-options.mjs",
     "scripts/codex-remote.mjs",
-    "scripts/codex-rules.mjs",
     "scripts/codex-tool-settings.mjs",
     "scripts/codex-user-config.mjs",
     "scripts/codex-user-settings-management.mjs",

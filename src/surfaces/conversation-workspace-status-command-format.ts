@@ -110,21 +110,6 @@ export function formatConversationPermissions(
   ].join("\n"));
 }
 
-export function formatConversationProjectRules(
-  result: Extract<ConversationCommandResult, { kind: "project-rules" }>,
-): string {
-  return toStructuredMarkdownList([
-    result.action === "initialized"
-      ? "项目规则已生成并检查通过"
-      : "项目规则检查通过",
-    `Workspace：${result.projectRoot}`,
-    `规则文件：${result.rulesPath}`,
-    ...(result.action === "initialized"
-      ? ["重启 Codex/App Server 后生效；Gateway 无需重启。"]
-      : []),
-  ].join("\n"));
-}
-
 export function formatConversationArtifacts(
   result: Extract<ConversationCommandResult, { kind: "artifacts" }>,
 ): string {

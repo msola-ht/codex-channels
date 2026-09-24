@@ -333,29 +333,6 @@ describe("Telegram command renderer", () => {
     );
   });
 
-  it("confirms project rule generation for the selected Workspace", async () => {
-    const reply = vi.fn(async () => undefined);
-
-    await renderTelegramCommandResult(
-      { reply } as unknown as Context,
-      {
-        kind: "project-rules",
-        action: "initialized",
-        projectRoot: "/workspace/project",
-        rulesPath: "/workspace/project/.codex/rules/default.rules",
-      },
-    );
-
-    expect(reply).toHaveBeenCalledWith(
-      expect.stringContaining("项目规则已生成并检查通过"),
-      expect.objectContaining({ parse_mode: "HTML" }),
-    );
-    expect(reply).toHaveBeenCalledWith(
-      expect.stringContaining("/workspace/project/.codex/rules/default.rules"),
-      expect.objectContaining({ parse_mode: "HTML" }),
-    );
-  });
-
   it("uses the shared localized Goal summary", async () => {
     const reply = vi.fn(async () => undefined);
 

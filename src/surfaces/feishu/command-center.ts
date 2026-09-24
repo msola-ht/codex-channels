@@ -696,7 +696,6 @@ function renderFeishuCategorizedCommandsCard(
         ["工作区权限", "workspaceperm", "default"],
         ["权限", "permissions", "default"],
         ["Diff", "diff", "default"],
-        ["项目规则", "rules", "default"],
         ["Review", "review", "default"],
       ]),
       sectionTitle("飞书"),

@@ -165,9 +165,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["config", "-h"], "用法：codexc config"],
       [["timezone", "-h"], "用法：codexc timezone"],
       [["doctor", "--help"], "用法：codexc doctor"],
-      [["rules", "-h"], "用法：codexc rules"],
-      [["rules", "init", "-h"], "用法：codexc rules init"],
-      [["rules", "check", "--help"], "用法：codexc rules check"],
       [["primary-provider", "-h"], "用法：codexc primary-provider"],
       [["opencode-go", "-h"], "用法：codexc opencode-go"],
       [["opencode-go", "account", "--help"], "用法：codexc opencode-go account"],
@@ -222,7 +219,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       },
       { args: ["work", "--help"], includes: ["权限"] },
       { args: ["work", "add", "--help"], includes: ["--cwd 指定的目录"] },
-      { args: ["rules", "--help"], includes: ["codexc rules check [--json]"] },
       ...["run", "turns", "threads", "report", "export"].map((subcommand) => ({
         args: ["metrics", subcommand, "--help"],
         includes: ["--stdout"],
@@ -274,7 +270,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       "doctor",
       "remote",
       "work",
-      "rules",
       "primary-provider",
       "opencode-go",
       "metrics",
@@ -520,319 +515,6 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
     expect(report.groups.every((group: { provider: string }) =>
       group.provider === "ds-test"
     )).toBe(true);
-  });
-
-  it("generates conservative Codex rules for the current project", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-"));
-    temporaryDirectories.push(root);
-    const project = join(root, "Project");
-    const nested = join(project, "src", "nested");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    const capturePath = join(root, "capture.json");
-    mkdirSync(join(project, ".git"), { recursive: true });
-    mkdirSync(nested, { recursive: true });
-    writeFileSync(join(project, "package.json"), JSON.stringify({
-      scripts: {
-        build: "tsc",
-        lint: "eslint .",
-        test: "vitest run",
-        dev: "vite",
-        "hooks:install": "node install-hooks.mjs",
-      },
-    }));
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "writeFileSync(process.env.CODEX_RULES_CAPTURE, JSON.stringify(process.argv.slice(2)));",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-
-    const output = execFileSync(process.execPath, [cli, "rules", "init"], {
-      cwd: nested,
-      env: {
-        ...process.env,
-        CODEX_BINARY: fakeCodex,
-        CODEX_RULES_CAPTURE: capturePath,
-      },
-      encoding: "utf8",
-    });
-    const realProject = realpathSync(project);
-    const rulesPath = join(realProject, ".codex", "rules", "default.rules");
-    const rules = readFileSync(rulesPath, "utf8");
-
-    expect(output).toContain(`项目目录：${realProject}`);
-    expect(output).toContain(`规则文件：${rulesPath}`);
-    expect(rules).toContain('pattern = ["git", ["status", "diff", "log"]]');
-    expect(rules).toContain('"npm test"');
-    expect(rules).toContain('"build"');
-    expect(rules).toContain('"lint"');
-    expect(rules).not.toContain('"dev"');
-    expect(rules).not.toContain('"hooks:install"');
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("execpolicy");
-    expect(output).toContain("项目 Codex 规则检查通过");
-  });
-
-  it("checks the current project's rules with the configured Codex CLI", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-check-"));
-    temporaryDirectories.push(root);
-    const project = join(root, "Project");
-    const rulesPath = join(project, ".codex", "rules", "default.rules");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    const capturePath = join(root, "capture.json");
-    mkdirSync(dirname(rulesPath), { recursive: true });
-    mkdirSync(join(project, ".git"), { recursive: true });
-    writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "writeFileSync(process.env.CODEX_RULES_CAPTURE, JSON.stringify(process.argv.slice(2)));",
-      "process.stdout.write('底层规则检查输出\\n');",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-
-    const output = execFileSync(process.execPath, [cli, "rules", "check"], {
-      cwd: project,
-      env: {
-        ...process.env,
-        CODEX_BINARY: fakeCodex,
-        CODEX_RULES_CAPTURE: capturePath,
-      },
-      encoding: "utf8",
-    });
-
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
-      "execpolicy",
-      "check",
-      "--pretty",
-      "--rules",
-      realpathSync(rulesPath),
-      "--",
-      "git",
-      "status",
-      "-sb",
-    ]);
-    expect(output).toContain("底层规则检查输出");
-    expect(output).toContain("项目 Codex 规则检查通过");
-
-    const jsonOutput = execFileSync(
-      process.execPath,
-      [cli, "rules", "check", "--json"],
-      {
-        cwd: project,
-        env: {
-          ...process.env,
-          CODEX_BINARY: fakeCodex,
-          CODEX_RULES_CAPTURE: capturePath,
-        },
-        encoding: "utf8",
-      },
-    );
-    expect(JSON.parse(jsonOutput)).toEqual({
-      valid: true,
-      projectRoot: realpathSync(project),
-      rulesPath: realpathSync(rulesPath),
-      error: null,
-    });
-  });
-
-  it.skipIf(process.platform === "win32")("reports a signaled project-rules check without terminating the CLI host", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-signal-"));
-    temporaryDirectories.push(root);
-    const project = join(root, "Project");
-    const rulesPath = join(project, ".codex", "rules", "default.rules");
-    const fakeCodex = join(root, "fake-codex");
-    mkdirSync(dirname(rulesPath), { recursive: true });
-    mkdirSync(join(project, ".git"));
-    writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
-    writeFileSync(fakeCodex, "#!/bin/sh\nkill -TERM $$\n");
-    chmodSync(fakeCodex, 0o700);
-
-    const result = spawnSync(process.execPath, [cli, "rules", "check"], {
-      cwd: project,
-      env: { ...process.env, CODEX_BINARY: fakeCodex },
-      encoding: "utf8",
-    });
-
-    expect(result.signal).toBeNull();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("项目 Codex 规则检查被信号终止：SIGTERM");
-    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
-
-    const jsonResult = spawnSync(
-      process.execPath,
-      [cli, "rules", "check", "--json"],
-      {
-        cwd: project,
-        env: { ...process.env, CODEX_BINARY: fakeCodex },
-        encoding: "utf8",
-      },
-    );
-    expect(jsonResult.signal).toBeNull();
-    expect(jsonResult.status).toBe(1);
-    expect(JSON.parse(jsonResult.stdout)).toEqual({
-      valid: false,
-      projectRoot: null,
-      rulesPath: null,
-      error: {
-        code: "check-signaled",
-        message: "项目 Codex 规则检查被信号终止：SIGTERM",
-      },
-    });
-    expect(jsonResult.stderr).toBe("");
-  });
-
-  it.each(["check", "init"])(
-    "uses config.toml Codex binary when running project rules %s",
-    (subcommand) => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-config-binary-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const project = join(root, "Project");
-    const rulesPath = join(project, ".codex", "rules", "default.rules");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    const capturePath = join(root, "capture.json");
-    if (subcommand === "check") {
-      mkdirSync(dirname(rulesPath), { recursive: true });
-      writeFileSync(
-        rulesPath,
-        'prefix_rule(pattern = ["git", "status"], decision = "allow")\n',
-      );
-    }
-    mkdirSync(join(project, ".git"), { recursive: true });
-    writeFileSync(join(project, "package.json"), JSON.stringify({ scripts: {} }));
-    writeFileSync(fakeCodex, [
-      "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
-      "writeFileSync(process.env.CODEX_RULES_CAPTURE, JSON.stringify(process.argv.slice(2)));",
-    ].join("\n"));
-    chmodSync(fakeCodex, 0o700);
-    const environment = {
-      ...process.env,
-      CODEX_BINARY: "",
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-      CODEX_RULES_CAPTURE: capturePath,
-    };
-    execFileSync(process.execPath, [cli, "init"], {
-      cwd: project,
-      env: environment,
-    });
-    const configPath = join(home, "config.toml");
-    updateGatewayConfig(configPath, (document) => {
-      table(document.codex).binary = fakeCodex;
-    });
-
-    execFileSync(process.execPath, [cli, "rules", subcommand], {
-      cwd: project,
-      env: environment,
-    });
-
-    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toContain("execpolicy");
-  });
-
-  it("rejects an invalid existing config when checking project rules", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-invalid-config-"));
-    temporaryDirectories.push(root);
-    const home = join(root, ".codex-connect");
-    const project = join(root, "Project");
-    const rulesPath = join(project, ".codex", "rules", "default.rules");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(dirname(rulesPath), { recursive: true });
-    mkdirSync(join(project, ".git"));
-    writeFileSync(rulesPath, 'prefix_rule(pattern = ["git", "status"], decision = "allow")\n');
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
-    chmodSync(fakeCodex, 0o700);
-    const environment = {
-      ...process.env,
-      CODEX_BINARY: fakeCodex,
-      CODEX_CONNECT_HOME: home,
-      CODEX_CONNECT_CONFIG_FILE: "",
-    };
-    execFileSync(process.execPath, [cli, "init"], {
-      cwd: project,
-      env: environment,
-    });
-    const configPath = join(home, "config.toml");
-    updateGatewayConfig(configPath, (document) => {
-      table(document.codex).unknown = true;
-    });
-
-    const result = spawnSync(process.execPath, [cli, "rules", "check"], {
-      cwd: project,
-      env: environment,
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("[codex]");
-    expect(result.stderr).toContain("unknown");
-  });
-
-  it("does not overwrite project rules unless force is explicit", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-force-"));
-    temporaryDirectories.push(root);
-    const project = join(root, "Project");
-    const rulesPath = join(project, ".codex", "rules", "default.rules");
-    const fakeCodex = join(root, "fake-codex.mjs");
-    mkdirSync(dirname(rulesPath), { recursive: true });
-    mkdirSync(join(project, ".git"));
-    writeFileSync(join(project, "package.json"), JSON.stringify({
-      scripts: { test: "vitest run" },
-    }));
-    writeFileSync(rulesPath, "custom rules\n");
-    writeFileSync(fakeCodex, "#!/usr/bin/env node\n");
-    chmodSync(fakeCodex, 0o700);
-    const environment = { ...process.env, CODEX_BINARY: fakeCodex };
-
-    const rejected = spawnSync(process.execPath, [cli, "rules", "init"], {
-      cwd: project,
-      env: environment,
-      encoding: "utf8",
-    });
-    expect(rejected.status).toBe(1);
-    expect(rejected.stderr).toContain("[失败]");
-    expect(rejected.stderr).toContain("项目规则已存在");
-    expect(readFileSync(rulesPath, "utf8")).toBe("custom rules\n");
-
-    const replaced = execFileSync(process.execPath, [cli, "rules", "init", "--force"], {
-      cwd: project,
-      env: environment,
-      encoding: "utf8",
-    });
-    expect(replaced).toContain("项目 Codex 规则已重新生成");
-    expect(replaced).toContain("[成功]");
-    expect(readFileSync(rulesPath, "utf8")).toContain('pattern = ["npm", "test"]');
-  });
-
-  it("fails clearly when checking a project without generated rules", () => {
-    const root = mkdtempSync(join(tmpdir(), "codex-connect-rules-missing-"));
-    temporaryDirectories.push(root);
-    mkdirSync(join(root, ".git"));
-
-    const result = spawnSync(process.execPath, [cli, "rules", "check"], {
-      cwd: root,
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("尚未生成项目规则");
-    expect(result.stderr).toContain("codexc rules init");
-
-    const jsonResult = spawnSync(process.execPath, [cli, "rules", "check", "--json"], {
-      cwd: root,
-      encoding: "utf8",
-    });
-    expect(jsonResult.status).toBe(1);
-    expect(JSON.parse(jsonResult.stdout)).toEqual({
-      valid: false,
-      projectRoot: null,
-      rulesPath: null,
-      error: {
-        code: "missing",
-        message: expect.stringContaining("尚未生成项目规则"),
-      },
-    });
-    expect(jsonResult.stderr).toBe("");
   });
 
     }
@@ -2398,10 +2080,12 @@ export function registerCodexcCliTests(shard: CodexcCliTestShard): void {
       [["work", "add", "--name", "-Project", "--unknown"], "未知参数：--unknown"],
       [["work", "unknown"], "用法：codexc work"],
       [["state", "upgrade"], "未知命令：state"],
+      [["rules", "init"], "未知命令：rules"],
+      [["rules", "check"], "未知命令：rules"],
+      [["rules", "--help"], "未知命令：rules"],
       [["metrics", "upgrade"], "用法：codexc metrics"],
       [["remote", "--workspace"], "用法：codexc remote"],
       [["remote", "--workspace", "--profile", "ds-test"], "用法：codexc remote"],
-      [["rules", "check", "--json", "unexpected"], "用法：codexc rules"],
       [["config", "--json", "unexpected"], "用法：codexc config [--json]"],
       [["doctor", "--json", "unexpected"], "用法：codexc doctor [--json]"],
       [["service", "status", "--json", "gateway"], "用法：codexc service status"],

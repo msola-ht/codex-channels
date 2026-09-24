@@ -14,12 +14,7 @@ import {
 import { join } from "node:path";
 
 import { primaryProviderUsage } from "../scripts/primary-provider-usage.mjs";
-import {
-  readGatewayConfig,
-  validateCodexConfigDocument,
-} from "../runtime/gateway-config.mjs";
 import { writeCliMessage as printCliMessage } from "../runtime/cli-presentation.mjs";
-import { effectiveCodexBinary } from "../runtime/executable.mjs";
 import {
   assertSynchronousChildSuccess,
   childProcessIsRunning,
@@ -30,7 +25,6 @@ import {
 } from "../runtime/process-lifecycle.mjs";
 import {
   initializeUserData,
-  locateOptionalUserConfig,
   packageDir,
   requireUserConfig,
 } from "../scripts/runtime-config.mjs";
@@ -38,11 +32,6 @@ import { codexHomePath } from "../runtime/codex-home.mjs";
 import {
   securePrivateFileSync,
 } from "../runtime/private-file.mjs";
-import {
-  checkProjectRules,
-  initializeProjectRules,
-  ProjectRulesError,
-} from "../scripts/codex-rules.mjs";
 import {
   CODEX_REMOTE_USAGE,
   parseCodexRemoteOptions,
@@ -101,7 +90,6 @@ const helpText = {
   remote [参数]                启动共享 App Server 的 Codex TUI
   desktop-app                 管理 Codex Desktop App 共享连接
   work                         管理 Workspace（交互菜单或子命令）
-  rules                        管理项目 Codex 命令预设
   primary-provider             管理第三方主 Provider（新增、列表、切换、删除）
   opencode-go                  管理 OpenCode Go 多账户
   ccg                          移除 CCG 账户或旧单账户
@@ -185,11 +173,6 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   security: `用法：codexc security repair
 
 修复 Windows Codex 私有 TOML 配置文件的 ACL；不修改 Codex 沙箱目录权限，其他平台明确提示无需处理。`,
-  rules: `用法：codexc rules <init|check>
-
-具体用法：
-  codexc rules init [--force]
-  codexc rules check [--json]`,
   "primary-provider": primaryProviderUsage,
   opencode_go: `用法：codexc opencode-go account <add|list|remove|default|stop> [id]
 
@@ -208,12 +191,6 @@ Linux 缺少 bubblewrap 时输出安装建议。`,
   "opencode_go.account.remove": "用法：codexc opencode-go account remove <id>",
   "opencode_go.account.default": "用法：codexc opencode-go account default <id>",
   "opencode_go.account.stop": "用法：codexc opencode-go account stop <id>",
-  "rules.init": `用法：codexc rules init [--force]
-
-为当前项目生成安全命令预设；已有文件默认不覆盖。`,
-  "rules.check": `用法：codexc rules check [--json]
-
-使用当前 Codex CLI 检查项目规则；--json 输出结构化校验结果。`,
   update: `用法：codexc update
 
 Git 源码安装检查并构建官方 main 最新提交，校验当前配置、数据库与配套 Codex CLI 合同后，
@@ -419,9 +396,6 @@ try {
     case "security":
       security(args);
       break;
-    case "rules":
-      projectRules(args);
-      break;
     case "primary-provider":
       if (showRequestedHelp(args, "primary-provider")) {
         break;
@@ -578,82 +552,6 @@ function runDoctor(args) {
   });
   assertSynchronousChildSuccess(result, { failureReportedByChild: true });
 }
-
-function projectRules(args) {
-  if (showRequestedHelp(args, "rules")) {
-    return;
-  }
-  if (showSubcommandHelp(args, "init", "rules.init") ||
-    showSubcommandHelp(args, "check", "rules.check")) {
-    return;
-  }
-  if (
-    args[0] === "check"
-    && (args.length === 1 || (args.length === 2 && args[1] === "--json"))
-  ) {
-    const json = args[1] === "--json";
-    let result;
-    try {
-      result = checkProjectRules({
-        cwd: process.cwd(),
-        codexBinary: projectRulesCodexBinary(),
-        quiet: json,
-      });
-    } catch (error) {
-      if (!json) throw error;
-      process.stdout.write(`${JSON.stringify({
-        valid: false,
-        projectRoot: null,
-        rulesPath: null,
-        error: {
-          code: error instanceof ProjectRulesError ? error.code : "check-unavailable",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      }, null, 2)}\n`);
-      process.exitCode = 1;
-      return;
-    }
-    if (json) {
-      process.stdout.write(`${JSON.stringify({
-        valid: true,
-        projectRoot: result.projectRoot,
-        rulesPath: result.rulesPath,
-        error: null,
-      }, null, 2)}\n`);
-      return;
-    }
-    printCliMessage("success", "项目 Codex 规则检查通过。");
-    console.log(`项目目录：${result.projectRoot}`);
-    console.log(`规则文件：${result.rulesPath}`);
-    return;
-  }
-  if (args[0] !== "init" || args.some((argument, index) =>
-    index > 0 && argument !== "--force"
-  )) {
-    throw new Error("用法：codexc rules <init [--force]|check [--json]>");
-  }
-  const force = args.includes("--force");
-  const result = initializeProjectRules({ cwd: process.cwd(), force });
-  printCliMessage("success", force ? "项目 Codex 规则已重新生成。" : "项目 Codex 规则已生成。");
-  console.log(`项目目录：${result.projectRoot}`);
-  console.log(`规则文件：${result.rulesPath}`);
-  checkProjectRules({
-    cwd: result.projectRoot,
-    codexBinary: projectRulesCodexBinary(),
-  });
-  printCliMessage("success", "项目 Codex 规则检查通过。");
-  printCliMessage("note", "重启 Codex 后生效；项目必须处于受信任状态。");
-}
-
-function projectRulesCodexBinary() {
-  const located = locateOptionalUserConfig();
-  if (!located) {
-    return process.env.CODEX_BINARY?.trim() || "codex";
-  }
-  const document = readGatewayConfig(located.configPath);
-  return effectiveCodexBinary(validateCodexConfigDocument(document.codex).binary);
-}
-
 
 function opencodeGoAccount(args) {
   if (args[0] === "legacy") {

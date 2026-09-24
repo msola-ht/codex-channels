@@ -152,10 +152,6 @@
   和 `ComSpec`，选择原生可执行文件或 `.cmd` / `.bat` shim，并以结构化调用描述交给 Codex/npm 子进程
   入口，避免依赖 Shell 自动补后缀。供 CLI、Bootstrap、服务安装器和 Doctor 复用，不依赖平台固定
   位置的 `which`。
-- `project-rules.mjs`：生成并检查项目级 Codex 命令规则；Gateway 使用精确 Workspace 根目录，
-  并拒绝通过符号链接把写入转移到 Workspace 外；CLI 的 JSON 模式可静默底层 Codex 展示，普通模式
-  继续原样转发检查输出。
-- `project-rules.d.mts`：声明共享项目规则模块的 TypeScript 接口。
 - `agent-roles.mjs`：读取 `~/.codex/config.toml` 的 `[agents]` 配置，返回带描述的子代理角色
   列表，供渠道 `/agents` 命令展示与调用。
 - `agent-roles.d.mts`：声明原生子代理角色查询模块的 TypeScript 接口。

@@ -1133,16 +1133,6 @@ function queueChoiceLabel(
 function renderCommandCenterInitialChoices(
   action: FeishuCommandCenterAction,
 ): FeishuCommandCenterChoices | undefined {
-  if (action === "rules") {
-    return {
-      title: "项目规则",
-      description: "仅操作当前已授权 Workspace 的项目规则。",
-      choices: [
-        { label: "生成并检查", action, input: "init" },
-        { label: "仅检查", action, input: "check" },
-      ],
-    };
-  }
   if (action === "review") {
     return {
       title: "开始 Review",

@@ -1208,41 +1208,6 @@ describe("Feishu command adapter", () => {
     await fixture.outbox.close();
   });
 
-  it("offers only the existing safe project-rule actions", async () => {
-    const fixture = createOutbox();
-    const checkProjectRules = vi.fn(async () => ({
-      projectRoot: "/workspace",
-      rulesPath: "/workspace/.codex/rules/default.rules",
-    }));
-    const adapter = new FeishuConversationAdapter(
-      { checkProjectRules },
-      fixture.outbox,
-      imagePort,
-    );
-
-    await expect(adapter.handleCommandCenterAction(
-      message.target,
-      "rules",
-      message.actorId,
-    )).resolves.toMatchObject({
-      title: "项目规则",
-      choices: [
-        { action: "rules", input: "init" },
-        { action: "rules", input: "check" },
-      ],
-    });
-    await adapter.handleCommandCenterAction(
-      message.target,
-      "rules",
-      message.actorId,
-      "check",
-    );
-    await fixture.outbox.close();
-
-    expect(checkProjectRules).toHaveBeenCalledWith(message.target);
-    expect(fixture.sent[0]?.text).toContain("项目规则检查通过");
-  });
-
   it("maps review cards back to the shared review command grammar", async () => {
     const fixture = createOutbox();
     const review = vi.fn(async () => ({
