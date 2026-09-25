@@ -29,7 +29,7 @@ contract.each([false, true])("Cline Pass preserves streamed items and tool follo
       const send = (delta: unknown, finish_reason: string | null = null, usage?: unknown) => response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) })}\n\n`);
       if (emptyOpening) send({ role: "assistant", content: "" });
       if (first) {
-        send({ reasoning: "Inspect scheduled tasks first." });
+        send({ reasoning: "Inspect scheduled tasks first.", reasoning_details: [{ type: "reasoning.text", text: "Inspect scheduled tasks first.", format: "unknown", index: 0 }] });
         send(delta);
         send({ content: "Checking tasks." }, "tool_calls");
       } else {

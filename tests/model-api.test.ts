@@ -3,6 +3,31 @@ import { ChatToResponses, responsesToChat } from "../src/model-api/index.js";
 
 const request = (input: unknown) => ({ model: "fixture", stream: true, input });
 const chunk = (delta: unknown, finish_reason: string | null = null) => ({ choices: [{ index: 0, delta, finish_reason }] });
+const detail = (text: string) => ({ type: "reasoning.text", text, format: "unknown", index: 0 });
+
+it.each([true, false])("converts plaintext reasoning details once (mirrored: %s)", mirrored => {
+  const converter = new ChatToResponses("r", "fixture");
+  converter.push(chunk({ reasoning_details: [] }));
+  for (const text of ["Think ", "carefully."]) {
+    converter.push(chunk({ ...(mirrored ? { reasoning: text } : {}), reasoning_details: [detail(text)] }));
+  }
+  converter.push(chunk({ content: "answer" }, "stop"));
+  expect(converter.finish().at(-1)).toMatchObject({ response: { output: [
+    { type: "reasoning", summary: [{ text: "Think carefully." }] },
+    { type: "message", content: [{ text: "answer" }] },
+  ] } });
+});
+
+it.each([
+  { reasoning_details: [{ type: "reasoning.encrypted", data: "secret" }] },
+  { reasoning_details: [{ ...detail("secret"), signature: "secret" }] },
+  { reasoning: "other", reasoning_details: [detail("secret")] },
+])("rejects unsupported or conflicting reasoning without exposing it", delta => {
+  const converter = new ChatToResponses("r", "fixture");
+  expect(() => converter.push(chunk(delta))).toThrow();
+  try { converter.push(chunk(delta)); } catch (error) { expect(String(error)).not.toContain("secret"); }
+});
+
 describe("Responses / Chat conversion", () => {
   it("preserves ordered parallel tool calls and correlated results", () => {
     const converted = responsesToChat({ ...request([

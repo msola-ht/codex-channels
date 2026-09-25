@@ -34,9 +34,9 @@ export class ChatToResponses {
     if (choice.index !== 0 || choice.error != null) throw new ModelConversionError("Invalid Chat choice");
     const delta = object(choice.delta);
     if (this.finishReason && Object.keys(delta).length) throw new ModelConversionError("Chat delta after finish reason");
-    if (delta.refusal != null || delta.reasoning_details != null) throw new ModelConversionError("Unsupported Chat content");
+    if (delta.refusal != null) throw new ModelConversionError("Unsupported Chat content");
     const events: JsonObject[] = [];
-    if (delta.reasoning != null) events.push(...this.appendContent("reasoning", string(delta.reasoning)));
+    events.push(...this.appendContent("reasoning", reasoningText(delta)));
     if (delta.content != null) events.push(...this.appendContent("message", string(delta.content)));
     if (delta.tool_calls != null) for (const raw of array(delta.tool_calls)) {
       const call = object(raw);
@@ -149,6 +149,22 @@ export class ChatToResponses {
     return { id: this.id, object: "response", model: this.model, status, output: [...this.items], ...(this.usage ? { usage: this.usage } : {}) };
   }
   private event(type: string, fields: JsonObject): JsonObject { return { type, sequence_number: this.sequence++, ...fields }; }
+}
+
+function reasoningText(delta: JsonObject): string {
+  const text = delta.reasoning == null ? "" : string(delta.reasoning);
+  if (delta.reasoning_details == null) return text;
+  const details = array(delta.reasoning_details).map(raw => {
+    const detail = object(raw);
+    if (detail.type !== "reasoning.text" || detail.signature != null || detail.data != null) {
+      throw new ModelConversionError("Unsupported Chat reasoning details");
+    }
+    return string(detail.text);
+  }).join("");
+  // Cline mirrors the same plaintext in both fields within each SSE delta.
+  // Reject conflicting representations instead of silently losing either one.
+  if (text && details && text !== details) throw new ModelConversionError("Conflicting Chat reasoning text");
+  return text || details;
 }
 
 function convertUsage(value: unknown): JsonObject {
