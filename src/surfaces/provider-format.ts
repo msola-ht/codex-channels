@@ -17,7 +17,6 @@ export function setConfiguredCustomPrimaryProviderId(
 export function formatProviderLabel(provider: string): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "deepseek") return "DeepSeek";
-  if (provider.startsWith("clp-")) return `CLP ${provider.slice(4)}`;
   if (isOpencodeGoProvider(provider)) {
     return boundProviderLabel(opencodeGoProviderDisplayName(provider));
   }
