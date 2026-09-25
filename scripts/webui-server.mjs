@@ -323,6 +323,7 @@ async function routeManagement(environment, url, request, response, state, token
     contentLength,
     requestLineBytes,
     headerBytes,
+    path: url.pathname.slice(`${API_PREFIX}/management`.length) || "/",
   });
   if (token !== null && !authorized(request, token)) {
     throw new ApiError(401, "unauthorized", "需要有效的访问令牌");

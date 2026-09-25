@@ -208,6 +208,7 @@ export function loadPrimaryModelProvider(
 export interface ConfiguredCustomPrimaryModelProvider {
   id: string;
   baseUrl: string;
+  catalogPath?: string;
 }
 
 export const customPrimaryProviderProfileName: "sf-custom";
@@ -234,14 +235,15 @@ export interface ConfiguredCustomSwitchingModelProvider {
   supportsWebsockets: boolean;
   profileName: string;
   profileContent: string;
-  reasoningEffort: "medium";
-  catalogSource: { kind: "official" };
+  reasoningEffort: string;
+  catalogSource: { kind: "official" } | { kind: "custom"; path: string };
   arguments: string[];
   childEnvironment: Record<string, string>;
 }
 
 export function loadConfiguredCustomSwitchingModelProviders(
   environment?: NodeJS.ProcessEnv,
+  providerId?: string,
 ): ConfiguredCustomSwitchingModelProvider[];
 
 export function writeCustomPrimaryProviderSwitchingProfile(
@@ -252,7 +254,7 @@ export function writeCustomPrimaryProviderSwitchingProfile(
     baseUrl: string;
     apiKey: string;
     supportsWebsockets?: boolean;
-    catalogSource?: { kind: "official" };
+    catalogSource?: { kind: "official" } | { kind: "custom"; reasoningEffort: string | null };
   },
   environment?: NodeJS.ProcessEnv,
   guards?: {

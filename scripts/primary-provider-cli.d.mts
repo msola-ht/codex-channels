@@ -29,6 +29,7 @@ export type InteractivePrimaryProviderCliOptions = Omit<
   PrimaryProviderCliOptions,
   "prompts" | "createClient"
 > & {
+  catalogKind?: "official" | "custom";
   prompts?: InteractivePrimaryProviderCliPrompts;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;

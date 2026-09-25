@@ -62,11 +62,15 @@
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
   镜像所选模型的默认思考等级。Profile 位于 `~/.codex`，模型目录、清单与管理标记位于
   `~/.codex-connect/providers/<id>/`。
-- `model-provider-custom-runtime.mjs`：拥有自定义主 Provider 候选备份和切换模式注册表，逐 Provider
-  管理 `sf-custom-<id>` 私有 Profile；仅接受 Codex 官方模型目录来源，并严格限制为单个目标 Provider
-  块和直接 API Key 字段。服务启动时通过配置的 Codex CLI 执行 `debug models --bundled`，把官方目录
-  原子写入 `~/.codex-connect/providers/custom/official-models.json`（0600）；注册表与 Profile 的增删改
-  共用私有文件锁并支持执行前快照保护，Provider 块与 Key 不进入主配置。
+- `model-provider-custom-runtime.mjs`：拥有 Codex 兼容／自定义 Responses Provider 候选备份和切换模式注册表，支持按目标 Provider 校验恢复状态，逐 Provider
+  管理 `sf-custom-<id>` 私有 Profile；按 Provider 类型校验官方或独立 Responses 模型目录，并严格限制为单个目标 Provider
+  块和直接 API Key 字段。注册表与 Profile 的增删改共用私有文件锁并支持执行前快照保护，
+  Provider 块与 Key 不进入主配置。
+- `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
+  Codex CLI 执行 `debug models --bundled`，校验后原子写入
+  `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
+- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 RS 上下文，保留私有恢复记录并提供整批恢复与预览目标。
+- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：校验手填模型定义、模板基础能力与最大上下文，生成版本化的独立目录，管理修订、私有备份与未完成写入标记；不保存凭据。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、

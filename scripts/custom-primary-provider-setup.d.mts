@@ -10,6 +10,7 @@ export interface CustomPrimaryProviderSetupClient extends CodexUserConfigTransac
 export interface CustomPrimaryProviderSetupPrompts {
   text(options: unknown): Promise<unknown>;
   password(options: unknown): Promise<unknown>;
+  multiselect?(options: unknown): Promise<unknown>;
   select(options: unknown): Promise<unknown>;
   confirm(options: unknown): Promise<unknown>;
   isCancel(value: unknown): boolean;
@@ -17,10 +18,13 @@ export interface CustomPrimaryProviderSetupPrompts {
 
 export interface CustomPrimaryProviderSetupOptions {
   allowBack?: boolean;
+  catalogKind?: "official" | "custom";
   environment?: NodeJS.ProcessEnv;
   output?: { write(value: string): unknown };
   prompts?: CustomPrimaryProviderSetupPrompts;
   providerId?: string;
+  probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
+  loadModelTemplates?: (source: import("./responses-model-templates.mjs").ResponsesTemplateSource) => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CustomPrimaryProviderSetupClient>;

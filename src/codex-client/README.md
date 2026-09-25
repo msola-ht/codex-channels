@@ -117,9 +117,10 @@
   精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
   不写用户级默认设置。
 - `provider-routing-client.ts` 不暴露自定义 Thread 分区 RPC；固定状态仍通过官方 Pinned 分区移动实现。
+  `listModelsForProvider` 通过指定实例和既有活动边界读取模型目录，供独立 RS 选择及精确可用性检查共用；不回退主实例目录。
 - `provider-routing-client.ts`：复用多个完整 Client 实例，按 Thread 的官方 `modelProvider` 路由
   生命周期、Turn、Review、Goal 和 MCP；合并各实例的进程内状态，隔离 Server Request ID，
-  第三方实例在首次选择对应模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
+  第三方实例在查询对应实时模型目录、首次选择模型或恢复其 Thread 时通过私有监管入口按需启动并连接，未使用的
   Provider 不增加 App Server 子进程；MCP 配置刷新只尝试当前已连接实例并传播任一失败，单 Provider
   重连只恢复该侧 Thread。组合根为所有 Provider 请求注入活动保护：统一空闲管理器在 Gateway 没有前后台
   绑定、没有进行中操作且没有启动任务时等待 60 秒并每 60 秒复检，宽限期内新请求会取消本轮释放；

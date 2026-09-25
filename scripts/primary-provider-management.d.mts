@@ -32,7 +32,7 @@ export interface PrimaryProviderRemovalTarget {
   id: string;
   displayName: string;
   baseUrl: string;
-  state: "configured" | "switching" | "stale-switching" | "backup";
+  state: "configured" | "switching" | "stale-switching" | "orphan-catalog" | "backup";
   active: boolean;
 }
 

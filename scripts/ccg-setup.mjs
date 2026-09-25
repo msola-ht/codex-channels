@@ -1,10 +1,8 @@
+import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import { pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import * as clackPrompts from "@clack/prompts";
@@ -20,7 +18,6 @@ import {
   validateCcgAccounts,
 } from "../runtime/ccg-accounts.mjs";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { effectiveCodexBinary, resolveExecutableInvocation } from "../runtime/executable.mjs";
 import {
   ccgAccountDefinition,
   commandCodeProviderDefinition as baseDefinition,
@@ -35,7 +32,7 @@ import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
-import { readPrivateFileSync, writePrivateFileAtomic } from "../runtime/private-file.mjs";
+import { readPrivateFileSync } from "../runtime/private-file.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
@@ -58,32 +55,7 @@ const maximumCatalogBytes = 2 * 1024 * 1024;
 
 async function validateCcgCatalog(catalog, environment) {
   checkCcgCatalog(catalog);
-  const content = `${JSON.stringify(catalog, null, 2)}\n`;
-  if (Buffer.byteLength(content) > maximumCatalogBytes) {
-    throw new Error("CCG 模型目录不能超过 2 MiB");
-  }
-  const directory = await mkdtemp(join(tmpdir(), "codexc-ccg-catalog-"));
-  try {
-    const path = join(directory, "models.json");
-    await writePrivateFileAtomic(path, content);
-    const validationEnvironment = { ...environment, CODEX_HOME: directory };
-    const invocation = resolveExecutableInvocation(
-      effectiveCodexBinary("codex", environment),
-      ["-c", `model_catalog_json=${JSON.stringify(path)}`, "debug", "models"],
-      validationEnvironment,
-    );
-    const result = spawnSync(invocation.file, invocation.args, {
-      cwd: directory, env: validationEnvironment,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      timeout: 30_000, maxBuffer: 8 * maximumCatalogBytes,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error("CCG 模型目录未通过当前 Codex CLI 校验；请检查完整模型能力字段及 CLI 是否可运行");
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  await validateModelCatalogWithCodex(catalog, environment);
 }
 
 function checkCcgCatalog(catalog) {

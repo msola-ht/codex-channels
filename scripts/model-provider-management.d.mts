@@ -36,6 +36,9 @@ export interface ManagedProviderManagementEntry {
 }
 
 export interface CustomProviderCandidate {
+  catalog?: "custom";
+  models?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
+  model?: string;
   id: string;
   displayName: string;
   kind: "custom";
@@ -46,6 +49,8 @@ export interface CustomProviderCandidate {
 }
 
 export interface CustomSwitchingProviderEntry {
+  catalog?: "custom";
+  models?: import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[];
   id: string;
   displayName: string;
   kind: "custom";

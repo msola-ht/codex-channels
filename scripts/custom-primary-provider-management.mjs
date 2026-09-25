@@ -1,3 +1,10 @@
+import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
+import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { codexHomePath } from "../runtime/codex-home.mjs";
+import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
 
@@ -9,6 +16,9 @@ import {
   validProviderBaseUrl,
   validateCustomPrimaryModelProviderId,
   writeCustomPrimaryProviderSwitchingProfile,
+  customPrimaryProviderProfilePath,
+  customSwitchingProviderRegistryPath,
+  restoreCustomPrimaryProviderSwitchingProfile,
 } from "../runtime/model-provider-runtime.mjs";
 import {
   createCustomPrimaryProviderConfig,
@@ -109,6 +119,41 @@ export async function applyCustomPrimaryProviderSave(input, options = {}) {
 }
 
 async function applySavePlan(input, plan, options) {
+  if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
+  const environment = options.environment ?? process.env;
+  if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
+  if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
+  const configPath = join(codexHomePath(environment), "config.toml");
+  const beforeConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
+  const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
+  const beforeProfile = existsSync(profilePath) ? readPrivateFileSync(profilePath) : undefined;
+  const backupPaths = [configPath, customPrimaryProviderProfilePath(environment, plan.provider.id), customSwitchingProviderRegistryPath(environment)];
+  const transaction = writeResponsesModelCatalog(environment, plan.provider.id, plan.models, plan.provider.model, plan.catalogRevision);
+  try {
+    writePrivateFileAtomicSync(responsesProviderBackupPath(environment, plan.provider.id), JSON.stringify({
+      schemaVersion: 1,
+      files: backupPaths.map(path => ({ path, content: existsSync(path) ? readPrivateFileSync(path) : null })),
+    }));
+    const result = await withResponsesModelCatalogWrite(transaction, () => applyConnectionSavePlan(input, plan, options));
+    finishResponsesModelCatalogWrite(transaction);
+    return result;
+  } catch (error) {
+    const afterConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
+    const afterProfile = existsSync(profilePath) ? readPrivateFileSync(profilePath) : undefined;
+    if (beforeConfig === afterConfig && (afterProfile === beforeProfile || (plan.switchingProvider && afterProfile === undefined))) {
+      finishResponsesModelCatalogWrite(transaction, true);
+      if (plan.switchingProvider && !existsSync(customPrimaryProviderProfilePath(environment, plan.provider.id))) {
+        restoreCustomPrimaryProviderSwitchingProfile(environment, plan.provider.id, plan.switchingProvider.profileContent);
+      }
+    } else {
+      // Preserve both revisions when the remote write outcome cannot be established.
+      throw new AggregateError([error], "Responses Provider 保存结果无法确认；已保留模型目录及 .backup，请检查配置后恢复，勿自动重试", { cause: error });
+    }
+    throw error;
+  }
+}
+
+async function applyConnectionSavePlan(input, plan, options) {
   const { environment = process.env, createClient = createCodexUserConfigClient } = options;
   if (plan.provider.mode === "switching") {
     const client = await createClient({ environment });
@@ -129,7 +174,7 @@ async function applySavePlan(input, plan, options) {
         baseUrl: plan.provider.baseUrl,
         apiKey: plan.apiKey,
         supportsWebsockets: plan.provider.supportsWebsockets,
-        catalogSource: { kind: "official" },
+        catalogSource: plan.models === undefined ? { kind: "official" } : { kind: "custom", reasoningEffort: plan.reasoningEffort },
       }, environment, {
         expectedProfilePresent: plan.switchingProvider !== undefined,
         expectedProfileContent: plan.switchingProvider?.profileContent,
@@ -180,7 +225,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     throw invalid("invalid-operation", "operation", "Provider 保存操作必须是 create 或 update");
   }
   const { environment = process.env } = options;
-  const { snapshot, officialModels } = await loadSaveContext(options);
+  const { snapshot, officialModels } = await loadSaveContext(options, input.catalog?.kind !== "custom");
   const config = record(snapshot.config);
   const currentProviders = record(config.model_providers);
   const configuredProviderIds = listCustomPrimaryProviderCandidates(currentProviders, environment);
@@ -226,15 +271,23 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   if (typeof input.supportsWebsockets !== "boolean") {
     throw invalid("invalid-websocket-setting", "supportsWebsockets", "WebSocket 设置必须是布尔值");
   }
+  const custom = input.catalog?.kind === "custom";
+  if (input.catalog !== undefined && (input.catalog?.kind !== "custom" || Object.keys(input.catalog).some(key => !["kind", "models"].includes(key)))) throw invalid("invalid-catalog", "catalog", "模型目录来源不受支持");
+  if (custom !== isResponsesProvider(providerId)) throw invalid("invalid-provider-id", "providerId", "自定义 Responses Provider 必须使用 rs- 前缀；Codex 兼容 Provider 不使用该前缀");
+  if (custom && displayName === "OpenAI") throw invalid("reserved-provider-name", "name", "自定义 Responses Provider 不能使用 OpenAI 显示名称，以免启用官方专用协议能力");
+  const previousCatalog = custom && input.operation === "update" ? readResponsesModelCatalog(environment, providerId) : undefined;
+  if (custom && input.operation === "create" && existsSync(responsesProviderCatalogPath(environment, providerId))) throw invalid("provider-exists", "providerId", "该 Provider 已有模型目录，请先恢复或删除已有配置");
+  const model = requiredString(input.model, "model", "模型 ID 不能为空");
+  const models = custom ? resolveResponsesTemplateContexts(validateResponsesModels(input.catalog.models, model),environment) : undefined;
+  const reasoningEffort = models?.find((entry) => entry.id === model)?.defaultReasoningEffort ?? "none";
   const officialModelIds = new Set(
     officialModels.filter((candidate) => candidate.available !== false)
       .map((candidate) => candidate.model),
   );
-  if (officialModelIds.size === 0) {
+  if (!custom && officialModelIds.size === 0) {
     throw invalid("official-models-unavailable", "model", "Codex App Server 没有返回可用的官方模型");
   }
-  const model = requiredString(input.model, "model", "模型 ID 不能为空");
-  if (!officialModelIds.has(model)) {
+  if (!custom && !officialModelIds.has(model)) {
     throw invalid("unknown-model", "model", `模型 ID 不在 Codex 官方模型目录中：${model}`);
   }
   const activeProviderId = optionalString(config.model_provider);
@@ -328,6 +381,8 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     bearerToken: apiKey,
     supportsWebsockets: input.supportsWebsockets,
   });
+  const catalog = models ? createResponsesModelCatalog(models, model) : undefined;
+  if (catalog) await validateModelCatalogWithCodex(catalog, environment);
   const provider = {
     id: providerId,
     displayName,
@@ -335,11 +390,16 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     mode,
     model,
     supportsWebsockets: input.supportsWebsockets,
-    catalog: "official",
+    catalog: custom ? "custom" : "official",
+    ...(models ? { models } : {}),
     hasApiKey: true,
   };
   return {
     provider,
+    models,
+    validatedCatalog: catalog ? JSON.stringify(catalog) : undefined,
+    reasoningEffort,
+    catalogRevision: previousCatalog?.revision,
     apiKey,
     expectedVersion: snapshot.version,
     switchingProvider,
@@ -357,6 +417,13 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
       ...(removesTopLevelBaseUrl ? [{ keyPath: "openai_base_url", value: null }] : []),
       { keyPath: "model_provider", value: providerId },
       { keyPath: "model", value: model },
+      ...(custom ? [
+        { keyPath: "model_catalog_json", value: responsesProviderCatalogPath(environment, providerId) },
+        { keyPath: "model_reasoning_effort", value: reasoningEffort },
+      ] : isResponsesProvider(effectiveActiveProviderId) ? [
+        { keyPath: "model_catalog_json", value: null },
+        { keyPath: "model_reasoning_effort", value: null },
+      ] : []),
       ...modelProviderBlockEdits(providerId, providerBlock),
     ] : [],
   };
@@ -366,16 +433,17 @@ async function loadSaveContext({
   environment = process.env,
   createClient = createCodexUserConfigClient,
   loadContext,
-}) {
+}, includeOfficialModels = true) {
   if (loadContext !== undefined) return loadContext();
   const client = await createClient({ environment });
   try {
     await client.connect();
     const [snapshot, officialModels] = await Promise.all([
       client.readUserConfigSnapshot(),
-      client.listModels(),
+      includeOfficialModels ? client.listModels() : [],
     ]);
-    return { snapshot, officialModels };
+    return { snapshot, officialModels: includeOfficialModels && isResponsesProvider(record(snapshot.config).model_provider)
+      ? bundledOfficialModelOptions(environment) : officialModels };
   } finally {
     await client.close().catch(() => undefined);
   }
@@ -433,4 +501,10 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+export function bundledOfficialModelOptions(environment = process.env) {
+  return readOfficialModelCatalog(environment).models
+    .filter(model => model.supported_in_api && model.visibility === "list")
+    .map(model => ({model: model.slug, available: true}));
 }

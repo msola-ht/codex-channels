@@ -253,17 +253,20 @@ export class ProviderRoutingClient {
     return this.clients.has(this.canonicalProvider(provider));
   }
 
+  listModelsForProvider(provider: string): ReturnType<ProviderClientInstance["listModels"]> {
+    return this.withProviderActivity(provider, async () =>
+      (await this.ensureClient(provider)).listModels());
+  }
+
   /**
    * Check one exact model on its requested Provider.  A missing model is not
    * replaced by the Provider default; callers must fail closed.
    */
   async isModelAvailable(provider: string, model: string): Promise<boolean> {
-    return this.withProviderActivity(provider, async () => {
-      const models = await (await this.ensureClient(provider)).listModels();
-      return models.some(
-        (candidate) => candidate.model === model && candidate.available !== false,
-      );
-    });
+    const models = await this.listModelsForProvider(provider);
+    return models.some(
+      (candidate) => candidate.model === model && candidate.available !== false,
+    );
   }
 
   async listThreads(

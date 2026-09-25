@@ -1,3 +1,4 @@
+import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 export type RangeName =
   | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
 
@@ -516,6 +517,8 @@ export interface ManagementProviderSettingsResponse {
   }>
   customProviders: {
     fixedCandidates: Array<{
+      catalog?: "custom"
+      models?: ResponsesModelDefinition[]
       id: string
       displayName: string
       kind: "custom"
@@ -525,6 +528,8 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
     switchingProviders: Array<{
+      catalog?: "custom"
+      models?: ResponsesModelDefinition[]
       id: string
       displayName: string
       mode: "switching"
@@ -534,6 +539,8 @@ export interface ManagementProviderSettingsResponse {
       baseUrl: string
     }>
     backupCandidates: Array<{
+      catalog?: "custom"
+      models?: ResponsesModelDefinition[]
       id: string
       displayName: string
       kind: "custom"
@@ -567,6 +574,7 @@ export type ManagementProviderSettingsMutationInput =
         baseUrl: string
         mode: "switching" | "exclusive"
         model: string
+        catalog?: { kind: "custom"; models: ResponsesModelDefinition[] }
         supportsWebsockets: boolean
         credential: { action: "preserve" } | { action: "replace"; apiKey: string }
         confirmRemoveTopLevelBaseUrl?: boolean
@@ -603,6 +611,7 @@ export interface ManagementProviderSettingsPreview {
     baseUrl?: string
     mode?: string
     catalog?: string
+    models?: ResponsesModelDefinition[]
     apiKeyChange?: boolean
   }
   model?: { id: string; displayName: string; contextWindow?: number }

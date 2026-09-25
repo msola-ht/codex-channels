@@ -20,6 +20,7 @@ export function validateManagementJsonRequest(input: {
   contentLength?: number;
   requestLineBytes?: number;
   headerBytes?: number;
+  path?: string;
 }): { maximumBodyBytes: number };
 
 export class ManagementConfirmationStore {

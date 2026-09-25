@@ -128,6 +128,7 @@ describe("Codex release upgrade preview", () => {
         "tests/real-app-server-supervised-provider.test.ts",
         "tests/real-app-server-supervised-thread-state.test.ts",
         "tests/real-app-server-supervised-tools.test.ts",
+        "tests/real-app-server-responses-provider.test.ts",
       ]),
     });
   });

@@ -1,3 +1,5 @@
+import { writeResponsesContextFollowers } from "./responses-context-sync.mjs";
+import { assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import {
   closeSync,
   constants,
@@ -51,6 +53,7 @@ export function validateConfiguredModelProvider(environment = process.env) {
 }
 
 export function validateConfiguredModelProviders(environment = process.env) {
+  assertResponsesContextSyncComplete(environment);
   const definitions = managedProviderDefinitions(environment);
   const exclusiveProviders = definitions.filter((definition) =>
     readManagedMarker(environment, definition)?.mode === "exclusive");
@@ -70,6 +73,7 @@ export function validateConfiguredModelProviders(environment = process.env) {
 }
 
 export function loadManagedModelProviderSettings(environment = process.env) {
+  assertResponsesContextSyncComplete(environment);
   return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);
     if (!marker) return [];
@@ -193,14 +197,15 @@ export function writeManagedModelProviderProfileDefault(
   });
   const previousCatalog = readPrivateFile(profile.catalogPath, maximumCatalogBytes);
   const nextCatalog = updateModelCatalogSettings(previousCatalog, definition, settings);
-  const document = record(parse(readPrivateFile(profilePath)));
+  const previousProfile = readPrivateFile(profilePath);
+  const document = record(parse(previousProfile));
   document.model = model;
   document.model_reasoning_effort = settings.reasoningEffort;
   delete document.model_context_window;
   delete document.model_auto_compact_token_limit;
   delete document.model_auto_compact_token_limit_scope;
-  writeCatalogWithProfileMirrors(environment, definition, profile.catalogPath, nextCatalog,
-    new Map([[profilePath, stringify(document)]]));
+  writeCatalogWithProfileMirrors(environment, profile.catalogPath, nextCatalog,
+    new Map([[profilePath, stringify(document)]]), new Map([[profile.catalogPath,previousCatalog],[profilePath,previousProfile]]),model);
   readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: "mirror",
@@ -217,8 +222,8 @@ export function writeManagedModelProviderCatalogSettings(
   validateManagedModelSettings(definition, settings);
   const previousContent = readPrivateFile(path, maximumCatalogBytes);
   const previous = modelCatalogSetting(previousContent, definition, settings.model);
-  writeCatalogWithProfileMirrors(environment, definition, path,
-    updateModelCatalogSettings(previousContent, definition, settings));
+  writeCatalogWithProfileMirrors(environment, path,
+    updateModelCatalogSettings(previousContent, definition, settings), new Map(), new Map([[path,previousContent]]),settings.model);
   return previous;
 }
 
@@ -233,11 +238,18 @@ export function restoreManagedModelProviderCatalogContent(
   content,
   environment = process.env,
 ) {
-  const { definition, path } = managedProviderCatalogPath(provider, environment);
-  writeCatalogWithProfileMirrors(environment, definition, path, content);
+  const { path } = managedProviderCatalogPath(provider, environment);
+  writeCatalogWithProfileMirrors(environment, path, content);
 }
 
-function writeCatalogWithProfileMirrors(environment, definition, catalogPath, content, updates = new Map()) {
+function writeCatalogWithProfileMirrors(environment, catalogPath, content, updates = new Map(), originals = new Map(), targetModel) {
+  collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals);
+  writeCatalogUpdates(environment, updates, originals, targetModel);
+}
+
+function collectCatalogWithProfileMirrors(environment, catalogPath, content, updates, originals) {
+  if (!originals.has(catalogPath)) originals.set(catalogPath,readPrivateFile(catalogPath,maximumCatalogBytes));
+  updates.set(catalogPath, content);
   // 账户 Profile 镜像目录默认值；角色独立选择模型与思考等级。
   const catalog = JSON.parse(content);
   for (const sibling of managedProviderDefinitions(environment)) {
@@ -245,14 +257,23 @@ function writeCatalogWithProfileMirrors(environment, definition, catalogPath, co
       || readManagedMarker(environment, sibling)?.mode !== "switching") continue;
     const path = join(codexHomePath(environment), sibling.profileFileName);
     if (updates.has(path)) continue;
-    const document = record(parse(readPrivateFile(path)));
+    const previousProfile=readPrivateFile(path);
+    originals.set(path,previousProfile);
+    const document = record(parse(previousProfile));
     const model = catalog.models.find((entry) => entry.slug === document.model);
     if (!model) throw new Error(`${sibling.displayName} 目录不支持当前模型`);
     document.model_reasoning_effort = model.default_reasoning_level;
     updates.set(path, stringify(document));
   }
-  updates = new Map([[catalogPath, content], ...updates]);
-  const originals = new Map([...updates.keys()].map((path) => [path, readPrivateFile(path, maximumCatalogBytes)]));
+}
+
+function writeCatalogUpdates(environment, updates, originals, targetModel) {
+  assertResponsesContextSyncComplete(environment);
+  if (writeResponsesContextFollowers(updates, environment, originals, targetModel)) return;
+  for (const path of updates.keys()) {
+    if (!originals.has(path)) originals.set(path,readPrivateFile(path,maximumCatalogBytes));
+    if (readPrivateFile(path,maximumCatalogBytes) !== originals.get(path)) throw new Error("模型目录或 Profile 已变化，请重新预览");
+  }
   const written = [];
   try {
     for (const [path, next] of updates) {
@@ -306,57 +327,30 @@ export function writeManagedModelWindowGlobal(
     throw new Error(`同名模型在不同 Provider 的最大上下文窗口不一致：${model}`);
   }
   const contextWindow = Math.round(base * windowPercent / 100);
-  const previousCatalogs = new Map(matches.map((provider) => [
-    provider.provider,
-    readManagedModelProviderCatalogContent(provider.provider, environment),
-  ]));
-  const writtenProviders = [];
+  const updates = new Map();
+  const originals = new Map();
   const overridden = [];
-  try {
-    for (const provider of matches) {
-      const modelEntry = provider.models.find((entry) => entry.model === model);
-      if (
-        modelEntry?.windowPercent !== undefined
-        && modelEntry.windowPercent !== windowPercent
-      ) {
-        overridden.push({
-          provider: provider.provider,
-          previousPercent: modelEntry.windowPercent,
-        });
-      }
-      writeManagedModelProviderCatalogSettings(
-        provider.provider,
-        {
-          model,
-          reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
-          contextWindow,
-        },
-        environment,
-      );
-      writtenProviders.push(provider.provider);
+  for (const provider of matches) {
+    const modelEntry = provider.models.find((entry) => entry.model === model);
+    if (modelEntry?.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent) {
+      overridden.push({provider: provider.provider, previousPercent: modelEntry.windowPercent});
     }
-  } catch (error) {
-    const rollbackErrors = [];
-    for (const provider of writtenProviders.reverse()) {
-      try {
-        restoreManagedModelProviderCatalogContent(
-          provider,
-          previousCatalogs.get(provider),
-          environment,
-        );
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError);
-      }
-    }
-    if (rollbackErrors.length > 0) {
-      throw new AggregateError(
-        [error, ...rollbackErrors],
-        "模型上下文窗口写入失败，且未能恢复全部 Provider 模型目录",
-        { cause: error },
-      );
-    }
-    throw error;
+    const { definition, path } = managedProviderCatalogPath(provider.provider, environment);
+    // 多个账户共享同一目录；每个目录及其 Profile 只计划和写入一次。
+    if (updates.has(path)) continue;
+    const settings = {
+      model,
+      reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
+      contextWindow,
+    };
+    validateManagedModelSettings(definition, settings);
+    const previous = readPrivateFile(path, maximumCatalogBytes);
+    originals.set(path, previous);
+    collectCatalogWithProfileMirrors(environment, path,
+      updateModelCatalogSettings(previous, definition, settings), updates, originals);
   }
+  // 全部受管目录、Profile 与 RS 跟随目录共享一次提交和原始快照回滚。
+  writeCatalogUpdates(environment, updates, originals, model);
   return {
     model,
     windowPercent,
@@ -438,6 +432,7 @@ export function loadManagedProviderProfileFor(
 }
 
 export function loadManagedProviderProfiles(environment, { requireLaunchConfig = false } = {}) {
+  assertResponsesContextSyncComplete(environment);
   const codexHome = codexHomePath(environment);
   return managedProviderDefinitions(environment).flatMap((definition) => {
     const marker = readManagedMarker(environment, definition);

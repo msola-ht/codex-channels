@@ -1,3 +1,4 @@
+import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { hasCodexAuthFile } from "../runtime/codex-home.mjs";
 import {
   listCustomPrimaryProviderCandidates,
@@ -35,18 +36,22 @@ export async function loadModelProviderManagementState({
       supportsWebsockets: provider.supportsWebsockets,
       baseUrl: publicBaseUrl(provider.baseUrl),
       profileName: provider.profileName,
+      ...customCatalog(provider.id, environment, provider.model),
     }));
   const fixedCandidates = fixedIds.map((id) => customCandidate(
     id,
     providerConfig[id],
     "configured",
     id === activeId,
+    environment,
+    id === activeId ? optionalString(config.model) : undefined,
   ));
   const backupCandidates = backupIds.map((id) => customCandidate(
     id,
     backup[id],
     "backup",
     id === activeId,
+    environment,
   ));
   const exclusiveManaged = managedProviders.find((provider) => provider.mode === "exclusive");
   const primary = exclusiveManaged === undefined
@@ -118,7 +123,7 @@ function safeManagedProvider(provider) {
   };
 }
 
-function customCandidate(id, value, state, active) {
+function customCandidate(id, value, state, active, environment, model) {
   const provider = record(value);
   return {
     id,
@@ -126,6 +131,7 @@ function customCandidate(id, value, state, active) {
     kind: "custom",
     state,
     active,
+    ...customCatalog(id, environment, model),
     supportsWebsockets: provider.supports_websockets === true,
     baseUrl: publicBaseUrl(provider.base_url),
   };
@@ -161,4 +167,10 @@ function record(value) {
 
 function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function customCatalog(id, environment, model) {
+  if (!isResponsesProvider(id)) return {};
+  const catalog = readResponsesModelCatalog(environment, id);
+  return { catalog: "custom", models: catalog.definitions, model: model ?? catalog.defaultModel };
 }

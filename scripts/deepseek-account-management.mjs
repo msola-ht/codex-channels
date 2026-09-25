@@ -1,3 +1,4 @@
+import { listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -67,6 +68,7 @@ function readBackup(path) {
 
 export function previewDeepseekAccountConfiguration(input, { environment = process.env } = {}) {
   const definition = deepseekAccountDefinition(input.accountId);
+  if (!existsSync(deepseekAccountPaths(environment,input.accountId).catalog)) assertNoResponsesContextFollowers(environment,"重建 DS 目录");
   const mode = input.mode ?? "switching";
   if (!["switching", "exclusive"].includes(mode)) throw new Error("DeepSeek 模式无效");
   if (hasLegacyDeepseekConfiguration(environment)) throw new Error("请先运行 codexc deepseek legacy remove 移除旧账户，再重新添加");
@@ -123,6 +125,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     if (existsSync(paths.catalog)) {
       catalog = JSON.parse(readPrivateFileSync(paths.catalog, 2_097_152));
     } else {
+      assertNoResponsesContextFollowers(environment,"重建 DS 目录");
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
       catalog = createManagedDeepseekCatalog(downloaded.catalog);
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
@@ -226,6 +229,7 @@ function deepseekAccountRemovalPlan(accountId, environment) {
   const snapshots = snapshotProviderFiles(Object.values(paths));
   const updates = new Map([[paths.profile, undefined], [paths.marker, undefined], [paths.registry, remaining.length === 0 ? undefined : `${JSON.stringify(remaining)}\n`]]);
   if (remaining.length === 0) {
+    assertNoResponsesContextFollowers(environment,"删除最后一个 DS 账户");
     updates.set(paths.catalog, undefined);
     updates.set(paths.manifest, undefined);
   }
@@ -259,4 +263,9 @@ export async function removeDeepseekAccount({ accountId, confirmRemove = false }
     await applyProviderFileUpdates(updates, snapshots);
     return { action: "removed", accountId, runtime, activation: "restart-all" };
   });
+}
+
+function assertNoResponsesContextFollowers(environment, operation) {
+  const followers=listResponsesContextFollowers(environment);
+  if (followers.length > 0) throw new Error(`${operation}前，请先关闭关联 RS 模型的上下文跟随：${[...new Set(followers.map(entry=>entry.providerId))].join("、")}`);
 }

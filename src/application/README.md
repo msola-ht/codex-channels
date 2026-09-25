@@ -38,6 +38,7 @@
 - `thread-revert-service.ts`：维护分页历史选择快照、一次性确认令牌、Queue 指纹与执行前并发复核；
   Revert 写请求保持单次调用且结果未知时不重试。
 - `model-selection-service.ts`：查询模型、输入能力与思考等级，保存按 Conversation 生效的 Turn 覆盖设置；
+  独立 RS 切换 Provider 经模型端口读取对应 App Server 目录，官方兼容目录与独立目录分别装配；默认选择保留精确 Provider 和平台模型 ID；总览隔离各 RS 的读取故障，定向操作只查询目标 RS，故障条目不参与能力选择。
   官方未登录时为未绑定会话解析唯一第三方，或组合根明确提供的同类账户默认 Provider，并使用其
   Profile 默认模型供状态、菜单与建线程复用；
   受管 Provider 设置应用后更新补充模型目录与默认标记，保留已绑定模型及待生效的明确选择；

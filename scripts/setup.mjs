@@ -254,8 +254,13 @@ async function runThirdPartyModelSetup({
       options: [
         {
           value: "custom_primary",
-          label: "自定义 Responses Provider",
-          hint: "新增、编辑、切换或删除 OpenAI Responses 兼容 Provider",
+          label: "Codex 兼容",
+          hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
+        },
+        {
+          value: "custom_responses",
+          label: "自定义第三方",
+          hint: "手填模型 ID、上下文与能力；使用独立模型目录",
         },
         {
           value: "deepseek",
@@ -268,14 +273,14 @@ async function runThirdPartyModelSetup({
           hint: "添加、列出、设置默认、停止、删除或修改模型设置",
         },
         {
-          value: "provider_default",
-          label: "受管 Provider 模型设置",
-          hint: "设置各受管 Provider 的默认模型与思考等级",
+          value: "ccg",
+          label: "CommandCode Go 官方",
+          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
         },
         {
-          value: "ccg",
-          label: "CCG（CommandCode）",
-          hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
+          value: "provider_default",
+          label: "默认模型与思考等级",
+          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go 的默认模型与思考等级",
         },
         {
           value: "model_window",
@@ -293,6 +298,8 @@ async function runThirdPartyModelSetup({
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "custom_responses") {
+      result = await customPrimarySetup({ input, output, prompts, allowBack: true, catalogKind: "custom" });
     } else if (module === "custom_primary") {
       result = await customPrimarySetup({ input, output, prompts, allowBack: true });
     } else if (module === "provider_default") {

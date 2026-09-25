@@ -1,3 +1,4 @@
+import {createResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -333,6 +334,35 @@ describe("webui server Provider and account management", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("previews and saves valid basic model metadata larger than 64 KiB",async()=>{
+    const fixture=createFixture();
+    const models=Array.from({length:64},(_,i)=>({id:`model-${i}-`+"模".repeat(185),name:"名".repeat(120),contextWindow:64000,maxContextWindow:1048576,reasoningEfforts:["low","high","max"],defaultReasoningEffort:"high",supportsImages:true,template:{source:"deepseek" as const,model:"source-model",followContext:false}}));
+    expect(createResponsesModelCatalog(models,models[0]!.id).models).toHaveLength(64);
+    const provider={operation:"update",providerId:"rs-demo",name:"Demo",baseUrl:"https://example.test/v1",mode:"switching",model:models[0]!.id,catalog:{kind:"custom",models},supportsWebsockets:false,credential:{action:"preserve"}};
+    const input={operation:"primary.custom.save",provider};
+    const applied=vi.fn(async()=>({action:"updated",provider:{id:"rs-demo",displayName:"Demo"}}));
+    const preview=vi.fn(async()=>({operation:"update",provider:{id:"rs-demo",displayName:"Demo",catalog:"custom",models},effects:{},activation:"restart-all"}));
+    const {origin}=await startServer(fixture.environment,undefined,{
+      token:"webui-token",managementOrigin:"http://127.0.0.1:0",
+      loadProviderState:async()=>({configVersion:"v1",defaults:{},primary:{id:"openai",displayName:"OpenAI",kind:"official",mode:"exclusive",active:true},managedProviders:[],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}}),
+      previewProviderSettings:preview,applyProviderSettings:applied,
+    });
+    const headers={authorization:"Bearer webui-token",origin,"content-type":"application/json"};
+    expect(Buffer.byteLength(JSON.stringify(input))).toBeGreaterThan(65536);
+    const response=await fetch(`${origin}/api/v1/management/provider-settings/preview`,{method:"POST",headers,body:JSON.stringify(input)});
+    expect(response.status).toBe(200);
+    const {confirmationToken}=await response.json() as {confirmationToken:string};
+    const saved=await fetch(`${origin}/api/v1/management/provider-settings`,{method:"POST",headers,body:JSON.stringify({...input,confirmationToken})});
+    expect(saved.status).toBe(200);
+    expect(applied).toHaveBeenCalledWith(input,expect.any(Object),expect.any(Object));
+    for(const path of ["provider-settings/preview","provider-settings"]) {
+      const oversized=await fetch(`${origin}/api/v1/management/${path}`,{method:"POST",headers,body:JSON.stringify({padding:"x".repeat(2*1024*1024)})});
+      expect(oversized.status).toBe(413);
+    }
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(applied).toHaveBeenCalledOnce();
   });
 
   it("manages unified Provider settings with the shared token and one-time confirmation", async () => {

@@ -60,6 +60,7 @@ export class ModelSelectionService {
     private readonly openaiAuthenticated: () => boolean = () => true,
     private readonly providersWithoutSubscription: () => ReadonlySet<string> = () => new Set(),
     private readonly defaultThirdPartyProvider?: string,
+    private readonly independentCatalogProviders: readonly OfficialModelCatalogProvider[] = [],
   ) {}
 
   updateSupplementaryModels(models: readonly ModelOption[]): void {
@@ -67,21 +68,27 @@ export class ModelSelectionService {
   }
 
   async state(target: ConversationTarget, requireSelection = false): Promise<ModelSelectionState> {
-    const models = await this.listModels();
     let filter = this.providerFilterByConversation.get(this.key(target));
     if (filter !== undefined && this.providersWithoutSubscription().has(filter)) {
       this.providerFilterByConversation.delete(this.key(target));
       filter = undefined;
     }
+    const models = await this.listModels(requireSelection ? this.status(target).modelProvider : filter);
     const state = this.selectionState(target, models, filter);
     if (requireSelection && state.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
+    }
+    if (requireSelection) {
+      const unavailable = models.find(model => model.provider === state.modelProvider && model.available === false);
+      if (unavailable && !models.some(model => model.provider === state.modelProvider && model.available !== false)) {
+        this.requireAvailableModel(unavailable);
+      }
     }
     return state;
   }
 
   async browseProvider(target: ConversationTarget, provider: string): Promise<ModelSelectionState> {
-    const models = await this.listModels();
+    const models = await this.listModels(/^\d+$/.test(provider.trim()) ? undefined : provider.trim());
     const resolvedProvider = resolveProvider(this.selectableModels(models), provider);
     if (resolvedProvider === undefined) {
       throw new UserFacingError(
@@ -110,7 +117,7 @@ export class ModelSelectionService {
     target: ConversationTarget,
     modality: ModelInputModality,
   ): Promise<void> {
-    const current = this.resolveState(target, await this.listModels());
+    const current = this.resolveState(target, await this.listModels(this.status(target).modelProvider));
     if (current.modelProvider === undefined) {
       throw new UserFacingError("model.provider.selection-required", "请先通过 /model 选择提供商和模型");
     }
@@ -122,6 +129,7 @@ export class ModelSelectionService {
         { model: current.model },
       );
     }
+    this.requireAvailableModel(model);
     if (model.inputModalities.includes(modality)) {
       return;
     }
@@ -147,8 +155,8 @@ export class ModelSelectionService {
   }
 
   async selectModel(target: ConversationTarget, selector: string | ModelSelectionIdentity): Promise<ModelSelectionState> {
-    const models = await this.listModels();
     const providerFilter = this.providerFilterByConversation.get(this.key(target));
+    const models = await this.listModels(typeof selector === "string" ? providerFilter : selector.provider);
     const eligible = this.selectableModels(models);
     const selectableModels = providerFilter === undefined
       ? eligible
@@ -159,17 +167,7 @@ export class ModelSelectionService {
     if (!selected) {
       throw new UserFacingError("model.selection.expired", "模型选项已失效，请重新发送 /model 选择");
     }
-    if (selected.available === false) {
-      throw new UserFacingError(
-        "model.unavailable",
-        `${selected.displayName} 暂不可用${selected.unavailableReason ? `：${selected.unavailableReason}` : ""}`,
-        {
-          model: selected.model,
-          ...(selected.provider ? { provider: selected.provider } : {}),
-          ...(selected.unavailableReason ? { reason: selected.unavailableReason } : {}),
-        },
-      );
-    }
+    this.requireAvailableModel(selected);
     const current = this.resolveState(target, models);
     const selectedProvider = selected.provider ?? "openai";
     const providerChanged = selectedProvider !== current.modelProvider;
@@ -234,7 +232,7 @@ export class ModelSelectionService {
   }
 
   async selectEffort(target: ConversationTarget, selector: string): Promise<ModelSelectionState> {
-    const models = await this.listModels();
+    const models = await this.listModels(this.status(target).modelProvider);
     const current = this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
     if (!model) {
@@ -244,6 +242,7 @@ export class ModelSelectionService {
         { model: current.model },
       );
     }
+    this.requireAvailableModel(model);
     const options = model.supportedReasoningEfforts.map((option) => option.effort);
     const effort = resolveEffort(options, selector);
     const pending = this.pendingByConversation.get(this.key(target));
@@ -256,9 +255,10 @@ export class ModelSelectionService {
     if (normalized && !new Set(["on", "off", "status"]).has(normalized)) {
       throw new UserFacingError("fast.usage", "Fast 模式参数必须是 on、off 或 status");
     }
-    const models = await this.listModels();
+    const models = await this.listModels(this.status(target).modelProvider);
     const current = this.resolveState(target, models);
     const model = findModel(models, current.model, current.modelProvider);
+    if (model) this.requireAvailableModel(model);
     const currentFast = isFastServiceTier(current.serviceTier, model);
     if (normalized === "status") {
       return current;
@@ -490,6 +490,15 @@ export class ModelSelectionService {
       : this.pendingProviderSwitches.has(key);
   }
 
+  private requireAvailableModel(model: ModelOption): void {
+    if (model.available !== false) return;
+    throw new UserFacingError("model.unavailable", `${model.displayName} 暂不可用${model.unavailableReason ? `：${model.unavailableReason}` : ""}`, {
+      model: model.model,
+      ...(model.provider ? {provider: model.provider} : {}),
+      ...(model.unavailableReason ? {reason: model.unavailableReason} : {}),
+    });
+  }
+
   private requireSubscribedProvider(provider: string): void {
     if (this.providersWithoutSubscription().has(provider)) {
       throw new UserFacingError("model.selection.expired", "账户已无有效订阅，请重新发送 /model 选择");
@@ -506,6 +515,7 @@ export class ModelSelectionService {
       ...this.supplementaryModels.filter((model) => model.available !== false)
         .map((model) => model.provider ?? "openai"),
       ...this.officialCatalogProviders.map((provider) => provider.provider),
+      ...this.independentCatalogProviders.map((provider) => provider.provider),
     ])].filter((provider) => provider !== "openai" && !blocked.has(provider));
   }
 
@@ -516,7 +526,7 @@ export class ModelSelectionService {
       ? this.defaultThirdPartyProvider
       : providers.length === 1 ? providers[0] : undefined;
     if (provider === undefined) return undefined;
-    const model = this.officialCatalogProviders.find((entry) => entry.provider === provider)?.defaultModel
+    const model = [...this.officialCatalogProviders, ...this.independentCatalogProviders].find((entry) => entry.provider === provider)?.defaultModel
       ?? this.supplementaryModels.find((entry) => entry.provider === provider && entry.isDefault)?.model;
     if (!model) {
       throw new UserFacingError("model.provider.default-missing", "提供商默认模型未配置", { provider });
@@ -548,7 +558,7 @@ export class ModelSelectionService {
       : provider;
   }
 
-  private async listModels(): Promise<ModelOption[]> {
+  private async listModels(targetProvider?: string): Promise<ModelOption[]> {
     const primary = (await this.codex.listModels()).map((model) => {
       if (this.primaryProvider === "openai") return model;
       const providerModel = withoutProviderUpgrade(model);
@@ -574,6 +584,32 @@ export class ModelSelectionService {
     }
     for (const model of this.supplementaryModels) {
       combined.set(modelKey(model), model);
+    }
+    const providers = this.independentCatalogProviders.filter(provider =>
+      targetProvider === undefined || provider.provider === targetProvider);
+    // Limit concurrent instance connections, while isolating each catalog failure.
+    for (let offset = 0; offset < providers.length; offset += 4) {
+      const catalogs = await Promise.all(providers.slice(offset, offset + 4).map(async provider => {
+        try {
+          if (!this.codex.listModelsForProvider) throw new Error("Provider catalog port unavailable");
+          const models = await this.codex.listModelsForProvider(provider.provider);
+          if (!models.some(model => model.available !== false)) throw new Error("Provider catalog empty");
+          return models.map(model => ({
+            ...withoutProviderUpgrade(model), provider: provider.provider,
+            isDefault: model.model === provider.defaultModel,
+          }));
+        } catch {
+          // Only expose configured identity; never invent capabilities or disclose upstream errors.
+          return [{
+            provider: provider.provider, id: provider.defaultModel, model: provider.defaultModel,
+            displayName: provider.displayName, isDefault: true, available: false,
+            unavailableReason: "模型目录暂不可用，请检查对应 App Server 后重试",
+            supportedReasoningEfforts: [], defaultReasoningEffort: "none",
+            inputModalities: [], serviceTiers: [], defaultServiceTier: null,
+          } satisfies ModelOption];
+        }
+      }));
+      for (const models of catalogs) for (const model of models) combined.set(modelKey(model), model);
     }
     if (
       combined.size === 0

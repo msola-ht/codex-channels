@@ -55,3 +55,5 @@ hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`np
 同步更新 `ci.yml` 中 App Server 合同任务安装的 Codex CLI 精确版本。自动提案阶段不修改稳定版
 文档，因此将文档索引检查记录为跳过；正式适配后必须由 `npm run verify:commit` 完成文档和全部
 提交门禁。
+
+真实 App Server 合同还覆盖自定义 Responses Provider：两个独立模型目录、配置读取、模型选择与函数工具往返；升级验证复用同一合同。

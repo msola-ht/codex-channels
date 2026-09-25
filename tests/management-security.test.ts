@@ -77,6 +77,19 @@ describe("management security core", () => {
     expect(() => fingerprintManagementValue(Number.NaN)).toThrow("有限数字");
   });
 
+  it("allows 2 MiB only for exact Provider POST paths", () => {
+    const request={method:"POST",origin:"http://127.0.0.1:8787",expectedOrigin:"http://127.0.0.1:8787",contentType:"application/json",contentLength:2*1024*1024};
+    for(const path of ["/provider-settings", "/provider-settings/preview"]) {
+      expect(validateManagementJsonRequest({...request,path})).toEqual({maximumBodyBytes:2*1024*1024});
+      expect(()=>validateManagementJsonRequest({...request,path,contentLength:request.contentLength+1})).toThrow(expect.objectContaining({code:"management.body-too-large"}));
+      expect(()=>validateManagementJsonRequest({...request,path,method:"PUT"})).toThrow("正文过大");
+    }
+    for(const path of ["/provider-settings/other", "/provider-settings/preview/", "/tasks", "/account-settings"]) {
+      expect(validateManagementJsonRequest({...request,path,contentLength:65536})).toEqual({maximumBodyBytes:65536});
+      expect(()=>validateManagementJsonRequest({...request,path,contentLength:65537})).toThrow("正文过大");
+    }
+  });
+
   it("enforces exact JSON request metadata limits", () => {
     expect(validateManagementJsonRequest({
       method: "POST",

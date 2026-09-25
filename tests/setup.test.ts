@@ -350,8 +350,8 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "custom_primary",
-      label: "自定义 Responses Provider",
-      hint: "新增、编辑、切换或删除 OpenAI Responses 兼容 Provider",
+      label: "Codex 兼容",
+      hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
     });
   });
 
@@ -421,8 +421,8 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
-      label: "受管 Provider 模型设置",
-      hint: "设置各受管 Provider 的默认模型与思考等级",
+      label: "默认模型与思考等级",
+      hint: "设置 DeepSeek、OpenCode Go、CommandCode Go 的默认模型与思考等级",
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "model_window",
@@ -743,4 +743,11 @@ describe("Codex Connect setup", () => {
     expect(telegramSetup).not.toHaveBeenCalled();
     expect(feishuSetup).not.toHaveBeenCalled();
   });
+  it("routes the custom Responses entry to the shared menu with an explicit catalog kind", async () => {
+    const prompts={intro:vi.fn(),select:vi.fn().mockResolvedValueOnce("models").mockResolvedValueOnce("third_party").mockResolvedValueOnce("custom_responses"),isCancel:()=>false,cancel:vi.fn()};
+    const customPrimarySetup=vi.fn(async()=>"configured");
+    await runInteractiveSetup({input:{isTTY:true},output:{isTTY:true},prompts,customPrimarySetup});
+    expect(customPrimarySetup).toHaveBeenCalledWith(expect.objectContaining({catalogKind:"custom"}));
+  });
+
 });
