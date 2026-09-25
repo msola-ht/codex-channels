@@ -23,12 +23,14 @@ it("isolates switching credentials and restores exclusive configuration on remov
   await applyClinePassConfiguration(input, { environment });
   expect(readFileSync(paths.config, "utf8")).toBe(original);
   expect(readFileSync(paths.profile, "utf8")).toContain('wire_api = "responses"');
-  expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"] }] });
+  expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"], default_reasoning_level: "high", supported_reasoning_levels: ["none", "low", "high", "max"].map(effort => ({ effort })) }] });
+  expect(parse(readFileSync(paths.profile, "utf8")).model_reasoning_effort).toBe("high");
   expect(loadManagedModelProviderSettings(environment)).toContainEqual(expect.objectContaining({ provider: "cline-pass", mode: "switching" }));
   if (process.platform !== "win32") expect(statSync(paths.profile).mode & 0o777).toBe(0o600);
   await expect(applyClinePassConfiguration({ ...input, mode: "exclusive" }, { environment })).rejects.toThrow("必须确认");
   await applyClinePassConfiguration({ ...input, mode: "exclusive", confirmExclusiveConfigChange: true }, { environment });
   expect(parse(readFileSync(paths.config, "utf8")).model_provider).toBe("cline-pass");
+  expect(parse(readFileSync(paths.config, "utf8"))).not.toHaveProperty("model_reasoning_effort");
   expect(existsSync(paths.profile)).toBe(false);
   await removeClinePassConfiguration({ confirmRemove: true }, { environment, resolvePrimarySocket: () => join(roots[0]!, "unused.sock"), inspectSupervisor: async () => ({ status: "missing" }) });
   expect(parse(readFileSync(paths.config, "utf8"))).toEqual(parse(original));

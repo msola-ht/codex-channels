@@ -14,7 +14,12 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdNvJ8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ2oPcf88OIhvJ6vAAAAAElFTkSuQmCC";
-contract.each([false, true])("Cline Pass preserves streamed items and tool follow-up (empty opening: %s)", async emptyOpening => {
+contract.each([
+  { emptyOpening: false, effort: "high", useDefault: true },
+  { emptyOpening: true, effort: "none", useDefault: false },
+  { emptyOpening: false, effort: "low", useDefault: false },
+  { emptyOpening: false, effort: "max", useDefault: false },
+])("Cline Pass preserves items and tool follow-up ($effort, empty opening: $emptyOpening)", async ({ emptyOpening, effort, useDefault }) => {
   const root = mkdtempSync(join(tmpdir(), "chat-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
   const bodies: Array<{ tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content?: string; tool_call_id?: string }> }> = [];
@@ -71,11 +76,12 @@ contract.each([false, true])("Cline Pass preserves streamed items and tool follo
     });
     await rpc.connect();
     const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "cline-pass", sandbox: "read-only", approvalPolicy: "never", ephemeral: true, dynamicTools: [{ type: "function", name: "schedule_task", description: "List fixture tasks", inputSchema: { type: "object", properties: { action: { type: "string" } }, required: ["action"], additionalProperties: false } }] } });
-    const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "List scheduled tasks", text_elements: [] }, { type: "image", url: imageUrl }] } });
+    const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, ...(!useDefault ? { effort } : {}), input: [{ type: "text", text: "List scheduled tasks", text_elements: [] }, { type: "image", url: imageUrl }] } });
     await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
     expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
     expect(bodies).toHaveLength(2);
     for (const body of bodies) {
+      expect(body).toMatchObject({ reasoning: { effort } });
       expect(body.messages).toContainEqual(expect.objectContaining({ role: "user", content: expect.arrayContaining([
         { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
       ]) }));

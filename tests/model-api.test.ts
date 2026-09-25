@@ -199,3 +199,15 @@ it.each([
 it.each(["system", "developer", "assistant"])("rejects images in %s messages", role => {
   expect(() => responsesToChat(request([{ role, content: [{ type: "input_image", image_url: "data:image/png;base64,c2VjcmV0" }] }]))).toThrow();
 });
+
+it.each(["none", "low", "high", "max"])("forwards explicit %s reasoning effort", effort => {
+  expect(responsesToChat({ ...request("hello"), reasoning: { effort, summary: "none" } }).request.reasoning).toEqual({ effort });
+});
+
+it.each([undefined, {}, { summary: "none" }])("does not invent a reasoning effort for absent controls", reasoning => {
+  expect(responsesToChat({ ...request("hello"), reasoning }).request).not.toHaveProperty("reasoning");
+});
+
+it.each([{ effort: "medium" }, { effort: "xhigh" }, { effort: "invalid" }, { effort: "high", summary: "auto" }, { max_tokens: 100 }])("rejects unsupported reasoning controls", reasoning => {
+  expect(() => responsesToChat({ ...request("hello"), reasoning })).toThrow();
+});

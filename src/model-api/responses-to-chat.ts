@@ -20,6 +20,7 @@ export interface ChatRequest {
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
+  reasoning?: { effort: "none" | "low" | "high" | "max" };
 }
 
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
@@ -31,11 +32,16 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   if (source.stream !== true || source.store === true) throw new ModelConversionError("Only stateless streaming Responses requests are supported");
   if (source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
   if (source.text != null && Object.keys(object(source.text)).length > 0) throw new ModelConversionError("Structured output and verbosity are unsupported");
+  let reasoningControl: ChatRequest["reasoning"];
   if (source.reasoning != null) {
     const reasoning = object(source.reasoning);
     if (Object.keys(reasoning).some(key => !["effort", "summary"].includes(key))
-      || (reasoning.effort != null && reasoning.effort !== "none")
       || (reasoning.summary != null && reasoning.summary !== "none")) throw new ModelConversionError("Reasoning controls are unsupported by this Chat adapter");
+    const effort = reasoning.effort;
+    if (effort != null) {
+      if (effort !== "none" && effort !== "low" && effort !== "high" && effort !== "max") throw new ModelConversionError("Unsupported Chat reasoning effort");
+      reasoningControl = { effort };
+    }
   }
   if (source.include != null && array(source.include).some(entry => entry !== "reasoning.encrypted_content")) throw new ModelConversionError("Unsupported Responses include");
   const toolNames = new Map<string, ChatToolIdentity>();
@@ -95,6 +101,7 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   }
   if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
   const result: ChatRequest = { model: string(source.model), messages, stream: true, stream_options: { include_usage: true } };
+  if (reasoningControl) result.reasoning = reasoningControl;
   const convertTool = (raw: unknown, namespace?: string): JsonObject => {
     const tool = object(raw);
     if (tool.type !== "function") throw new ModelConversionError("Only function tools are supported");

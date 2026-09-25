@@ -21,8 +21,9 @@ Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `sr
 Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘要；同一增量中的重复文本只保留一次，内容冲突时明确失败。
 用户图片支持 PNG、JPEG、WebP、GIF 的内联 Base64 Data URL，保留多图与文本顺序，沿用渠道的图片校验。
 不支持图片文件引用、远程图片 URL、工具结果中的图片或 `detail: original`；`auto`、`low`、`high` 原样传递。
-已有 Cline Pass 配置需通过 Setup 重新配置以更新模型目录中的图片能力，再按提示重启服务。
-思考等级当前只提供 `none`，表示不向 Chat 发送等级参数，模型仍可能自行输出推理。
+已有 Cline Pass 配置需通过 Setup 重新配置以更新模型目录中的图片能力和思考等级，再按提示重启服务。
+思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；选择的等级通过 Chat `reasoning.effort` 原样传递，`none` 明确关闭思考。
+未传入等级时沿用上游默认值。旧配置的 `none` 原先不发送参数，更新后会关闭思考；需要思考时选择 `low`、`high` 或 `max`。
 非 OpenAI Provider 的上下文压缩沿用锁定 Codex 的本地压缩路径，不伪造远程压缩结果。
 
 请求正文上限 16 MiB，单个 SSE 缓冲上限 2 MiB，单次响应转换状态有界；客户端取消和服务关闭会中止上游请求。
@@ -46,7 +47,9 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 短请求返回缓存计数 0，尚未验证实际缓存命中。此验收未修改运行中的服务或用户配置。
 同日通过临时 Codex Home 中的真实 App Server、转换桥和 Cline 线上模型验证内联 PNG 识图，模型正确识别图片颜色并正常完成。
 隔离合同测试覆盖图片历史在函数调用后的续写请求中保留。
+同日线上接口验证 `none`、`low`、`high`、`max` 均正常完成，`none` 返回 0 推理 Token，其余等级返回推理，非法等级返回流内错误。
+真实 App Server 经转换桥连接 Cline 的完整链路也验证了默认 `high` 产生推理，以及同一 Thread 切换 `none` 后不再产生推理。
 
 普通 `/api/v1/models` 未列出该 Pass 模型，但直接调用成功；
 [官方推荐目录](https://api.cline.bot/api/v1/ai/cline/recommended-models) 的 `clinePass` 列出该模型并描述为 1M 上下文。
-该描述不提供精确 Token 上限，也未做满窗口测试，Setup 仍要求用户填写窗口；推理等级控制未作线上验证。
+该描述不提供精确 Token 上限，也未做满窗口测试，Setup 仍要求用户填写窗口。

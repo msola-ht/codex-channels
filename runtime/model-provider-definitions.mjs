@@ -89,7 +89,7 @@ export const clinePassProviderDefinition = Object.freeze({
   baseUrl: "https://api.cline.bot/api/v1", wireApi: "responses",
   upstreamWireApi: "chat_completions",
   apiKeyEnvironmentKey: "CODEX_CONNECT_CLINE_PASS_API_KEY",
-  defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "none",
+  defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "high",
   supportsWebsockets: false,
   capabilities: Object.freeze({ accountAdapter: "none", instanceAdapter: "single" }),
 });
