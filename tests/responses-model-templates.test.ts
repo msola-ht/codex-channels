@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, writeResponsesModelCatalog, finishResponsesModelCatalogWrite, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { describe, expect, it, vi } from "vitest";
 import { loadResponsesModelTemplates, promptResponsesModelImport, responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 
@@ -25,6 +25,27 @@ describe("Responses model template import", () => {
     expect(result?.[0]?.maxContextWindow).toBe(1048576);
     expect(result?.[0]?.template).not.toHaveProperty("snapshot");
     expect(result?.[0]?.contextWindow).toBe(edit ? 32768 : model.contextWindow);
+  });
+
+  it.each(["import-edit", "reconfigure", "import-keep"] as const)("preserves instructions and tool capabilities through CLI %s and catalog save", async mode => {
+    const previous = {...model, instructions: "DS instructions\nUse the available tools.", applyPatchToolType: "freeform" as const, supportsSearchTool: true};
+    const original = structuredClone(previous);
+    const texts = ["Edited", "32768", "high"];
+    const confirms = mode === "import-edit" ? [true, false, false] : mode === "reconfigure" ? [false, false, false] : [false, false];
+    const ui = {confirm: async () => confirms.shift(), text: async () => texts.shift(), select: async () => "high", password: vi.fn(), isCancel: () => false};
+    const result = await promptResponsesModels(ui, model.id, [previous], mode === "reconfigure" ? [] : [model.id]);
+    expect(result?.[0]).toMatchObject({instructions: previous.instructions, applyPatchToolType: "freeform", supportsSearchTool: true, maxContextWindow: model.maxContextWindow, template: model.template});
+    expect(result?.[0]?.contextWindow).toBe(mode === "import-keep" ? model.contextWindow : 32768);
+    expect(previous).toEqual(original);
+    const root = mkdtempSync(join(tmpdir(), "responses-cli-save-"));
+    try {
+      const environment = {CODEX_CONNECT_HOME: root};
+      const transaction = writeResponsesModelCatalog(environment, "rs-fixture", result!, model.id, undefined);
+      finishResponsesModelCatalogWrite(transaction);
+      const saved = readResponsesModelCatalog(environment, "rs-fixture");
+      expect(saved.definitions).toEqual(result);
+      expect(saved.models[0]).toMatchObject({model_messages: {instructions_template: previous.instructions}, apply_patch_tool_type: "freeform", supports_search_tool: true});
+    } finally { rmSync(root, {recursive: true, force: true}); }
   });
 
   it.each([["deepseek","deepseek"]] as const)("reads only basic %s fields from its private catalog",async(source,directory)=>{

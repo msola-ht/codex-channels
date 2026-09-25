@@ -6,6 +6,9 @@ export interface ResponsesModelDefinition {
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   supportsImages: boolean;
+  applyPatchToolType?: "freeform";
+  instructions?: string;
+  supportsSearchTool?: boolean;
   template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
 }
 export function isResponsesProvider(id: unknown): boolean;

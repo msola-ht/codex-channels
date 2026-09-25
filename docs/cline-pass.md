@@ -3,7 +3,7 @@
 通过 `codexc setup` → 模型与提供商 → 第三方 Provider → Cline Pass 官方配置。
 支持多个 CLP 账户，各账户使用独立 API Key，当前模型为 `cline-pass/deepseek-v4.1-flash`，支持固定与切换模式。
 Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
-上下文与图片、思考等级模板复用 DS 的 `deepseek-flash`：优先读取本地 DS 目录，缺失时读取官方安装脚本中的目录并与 Cline 配置一并保存为本地共享 DS 模板，不执行脚本，无需手填上下文。
+上下文、图片、思考等级与提示词复用 DS 的 `deepseek-flash`：优先读取本地 DS 目录，缺失时读取官方安装脚本中的目录并与 Cline 配置一并保存为本地共享 DS 模板，不执行脚本，无需手填上下文；目录自带的提示词（`model_messages.instructions_template`）随模板带入 CLP 目录。
 保留 Cline 已验证的 `none` 思考等级和 Chat 转换边界，不复制原生搜索等服务端能力。
 通过“模型上下文窗口”统一修改 `deepseek-flash`，同步 DS、同名受管模型、CLP 和已启用 DS 跟随的第三方自定义模型；不同模型不联动思考等级。
 所有 Cline 账户共享同一份模型目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
@@ -25,7 +25,8 @@ Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行�
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，完整 Lark 语法保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。不支持服务端执行的 `tool_search`、原生网页搜索等托管工具、远程 compaction、加密或带签名的推理、结构化输出、Fast 或 WebSocket；外部函数形式的工具仍按函数调用处理。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，声明 `grammar`（lark）格式时其语法原文保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。CLP 共享目录声明 `apply_patch_tool_type: freeform`，模型改用自由格式 `apply_patch` 工具修改文件，渠道据此显示「修改文件」卡片；CLP 共享目录同时开启 `supports_search_tool`，客户端 `tool_search` 可检索并按需加载命名空间工具。这些声明只在首次生成 CLP 共享目录时写入，已有账户需重建共享目录（移除全部 CLP 账户后重新添加）后生效。不支持服务端执行的 `tool_search`、原生网页搜索等托管工具、远程 compaction、加密或带签名的推理、结构化输出、Fast 或 WebSocket；外部函数形式的工具仍按函数调用处理。
+边界案例可对照 [CLIProxyAPI 的 Responses 转换器（固定提交 9bdde54）](https://github.com/router-for-me/CLIProxyAPI/tree/9bdde54b59d1af70ae0534a0ef61b2c3361a1257/internal/translator/openai/openai/responses)，仅作实现参考，不作为 Codex 协议来源或运行时依赖。
 Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘要，并随请求历史回传为 `reasoning`。若上游使用 `reasoning_content`，则通过 Responses 的 `reasoning.content` 保留完整正文，后续还原为 `reasoning_content`，不以摘要替代。工具续跑及下一用户轮次均保留请求历史中的推理；同一增量中的重复文本只保留一次，内容冲突时明确失败。
 [DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)要求携带 `tools` 的 Chat 请求完整回传历史推理，即使某轮没有调用工具。CLP 按 Cline 的实际返回字段转换；DeepSeek 官方账户使用原生 Responses，见 [DeepSeek](deepseek.md)。
 用户图片支持 PNG、JPEG、WebP、GIF 的内联 Base64 Data URL，保留多图与文本顺序，沿用渠道的图片校验。

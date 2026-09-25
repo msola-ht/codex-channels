@@ -8,7 +8,7 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ThreadStartResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration, createClinePassCatalog } from "../scripts/cline-pass-setup.mjs";
 import { loadManagedProviderAppServers, withProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 import { waitFor } from "./support/real-app-server-helpers.js";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
@@ -122,7 +122,7 @@ contract.each([
   }
 }, 30000);
 
-contract.each(["custom", "tool_search"] as const)("executes %s through the Chat bridge using real Codex tool shapes", async kind => {
+contract.each(["custom", "tool_search", "clp_combined"] as const)("executes %s through the Chat bridge using real Codex tool shapes", async kind => {
   const root = mkdtempSync(join(tmpdir(), "chat-tools-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
   const bodies: Array<{ tools: Array<{ function: { name: string; description?: string } }>; messages: Array<{ role: string; content?: string; reasoning_content?: string }> }> = [];
@@ -133,10 +133,10 @@ contract.each(["custom", "tool_search"] as const)("executes %s through the Chat 
       const body = JSON.parse(Buffer.concat(chunks).toString()) as typeof bodies[number];
       bodies.push(body);
       const step = bodies.length;
-      const toolStep = step === 1 || (kind === "tool_search" && step === 2);
-      const target = kind === "custom" ? "apply_patch" : step === 1 ? "tool_search" : "fixture_list";
+      const toolStep = step === 1 || (kind !== "custom" && step === 2) || (kind === "clp_combined" && step === 3);
+      const target = kind === "custom" || (kind === "clp_combined" && step === 3) ? "apply_patch" : step === 1 ? "tool_search" : "fixture_list";
       const tool = body.tools.find(tool => tool.function.name.endsWith(target));
-      const argumentsText = kind === "custom"
+      const argumentsText = target === "apply_patch"
         ? JSON.stringify({ input: "*** Begin Patch\n*** Add File: fixture.txt\n+chat patch verified\n*** End Patch" })
         : step === 1 ? JSON.stringify({ query: "fixture_list", limit: null }) : "{}";
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -156,20 +156,27 @@ contract.each(["custom", "tool_search"] as const)("executes %s through the Chat 
     bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
     await bridge.start();
     const catalog = createResponsesModelCatalog([{ id: "fixture", name: "Fixture", contextWindow: 64000, reasoningEfforts: ["high"], defaultReasoningEffort: "high", supportsImages: false }], "fixture");
-    const models = catalog.models.map(model => ({ ...model, supports_search_tool: kind === "tool_search", apply_patch_tool_type: kind === "custom" ? "freeform" : null }));
+    const models: Array<Record<string, unknown>> = kind === "clp_combined"
+      ? createClinePassCatalog([{id: "deepseek-flash", name: "DS fixture", contextWindow: 64000, reasoningEfforts: ["high"], defaultReasoningEffort: "high", supportsImages: false, instructions: "CLP fixture instructions: inspect tools and apply patches."}]).models
+      : catalog.models.map(model => ({ ...model, supports_search_tool: kind === "tool_search", apply_patch_tool_type: kind === "custom" ? "freeform" : null }));
     const catalogPath = join(root, "models.json");
     writePrivateFileAtomicSync(catalogPath, JSON.stringify({ models }));
     writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), [
-      'model = "fixture"', 'model_provider = "fixture"', 'web_search = "disabled"',
+      `model = ${JSON.stringify(models[0]!.slug)}`, 'model_provider = "fixture"', 'web_search = "disabled"',
       `model_catalog_json = ${JSON.stringify(catalogPath)}`,
       '[model_providers.fixture]', 'name = "Fixture"', `base_url = "http://${bridge.address()}"`,
       'wire_api = "responses"', 'supports_websockets = false', 'request_max_retries = 0', 'stream_max_retries = 0',
     ].join("\n"));
     rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment }), 15000);
     const turns: Array<{ id: string; status: string }> = [];
+    const fileChanges: unknown[] = [];
     let dynamicCalls = 0;
     rpc.onNotification(notification => {
       if (notification.method === "turn/completed") turns.push((notification.params as { turn: typeof turns[number] }).turn);
+      if (notification.method === "item/completed") {
+        const {item} = notification.params as {item: {type: string}};
+        if (item.type === "fileChange") fileChanges.push(item);
+      }
     });
     rpc.setServerRequestHandler(async request => {
       if (request.method !== "item/tool/call") throw new Error("Unexpected privileged request");
@@ -180,12 +187,12 @@ contract.each(["custom", "tool_search"] as const)("executes %s through the Chat 
     await rpc.connect();
     const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
       cwd: root, modelProvider: "fixture", sandbox: "workspace-write", approvalPolicy: "never", ephemeral: true,
-      ...(kind === "tool_search" ? { dynamicTools: [{ type: "namespace" as const, name: "fixtures", description: "Fixture tools", tools: [{ type: "function" as const, name: "fixture_list", description: "fixture_list lists fixtures", inputSchema: { type: "object", properties: {}, additionalProperties: false }, deferLoading: true }] }] } : {}),
+      ...(kind !== "custom" ? { dynamicTools: [{ type: "namespace" as const, name: "fixtures", description: "Fixture tools", tools: [{ type: "function" as const, name: "fixture_list", description: "fixture_list lists fixtures", inputSchema: { type: "object", properties: {}, additionalProperties: false }, deferLoading: true }] }] } : {}),
     } });
     const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Verify fixture tools", text_elements: [] }] } });
     await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
     expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
-    expect(bodies).toHaveLength(kind === "custom" ? 2 : 3);
+    expect(bodies).toHaveLength(kind === "custom" ? 2 : kind === "clp_combined" ? 4 : 3);
     expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", reasoning_content: "Step 1." }));
     if (kind === "custom") {
       expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.stringContaining("Success") }));
@@ -197,6 +204,12 @@ contract.each(["custom", "tool_search"] as const)("executes %s through the Chat 
       expect(bodies[1]?.tools.some(tool => tool.function.name.endsWith("fixture_list"))).toBe(true);
       expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.stringContaining("fixture-list-ok") }));
       expect(dynamicCalls).toBe(1);
+    }
+    if (kind === "clp_combined") {
+      expect(bodies[0]?.messages).toContainEqual({role: "system", content: "CLP fixture instructions: inspect tools and apply patches."});
+      expect(bodies[3]?.messages).toContainEqual(expect.objectContaining({role: "tool", content: expect.stringContaining("Success")}));
+      expect(readFileSync(join(root, "fixture.txt"), "utf8")).toBe("chat patch verified\n");
+      expect(fileChanges).toContainEqual(expect.objectContaining({type: "fileChange", status: "completed", changes: expect.arrayContaining([expect.objectContaining({path: join(root, "fixture.txt")})])}));
     }
   } finally {
     await rpc?.close(); await bridge?.close(); backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()));

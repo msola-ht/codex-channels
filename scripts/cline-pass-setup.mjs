@@ -44,6 +44,9 @@ export function createClinePassCatalog(templates) {
     contextWindow: template.contextWindow, maxContextWindow: template.maxContextWindow,
     reasoningEfforts: [...new Set(["none", ...template.reasoningEfforts])],
     defaultReasoningEffort: template.defaultReasoningEffort, supportsImages: template.supportsImages,
+    applyPatchToolType: "freeform",
+    ...(template.instructions === undefined ? {} : {instructions: template.instructions}),
+    supportsSearchTool: true,
   }], definition.defaultModel).models };
 }
 

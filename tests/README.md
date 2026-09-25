@@ -54,7 +54,9 @@ TMPDIR=/tmp RUN_CODEX_CONTRACT=1 npm test -- --run \
   tests/real-app-server-queue.test.ts \
   tests/real-app-server-supervised-provider.test.ts \
   tests/real-app-server-supervised-thread-state.test.ts \
-  tests/real-app-server-supervised-tools.test.ts
+  tests/real-app-server-supervised-tools.test.ts \
+  tests/real-app-server-responses-provider.test.ts \
+  tests/real-app-server-chat-provider.test.ts
 ```
 
 非 Windows 门禁把临时根固定为 `/tmp`，避免 macOS 默认临时目录使 Unix Socket 路径超过系统限制；
