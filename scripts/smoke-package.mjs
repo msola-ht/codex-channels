@@ -34,6 +34,7 @@ try {
   }
   const version = run(command, ["--version"], temporaryDirectory, environment, true).stdout.trim();
   const help = run(command, ["--help"], temporaryDirectory, environment, true).stdout;
+  const setupHelp = run(command, ["setup", "--help"], temporaryDirectory, environment, true).stdout;
   const workspaceHelp = run(command, ["work", "-h"], temporaryDirectory, environment, true).stdout;
   const metricsHelp = run(command, ["metrics", "-h"], temporaryDirectory, environment, true).stdout;
   const serviceHelp = run(
@@ -73,7 +74,8 @@ try {
     throw new Error("CLI 帮助缺少公开命令");
   }
   if (
-    !workspaceHelp.includes("用法：codexc work")
+    !setupHelp.includes("codexc setup")
+    || !workspaceHelp.includes("用法：codexc work")
     || !metricsHelp.includes("用法：codexc metrics")
     || !serviceHelp.includes("install")
     || !serviceHelp.includes("reload")
@@ -83,6 +85,13 @@ try {
     throw new Error("CLI 分级帮助不完整");
   }
   const installedPackage = join(temporaryDirectory, "node_modules", "@hegenai", "codexc");
+  // CLI help is handled before loading Setup; exercise its installed import graph too.
+  run(process.execPath, ["--input-type=module", "-e", `
+    import { pathToFileURL } from "node:url";
+    import { join } from "node:path";
+    const setup = await import(pathToFileURL(join(process.argv[1], "scripts", "setup.mjs")).href);
+    if (typeof setup.runSetup !== "function") throw new Error("Installed Setup entry point is missing");
+  `, installedPackage], temporaryDirectory, environment, true);
   for (const requiredFile of [
     "runtime/app-server-runtime.mjs",
     "runtime/app-server-supervisor.mjs",

@@ -19,7 +19,7 @@ export type {
   ErrorGroup,
   ErrorsReport,
   ErrorsResponse,
-  OpencodeGoAccountUsage,
+  QuotaAccountUsage,
   OpencodeGoQuotaWindow,
   OpencodeGoUsageResponse,
   OfficialAccountSnapshot,

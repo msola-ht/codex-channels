@@ -1,5 +1,6 @@
+import { clinePassAccountsFilePath } from "../runtime/cline-pass-accounts.mjs";
 import {createResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +43,41 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("refreshes Cline quota and hides retained snapshots after configuration removal", async () => {
+    const fixture = createFixture();
+    new SqliteModelRequestMetricsStore(fixture.databasePath).close();
+    const marker = clinePassAccountsFilePath(fixture.environment);
+    writePrivateFileAtomicSync(marker, JSON.stringify([{id:"test",default:true}]));
+    let fail = false;
+    const service = new ProviderAccountService([{ provider: "clp-test", accountUsage: async () => {
+      if (fail) throw new Error("upstream unavailable");
+      return { kind: "quota-windows", provider: "clp-test", available: true,
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 12.5, resetsAt: 1790922837, status: null }] };
+    } }], { writeOfficialAccountSnapshot: snapshot => {
+      const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+      try { store.upsertAccountSnapshot({ ...snapshot, sourceId: "clp-test:test", accountId: null,
+        displayName: "CLP", enabled: true }); } finally { store.close(); }
+    } });
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin,
+      refreshGatewayAccount: async (_path, provider) => service.refreshAccountSnapshot(provider) });
+    const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
+    const refresh = () => fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "clp-test" }),
+    });
+    expect((await read()).snapshots).toContainEqual(expect.objectContaining({ provider: "clp-test", observedAtMs: 0 }));
+    expect((await refresh()).status).toBe(200);
+    const before = await read();
+    expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [{ usedPercent: 12.5 }] });
+    fail = true;
+    expect((await refresh()).status).toBe(503);
+    expect(await read()).toEqual(before);
+    unlinkSync(marker);
+    expect((await read()).snapshots).toEqual([]);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    try { expect(store.latestAccountSnapshots()).toHaveLength(1); } finally { store.close(); }
+  });
   it("isolates same-name accounts through CCG refresh, persistence, failure, recovery and OCG removal", async () => {
     const fixture = createFixture();
     configureCcgAccounts(fixture.home);
@@ -562,7 +598,7 @@ describe("webui server Provider and account management", () => {
     expect(snapshots).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "ds-work", accountId: "work", displayName: "DS work", default: true, observedAtMs: 0 }),
       expect.objectContaining({ provider: "ocg-main", accountId: "main", displayName: "ocg-main@example.com", default: true, observedAtMs: 0 }),
-      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CCG team", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CommandCode Go team", default: true, observedAtMs: 0 }),
     ]));
     expect(snapshots).not.toContainEqual(expect.objectContaining({ provider: "ccg" }));
   });
@@ -606,4 +642,46 @@ describe("webui server Provider and account management", () => {
     });
   });
 
+});
+
+it.each(["configure", "default", "remove"] as const)("audits Cline account %s through confirmed WebUI writes without exposing credentials", async action => {
+  const fixture = createFixture();
+  writePrivateFileAtomicSync(join(fixture.home, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
+    slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,
+    context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
+    default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort, description: effort })),
+  }] }));
+  const managementOrigin = "http://127.0.0.1:0";
+  const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+  const url = `${origin}/api/v1/management/account-settings`;
+  const headers = { origin: managementOrigin, "content-type": "application/json" };
+  const configure = { operation: "clp.configure", accountId: "main", apiKey: "sk_cline-private" };
+  const preview = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(configure) });
+  expect(preview.status).toBe(200);
+  const confirmation = await preview.json() as { confirmationToken: string };
+  expect(JSON.stringify(confirmation)).not.toContain("sk_cline-private");
+  const saved = await fetch(url, { method: "POST", headers, body: JSON.stringify({ ...configure, confirmationToken: confirmation.confirmationToken }) });
+  expect(saved.status).toBe(200);
+  expect(await saved.text()).not.toContain("sk_cline-private");
+  const settings = await (await fetch(url)).json() as { clinePass: { accounts: unknown[] } };
+  expect(settings.clinePass.accounts).toEqual([{ id: "main", default: true, mode: "switching", model: "cline-pass/deepseek-v4.1-flash" }]);
+  expect(JSON.stringify(settings)).not.toContain("sk_cline-private");
+  const replay = await fetch(url, { method: "POST", headers, body: JSON.stringify({ ...configure, reconfigure: true, confirmationToken: confirmation.confirmationToken }) });
+  expect(replay.status).not.toBe(200);
+  const input = action === "configure"
+    ? { ...configure, reconfigure: true, apiKey: "sk_rotated-private" }
+    : { operation: `clp.${action}`, accountId: "main" };
+  const response = await fetch(`${url}/preview`, { method: "POST", headers, body: JSON.stringify(input) });
+  expect(response.status).toBe(200);
+  const confirmed = await response.json() as { confirmationToken: string };
+  const applied = await fetch(url, { method: "POST", headers, body: JSON.stringify({ ...input, confirmationToken: confirmed.confirmationToken }) });
+  expect(applied.status).toBe(200);
+  expect(await applied.json()).toMatchObject({ auditStatus: "recorded" });
+  const audit = readFileSync(join(fixture.home, "management-audit.jsonl"), "utf8");
+  const records = audit.trim().split("\n").map(line => JSON.parse(line) as { operation: string; target: string; resultCode: string });
+  expect(records.map(record => ({ operation: record.operation, target: record.target, resultCode: record.resultCode }))).toEqual(
+    ["configured", action === "configure" ? "configured" : action === "default" ? "default-set" : "removed"].map(resultCode => ({ operation: "account-settings.write", target: "clp-main", resultCode })),
+  );
+  expect(audit).not.toContain("sk_cline-private");
+  expect(audit).not.toContain("sk_rotated-private");
 });

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertManagedModelProviderCapabilities,
   ccgAccountDefinition,
+  clinePassAccountDefinition,
   commandCodeProviderDefinition,
   deepseekProviderDefinition,
   deepseekAccountDefinition,
@@ -145,7 +146,7 @@ describe("managed Provider capability registry", () => {
         CODEX_CONNECT_HOME: join(home, ".codex-connect"),
       };
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
-        .toEqual(["deepseek", "ocg", "ccg"]);
+        .toEqual(["deepseek", "ocg", "ccg", "clp"]);
 
       writeOpencodeGoAccounts(environment, [
         { id: "main", default: true },
@@ -157,7 +158,7 @@ describe("managed Provider capability registry", () => {
       ])}\n`);
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
         .toEqual([
-          "deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg", "ccg-main", "ccg-work",
+          "deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg", "ccg-main", "ccg-work", "clp",
         ]);
     } finally {
       rmSync(home, { recursive: true, force: true });
@@ -169,6 +170,7 @@ describe("managed Provider capability registry", () => {
       deepseekAccountDefinition("test"),
       opencodeGoAccountDefinition("lunare"),
       ccgAccountDefinition("main"),
+      clinePassAccountDefinition("test"),
     ];
     const accounts = createManagedProviderAccountAdapters(definitions, {
       environment: process.env,
@@ -179,6 +181,7 @@ describe("managed Provider capability registry", () => {
       "ds-test",
       "ocg-lunare",
       "ccg-main",
+      "clp-test",
     ]);
   });
 

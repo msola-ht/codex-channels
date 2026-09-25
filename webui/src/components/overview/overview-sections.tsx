@@ -44,6 +44,7 @@ import type {
   DeepseekAccountBalance,
   ErrorsReport,
   OpencodeGoQuotaWindow,
+  QuotaAccountUsage,
   ProviderGroup,
 } from "@/lib/types"
 
@@ -247,7 +248,7 @@ export function CcgCreditUsageCards({
   refreshControls: Record<string, AccountRefreshControl>
 }) {
   if (accounts.length === 0) {
-    return <AccountProviderEmpty title="CCG 账户额度" description="尚未配置 CCG 账户" />
+    return <AccountProviderEmpty title="CommandCode Go 账户额度" description="尚未配置 CommandCode Go 账户" />
   }
   return <div className="flex flex-col gap-4">{accounts.map((account) => (
     <CcgCreditAccountCard
@@ -281,7 +282,7 @@ function CcgCreditAccountCard({
         </CardTitle>
         <CardDescription>
           {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
-            ? "CCG 账户额度暂不可用"
+            ? "CommandCode Go 账户额度暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
         {refreshControl && !refreshControl.error && available
@@ -336,7 +337,7 @@ export function OpencodeGoUsageCard({
   return (
     <div className="flex flex-col gap-4">
       {accounts.map((account) => (
-        <OpencodeGoAccountCard
+        <QuotaAccountCard
           key={account.provider}
           {...account}
           refreshControl={refreshControls[account.provider]}
@@ -347,7 +348,15 @@ export function OpencodeGoUsageCard({
   )
 }
 
-function OpencodeGoAccountCard({
+export function ClinePassUsageCard({ account, refreshControl }: {
+  account: QuotaAccountUsage | null
+  refreshControl: AccountRefreshControl | undefined
+}) {
+  if (!account) return null
+  return <QuotaAccountCard {...account} refreshControl={refreshControl} />
+}
+
+function QuotaAccountCard({
   account,
   displayName,
   default: isDefault,
@@ -366,7 +375,7 @@ function OpencodeGoAccountCard({
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
   refreshControl: AccountRefreshControl | undefined
-  onRemoved: (accountId: string, activation?: string) => void
+  onRemoved?: (accountId: string, activation?: string) => void
   subscriptionRequired: boolean
 }) {
   return (
@@ -382,7 +391,7 @@ function OpencodeGoAccountCard({
         {refreshControl && !refreshControl.error && available && windows.length > 0
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {subscriptionRequired
+      {subscriptionRequired && onRemoved
         ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
         : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
       {!subscriptionRequired && available && windows.length > 0 ? <CardContent><QuotaWindows windows={windows} /></CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}

@@ -1,4 +1,6 @@
 export type ManagedModelProviderId =
+  | "clp"
+  | `clp-${string}`
   | "ccg"
   | `ccg-${string}`
   | "deepseek"
@@ -9,8 +11,8 @@ export type ManagedModelProviderId =
   | "opencode-go"
   | `opencode-go-${string}`;
 
-export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
-export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
+export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "clp";
+export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts" | "clp-accounts";
 
 export interface ModelProviderCapabilities {
   readonly accountAdapter: ManagedModelProviderAccountAdapter;
@@ -35,6 +37,7 @@ export interface ModelProviderDefinition {
   readonly backupDirectoryName: string;
   readonly baseUrl: string;
   readonly wireApi: "responses";
+  readonly upstreamWireApi?: "chat_completions";
   readonly apiKeyEnvironmentKey: string;
   /** 自动生成目录的 Provider 默认值；CCG 必须由文件和用户选择提供。 */
   readonly defaultModel?: string;
@@ -43,6 +46,8 @@ export interface ModelProviderDefinition {
   readonly capabilities: ModelProviderCapabilities;
 }
 
+export function clinePassAccountDefinition(accountId: string): ModelProviderDefinition;
+export const clinePassProviderDefinition: ModelProviderDefinition;
 export const deepseekProviderDefinition: ModelProviderDefinition;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;
 export const commandCodeProviderDefinition: ModelProviderDefinition;

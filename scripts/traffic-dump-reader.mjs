@@ -187,6 +187,7 @@ export async function describeDumpExchange(
   return {
     ...summaryOf(interaction, requestBody),
     modelEvidence: models.result(),
+    chatDiagnostics: trace.chatDiagnostics,
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
@@ -481,12 +482,16 @@ async function* traceRecords(directory) {
 async function readTrace(directory, id, offset, limit, maxBytes, output) {
   const items = [];
   const milestones = {};
+  let chatDiagnostics;
   let remaining = maxBytes;
   let total = 0;
   for await (const record of traceRecords(directory)) {
     if (record?.interaction !== id) continue;
     if (["request_end", "response_head", "response_end"].includes(record.kind)) {
       milestones[record.kind] = record.ts;
+    }
+    if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
+      chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
     }
     output?.consume(record);
     if (total >= offset && items.length < limit && remaining > 0) {
@@ -502,6 +507,7 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
   return {
     items,
     milestones,
+    chatDiagnostics,
     page: {
       offset,
       total,

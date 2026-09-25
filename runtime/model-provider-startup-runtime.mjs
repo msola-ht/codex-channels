@@ -53,6 +53,7 @@ function providerAppServerRuntime(profile) {
       "-c", `model=${JSON.stringify(profile.model)}`,
       "-c", `model_provider=${JSON.stringify(profile.provider)}`,
       "-c", 'service_tier="default"',
+      ...(profile.upstreamWireApi === "chat_completions" ? ["-c", 'web_search="disabled"'] : []),
       "-c", `model_catalog_json=${JSON.stringify(profile.catalogPath)}`,
       ...(profile.reasoningEffort === undefined
         ? []

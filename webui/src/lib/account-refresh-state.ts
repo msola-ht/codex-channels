@@ -1,7 +1,7 @@
 import type {
   CcgCreditAccountUsage, DeepseekAccountBalance, DeepseekBalance,
   ManagementProvidersResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
-  OpencodeGoAccountUsage, OpencodeGoQuotaWindow,
+  QuotaAccountUsage, OpencodeGoQuotaWindow,
 } from "./types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
@@ -26,7 +26,7 @@ export function accountSnapshotIsStale(observedAtMs: number, now = Date.now()): 
 
 export function refreshableAccounts(result: ManagementProvidersResponse): RefreshableAccount[] {
   return result.providers.filter((provider) => provider.kind === "managed" && (
-    provider.id === "deepseek" || provider.id.startsWith("ds-")
+    provider.id.startsWith("clp-") || provider.id === "deepseek" || provider.id.startsWith("ds-")
       || provider.id === "ocg" || provider.id.startsWith("ocg-")
       || provider.id === "ccg" || provider.id.startsWith("ccg-")
   ))
@@ -107,9 +107,9 @@ export function remainingRemovedAccountProviders(
     || result.snapshots.some((snapshot) => snapshot.provider === provider))
 }
 
-export function opencodeAccountFromSnapshot(
+export function quotaAccountFromSnapshot(
   snapshot: OfficialAccountSnapshotsResponse["snapshots"][number],
-): OpencodeGoAccountUsage {
+): QuotaAccountUsage {
   const usage = snapshot.usage as { kind?: string; windows?: OpencodeGoQuotaWindow[] } | null
   return {
     subscriptionRequired: usage?.kind === "subscription-required",

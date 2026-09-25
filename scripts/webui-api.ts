@@ -680,6 +680,10 @@ export interface ManagementAccountSettingsResponse {
       default: boolean
     }>
   }
+  clinePass: {
+    configured: boolean
+    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+  }
   deepseek: {
     configured: boolean
     legacyConfigurationPresent: boolean
@@ -703,14 +707,14 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "opencode.account.stop"; accountId: string }
   | { operation: "opencode.account.remove"; accountId: string; confirmHistoryLoss?: boolean }
   | {
-      operation: "deepseek.configure"
+      operation: "deepseek.configure" | "clp.configure"
       accountId: string
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey: string
       confirmExclusiveConfigChange?: boolean
     }
-  | { operation: "deepseek.default" | "deepseek.remove"; accountId: string }
+  | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
   | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
@@ -786,7 +790,7 @@ export interface OpencodeGoQuotaWindow {
   localTokens?: number | null
 }
 
-export interface OpencodeGoAccountUsage {
+export interface QuotaAccountUsage {
   subscriptionRequired: boolean
   provider: string
   account: string | null
@@ -798,7 +802,7 @@ export interface OpencodeGoAccountUsage {
 }
 
 export interface OpencodeGoUsageResponse {
-  accounts: OpencodeGoAccountUsage[]
+  accounts: QuotaAccountUsage[]
 }
 
 export interface CcgCreditAccountUsage {
@@ -835,7 +839,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "deepseek" | "opencode-go" | "ccg"
+    source: "deepseek" | "opencode-go" | "ccg" | "clp"
     code: "registry_unavailable"
     message: string
   }>
@@ -894,6 +898,7 @@ export interface TrafficTurnStatesResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
     safetyModels: Array<{ source: string; model: string }>

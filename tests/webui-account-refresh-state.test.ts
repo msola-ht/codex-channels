@@ -9,7 +9,7 @@ import {
   deepseekAccountFromSnapshot,
   refreshableAccounts,
   remainingRemovedAccountProviders,
-  opencodeAccountFromSnapshot,
+  quotaAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
 import type { ManagementProvidersResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 
@@ -30,11 +30,11 @@ describe("WebUI per-account refresh state", () => {
     const response = { observedAtMs: 1, warnings: [], snapshots: [old] };
     const missing = { ...old, observedAtMs: 2, available: false, usage: { kind: "subscription-required" } };
     const refreshed = accountSnapshotsAfterRefresh(response, ["ocg-old"], [{ status: "fulfilled", value: { ...response, snapshots: [missing] } }]);
-    expect(opencodeAccountFromSnapshot(refreshed.snapshots[0]!).subscriptionRequired).toBe(true);
+    expect(quotaAccountFromSnapshot(refreshed.snapshots[0]!).subscriptionRequired).toBe(true);
     const failed = accountSnapshotsAfterRefresh(refreshed, ["ocg-old"], [{ status: "rejected", reason: new Error("timeout") }]);
     expect(failed.snapshots).toEqual([missing]);
     const recovered = accountSnapshotsAfterRefresh(failed, ["ocg-old"], [{ status: "fulfilled", value: response }]);
-    expect(opencodeAccountFromSnapshot(recovered.snapshots[0]!).subscriptionRequired).toBe(false);
+    expect(quotaAccountFromSnapshot(recovered.snapshots[0]!).subscriptionRequired).toBe(false);
   });
 
   it("does not resurrect a confirmed deletion from old snapshots or missing-provider placeholders", () => {
@@ -66,15 +66,15 @@ describe("WebUI per-account refresh state", () => {
       provider: "ocg-main", accountId: null, displayName: "OCG", default: false,
       observedAtMs: 1, available: true, usage: { windows: [{ resetsAt: 123 }] }, limits: null,
     };
-    expect(opencodeAccountFromSnapshot(snapshot)).toMatchObject({ account: null, windows: [{ resetsAt: 123000 }] });
-    expect(opencodeAccountFromSnapshot({ ...snapshot, accountId: "main" }).account).toBe("main");
+    expect(quotaAccountFromSnapshot(snapshot)).toMatchObject({ account: null, windows: [{ resetsAt: 123000 }] });
+    expect(quotaAccountFromSnapshot({ ...snapshot, accountId: "main" }).account).toBe("main");
   });
   it("keeps subscription facts in snapshots independently of refresh failures", () => {
     const snapshot = {
       provider: "ocg-old", accountId: "old", displayName: "OCG", default: false,
       observedAtMs: 123, available: false, usage: { kind: "subscription-required" }, limits: null,
     };
-    expect(opencodeAccountFromSnapshot(snapshot)).toMatchObject({ subscriptionRequired: true, windows: [] });
+    expect(quotaAccountFromSnapshot(snapshot)).toMatchObject({ subscriptionRequired: true, windows: [] });
     expect(accountRefreshErrors(["deepseek", "ocg-old", "ocg-other"], [
       { status: "fulfilled", value: {} },
       { status: "rejected", reason: new Error("网络超时") },
@@ -85,8 +85,8 @@ describe("WebUI per-account refresh state", () => {
       "ocg-other": { kind: "refresh-failed", message: "账户刷新失败" },
     });
     expect(accountRefreshErrors(["ocg-old"], [{ status: "fulfilled", value: {} }])).toEqual({ "ocg-old": null });
-    expect(opencodeAccountFromSnapshot(snapshot).subscriptionRequired).toBe(true);
-    expect(opencodeAccountFromSnapshot({ ...snapshot, available: true, usage: { kind: "quota-windows", windows: [] } }).subscriptionRequired).toBe(false);
+    expect(quotaAccountFromSnapshot(snapshot).subscriptionRequired).toBe(true);
+    expect(quotaAccountFromSnapshot({ ...snapshot, available: true, usage: { kind: "quota-windows", windows: [] } }).subscriptionRequired).toBe(false);
   });
 
   it("keeps snapshots and adds missing configured accounts without fabricating usage", () => {
@@ -141,4 +141,14 @@ describe("WebUI per-account refresh state", () => {
       windows: [{ windowId: "weekly", resetsAt: 456000 }],
     });
   });
+});
+
+it("includes CLP in refresh and maps official quota reset seconds to milliseconds", () => {
+  const providers = { providers: [{ id: "clp-test", kind: "managed", displayName: "CLP" }] } as ManagementProvidersResponse;
+  expect(refreshableAccounts(providers)).toEqual(providers.providers);
+  const account = quotaAccountFromSnapshot({ provider: "clp-test", accountId: null, displayName: "CLP", default: false,
+    observedAtMs: 1234, available: true, limits: null, usage: { kind: "quota-windows", windows: [
+      { windowId: "five-hour", label: "5小时", usedPercent: 12.5, resetsAt: 1800000000, status: null },
+    ] } });
+  expect(account).toMatchObject({ available: true, subscriptionRequired: false, windows: [{ usedPercent: 12.5, resetsAt: 1800000000000 }] });
 });

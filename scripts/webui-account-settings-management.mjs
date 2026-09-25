@@ -1,3 +1,5 @@
+import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
+import { previewClinePassConfiguration, applyClinePassConfiguration, previewClinePassRemoval, removeClinePassConfiguration, previewClinePassDefaultAccount, setClinePassDefaultAccount } from "./cline-pass-setup.mjs";
 import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,
@@ -37,6 +39,7 @@ export async function loadAccountSettingsResource(
   try {
     const accounts = loadAccounts(environment);
     const providers = loadProviders(environment);
+    const clineAccounts = loadClinePassAccounts(environment);
     const dsAccounts = loadDeepseekAccounts(environment);
     return {
       opencodeGo: {
@@ -52,6 +55,13 @@ export async function loadAccountSettingsResource(
             ...(marker?.mode === undefined ? {} : { mode: marker.mode }),
             default: account.default === true,
           };
+        }),
+      },
+      clinePass: {
+        configured: clineAccounts.length > 0,
+        accounts: clineAccounts.map(account => {
+          const provider = providers.find(entry => entry.provider === clinePassProviderId(account.id));
+          return { ...account, mode: provider?.mode ?? null, model: provider?.model ?? null };
         }),
       },
       deepseek: {
@@ -97,6 +107,7 @@ export function normalizeAccountSettingsMutation(input) {
         accountId: input.accountId,
         ...(input.confirmHistoryLoss === undefined ? {} : { confirmHistoryLoss: input.confirmHistoryLoss }),
       };
+    case "clp.configure":
     case "deepseek.configure":
       return {
         operation: input.operation,
@@ -110,6 +121,8 @@ export function normalizeAccountSettingsMutation(input) {
       };
     case "deepseek.legacy.remove":
       return { operation: input.operation };
+    case "clp.default":
+    case "clp.remove":
     case "deepseek.default":
     case "deepseek.remove":
       return { operation: input.operation, accountId: input.accountId };
@@ -129,6 +142,12 @@ export async function previewAccountSettingsMutation(input, environment) {
         return await previewOpencodeGoAccountStop(input.accountId, { environment });
       case "opencode.account.remove":
         return await previewOpencodeGoAccountRemoval(input.accountId, { environment });
+      case "clp.configure":
+        return previewClinePassConfiguration(input, { environment });
+      case "clp.default":
+        return previewClinePassDefaultAccount(input.accountId, { environment });
+      case "clp.remove":
+        return await previewClinePassRemoval(input.accountId, { environment });
       case "deepseek.configure":
         return previewDeepseekAccountConfiguration(input, { environment });
       case "deepseek.legacy.remove":
@@ -159,6 +178,12 @@ export async function applyAccountSettingsMutation(input, environment) {
         return await applyOpencodeGoAccountStop(input.accountId, { environment });
       case "opencode.account.remove":
         return await applyOpencodeGoAccountRemoval(accountSettingsApplyInput(input), { environment });
+      case "clp.configure":
+        return await applyClinePassConfiguration(accountSettingsApplyInput(input), { environment });
+      case "clp.default":
+        return await setClinePassDefaultAccount(input.accountId, { environment });
+      case "clp.remove":
+        return await removeClinePassConfiguration(accountSettingsApplyInput(input), { environment });
       case "deepseek.configure":
         return await applyDeepseekAccountConfiguration(accountSettingsApplyInput(input), { environment });
       case "deepseek.legacy.remove":
@@ -183,12 +208,14 @@ export function accountSettingsApplyInput(input) {
         : input;
     case "opencode.account.remove":
       return { ...input, confirmHistoryLoss: true };
+    case "clp.configure":
     case "deepseek.configure":
       return input.mode === "exclusive"
         ? { ...input, confirmExclusiveConfigChange: true }
         : input;
     case "deepseek.legacy.remove":
       return { ...input, confirmRemove: true };
+    case "clp.remove":
     case "deepseek.remove":
       return { ...input, confirmRemove: true };
     default:

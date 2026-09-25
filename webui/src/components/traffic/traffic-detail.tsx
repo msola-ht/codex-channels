@@ -156,6 +156,13 @@ export function TrafficDetail({
         </Card>
       )}
 
+      {detail.chatDiagnostics ? <TrafficDisclosure title="Chat 上游信息">
+        <p className="text-sm">实际上游：{String(detail.chatDiagnostics.fields["routing.finalProvider"] ?? "未提供")} · 上游模型：{String(detail.chatDiagnostics.fields.model ?? "未提供")}</p>
+        <p className="text-xs text-muted-foreground">上游回报的路由、标识和费用；不同费用字段保持各自口径，不代表套餐实际扣费。备用提供商不代表已调用。</p>
+        <TrafficContent title="上游诊断字段" text={JSON.stringify(detail.chatDiagnostics.fields, null, 2)} json />
+        {detail.chatDiagnostics.truncated ? <p className="text-xs text-muted-foreground">部分诊断字段超出限制或格式无效，未保留。</p> : null}
+      </TrafficDisclosure> : null}
+
       <TrafficDisclosure title="诊断信息：详细耗时、模型声明与参数对照">
         {detail.response === null ? null : <TimingSummary response={detail.response} />}
         <ModelEvidence detail={detail} />

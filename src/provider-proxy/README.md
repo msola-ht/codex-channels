@@ -117,3 +117,12 @@ WebSocket 升级失败按握手失败记录，不推断尚未收到的模型调�
 HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `response.create`。`/models` 和其他非 Responses 端点不计模型请求。
 `resolveUpstream` 支持异步解析；等待期间保留 HTTP 请求体，关闭代理会清理待升级连接，
 客户端已断开或代理已关闭时不再建立上游连接。
+
+## Chat 上游
+
+`chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出或指标。
+
+`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码，不自动重试。
+
+`chat-bridge.ts` 管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。
+Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。

@@ -1,3 +1,4 @@
+import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
 import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
@@ -26,6 +27,7 @@ import {
 import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
+  clinePassProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -120,6 +122,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    ChatCompletionsBridge,
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -145,6 +148,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider,
     options,
   ) => {
+    const definition = provider === "clp" ? clinePassProviderDefinition : providerDefinitions.get(provider);
+    let bridge;
+    if (definition?.upstreamWireApi === "chat_completions") {
+      bridge = new ChatCompletionsBridge({ ...options,
+        onError: () => proxySelector.invalidate(),
+        ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
+      });
+      await bridge.start();
+      const url = new URL(`http://${bridge.address()}`);
+      options = { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics };
+    }
     const optionsWithUserAgent = {
       ...options,
       ...(validatedCodex.upstream_user_agent
@@ -200,9 +214,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           }
         : provider === "deepseek"
           ? managedAccountProxyOptions(dsAccounts, deepseekProviderId, "DS")
-          : provider === "ccg"
-            ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
-            : {
+          : provider === "clp"
+            ? managedAccountProxyOptions(clineAccounts, clinePassProviderId, "CLP")
+            : provider === "ccg"
+              ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
+              : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
                   providerMetricsSocketPath(socketPath, provider),
                   metrics,
@@ -216,10 +232,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         );
       },
     });
-    await modelProxy.start();
+    try { await modelProxy.start(); } catch (error) { await bridge?.close(); throw error; }
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
-      proxy: modelProxy,
+      proxy: bridge ? { close: async () => {
+        try { await modelProxy.close(); } finally { await bridge.close(); }
+      } } : modelProxy,
     };
     console.log(
       `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
@@ -237,6 +255,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       .map((definition) => [definition.id, definition]),
   );
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
+  const clineAccounts = loadClinePassAccounts(runtime.environment);
   const dsAccounts = loadDeepseekAccounts(runtime.environment);
   const ccgAccounts = loadCcgAccounts(runtime.environment);
   const proxyAccountId = managedProviderAccountIdFromProvider;
@@ -600,6 +619,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
+      if (definition.upstreamWireApi === "chat_completions") primaryArguments.push("-c", 'web_search="disabled"');
       const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,

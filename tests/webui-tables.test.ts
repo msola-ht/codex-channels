@@ -20,6 +20,7 @@ describe("WebUI metrics table presentation", () => {
         } }],
       });
       try {
+        const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
@@ -59,6 +60,10 @@ describe("WebUI metrics table presentation", () => {
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
         const result = {
+          newAccount: render(AccountIdField, { id: "account", value: "main", accounts: [], disabled: false, editing: false, onChange: noop }),
+          reservedAccount: render(AccountIdField, { id: "account", value: "openai", accounts: [], reservedIds: ["openai", "deepseek", "ocg"], disabled: false, editing: false, onChange: noop }),
+          customAccount: render(AccountIdField, { id: "account", value: "team_a", accounts: [{ id: "team-a" }], disabled: false, editing: false, onChange: noop }),
+          editingAccount: render(AccountIdField, { id: "account", value: "main", accounts: [{ id: "main" }], disabled: false, editing: true, onChange: noop }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
           shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
@@ -177,6 +182,18 @@ describe("WebUI metrics table presentation", () => {
 
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
+
+  it("renders account presets, custom validation and an immutable existing ID", () => {
+    expect(markup.newAccount).toContain('role="combobox"');
+    expect(markup.newAccount).not.toContain("自定义账户 ID");
+    expect(markup.reservedAccount).toContain("该账户 ID 为保留名称");
+    expect(markup.reservedAccount).toContain('aria-invalid="true"');
+    expect(markup.customAccount).toContain("自定义账户 ID");
+    expect(markup.customAccount).toContain("账户 ID 或凭据变量名已被使用");
+    expect(markup.customAccount).toContain('aria-invalid="true"');
+    expect(markup.editingAccount).toMatch(/<input[^>]*disabled=""[^>]*value="main"/);
+    expect(markup.editingAccount).not.toContain("自定义");
+  });
 
   it("renders a single-row filter toolbar with flexible search and collapsed secondary fields", () => {
     expect(markup.filters).toContain("flex-row flex-nowrap items-center gap-2");

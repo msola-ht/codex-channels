@@ -505,7 +505,7 @@ export async function runPrimaryProviderCli(
     const [id, action, yes] = rest;
     if (!id || !["keep", "rollback"].includes(action) || rest.length > 3 || (yes !== undefined && yes !== "--yes")) throw new Error("用法：codexc primary-provider recover <Provider ID> <keep|rollback> [--yes]");
     if (yes !== "--yes") {
-      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS/RS 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
+      const confirmed = await prompts.confirm({ message: `恢复 ${id} 模型目录（如有上下文联动事务，将同时恢复关联的 DS、RS、CLP 目录及 Profile）：${action === "keep" ? "保留新目录" : "回滚上一目录"}？请先停止对应服务并核对配置。`, initialValue: false });
       if (prompts.isCancel(confirmed) || confirmed !== true) return;
     }
     await recoverResponsesProviderCatalog(id, action, environment);

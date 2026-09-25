@@ -1,6 +1,7 @@
 export {
   managedProviderDirectory,
   managedProviderMarkerPath,
+  readManagedMarker,
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
   loadManagedModelProviderSettings,
