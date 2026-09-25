@@ -82,6 +82,8 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
 - 推理 Token 计数对所有 Provider 展示；代理不读取或保存推理内容。
 - 原生 OpenAI 账户对应的 Codex Provider 明确显示为“OpenAI 官方”；配置的自定义主模型
   Provider（如 `model_providers.OpenAI`）显示为“OpenAI · 自定义”，与官方直连区分。
+- Cline Pass 在渠道提供商菜单、模型摘要、状态、完成卡片和用量中保留 `clp-<账户>` 标识，
+  例如 `clp-main`；Setup 品牌入口与 WebUI 账户卡片使用完整名称 Cline Pass。
 - 同一 Turn 中模型请求遇到 `429/5xx` 或上游 WebSocket 断流后由 Codex 重试并最终完成时，完成
   卡片显示“自动重试、最终成功”；真实失败尝试仍保留在
   指标库与异常报告中。

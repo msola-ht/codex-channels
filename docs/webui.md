@@ -358,4 +358,4 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
 开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。
 
-控制台账户卡片使用完整提供商名称 CommandCode、Cline Pass，并附账户 ID；`ccg-<账户>`、`clp-<账户>` 继续作为内部 Provider 标识。
+控制台账户卡片使用完整提供商名称 CommandCode Go、Cline Pass，并附账户 ID；`ccg-<账户>`、`clp-<账户>` 继续作为内部 Provider 标识。

@@ -1,3 +1,5 @@
+import { formatCodexProviderLabel } from "../src/surfaces/provider-format.js";
+import { formatConversationModel } from "../src/surfaces/conversation-model-account-command-format.js";
 import { describe, expect, it, vi } from "vitest";
 import { toAccountRateLimits } from "../src/codex-client/account-adapter.js";
 
@@ -18,6 +20,11 @@ import {
 } from "../src/surfaces/conversation-command-format.js";
 
 describe("conversation model and account command formatting", () => {
+  it.each(["clp-main", "clp-work", "clp-other"])("preserves provider ID %s across shared labels and model summaries", provider => {
+    expect(formatCodexProviderLabel(provider)).toBe(provider);
+    expect(formatConversationModel("当前模型", { model: "cline-pass/deepseek-v4.1-flash", modelProvider: provider })).toContain(`Provider：${provider}`);
+  });
+
   it("shows no current Provider while an unauthenticated multi-Provider conversation awaits selection", () => {
     const rendered = formatConversationModels({
       kind: "models", view: "model",
@@ -415,7 +422,7 @@ describe("conversation model and account command formatting", () => {
         windowId: String(index), label, usedPercent: 12.5, resetsAt: 1790922837, status: null,
       })),
     } });
-    expect(rendered).toContain("CLP test 账户用量");
+    expect(rendered).toContain("clp-test 账户用量");
     for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：已用 12.5% · 重置`);
     expect(rendered).not.toContain("未知");
     expect(rendered).not.toContain("本地 Token");

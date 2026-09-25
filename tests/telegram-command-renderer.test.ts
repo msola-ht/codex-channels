@@ -512,7 +512,7 @@ describe("Telegram command renderer", () => {
       .toContain("wp:approval:never");
   });
 
-  it("renders provider buttons first and model buttons after provider browsing", () => {
+  it.each([["deepseek", "DeepSeek"], ["clp-main", "clp-main"]])("renders provider %s before its model buttons", (provider, label) => {
     const baseState = {
       models: [
         {
@@ -530,7 +530,7 @@ describe("Telegram command renderer", () => {
         {
           id: "deepseek-v4-flash",
           model: "deepseek-v4-flash",
-          provider: "deepseek",
+          provider,
           displayName: "DeepSeek V4 Flash",
           supportedReasoningEfforts: [{ effort: "high", description: "High" }],
           defaultReasoningEffort: "high",
@@ -562,6 +562,7 @@ describe("Telegram command renderer", () => {
     expect(telegramModelSelectionToken({ ...baseState, providerFilter: "openai" })).not.toBe(token);
     expect(telegramModelSelectionToken({ ...baseState, models: baseState.models.map((model) => ({ ...model, available: false })) })).not.toBe(token);
     expect(providerKeyboard?.inline_keyboard).toHaveLength(2);
+    expect(providerKeyboard?.inline_keyboard[1]?.[0]?.text).toBe(label);
     expect(
       (providerKeyboard?.inline_keyboard[0]?.[0] as { callback_data?: string })
         ?.callback_data,
@@ -576,7 +577,7 @@ describe("Telegram command renderer", () => {
       view: "model" as const,
       state: {
         ...baseState,
-        providerFilter: "deepseek",
+        providerFilter: provider,
         models: [baseState.models[1]!],
       },
     };
