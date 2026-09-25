@@ -37,14 +37,29 @@ export function responsesModelTemplatesFromCatalog(catalog) {
 export async function promptResponsesModelImport(prompts, previous = [], loadTemplates = loadResponsesModelTemplates) {
   const selected = [];
   for (const [source, label] of [["official", "官方 Codex"], ["deepseek", "DeepSeek"]]) {
-    const enabled = await prompts.confirm({ message: `平台是否提供${label}模型，是否从模板导入？${source === "official" ? "（只复制普通思考等级，不导入 Codex 专用 ultra/persistent 模式）" : ""}`, initialValue: false });
+    const enabled = await prompts.confirm({ message: `平台是否提供 ${label} 模型，是否从模板导入？${source === "official" ? "（只复制普通思考等级，不导入 Codex 专用 ultra/persistent 模式）" : ""}`, initialValue: false });
     if (prompts.isCancel(enabled)) return undefined;
     if (!enabled) continue;
     const templates = await loadTemplates(source);
     if (!prompts.multiselect) throw new Error("当前交互入口缺少模型多选能力");
-    const ids = await prompts.multiselect({ message: `勾选平台支持的${label}模型`, options: templates.map(model => ({ value: model.id, label: `${model.name}（${model.id}）` })), required: false });
-    if (prompts.isCancel(ids)) return undefined;
-    if (!Array.isArray(ids) || ids.some(id => !templates.some(model => model.id === id))) throw new Error("所选模型模板无效");
+    let ids;
+    while (true) {
+      ids = await prompts.multiselect({ message: `勾选平台支持的 ${label} 模型（空格勾选，回车确认）`, options: templates.map(model => ({ value: model.id, label: `${model.name}（${model.id}）` })), required: false });
+      if (prompts.isCancel(ids)) return undefined;
+      if (!Array.isArray(ids) || ids.some(id => !templates.some(model => model.id === id))) throw new Error("所选模型模板无效");
+      if (ids.length > 0) break;
+      const action = await prompts.select({
+        message: `尚未勾选 ${label} 模板，本次没有导入模型参数`,
+        options: [
+          {value: "retry", label: "返回选择模板", hint: "空格勾选后按回车，复制上下文等参数"},
+          {value: "skip", label: "跳过本类模板导入", hint: "未从模板导入的模型需手动填写上下文等参数"},
+        ],
+        initialValue: "retry",
+      });
+      if (prompts.isCancel(action)) return undefined;
+      if (action === "skip") break;
+      if (action !== "retry") throw new Error("模板空选操作无效");
+    }
     for (const id of ids) {
       if (previous.length + selected.length >= 64) throw new Error("自定义模型目录最多包含 64 个模型");
       const template = templates.find(model => model.id === id);

@@ -484,7 +484,7 @@ export abstract class GatewayComponentGraph {
       config.codexModel,
       supplementaryModels,
       customPrimaryProvider?.id ?? primaryProvider,
-      customSwitchingProviders.map((provider) => ({
+      customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "official").map((provider) => ({
         provider: provider.provider,
         displayName: provider.provider,
         defaultModel: provider.model,
@@ -496,6 +496,11 @@ export abstract class GatewayComponentGraph {
           && "kind" in snapshot.usage && snapshot.usage.kind === "subscription-required")
         .map((snapshot) => snapshot.provider)),
       defaultThirdPartyProvider,
+      customSwitchingProviders.filter((provider) => provider.catalogSource.kind === "custom").map((provider) => ({
+        provider: provider.provider,
+        displayName: provider.name,
+        defaultModel: provider.model,
+      })),
     );
     this.refreshProviderModels = () => models.updateSupplementaryModels(readSupplementaryModels());
     const collaborationModes = new CollaborationModeSelectionService(

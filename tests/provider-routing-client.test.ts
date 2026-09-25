@@ -11,6 +11,22 @@ import type { SessionRouter, ThreadSession, ThreadSnapshot } from "../src/sessio
 const cwd = "/workspace";
 
 describe("ProviderRoutingClient", () => {
+  it("loads an exact Provider catalog through its connection and activity boundary", async () => {
+    const openai = client();
+    const rs = client();
+    rs.listModels.mockResolvedValue([{model:"deepseek-v4.1-flash"}]);
+    const routed = new ProviderRoutingClient("openai", new Map([["openai",openai],["rs-test",rs]]), async () => undefined);
+    await expect(routed.listModelsForProvider("rs-test")).resolves.toEqual([{model:"deepseek-v4.1-flash"}]);
+    expect(rs.connect).toHaveBeenCalledOnce();
+    expect(openai.listModels).not.toHaveBeenCalled();
+    await expect(routed.isModelAvailable("rs-test","gpt-main")).resolves.toBe(false);
+    rs.listModels.mockRejectedValueOnce(new Error("catalog offline"));
+    await expect(routed.listModelsForProvider("rs-test")).rejects.toThrow("catalog offline");
+    await expect(routed.listModelsForProvider("missing")).rejects.toThrow();
+    expect(openai.listModels).not.toHaveBeenCalled();
+    await routed.close();
+  });
+
   it("cancels a Provider opening when close is requested in the same tick", async () => {
     const openai = client();
     const routed = new ProviderRoutingClient("openai", new Map([["openai", openai]]), async () => undefined);

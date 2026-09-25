@@ -26,6 +26,31 @@ describe("Responses model template import", () => {
     expect(selected).toEqual([{...model,id:"deepseek-v4.1-flash",template:{source:"deepseek",model:model.id,followContext:false}}]);
     expect(model.id).toBe("deepseek-flash");
   });
+  it("returns to selection after an empty choice and imports the template parameters", async () => {
+    const confirms=[false,true,false,true];
+    const choices=[[],[model.id]];
+    const load=vi.fn(async()=>[model]);
+    const multiselect=vi.fn(async()=>choices.shift());
+    const select=vi.fn(async()=>"retry");
+    const prompts={confirm:async()=>confirms.shift(),multiselect,select,text:async()=>"platform-flash",password:async()=>undefined,isCancel:()=>false};
+    expect(await promptResponsesModelImport(prompts,[],load)).toEqual([{...model,id:"platform-flash",template:{source:"deepseek",model:model.id,followContext:false}}]);
+    expect(multiselect).toHaveBeenCalledTimes(2);
+    expect(select).toHaveBeenCalledOnce();
+    expect(load).toHaveBeenCalledOnce();
+  });
+  it("explicitly skips an empty source and continues importing the next source", async () => {
+    const confirms=[true,true,false,true];
+    const choices=[[],[model.id]];
+    const prompts={confirm:async()=>confirms.shift(),multiselect:async()=>choices.shift(),select:async()=>"skip",text:async()=>model.id,password:async()=>undefined,isCancel:()=>false};
+    expect(await promptResponsesModelImport(prompts,[],async()=>[model])).toEqual([{...model,template:{source:"deepseek",model:model.id,followContext:false}}]);
+  });
+  it("cancels the empty selection decision without entering manual input", async () => {
+    const cancel=Symbol("cancel");
+    const text=vi.fn();
+    const prompts={confirm:async()=>true,multiselect:async()=>[],select:async()=>cancel,text,password:async()=>undefined,isCancel:(value:unknown)=>value===cancel};
+    expect(await promptResponsesModelImport(prompts,[],async()=>[model])).toBeUndefined();
+    expect(text).not.toHaveBeenCalled();
+  });
   it("rejects duplicate mapped IDs already in this provider", async () => {
     const prompts={confirm:async()=>true,multiselect:async()=>[model.id],text:async()=>model.id,select:async()=>undefined,password:async()=>undefined,isCancel:()=>false};
     await expect(promptResponsesModelImport(prompts,[model],async()=>[model])).rejects.toThrow("平台模型 ID 已存在");

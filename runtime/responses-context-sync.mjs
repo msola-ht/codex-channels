@@ -34,7 +34,7 @@ export function writeResponsesContextFollowers(updates, environment, originals =
       return {...model, contextWindow: windows.get(model.template.model)};
     });
     if (matched) {
-      next.set(catalog.path, `${JSON.stringify(createResponsesModelCatalog(definitions,catalog.defaultModel))}\n`);
+      next.set(catalog.path, `${JSON.stringify(createResponsesModelCatalog(definitions,catalog.defaultModel), null, 2)}\n`);
       originals.set(catalog.path,catalog.content);
     }
   }

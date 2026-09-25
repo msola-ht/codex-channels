@@ -110,7 +110,7 @@ export function writeResponsesModelCatalog(environment, id, definitions, model, 
   if (existsSync(`${path}.pending`)) throw new Error("Responses 模型目录上次保存未完成，请先恢复");
   const previous = existsSync(path) ? readResponsesModelCatalog(environment, id) : undefined;
   if (previous?.revision !== expectedRevision) throw new Error("Responses 模型目录已变化，请重新预览");
-  const content = `${JSON.stringify(createResponsesModelCatalog(definitions, model))}\n`;
+  const content = `${JSON.stringify(createResponsesModelCatalog(definitions, model), null, 2)}\n`;
   if (previous) writePrivateFileAtomicSync(`${path}.backup`, readPrivateFileSync(path, maximumBytes));
   writePrivateFileAtomicSync(`${path}.pending`, JSON.stringify({ schemaVersion: 1, previous: previous !== undefined }));
   writePrivateFileAtomicSync(path, content);

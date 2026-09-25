@@ -257,6 +257,81 @@ describe("ModelSelectionService", () => {
     expect(service.threadStartOptions(target)).toEqual({ model: thirdParty.model, modelProvider: "deepseek" });
   });
 
+  it("uses the RS instance catalog for listing, reasoning and the next Thread without official aliases", async () => {
+    const rs = model("deepseek-v4.1-flash", ["low", "high", "max"], "high", true);
+    const listModelsForProvider = vi.fn(async () => [rs]);
+    const codex = {
+      listModels: async () => models, listModelsForProvider,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      newSession: async () => undefined, workspace: () => ({ cwd: "/workspace" }),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [], "openai", [], () => false,
+      undefined, undefined, [{provider:"rs-test",displayName:"RS",defaultModel:rs.model}]);
+    const state = await service.browseProvider(target, "rs-test");
+    expect(state.models.map(entry => entry.model)).toEqual([rs.model]);
+    expect(state.models[0]?.supportedReasoningEfforts).toEqual(rs.supportedReasoningEfforts);
+    expect(listModelsForProvider).toHaveBeenCalledWith("rs-test");
+    await service.selectModel(target, {provider:"rs-test",model:rs.model});
+    expect(service.threadStartOptions(target)).toMatchObject({modelProvider:"rs-test",model:rs.model});
+    await expect(service.selectModel(target, {provider:"rs-test",model:"gpt-main"})).rejects.toThrow();
+    listModelsForProvider.mockRejectedValueOnce(new Error("catalog offline"));
+    expect((await service.state(target)).models).toContainEqual(expect.objectContaining({provider:"rs-test",available:false}));
+    listModelsForProvider.mockResolvedValue([]);
+    expect((await service.state(target)).models).toContainEqual(expect.objectContaining({provider:"rs-test",available:false}));
+  });
+
+  it("isolates a failed RS catalog and queries only the selected RS for model operations", async () => {
+    const rs = model("deepseek-v4.1-flash", ["low", "high", "max"], "high", true);
+    let broken = true;
+    const listModelsForProvider = vi.fn(async (provider: string) => {
+      if (provider === "rs-broken" && broken) throw new Error("secret upstream failure");
+      return [rs];
+    });
+    const codex = {
+      listModels: async () => models, listModelsForProvider,
+      writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null,
+      readDefaultServiceTier: async () => null,
+    };
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      newSession: async () => undefined, workspace: () => ({cwd:"/workspace"}),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService(codex, router, undefined, [], "openai", [], () => true,
+      undefined, undefined, ["rs-ok","rs-broken"].map(provider=>({provider,displayName:provider,defaultModel:rs.model})));
+    const overview = await service.state(target);
+    expect(overview.models).toContainEqual(expect.objectContaining({model:"gpt-main"}));
+    expect(overview.models).toContainEqual(expect.objectContaining({provider:"rs-ok",model:rs.model}));
+    expect(overview.models).toContainEqual(expect.objectContaining({provider:"rs-broken",available:false}));
+    expect(JSON.stringify(overview)).not.toContain("secret upstream failure");
+    listModelsForProvider.mockClear();
+    await service.browseProvider(target,"rs-ok");
+    await service.selectModel(target,{provider:"rs-ok",model:rs.model});
+    await service.selectEffort(target,"max");
+    await service.requireInputModality(target,"image");
+    expect(listModelsForProvider.mock.calls.every(([provider])=>provider === "rs-ok")).toBe(true);
+    await service.browseProvider(target,"rs-broken");
+    listModelsForProvider.mockClear();
+    expect(await service.state(target,true)).toMatchObject({modelProvider:"rs-ok",model:rs.model});
+    expect(listModelsForProvider.mock.calls.map(([provider])=>provider)).toEqual(["rs-ok"]);
+    listModelsForProvider.mockClear();
+    await service.selectModel(target,{provider:"openai",model:"gpt-main"});
+    expect(listModelsForProvider).not.toHaveBeenCalled();
+    await expect(service.selectModel(target,{provider:"rs-broken",model:rs.model})).rejects.toThrow("暂不可用");
+    broken = false;
+    await service.selectModel(target,{provider:"rs-broken",model:rs.model});
+    broken = true;
+    await expect(service.state(target,true)).rejects.toThrow("暂不可用");
+    await expect(service.requireInputModality(target,"image")).rejects.toThrow("暂不可用");
+    await expect(service.selectEffort(target,"high")).rejects.toThrow("暂不可用");
+    await expect(service.selectFastMode(target,"on")).rejects.toThrow("暂不可用");
+  });
+
   it("uses the sole third-party configured default rather than catalog order or the unavailable official default", async () => {
     const codex = {
       listModels: async () => models,

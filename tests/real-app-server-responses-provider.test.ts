@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { ModelSelectionService } from "../src/application/model-selection-service.js";
+import type { SessionRouter } from "../src/session-routing/index.js";
+import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
@@ -59,7 +62,26 @@ describe("real custom Responses provider", () => {
         expect(config.config.model_provider).toBe(runtime.id);
         const listed=await rpc.request<ModelListResponse>({method:"model/list",params:{}});
         expect(listed.data.map(model=>model.model)).toEqual([runtime.model]);
-        const {thread}=await rpc.request<ThreadStartResponse>({method:"thread/start",params:{cwd:root,sandbox:"read-only",approvalPolicy:"never",ephemeral:true}});
+        const client = new CodexAppServerClient(rpc, {sandbox:"read-only"});
+        const selection = new ModelSelectionService({
+          listModels: async () => [],
+          listModelsForProvider: async provider => {
+            expect(provider).toBe(runtime.id);
+            return client.listModels();
+          },
+          writeDefaultFastMode: async () => undefined,
+          readDefaultReasoningEffort: async () => null,
+          readDefaultServiceTier: async () => null,
+        }, {current:()=>undefined,modelSettings:()=>undefined} as unknown as SessionRouter,
+        undefined, [], "openai", [], () => false, undefined, undefined,
+        [{provider:runtime.id,displayName:runtime.name,defaultModel:runtime.model}]);
+        const target = {surface:"telegram" as const,accountId:"fixture",conversationId:"fixture"};
+        expect((await selection.browseProvider(target,runtime.id)).models.map(model=>model.model)).toEqual([runtime.model]);
+        await selection.selectModel(target,{provider:runtime.id,model:runtime.model});
+        const selected = selection.threadStartOptions(target);
+        expect(selected).toMatchObject({modelProvider:runtime.id,model:runtime.model});
+        if (!selected.model || !selected.modelProvider) throw new Error("RS selection missing");
+        const {thread}=await rpc.request<ThreadStartResponse>({method:"thread/start",params:{cwd:root,model:selected.model,modelProvider:selected.modelProvider,sandbox:"read-only",approvalPolicy:"never",ephemeral:true}});
         expect(thread.modelProvider).toBe(runtime.id);
         const {turn}=await rpc.request<TurnStartResponse>({method:"turn/start",params:{threadId:thread.id,input:[{type:"text",text:"Run the fixture command",text_elements:[]}]}});
         await waitFor(()=>turns.some(entry=>entry.id===turn.id),15000);
