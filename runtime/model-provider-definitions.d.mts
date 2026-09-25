@@ -10,7 +10,7 @@ export type ManagedModelProviderId =
   | "opencode-go"
   | `opencode-go-${string}`;
 
-export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg";
+export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "cline-pass";
 export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
 
 export interface ModelProviderCapabilities {

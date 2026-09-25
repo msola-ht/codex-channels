@@ -1,5 +1,7 @@
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
+import { readManagedMarker } from "../runtime/model-provider-runtime.mjs";
+import { clinePassProviderDefinition } from "../runtime/model-provider-definitions.mjs";
 import {
   GatewayAccountRefreshError,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -255,7 +257,17 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       "ccg",
       "CCG 账户元数据暂不可用",
     );
+    const clineAccounts = loadAccountRegistry(
+      () => {
+        const marker = readManagedMarker(environment, clinePassProviderDefinition);
+        return marker ? [marker] : [];
+      },
+      warnings,
+      "cline-pass",
+      "Cline Pass 配置暂不可用",
+    );
     const accountMetadata = [
+      ...(clineAccounts ?? []).map(() => ({ provider: "cline-pass", accountId: null, displayName: "Cline Pass", default: false })),
       ...(dsAccounts ?? []).map((account) => ({
         provider: deepseekProviderId(account.id),
         accountId: account.id,
@@ -278,6 +290,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
+        if (snapshot.provider === "cline-pass") return clineAccounts === null || clineAccounts.length > 0;
         const legacyRegistry = snapshot.provider === "deepseek"
           ? dsAccounts
           : snapshot.provider === "ocg"

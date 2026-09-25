@@ -786,7 +786,7 @@ export interface OpencodeGoQuotaWindow {
   localTokens?: number | null
 }
 
-export interface OpencodeGoAccountUsage {
+export interface QuotaAccountUsage {
   subscriptionRequired: boolean
   provider: string
   account: string | null
@@ -798,7 +798,7 @@ export interface OpencodeGoAccountUsage {
 }
 
 export interface OpencodeGoUsageResponse {
-  accounts: OpencodeGoAccountUsage[]
+  accounts: QuotaAccountUsage[]
 }
 
 export interface CcgCreditAccountUsage {

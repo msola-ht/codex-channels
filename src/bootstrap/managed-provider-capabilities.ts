@@ -9,6 +9,7 @@ import type {
 import { createDeepseekAccountAdapter } from "./deepseek-account-adapter.js";
 import { createOpencodeGoAccountAdapter } from "./opencode-go-account-adapter.js";
 import { createCcgAccountAdapter } from "./ccg-account-adapter.js";
+import { createClinePassAccountAdapter } from "./cline-pass-account-adapter.js";
 
 export interface ManagedProviderAccountFactoryOptions {
   environment?: NodeJS.ProcessEnv;
@@ -27,6 +28,9 @@ export function createManagedProviderAccountAdapters(
     const capabilities = assertManagedModelProviderCapabilities(definition);
     switch (capabilities.accountAdapter) {
       case "none":
+        break;
+      case "cline-pass":
+        adapters.push(createClinePassAccountAdapter({ environment, fetchImpl }));
         break;
       case "deepseek":
         adapters.push(createDeepseekAccountAdapter({

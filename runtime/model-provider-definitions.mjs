@@ -8,7 +8,7 @@ import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey 
 import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
-  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
+  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg", "cline-pass"]),
   instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts"]),
 });
 
@@ -91,7 +91,7 @@ export const clinePassProviderDefinition = Object.freeze({
   apiKeyEnvironmentKey: "CODEX_CONNECT_CLINE_PASS_API_KEY",
   defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "high",
   supportsWebsockets: false,
-  capabilities: Object.freeze({ accountAdapter: "none", instanceAdapter: "single" }),
+  capabilities: Object.freeze({ accountAdapter: "cline-pass", instanceAdapter: "single" }),
 });
 
 export function isManagedProviderApiKeyValid(definition, apiKey) {

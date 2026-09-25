@@ -487,6 +487,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 ### Cline Pass Chat 转换
 
 Cline Pass 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
+账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；验证见 [`cline-pass-account-adapter.test.ts`](../tests/cline-pass-account-adapter.test.ts)。
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 创建受管 Profile；
 [`model-api`](../src/model-api/README.md) 独立转换模型消息，
 [`chat-bridge.ts`](../src/provider-proxy/chat-bridge.ts) 提供服务拥有的本地 HTTP 适配。

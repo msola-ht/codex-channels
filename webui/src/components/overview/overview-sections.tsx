@@ -44,6 +44,7 @@ import type {
   DeepseekAccountBalance,
   ErrorsReport,
   OpencodeGoQuotaWindow,
+  QuotaAccountUsage,
   ProviderGroup,
 } from "@/lib/types"
 
@@ -336,7 +337,7 @@ export function OpencodeGoUsageCard({
   return (
     <div className="flex flex-col gap-4">
       {accounts.map((account) => (
-        <OpencodeGoAccountCard
+        <QuotaAccountCard
           key={account.provider}
           {...account}
           refreshControl={refreshControls[account.provider]}
@@ -347,7 +348,15 @@ export function OpencodeGoUsageCard({
   )
 }
 
-function OpencodeGoAccountCard({
+export function ClinePassUsageCard({ account, refreshControl }: {
+  account: QuotaAccountUsage | null
+  refreshControl: AccountRefreshControl | undefined
+}) {
+  if (!account) return null
+  return <QuotaAccountCard {...account} displayName="Cline Pass" refreshControl={refreshControl} />
+}
+
+function QuotaAccountCard({
   account,
   displayName,
   default: isDefault,
@@ -366,7 +375,7 @@ function OpencodeGoAccountCard({
   windows: OpencodeGoQuotaWindow[]
   observedAtMs: number
   refreshControl: AccountRefreshControl | undefined
-  onRemoved: (accountId: string, activation?: string) => void
+  onRemoved?: (accountId: string, activation?: string) => void
   subscriptionRequired: boolean
 }) {
   return (
@@ -382,7 +391,7 @@ function OpencodeGoAccountCard({
         {refreshControl && !refreshControl.error && available && windows.length > 0
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {subscriptionRequired
+      {subscriptionRequired && onRemoved
         ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
         : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
       {!subscriptionRequired && available && windows.length > 0 ? <CardContent><QuotaWindows windows={windows} /></CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}

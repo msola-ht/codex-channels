@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertManagedModelProviderCapabilities,
   ccgAccountDefinition,
+  clinePassProviderDefinition,
   commandCodeProviderDefinition,
   deepseekProviderDefinition,
   deepseekAccountDefinition,
@@ -169,6 +170,7 @@ describe("managed Provider capability registry", () => {
       deepseekAccountDefinition("test"),
       opencodeGoAccountDefinition("lunare"),
       ccgAccountDefinition("main"),
+      clinePassProviderDefinition,
     ];
     const accounts = createManagedProviderAccountAdapters(definitions, {
       environment: process.env,
@@ -179,6 +181,7 @@ describe("managed Provider capability registry", () => {
       "ds-test",
       "ocg-lunare",
       "ccg-main",
+      "cline-pass",
     ]);
   });
 

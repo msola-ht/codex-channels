@@ -10,6 +10,7 @@ import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { RangeSelector } from "@/components/metrics/range-selector"
 import {
   CcgCreditUsageCards,
+  ClinePassUsageCard,
   DeepseekBalanceCards,
   ErrorsSummary,
   GlobalCards,
@@ -24,6 +25,7 @@ import { useDashboard } from "@/hooks/use-dashboard"
 import { cn } from "@/lib/utils"
 import type {
   CcgCreditUsageResponse,
+  QuotaAccountUsage,
   DeepseekBalanceResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
@@ -73,6 +75,7 @@ export function ConsolePage({ range, onRangeChange }: {
         deepseek={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         ccgUsage={officialAccounts.data?.ccg ?? null}
+        clinePass={officialAccounts.data?.clinePass ?? null}
         refreshControls={officialAccounts.refreshControls}
         accountError={officialAccounts.refreshError ?? officialAccounts.error}
         accountWarning={officialAccounts.data?.warning ?? null}
@@ -146,6 +149,7 @@ function AccountStatusCards({
   deepseek,
   opencodeGoUsage,
   ccgUsage,
+  clinePass,
   refreshControls,
   accountError,
   accountWarning,
@@ -158,6 +162,7 @@ function AccountStatusCards({
   deepseek: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   ccgUsage: CcgCreditUsageResponse | null
+  clinePass: QuotaAccountUsage | null
   refreshControls: Record<string, AccountRefreshControl>
   accountError: string | null
   accountWarning: string | null
@@ -197,6 +202,7 @@ function AccountStatusCards({
           refreshControls={refreshControls}
           onAccountsChanged={onAccountRemoved}
         />
+        <ClinePassUsageCard account={clinePass} refreshControl={refreshControls["cline-pass"]} />
         <CcgCreditUsageCards
           accounts={ccgUsage?.accounts ?? []}
           refreshControls={refreshControls}

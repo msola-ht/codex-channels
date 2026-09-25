@@ -31,7 +31,11 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 错误消息不回显上游报文或凭据。调用记录保存转换前后的 Responses 视图，不额外存储 Chat 报文。
 
 输入和输出 Token 来自上游 `usage`；缓存来自 `prompt_tokens_details.cached_tokens`，没有该字段时显示未知。
-尚未接入 Cline Pass 套餐额度查询，额度以 Cline 官方页面为准。
+账户用量通过 Cline 官方 `GET /api/v1/users/me/plan/usage-limits` 查询，使用已配置的 Key，支持固定和切换模式。
+WebUI 账户卡片和渠道 `/usage` 显示 5 小时、7 天、月度窗口的已用比例及重置时间，并复用现有账户刷新入口。
+只展示官方返回的比例与重置时间，不推算 Token 总额度、Credits 余额或套餐续费日期。
+查询失败时保留上次有效快照并显示刷新失败；删除 Cline 配置后隐藏账户卡片，保留历史统计。
+已有配置升级后需重启 Gateway 以加载账户适配器，无需为额度查询重新执行 Setup。
 
 ## 来源与验证
 
@@ -53,3 +57,5 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 普通 `/api/v1/models` 未列出该 Pass 模型，但直接调用成功；
 [官方推荐目录](https://api.cline.bot/api/v1/ai/cline/recommended-models) 的 `clinePass` 列出该模型并描述为 1M 上下文。
 该描述不提供精确 Token 上限，也未做满窗口测试，Setup 仍要求用户填写窗口。
+
+2026-09-25 已使用现有 API Key 确认官方额度接口返回三个窗口的 `percentUsed` 与 `resetsAt`；接口来源为 [Cline 账户控制台](https://app.cline.bot/)。

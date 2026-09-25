@@ -11,7 +11,8 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { ProviderAccountService } from "../src/application/index.js";
 import { createManagedProviderAccountAdapters } from "../src/bootstrap/managed-provider-capabilities.js";
-import { ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
+import { managedProviderMarkerPath } from "../runtime/model-provider-runtime.mjs";
+import { clinePassProviderDefinition, ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import { configureCcgAccounts } from "./model-provider-runtime-test-fixture.js";
 import type { OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 import {
@@ -42,6 +43,41 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("refreshes Cline quota and hides retained snapshots after configuration removal", async () => {
+    const fixture = createFixture();
+    new SqliteModelRequestMetricsStore(fixture.databasePath).close();
+    const marker = managedProviderMarkerPath(fixture.environment, clinePassProviderDefinition);
+    writePrivateFileAtomicSync(marker, 'version = 1\nprovider = "cline-pass"\nmode = "switching"\n');
+    let fail = false;
+    const service = new ProviderAccountService([{ provider: "cline-pass", accountUsage: async () => {
+      if (fail) throw new Error("upstream unavailable");
+      return { kind: "quota-windows", provider: "cline-pass", available: true,
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 12.5, resetsAt: 1790922837, status: null }] };
+    } }], { writeOfficialAccountSnapshot: snapshot => {
+      const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+      try { store.upsertAccountSnapshot({ ...snapshot, sourceId: "cline-pass:default", accountId: null,
+        displayName: "Cline Pass", enabled: true }); } finally { store.close(); }
+    } });
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin,
+      refreshGatewayAccount: async (_path, provider) => service.refreshAccountSnapshot(provider) });
+    const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
+    const refresh = () => fetch(`${origin}/api/v1/management/accounts/refresh`, {
+      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ provider: "cline-pass" }),
+    });
+    expect((await read()).snapshots).toContainEqual(expect.objectContaining({ provider: "cline-pass", observedAtMs: 0 }));
+    expect((await refresh()).status).toBe(200);
+    const before = await read();
+    expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [{ usedPercent: 12.5 }] });
+    fail = true;
+    expect((await refresh()).status).toBe(503);
+    expect(await read()).toEqual(before);
+    unlinkSync(marker);
+    expect((await read()).snapshots).toEqual([]);
+    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    try { expect(store.latestAccountSnapshots()).toHaveLength(1); } finally { store.close(); }
+  });
   it("isolates same-name accounts through CCG refresh, persistence, failure, recovery and OCG removal", async () => {
     const fixture = createFixture();
     configureCcgAccounts(fixture.home);

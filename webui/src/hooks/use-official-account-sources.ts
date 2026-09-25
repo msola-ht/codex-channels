@@ -9,7 +9,7 @@ import {
 import {
   accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
-  opencodeAccountFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
+  quotaAccountFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
   type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
 } from "@/lib/account-refresh-state"
 
@@ -118,15 +118,17 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
     ? { accounts: deepseekSnapshots.map(deepseekAccountFromSnapshot) }
     : null
   const opencodeGo = opencodeSnapshots.length > 0
-    ? { accounts: opencodeSnapshots.map(opencodeAccountFromSnapshot) }
+    ? { accounts: opencodeSnapshots.map(quotaAccountFromSnapshot) }
     : null
   const ccg = ccgSnapshots.length > 0
     ? { accounts: ccgSnapshots.map(ccgAccountFromSnapshot) }
     : null
+  const clinePass = result.snapshots.find((snapshot) => snapshot.provider === "cline-pass")
   return {
     deepseek,
     opencodeGo,
     ccg,
+    clinePass: clinePass ? quotaAccountFromSnapshot(clinePass) : null,
     warning: result.warnings.length === 0
       ? null
       : result.warnings.map((warning) => warning.message).join("；"),
