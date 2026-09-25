@@ -1,3 +1,4 @@
+import { chatDiagnosticsHeader, type ChatDiagnosticsChannel } from "./chat-diagnostics.js";
 import {
   createServer,
   request as httpRequest,
@@ -81,6 +82,8 @@ export interface ProviderProxyOptions {
   defaultAccountId?: string;
   /** 覆盖发给模型上游的完整 User-Agent；缺省时原样转发 App Server 生成的 UA。 */
   upstreamUserAgent?: string;
+  /** Only enable for the local Chat conversion bridge. Never forwarded to App Server. */
+  chatDiagnostics?: ChatDiagnosticsChannel;
   /**
    * 模型请求与响应的完整报文转储；缺省时不记录。
    * 仅在 `[debug].model_traffic_dump` 开启时由组合层传入。
@@ -125,6 +128,7 @@ export class ProviderProxy {
   private readonly defaultAccountId: string | undefined;
   private readonly upstreamUserAgent: string | undefined;
   private readonly allowOpenAiApiPaths: boolean;
+  private readonly chatDiagnostics: ChatDiagnosticsChannel | undefined;
   private readonly trafficDump: ModelTrafficDump | undefined;
   private readonly quotaWindowsProvider:
     | ((
@@ -162,6 +166,7 @@ export class ProviderProxy {
     this.accountIds = options.accountIds;
     this.defaultAccountId = options.defaultAccountId;
     this.upstreamUserAgent = options.upstreamUserAgent;
+    this.chatDiagnostics = options.chatDiagnostics;
     this.allowOpenAiApiPaths = options.allowOpenAiApiPaths ?? false;
     this.onError = options.onError;
     this.trafficDump = options.trafficDump === undefined
@@ -354,18 +359,20 @@ export class ProviderProxy {
     const upstreamRequest = upstreamTarget.protocol === "http"
       ? httpRequest
       : httpsRequest;
+    const diagnosticObserver = exchange ? this.chatDiagnostics?.subscribe(snapshot => {
+      exchange.write({ kind: "chat_diagnostics", ...snapshot });
+    }) : undefined;
+    response.once("close", () => diagnosticObserver?.close());
+    const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
+    delete upstreamHeaders[chatDiagnosticsHeader];
+    if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
       hostname: upstreamTarget.host,
       ...(upstreamTarget.port === undefined ? {} : { port: upstreamTarget.port }),
       path: upstreamPath(upstreamTarget.basePath, route.path),
       method: request.method,
-      headers: forwardedRequestHeaders(
-        request.headers,
-        upstreamTarget.host,
-        upstreamTarget.port,
-        this.upstreamUserAgent,
-      ),
+      headers: upstreamHeaders,
     }, (upstreamResponse) => {
       exchange?.callTiming?.responseHead(performance.now());
       metrics.httpStatus = upstreamResponse.statusCode ?? null;

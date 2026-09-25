@@ -79,7 +79,7 @@ describe("Responses / Chat conversion", () => {
     expect(() => converter.push(chunk({}, "error"))).toThrow();
     const limited = new ChatToResponses("r2", "fixture");
     limited.push(chunk({ content: "partial" }, "length"));
-    expect(limited.finish()).toMatchObject([{ type: "response.incomplete" }]);
+    expect(limited.finish().at(-1)).toMatchObject({ type: "response.incomplete" });
   });
 });
 
@@ -210,4 +210,44 @@ it.each([undefined, {}, { summary: "none" }])("does not invent a reasoning effor
 
 it.each([{ effort: "medium" }, { effort: "xhigh" }, { effort: "invalid" }, { effort: "high", summary: "auto" }, { max_tokens: 100 }])("rejects unsupported reasoning controls", reasoning => {
   expect(() => responsesToChat({ ...request("hello"), reasoning })).toThrow();
+});
+
+it("shortens long tool identities consistently across definitions, choice, output and history", () => {
+  const namespace = "mcp__codex_apps__codex_document_control";
+  const names = ["_execute_document_command", "_get_document_tool_schemas"];
+  const tools = [{type:"namespace",name:namespace,tools:names.map(name=>({type:"function",name,parameters:{type:"object"}}))}];
+  const source={...request([]),tools,tool_choice:{type:"function",namespace,name:names[0]}};
+  const converted=responsesToChat(source);
+  const aliases=[...converted.toolNames.keys()];
+  expect(new Set(aliases).size).toBe(2);
+  for(const alias of aliases) expect(alias).toMatch(/^[a-zA-Z0-9_-]{1,64}$/u);
+  expect(converted.request.tool_choice).toEqual({type:"function",function:{name:aliases[0]}});
+  const stream=new ChatToResponses("r","fixture",converted.toolNames);
+  stream.push(chunk({tool_calls:[{index:0,id:"call",type:"function",function:{name:aliases[0],arguments:"{}"}}]},"tool_calls"));
+  const item=stream.finish().find(event=>event.type === "response.output_item.done")?.item;
+  expect(item).toMatchObject({name:names[0],namespace});
+  const replay=responsesToChat({...source,input:[item,{type:"function_call_output",call_id:"call",output:"ok"}],tools:[{...tools[0],tools:[...tools[0]!.tools].reverse()}]});
+  expect(replay.request.messages[0]).toMatchObject({tool_calls:[{function:{name:aliases[0]}}]});
+  expect(replay.toolNames.get(aliases[0]!)).toEqual({name:names[0],namespace});
+  expect([...responsesToChat({...request([]),tools:[{type:"function",name:"x".repeat(80),parameters:{}}]}).toolNames.keys()][0]).toHaveLength(57);
+});
+
+it.each(["length", "content_filter"])("preserves partial text and reasoning in %s terminal output without publishing partial tools", reason => {
+  const converter = new ChatToResponses("r", "fixture");
+  converter.push(chunk({ reasoning: "partial thought" }));
+  converter.push(chunk({ content: "partial answer", tool_calls: [{ index: 0, id: "call", type: "function", function: { name: "tool", arguments: '{"incomplete":' } }] }));
+  converter.push(chunk({}, reason));
+  const events = converter.finish();
+  expect(events.at(-1)).toMatchObject({ type: "response.incomplete", response: { status: "incomplete", output: [
+    { type: "reasoning", summary: [{ text: "partial thought" }] },
+    { type: "message", status: "incomplete", content: [{ text: "partial answer" }] },
+  ] } });
+  expect(events.some(event => event.type === "response.output_item.done")).toBe(true);
+  expect(events.some(event => event.type === "response.completed" || event.type === "response.function_call_arguments.done")).toBe(false);
+});
+
+it("preserves reasoning-only output on length termination", () => {
+  const converter = new ChatToResponses("r", "fixture");
+  converter.push(chunk({ reasoning: "partial thought" }, "length"));
+  expect(converter.finish().at(-1)).toMatchObject({ response: { output: [{ summary: [{ text: "partial thought" }] }] } });
 });

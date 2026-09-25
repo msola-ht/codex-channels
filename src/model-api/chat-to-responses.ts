@@ -66,7 +66,10 @@ export class ChatToResponses {
   finish(): JsonObject[] {
     if (this.ended || !this.finishReason) throw new ModelConversionError("Chat stream ended without a finish reason");
     this.ended = true;
-    if (this.finishReason === "length" || this.finishReason === "content_filter") return [this.event("response.incomplete", { response: { ...this.response("incomplete"), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
+    if (this.finishReason === "length" || this.finishReason === "content_filter") {
+      const events = this.closeContent("incomplete");
+      return [...events, this.event("response.incomplete", { response: { ...this.response("incomplete"), incomplete_details: { reason: this.finishReason === "length" ? "max_output_tokens" : "content_filter" } } })];
+    }
     if ((this.tools.size > 0) !== (this.finishReason === "tool_calls")) throw new ModelConversionError("Chat tool finish reason mismatch");
     const calls: OutputItem[] = [];
     for (const [index, state] of this.tools) {
@@ -116,7 +119,7 @@ export class ChatToResponses {
     return events;
   }
 
-  private closeContent(): JsonObject[] {
+  private closeContent(status = "completed"): JsonObject[] {
     const active = this.activeContent;
     if (!active) return [];
     this.activeContent = undefined;
@@ -126,7 +129,7 @@ export class ChatToResponses {
       ? { type: "output_text", text, annotations: [] }
       : { type: "summary_text", text };
     const completed = kind === "message"
-      ? { ...item, status: "completed", content: [part] }
+      ? { ...item, status, content: [part] }
       : { ...item, summary: [part] };
     this.items[output_index] = completed;
     return [

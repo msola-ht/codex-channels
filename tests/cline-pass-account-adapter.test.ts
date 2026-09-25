@@ -15,8 +15,13 @@ const valid = { success: true, data: { limits: ["five_hour", "weekly", "monthly"
 async function fixture(mode: "switching" | "exclusive" = "switching") {
   const root = mkdtempSync(join(tmpdir(), "cline-quota-")); roots.push(root);
   const environment = { CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+  writePrivateFileAtomicSync(join(environment.CODEX_CONNECT_HOME, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
+    slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,
+    context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
+    default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort })),
+  }] }));
   writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
-  await applyClinePassConfiguration({ apiKey: "sk_fixture-secret", contextWindow: 64000, mode, confirmExclusiveConfigChange: true }, { environment });
+  await applyClinePassConfiguration({ apiKey: "sk_fixture-secret", mode, confirmExclusiveConfigChange: true }, { environment });
   return environment;
 }
 

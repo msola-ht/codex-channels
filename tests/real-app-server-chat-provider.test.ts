@@ -15,11 +15,13 @@ import { waitFor } from "./support/real-app-server-helpers.js";
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdNvJ8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ2oPcf88OIhvJ6vAAAAAElFTkSuQmCC";
 contract.each([
-  { emptyOpening: false, effort: "high", useDefault: true },
+  { emptyOpening: false, effort: "high", useDefault: true, incomplete: false },
+  { emptyOpening: false, effort: "high", useDefault: true, incomplete: true },
+  { emptyOpening: false, effort: "high", useDefault: true, streamError: true },
   { emptyOpening: true, effort: "none", useDefault: false },
   { emptyOpening: false, effort: "low", useDefault: false },
   { emptyOpening: false, effort: "max", useDefault: false },
-])("Cline Pass preserves items and tool follow-up ($effort, empty opening: $emptyOpening)", async ({ emptyOpening, effort, useDefault }) => {
+])("Cline Pass preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError)", async ({ emptyOpening, effort, useDefault, incomplete, streamError }) => {
   const root = mkdtempSync(join(tmpdir(), "chat-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
   const bodies: Array<{ tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content?: string; tool_call_id?: string }> }> = [];
@@ -42,8 +44,9 @@ contract.each([
         send({ reasoning: "Review task results." });
         send({ content: "First answer. " });
         send({ reasoning: "Double check." });
-        send(delta, "stop", { prompt_tokens: 20, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 12 } });
+        send(delta, streamError ? null : incomplete ? "length" : "stop", { prompt_tokens: 20, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 12 } });
       }
+      if (!first && streamError) response.write(`data: ${JSON.stringify({ choices: [{ finish_reason: "error", error: { code: "context_length_exceeded", message: "private upstream diagnostic" } }] })}\n\n`);
       response.end("data: [DONE]\n\n");
     });
   });
@@ -54,8 +57,13 @@ contract.each([
     const address = backend.address(); if (!address || typeof address === "string") throw new Error("No listener");
     bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", upstreamBasePath: "/v1" });
     await bridge.start();
+  writePrivateFileAtomicSync(join(environment.CODEX_CONNECT_HOME, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
+    slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,
+    context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
+    default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort })),
+  }] }));
     writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
-    await applyClinePassConfiguration({ apiKey: "sk_fixture", contextWindow: 64000 }, { environment });
+    await applyClinePassConfiguration({ apiKey: "sk_fixture" }, { environment });
     const managed = loadManagedProviderAppServers(environment)[0]!;
     const runtime = { ...managed, arguments: withProviderBaseUrl(managed.arguments, managed.provider, `http://${bridge.address()}`) };
     rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment: { ...environment, ...runtime.childEnvironment }, createCodexProcessInvocation: args => ({ file: process.env.CODEX_BINARY ?? "codex", args: [...args, ...runtime.arguments] }) }), 15000);
@@ -78,7 +86,7 @@ contract.each([
     const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "cline-pass", sandbox: "read-only", approvalPolicy: "never", ephemeral: true, dynamicTools: [{ type: "function", name: "schedule_task", description: "List fixture tasks", inputSchema: { type: "object", properties: { action: { type: "string" } }, required: ["action"], additionalProperties: false } }] } });
     const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, ...(!useDefault ? { effort } : {}), input: [{ type: "text", text: "List scheduled tasks", text_elements: [] }, { type: "image", url: imageUrl }] } });
     await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
-    expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
+    expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: incomplete || streamError ? "failed" : "completed" }));
     expect(bodies).toHaveLength(2);
     for (const body of bodies) {
       expect(body).toMatchObject({ reasoning: { effort } });
@@ -86,10 +94,11 @@ contract.each([
         { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
       ]) }));
     }
+    if (streamError) expect(JSON.stringify(turns)).not.toContain("private upstream diagnostic");
     expect(deltas.map(item => item.delta).join("")).toBe("Checking tasks.First answer. Chat tool round trip complete");
     for (const delta of deltas) {
       expect(started.filter(item => item.id === delta.itemId)).toEqual([expect.objectContaining({ type: "agentMessage" })]);
-      expect(completed.filter(item => item.id === delta.itemId)).toEqual([expect.objectContaining({ type: "agentMessage" })]);
+      if (!streamError) expect(completed.filter(item => item.id === delta.itemId)).toEqual([expect.objectContaining({ type: "agentMessage" })]);
     }
     const reasoningItems = started.filter(item => item.type === "reasoning");
     expect(reasoningItems).toHaveLength(3);

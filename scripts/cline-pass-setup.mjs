@@ -3,8 +3,10 @@ import { join } from "node:path";
 import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
-import { clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
+import { deepseekProviderDefinition, clinePassProviderDefinition as definition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
 import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
+import { downloadDeepseekCatalog, createManagedDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
+import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
 import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
@@ -27,22 +29,29 @@ export function clinePassSetupPaths(environment = process.env) {
   };
 }
 
-export function createClinePassCatalog(contextWindow) {
+export function createClinePassCatalog(templates) {
+  const matches = templates.filter(model => model.id === "deepseek-flash");
+  if (matches.length !== 1) throw new Error("DS 模型目录必须包含唯一的 deepseek-flash 模板");
+  const template = matches[0];
+  if (template.reasoningEfforts.some(effort => !["none", "low", "high", "max"].includes(effort))) throw new Error("DS 模板包含 Cline Pass 未支持的思考等级");
   return { models: createResponsesModelCatalog([{
     id: definition.defaultModel, name: "Cline Pass DeepSeek V4.1 Flash",
-    contextWindow, reasoningEfforts: ["none", "low", "high", "max"], defaultReasoningEffort: definition.defaultReasoningEffort, supportsImages: true,
+    contextWindow: template.contextWindow, maxContextWindow: template.maxContextWindow,
+    reasoningEfforts: [...new Set(["none", ...template.reasoningEfforts])],
+    defaultReasoningEffort: template.defaultReasoningEffort, supportsImages: template.supportsImages,
   }], definition.defaultModel).models };
 }
 
-export async function applyClinePassConfiguration({ apiKey, contextWindow, mode = "switching", confirmExclusiveConfigChange = false }, { environment = process.env } = {}) {
+export async function applyClinePassConfiguration({ apiKey, mode = "switching", confirmExclusiveConfigChange = false }, { environment = process.env, loadTemplates = loadResponsesModelTemplates, downloadCatalog = downloadDeepseekCatalog } = {}) {
   if (!isManagedProviderApiKeyValid(definition, apiKey)) throw new Error("Cline Pass API Key 无效");
   if (!["switching", "exclusive"].includes(mode)) throw new Error("Cline Pass 模式无效");
   if (mode === "exclusive" && !confirmExclusiveConfigChange) throw new Error("固定模式修改 Codex 主配置前必须确认");
-  const catalog = createClinePassCatalog(contextWindow);
-  await validateModelCatalogWithCodex(catalog, environment);
   return withModelProviderManagementTransaction(environment, async () => {
     const paths = clinePassSetupPaths(environment);
-    const snapshots = snapshotProviderFiles(Object.values(paths));
+    const dsDirectory = managedProviderDirectory(environment, deepseekProviderDefinition);
+    const dsCatalogPath = join(dsDirectory, deepseekProviderDefinition.catalogFileName);
+    const dsManifestPath = join(dsDirectory, deepseekProviderDefinition.catalogManifestFileName);
+    const snapshots = snapshotProviderFiles([...Object.values(paths), dsCatalogPath, dsManifestPath]);
     const content = key => snapshots.find(item => item.path === paths[key]).content?.toString("utf8");
     const current = content("config") === undefined ? {} : parsePrivateConfig(content("config"));
     const previous = loadManagedModelProviderSettings(environment).find(item => item.provider === definition.id);
@@ -50,6 +59,18 @@ export async function applyClinePassConfiguration({ apiKey, contextWindow, mode 
     if (mode === "exclusive" && !["openai", definition.id].includes(loadPrimaryModelProvider(environment))) throw new Error("请先恢复当前固定 Provider");
     const backup = content("backup") === undefined ? undefined : parsePrivateBackup(content("backup"));
     if (previous && !backup?.config) throw new Error("Cline Pass 初始备份缺失");
+    let downloadedDs;
+    if (snapshots.find(item => item.path === dsCatalogPath).content === undefined) {
+      downloadedDs = createManagedDeepseekCatalog((await downloadCatalog(globalThis.fetch)).catalog);
+    }
+    const catalog = createClinePassCatalog(downloadedDs
+      ? responsesModelTemplatesFromCatalog(downloadedDs, "deepseek")
+      : await loadTemplates("deepseek", environment));
+    if (previous) {
+      const effort = previous.models.find(model => model.model === definition.defaultModel)?.reasoningEffort;
+      if (catalog.models[0].supported_reasoning_levels.some(level => level.effort === effort)) catalog.models[0].default_reasoning_level = effort;
+    }
+    await validateModelCatalogWithCodex(catalog, environment);
     const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
     const { config, profile } = createManagedProviderConfiguration(current, initial, definition, {
       mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog, model: definition.defaultModel,
@@ -57,10 +78,14 @@ export async function applyClinePassConfiguration({ apiKey, contextWindow, mode 
     const updates = new Map([
       [paths.backup, `${JSON.stringify({ config: initial })}\n`],
       [paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`],
-      [paths.manifest, `${JSON.stringify({ source: "https://docs.cline.bot/api/chat-completions", contextWindowSource: "user" })}\n`],
+      [paths.manifest, `${JSON.stringify({ source: "deepseek", model: "deepseek-flash" })}\n`],
       [paths.profile, profile === undefined ? undefined : stringify(profile)],
       [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
     ]);
+    if (downloadedDs) {
+      updates.set(dsCatalogPath, `${JSON.stringify(downloadedDs, null, 2)}\n`);
+      updates.set(dsManifestPath, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
+    }
     if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial)) {
       const archive = `${paths.backup}.${randomUUID()}`;
       snapshots.push(...snapshotProviderFiles([archive]));
@@ -95,7 +120,7 @@ export async function removeClinePassConfiguration({ confirmRemove = false } = {
 
 export async function runClinePassSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
   const configured = loadManagedModelProviderSettings(environment).some(item => item.provider === definition.id);
-  const action = await prompts.select({ message: "Cline Pass", options: [
+  const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: configured ? "重新配置" : "配置 Cline Pass" },
     ...(configured ? [{ value: "remove", label: "移除配置" }] : []),
     { value: "back", label: "返回" },
@@ -108,12 +133,10 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   } else {
     const apiKey = await prompts.password({ message: "Cline Pass API Key", validate: value => isManagedProviderApiKeyValid(definition, value) ? undefined : "请输入有效 API Key" });
     if (prompts.isCancel(apiKey)) return { action: "back" };
-    const contextWindow = await prompts.text({ message: "模型上下文窗口（Token，按账户提供的模型能力填写）", validate: value => /^\d+$/u.test(value ?? "") && Number.isSafeInteger(Number(value)) && Number(value) >= 4096 ? undefined : "请输入至少 4096 的整数" });
-    if (prompts.isCancel(contextWindow)) return { action: "back" };
     const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定模式" }] });
     if (prompts.isCancel(mode)) return { action: "back" };
     if (mode === "exclusive" && await prompts.confirm({ message: "固定模式会修改 Codex 主配置，是否继续？", initialValue: false }) !== true) return { action: "back" };
-    result = await applyClinePassConfiguration({ apiKey, contextWindow: Number(contextWindow), mode, confirmExclusiveConfigChange: mode === "exclusive" }, { environment });
+    result = await applyClinePassConfiguration({ apiKey, mode, confirmExclusiveConfigChange: mode === "exclusive" }, { environment });
   }
   writeGatewayConfigActivationNotice(output, environment, configActivationResult(result.activation));
   return result;

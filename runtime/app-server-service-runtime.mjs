@@ -155,7 +155,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       });
       await bridge.start();
       const url = new URL(`http://${bridge.address()}`);
-      options = { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http" };
+      options = { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics };
     }
     const optionsWithUserAgent = {
       ...options,

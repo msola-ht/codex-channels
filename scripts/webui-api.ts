@@ -894,6 +894,7 @@ export interface TrafficTurnStatesResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
     safetyModels: Array<{ source: string; model: string }>

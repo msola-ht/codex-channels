@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const writes=vi.hoisted(()=>[] as string[]);
@@ -28,7 +30,7 @@ vi.mock("../runtime/private-file.mjs",async original=>{
 });
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { finishResponsesModelCatalogWrite, removeResponsesModelCatalog, readResponsesModelCatalog, responsesContextSyncPath, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
-import { recoverResponsesContextSync } from "../runtime/responses-context-sync.mjs";
+import { recoverResponsesContextSync, writeResponsesContextFollowers, listResponsesContextFollowers } from "../runtime/responses-context-sync.mjs";
 import { writeManagedModelWindowGlobal, loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { applyModelWindowChange, previewModelWindowChange } from "../scripts/model-window-management.mjs";
 import { configureCcgAccounts, configureOpenCodeGo, configuredHome, testEnvironment, connectHomeFor, providerCatalogPath } from "./model-provider-runtime-test-fixture.js";
@@ -192,4 +194,70 @@ describe("DS context propagation to mapped RS models",()=>{
     expect(()=>recoverResponsesContextSync(environment,"rs-one","rollback")).toThrow("已变化");
     expect(existsSync(path)).toBe(true);
   });
+});
+
+it.each(["keep","rollback"] as const)("recovers a Cline-only context transaction without DS accounts with %s",action=>{
+  const home=mkdtempSync(join(tmpdir(),"codexc-cline-recovery-"));roots.push(home);
+  const environment=testEnvironment(home);
+  const source=providerCatalogPath(home);
+  const directory=join(connectHomeFor(home),"providers","cline-pass");
+  const path=join(directory,"models.json");
+  writePrivateFileAtomicSync(join(directory,"managed.toml"),'version = 1\nprovider = "cline-pass"\nmode = "switching"\n');
+  writePrivateFileAtomicSync(join(directory,"models.manifest.json"),JSON.stringify({source:"deepseek",model:"deepseek-flash"}));
+  writePrivateFileAtomicSync(source,JSON.stringify({models:[{slug:"deepseek-flash",context_window:1048576,max_context_window:1048576}]}));
+  writePrivateFileAtomicSync(path,JSON.stringify({models:[{slug:"cline-pass/deepseek-v4.1-flash",context_window:1048576,max_context_window:1048576}]}));
+  const before=[readFileSync(source,"utf8"),readFileSync(path,"utf8")];
+  const ds=JSON.parse(before[0]!);ds.models[0].context_window=524288;
+  failures.path=path;failures.rollback=true;
+  expect(()=>writeResponsesContextFollowers(new Map([[source,JSON.stringify(ds)]]),environment)).toThrow("同步结果无法确认");
+  const journal=responsesContextSyncPath(environment);
+  const content=readFileSync(journal,"utf8");
+  const record=JSON.parse(content) as {files:Array<{path:string;next:string}>};
+  failures.path="";failures.rollback=false;
+  // Recovery must still reject other files under the shared DS directory.
+  record.files[0]!.path=join(connectHomeFor(home),"providers","deepseek","unrelated.json");
+  writePrivateFileAtomicSync(journal,JSON.stringify(record));
+  expect(()=>recoverResponsesContextSync(environment,"cline-pass",action)).toThrow("恢复文件无效");
+  expect(existsSync(journal)).toBe(true);
+  writePrivateFileAtomicSync(journal,content);
+  expect(recoverResponsesContextSync(environment,"cline-pass",action)).toBe(true);
+  const expected=action === "rollback" ? before : (JSON.parse(content) as typeof record).files.map(file=>file.next);
+  expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(expected);
+  expect(existsSync(journal)).toBe(false);
+});
+
+it.each(["none","write","rollback"])("includes planned Cline writes in the DS recovery transaction (failure: %s)",async failure=>{
+  const fail=failure !== "none";
+  const {environment,home,source}=await fixture();
+  const ds=JSON.parse(readFileSync(source,"utf8"));
+  ds.models.push({...ds.models[0],slug:"deepseek-flash",context_window:1048576});
+  writePrivateFileAtomicSync(source,JSON.stringify(ds));
+  const directory=`${connectHomeFor(home)}/providers/cline-pass`;
+  const path=`${directory}/models.json`;
+  writePrivateFileAtomicSync(`${directory}/managed.toml`,'version = 1\nprovider = "cline-pass"\nmode = "switching"\n');
+  writePrivateFileAtomicSync(`${directory}/models.manifest.json`,JSON.stringify({source:"deepseek",model:"deepseek-flash"}));
+  writePrivateFileAtomicSync(path,JSON.stringify({models:[{slug:"cline-pass/deepseek-v4.1-flash",context_window:1048576,max_context_window:1048576,default_reasoning_level:"none"}]}));
+  expect(listResponsesContextFollowers(environment,"deepseek-flash")).toContainEqual({providerId:"cline-pass",model:"cline-pass/deepseek-v4.1-flash",contextWindow:1048576});
+  const before=[readFileSync(source,"utf8"),readFileSync(path,"utf8")];
+  ds.models.at(-1).context_window=524288;
+  if(fail) failures.path=path;
+  failures.rollback=failure === "rollback";
+  const nextCline=JSON.parse(before[1]!);nextCline.models[0].context_window=524288;
+  const run=()=>writeResponsesContextFollowers(new Map([[source,JSON.stringify(ds)],[path,JSON.stringify(nextCline)]]),environment,new Map([[source,before[0]!],[path,before[1]!]]),"deepseek-flash");
+  if(fail){
+    expect(run).toThrow(failure === "rollback" ? "同步结果无法确认" : "injected write failure");
+    if(failure === "rollback") {
+      expect(existsSync(responsesContextSyncPath(environment))).toBe(true);
+      failures.path="";failures.rollback=false;
+      expect(recoverResponsesContextSync(environment,"cline-pass","rollback")).toBe(true);
+    }
+    expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(before);
+  }else{
+    expect(run()).toBe(true);
+    expect(JSON.parse(readFileSync(path,"utf8")).models[0]).toMatchObject({context_window:524288,default_reasoning_level:"none"});
+    const journal=responsesContextSyncPath(environment);
+    writePrivateFileAtomicSync(journal,readFileSync(`${journal}.backup`,"utf8"));
+    expect(recoverResponsesContextSync(environment,"cline-pass","rollback")).toBe(true);
+    expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(before);
+  }
 });

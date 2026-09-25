@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { array, ModelConversionError, object, string } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
@@ -175,6 +176,9 @@ function textContent(value: unknown): string {
 
 function chatToolName(name: string, namespace?: string): string {
   const result = namespace === undefined ? name : `${namespace}__${name}`;
-  if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(result)) throw new ModelConversionError("Unsupported Chat tool name");
-  return result;
+  if (!name || (namespace !== undefined && !namespace) || !/^[a-zA-Z0-9_-]+$/u.test(result)) throw new ModelConversionError("Unsupported Chat tool name");
+  if (result.length <= 64) return result;
+  // Stable across requests and history, with the full identity retained in toolNames.
+  const digest = createHash("sha256").update(JSON.stringify([namespace ?? null, name])).digest("hex").slice(0, 32);
+  return `${result.slice(0, 24)}_${digest}`;
 }

@@ -1,4 +1,4 @@
-import { writeResponsesContextFollowers } from "./responses-context-sync.mjs";
+import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import {
   closeSync,
@@ -15,6 +15,7 @@ import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "./codex-home.mjs";
 import { providerStorageRoot } from "./connect-home.mjs";
 import {
+  deepseekProviderDefinition,
   isManagedProviderModelValid,
   isManagedProviderApiKeyValid,
   loadManagedModelProviderDefinitions,
@@ -97,10 +98,11 @@ export function loadManagedModelProviderSettings(environment = process.env) {
 // 全部未设置时省略该字段（目录里的官方窗口保持不变）。
 export function loadManagedModelWindow(environment = process.env) {
   const providers = loadManagedModelProviderSettings(environment);
+  const clineFollows = clinePassFollowsDeepseekContext(environment);
   const bySlug = new Map();
   for (const provider of providers) {
     for (const model of provider.models ?? []) {
-      const slug = model.model;
+      const slug = clineFollows && provider.provider === "cline-pass" ? "deepseek-flash" : model.model;
       if (typeof slug !== "string" || slug === "") continue;
       const percent = model.windowPercent;
       const existing = bySlug.get(slug);
@@ -311,13 +313,16 @@ export function writeManagedModelWindowGlobal(
 ) {
   validateWindowPercent(windowPercent);
   const providers = loadManagedModelProviderSettings(environment);
+  const clineFollows = clinePassFollowsDeepseekContext(environment);
+  const localModel = provider => clineFollows && provider.provider === "cline-pass" && model === "deepseek-flash"
+    ? "cline-pass/deepseek-v4.1-flash" : model;
   const matches = providers.filter((provider) =>
-    (provider.models ?? []).some((candidate) => candidate.model === model));
+    (provider.models ?? []).some((candidate) => candidate.model === localModel(provider)));
   if (matches.length === 0) {
     throw new Error(`未找到已配置模型：${model}`);
   }
   const bases = matches.map((provider) =>
-    provider.models.find((entry) => entry.model === model)?.maxContextWindow);
+    provider.models.find((entry) => entry.model === localModel(provider))?.maxContextWindow);
   const base = bases[0];
   if (
     !Number.isSafeInteger(base)
@@ -331,7 +336,7 @@ export function writeManagedModelWindowGlobal(
   const originals = new Map();
   const overridden = [];
   for (const provider of matches) {
-    const modelEntry = provider.models.find((entry) => entry.model === model);
+    const modelEntry = provider.models.find((entry) => entry.model === localModel(provider));
     if (modelEntry?.windowPercent !== undefined && modelEntry.windowPercent !== windowPercent) {
       overridden.push({provider: provider.provider, previousPercent: modelEntry.windowPercent});
     }
@@ -339,7 +344,7 @@ export function writeManagedModelWindowGlobal(
     // 多个账户共享同一目录；每个目录及其 Profile 只计划和写入一次。
     if (updates.has(path)) continue;
     const settings = {
-      model,
+      model: localModel(provider),
       reasoningEffort: modelEntry?.reasoningEffort ?? provider.reasoningEffort,
       contextWindow,
     };
@@ -348,6 +353,18 @@ export function writeManagedModelWindowGlobal(
     originals.set(path, previous);
     collectCatalogWithProfileMirrors(environment, path,
       updateModelCatalogSettings(previous, definition, settings), updates, originals);
+  }
+  // Cline can own the first configuration while the shared DS template has no account yet.
+  if (clineFollows && model === "deepseek-flash") {
+    const path = join(managedProviderDirectory(environment, deepseekProviderDefinition), deepseekProviderDefinition.catalogFileName);
+    if (!updates.has(path)) {
+      const previous = readPrivateFile(path, maximumCatalogBytes);
+      const sourceModel = modelCatalogSetting(previous, deepseekProviderDefinition, model);
+      originals.set(path, previous);
+      collectCatalogWithProfileMirrors(environment, path, updateModelCatalogSettings(previous, deepseekProviderDefinition, {
+        model, contextWindow, reasoningEffort: sourceModel.reasoningEffort,
+      }), updates, originals);
+    }
   }
   // 全部受管目录、Profile 与 RS 跟随目录共享一次提交和原始快照回滚。
   writeCatalogUpdates(environment, updates, originals, model);

@@ -459,7 +459,7 @@
 - `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
   全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
-  `codexc` 入口与配置预检。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
+  `codexc` 入口与配置预检，并加载安装后的 Setup 模块，检查其传递依赖是否完整打包。安装目录和依赖树每次重建，下载缓存沿用 npm 配置，避免重复下载；干净源码安装仍使用独立缓存。
 - `sync-gateway-version.mjs`：升级 Codex CLI 协议时把 `package.json`、锁文件和 Gateway 运行时
   版本重置为新的正式基础版本；Gateway 候选发行和修复发行可分别在该基础版本后使用受控的
   `-rc.N` 或 `-fixN` 后缀。任一后缀 Tag 发布并核验后，`main` 必须通过独立 PR 恢复无后缀基础
@@ -536,4 +536,4 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
-- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：Cline Pass 单账户固定/切换配置、模型目录校验、私有事务写入与移除。
+- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：Cline Pass 单账户固定/切换配置、复用 DS Flash 模板并关联统一上下文设置、模型目录校验、私有事务写入与移除。

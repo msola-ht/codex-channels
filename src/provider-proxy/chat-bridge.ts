@@ -5,10 +5,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { ChatToResponses, ModelConversionError, responsesToChat } from "../model-api/index.js";
+import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
+import { ChatUpstreamError, chatStreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
 
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
+  readonly diagnostics = new ChatDiagnosticsChannel();
   private readonly active = new Set<AbortController>();
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
   constructor(private readonly options: ProviderProxyOptions) {}
@@ -24,6 +27,7 @@ export class ChatCompletionsBridge {
   async close(): Promise<void> {
     for (const controller of this.active) controller.abort();
     this.server.closeAllConnections();
+    this.diagnostics.clear();
     await new Promise<void>(resolve => this.server.close(() => resolve()));
   }
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -38,6 +42,8 @@ export class ChatCompletionsBridge {
     const abort = (): void => { controller.abort(); };
     response.once("close", abort);
     let status = 400;
+    const diagnostics = new ChatDiagnostics();
+    const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], diagnostics.snapshot());
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
       const chunks: Buffer[] = [];
@@ -66,10 +72,12 @@ export class ChatCompletionsBridge {
       const ready = once(upstreamRequest, "response");
       upstreamRequest.end(payload);
       const [incoming] = await ready as [IncomingMessage];
+      diagnostics.header(incoming.headers["x-request-id"]);
+      diagnostics.responseStatus(incoming.statusCode);
+      publishDiagnostics();
       if (incoming.statusCode !== 200) {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
-        incoming.destroy();
-        throw new Error("upstream rejected request");
+        throw await readChatHttpError(incoming);
       }
       if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) { incoming.destroy(); throw new Error("invalid upstream content type"); }
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
@@ -95,20 +103,31 @@ export class ChatCompletionsBridge {
           if (!data) continue;
           if (done) throw new ModelConversionError("Chat data after DONE");
           if (data === "[DONE]") done = true;
-          else await emit(converter.push(JSON.parse(data) as unknown));
+          else {
+            const chunk: unknown = JSON.parse(data);
+            diagnostics.push(chunk);
+            const upstreamError = chatStreamError(chunk);
+            if (upstreamError) throw upstreamError;
+            await emit(converter.push(chunk));
+          }
         }
         if (done) break;
       }
       if (!done) throw new ModelConversionError("Chat stream disconnected before DONE");
-      await emit(converter.finish());
+      const terminal = converter.finish();
+      publishDiagnostics();
+      await emit(terminal);
       response.end();
     } catch (error) {
-      const message = error instanceof ModelConversionError ? error.message : "Chat upstream request failed";
+      const message = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error.message : "Chat upstream request failed";
       if (status === 502 && !controller.signal.aborted) this.options.onError?.(new Error(message));
-      const detail = { code: status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
+      const detail = { code: error instanceof ChatUpstreamError ? error.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
+      if (error instanceof ChatUpstreamError) diagnostics.error(error.code, response.headersSent ? "stream" : "http", error.retryable);
+      publishDiagnostics();
       if (!response.destroyed) {
-        if (response.headersSent) response.end(`event: response.failed\ndata: ${JSON.stringify({ type: "response.failed", response: { status: "failed", error: detail } })}\n\n`);
-        else response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
+        if (response.headersSent) {
+          response.end(`event: response.failed\ndata: ${JSON.stringify({ type: "response.failed", response: { status: "failed", error: detail } })}\n\n`);
+        } else response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
       }
     } finally {
       clearTimeout(timer); response.off("close", abort); controller.abort(); this.active.delete(controller);

@@ -19,9 +19,19 @@ export function writeResponsesContextFollowers(updates, environment, originals =
     ? previousSource.models.find(old=>old.slug === model.slug)?.context_window !== model.context_window
     : model.slug === targetModel).map(model => [model.slug, model.context_window]));
   const directory = join(providerStorageRoot(environment), "responses");
-  if (!existsSync(directory)) return false;
   const next = new Map(updates);
-  for (const entry of readdirSync(directory, {withFileTypes:true})) {
+  const cline = readClineContextFollower(environment);
+  if (cline && windows.has("deepseek-flash")) {
+    const contextWindow = windows.get("deepseek-flash");
+    const model = cline.catalog.models[0];
+    if (model.context_window !== contextWindow) {
+      if (!Number.isSafeInteger(contextWindow) || contextWindow < 1024 || contextWindow > model.max_context_window) throw new Error("DS 上下文超出 Cline Pass 模型窗口，请重新配置 Cline Pass");
+      model.context_window = contextWindow;
+      next.set(cline.path, `${JSON.stringify(cline.catalog, null, 2)}\n`);
+      if (!originals.has(cline.path)) originals.set(cline.path, cline.content);
+    }
+  }
+  for (const entry of existsSync(directory) ? readdirSync(directory, {withFileTypes:true}) : []) {
     if (!isResponsesProvider(entry.name)) continue;
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("RS 模型目录类型无效");
     const catalogPath=responsesProviderCatalogPath(environment,entry.name);
@@ -38,7 +48,7 @@ export function writeResponsesContextFollowers(updates, environment, originals =
       originals.set(catalog.path,catalog.content);
     }
   }
-  if (next.size === updates.size) return false;
+  if (next.size === updates.size && !(cline && windows.has("deepseek-flash") && next.has(cline.path))) return false;
   const path = responsesContextSyncPath(environment);
   if (existsSync(path)) throw new Error("DS/RS 上下文同步尚未恢复");
   const files = [...next].map(([path,content]) => ({path,previous:originals.get(path) ?? readPrivateFileSync(path,maximumBytes),next:content}));
@@ -60,7 +70,7 @@ export function writeResponsesContextFollowers(updates, environment, originals =
       restoreFiles(files,"rollback");
       unlinkSync(path);
     } catch (rollbackError) {
-      throw new AggregateError([error,rollbackError],"DS/RS 上下文同步结果无法确认，已保留恢复记录；请停止服务后执行 primary-provider recover <RS ID> keep 或 rollback",{cause:rollbackError});
+      throw new AggregateError([error,rollbackError],"DS/RS 上下文同步结果无法确认，已保留恢复记录；请停止服务后执行 primary-provider recover <Provider ID> keep 或 rollback",{cause:rollbackError});
     }
     throw error;
   }
@@ -90,19 +100,21 @@ export function recoverResponsesContextSync(environment,id,action) {
   let journal;
   try { journal=JSON.parse(readPrivateFileSync(path,maximumBytes)); } catch { throw new Error("DS/RS 上下文恢复记录无法安全读取"); }
   if (journal?.schemaVersion !== 1 || Object.keys(journal).length !== 2 || !Array.isArray(journal.files) || journal.files.length < 2) throw new Error("DS/RS 上下文恢复记录格式无效");
-  const target = responsesProviderCatalogPath(environment,id);
+  const target = id === "cline-pass" ? join(providerStorageRoot(environment), "cline-pass", "models.json") : responsesProviderCatalogPath(environment,id);
   const seen=new Set();
   for (const file of journal.files) {
     if (!file || Object.keys(file).length !== 3 || typeof file.path !== "string" || typeof file.previous !== "string" || typeof file.next !== "string" || seen.has(file.path) || !allowedPath(file.path,environment)) throw new Error("DS/RS 上下文恢复文件无效");
     seen.add(file.path);
   }
-  if (!seen.has(target)) throw new Error("该 RS Provider 不在待恢复的上下文事务中");
+  if (!seen.has(target)) throw new Error("该 Provider 不在待恢复的上下文事务中");
   restoreFiles(journal.files,action);
   unlinkSync(path);
   return true;
 }
 
 function allowedPath(path,environment) {
+  // Cline may create and follow the shared template before any DS account exists.
+  if (path === join(providerStorageRoot(environment),"deepseek","models.json")) return true;
   for (const definition of loadManagedModelProviderDefinitions(environment)) {
     if (path === join(providerStorageRoot(environment), definition.storageId ?? definition.id, definition.catalogFileName)
       || path === join(codexHomePath(environment), definition.profileFileName)) return true;
@@ -115,11 +127,35 @@ function allowedPath(path,environment) {
 
 export function listResponsesContextFollowers(environment, model) {
   const directory=join(providerStorageRoot(environment),"responses");
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory,{withFileTypes:true}).filter(entry=>isResponsesProvider(entry.name)).flatMap(entry=>{
+  const cline = model === undefined || model === "deepseek-flash" ? readClineContextFollower(environment) : undefined;
+  const managed = cline ? [{providerId:"cline-pass",model:"cline-pass/deepseek-v4.1-flash",contextWindow:cline.catalog.models[0].context_window}] : [];
+  return [...managed, ...(existsSync(directory) ? readdirSync(directory,{withFileTypes:true}) : []).filter(entry=>isResponsesProvider(entry.name)).flatMap(entry=>{
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error("RS 模型目录类型无效");
     const path=responsesProviderCatalogPath(environment,entry.name);
     if (!existsSync(path) && !existsSync(`${path}.pending`)) return [];
     return readResponsesModelCatalog(environment,entry.name).definitions.filter(value=>value.template?.source === "deepseek" && value.template.followContext && (model === undefined || value.template.model === model)).map(value=>({providerId:entry.name,model:value.id,contextWindow:value.contextWindow}));
-  });
+  })];
+}
+
+function readClineContextFollower(environment) {
+  const directory = join(providerStorageRoot(environment), "cline-pass");
+  if (!existsSync(join(directory, "managed.toml"))) return undefined;
+  const manifestPath = join(directory, "models.manifest.json");
+  let manifest;
+  try { manifest = JSON.parse(readPrivateFileSync(manifestPath, maximumBytes)); }
+  catch { throw new Error("Cline Pass 模型来源无法安全读取"); }
+  if (manifest.source !== "deepseek" || manifest.model !== "deepseek-flash") return undefined;
+  const path = join(directory, "models.json");
+  let catalog, content;
+  try { content = readPrivateFileSync(path, maximumBytes); catalog = JSON.parse(content); }
+  catch { throw new Error("Cline Pass 模型目录无法安全读取"); }
+  if (!Array.isArray(catalog.models) || catalog.models.length !== 1
+    || catalog.models[0].slug !== "cline-pass/deepseek-v4.1-flash"
+    || !Number.isSafeInteger(catalog.models[0].context_window)
+    || !Number.isSafeInteger(catalog.models[0].max_context_window)) throw new Error("Cline Pass 上下文跟随目录无效");
+  return {path, content, catalog};
+}
+
+export function clinePassFollowsDeepseekContext(environment) {
+  return readClineContextFollower(environment) !== undefined;
 }

@@ -1,3 +1,9 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+// @ts-expect-error JavaScript reader intentionally has no declaration file.
+import { listDumpFiles, describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
+import { ChatDiagnostics, ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
 import { createServer } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import { ChatCompletionsBridge, ProviderProxy } from "../src/provider-proxy/index.js";
@@ -5,16 +11,16 @@ import type { ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
-async function fixture(reply: string, status = 200) {
+async function fixture(reply: string | ((request: unknown) => string), status = 200) {
   let received: unknown;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       received = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
-      response.writeHead(status, { "content-type": "text/event-stream" });
+      response.writeHead(status, { "content-type": "text/event-stream", "x-request-id": "fixture-request-id" });
       // Deliberately split UTF-8 and SSE frame boundaries.
-      for (const byte of Buffer.from(reply)) response.write(Buffer.from([byte]));
+      for (const byte of Buffer.from(typeof reply === "string" ? reply : reply(received))) response.write(Buffer.from([byte]));
       response.end();
     });
   });
@@ -83,4 +89,117 @@ it.each(["client", "service"])("cancels upstream work when the %s disconnects", 
   if (owner === "client") controller.abort(); else await bridge.close();
   await closed;
   await pending;
+});
+
+it("round-trips a namespaced tool exceeding Chat name length through HTTP", async () => {
+  const namespace="mcp__codex_apps__codex_document_control",name="_execute_document_command";
+  const {bridge}=await fixture(value=>{
+    const request=value as {tools:Array<{function:{name:string}}>;tool_choice:{function:{name:string}}};
+    const alias=request.tools[0]!.function.name;
+    expect(alias).toMatch(/^[a-zA-Z0-9_-]{1,64}$/u);
+    expect(request.tool_choice.function.name).toBe(alias);
+    return frame({tool_calls:[{index:0,id:"long-call",type:"function",function:{name:alias,arguments:"{}"}}]},"tool_calls")+"data: [DONE]\n\n";
+  });
+  const result=await fetch(`http://${bridge.address()}/responses`,{method:"POST",body:JSON.stringify({...body,tools:[{type:"namespace",name:namespace,tools:[{type:"function",name,parameters:{type:"object"}}]}],tool_choice:{type:"function",name,namespace}})});
+  expect(result.status).toBe(200);
+  const response=await result.text();
+  expect(response).toContain('"type":"response.completed"');
+  expect(response).toContain(`"name":"${name}"`);
+  expect(response).toContain(`"namespace":"${namespace}"`);
+});
+
+
+it.each([true, false])("records diagnostics only for a configured Chat bridge (enabled: %s)", async enabled => {
+  const root = mkdtempSync(join(tmpdir(), "chat-diagnostics-"));
+  cleanups.push(async () => { rmSync(root, { recursive: true, force: true }); });
+  const metadata = { model: "deepseek/flash", id: "upstream-id", usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.01, gateway_cost: 0.02 }, choices: [{ index: 0, delta: { content: "partial", provider_metadata: { gateway: { cost: "0.03", routing: { finalProvider: "deepseek", totalProviderAttemptCount: 1, fallbacksAvailable: ["other"], modelAttempts: [{ providerAttempts: [{ provider: "deepseek", statusCode: 200, success: true }] }], credential: "secret" } }, secret: "secret" } }, finish_reason: "length" }] };
+  const { bridge } = await fixture(`data: ${JSON.stringify(metadata)}\n\ndata: [DONE]\n\n`);
+  const url = new URL(`http://${bridge.address()}`);
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", ...(enabled ? { chatDiagnostics: bridge.diagnostics } : {}), trafficDump: { directory: root, label: "cline-pass" } });
+  await proxy.start(); cleanups.push(() => proxy.close());
+  const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(result.headers.has("trailer")).toBe(false);
+  expect(result.headers.has("x-codexc-chat-diagnostics")).toBe(false);
+  expect(text).toContain('"type":"response.incomplete"');
+  expect(text).not.toContain("upstream-id");
+  expect(text).not.toContain("provider_metadata");
+  await proxy.close(); cleanups.pop();
+  const detail = await describeDumpExchange(listDumpFiles(root), 1, { maxTracePageSize: 1 });
+  if (enabled) expect(detail.chatDiagnostics).toMatchObject({ fields: { model: "deepseek/flash", id: "upstream-id", "routing.finalProvider": "deepseek", "usage.cost": 0.01, "usage.gateway_cost": 0.02, "gateway.cost": "0.03" }, truncated: false });
+  else expect(detail.chatDiagnostics).toBeUndefined();
+  expect(JSON.stringify(detail.chatDiagnostics ?? {})).not.toContain("secret");
+  expect(detail.response.body).toContain('"text":"partial"');
+  expect(detail.response.state).toBe("incomplete");
+});
+
+it("bounds diagnostic data without leaking arbitrary metadata", () => {
+  const collector = new ChatDiagnostics();
+  collector.header("request-id");
+  collector.push({ model: "x".repeat(300), choices: [{ delta: { provider_metadata: { gateway: { routing: { finalProvider: "deepseek", fallbacksAvailable: Array.from({length: 100}, () => "fallback"), clientSessionId: "secret" } } } } }] });
+  const value = collector.snapshot();
+  expect(value).toMatchObject({ truncated: true, fields: { requestId: "request-id", "routing.finalProvider": "deepseek" } });
+  expect(JSON.stringify(value)).not.toContain("secret");
+  expect(JSON.stringify(value).length).toBeLessThan(8192);
+});
+
+it("cleans diagnostic observers and isolates concurrent requests", () => {
+  const channel = new ChatDiagnosticsChannel();
+  const first: unknown[] = [], second: unknown[] = [];
+  const a = channel.subscribe(value => first.push(value));
+  const b = channel.subscribe(value => second.push(value));
+  channel.publish(a.id, { fields: { model: "a" }, truncated: false });
+  channel.publish(b.id, { fields: { model: "b" }, truncated: false });
+  a.close();channel.publish(a.id, { fields: { model: "leaked" }, truncated: false });
+  channel.clear();channel.publish(b.id, { fields: { model: "leaked" }, truncated: false });
+  expect(first).toEqual([{ fields: { model: "a" }, truncated: false }]);
+  expect(second).toEqual([{ fields: { model: "b" }, truncated: false }]);
+});
+
+it.each([400, 401, 402, 403, 404, 429, 500, 502, 503])("keeps request IDs and safe diagnostics for HTTP %s failures", async status => {
+  const root = mkdtempSync(join(tmpdir(), "chat-http-error-"));
+  cleanups.push(async () => { rmSync(root, { recursive: true, force: true }); });
+  const { bridge } = await fixture(JSON.stringify({ error: { code: status, message: "private upstream text", metadata: { secret: "credential" } } }), status);
+  const url = new URL(`http://${bridge.address()}`);
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "cline-pass" } });
+  await proxy.start();cleanups.push(() => proxy.close());
+  const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(result.status).toBe(status);expect(text).not.toContain("private upstream text");
+  await proxy.close();cleanups.pop();
+  const detail = await describeDumpExchange(listDumpFiles(root), 1);
+  expect(detail.chatDiagnostics.fields).toMatchObject({ requestId: "fixture-request-id", httpStatus: status, "error.stage": "http", "error.retryable": [429, 500, 502, 503].includes(status) });
+  expect(JSON.stringify(detail)).not.toContain("credential");
+});
+
+it.each(["context_length_exceeded", "content_filter", "rate_limit", "server_error"])("classifies documented mid-stream %s without exposing upstream messages", async code => {
+  const { bridge } = await fixture(frame({ content: "partial" }) + `data: ${JSON.stringify({ choices: [{ finish_reason: "error", error: { code, message: "upstream-secret" } }] })}\n\ndata: [DONE]\n\n`);
+  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(result.status).toBe(200);expect(text).toContain("response.failed");expect(text).toContain(`"code":"${code}"`);expect(text).not.toContain("upstream-secret");
+});
+
+it("records diagnostics before a client cancels immediately on the terminal event", async () => {
+  const root = mkdtempSync(join(tmpdir(), "chat-terminal-cancel-"));
+  cleanups.push(async () => { rmSync(root, { recursive: true, force: true }); });
+  const { bridge } = await fixture(`data: ${JSON.stringify({ model: "actual/model", choices: [{ index: 0, delta: { content: "done", provider_metadata: { gateway: { routing: { finalProvider: "deepseek" } } } }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  const url = new URL(`http://${bridge.address()}`);
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "cline-pass" } });
+  await proxy.start();cleanups.push(() => proxy.close());
+  const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const reader = result.body!.getReader();let text = "";
+  while (!text.includes('"type":"response.completed"')) { const item = await reader.read();if (item.done) break;text += new TextDecoder().decode(item.value); }
+  expect(text).toContain("response.completed");await reader.cancel();
+  await proxy.close();cleanups.pop();
+  const detail = await describeDumpExchange(listDumpFiles(root), 1);
+  expect(detail.chatDiagnostics.fields).toMatchObject({ model: "actual/model", "routing.finalProvider": "deepseek" });
+});
+
+it.each(["not-json", "x".repeat(65 * 1024), JSON.stringify({ error: { code: "unknown-secret", message: "upstream-secret" } })])("uses a safe HTTP fallback for invalid, oversized or unknown errors", async payload => {
+  const { bridge } = await fixture(payload, 502);
+  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(result.status).toBe(502);
+  const text = await result.text();
+  expect(text).toContain('"code":"server_error"');
+  expect(text).not.toContain("secret");
 });

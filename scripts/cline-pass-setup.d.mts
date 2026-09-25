@@ -1,5 +1,6 @@
+import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs";
 export function clinePassSetupPaths(environment?: NodeJS.ProcessEnv): Record<"config" | "profile" | "marker" | "catalog" | "manifest" | "backup", string>;
-export function createClinePassCatalog(contextWindow: number): { models: Array<Record<string, unknown>> };
-export function applyClinePassConfiguration(input: { apiKey: string; contextWindow: number; mode?: "switching" | "exclusive"; confirmExclusiveConfigChange?: boolean }, options?: { environment?: NodeJS.ProcessEnv }): Promise<{ action: string; provider: string; mode: string; activation: string }>;
+export function createClinePassCatalog(templates: ResponsesModelDefinition[]): { models: Array<Record<string, unknown>> };
+export function applyClinePassConfiguration(input: { apiKey: string; mode?: "switching" | "exclusive"; confirmExclusiveConfigChange?: boolean }, options?: { environment?: NodeJS.ProcessEnv; downloadCatalog?: typeof import("./deepseek-setup.mjs").downloadDeepseekCatalog; loadTemplates?: typeof import("./responses-model-templates.mjs").loadResponsesModelTemplates }): Promise<{ action: string; provider: string; mode: string; activation: string }>;
 export function removeClinePassConfiguration(input?: { confirmRemove?: boolean }, options?: import("./managed-provider-account-runtime.mjs").ManagedAccountRuntimeOptions): Promise<{ action: string; activation: string }>;
 export function runClinePassSetup(options?: { environment?: NodeJS.ProcessEnv; prompts?: unknown; output?: { write(value: string): unknown } }): Promise<unknown>;
