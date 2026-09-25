@@ -66,7 +66,7 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   上游轮次首 Token 来自 Responses WebSocket 的上游 timing 事件，只有请求带
   `x-responsesapi-include-timing-metrics` 时才下发；该内部头不由网关请求或注入，只按客户端原样透传，
   HTTP/SSE 请求也从不携带，因此这些上游项在默认配置下始终显示“未提供”。
-  完成卡片的运行、任务与会话摘要统一标为“Token/s”，`/metrics` 保留“平均 Token/s”：范围内有效请求输出速率的算术平均。单请求为 `outputTokens × 1000 / totalDurationMs`，只纳入输出 Token 与总耗时都大于零的记录；不扣首字等待，不从输出中减去推理 Token，不额外限制请求状态，压缩请求沿用原统计范围。平均值从原始请求直接计算，不对各轮或子代理均值再次平均；不是总 Token 除以 Turn/会话墙钟耗时，也不是纯生成速度。历史缺少耗时或无有效样本时显示“未提供”，不按旧时间戳补算。正式和调试模式均显示；该派生值不新增存储字段。
+  完成卡片在每一处速度读数上都给出“生成 Token/s”与“端到端 Token/s”（各自在未采样时整行省略），`/metrics` 保留“生成 Token/s”。生成速率为 `outputTokens × 1000 / (totalDurationMs - firstContentMs)`，端到端为 `outputTokens × 1000 / totalDurationMs`；Turn/Thread 与范围汇总都按「合计输出 ÷ 合计时间窗」合并计算，不先把逐请求速率平均，只在输出 Token 与对应时间窗同时大于零的记录上取样，缺采样的记录整条退出。两者都不从输出中减去推理 Token，也不额外限制请求状态，压缩请求沿用原统计范围；生成速率不是含首字等待的产出率，端到端不是纯生成速度。历史缺少时间窗或无有效样本时整行省略（`/metrics` 文本显示“未提供”），不按旧时间戳补算。正式和调试模式均显示；两个派生值都不新增存储字段。
   请求明细和转储的“首字耗时”从上游转发开始计到首个符合条件的事件，
   HTTP/SSE 采用 semantic 事件口径，WebSocket 采用 delta 与指定 done 事件口径，不要求文本非空；详见[WebUI 请求明细](webui.md)。
   当前锁定 Codex 0.156.1 的首轮 `generate=false` WebSocket 预热不属于模型推理，

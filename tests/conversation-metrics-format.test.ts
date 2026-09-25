@@ -11,6 +11,7 @@ describe("conversation metrics formatting", () => {
         modelProvider: "deepseek",
         latestTurn: {
           tokensPerSecond: 123.456,
+          generationTokensPerSecond: 200.5,
           turnId: "turn-1",
           requestCount: 3,
           unsuccessfulRequestCount: 1,
@@ -30,6 +31,7 @@ describe("conversation metrics formatting", () => {
         },
         threadAggregate: {
           tokensPerSecond: 234.567,
+          generationTokensPerSecond: 300.25,
           turnCount: 8,
           requestCount: 21,
           unsuccessfulRequestCount: 2,
@@ -51,8 +53,8 @@ describe("conversation metrics formatting", () => {
     });
 
     expect(rendered).toContain("模型请求：3 次（异常 1 次）");
-    expect(rendered).toContain("平均 Token/s：123.46");
-    expect(rendered).toContain("平均 Token/s：234.57");
+    expect(rendered).toContain("生成 Token/s：200.50");
+    expect(rendered).toContain("生成 Token/s：300.25");
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("其中推理输出：300");
     expect(rendered).toContain("其中推理输出：1.8 K");

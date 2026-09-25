@@ -219,8 +219,8 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首字耗时 | 总耗时 | Token/s | 上游轮次首 Token | 请求模型 | 响应回显 | 转储定位 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首字耗时 | 总耗时 | 生成 Token/s | 端到端 Token/s | 上游轮次首 Token | 请求模型 | 响应回显 | 转储定位 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
         [
@@ -235,6 +235,7 @@ export function printMetricsExport(result, format) {
           markdownCell(formatTokenCount(record.outputTokens ?? 0)),
           markdownCell(record.firstContentMs == null ? "—" : formatElapsedDuration(record.firstContentMs)),
           markdownCell(record.totalDurationMs == null ? "—" : formatElapsedDuration(record.totalDurationMs)),
+          formatTokensPerSecond(record.generationTokensPerSecond),
           formatTokensPerSecond(record.tokensPerSecond),
           markdownCell(record.upstreamTtftMs == null ? "—" : formatElapsedDuration(record.upstreamTtftMs)),
           markdownCell(record.requestModel ?? "未知"),
@@ -408,6 +409,7 @@ export function printMetricsRun(result, format) {
 
 function printTurnSummaryCsv(rows) {
   const columns = [
+    ["generationTokensPerSecond", (row) => row.generationTokensPerSecond],
     ["tokensPerSecond", (row) => row.tokensPerSecond],
     ["type", (row) => row.type],
     ["provider", (row) => row.provider],
@@ -449,7 +451,7 @@ export function printMetricsTurns(result, format) {
     console.log("该会话暂无可导出的对话记录。");
     return;
   }
-  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 总 Token | 平均 Token/s | 缓存率 | 上下文压缩 |");
+  console.log("| # | 对话 ID | 时间 | 模型 | 思考等级 | 请求 | 异常 | 总 Token | 生成 Token/s | 缓存率 | 上下文压缩 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
   for (const [index, turn] of result.turns.entries()) {
     const cacheRate = turn.cachedInputTokens === null || turn.inputTokens === 0
@@ -465,7 +467,7 @@ export function printMetricsTurns(result, format) {
         String(turn.requestCount),
         String(turn.unsuccessfulRequestCount),
         formatTokenCount(turn.inputTokens + turn.outputTokens),
-        formatTokensPerSecond(turn.tokensPerSecond),
+        formatTokensPerSecond(turn.generationTokensPerSecond),
         cacheRate,
         markdownCell(formatCompactSummary(turn.compact) ?? "无"),
       ].join(" | "),
@@ -489,6 +491,7 @@ export function printMetricsThreads(result, format) {
       ["requestCount", (thread) => thread.requestCount],
       ["inputTokens", (thread) => thread.inputTokens],
       ["outputTokens", (thread) => thread.outputTokens],
+      ["generationTokensPerSecond", (thread) => thread.generationTokensPerSecond],
       ["tokensPerSecond", (thread) => thread.tokensPerSecond],
       ...compactCsvColumns(),
       ["lastRecordedAtMs", (thread) => thread.lastRecordedAtMs],
@@ -507,7 +510,7 @@ export function printMetricsThreads(result, format) {
   console.log(`- 时区：${formatLocalTimeZone()}`);
   console.log(`- 时间范围：${result.range.name} · 各会话自身的期间统计`);
   console.log("");
-  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 平均 Token/s | 上下文压缩 | 最近记录 |");
+  console.log("| # | Thread | 模型 | 思考等级 | 类型 | 对话数 | 请求数 | 总 Token | 生成 Token/s | 上下文压缩 | 最近记录 |");
   console.log("| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |");
   for (const [index, thread] of result.threads.entries()) {
     console.log(
@@ -522,7 +525,7 @@ export function printMetricsThreads(result, format) {
         String(thread.turnCount),
         String(thread.requestCount),
         formatTokenCount(thread.inputTokens + thread.outputTokens),
-        formatTokensPerSecond(thread.tokensPerSecond),
+        formatTokensPerSecond(thread.generationTokensPerSecond),
         markdownCell(formatCompactSummary(thread.compact) ?? "无"),
         markdownCell(formatLocalTime(thread.lastRecordedAtMs)),
       ].join(" | "),
@@ -544,7 +547,7 @@ function printTurnSummary(summary) {
     `- 模型请求：${formatRequestCount(summary.requestCount)} 次${summary.unsuccessfulRequestCount > 0 ? `（异常 ${formatRequestCount(summary.unsuccessfulRequestCount)} 次）` : ""}`,
   );
   console.log(`- 总 Token：${formatTokenCount(totalTokens)}`);
-  console.log(`- 平均 Token/s：${formatTokensPerSecond(summary.tokensPerSecond)}`);
+  console.log(`- 生成 Token/s：${formatTokensPerSecond(summary.generationTokensPerSecond)}`);
   if (summary.cachedInputTokens === null) {
     console.log("  - 缓存：上游未提供完整数据");
   } else {
@@ -565,6 +568,7 @@ function printTurnSummary(summary) {
 
 function csvColumns() {
   return [
+    ["generationTokensPerSecond", (record) => record.generationTokensPerSecond],
     ["tokensPerSecond", (record) => record.tokensPerSecond],
     ["firstContentMs", (record) => record.firstContentMs],
     ["totalDurationMs", (record) => record.totalDurationMs],

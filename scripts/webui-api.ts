@@ -62,6 +62,7 @@ export interface CacheUsage {
 export interface Aggregate {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -158,6 +159,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 export interface ThreadListItem {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -182,6 +184,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 
 export interface TurnSummary {
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -215,6 +218,7 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 
 export interface RequestRecord {
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
@@ -249,6 +253,7 @@ export interface RequestRecord {
 
 export type RequestSortKey =
   | "tokensPerSecond"
+  | "generationTokensPerSecond"
   | "totalDuration"
   | "time"
   | "provider"
