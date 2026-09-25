@@ -11,6 +11,49 @@ const directories: string[] = [];
 afterEach(() => { vi.useRealTimers(); for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true }); });
 
 describe("request metrics aggregate reports", () => {
+  it("excludes missing cache samples from both sides of cache usage without losing total usage", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
+    const now = Date.now();
+    const scope = { startAtMs: now - 1000, endAtMs: now + 1000, limit: 1 };
+    try {
+      store.recordBatch([
+        { ...sample(), recordedAtMs: now, inputTokens: 100, cachedInputTokens: 80 },
+        { ...sample(), recordedAtMs: now, inputTokens: 300, cachedInputTokens: 0 },
+        { ...sample(), recordedAtMs: now, inputTokens: 900, cachedInputTokens: null },
+        { ...sample(), recordedAtMs: now, inputTokens: null, cachedInputTokens: 20 },
+        { ...sample(), recordedAtMs: now, inputTokens: null, cachedInputTokens: null },
+        { ...sample(), recordedAtMs: now - 2000, inputTokens: 1000, cachedInputTokens: 1000 },
+      ]);
+      const expected = { inputTokens: 1300,
+        cacheUsage: { inputTokens: 400, cachedInputTokens: 80, missingRequestCount: 3 } };
+      expect(store.aggregate({ ...scope, dimension: "global" }).aggregate).toMatchObject(expected);
+      expect(store.aggregate({ ...scope, dimension: "provider" }).groups[0]?.aggregate).toMatchObject(expected);
+      expect(store.page(scope).aggregate).toMatchObject(expected);
+      expect(store.threadList(scope).aggregate).toMatchObject(expected);
+      expect(store.threadList(scope).threads[0]).toMatchObject(expected);
+      expect(store.threadTurnSummaries("thread-1", scope).aggregate).toMatchObject(expected);
+      expect(store.aggregate({ ...scope, dimension: "global", provider: "missing" }).aggregate).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
+  it.each([
+    [null, null, 0, 1],
+    [0, 0, 100, 0],
+    [50, 50, 100, 0],
+  ])("preserves missing and zero cache observations (%s)", (cachedInputTokens, expectedCached, expectedInput, missingRequestCount) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "request-metrics.sqlite3"));
+    const now = Date.now();
+    try {
+      store.record({ ...sample(), recordedAtMs: now, inputTokens: 100, cachedInputTokens });
+      const result = store.threadList({ startAtMs: now - 1000, endAtMs: now + 1000, limit: 10 });
+      expect(result.threads[0]?.cacheUsage).toEqual({ cachedInputTokens: expectedCached, inputTokens: expectedInput, missingRequestCount });
+    } finally {
+      store.close();
+    }
+  });
+
   it.each(["Asia/Shanghai", "America/New_York", "Asia/Kathmandu", "UTC"])("groups by system calendar day and hour in %s", (timeZone) => {
     const directory = temporaryDirectory();
     const result = execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `

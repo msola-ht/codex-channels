@@ -12,7 +12,7 @@ export function ThreadRunSummary({
   threadAggregate,
 }: {
   latestTurn: TurnSummary | null
-  threadAggregate: (Aggregate & { turnCount: number }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
 }) {
   if (threadAggregate === null) {
     return (

@@ -27,6 +27,7 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
+        const { GlobalCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
@@ -40,6 +41,7 @@ describe("WebUI metrics table presentation", () => {
           onPrevious: noop, onNext: noop, onPageSizeChange: noop, onSortingChange: noop,
           sorting: [{ id: "time", desc: true }], serverTotal: 1 };
         const common = { provider: "openai", model: "model-test", recordedAtMs: 1000,
+          cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0 };
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
@@ -87,6 +89,20 @@ describe("WebUI metrics table presentation", () => {
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
         };
+        for (const [key, inputTokens, cachedInputTokens] of [
+          ["threadCacheZero", 100, 0], ["threadCacheUnknown", 100, null], ["threadInputZero", 0, 0],
+        ]) {
+          result[key] = render(ThreadTable, { threads: [{ ...common, inputTokens, cachedInputTokens,
+            cacheUsage: { inputTokens: cachedInputTokens === null ? 0 : inputTokens, cachedInputTokens, missingRequestCount: cachedInputTokens === null ? 1 : 0 },
+            threadId: "thread-1", agentPath: null, parentThreadId: null, turnCount: 1,
+            firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
+        }
+        const partial = { ...common, inputTokens: 1000, cachedInputTokens: null,
+          cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 1 } };
+        result.partialSummary = render(QuerySummary, { aggregate: partial, range: { name: "all" } });
+        result.partialGlobal = render(GlobalCards, { global: partial, threadCount: 1, turnCount: 1 });
+        result.partialThread = render(ThreadTable, { threads: [{ ...partial, threadId: "thread-1", agentPath: null,
+          parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
         globalThis.fixtureDisclosureOpen = true;
         for (const tier of ["fast", "priority", "default", "flex", "auto", null, undefined]) {
           result['tier-' + tier] = render(FastBadge, { tier, source: "request" });
@@ -241,12 +257,26 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "输出 Token", "平均 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "平均 Token/s", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
       "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "平均 Token/s",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
+  });
+
+  it("shows thread cache hit rates and preserves unknown or zero-input usage", () => {
+    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][8]?.[1];
+    expect(cacheCell(markup.threads!)).toContain("50.0%");
+    expect(cacheCell(markup.threadCacheZero!)).toContain("0.0%");
+    expect(cacheCell(markup.threadCacheUnknown!)).toContain("—");
+    expect(cacheCell(markup.threadInputZero!)).toContain("—");
+    expect(cacheCell(markup.partialThread!)).toContain("50.0%");
+    expect(markup.partialSummary).toContain("缓存 50");
+    expect(markup.partialGlobal).toContain("缓存 50 · 命中率 50.0%");
+    for (const key of ["partialThread", "partialSummary", "partialGlobal"]) {
+      expect(markup[key]).not.toMatch(/部分已知|已知样本/);
+    }
   });
 
   it("exposes sort direction and focusable tooltip triggers", () => {

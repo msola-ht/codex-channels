@@ -1,4 +1,4 @@
-import { formatCount, formatTokens, formatSuccessRate, formatTime } from "@/lib/format"
+import { formatCacheUsage, formatCount, formatTokens, formatSuccessRate, formatTime } from "@/lib/format"
 import type { Aggregate, Range } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -9,7 +9,7 @@ export function QuerySummary({ aggregate, range, turns, loading = false }: { agg
       {turns === undefined ? null : <span>{formatCount(turns)} 轮</span>}
       <span>请求 {formatCount(aggregate?.requestCount ?? 0)}</span>
       <span>成功率 {formatSuccessRate(aggregate?.requestCount ?? 0, aggregate?.unsuccessfulRequestCount ?? 0)}</span>
-      <span>输入 {formatTokens(aggregate?.inputTokens ?? 0)} · 缓存 {formatTokens(aggregate?.cachedInputTokens ?? null)}</span>
+      <span>输入 {formatTokens(aggregate?.inputTokens ?? 0)} · 缓存 {formatCacheUsage(aggregate?.cacheUsage ?? null).cached}</span>
       <span>输出 {formatTokens(aggregate?.outputTokens ?? 0)}</span>
     </div>
   )

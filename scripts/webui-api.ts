@@ -53,7 +53,14 @@ export interface CompactSummary {
   outputTokens: number
 }
 
+export interface CacheUsage {
+  cachedInputTokens: number | null
+  inputTokens: number
+  missingRequestCount: number
+}
+
 export interface Aggregate {
+  cacheUsage: CacheUsage
   tokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
@@ -149,6 +156,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 )
 
 export interface ThreadListItem {
+  cacheUsage: CacheUsage
   tokensPerSecond?: number | null
   threadId: string
   provider: string | null
@@ -195,7 +203,7 @@ export interface ThreadRunResponse {
   parentThreadId: string | null
   parentTurnId: string | null
   latestTurn: TurnSummary | null
-  threadAggregate: (Aggregate & { turnCount: number }) | null
+  threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
 }
 
 export interface ThreadTurnsResponse extends MetricsPageSummary {
