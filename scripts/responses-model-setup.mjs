@@ -26,7 +26,8 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     if (configure) {
       const name = await prompts.text({ message: `${id} 显示名称`, initialValue: old?.name ?? id });
       if (prompts.isCancel(name)) return undefined;
-      const context = template?.followContext ? old.contextWindow : await prompts.text({ message: `${id} 上下文窗口（Token，请按平台说明填写）`, initialValue: String(old?.contextWindow ?? ""), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= 100_000_000 ? undefined : "请输入 1024-100000000 的整数" });
+      const maximumContext = template?.snapshot?.max_context_window ?? 100_000_000;
+      const context = template?.followContext ? old.contextWindow : await prompts.text({ message: `${id} 上下文窗口（Token，请按平台说明填写）`, initialValue: String(old?.contextWindow ?? ""), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= maximumContext ? undefined : `请输入 1024-${maximumContext} 的整数` });
       if (prompts.isCancel(context)) return undefined;
       const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
       if (prompts.isCancel(reasoning)) return undefined;

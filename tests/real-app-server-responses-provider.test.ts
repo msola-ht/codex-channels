@@ -1,4 +1,5 @@
-import { loadResponsesModelTemplates } from "../scripts/responses-model-templates.mjs";
+import {validateModelCatalogWithCodex} from "../scripts/model-catalog-validation.mjs";
+import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 import { createServer } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +13,7 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { writeCustomPrimaryProviderSwitchingProfile, loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
 import { waitFor } from "./support/real-app-server-helpers.js";
@@ -24,10 +25,21 @@ describe("real custom Responses provider", () => {
     expect(models.length).toBeGreaterThan(0);
     expect(models.every(model=>!model.reasoningEfforts.includes("ultra") && !model.reasoningEfforts.includes("persistent"))).toBe(true);
   });
+  contract("validates complete snapshots against the native catalog contract before saving",async()=>{
+    const definition={id:"test-model",name:"Test",contextWindow:64000,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false};
+    const source=createResponsesModelCatalog([definition],definition.id).models[0]!;
+    await expect(validateModelCatalogWithCodex({models:[source]})).resolves.toBeUndefined();
+    for(const patch of [{apply_patch_tool_type:"not-a-tool"},{support_verbosity:"yes"},{truncation_policy:undefined}]) {
+      const snapshot=JSON.parse(JSON.stringify({...source,...patch})) as Record<string,unknown>;
+      const catalog=createResponsesModelCatalog([{...definition,template:{source:"deepseek",model:definition.id,followContext:false,snapshot}}],definition.id);
+      await expect(validateModelCatalogWithCodex(catalog)).rejects.toThrow("Codex CLI 校验");
+    }
+  });
+
   contract("isolates arbitrary model catalogs, sends declared capabilities and completes a tool round trip", async () => {
     const root = mkdtempSync(join(tmpdir(), "custom-responses-contract-"));
     const environment = { ...process.env, CODEX_HOME: join(root,"codex"), CODEX_CONNECT_HOME: join(root,"connect") };
-    type RequestBody = { model: string; reasoning: {effort?: string; summary?: string}; input: Array<{type:string; call_id?:string; output?:unknown}> };
+    type RequestBody = { instructions?: string; text?: {verbosity?:string}; tools?: Array<{type:string;name?:string}>; model: string; reasoning: {effort?: string; summary?: string}; input: Array<{type:string; call_id?:string; output?:unknown}> };
     const bodies: RequestBody[] = [];
     const backend = createServer((request,response) => {
       const chunks: Buffer[]=[];request.on("data",(chunk:Buffer)=>chunks.push(chunk));
@@ -47,8 +59,13 @@ describe("real custom Responses provider", () => {
       await new Promise<void>(resolve=>backend.listen(0,"127.0.0.1",resolve));
       const address=backend.address();if(!address||typeof address==="string")throw new Error("Missing fixture listener");
       writePrivateFileAtomicSync(join(environment.CODEX_HOME,"config.toml"),'model_provider = "openai"\nmodel_reasoning_effort = "high"\n');
-      for(const [id,model,reasoning] of [["rs-first","vendor/model-a",null],["rs-second","vendor/model-b","max"]] as const) {
-        const transaction=writeResponsesModelCatalog(environment,id,[{id:model,name:model,contextWindow:64000,reasoningEfforts:reasoning===null?[]:[reasoning],defaultReasoningEffort:reasoning,supportsImages:false}],model);
+      for(const [id,model,reasoning] of [["rs-first","vendor/model-a",null],["rs-second","vendor/model-b","max"],["rs-template","vendor/ds-flash","high"]] as const) {
+        const definition={id:model,name:model,contextWindow:64000,reasoningEfforts:reasoning===null?[]:[reasoning],defaultReasoningEffort:reasoning,supportsImages:false};
+        const snapshot={...createResponsesModelCatalog([definition],model).models[0]!,slug:"deepseek-flash",max_context_window:1048576,
+          model_messages:{instructions_template:"Complete DS fixture instructions. Use exec_command for commands."},
+          shell_type:"shell_command",support_verbosity:true,default_verbosity:"low",apply_patch_tool_type:"freeform"};
+        const imported=responsesModelTemplatesFromCatalog({models:[snapshot]},"deepseek")[0]!;
+        const transaction=writeResponsesModelCatalog(environment,id,[id === "rs-template" ? {...imported,id:model} : definition],model);
         finishResponsesModelCatalogWrite(transaction);
         writeCustomPrimaryProviderSwitchingProfile({provider:id,model,name:"Custom Responses fixture",baseUrl:`http://127.0.0.1:${address.port}`,apiKey:"fixture-key",supportsWebsockets:false,catalogSource:{kind:"custom",reasoningEffort:reasoning}},environment);
       }
@@ -88,6 +105,11 @@ describe("real custom Responses provider", () => {
         expect(turns).toContainEqual(expect.objectContaining({id:turn.id,status:"completed"}));
         const requests=bodies.filter(body=>body.model===runtime.model);
         expect(requests).toHaveLength(2);
+        if (runtime.id === "rs-template") {
+          expect(requests[0]?.instructions).toContain("Complete DS fixture instructions");
+          expect(requests[0]?.text?.verbosity).toBe("low");
+          expect(requests[0]?.tools).toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
+        }
         expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
         expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));
         await rpc.close();rpc=undefined;

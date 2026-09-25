@@ -1,12 +1,15 @@
+vi.mock("../scripts/model-catalog-validation.mjs", () => ({validateModelCatalogWithCodex: vi.fn(async () => {})}));
+import {validateModelCatalogWithCodex} from "../scripts/model-catalog-validation.mjs";
+import { responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createResponsesModelCatalog, readResponsesModelCatalog, responsesProviderCatalogPath, responsesProviderBackupPath, validateResponsesModels, writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { applyCustomPrimaryProviderSave, prepareCustomPrimaryProviderSave } from "../scripts/custom-primary-provider-management.mjs";
+import { applyCustomPrimaryProviderSave, prepareCustomPrimaryProviderSave, previewCustomPrimaryProviderSave } from "../scripts/custom-primary-provider-management.mjs";
 import { applyPrimaryProviderRemoval, applyPrimaryProviderSwitch } from "../scripts/primary-provider-management.mjs";
 import { recoverResponsesProviderCatalog } from "../scripts/responses-provider-recovery.mjs";
 // @ts-expect-error JavaScript presentation boundary intentionally has no declaration file.
@@ -53,10 +56,82 @@ describe("Responses provider catalog and lifecycle", () => {
   it("rejects unsupported catalog versions and invalid template links", () => {
     const {options,input}=fixture();
     const catalog=createResponsesModelCatalog([model],model.id);
-    expect(catalog.schemaVersion).toBe(2);
-    writePrivateFileAtomicSync(responsesProviderCatalogPath(options.environment,input.providerId),JSON.stringify({...catalog,schemaVersion:1}));
+    expect(catalog.schemaVersion).toBe(3);
+    writePrivateFileAtomicSync(responsesProviderCatalogPath(options.environment,input.providerId),JSON.stringify({...catalog,schemaVersion:2}));
     expect(()=>readResponsesModelCatalog(options.environment,input.providerId)).toThrow("版本");
     expect(()=>validateResponsesModels([{...model,template:{source:"official",model:"source",followContext:true}}],model.id)).toThrow("模板关联");
+  });
+
+  it.each(["deepseek"] as const)("preserves the complete %s snapshot through import, WebUI edit and rollback", async source => {
+    const {options,input}=fixture();
+    const snapshot={...createResponsesModelCatalog([model],model.id).models[0]!,
+      max_context_window:1048576, shell_type:"shell_command", priority:7,
+      support_verbosity:true,default_verbosity:"low",apply_patch_tool_type:"freeform",
+      web_search_tool_type:"text",supports_parallel_tool_calls:true,
+      model_messages:{instructions_template:"Complete source instructions"},
+      base_instructions:"Original base instructions",comp_hash:"source-hash",
+      input_modalities:["text","image","audio"],auto_compact_token_limit:60000,
+      supported_reasoning_levels:[{effort:"high",description:"Detailed source description"}],default_reasoning_level:"high"};
+    const definition=responsesModelTemplatesFromCatalog({models:[snapshot]},source)[0]!;
+    const mapped={...definition,id:"platform/custom"};
+    expect(createResponsesModelCatalog([mapped],mapped.id).models).toEqual([{...snapshot,slug:mapped.id}]);
+    await applyCustomPrimaryProviderSave({...input,model:mapped.id,catalog:{kind:"custom",models:[mapped]}},options);
+    const state=await loadModelProviderManagementState({...options,readUserConfig:async()=>({config:{model_provider:"openai"}})});
+    const resource=projectProviderSettings(state);
+    const edited={...resource.customProviders.switchingProviders[0].models[0],name:"Edited",contextWindow:32000,supportsImages:false};
+    const mutation=normalizeProviderSettingsMutation({operation:"primary.custom.save",provider:{...input,operation:"update",model:mapped.id,catalog:{kind:"custom",models:[edited]}}});
+    await applyCustomPrimaryProviderSave(mutation.provider,options);
+    const saved=readResponsesModelCatalog(options.environment,input.providerId);
+    expect(saved.models).toEqual([{...snapshot,slug:mapped.id,display_name:"Edited",context_window:32000,input_modalities:["text","audio"]}]);
+    expect(saved.definitions[0]?.template?.snapshot).toEqual(snapshot);
+    const transaction=writeResponsesModelCatalog(options.environment,input.providerId,[{...edited,contextWindow:16000}],mapped.id,saved.revision);
+    finishResponsesModelCatalogWrite(transaction,true);
+    expect(readResponsesModelCatalog(options.environment,input.providerId).content).toBe(saved.content);
+    expect(()=>createResponsesModelCatalog([{...mapped,contextWindow:1048577}],mapped.id)).toThrow("最大上下文");
+  });
+
+  it("rejects unsafe or oversized snapshots before creating transaction files", () => {
+    const {options,input}=fixture();
+    const snapshot=createResponsesModelCatalog([model],model.id).models[0]!;
+    for (const extra of [{apiKey:"secret"},{guardian:{}},{unknown_field:true}]) {
+      expect(()=>responsesModelTemplatesFromCatalog({models:[{...snapshot,...extra}]},"deepseek")).toThrow("快照");
+    }
+    const definition=responsesModelTemplatesFromCatalog({models:[{...snapshot,base_instructions:"x".repeat(1024*1024)}]},"deepseek")[0]!;
+    expect(()=>writeResponsesModelCatalog(options.environment,input.providerId,[definition],definition.id)).toThrow("2 MiB");
+    const path=responsesProviderCatalogPath(options.environment,input.providerId);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(`${path}.pending`)).toBe(false);
+  });
+
+  it.each(["preview", "prepare", "save"])("rejects invalid native catalogs during %s without touching managed files", async operation => {
+    const {options,input,configPath}=fixture();
+    const original=readFileSync(configPath,"utf8");
+    vi.mocked(validateModelCatalogWithCodex).mockRejectedValueOnce(new Error("模型目录未通过当前 Codex CLI 校验"));
+    const action=operation === "preview" ? previewCustomPrimaryProviderSave : operation === "prepare" ? prepareCustomPrimaryProviderSave : applyCustomPrimaryProviderSave;
+    await expect(action(input,options)).rejects.toThrow("Codex CLI 校验");
+    expect(readFileSync(configPath,"utf8")).toBe(original);
+    for (const path of [responsesProviderCatalogPath(options.environment,input.providerId),responsesProviderBackupPath(options.environment,input.providerId),customPrimaryProviderProfilePath(options.environment,input.providerId),customSwitchingProviderRegistryPath(options.environment)]) {
+      for (const suffix of ["", ".backup", ".pending"]) expect(existsSync(`${path}${suffix}`)).toBe(false);
+    }
+  });
+
+  it("keeps an existing provider unchanged when native validation fails",async()=>{
+    const {options,input,configPath}=fixture();
+    await applyCustomPrimaryProviderSave(input,options);
+    const paths=[configPath,responsesProviderCatalogPath(options.environment,input.providerId),customPrimaryProviderProfilePath(options.environment,input.providerId),customSwitchingProviderRegistryPath(options.environment),responsesProviderBackupPath(options.environment,input.providerId)];
+    const originals=paths.map(path=>readFileSync(path,"utf8"));
+    vi.mocked(validateModelCatalogWithCodex).mockRejectedValueOnce(new Error("模型目录未通过当前 Codex CLI 校验"));
+    await expect(applyCustomPrimaryProviderSave({...input,operation:"update"},options)).rejects.toThrow("Codex CLI 校验");
+    expect(paths.map(path=>readFileSync(path,"utf8"))).toEqual(originals);
+    expect(existsSync(`${paths[1]}.pending`)).toBe(false);
+  });
+
+  it("rejects mutated prepared models instead of saving unvalidated metadata",async()=>{
+    const {options,input}=fixture();
+    const prepared=await prepareCustomPrimaryProviderSave(input,options);
+    prepared.preview.provider.models![0]!.name="Changed after validation";
+    await expect(prepared.apply()).rejects.toThrow("重新预览并校验");
+    expect(existsSync(responsesProviderCatalogPath(options.environment,input.providerId))).toBe(false);
   });
 
   it("generates explicit metadata without copying official model capabilities", () => {

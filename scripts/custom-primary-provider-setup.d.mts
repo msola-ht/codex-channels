@@ -23,7 +23,8 @@ export interface CustomPrimaryProviderSetupOptions {
   output?: { write(value: string): unknown };
   prompts?: CustomPrimaryProviderSetupPrompts;
   providerId?: string;
-  loadModelTemplates?: (source: "official" | "deepseek") => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
+  probeWebSocket?: typeof import("./responses-websocket-probe.mjs").probeResponsesWebSocket;
+  loadModelTemplates?: (source: import("./responses-model-templates.mjs").ResponsesTemplateSource) => Promise<import("../runtime/model-provider-responses-catalog.mjs").ResponsesModelDefinition[]>;
   createClient?: (options: {
     environment: NodeJS.ProcessEnv;
   }) => Promise<CustomPrimaryProviderSetupClient>;

@@ -63,6 +63,7 @@ export function validateManagementJsonRequest({
   contentLength,
   requestLineBytes = 0,
   headerBytes = 0,
+  path,
 }) {
   if (origin !== exactOrigin(expectedOrigin)) {
     throw new ManagementSecurityError("management.origin-invalid", "管理请求来源无效");
@@ -77,10 +78,11 @@ export function validateManagementJsonRequest({
   if (String(contentType).toLowerCase().split(";", 1)[0]?.trim() !== "application/json") {
     throw new ManagementSecurityError("management.content-type-invalid", "管理请求只接受 JSON", 415);
   }
-  if (!Number.isInteger(contentLength) || contentLength < 0 || contentLength > 65_536) {
+  const maximumBodyBytes = method === "POST" && ["/provider-settings", "/provider-settings/preview"].includes(path) ? 2 * 1024 * 1024 : 65_536;
+  if (!Number.isInteger(contentLength) || contentLength < 0 || contentLength > maximumBodyBytes) {
     throw new ManagementSecurityError("management.body-too-large", "管理请求正文过大", 413);
   }
-  return { maximumBodyBytes: 65_536 };
+  return { maximumBodyBytes };
 }
 
 function exactOrigin(value) {

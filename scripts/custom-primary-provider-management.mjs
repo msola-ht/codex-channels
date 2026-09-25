@@ -1,9 +1,10 @@
+import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { readOfficialModelCatalog } from "../runtime/model-provider-official-catalog.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
+import { createResponsesModelCatalog, resolveResponsesTemplateContexts, isResponsesProvider, responsesProviderCatalogPath, responsesProviderBackupPath, readResponsesModelCatalog, validateResponsesModels, writeResponsesModelCatalog, withResponsesModelCatalogWrite, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
 
@@ -121,6 +122,7 @@ async function applySavePlan(input, plan, options) {
   if (plan.models === undefined) return applyConnectionSavePlan(input, plan, options);
   const environment = options.environment ?? process.env;
   if (!isDeepStrictEqual(plan.models, resolveResponsesTemplateContexts(plan.models,environment))) throw invalid("stale-preview","catalog","DS 模板上下文已变化，请重新预览");
+  if (JSON.stringify(createResponsesModelCatalog(plan.models, plan.provider.model)) !== plan.validatedCatalog) throw invalid("stale-preview", "catalog", "模型目录已变化，请重新预览并校验");
   const configPath = join(codexHomePath(environment), "config.toml");
   const beforeConfig = existsSync(configPath) ? readPrivateFileSync(configPath) : undefined;
   const profilePath = customPrimaryProviderProfilePath(environment, plan.provider.id);
@@ -379,6 +381,8 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
     bearerToken: apiKey,
     supportsWebsockets: input.supportsWebsockets,
   });
+  const catalog = models ? createResponsesModelCatalog(models, model) : undefined;
+  if (catalog) await validateModelCatalogWithCodex(catalog, environment);
   const provider = {
     id: providerId,
     displayName,
@@ -393,6 +397,7 @@ async function buildSavePlan(input, options, { requireConfirmation }) {
   return {
     provider,
     models,
+    validatedCatalog: catalog ? JSON.stringify(catalog) : undefined,
     reasoningEffort,
     catalogRevision: previousCatalog?.revision,
     apiKey,

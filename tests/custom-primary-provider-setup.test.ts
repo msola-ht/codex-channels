@@ -1,3 +1,5 @@
+vi.mock("../scripts/model-catalog-validation.mjs", () => ({validateModelCatalogWithCodex: vi.fn(async () => {})}));
+import {writeResponsesModelCatalog,finishResponsesModelCatalogWrite,readResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
 import {
   chmodSync,
   existsSync,
@@ -96,6 +98,38 @@ function switchingMainConfig(): string {
 }
 
 describe("custom primary Provider setup", () => {
+  it.each(["official","custom"] as const)("detects WS before saving a %s Provider and can cancel without writes",async catalogKind=>{
+    const environment=testEnvironment();
+    const {client,createClient}=clientFixture({model_provider:"openai"});
+    const custom=catalogKind === "custom";
+    const id=custom ? "rs-api-example-test" : "api-example-test";
+    const prompts=promptFixture({
+      texts:custom ? ["https://api.example.test/v1","Custom","vendor/custom","Custom model","64000",""] : ["https://api.example.test/v1","Custom","model-a"],
+      selects:[id,"switching","detect"],
+      confirms:custom ? [false,false,false,false] : [],
+    });
+    const probeWebSocket=vi.fn(async()=>{
+      expect(existsSync(customPrimaryProviderProfilePath(environment,id))).toBe(false);
+      return {status:"cancelled" as const,reason:"cancelled",connected:false};
+    });
+    expect(await runCustomPrimaryProviderSetup({environment,createClient,prompts,catalogKind,probeWebSocket,output:{write:vi.fn()}})).toEqual({action:"cancel"});
+    expect(probeWebSocket).toHaveBeenCalledWith(expect.objectContaining({apiKey:"sk-test-secret",model:custom ? "vendor/custom" : "model-a",mode:"prewarm"}));
+    expect(client.writeUserConfigEdits).not.toHaveBeenCalled();
+    expect(existsSync(customPrimaryProviderProfilePath(environment,id))).toBe(false);
+  });
+
+  it("detects an edited Provider with the preserved same-origin key",async()=>{
+    const environment=testEnvironment();
+    writeMainConfig(environment,switchingMainConfig());
+    writeCustomPrimaryProviderSwitchingProfile({provider:"thirdparty",model:"model-a",name:"Third",baseUrl:"https://api.example.test/v1",apiKey:"sk-existing-secret"},environment);
+    const {createClient}=clientFixture({model_provider:"openai"});
+    const prompts=promptFixture({texts:["https://api.example.test/v1","Third","model-a"],selects:["switching","detect","yes"],passwords:[""]});
+    const probeWebSocket=vi.fn(async()=>({status:"prewarm" as const,connected:true,reason:"预热通过"}));
+    await runCustomPrimaryProviderSetup({environment,createClient,prompts,providerId:"thirdparty",probeWebSocket,output:{write:vi.fn()}});
+    expect(probeWebSocket).toHaveBeenCalledWith(expect.objectContaining({apiKey:"sk-existing-secret",mode:"prewarm"}));
+    expect(loadConfiguredCustomSwitchingModelProviders(environment)[0]?.supportsWebsockets).toBe(true);
+  });
+
   it("uses a manually entered Provider ID instead of deriving it from the URL", async () => {
     const environment = testEnvironment();
     const { createClient } = clientFixture();
@@ -848,6 +882,27 @@ describe("custom primary Provider setup", () => {
     expect(existsSync(customPrimaryProviderProfilePath(environment, "thirdparty"))).toBe(true);
     expect(output.write.mock.calls.flat().join("")).toContain("私有备份清理失败");
   });
+  it("updates an imported model in place while preserving other models and the default on edit",async()=>{
+    const environment=testEnvironment();
+    writeMainConfig(environment,switchingMainConfig());
+    const template={id:"source-model",name:"Updated",contextWindow:64000,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false};
+    const mapped={...template,id:"vendor/mapped",name:"Old",contextWindow:32000,template:{source:"official" as const,model:template.id,followContext:false}};
+    const other={...template,id:"vendor/other",name:"Other",contextWindow:16000};
+    finishResponsesModelCatalogWrite(writeResponsesModelCatalog(environment,"rs-edit",[mapped,other],mapped.id));
+    writeCustomPrimaryProviderSwitchingProfile({provider:"rs-edit",name:"Custom",model:mapped.id,baseUrl:"https://api.example.test/v1",apiKey:"sk-existing-secret",catalogSource:{kind:"custom",reasoningEffort:"none"}},environment);
+    const {createClient}=clientFixture({model_provider:"openai"});
+    const prompts={...promptFixture({
+      texts:["https://api.example.test/v1","Custom",mapped.id,other.name,String(other.contextWindow),""],
+      selects:["switching",mapped.id,"no"],passwords:[""],
+      confirms:[true,true,false,false,true,false,false,true],
+    }),multiselect:vi.fn(async()=>[template.id])};
+    await runCustomPrimaryProviderSetup({environment,createClient,prompts,providerId:"rs-edit",loadModelTemplates:async()=>[template],output:{write:vi.fn()}});
+    const catalog=readResponsesModelCatalog(environment,"rs-edit");
+    expect(catalog.defaultModel).toBe(mapped.id);
+    expect(catalog.definitions).toEqual([{...mapped,name:template.name,contextWindow:64000},other]);
+    expect(loadConfiguredCustomSwitchingModelProviders(environment)[0]?.model).toBe(mapped.id);
+  });
+
   it("imports a selected template and persists the mapped platform model", async () => {
     const environment=testEnvironment();
     writePrivate(join(environment.CODEX_HOME!,"config.toml"),'model_provider = "openai"\n');

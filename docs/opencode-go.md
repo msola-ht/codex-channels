@@ -51,7 +51,7 @@ codexc service restart all
 ```
 
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
-修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 受管 Provider 模型设置 → OpenCode Go”，
+修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 默认模型与思考等级 → OpenCode Go”，
 再按模型设置默认思考等级，同一目录中引用该模型的账户 Profile 同步该等级，原生子代理保留独立设置，选择其他模型的账户保持各自模型的等级；目录刷新也同步仍存在模型的有效等级。上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
 每个模型按自己的 `max_context_window` 换算窗口，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型窗口占比，

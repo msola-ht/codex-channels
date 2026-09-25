@@ -1,3 +1,4 @@
+import { promptResponsesWebSocket } from "./responses-websocket-setup.mjs";
 import { isResponsesProvider, readResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { loadResponsesModelTemplates, promptResponsesModelImport } from "./responses-model-templates.mjs";
 import { promptResponsesModels } from "./responses-model-setup.mjs";
@@ -33,21 +34,6 @@ function optionalString(value) {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-function websocketOptions() {
-  return [
-    {
-      value: "no",
-      label: "否（推荐）",
-      hint: "supports_websockets = false，走 HTTPS",
-    },
-    {
-      value: "yes",
-      label: "是",
-      hint: "supports_websockets = true",
-    },
-  ];
-}
-
 function modeOptions() {
   return [
     {
@@ -72,6 +58,7 @@ export async function runCustomPrimaryProviderSetup({
   providerId: editingProviderId,
   catalogKind = "official",
   loadModelTemplates = source => loadResponsesModelTemplates(source, environment),
+  probeWebSocket,
 } = {}) {
   const custom = editingProviderId === undefined ? catalogKind === "custom" : isResponsesProvider(editingProviderId);
   const previousCatalog = editingProviderId && custom ? readResponsesModelCatalog(environment, editingProviderId) : undefined;
@@ -318,7 +305,7 @@ export async function runCustomPrimaryProviderSetup({
 
   const imported = custom ? await promptResponsesModelImport(prompts, previousCatalog?.definitions, loadModelTemplates) : [];
   if (imported === undefined) return { action: allowBack ? "back" : "cancel" };
-  const definitions = [...(previousCatalog?.definitions ?? []), ...imported];
+  const definitions = [...new Map([...(previousCatalog?.definitions ?? []), ...imported].map(entry => [entry.id, entry])).values()];
   let selectedModel;
   if (imported.length > 0) {
     selectedModel = await prompts.select({
@@ -370,16 +357,15 @@ export async function runCustomPrimaryProviderSetup({
     throw new Error("API Key 不能为空");
   }
 
-  const websockets = await prompts.select({
-    message: "上游是否支持 Responses WebSocket？",
-    options: websocketOptions(),
-    initialValue: currentWebsockets,
-  });
-  if (prompts.isCancel(websockets) || websockets === "back") {
-    return { action: allowBack ? "back" : "cancel" };
-  }
+  const supportsWebsockets = await promptResponsesWebSocket(prompts, {
+    baseUrl: normalizedBaseUrl,
+    apiKey: replacementApiKey || optionalString(currentProvider?.experimental_bearer_token),
+    model: normalizedModel,
+    reasoningEffort: custom ? models.find(entry => entry.id === normalizedModel)?.defaultReasoningEffort ?? "none" : "medium",
+    environment,
+  }, {output, probe: probeWebSocket, current: currentWebsockets === "yes"});
+  if (supportsWebsockets === undefined) return { action: allowBack ? "back" : "cancel" };
 
-  const supportsWebsockets = websockets === "yes";
   const saveInput = {
     operation: fixedProviderId === undefined ? "create" : "update",
     providerId: normalizedId,

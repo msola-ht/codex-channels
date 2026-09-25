@@ -290,10 +290,11 @@ Codex 兼容 Provider Setup 的官方模型目录复用、手工模型 ID、固�
 [`第三方模型 Provider 接入指南`](provider-integration-guide.md)；该本地 Setup 能力不新增 App Server RPC。
 自定义 Responses Provider 使用 [`model-provider-responses-catalog.mjs`](../runtime/model-provider-responses-catalog.mjs)
 生成逐 Provider 的版本化目录，通过同一 `model/list`、`config/batchWrite`、Thread/Turn 路由接入；
-模板选择及平台模型 ID 映射复用本地目录；DS 上下文跟随接入既有受管模型窗口事务，
+模板选择及平台模型 ID 映射复用本地目录，版本 3 完整保留 DS 模型快照，生成时保留最大窗口、指令与工具字段；DS 上下文跟随接入既有受管模型窗口事务，
 实现见 [`responses-context-sync.mjs`](../runtime/responses-context-sync.mjs)，验证见 [`responses-context-sync.test.ts`](../tests/responses-context-sync.test.ts)。
+CLI 自定义 Provider 的保存前 WS 检测见 [`responses-websocket-probe.mjs`](../scripts/responses-websocket-probe.mjs) 和 [`responses-websocket-setup.mjs`](../scripts/responses-websocket-setup.mjs)。使用锁定源码 `core/src/client.rs` 的 WS v2 Beta 头及 `codex-api/src/common.rs` 的 `ResponseCreateWsRequest`，以 `generate=false` 预热和经确认的独立文字请求分别报告兼容程度；验证见 [`responses-websocket-probe.test.ts`](../tests/responses-websocket-probe.test.ts) 与 [`responses-websocket-setup.test.ts`](../tests/responses-websocket-setup.test.ts)。这不是新的 App Server RPC。
 RS 模板不导入 Codex 专用 `ultra` / `persistent` 模式；其请求转换语义已核对锁定源码 `protocol/src/openai_models/reasoning_effort.rs` 及相应测试。
-目录字段与指令模板要求以锁定源码 `protocol/src/openai_models.rs` 的 `ModelInfo` / `ModelsResponse` 为准，
+RS 与 CCG 保存前通过 [`model-catalog-validation.mjs`](../scripts/model-catalog-validation.mjs) 调用本机 `debug models` 校验生成目录。目录字段与指令模板要求以锁定源码 `protocol/src/openai_models.rs` 的 `ModelInfo` / `ModelsResponse` 为准，
 验证见 [`model-provider-responses-catalog.test.ts`](../tests/model-provider-responses-catalog.test.ts) 和
 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。
 

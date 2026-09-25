@@ -77,6 +77,15 @@ describe("management security core", () => {
     expect(() => fingerprintManagementValue(Number.NaN)).toThrow("有限数字");
   });
 
+  it("bounds complete model snapshots only on exact Provider write paths", () => {
+    const request = {method:"POST",origin:"http://127.0.0.1:8787",expectedOrigin:"http://127.0.0.1:8787",contentType:"application/json",contentLength:100_000};
+    for (const path of ["/provider-settings", "/provider-settings/preview"]) {
+      expect(validateManagementJsonRequest({...request,path})).toEqual({maximumBodyBytes:2*1024*1024});
+      expect(()=>validateManagementJsonRequest({...request,path,contentLength:2*1024*1024+1})).toThrow("正文过大");
+    }
+    for (const path of ["/provider-settings/other", "/tasks", "/account-settings"]) expect(()=>validateManagementJsonRequest({...request,path})).toThrow("正文过大");
+  });
+
   it("enforces exact JSON request metadata limits", () => {
     expect(validateManagementJsonRequest({
       method: "POST",

@@ -350,7 +350,7 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "custom_primary",
-      label: "Codex 兼容 Provider",
+      label: "Codex 兼容",
       hint: "使用 Codex 官方模型目录；新增、编辑、切换或删除 Provider",
     });
   });
@@ -421,8 +421,8 @@ describe("Codex Connect setup", () => {
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
-      label: "受管 Provider 模型设置",
-      hint: "设置各受管 Provider 的默认模型与思考等级",
+      label: "默认模型与思考等级",
+      hint: "设置 DeepSeek、OpenCode Go、CommandCode Go 的默认模型与思考等级",
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "model_window",

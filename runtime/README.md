@@ -70,7 +70,7 @@
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
 - `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 RS 上下文，保留私有恢复记录并提供整批恢复与预览目标。
-- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：校验手填模型定义，生成版本化的独立目录，管理修订、私有备份与未完成写入标记；不保存凭据。
+- `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：校验手填模型定义及 DS 完整模板快照，生成版本化的独立目录，管理修订、私有备份与未完成写入标记；不保存凭据。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标
   子进程环境；读取并校验已有 OpenAI 上游地址，为统计代理替换 Provider 地址，同时统一 DeepSeek、

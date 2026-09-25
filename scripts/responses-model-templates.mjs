@@ -11,17 +11,21 @@ export async function loadResponsesModelTemplates(source, environment = process.
   let catalog;
   if (source === "official") catalog = readOfficialModelCatalog(environment);
   else if (source === "deepseek") {
-    const path = join(managedProviderDirectory(environment, deepseekProviderDefinition), deepseekProviderDefinition.catalogFileName);
+    const definition = deepseekProviderDefinition;
+    const path = join(managedProviderDirectory(environment, definition), definition.catalogFileName);
     if (existsSync(path)) {
       try { catalog = JSON.parse(readPrivateFileSync(path, 2 * 1024 * 1024)); } catch {
-        throw new Error("本地 DeepSeek 模型目录无法安全读取，请先修复目录");
+        throw new Error("本地模型模板目录无法安全读取，请先修复目录");
       }
-    } else catalog = (await downloadDeepseekCatalog(globalThis.fetch)).catalog;
+    } else {
+      catalog = (await downloadDeepseekCatalog(globalThis.fetch)).catalog;
+    }
   } else throw new Error("模型模板来源无效");
-  return responsesModelTemplatesFromCatalog(catalog);
+  return responsesModelTemplatesFromCatalog(catalog, source);
 }
 
-export function responsesModelTemplatesFromCatalog(catalog) {
+export function responsesModelTemplatesFromCatalog(catalog, source = "official") {
+  if (!["official", "deepseek"].includes(source)) throw new Error("模型模板来源无效");
   if (!Array.isArray(catalog?.models)) throw new Error("模型模板目录缺少 models");
   const models = catalog.models.filter(model => model.visibility === "list" && model.supported_in_api === true).map(model => ({
     id: model.slug,
@@ -30,6 +34,7 @@ export function responsesModelTemplatesFromCatalog(catalog) {
     reasoningEfforts: model.supported_reasoning_levels?.map(entry => entry.effort).filter(effort => effort !== "ultra" && effort !== "persistent"),
     defaultReasoningEffort: model.default_reasoning_level ?? null,
     supportsImages: model.input_modalities?.includes("image") === true,
+    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false, snapshot: structuredClone(model)}}),
   }));
   return validateResponsesModels(models, models[0]?.id);
 }
@@ -61,21 +66,25 @@ export async function promptResponsesModelImport(prompts, previous = [], loadTem
       if (action !== "retry") throw new Error("模板空选操作无效");
     }
     for (const id of ids) {
-      if (previous.length + selected.length >= 64) throw new Error("自定义模型目录最多包含 64 个模型");
       const template = templates.find(model => model.id === id);
-      const used = new Set([...previous, ...selected].map(model => model.id));
+      const used = new Set(selected.map(model => model.id));
+      const linked = previous.filter(model => model.template?.source === source && model.template.model === id);
       const validate = value => {
         try { validateResponsesModels([{...template, id: String(value).trim()}], String(value).trim()); } catch { return "请输入有效的平台模型 ID"; }
-        return used.has(String(value).trim()) ? "平台模型 ID 已存在，请使用不同 ID" : undefined;
+        const targetId = String(value).trim();
+        if (used.has(targetId)) return "本次导入已使用该平台模型 ID，请使用不同 ID";
+        if (new Set([...previous, ...selected].map(model => model.id)).size >= 64 && !previous.some(model => model.id === targetId)) return "自定义模型目录最多包含 64 个模型";
+        return undefined;
       };
-      const target = await prompts.text({ message: `${id} → 平台模型 ID（请求实际使用的名称）`, initialValue: id, validate });
+      const target = await prompts.text({ message: `${id} → 平台模型 ID（请求实际使用的名称）`, initialValue: linked.length === 1 ? linked[0].id : id, validate });
       if (prompts.isCancel(target)) return undefined;
       const error = validate(target);
       if (error) throw new Error(error);
-      const followContext = source === "deepseek" ? await prompts.confirm({ message: "跟随 DeepSeek 模板上下文设置？（通过项目修改 DS 窗口时同步）", initialValue: false }) : false;
+      const existing = previous.find(model => model.id === String(target).trim());
+      const followContext = source === "deepseek" ? await prompts.confirm({ message: "跟随 DeepSeek 模板上下文设置？（通过项目修改 DS 窗口时同步）", initialValue: existing?.template?.source === source && existing.template.model === id ? existing.template.followContext : false }) : false;
       if (prompts.isCancel(followContext)) return undefined;
-      const model = {...template, id: String(target).trim(), template: {source, model: id, followContext: followContext === true}};
-      const confirmed = await prompts.confirm({ message: `复制 ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}）？`, initialValue: true });
+      const model = {...template, id: String(target).trim(), template: {...template.template, source, model: id, followContext: followContext === true}};
+      const confirmed = await prompts.confirm({ message: `${existing ? "用模板更新已有模型" : "复制"} ${id} → ${model.id}（${model.contextWindow} Token；图片${model.supportsImages ? "支持" : "不支持"}；思考等级 ${model.reasoningEfforts.join("/") || "none"}；上下文${model.template.followContext ? "跟随 DS" : "独立"}）？${existing ? "将替换该模型的名称、能力参数及模板关联；拒绝则保留原值。" : ""}`, initialValue: existing === undefined });
       if (prompts.isCancel(confirmed)) return undefined;
       if (confirmed) selected.push(model);
     }

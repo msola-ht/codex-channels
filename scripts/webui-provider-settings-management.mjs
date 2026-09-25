@@ -314,6 +314,6 @@ function redactCatalog(provider) {
     id: model.id, name: model.name, contextWindow: model.contextWindow,
     reasoningEfforts: model.reasoningEfforts, defaultReasoningEffort: model.defaultReasoningEffort,
     supportsImages: model.supportsImages,
-    ...(model.template === undefined ? {} : {template: {source: model.template.source, model: model.template.model, followContext: model.template.followContext}}),
+    ...(model.template === undefined ? {} : {template: structuredClone(model.template)}),
   })) };
 }

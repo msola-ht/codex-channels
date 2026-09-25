@@ -5,7 +5,7 @@ export interface ResponsesModelDefinition {
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   supportsImages: boolean;
-  template?: {source: "official" | "deepseek"; model: string; followContext: boolean};
+  template?: {source: "official" | "deepseek"; model: string; followContext: boolean; snapshot?: Record<string, unknown>};
 }
 export function isResponsesProvider(id: unknown): boolean;
 export function responsesProviderCatalogPath(environment: NodeJS.ProcessEnv | undefined, id: string): string;
