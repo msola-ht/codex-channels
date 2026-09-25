@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 
 import {
   securePrivateDirectorySync,
@@ -147,6 +147,7 @@ const metricsAggregateSql = `
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
+  private readonly activeReadStatements = new Set<StatementSync>();
   private readonly insert?: StatementSync;
   private readonly insertSubagentThread?: StatementSync;
   private readonly insertSubagentTurn?: StatementSync;
@@ -413,7 +414,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.requireOpen();
     validateWeeklyQuotaEstimateQuery(query);
     const startAtMs = query.resetsAt * 1_000 - weeklyWindowMs;
-    const rows = this.database.prepare(`
+    const rows = this.iterateRows(`
       SELECT status, input_tokens, output_tokens, recorded_at_ms,
         weekly_quota_limit_id, weekly_resets_at, weekly_used_percent_millionths
       FROM model_request_metrics
@@ -421,7 +422,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         AND recorded_at_ms >= ?
         AND recorded_at_ms <= ?
       ORDER BY id ASC
-    `).iterate(query.provider, startAtMs, query.nowMs) as unknown as Iterable<WeeklyQuotaRow>;
+    `, query.provider, startAtMs, query.nowMs) as unknown as Iterable<WeeklyQuotaRow>;
     return estimateWeeklyQuotaRows(rows, query);
   }
 
@@ -470,11 +471,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       || query.startAtMs < 0 || query.startAtMs >= query.endAtMs) {
       throw new Error("额度历史查询时间范围无效");
     }
-    const rows = this.database.prepare(`
+    const rows = this.iterateRows(`
       SELECT * FROM model_request_metrics
       WHERE recorded_at_ms >= ? AND recorded_at_ms < ?
       ORDER BY recorded_at_ms ASC, id ASC
-    `).iterate(query.startAtMs, query.endAtMs) as unknown as Iterable<MetricRow>;
+    `, query.startAtMs, query.endAtMs) as unknown as Iterable<MetricRow>;
     const groups = new Map<string, StoredQuotaPeriod>();
     for (const row of rows) {
       const metric = toStoredMetric(row);
@@ -640,7 +641,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (!query.provider || query.provider.length > 128) {
       throw new Error("模型请求指标 Provider 无效");
     }
-    const statement = this.database.prepare(`
+    const rows = this.iterateRows(`
       SELECT request_started_at_ms, recorded_at_ms, input_tokens,
         output_tokens, total_tokens, quota_windows
       FROM model_request_metrics
@@ -648,12 +649,8 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         AND recorded_at_ms >= ?
         AND recorded_at_ms < ?
       ORDER BY recorded_at_ms ASC, id ASC
-    `);
-    for (const rawRow of statement.iterate(
-      query.provider,
-      query.startAtMs,
-      query.endAtMs,
-    )) {
+    `, query.provider, query.startAtMs, query.endAtMs);
+    for (const rawRow of rows) {
       const row = rawRow as {
         request_started_at_ms: number;
         recorded_at_ms: number;
@@ -1291,6 +1288,17 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT COUNT(*) AS count FROM model_request_metrics
     `).get() as { count: number };
     return row.count;
+  }
+
+  private *iterateRows(sql: string, ...parameters: SQLInputValue[]) {
+    const statement = this.database.prepare(sql);
+    // Node 22.13 的 SQLite 迭代器不持有 statement，读取期间必须防止其被 GC 提前释放。
+    this.activeReadStatements.add(statement);
+    try {
+      yield* statement.iterate(...parameters);
+    } finally {
+      this.activeReadStatements.delete(statement);
+    }
   }
 
   private queryAggregationRows(

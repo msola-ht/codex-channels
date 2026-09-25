@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
   rmSync,
@@ -25,6 +26,43 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("retains streaming statements through GC and releases iterators after visitor failure", () => {
+    const directory = temporaryDirectory();
+    execFileSync(process.execPath, ["--expose-gc", "--import", "tsx", "--input-type=module", "-e", `
+      import assert from 'node:assert/strict';
+      import { StatementSync } from 'node:sqlite';
+      import { SqliteModelRequestMetricsStore } from './src/observability/index.ts';
+      import { sample } from './tests/request-metrics-fixtures.ts';
+      const originalIterate = StatementSync.prototype.iterate;
+      StatementSync.prototype.iterate = function (...args) {
+        const iterator = originalIterate.apply(this, args);
+        return (function* () {
+          global.gc();
+          yield* iterator;
+        })();
+      };
+      const now = Date.now();
+      const resetsAt = Math.floor(now / 1000) + 3600;
+      const store = new SqliteModelRequestMetricsStore(process.argv[1]);
+      try {
+        store.recordBatch([10, 20].map((used, index) => ({ ...sample(), provider: 'openai',
+          recordedAtMs: now + index, weeklyQuota: { limitId: 'codex', resetsAt,
+            usedPercentMillionths: used * 1000000, planType: 'plus' } })));
+        const scope = { provider: 'openai', startAtMs: now, endAtMs: now + 1000 };
+        assert.equal(store.quotaHistory(scope)[0].requestCount, 2);
+        assert.equal(store.weeklyQuotaEstimate({ provider: 'openai', limitId: 'codex', resetsAt, nowMs: now + 1000 }).requestCount, 1);
+        assert.throws(() => store.forEachProviderTokenMetric(scope, () => { throw new Error('visitor failed'); }), /visitor failed/);
+        let count = 0;
+        store.forEachProviderTokenMetric(scope, () => { global.gc(); count++; });
+        assert.equal(count, 2);
+        assert.equal(store.quotaHistory(scope)[0].requestCount, 2);
+      } finally {
+        store.close();
+        StatementSync.prototype.iterate = originalIterate;
+      }
+    `, join(directory, "metrics.sqlite3")], { cwd: process.cwd(), stdio: "pipe", timeout: 15000 });
+  });
+
   it("derives request speed and averages only eligible raw requests across scopes", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
     const base = { ...sample(), recordedAtMs: 2_000 };
