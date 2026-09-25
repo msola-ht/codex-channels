@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -11,6 +11,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
 import { loadManagedProviderAppServers, withProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 import { waitFor } from "./support/real-app-server-helpers.js";
+import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 
 const contract = process.env.RUN_CODEX_CONTRACT === "1" ? it : it.skip;
 const imageUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3PAQkAAAyEwO9feoshgnABdNvJ8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ3I8QUNyPEFDcjxBQ2oPcf88OIhvJ6vAAAAAElFTkSuQmCC";
@@ -21,9 +22,11 @@ contract.each([
   { emptyOpening: true, effort: "none", useDefault: false },
   { emptyOpening: false, effort: "low", useDefault: false },
   { emptyOpening: false, effort: "max", useDefault: false },
-])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError)", async ({ emptyOpening, effort, useDefault, incomplete, streamError }) => {
+  { emptyOpening: false, effort: "high", useDefault: true, fullReasoning: true },
+])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError, full reasoning: $fullReasoning)", async ({ emptyOpening, effort, useDefault, incomplete, streamError, fullReasoning }) => {
   const root = mkdtempSync(join(tmpdir(), "chat-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+  const reasoningField = fullReasoning ? "reasoning_content" : "reasoning";
   const bodies: Array<{ tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content?: string; tool_call_id?: string }> }> = [];
   const backend = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -37,13 +40,13 @@ contract.each([
       const send = (delta: unknown, finish_reason: string | null = null, usage?: unknown) => response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) })}\n\n`);
       if (emptyOpening) send({ role: "assistant", content: "" });
       if (first) {
-        send({ reasoning: "Inspect scheduled tasks first.", reasoning_details: [{ type: "reasoning.text", text: "Inspect scheduled tasks first.", format: "unknown", index: 0 }] });
+        send({ [reasoningField]: "Inspect scheduled tasks first.", reasoning_details: [{ type: "reasoning.text", text: "Inspect scheduled tasks first.", format: "unknown", index: 0 }] });
         send(delta);
         send({ content: "Checking tasks." }, "tool_calls");
       } else {
-        send({ reasoning: "Review task results." });
+        send({ [reasoningField]: "Review task results." });
         send({ content: "First answer. " });
-        send({ reasoning: "Double check." });
+        send({ [reasoningField]: "Double check." });
         send(delta, streamError ? null : incomplete ? "length" : "stop", { prompt_tokens: 20, completion_tokens: 4, prompt_tokens_details: { cached_tokens: 12 } });
       }
       if (!first && streamError) response.write(`data: ${JSON.stringify({ choices: [{ finish_reason: "error", error: { code: "context_length_exceeded", message: "private upstream diagnostic" } }] })}\n\n`);
@@ -103,8 +106,98 @@ contract.each([
     const reasoningItems = started.filter(item => item.type === "reasoning");
     expect(reasoningItems).toHaveLength(3);
     expect(new Set(reasoningItems.map(item => item.id)).size).toBe(3);
-    expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", reasoning: "Inspect scheduled tasks first.", content: "Checking tasks.", tool_calls: [expect.objectContaining({ id: "fixture-call" })] }));
+    expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Inspect scheduled tasks first.", content: "Checking tasks.", tool_calls: [expect.objectContaining({ id: "fixture-call" })] }));
     expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "fixture-call", content: expect.stringContaining("Gateway scheduled tasks: empty") }));
+    if (!incomplete && !streamError) {
+      const next = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Continue", text_elements: [] }] } });
+      await waitFor(() => turns.some(entry => entry.id === next.turn.id), 15000);
+      expect(turns).toContainEqual(expect.objectContaining({ id: next.turn.id, status: "completed" }));
+      expect(bodies).toHaveLength(3);
+      expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Inspect scheduled tasks first." }));
+      expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Review task results.Double check.", content: "First answer. Chat tool round trip complete" }));
+    }
+  } finally {
+    await rpc?.close(); await bridge?.close(); backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}, 30000);
+
+contract.each(["custom", "tool_search"] as const)("executes %s through the Chat bridge using real Codex tool shapes", async kind => {
+  const root = mkdtempSync(join(tmpdir(), "chat-tools-contract-"));
+  const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+  const bodies: Array<{ tools: Array<{ function: { name: string; description?: string } }>; messages: Array<{ role: string; content?: string; reasoning_content?: string }> }> = [];
+  const backend = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as typeof bodies[number];
+      bodies.push(body);
+      const step = bodies.length;
+      const toolStep = step === 1 || (kind === "tool_search" && step === 2);
+      const target = kind === "custom" ? "apply_patch" : step === 1 ? "tool_search" : "fixture_list";
+      const tool = body.tools.find(tool => tool.function.name.endsWith(target));
+      const argumentsText = kind === "custom"
+        ? JSON.stringify({ input: "*** Begin Patch\n*** Add File: fixture.txt\n+chat patch verified\n*** End Patch" })
+        : step === 1 ? JSON.stringify({ query: "fixture_list", limit: null }) : "{}";
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      const send = (delta: unknown, finish_reason: string | null = null) => response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`);
+      send({ reasoning_content: `Step ${step}.` });
+      send(toolStep
+        ? { tool_calls: [{ index: 0, id: `call-${step}`, type: "function", function: { name: tool?.function.name ?? "missing-tool", arguments: argumentsText } }] }
+        : { content: "Tools verified" }, toolStep ? "tool_calls" : "stop");
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  let rpc: JsonRpcClient | undefined;
+  let bridge: ChatCompletionsBridge | undefined;
+  try {
+    await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+    const address = backend.address(); if (!address || typeof address === "string") throw new Error("No listener");
+    bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+    await bridge.start();
+    const catalog = createResponsesModelCatalog([{ id: "fixture", name: "Fixture", contextWindow: 64000, reasoningEfforts: ["high"], defaultReasoningEffort: "high", supportsImages: false }], "fixture");
+    const models = catalog.models.map(model => ({ ...model, supports_search_tool: kind === "tool_search", apply_patch_tool_type: kind === "custom" ? "freeform" : null }));
+    const catalogPath = join(root, "models.json");
+    writePrivateFileAtomicSync(catalogPath, JSON.stringify({ models }));
+    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), [
+      'model = "fixture"', 'model_provider = "fixture"', 'web_search = "disabled"',
+      `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+      '[model_providers.fixture]', 'name = "Fixture"', `base_url = "http://${bridge.address()}"`,
+      'wire_api = "responses"', 'supports_websockets = false', 'request_max_retries = 0', 'stream_max_retries = 0',
+    ].join("\n"));
+    rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment }), 15000);
+    const turns: Array<{ id: string; status: string }> = [];
+    let dynamicCalls = 0;
+    rpc.onNotification(notification => {
+      if (notification.method === "turn/completed") turns.push((notification.params as { turn: typeof turns[number] }).turn);
+    });
+    rpc.setServerRequestHandler(async request => {
+      if (request.method !== "item/tool/call") throw new Error("Unexpected privileged request");
+      expect(request.params).toMatchObject({ tool: "fixture_list", arguments: {} });
+      dynamicCalls++;
+      return { contentItems: [{ type: "inputText", text: "fixture-list-ok" }], success: true };
+    });
+    await rpc.connect();
+    const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: {
+      cwd: root, modelProvider: "fixture", sandbox: "workspace-write", approvalPolicy: "never", ephemeral: true,
+      ...(kind === "tool_search" ? { dynamicTools: [{ type: "namespace" as const, name: "fixtures", description: "Fixture tools", tools: [{ type: "function" as const, name: "fixture_list", description: "fixture_list lists fixtures", inputSchema: { type: "object", properties: {}, additionalProperties: false }, deferLoading: true }] }] } : {}),
+    } });
+    const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Verify fixture tools", text_elements: [] }] } });
+    await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
+    expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
+    expect(bodies).toHaveLength(kind === "custom" ? 2 : 3);
+    expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", reasoning_content: "Step 1." }));
+    if (kind === "custom") {
+      expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.stringContaining("Success") }));
+      expect(readFileSync(join(root, "fixture.txt"), "utf8")).toBe("chat patch verified\n");
+      expect(bodies[0]?.tools.find(tool => tool.function.name.endsWith("apply_patch"))?.function.description).toContain("lark grammar:");
+      expect(dynamicCalls).toBe(0);
+    } else {
+      expect(bodies[0]?.tools.some(tool => tool.function.name.endsWith("fixture_list"))).toBe(false);
+      expect(bodies[1]?.tools.some(tool => tool.function.name.endsWith("fixture_list"))).toBe(true);
+      expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "tool", content: expect.stringContaining("fixture-list-ok") }));
+      expect(dynamicCalls).toBe(1);
+    }
   } finally {
     await rpc?.close(); await bridge?.close(); backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()));
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

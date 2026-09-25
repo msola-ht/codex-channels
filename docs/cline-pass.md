@@ -25,9 +25,9 @@ Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行�
 把完整请求转换后发送至 `https://api.cline.bot/api/v1/chat/completions`，再把 Chat SSE 转换回 Responses。
 Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `src/model-api`，可以供其他 Chat Provider 复用。
 
-支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量；不支持自由格式工具、远程 compaction、
-加密或带签名的推理、结构化输出、Fast 或 WebSocket。原生网页搜索工具不支持；外部函数形式的工具仍按函数调用处理。
-Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘要；同一增量中的重复文本只保留一次，内容冲突时明确失败。
+支持文本、用户图片输入、函数工具（含命名空间）及文本结果、明文推理展示和 Token 用量。自由格式 `custom` 工具以单字段 `input` 的 JSON 函数下发，完整 Lark 语法保留在工具说明中，回程还原为 `custom_tool_call`；执行位置为 `client` 的 `tool_search` 回程还原为 `tool_search_call`，其结果带回的工具在同一请求内补充声明，并移除已发现工具的 `defer_loading` 标记。不支持服务端执行的 `tool_search`、原生网页搜索等托管工具、远程 compaction、加密或带签名的推理、结构化输出、Fast 或 WebSocket；外部函数形式的工具仍按函数调用处理。
+Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘要，并随请求历史回传为 `reasoning`。若上游使用 `reasoning_content`，则通过 Responses 的 `reasoning.content` 保留完整正文，后续还原为 `reasoning_content`，不以摘要替代。工具续跑及下一用户轮次均保留请求历史中的推理；同一增量中的重复文本只保留一次，内容冲突时明确失败。
+[DeepSeek 思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)要求携带 `tools` 的 Chat 请求完整回传历史推理，即使某轮没有调用工具。CLP 按 Cline 的实际返回字段转换；DeepSeek 官方账户使用原生 Responses，见 [DeepSeek](deepseek.md)。
 用户图片支持 PNG、JPEG、WebP、GIF 的内联 Base64 Data URL，保留多图与文本顺序，沿用渠道的图片校验。
 不支持图片文件引用、远程图片 URL、工具结果中的图片或 `detail: original`；`auto`、`low`、`high` 原样传递。
 新账户复用共享目录中的图片能力和思考等级。

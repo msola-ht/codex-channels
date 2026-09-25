@@ -138,6 +138,13 @@ Thread；显式恢复不同 Provider 的历史 Thread 时尊重该 Thread 的 Pr
 - `/limits` 当前只支持 OpenAI；DeepSeek 不会回退显示 OpenAI 限额。
 - DeepSeek 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
 
+## 推理历史回传
+
+DeepSeek 官方账户使用原生 Responses API。Gateway 代理透传请求和响应，由 Codex 保存并在工具续跑及后续用户轮次的 `input` 中带回 `reasoning.content`，无需转换成 Chat 字段。
+官方 [Responses 说明](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)以 `reasoning_text` 正文承载推理，不接受以 `summary` 或 `encrypted_content` 替代。
+官方 [思考模式说明](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)中的 `reasoning_content` 要求针对 Chat API：携带 `tools` 时必须回传历史各轮推理，没有 `tools` 时该字段会被忽略。
+CLP 的 Chat 转换和字段保留方式见 [Cline Pass](cline-pass.md)。本地压缩之后，以 Codex 实际保留的上下文为准，Gateway 不另存历史或补造已丢弃的推理。
+
 ## 图片识别
 
 `deepseek-flash` 原生接受当前渠道校验后的 PNG/JPEG/WebP/非动画 GIF 图片，并通过现有 App Server
