@@ -91,7 +91,7 @@ it("restores function namespaces and rejects ambiguous flattened names", () => {
   response.push(chunk({ tool_calls: [{ index: 0, id: "call", type: "function", function: { name: "tasks__list", arguments: "{}" } }] }, "tool_calls"));
   const item = response.finish().find(event => event.type === "response.output_item.done")?.item;
   expect(item).toMatchObject({ name: "list", namespace: "tasks", call_id: "call" });
-  expect(responsesToChat({ ...source, input: [item, { type: "function_call_output", call_id: "call", output: "ok" }] }).request.messages[0]?.tool_calls?.[0]?.function.name).toBe("tasks__list");
+  expect(responsesToChat({ ...source, input: [item, { type: "function_call_output", call_id: "call", output: "ok" }] }).request.messages[0]).toMatchObject({ role: "assistant", tool_calls: [{ function: { name: "tasks__list" } }] });
   expect(() => responsesToChat({ ...source, tools: [...source.tools, { type: "function", name: "tasks__list", parameters: {} }] })).toThrow("Conflicting");
 });
 
@@ -161,4 +161,41 @@ it("keeps previously emitted response snapshots unchanged", () => {
   const completed = converter.finish();
   expect(created).toMatchObject([{ response: { status: "in_progress", output: [] } }]);
   expect(completed.at(-1)).toMatchObject({ response: { status: "completed", output: [{ content: [{ text: "answer" }] }] } });
+});
+
+it("preserves interleaved image parts and their details in user history", () => {
+  const url = "data:image/png;base64,iVBORw0KGgo=";
+  const input = [{ role: "user", content: [
+    { type: "input_text", text: "First" },
+    { type: "input_image", image_url: url, detail: "high" },
+    { type: "input_text", text: "Second" },
+    { type: "input_image", image_url: url },
+  ] }, { role: "assistant", content: "Two images." }, { role: "user", content: "Compare." }];
+  expect(responsesToChat(request(input)).request.messages).toEqual([
+    { role: "user", content: [
+      { type: "text", text: "First" },
+      { type: "image_url", image_url: { url, detail: "high" } },
+      { type: "text", text: "Second" },
+      { type: "image_url", image_url: { url } },
+    ] }, { role: "assistant", content: "Two images." }, { role: "user", content: "Compare." },
+  ]);
+});
+
+it.each([
+  { image_url: "file:///secret.png" },
+  { image_url: "https://example.com/secret.png" },
+  { image_url: "data:image/svg+xml;base64,c2VjcmV0" },
+  { image_url: "data:image/png;base64," },
+  { image_url: "data:image/png;base64,secret!=" },
+  { file_id: "secret" },
+  { image_url: "data:image/png;base64,c2VjcmV0", file_id: "secret" },
+  { image_url: "data:image/png;base64,c2VjcmV0", detail: "original" },
+])("rejects unsupported image inputs without exposing data", image => {
+  expect(() => responsesToChat(request([{ role: "user", content: [{ type: "input_image", ...image }] }]))).toThrow();
+  try { responsesToChat(request([{ role: "user", content: [{ type: "input_image", ...image }] }])); }
+  catch (error) { expect(String(error)).not.toContain("secret"); }
+});
+
+it.each(["system", "developer", "assistant"])("rejects images in %s messages", role => {
+  expect(() => responsesToChat(request([{ role, content: [{ type: "input_image", image_url: "data:image/png;base64,c2VjcmV0" }] }]))).toThrow();
 });

@@ -1,13 +1,16 @@
 import { array, ModelConversionError, object, string } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
-export interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
+export type ChatUserContentPart = { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
+interface ChatTextMessage {
+  role: "system" | "assistant" | "tool";
   content: string | null;
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
   reasoning?: string;
 }
+export type ChatMessage = ChatTextMessage | { role: "user"; content: string | ChatUserContentPart[] };
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
@@ -42,11 +45,11 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   const seenCalls = new Set<string>();
   // A Chat assistant message owns its text, reasoning and all parallel calls.
   // Once tool results start, a new assistant group requires every result first.
-  const assistant = (): ChatMessage => {
+  const assistant = (): ChatTextMessage => {
     const last = messages.at(-1);
     if (last?.role === "assistant") return last;
     if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
-    const message: ChatMessage = { role: "assistant", content: null };
+    const message: ChatTextMessage = { role: "assistant", content: null };
     messages.push(message);
     return message;
   };
@@ -82,7 +85,9 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
         message.content = (message.content ?? "") + textContent(item.content);
       } else {
         if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
-        messages.push({ role, content: textContent(item.content) });
+        messages.push(role === "user"
+          ? { role, content: userContent(item.content) }
+          : { role, content: textContent(item.content) });
       }
     } else {
       throw new ModelConversionError("Unsupported Responses input item");
@@ -129,6 +134,27 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     result.max_completion_tokens = Number(source.max_output_tokens);
   }
   return { request: result, toolNames };
+}
+
+function userContent(value: unknown): string | ChatUserContentPart[] {
+  if (typeof value === "string") return value;
+  const parts: ChatUserContentPart[] = array(value).map(raw => {
+    const part = object(raw);
+    if (part.type === "input_text") return { type: "text", text: string(part.text) };
+    if (part.type !== "input_image" || part.file_id != null) throw new ModelConversionError("Unsupported user content");
+    const url = string(part.image_url);
+    // Preserve inline data without decoding or fetching it in this pure adapter.
+    // Surface image validation remains responsible for file format and size.
+    const prefix = /^data:image\/(?:png|jpeg|webp|gif);base64,/u.exec(url);
+    const encoded = prefix ? url.slice(prefix[0].length) : "";
+    if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) {
+      throw new ModelConversionError("Only inline Base64 images are supported");
+    }
+    const detail = part.detail;
+    if (detail != null && detail !== "auto" && detail !== "low" && detail !== "high") throw new ModelConversionError("Unsupported Chat image detail");
+    return { type: "image_url", image_url: { url, ...(detail == null ? {} : { detail }) } };
+  });
+  return parts.some(part => part.type === "image_url") ? parts : parts.map(part => part.type === "text" ? part.text : "").join("");
 }
 
 function textContent(value: unknown): string {

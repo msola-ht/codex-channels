@@ -23,6 +23,7 @@ it("isolates switching credentials and restores exclusive configuration on remov
   await applyClinePassConfiguration(input, { environment });
   expect(readFileSync(paths.config, "utf8")).toBe(original);
   expect(readFileSync(paths.profile, "utf8")).toContain('wire_api = "responses"');
+  expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"] }] });
   expect(loadManagedModelProviderSettings(environment)).toContainEqual(expect.objectContaining({ provider: "cline-pass", mode: "switching" }));
   if (process.platform !== "win32") expect(statSync(paths.profile).mode & 0o777).toBe(0o600);
   await expect(applyClinePassConfiguration({ ...input, mode: "exclusive" }, { environment })).rejects.toThrow("必须确认");

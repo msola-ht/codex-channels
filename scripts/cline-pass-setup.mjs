@@ -30,7 +30,7 @@ export function clinePassSetupPaths(environment = process.env) {
 export function createClinePassCatalog(contextWindow) {
   return { models: createResponsesModelCatalog([{
     id: definition.defaultModel, name: "Cline Pass DeepSeek V4.1 Flash",
-    contextWindow, reasoningEfforts: ["none"], defaultReasoningEffort: "none", supportsImages: false,
+    contextWindow, reasoningEfforts: ["none"], defaultReasoningEffort: "none", supportsImages: true,
   }], definition.defaultModel).models };
 }
 

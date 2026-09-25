@@ -491,5 +491,5 @@ Cline Pass 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider
 [`model-api`](../src/model-api/README.md) 独立转换模型消息，
 [`chat-bridge.ts`](../src/provider-proxy/chat-bridge.ts) 提供服务拥有的本地 HTTP 适配。
 依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
-仅接受文本与函数工具，不伪造加密推理或远程压缩语义。验证入口为
+接受文本、用户内联图片与函数工具，图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义。验证入口为
 [`real-app-server-chat-provider.test.ts`](../tests/real-app-server-chat-provider.test.ts)；用户边界见 [`Cline Pass`](cline-pass.md)。
