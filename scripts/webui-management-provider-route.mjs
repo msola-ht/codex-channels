@@ -254,7 +254,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       () => loadCcgAccounts(environment),
       warnings,
       "ccg",
-      "CommandCode 账户元数据暂不可用",
+      "CommandCode Go 账户元数据暂不可用",
     );
     const clineAccounts = loadAccountRegistry(
       () => loadClinePassAccounts(environment),
@@ -279,7 +279,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       ...(ccgAccounts ?? []).map((account) => ({
         provider: ccgProviderId(account.id),
         accountId: account.id,
-        displayName: `CommandCode ${account.id}`,
+        displayName: `CommandCode Go ${account.id}`,
         default: account.default,
       })),
     ];

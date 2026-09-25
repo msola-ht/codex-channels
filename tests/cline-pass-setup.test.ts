@@ -72,7 +72,7 @@ it("reads DS context automatically and preserves the shared catalog on credentia
 it("configures through Setup without a manual context prompt", async () => {
   const {environment}=fixture();
   const text=vi.fn().mockResolvedValue("test");
-  await runClinePassSetup({environment,prompts:{select:vi.fn().mockResolvedValueOnce("configure").mockResolvedValueOnce("switching"),password:async()=>"sk_fixture-key",text,isCancel:()=>false},output:{write:()=>true}});
+  await runClinePassSetup({environment,prompts:{select:vi.fn().mockResolvedValueOnce("configure").mockResolvedValueOnce("custom").mockResolvedValueOnce("switching"),password:async()=>"sk_fixture-key",text,isCancel:()=>false},output:{write:()=>true}});
   expect(text).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({message:"账户 ID"}));
 });
 it("rejects a missing DS Flash template", () => {

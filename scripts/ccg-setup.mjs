@@ -1,3 +1,4 @@
+import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import { pathToFileURL } from "node:url";
@@ -345,12 +346,7 @@ export async function runCcgSetup({
     return result;
   }
   const accountId = requestedAccountId ?? (action === "add"
-    ? await prompts.text({
-        message: "账户 ID",
-        validate: (value) => {
-          try { validateCcgAccountId(value); } catch (error) { return error.message; }
-        },
-      })
+    ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({
         message: "选择 CCG 账户",
         options: accounts.map((account) => ({

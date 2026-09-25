@@ -69,6 +69,7 @@
     "scripts/debug-setup.mjs",
     "scripts/deepseek-setup.mjs",
     "scripts/cline-pass-setup.mjs",
+    "scripts/managed-provider-account-prompt.mjs",
     "scripts/deepseek-account-management.mjs",
     "scripts/deepseek-account-setup.mjs",
     "scripts/desktop-app-command.mjs",

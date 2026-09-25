@@ -1,3 +1,4 @@
+import { opencodeGoReservedAccountIds } from "./managed-provider-account-options.mjs";
 import {
   existsSync,
   mkdirSync,
@@ -14,7 +15,6 @@ import {
 } from "./private-file.mjs";
 
 const accountIdPattern = /^[a-z0-9_-]{1,32}$/u;
-const reservedAccountIds = new Set(["openai", "deepseek", "ocg"]);
 const maximumRegistryBytes = 262_144;
 const opencodeGoProviderPrefix = "ocg-";
 
@@ -112,7 +112,7 @@ export function validateOpencodeGoAccountId(accountId) {
   if (
     typeof accountId !== "string"
     || !accountIdPattern.test(accountId)
-    || reservedAccountIds.has(accountId)
+    || opencodeGoReservedAccountIds.includes(accountId)
   ) {
     throw new Error(
       "OpenCode Go 账户 id 必须是小写字母/数字/`-`/`_` 组成的 1-32 位字符串，且不能与现有 Provider id 冲突；Provider 使用 ocg-<accountId>",

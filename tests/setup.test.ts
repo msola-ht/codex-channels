@@ -422,7 +422,7 @@ describe("Codex Connect setup", () => {
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "provider_default",
       label: "默认模型与思考等级",
-      hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、CLP 的默认模型与思考等级",
+      hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 的默认模型与思考等级",
     });
     expect(prompts.select.mock.calls[2]?.[0]?.options).toContainEqual({
       value: "model_window",
@@ -759,7 +759,7 @@ it("routes CLP through the third-party setup menu", async () => {
     prompts: { intro: vi.fn(), select, isCancel: () => false, cancel: vi.fn() },
     clinePassSetup,
   });
-  expect(select).toHaveBeenCalledWith(expect.objectContaining({options:expect.arrayContaining([expect.objectContaining({value:"clp",label:"CLP 官方"})])}));
+  expect(select).toHaveBeenCalledWith(expect.objectContaining({options:expect.arrayContaining([expect.objectContaining({value:"clp",label:"Cline Pass 官方"})])}));
   expect(clinePassSetup).toHaveBeenCalledOnce();
   expect(result).toMatchObject({ action: "configured", activation: "restart-all" });
 });

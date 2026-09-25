@@ -1,3 +1,4 @@
+import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import { pathToFileURL } from "node:url";
 import * as clackPrompts from "@clack/prompts";
@@ -37,7 +38,7 @@ export async function runDeepseekSetup({ environment = process.env, prompts = cl
     return result;
   }
   const accountId = requestedId ?? (action === "add"
-    ? await prompts.text({ message: "账户 ID", validate: (value) => { try { validateDeepseekAccountId(value); } catch (error) { return error.message; } } })
+    ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({ message: "选择 DS 账户", options: accounts.map((account) => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) }));
   if (prompts.isCancel(accountId)) return { action: "back" };
   validateDeepseekAccountId(accountId);

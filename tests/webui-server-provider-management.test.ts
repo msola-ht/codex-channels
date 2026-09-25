@@ -598,7 +598,7 @@ describe("webui server Provider and account management", () => {
     expect(snapshots).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "ds-work", accountId: "work", displayName: "DS work", default: true, observedAtMs: 0 }),
       expect.objectContaining({ provider: "ocg-main", accountId: "main", displayName: "ocg-main@example.com", default: true, observedAtMs: 0 }),
-      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CommandCode team", default: true, observedAtMs: 0 }),
+      expect.objectContaining({ provider: "ccg-team", accountId: "team", displayName: "CommandCode Go team", default: true, observedAtMs: 0 }),
     ]));
     expect(snapshots).not.toContainEqual(expect.objectContaining({ provider: "ccg" }));
   });

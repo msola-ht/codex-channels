@@ -285,13 +285,13 @@ async function runThirdPartyModelSetup({
         },
         {
           value: "clp",
-          label: "CLP 官方",
+          label: "Cline Pass 官方",
           hint: "Chat 模型接入、固定/切换模式与移除配置",
         },
         {
           value: "provider_default",
           label: "默认模型与思考等级",
-          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、CLP 的默认模型与思考等级",
+          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 的默认模型与思考等级",
         },
         {
           value: "model_window",

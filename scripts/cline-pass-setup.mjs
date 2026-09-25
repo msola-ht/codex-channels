@@ -1,5 +1,6 @@
+import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { existsSync } from "node:fs";
-import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccountId, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
+import { clinePassAccountDirectory, clinePassAccountMarkerPath, clinePassAccountsFilePath, loadClinePassAccounts, validateClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import * as clackPrompts from "@clack/prompts";
@@ -187,14 +188,14 @@ export async function setClinePassDefaultAccount(accountId, { environment = proc
 
 export async function runClinePassSetup({ environment = process.env, prompts = clackPrompts, output = process.stdout } = {}) {
   const accounts = loadClinePassAccounts(environment);
-  const action = await prompts.select({ message: "CLP 官方", options: [
+  const action = await prompts.select({ message: "Cline Pass 官方", options: [
     { value: "configure", label: "添加账户" },
     ...(accounts.length ? [{ value: "reconfigure", label: "重新配置账户" }, { value: "default", label: "设置默认账户" }, { value: "remove", label: "移除账户" }] : []),
     { value: "back", label: "返回" },
   ] });
   if (prompts.isCancel(action) || action === "back") return { action: "back" };
   const accountId = action === "configure"
-    ? await prompts.text({ message: "账户 ID", validate: value => { try { validateClinePassAccountId(value); } catch { return "请输入 1–32 位小写字母、数字、- 或 _"; } } })
+    ? await promptManagedAccountId(prompts, accounts)
     : await prompts.select({ message: "选择账户", options: accounts.map(account => ({ value: account.id, label: `${account.id}${account.default ? "（默认）" : ""}` })) });
   if (prompts.isCancel(accountId)) return { action: "back" };
   let result;
@@ -205,7 +206,7 @@ export async function runClinePassSetup({ environment = process.env, prompts = c
   } else if (action === "default") {
     result = await setClinePassDefaultAccount(accountId, { environment });
   } else {
-    const apiKey = await prompts.password({ message: "CLP API Key", validate: value => isManagedProviderApiKeyValid(definition, value) ? undefined : "请输入有效 API Key" });
+    const apiKey = await prompts.password({ message: "Cline Pass API Key", validate: value => isManagedProviderApiKeyValid(definition, value) ? undefined : "请输入有效 API Key" });
     if (prompts.isCancel(apiKey)) return { action: "back" };
     const mode = await prompts.select({ message: "运行模式", options: [{ value: "switching", label: "切换模式" }, { value: "exclusive", label: "固定模式" }] });
     if (prompts.isCancel(mode)) return { action: "back" };

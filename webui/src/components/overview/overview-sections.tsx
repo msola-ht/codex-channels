@@ -248,7 +248,7 @@ export function CcgCreditUsageCards({
   refreshControls: Record<string, AccountRefreshControl>
 }) {
   if (accounts.length === 0) {
-    return <AccountProviderEmpty title="CommandCode 账户额度" description="尚未配置 CommandCode 账户" />
+    return <AccountProviderEmpty title="CommandCode Go 账户额度" description="尚未配置 CommandCode Go 账户" />
   }
   return <div className="flex flex-col gap-4">{accounts.map((account) => (
     <CcgCreditAccountCard
@@ -282,7 +282,7 @@ function CcgCreditAccountCard({
         </CardTitle>
         <CardDescription>
           {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
-            ? "CommandCode 账户额度暂不可用"
+            ? "CommandCode Go 账户额度暂不可用"
             : `更新于 ${formatTime(observedAtMs)}`}
         </CardDescription>
         {refreshControl && !refreshControl.error && available

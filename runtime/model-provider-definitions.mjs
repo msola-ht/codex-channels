@@ -65,7 +65,7 @@ export const opencodeGoProviderDefinition = Object.freeze({
 
 export const commandCodeProviderDefinition = Object.freeze({
   id: "ccg",
-  displayName: "CommandCode",
+  displayName: "CommandCode Go",
   profileName: "sf-ccg",
   profileFileName: "sf-ccg.config.toml",
   catalogFileName: "models.json",
@@ -181,7 +181,7 @@ export function ccgAccountDefinition(accountId) {
   const profileName = `sf-${id}`;
   return Object.freeze({
     ...commandCodeProviderDefinition,
-    id, accountId, storageId: "ccg", displayName: `CommandCode ${accountId}`,
+    id, accountId, storageId: "ccg", displayName: `CommandCode Go ${accountId}`,
     profileName, profileFileName: `${profileName}.config.toml`,
     apiKeyEnvironmentKey: ccgApiKeyEnvironmentKey(accountId),
   });
