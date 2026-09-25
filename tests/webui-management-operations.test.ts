@@ -118,6 +118,10 @@ describe("WebUI management operation boundaries", () => {
       .toMatchObject({ confirmExclusiveConfigChange: true });
     expect(accountSettingsApplyInput({ operation: "deepseek.legacy.remove" }))
       .toMatchObject({ confirmRemove: true });
+    expect(accountSettingsApplyInput({ operation: "clp.configure", mode: "exclusive", accountId: "work", apiKey: "secret" }))
+      .toMatchObject({ confirmExclusiveConfigChange: true });
+    expect(accountSettingsApplyInput({ operation: "clp.remove", accountId: "work" }))
+      .toMatchObject({ confirmRemove: true });
     expect(accountSettingsApplyInput({ operation: "deepseek.remove", accountId: "work" }))
       .toMatchObject({ confirmRemove: true });
   });

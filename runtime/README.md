@@ -36,10 +36,11 @@
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go 与 CCG 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>` 与 `ccg-<账户>` 实例；能力元数据声明实例展开与账户能力。Cline Pass 使用单实例定义并显式声明 Chat 上游，服务组合本地转换桥；账户实例继承共享定义；
+  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
+- `cline-pass-accounts.mjs` / `cline-pass-accounts.d.mts`：CLP 账户注册表、默认账户、私有路径与凭据变量名；运行实例使用 `clp-<账户>`，共享模型目录和 Chat 转换代理。
 - `ccg-accounts.mjs` / `ccg-accounts.d.mts`：CCG 账户注册表、默认账户、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ccg-<账户>`，共用 CCG 目录与统计代理。
 - `opencode-go-accounts.mjs` / `opencode-go-accounts.d.mts`：OpenCode Go 账户注册表
   （`accounts.json`）、账户目录与管理标记；默认账户只由注册表标记决定。Key 不进入注册表，邮箱或手机号仅用于本机展示。
@@ -69,7 +70,7 @@
 - `model-provider-official-catalog.mjs`：独立管理 Codex 兼容 Provider 共用的官方模型目录；通过配置的
   Codex CLI 执行 `debug models --bundled`，校验后原子写入
   `~/.codex-connect/providers/custom/official-models.json`（0600），并统一注入 App Server 启动参数。
-- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 RS 与 Cline Pass 上下文，保留私有恢复记录并提供整批恢复与预览目标。
+- `responses-context-sync.mjs` / `responses-context-sync.d.mts`：扩展现有 DS 目录与 Profile 事务，按模板关联同步 RS 与 CLP 上下文，保留私有恢复记录并提供整批恢复与预览目标。
 - `model-provider-responses-catalog.mjs` / `model-provider-responses-catalog.d.mts`：校验手填模型定义、模板基础能力与最大上下文，生成版本化的独立目录，管理修订、私有备份与未完成写入标记；不保存凭据。
 - `model-provider-startup-runtime.mjs`：判定切换/固定模式的主 Provider，派生私有 Provider Socket，
   为不支持 Profile 选择器的 App Server 生成非敏感 `-c` 覆盖，并只把当前 Provider 的 Key 注入目标

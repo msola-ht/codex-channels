@@ -1,16 +1,22 @@
-# Cline Pass
+# CLP（Cline Pass）
 
-通过 `codexc setup` → 模型与提供商 → 第三方 Provider → Cline Pass 配置。
-当前接入单个 Cline Pass Key 和 `cline-pass/deepseek-v4.1-flash` 模型，支持固定与切换模式。
+通过 `codexc setup` → 模型与提供商 → 第三方 Provider → CLP 配置。
+支持多个 CLP 账户，各账户使用独立 API Key，当前模型为 `cline-pass/deepseek-v4.1-flash`，支持固定与切换模式。
+Setup 和 WebUI 设置页均可添加、重新配置、设置默认及移除账户。账户 ID 为 1–32 位小写字母、数字、`-` 或 `_`；映射后凭据变量名相同的 ID 不可同时使用，例如 `a-b` 与 `a_b`。
 上下文与图片、思考等级模板复用 DS 的 `deepseek-flash`：优先读取本地 DS 目录，缺失时读取官方安装脚本中的目录并与 Cline 配置一并保存为本地共享 DS 模板，不执行脚本，无需手填上下文。
 保留 Cline 已验证的 `none` 思考等级和 Chat 转换边界，不复制原生搜索等服务端能力。
-通过“模型上下文窗口”统一修改 `deepseek-flash`，同步 DS、同名受管模型、Cline Pass 和已启用 DS 跟随的第三方自定义模型；不同模型不联动思考等级。
-重新配置 Cline 时刷新模板上下文，保留其已有思考等级。已有手填配置需在 Setup 重新配置一次，才会明确建立 DS 跟随关系。
+通过“模型上下文窗口”统一修改 `deepseek-flash`，同步 DS、同名受管模型、CLP 和已启用 DS 跟随的第三方自定义模型；不同模型不联动思考等级。
+所有 Cline 账户共享同一份模型目录。添加账户或更新密钥保留已有上下文及思考等级；调整上下文仍使用统一的模型窗口设置。
 
-切换模式使用独立 `sf-cline-pass.config.toml` Profile；固定模式修改 Codex 主配置并保留初始备份。
+切换模式按账户使用 `sf-clp-<账户>.config.toml` Profile 和独立 App Server；固定模式修改 Codex 主配置并保留该账户的初始备份。
 Key 使用现有私有文件机制保存，不写入 Gateway TOML 或命令行。配置文件位于 Codex Home，目录与管理标记
-位于 `~/.codex-connect/providers/cline-pass/`。配置变更后按 Setup 提示重启服务；切换模式通过
-现有 Provider 选择入口使用 Cline Pass。删除配置会停止对应受管实例，保留初始配置备份和历史统计。
+位于 `~/.codex-connect/providers/clp/`。配置变更后按 Setup 提示重启服务；切换模式通过
+现有 Provider 选择入口使用 `clp-<账户>`，终端可使用 `codexc remote --profile sf-clp-<账户>`。
+账户注册表 `accounts.json` 只保存 ID 和默认标记；各账户的管理标记和备份位于 `accounts/<账户>/`。
+默认账户用于默认选择，已有会话不自动更换账户，也不因额度不足轮换密钥。删除账户前须先把默认标记交给其他账户（仅剩一个账户时可直接删除）。
+删除会停止对应受管实例，保留初始配置备份和历史统计，该账户的历史会话不再可用；其他账户及共享目录保留。仅在删除最后一个账户时删除 Cline 共享模型目录，DS 模板保留。
+
+仅支持新多账户结构，不迁移或兼容旧单账户配置。升级前请用旧版 Setup 移除旧 Cline 配置，再用新版重新添加；新版本遇到旧管理标记或 Profile 会明确拒绝读取，不自动删除数据。
 配置写入复用受管事务和失败回滚，不迁移已有 Provider 数据或数据库。
 
 ## Chat 转换边界
@@ -24,7 +30,7 @@ Gateway 重启不会终止该桥或共享 App Server。转换逻辑独立在 `sr
 Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘要；同一增量中的重复文本只保留一次，内容冲突时明确失败。
 用户图片支持 PNG、JPEG、WebP、GIF 的内联 Base64 Data URL，保留多图与文本顺序，沿用渠道的图片校验。
 不支持图片文件引用、远程图片 URL、工具结果中的图片或 `detail: original`；`auto`、`low`、`high` 原样传递。
-已有 Cline Pass 配置需通过 Setup 重新配置以更新模型目录中的图片能力和思考等级，再按提示重启服务。
+新账户复用共享目录中的图片能力和思考等级。
 思考等级支持 `none`、`low`、`high`、`max`，新配置默认 `high`；选择的等级通过 Chat `reasoning.effort` 原样传递，`none` 明确关闭思考。
 未传入等级时沿用上游默认值。旧配置的 `none` 原先不发送参数，更新后会关闭思考；需要思考时选择 `low`、`high` 或 `max`。
 非 OpenAI Provider 的上下文压缩沿用锁定 Codex 的本地压缩路径，不伪造远程压缩结果。
@@ -37,12 +43,12 @@ Chat 的 `reasoning` 与无签名 `reasoning_details` 明文映射为推理摘�
 账户用量通过 Cline 官方 `GET /api/v1/users/me/plan/usage-limits` 查询，使用已配置的 Key，支持固定和切换模式。
 WebUI 账户卡片和渠道 `/usage` 显示 5 小时、7 天、月度窗口的已用比例及重置时间，并复用现有账户刷新入口。
 只展示官方返回的比例与重置时间，不推算 Token 总额度、Credits 余额或套餐续费日期。
-查询失败时保留上次有效快照并显示刷新失败；删除 Cline 配置后隐藏账户卡片，保留历史统计。
+额度、重置时间、刷新状态和请求统计按账户分别记录；查询失败保留该账户上次有效快照，其他账户不受影响。删除账户后隐藏对应卡片，保留历史统计。
 已有配置升级后需重启 Gateway 以加载账户适配器，无需为额度查询重新执行 Setup。
 
 ## 调用诊断与错误
 
-上下文同步复用现有事务与私有恢复记录。若同步失败且自动回滚未完成，停止相关服务后可执行 `codexc primary-provider recover cline-pass rollback`（恢复原值）或 `keep`（保留新值）；恢复整个关联事务后再重启服务。
+上下文同步复用现有事务与私有恢复记录。若同步失败且自动回滚未完成，停止相关服务后可执行 `codexc primary-provider recover clp-<账户> rollback`（恢复原值）或 `keep`（保留新值）；恢复整个关联事务后再重启服务。
 
 工具名称与命名空间拼接超过 Chat 的 64 字符限制时，转换层使用稳定短名，返回时还原原始工具身份；历史调用和指定工具选择使用相同映射。
 
@@ -55,7 +61,7 @@ WebUI 调用详情的“Chat 上游信息”展示上述字段；受长度或条
 ## 来源与验证
 
 - [Cline Chat API](https://docs.cline.bot/api/chat-completions)：认证、消息、函数工具、流和用量。
-- [Cline Pass](https://docs.cline.bot/getting-started/clinepass)：套餐和模型入口。
+- [CLP](https://docs.cline.bot/getting-started/clinepass)：套餐和模型入口。
 - `tests/model-api.test.ts`：消息、并行工具、缓存和失败语义。
 - `tests/real-app-server-chat-provider.test.ts`：真实锁定 App Server 通过隔离 Chat 上游完成工具闭环。
 

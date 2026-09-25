@@ -1,3 +1,4 @@
+import { loadClinePassAccounts, clinePassProviderId } from "./cline-pass-accounts.mjs";
 import { isResponsesProvider, responsesProviderCatalogPath } from "./model-provider-responses-catalog.mjs";
 import { readCodexProxySettings } from "./codex-proxy-env.mjs";
 import { spawn } from "node:child_process";
@@ -26,6 +27,7 @@ import {
 import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
+  clinePassProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -146,7 +148,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider,
     options,
   ) => {
-    const definition = providerDefinitions.get(provider);
+    const definition = provider === "clp" ? clinePassProviderDefinition : providerDefinitions.get(provider);
     let bridge;
     if (definition?.upstreamWireApi === "chat_completions") {
       bridge = new ChatCompletionsBridge({ ...options,
@@ -212,9 +214,11 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
           }
         : provider === "deepseek"
           ? managedAccountProxyOptions(dsAccounts, deepseekProviderId, "DS")
-          : provider === "ccg"
-            ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
-            : {
+          : provider === "clp"
+            ? managedAccountProxyOptions(clineAccounts, clinePassProviderId, "CLP")
+            : provider === "ccg"
+              ? managedAccountProxyOptions(ccgAccounts, ccgProviderId, "CCG")
+              : {
                 onMetrics: (metrics) => sendProviderProxyMetrics(
                   providerMetricsSocketPath(socketPath, provider),
                   metrics,
@@ -251,6 +255,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
       .map((definition) => [definition.id, definition]),
   );
   const goAccounts = loadOpencodeGoAccounts(runtime.environment);
+  const clineAccounts = loadClinePassAccounts(runtime.environment);
   const dsAccounts = loadDeepseekAccounts(runtime.environment);
   const ccgAccounts = loadCcgAccounts(runtime.environment);
   const proxyAccountId = managedProviderAccountIdFromProvider;

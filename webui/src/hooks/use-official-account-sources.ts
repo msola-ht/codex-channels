@@ -123,12 +123,12 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
   const ccg = ccgSnapshots.length > 0
     ? { accounts: ccgSnapshots.map(ccgAccountFromSnapshot) }
     : null
-  const clinePass = result.snapshots.find((snapshot) => snapshot.provider === "cline-pass")
+  const clinePass = result.snapshots.filter((snapshot) => snapshot.provider.startsWith("clp-"))
   return {
     deepseek,
     opencodeGo,
     ccg,
-    clinePass: clinePass ? quotaAccountFromSnapshot(clinePass) : null,
+    clinePass: clinePass.map(quotaAccountFromSnapshot),
     warning: result.warnings.length === 0
       ? null
       : result.warnings.map((warning) => warning.message).join("；"),

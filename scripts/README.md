@@ -536,4 +536,4 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
-- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：Cline Pass 单账户固定/切换配置、复用 DS Flash 模板并关联统一上下文设置、模型目录校验、私有事务写入与移除。
+- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。

@@ -16,7 +16,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`~/.codex-connect/providers/<id>/` 目录、`modelProvider`、环境变量名 |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；Cline Pass 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api` |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api` |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | `sk-` API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |

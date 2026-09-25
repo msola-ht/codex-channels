@@ -26,7 +26,7 @@ export function accountSnapshotIsStale(observedAtMs: number, now = Date.now()): 
 
 export function refreshableAccounts(result: ManagementProvidersResponse): RefreshableAccount[] {
   return result.providers.filter((provider) => provider.kind === "managed" && (
-    provider.id === "cline-pass" || provider.id === "deepseek" || provider.id.startsWith("ds-")
+    provider.id.startsWith("clp-") || provider.id === "deepseek" || provider.id.startsWith("ds-")
       || provider.id === "ocg" || provider.id.startsWith("ocg-")
       || provider.id === "ccg" || provider.id.startsWith("ccg-")
   ))

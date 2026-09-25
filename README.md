@@ -78,7 +78,7 @@ Codex 用户配置：
 共享代理通过 `codexc config → 网络代理` 设置，保存在 `~/.codex/.env`，见[代理设置](docs/user-guide.md#代理与权限)。
 
 配置示例见[`config.example.toml`](config.example.toml)。不要把 Token、Cookie 或 Authorization Header 写入日志或提交到仓库。
-DS、OCG、CCG 支持多账户，在 `codexc setup → 模型与提供商` 中管理。旧单账户需要先确认移除再重新添加，更新器不执行账户迁移；具体命令见下面的提供商文档。
+DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商` 中管理。旧单账户需要先确认移除再重新添加，更新器不执行账户迁移；具体命令见下面的提供商文档。
 
 ## 专题文档
 
@@ -90,7 +90,7 @@ DS、OCG、CCG 支持多账户，在 `codexc setup → 模型与提供商` 中�
 - [DeepSeek 多账户管理](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
-- [Cline Pass](docs/cline-pass.md)
+- [CLP（Cline Pass）](docs/cline-pass.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

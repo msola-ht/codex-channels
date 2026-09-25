@@ -1,3 +1,4 @@
+import { clinePassAccountIdFromProvider, clinePassProviderId, isClinePassAccountProvider, loadClinePassAccounts } from "./cline-pass-accounts.mjs";
 import {
   deepseekAccountIdFromProvider,
   deepseekProviderId,
@@ -18,6 +19,13 @@ import {
 } from "./opencode-go-accounts.mjs";
 
 const families = Object.freeze([
+  {
+    proxyKey: "clp",
+    matches: isClinePassAccountProvider,
+    accountId: clinePassAccountIdFromProvider,
+    providerId: clinePassProviderId,
+    loadAccounts: loadClinePassAccounts,
+  },
   {
     proxyKey: "deepseek",
     matches: isDeepseekAccountProvider,

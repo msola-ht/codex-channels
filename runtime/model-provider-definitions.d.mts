@@ -1,5 +1,6 @@
 export type ManagedModelProviderId =
-  | "cline-pass"
+  | "clp"
+  | `clp-${string}`
   | "ccg"
   | `ccg-${string}`
   | "deepseek"
@@ -10,8 +11,8 @@ export type ManagedModelProviderId =
   | "opencode-go"
   | `opencode-go-${string}`;
 
-export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "cline-pass";
-export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts";
+export type ManagedModelProviderAccountAdapter = "none" | "deepseek" | "opencode-go" | "ccg" | "clp";
+export type ManagedModelProviderInstanceAdapter = "single" | "opencode-go-accounts" | "deepseek-accounts" | "ccg-accounts" | "clp-accounts";
 
 export interface ModelProviderCapabilities {
   readonly accountAdapter: ManagedModelProviderAccountAdapter;
@@ -45,6 +46,7 @@ export interface ModelProviderDefinition {
   readonly capabilities: ModelProviderCapabilities;
 }
 
+export function clinePassAccountDefinition(accountId: string): ModelProviderDefinition;
 export const clinePassProviderDefinition: ModelProviderDefinition;
 export const deepseekProviderDefinition: ModelProviderDefinition;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;

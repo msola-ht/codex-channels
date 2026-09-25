@@ -284,14 +284,14 @@ async function runThirdPartyModelSetup({
           hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
         },
         {
-          value: "cline-pass",
-          label: "Cline Pass 官方",
+          value: "clp",
+          label: "CLP 官方",
           hint: "Chat 模型接入、固定/切换模式与移除配置",
         },
         {
           value: "provider_default",
           label: "默认模型与思考等级",
-          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、Cline Pass 的默认模型与思考等级",
+          hint: "设置 DeepSeek、OpenCode Go、CommandCode Go、CLP 的默认模型与思考等级",
         },
         {
           value: "model_window",
@@ -307,7 +307,7 @@ async function runThirdPartyModelSetup({
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
     } else if (module === "opencode-go") {
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
-    } else if (module === "cline-pass") {
+    } else if (module === "clp") {
       result = await clinePassSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });

@@ -28,6 +28,10 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [deepseekKey, setDeepseekKey] = useState("")
   const [dsAccountId, setDsAccountId] = useState("")
   const [dsReconfigure, setDsReconfigure] = useState(false)
+  const [clineAccountId, setClineAccountId] = useState("")
+  const [clineMode, setClineMode] = useState<"switching" | "exclusive">("switching")
+  const [clineKey, setClineKey] = useState("")
+  const [clineReconfigure, setClineReconfigure] = useState(false)
   const pending = management.pendingPreview
 
   const configureAccount = async () => {
@@ -59,10 +63,15 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
       setDeepseekKey("")
       setDsReconfigure(false)
     }
+    if (result !== null && pending?.input.operation === "clp.configure") {
+      setClineKey("")
+      setClineReconfigure(false)
+    }
     if (result !== null) onChanged?.()
   }
   const cancelPending = () => {
     management.cancel()
+    setClineKey("")
     setAccountKey("")
     setDeepseekKey("")
   }
@@ -78,7 +87,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   return <Card>
     <CardHeader>
       <CardTitle>账户与授权配置</CardTitle>
-      <CardDescription>OpenCode Go 多账户和 DeepSeek 配置复用现有原子事务；API Key 只写入，不会回显或进入结果。</CardDescription>
+      <CardDescription>管理 OpenCode Go、DeepSeek 和 Cline Pass 账户；API Key 只写入，不会回显。</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-6 text-sm">
       <section className="flex flex-col gap-3">
@@ -97,6 +106,17 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
           <ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Field data-disabled={disabled}><FieldLabel htmlFor="deepseek-api-key">DeepSeek API Key</FieldLabel><Input id="deepseek-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></Field>
         </FieldGroup> : null}
         <div className="flex gap-2">{settings.deepseek.legacyConfigurationPresent ? <Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.legacy.remove" })}>移除旧账户</Button> : <Button disabled={disabled || dsAccountId.trim() === "" || deepseekKey.trim() === ""} onClick={() => void configureDeepseek()}>{dsReconfigure ? "重新配置账户" : "新增账户"}</Button>}{dsReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setDsAccountId(""); setDsReconfigure(false); setDeepseekKey("") }}>取消编辑</Button> : null}</div>
+      </section>
+      <Separator />
+      <section className="flex flex-col gap-3">
+        <div><h3 className="font-medium">Cline Pass 多账户</h3><p className="text-xs text-muted-foreground">各账户独立使用 Key、会话和额度，共享模型目录及 DS 上下文设置。</p></div>
+        {settings.clinePass.accounts.length === 0 ? <SettingsEmpty>尚未配置 Cline Pass 账户。</SettingsEmpty> : settings.clinePass.accounts.map(account => <div key={account.id} className="flex flex-wrap items-center justify-between gap-2"><div>{account.id} {account.default ? <Badge variant="outline">默认</Badge> : null}<p className="text-xs text-muted-foreground">{account.model} · {account.mode}</p></div><div className="flex gap-2"><Button variant="outline" disabled={disabled} onClick={() => { setClineAccountId(account.id); setClineMode(account.mode ?? "switching"); setClineReconfigure(true); setClineKey("") }}>重新配置</Button><Button variant="outline" disabled={disabled || account.default} onClick={() => void management.mutate({ operation: "clp.default", accountId: account.id })}>设为默认</Button><Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "clp.remove", accountId: account.id })}>删除</Button></div></div>)}
+        <FieldGroup className="grid gap-3 md:grid-cols-3">
+          <Field data-disabled={disabled || clineReconfigure}><FieldLabel htmlFor="cline-account-id">账户 ID</FieldLabel><Input id="cline-account-id" value={clineAccountId} disabled={disabled || clineReconfigure} onChange={event => setClineAccountId(event.target.value)} placeholder="小写字母、数字、-、_" /></Field>
+          <ManagedSelect label="运行模式" value={clineMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={value => setClineMode(value as "switching" | "exclusive")} />
+          <Field data-disabled={disabled}><FieldLabel htmlFor="cline-api-key">Cline Pass API Key</FieldLabel><Input id="cline-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={clineKey} disabled={disabled} onChange={event => setClineKey(event.target.value)} /></Field>
+        </FieldGroup>
+        <div className="flex gap-2"><Button disabled={disabled || clineAccountId.trim() === "" || clineKey.trim() === ""} onClick={() => void management.mutate({ operation: "clp.configure", accountId: clineAccountId.trim(), apiKey: clineKey, mode: clineMode, reconfigure: clineReconfigure })}>{clineReconfigure ? "重新配置账户" : "新增账户"}</Button>{clineReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setClineAccountId(""); setClineReconfigure(false); setClineKey("") }}>取消编辑</Button> : null}</div>
       </section>
       {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
@@ -129,6 +149,7 @@ export function AccountSettingsConfirmationDialog({
     if (effects.length > 0) lines.push(`影响：${effects.join("；")}`)
   }
   const removing = pending.input.operation === "opencode.account.remove"
+    || pending.input.operation === "clp.remove"
     || pending.input.operation === "deepseek.remove"
     || pending.input.operation === "deepseek.legacy.remove"
   const stopping = pending.input.operation === "opencode.account.stop"

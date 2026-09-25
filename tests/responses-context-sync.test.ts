@@ -200,9 +200,9 @@ it.each(["keep","rollback"] as const)("recovers a Cline-only context transaction
   const home=mkdtempSync(join(tmpdir(),"codexc-cline-recovery-"));roots.push(home);
   const environment=testEnvironment(home);
   const source=providerCatalogPath(home);
-  const directory=join(connectHomeFor(home),"providers","cline-pass");
+  const directory=join(connectHomeFor(home),"providers","clp");
   const path=join(directory,"models.json");
-  writePrivateFileAtomicSync(join(directory,"managed.toml"),'version = 1\nprovider = "cline-pass"\nmode = "switching"\n');
+  writePrivateFileAtomicSync(join(directory,"accounts.json"),JSON.stringify([{id:"test",default:true}]));
   writePrivateFileAtomicSync(join(directory,"models.manifest.json"),JSON.stringify({source:"deepseek",model:"deepseek-flash"}));
   writePrivateFileAtomicSync(source,JSON.stringify({models:[{slug:"deepseek-flash",context_window:1048576,max_context_window:1048576}]}));
   writePrivateFileAtomicSync(path,JSON.stringify({models:[{slug:"cline-pass/deepseek-v4.1-flash",context_window:1048576,max_context_window:1048576}]}));
@@ -214,13 +214,19 @@ it.each(["keep","rollback"] as const)("recovers a Cline-only context transaction
   const content=readFileSync(journal,"utf8");
   const record=JSON.parse(content) as {files:Array<{path:string;next:string}>};
   failures.path="";failures.rollback=false;
+  const pendingFiles = [readFileSync(source,"utf8"),readFileSync(path,"utf8")];
+  const writeCount = writes.length;
+  expect(()=>recoverResponsesContextSync(environment,"clp-unregistered",action)).toThrow("账户未注册");
+  expect(writes).toHaveLength(writeCount);
+  expect(readFileSync(journal,"utf8")).toBe(content);
+  expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(pendingFiles);
   // Recovery must still reject other files under the shared DS directory.
   record.files[0]!.path=join(connectHomeFor(home),"providers","deepseek","unrelated.json");
   writePrivateFileAtomicSync(journal,JSON.stringify(record));
-  expect(()=>recoverResponsesContextSync(environment,"cline-pass",action)).toThrow("恢复文件无效");
+  expect(()=>recoverResponsesContextSync(environment,"clp-test",action)).toThrow("恢复文件无效");
   expect(existsSync(journal)).toBe(true);
   writePrivateFileAtomicSync(journal,content);
-  expect(recoverResponsesContextSync(environment,"cline-pass",action)).toBe(true);
+  expect(recoverResponsesContextSync(environment,"clp-test",action)).toBe(true);
   const expected=action === "rollback" ? before : (JSON.parse(content) as typeof record).files.map(file=>file.next);
   expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(expected);
   expect(existsSync(journal)).toBe(false);
@@ -232,12 +238,12 @@ it.each(["none","write","rollback"])("includes planned Cline writes in the DS re
   const ds=JSON.parse(readFileSync(source,"utf8"));
   ds.models.push({...ds.models[0],slug:"deepseek-flash",context_window:1048576});
   writePrivateFileAtomicSync(source,JSON.stringify(ds));
-  const directory=`${connectHomeFor(home)}/providers/cline-pass`;
+  const directory=`${connectHomeFor(home)}/providers/clp`;
   const path=`${directory}/models.json`;
-  writePrivateFileAtomicSync(`${directory}/managed.toml`,'version = 1\nprovider = "cline-pass"\nmode = "switching"\n');
+  writePrivateFileAtomicSync(`${directory}/accounts.json`,JSON.stringify([{id:"test",default:true}]));
   writePrivateFileAtomicSync(`${directory}/models.manifest.json`,JSON.stringify({source:"deepseek",model:"deepseek-flash"}));
   writePrivateFileAtomicSync(path,JSON.stringify({models:[{slug:"cline-pass/deepseek-v4.1-flash",context_window:1048576,max_context_window:1048576,default_reasoning_level:"none"}]}));
-  expect(listResponsesContextFollowers(environment,"deepseek-flash")).toContainEqual({providerId:"cline-pass",model:"cline-pass/deepseek-v4.1-flash",contextWindow:1048576});
+  expect(listResponsesContextFollowers(environment,"deepseek-flash")).toContainEqual({providerId:"clp-test",model:"cline-pass/deepseek-v4.1-flash",contextWindow:1048576});
   const before=[readFileSync(source,"utf8"),readFileSync(path,"utf8")];
   ds.models.at(-1).context_window=524288;
   if(fail) failures.path=path;
@@ -249,7 +255,7 @@ it.each(["none","write","rollback"])("includes planned Cline writes in the DS re
     if(failure === "rollback") {
       expect(existsSync(responsesContextSyncPath(environment))).toBe(true);
       failures.path="";failures.rollback=false;
-      expect(recoverResponsesContextSync(environment,"cline-pass","rollback")).toBe(true);
+      expect(recoverResponsesContextSync(environment,"clp-test","rollback")).toBe(true);
     }
     expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(before);
   }else{
@@ -257,7 +263,7 @@ it.each(["none","write","rollback"])("includes planned Cline writes in the DS re
     expect(JSON.parse(readFileSync(path,"utf8")).models[0]).toMatchObject({context_window:524288,default_reasoning_level:"none"});
     const journal=responsesContextSyncPath(environment);
     writePrivateFileAtomicSync(journal,readFileSync(`${journal}.backup`,"utf8"));
-    expect(recoverResponsesContextSync(environment,"cline-pass","rollback")).toBe(true);
+    expect(recoverResponsesContextSync(environment,"clp-test","rollback")).toBe(true);
     expect([readFileSync(source,"utf8"),readFileSync(path,"utf8")]).toEqual(before);
   }
 });

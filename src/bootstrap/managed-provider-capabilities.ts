@@ -29,8 +29,8 @@ export function createManagedProviderAccountAdapters(
     switch (capabilities.accountAdapter) {
       case "none":
         break;
-      case "cline-pass":
-        adapters.push(createClinePassAccountAdapter({ environment, fetchImpl }));
+      case "clp":
+        adapters.push(createClinePassAccountAdapter({ environment, fetchImpl, provider: definition.id }));
         break;
       case "deepseek":
         adapters.push(createDeepseekAccountAdapter({

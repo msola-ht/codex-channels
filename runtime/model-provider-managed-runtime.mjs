@@ -1,3 +1,4 @@
+import { clinePassAccountMarkerPath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
 import { assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
 import {
@@ -34,6 +35,7 @@ export function managedProviderDirectory(environment, definition) {
 
 export function managedProviderMarkerPath(environment, definition) {
   if (definition.accountId !== undefined) {
+    if (definition.storageId === "clp") return clinePassAccountMarkerPath(environment, definition.accountId);
     if (definition.storageId === "deepseek") {
       return deepseekAccountMarkerPath(environment, definition.accountId);
     }
@@ -102,7 +104,7 @@ export function loadManagedModelWindow(environment = process.env) {
   const bySlug = new Map();
   for (const provider of providers) {
     for (const model of provider.models ?? []) {
-      const slug = clineFollows && provider.provider === "cline-pass" ? "deepseek-flash" : model.model;
+      const slug = clineFollows && isClinePassAccountProvider(provider.provider) ? "deepseek-flash" : model.model;
       if (typeof slug !== "string" || slug === "") continue;
       const percent = model.windowPercent;
       const existing = bySlug.get(slug);
@@ -314,7 +316,7 @@ export function writeManagedModelWindowGlobal(
   validateWindowPercent(windowPercent);
   const providers = loadManagedModelProviderSettings(environment);
   const clineFollows = clinePassFollowsDeepseekContext(environment);
-  const localModel = provider => clineFollows && provider.provider === "cline-pass" && model === "deepseek-flash"
+  const localModel = provider => clineFollows && isClinePassAccountProvider(provider.provider) && model === "deepseek-flash"
     ? "cline-pass/deepseek-v4.1-flash" : model;
   const matches = providers.filter((provider) =>
     (provider.models ?? []).some((candidate) => candidate.model === localModel(provider)));

@@ -1,7 +1,6 @@
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
-import { readManagedMarker } from "../runtime/model-provider-runtime.mjs";
-import { clinePassProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
 import {
   GatewayAccountRefreshError,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -255,19 +254,16 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       () => loadCcgAccounts(environment),
       warnings,
       "ccg",
-      "CCG 账户元数据暂不可用",
+      "CommandCode 账户元数据暂不可用",
     );
     const clineAccounts = loadAccountRegistry(
-      () => {
-        const marker = readManagedMarker(environment, clinePassProviderDefinition);
-        return marker ? [marker] : [];
-      },
+      () => loadClinePassAccounts(environment),
       warnings,
-      "cline-pass",
+      "clp",
       "Cline Pass 配置暂不可用",
     );
     const accountMetadata = [
-      ...(clineAccounts ?? []).map(() => ({ provider: "cline-pass", accountId: null, displayName: "Cline Pass", default: false })),
+      ...(clineAccounts ?? []).map(account => ({ provider: clinePassProviderId(account.id), accountId: account.id, displayName: `Cline Pass ${account.id}`, default: account.default })),
       ...(dsAccounts ?? []).map((account) => ({
         provider: deepseekProviderId(account.id),
         accountId: account.id,
@@ -283,14 +279,15 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       ...(ccgAccounts ?? []).map((account) => ({
         provider: ccgProviderId(account.id),
         accountId: account.id,
-        displayName: `CCG ${account.id}`,
+        displayName: `CommandCode ${account.id}`,
         default: account.default,
       })),
     ];
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
-        if (snapshot.provider === "cline-pass") return clineAccounts === null || clineAccounts.length > 0;
+        if (snapshot.provider === "clp") return false;
+        if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
         const legacyRegistry = snapshot.provider === "deepseek"
           ? dsAccounts
           : snapshot.provider === "ocg"
@@ -379,6 +376,7 @@ function providerSettingsAuditTarget(input) {
 }
 
 function accountSettingsAuditTarget(input) {
+  if (input.operation.startsWith("clp.")) return clinePassProviderId(input.accountId);
   if (input.operation.startsWith("opencode.account.")) return String(input.accountId ?? "unknown");
   return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
 }

@@ -143,10 +143,10 @@ describe("WebUI per-account refresh state", () => {
   });
 });
 
-it("includes Cline Pass in refresh and maps official quota reset seconds to milliseconds", () => {
-  const providers = { providers: [{ id: "cline-pass", kind: "managed", displayName: "Cline Pass" }] } as ManagementProvidersResponse;
+it("includes CLP in refresh and maps official quota reset seconds to milliseconds", () => {
+  const providers = { providers: [{ id: "clp-test", kind: "managed", displayName: "CLP" }] } as ManagementProvidersResponse;
   expect(refreshableAccounts(providers)).toEqual(providers.providers);
-  const account = quotaAccountFromSnapshot({ provider: "cline-pass", accountId: null, displayName: "Cline Pass", default: false,
+  const account = quotaAccountFromSnapshot({ provider: "clp-test", accountId: null, displayName: "CLP", default: false,
     observedAtMs: 1234, available: true, limits: null, usage: { kind: "quota-windows", windows: [
       { windowId: "five-hour", label: "5小时", usedPercent: 12.5, resetsAt: 1800000000, status: null },
     ] } });

@@ -410,12 +410,12 @@ describe("conversation model and account command formatting", () => {
 
   it("renders Cline quota windows and reset times without invented token totals", () => {
     const rendered = formatConversationUsage({ kind: "usage", result: {
-      kind: "quota-windows", provider: "cline-pass", available: true,
+      kind: "quota-windows", provider: "clp-test", available: true,
       windows: ["5小时", "7天", "月度"].map((label, index) => ({
         windowId: String(index), label, usedPercent: 12.5, resetsAt: 1790922837, status: null,
       })),
     } });
-    expect(rendered).toContain("Cline Pass 账户用量");
+    expect(rendered).toContain("CLP test 账户用量");
     for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：已用 12.5% · 重置`);
     expect(rendered).not.toContain("未知");
     expect(rendered).not.toContain("本地 Token");

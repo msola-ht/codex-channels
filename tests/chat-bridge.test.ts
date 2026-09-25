@@ -115,7 +115,7 @@ it.each([true, false])("records diagnostics only for a configured Chat bridge (e
   const metadata = { model: "deepseek/flash", id: "upstream-id", usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.01, gateway_cost: 0.02 }, choices: [{ index: 0, delta: { content: "partial", provider_metadata: { gateway: { cost: "0.03", routing: { finalProvider: "deepseek", totalProviderAttemptCount: 1, fallbacksAvailable: ["other"], modelAttempts: [{ providerAttempts: [{ provider: "deepseek", statusCode: 200, success: true }] }], credential: "secret" } }, secret: "secret" } }, finish_reason: "length" }] };
   const { bridge } = await fixture(`data: ${JSON.stringify(metadata)}\n\ndata: [DONE]\n\n`);
   const url = new URL(`http://${bridge.address()}`);
-  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", ...(enabled ? { chatDiagnostics: bridge.diagnostics } : {}), trafficDump: { directory: root, label: "cline-pass" } });
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", ...(enabled ? { chatDiagnostics: bridge.diagnostics } : {}), trafficDump: { directory: root, label: "clp" } });
   await proxy.start(); cleanups.push(() => proxy.close());
   const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
   const text = await result.text();
@@ -161,7 +161,7 @@ it.each([400, 401, 402, 403, 404, 429, 500, 502, 503])("keeps request IDs and sa
   cleanups.push(async () => { rmSync(root, { recursive: true, force: true }); });
   const { bridge } = await fixture(JSON.stringify({ error: { code: status, message: "private upstream text", metadata: { secret: "credential" } } }), status);
   const url = new URL(`http://${bridge.address()}`);
-  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "cline-pass" } });
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "clp" } });
   await proxy.start();cleanups.push(() => proxy.close());
   const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
   const text = await result.text();
@@ -184,7 +184,7 @@ it("records diagnostics before a client cancels immediately on the terminal even
   cleanups.push(async () => { rmSync(root, { recursive: true, force: true }); });
   const { bridge } = await fixture(`data: ${JSON.stringify({ model: "actual/model", choices: [{ index: 0, delta: { content: "done", provider_metadata: { gateway: { routing: { finalProvider: "deepseek" } } } }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   const url = new URL(`http://${bridge.address()}`);
-  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "cline-pass" } });
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics, trafficDump: { directory: root, label: "clp" } });
   await proxy.start();cleanups.push(() => proxy.close());
   const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
   const reader = result.body!.getReader();let text = "";
@@ -202,4 +202,39 @@ it.each(["not-json", "x".repeat(65 * 1024), JSON.stringify({ error: { code: "unk
   const text = await result.text();
   expect(text).toContain('"code":"server_error"');
   expect(text).not.toContain("secret");
+});
+
+it("shares one Chat bridge without mixing concurrent account credentials or metrics", async () => {
+  const seen: string[] = [];
+  const upstream = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      seen.push(request.headers.authorization!);
+      expect(request.url).toBe("/chat/completions");
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(frame({ content: "ok" }, "stop") + "data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
+  const address = upstream.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const url = new URL(`http://${bridge.address()}`);
+  const metricsAccounts: Array<string | undefined> = [];
+  const proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http",
+    accountIds: ["main", "work"], defaultAccountId: "main", chatDiagnostics: bridge.diagnostics,
+    onMetrics: (_metrics, accountId) => { metricsAccounts.push(accountId); } });
+  await proxy.start(); cleanups.push(() => proxy.close());
+  await Promise.all(["main", "work"].map(async account => {
+    const response = await fetch(`http://${proxy.address()}/go/${account}/responses`, {
+      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer sk_${account}` }, body: JSON.stringify(body),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("response.completed");
+  }));
+  const unknown = await fetch(`http://${proxy.address()}/go/unknown/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(unknown.status).toBe(404); await unknown.text();
+  expect(seen.sort()).toEqual(["Bearer sk_main", "Bearer sk_work"]);
+  expect(metricsAccounts.sort()).toEqual(["main", "work"]);
 });

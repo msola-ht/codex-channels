@@ -88,7 +88,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
@@ -247,8 +247,8 @@ Threads 和每轮明细默认全部保留历史，控制台、请求和错误页
 `K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
 汇总请求数最多保留两位小数；明细表请求数仍显示精确整数。
 四张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
-控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；DS、OCG 与 CCG
-快照超过 15 分钟时，账户标题显示“数据已过期”；尚未采集时显示空状态，不以零用量代替。控制台首次打开时自动刷新已配置的 DS、OCG 与 CCG
+控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；DeepSeek、OpenCode Go、CommandCode 与 Cline Pass
+快照超过 15 分钟时，账户标题显示“数据已过期”；尚未采集时显示空状态，不以零用量代替。控制台首次打开时自动刷新已配置的 DeepSeek、OpenCode Go、CommandCode 与 Cline Pass
 账户；汇总范围旁的刷新按钮同时更新本地指标、固定 90 天热力图和账户快照。WebUI 通过私有 Gateway
 IPC 发起账户查询，不读取凭据、不直接调用官方接口，也不定时轮询。查询失败时
 保留最后一次有效快照，在对应账户卡片内显示“刷新失败”与单账户重试；刷新期间禁用刷新按钮，
@@ -357,3 +357,5 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 开发入口会读取 `[webui]` 配置并让 `/api` 代理跟随实际 API 端口；也可以手动先运行
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
 开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。
+
+控制台账户卡片使用完整提供商名称 CommandCode、Cline Pass，并附账户 ID；`ccg-<账户>`、`clp-<账户>` 继续作为内部 Provider 标识。

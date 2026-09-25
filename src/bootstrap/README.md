@@ -39,7 +39,7 @@
 - `request-metrics-query-adapter.ts`：复用 Observability 统一只读查询服务，把查询结果和 Provider
   显示名映射为 Application 的 `/metrics` 窄端口；不让 Application 依赖 SQLite 实现。
 - `managed-provider-capabilities.ts`：按 `runtime/model-provider-definitions.mjs` 的编译期能力元数据
-  有界装配 DeepSeek、OpenCode Go、CCG、Cline Pass 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
+  有界装配 DeepSeek、OpenCode Go、CCG、CLP 的账户适配器；适配器以精确 Provider ID 登记，`none` 明确不提供
   账户能力；未知能力或适配器冲突启动时失败关闭，不回退到 OpenAI 账户查询。
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求统计端口。所有脱敏请求样本都会持久化；具备 Thread 与 Turn 关联的样本按 Turn 聚合
@@ -106,7 +106,7 @@
   重复计数或偏移分页；Key、响应正文
   和解析异常同样不进入日志或业务事件；仅将官方明确的缺少订阅权益响应转换为可持久化的无有效订阅结果，
   不把普通鉴权或网络失败解释为订阅到期。
-- `cline-pass-account-adapter.ts`：读取固定或切换配置中的私有 Key，查询官方套餐额度接口，归约 5 小时、7 天和月度的已用比例及重置时间；响应有界读取、严格校验并使用稳定脱敏错误。
+- `cline-pass-account-adapter.ts`：按独立账户 Provider 读取固定或切换配置中的私有 Key，查询官方套餐额度接口，归约 5 小时、7 天和月度的已用比例及重置时间；响应有界读取、严格校验并使用稳定脱敏错误。
 - `ccg-account-adapter.ts`：按精确 `ccg-<账户>` 读取私有 Key，调用 Command Code 官方 CLI 当前使用的
   账户身份与 Credits 接口，归约月度、充值、赠送余额及 5 小时/7 天窗口；响应按统一字节上限和稳定
   Schema 校验，失败不传播上游正文。
