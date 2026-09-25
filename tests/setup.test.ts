@@ -751,3 +751,14 @@ describe("Codex Connect setup", () => {
   });
 
 });
+
+it("routes Cline Pass through the third-party setup menu", async () => {
+  const clinePassSetup = vi.fn(async () => ({ action: "configured", activation: "restart-all" }));
+  const select = vi.fn().mockResolvedValueOnce("models").mockResolvedValueOnce("third_party").mockResolvedValueOnce("cline-pass");
+  const result = await runInteractiveSetup({
+    prompts: { intro: vi.fn(), select, isCancel: () => false, cancel: vi.fn() },
+    clinePassSetup,
+  });
+  expect(clinePassSetup).toHaveBeenCalledOnce();
+  expect(result).toMatchObject({ action: "configured", activation: "restart-all" });
+});

@@ -120,6 +120,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
   );
   const {
     ProviderProxy,
+    ChatCompletionsBridge,
     pruneModelTrafficDumpSessions,
     sendProviderProxyMetrics,
   } = await import("../dist/provider-proxy/index.js");
@@ -145,6 +146,17 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider,
     options,
   ) => {
+    const definition = providerDefinitions.get(provider);
+    let bridge;
+    if (definition?.upstreamWireApi === "chat_completions") {
+      bridge = new ChatCompletionsBridge({ ...options,
+        onError: () => proxySelector.invalidate(),
+        ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
+      });
+      await bridge.start();
+      const url = new URL(`http://${bridge.address()}`);
+      options = { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http" };
+    }
     const optionsWithUserAgent = {
       ...options,
       ...(validatedCodex.upstream_user_agent
@@ -216,10 +228,12 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         );
       },
     });
-    await modelProxy.start();
+    try { await modelProxy.start(); } catch (error) { await bridge?.close(); throw error; }
     const proxyRuntime = {
       baseUrl: `http://${modelProxy.address()}`,
-      proxy: modelProxy,
+      proxy: bridge ? { close: async () => {
+        try { await modelProxy.close(); } finally { await bridge.close(); }
+      } } : modelProxy,
     };
     console.log(
       `${opencodeGo ? "opencode-go" : provider} 模型统计代理已启动：${modelProxy.address()}`,
@@ -600,6 +614,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
+      if (definition.upstreamWireApi === "chat_completions") primaryArguments.push("-c", 'web_search="disabled"');
       const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,

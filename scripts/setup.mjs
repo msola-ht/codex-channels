@@ -1,3 +1,4 @@
+import { runClinePassSetup } from "./cline-pass-setup.mjs";
 import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
@@ -25,6 +26,7 @@ export async function runSetup({
   feishuSetup = runFeishuSetup,
   deepseekSetup = runDeepseekSetup,
   ccgSetup = runCcgSetup,
+  clinePassSetup = runClinePassSetup,
   telegramSetup = runTelegramSetup,
   weixinSetup = runWeixinSetup,
   skillSetup = runSkillSetup,
@@ -108,6 +110,7 @@ export async function runSetup({
             prompts,
             deepseekSetup,
             ccgSetup,
+            clinePassSetup,
             openCodeGoSetup,
             modelProviderDefaultSetup,
             modelWindowSetup,
@@ -151,6 +154,7 @@ async function runModelSetup({
   prompts,
   deepseekSetup,
   ccgSetup,
+  clinePassSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -193,6 +197,7 @@ async function runModelSetup({
         prompts,
         deepseekSetup,
         ccgSetup,
+        clinePassSetup,
         openCodeGoSetup,
         modelProviderDefaultSetup,
         modelWindowSetup,
@@ -242,6 +247,7 @@ async function runThirdPartyModelSetup({
   prompts,
   deepseekSetup,
   ccgSetup,
+  clinePassSetup,
   openCodeGoSetup,
   modelProviderDefaultSetup,
   modelWindowSetup,
@@ -278,6 +284,11 @@ async function runThirdPartyModelSetup({
           hint: "获取 DS 基础模型目录，配置固定/切换模式或删除",
         },
         {
+          value: "cline-pass",
+          label: "Cline Pass",
+          hint: "Chat 模型接入、固定/切换模式与移除配置",
+        },
+        {
           value: "provider_default",
           label: "默认模型与思考等级",
           hint: "设置 DeepSeek、OpenCode Go、CommandCode Go 的默认模型与思考等级",
@@ -296,6 +307,8 @@ async function runThirdPartyModelSetup({
       result = await deepseekSetup({ input, output, prompts, allowBack: true });
     } else if (module === "opencode-go") {
       result = await openCodeGoSetup({ input, output, prompts, allowBack: true });
+    } else if (module === "cline-pass") {
+      result = await clinePassSetup({ input, output, prompts, allowBack: true });
     } else if (module === "ccg") {
       result = await ccgSetup({ input, output, prompts, allowBack: true });
     } else if (module === "custom_responses") {

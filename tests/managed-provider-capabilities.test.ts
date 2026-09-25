@@ -145,7 +145,7 @@ describe("managed Provider capability registry", () => {
         CODEX_CONNECT_HOME: join(home, ".codex-connect"),
       };
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
-        .toEqual(["deepseek", "ocg", "ccg"]);
+        .toEqual(["deepseek", "ocg", "ccg", "cline-pass"]);
 
       writeOpencodeGoAccounts(environment, [
         { id: "main", default: true },
@@ -157,7 +157,7 @@ describe("managed Provider capability registry", () => {
       ])}\n`);
       expect(loadManagedModelProviderWatcherDefinitions(environment).map(({ id }) => id))
         .toEqual([
-          "deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg", "ccg-main", "ccg-work",
+          "deepseek", "ocg", "ocg-main", "ocg-lunare", "ccg", "ccg-main", "ccg-work", "cline-pass",
         ]);
     } finally {
       rmSync(home, { recursive: true, force: true });

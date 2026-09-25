@@ -9,3 +9,5 @@ export {
   sendProviderProxyMetrics,
 } from "./metrics-channel.js";
 export { pruneModelTrafficDumpSessions } from "./traffic-dump.js";
+
+export { ChatCompletionsBridge } from "./chat-bridge.js";

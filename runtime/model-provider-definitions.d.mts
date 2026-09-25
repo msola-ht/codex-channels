@@ -1,4 +1,5 @@
 export type ManagedModelProviderId =
+  | "cline-pass"
   | "ccg"
   | `ccg-${string}`
   | "deepseek"
@@ -35,6 +36,7 @@ export interface ModelProviderDefinition {
   readonly backupDirectoryName: string;
   readonly baseUrl: string;
   readonly wireApi: "responses";
+  readonly upstreamWireApi?: "chat_completions";
   readonly apiKeyEnvironmentKey: string;
   /** 自动生成目录的 Provider 默认值；CCG 必须由文件和用户选择提供。 */
   readonly defaultModel?: string;
@@ -43,6 +45,7 @@ export interface ModelProviderDefinition {
   readonly capabilities: ModelProviderCapabilities;
 }
 
+export const clinePassProviderDefinition: ModelProviderDefinition;
 export const deepseekProviderDefinition: ModelProviderDefinition;
 export function deepseekAccountDefinition(accountId: string): ModelProviderDefinition;
 export const commandCodeProviderDefinition: ModelProviderDefinition;

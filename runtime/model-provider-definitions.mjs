@@ -81,15 +81,29 @@ export const commandCodeProviderDefinition = Object.freeze({
   }),
 });
 
+export const clinePassProviderDefinition = Object.freeze({
+  id: "cline-pass", displayName: "Cline Pass",
+  profileName: "sf-cline-pass", profileFileName: "sf-cline-pass.config.toml",
+  catalogFileName: "models.json", catalogManifestFileName: "models.manifest.json",
+  managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
+  baseUrl: "https://api.cline.bot/api/v1", wireApi: "responses",
+  upstreamWireApi: "chat_completions",
+  apiKeyEnvironmentKey: "CODEX_CONNECT_CLINE_PASS_API_KEY",
+  defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "none",
+  supportsWebsockets: false,
+  capabilities: Object.freeze({ accountAdapter: "none", instanceAdapter: "single" }),
+});
+
 export function isManagedProviderApiKeyValid(definition, apiKey) {
   return typeof apiKey === "string"
     && apiKey.length <= 4_096
-    && ((definition.storageId ?? definition.id) === "ccg"
+    && (["ccg", "cline-pass"].includes(definition.storageId ?? definition.id)
       ? /^[A-Za-z0-9._~+/-]+=*$/u.test(apiKey)
       : /^sk-[^\s"]+$/u.test(apiKey));
 }
 
 export function isManagedProviderModelValid(definition, model) {
+  if (definition.id === "cline-pass") return model === clinePassProviderDefinition.defaultModel;
   return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
@@ -99,6 +113,7 @@ export const managedModelProviderDefinitions = Object.freeze([
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
   commandCodeProviderDefinition,
+  clinePassProviderDefinition,
 ]);
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {

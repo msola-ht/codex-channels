@@ -90,6 +90,7 @@ DS、OCG、CCG 支持多账户，在 `codexc setup → 模型与提供商` 中�
 - [DeepSeek 多账户管理](docs/deepseek.md)
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
+- [Cline Pass](docs/cline-pass.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

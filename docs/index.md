@@ -51,7 +51,7 @@
 | 70 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 45 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
-| 15 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
+| 16 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
 这里的数量描述协议结构，不等于本项目已实现的功能数。只有 `codex-client` 可以使用
 `src/codex-protocol/index.ts` 的受控导出；生成目录可能包含尚未采用、实验中或仅供其他客户端
@@ -483,3 +483,13 @@ rg -c '^export type ' src/codex-protocol/index.ts
 ```
 
 Config 文案说明：协议索引中的“Codex 用户设置”“一键配置全部”为历史称谓。当前入口统一使用“Codex 新会话与用户偏好”和“配置核心默认值”；计划清单工具通过 Config 单独控制且默认关闭，TUI 空闲总结通过 Config 单独控制且默认写入关闭，Fast 仅对 OpenAI 官方主配置开放，核心默认值操作不会隐式修改联网搜索、分析、反馈或 Goals。
+
+### Cline Pass Chat 转换
+
+Cline Pass 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
+[`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 创建受管 Profile；
+[`model-api`](../src/model-api/README.md) 独立转换模型消息，
+[`chat-bridge.ts`](../src/provider-proxy/chat-bridge.ts) 提供服务拥有的本地 HTTP 适配。
+依据锁定官方 `core/src/client.rs`、`protocol/src/models.rs` 与 `codex-api/src/sse/responses.rs` 的请求、条目和事件合同，
+仅接受文本与函数工具，不伪造加密推理或远程压缩语义。验证入口为
+[`real-app-server-chat-provider.test.ts`](../tests/real-app-server-chat-provider.test.ts)；用户边界见 [`Cline Pass`](cline-pass.md)。
