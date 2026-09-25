@@ -74,7 +74,7 @@ export function TrafficTable({
               </TableCell>
               <TableCell><Badge variant="outline">{exchange.label}</Badge></TableCell>
               <TableCell>
-                <TrafficModel request={exchange.requestModel} responses={exchange.responseModels} />
+                <TrafficModel request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}

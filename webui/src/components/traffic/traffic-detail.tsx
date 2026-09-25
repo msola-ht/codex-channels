@@ -37,6 +37,7 @@ export function TrafficDetail({
   traceError?: boolean
   onRetry: () => void
 }) {
+  const finalProvider = detail.chatDiagnostics?.fields["routing.finalProvider"]
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const copyReference = async () => {
     setCopyState("pending")
@@ -62,7 +63,10 @@ export function TrafficDetail({
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
-        <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+          {typeof finalProvider === "string" && finalProvider.trim() !== "" ? <Badge variant="outline" className="whitespace-normal break-all" title="routing.finalProvider">上游：{finalProvider}</Badge> : null}
+        </div>
         <span className="min-w-0 break-all text-muted-foreground">
           线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}

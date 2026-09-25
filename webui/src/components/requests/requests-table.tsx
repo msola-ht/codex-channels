@@ -1,8 +1,7 @@
 import * as React from "react"
 import { Link } from "react-router"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
+import { TrafficModel } from "@/components/traffic/traffic-model"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { SortingState } from "@tanstack/react-table"
 
@@ -125,17 +124,12 @@ export function RequestsTable({
       ),
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
-          {modelNameComparison(row.original.requestModel, row.original.responseModel) !== "名称不一致"
-            ? <TruncatedText text={row.original.requestModel ?? row.original.responseModel ?? row.original.model} className="max-w-64" />
-            : <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
-            <span className="min-w-0 truncate">
-              {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-                ? `${row.original.requestModel} → ${row.original.responseModel}`
-                : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
-            </span>
-            {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-              ? <Badge variant="outline">名称不一致</Badge> : null}
-          </span></TableHint>}
+          <TrafficModel
+            request={row.original.requestModel}
+            responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
+            fallback={row.original.model ?? undefined}
+            upstream={row.original.upstreamProvider}
+          />
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),

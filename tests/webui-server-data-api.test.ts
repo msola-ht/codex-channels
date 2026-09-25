@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -35,6 +35,28 @@ function startServer(
   options: WebuiTestServerOptions = {},
 ) {
   return startWebuiTestServer(servers, environment, staticDir, options);
+}
+
+/** 写入只含索引的最小 V2 批次，用于校验请求明细列表按调用记录关联上游提供商。 */
+function writeCallIndex(
+  fixture: ReturnType<typeof createFixture>,
+  session: string,
+  id: number,
+  upstreamProvider: string,
+) {
+  const directory = join(fixture.home, "traffic", `openai-${session}`);
+  mkdirSync(directory, { mode: 0o700, recursive: true });
+  writeFileSync(join(directory, "manifest.json"), JSON.stringify({ createdAtMs: 1, label: "openai", session, version: 2 }));
+  const request = Buffer.from(JSON.stringify({ model: "deepseek-flash" }));
+  const response = Buffer.from(JSON.stringify({ type: "response.completed" }));
+  writeFileSync(join(directory, "payload-1.bin"), Buffer.concat([request, response]), { mode: 0o600 });
+  const payload = (bytes: number, offset: number) => ({ bytes, parts: [{ bytes, encoding: "utf8", file: "payload-1.bin", offset }] });
+  writeFileSync(join(directory, "interactions.jsonl"), [
+    { version: 2, ts: 1, id, kind: "request", method: "POST", path: "/responses", transport: "http",
+      startedAtMs: 1, requestModel: "requested", payload: payload(request.length, 0) },
+    { version: 2, ts: 2, id, kind: "response", state: "completed", status: 200, upstreamProvider,
+      responseModels: ["requested"], payload: payload(response.length, request.length) },
+  ].map((record) => `${JSON.stringify(record)}\n`).join(""), { mode: 0o600 });
 }
 
 describe("webui server data API", () => {
@@ -100,6 +122,50 @@ describe("webui server data API", () => {
         expect(body[key!]![0]?.[field]).toBe(expected);
       }
     }
+  });
+  it("attaches the recorded Chat upstream provider to the request list without changing the export", async () => {
+    const fixture = createFixture();
+    const session = "2026-09-19T00-00-00-000Z-2";
+    recordSample(fixture.databasePath, { ...metricSample(), provider: "clp", traffic: { label: "openai", session, interaction: 4 } });
+    writeCallIndex(fixture, session, 4, "deepseek");
+    const { origin } = await startServer(fixture.environment);
+    const list = await fetch(`${origin}/api/v1/requests?range=all`);
+    expect(list.status).toBe(200);
+    const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
+    expect(record?.upstreamProvider).toBe("deepseek");
+    const exported = await fetch(`${origin}/api/v1/requests/export?range=all`);
+    expect(exported.status).toBe(200);
+    const exportedRecord = ((await exported.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
+    expect(exportedRecord).not.toHaveProperty("upstreamProvider");
+  });
+  it("keeps serving the request list when the referenced call record is missing", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      traffic: { label: "openai", session: "2026-09-19T00-00-00-000Z-3", interaction: 9 },
+    });
+    const { origin } = await startServer(fixture.environment);
+    const list = await fetch(`${origin}/api/v1/requests?range=all`);
+    expect(list.status).toBe(200);
+    const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
+    expect(record).not.toHaveProperty("upstreamProvider");
+  });
+  it("attaches the recorded Chat upstream provider to the error list with the same join", async () => {
+    const fixture = createFixture();
+    const session = "2026-09-19T00-00-00-000Z-5";
+    recordSample(fixture.databasePath, {
+      ...metricSample(),
+      status: "failed",
+      httpStatus: 502,
+      errorType: "http_error",
+      traffic: { label: "openai", session, interaction: 7 },
+    });
+    writeCallIndex(fixture, session, 7, "deepseek");
+    const { origin } = await startServer(fixture.environment);
+    const errors = await fetch(`${origin}/api/v1/errors?range=all`);
+    expect(errors.status).toBe(200);
+    const record = ((await errors.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
+    expect(record?.upstreamProvider).toBe("deepseek");
   });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };

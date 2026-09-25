@@ -219,6 +219,8 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 export interface RequestRecord {
   tokensPerSecond?: number | null
   generationTokensPerSecond?: number | null
+  /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
+  upstreamProvider?: string
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
@@ -877,6 +879,8 @@ export interface TrafficExchangeSummary {
   hasError: boolean
   requestModel?: string
   responseModels: string[]
+  /** Chat 上游诊断记录的实际上游提供商；缺失表示没有诊断或不适用。 */
+  upstreamProvider?: string
 }
 
 export interface TrafficListResponse {
@@ -921,6 +925,8 @@ export interface TrafficExchangeDetail {
   category: "models" | "prewarm" | "model"
   requestModel?: string
   responseModels: string[]
+  /** 与调用列表同源的 Chat 上游提供商；详情同时保留完整诊断字段。 */
+  upstreamProvider?: string
   state: "completed" | "failed" | "incomplete" | "pending"
   url?: string
   request: {

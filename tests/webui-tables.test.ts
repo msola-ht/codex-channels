@@ -84,10 +84,14 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "tokensPerSecond", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
@@ -142,6 +146,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].requestServiceTier = "priority";
         errorsData.records[0].serviceTier = "default";
         result.fastErrors = render(ErrorsPage, {});
+        errorsData.records[0].upstreamProvider = "deepseek";
+        result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
@@ -182,6 +188,32 @@ describe("WebUI metrics table presentation", () => {
 
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
+
+  it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
+    for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
+      const html = markup[key]!;
+      expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+      expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+      expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
+    }
+    expect(markup.requests).not.toContain('title="routing.finalProvider"');
+    expect(markup.traffic).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the recorded upstream provider on the error list without adding a column", () => {
+    const html = markup.errorsUpstream!;
+    expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+    expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+    expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
+    expect(markup.errors).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
+    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
+    expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
+    expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
 
   it("renders account presets, custom validation and an immutable existing ID", () => {
     expect(markup.newAccount).toContain('role="combobox"');

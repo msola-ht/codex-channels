@@ -205,6 +205,24 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout).toContain("上游轮次统计（独立口径）");
   });
 
+  it("shows the recorded Chat upstream provider and keeps a placeholder when absent", () => {
+    const directory = temporaryDirectory();
+    writeSession(directory, "clp", "upstream-provider", [interaction(1, "hello", "deepseek"), interaction(2, "plain")]);
+
+    const list = runTraffic(["--dir", directory, "--list"]);
+    expect(list.status).toBe(0);
+    expect(list.stdout).toContain("上游=deepseek");
+    expect(list.stdout).toContain("上游=-");
+
+    const reported = runTraffic(["--dir", directory, "--exchange", "1"]);
+    expect(reported.status).toBe(0);
+    expect(reported.stdout).toContain("上游提供商：deepseek");
+
+    const absent = runTraffic(["--dir", directory, "--exchange", "2"]);
+    expect(absent.status).toBe(0);
+    expect(absent.stdout).toContain("上游提供商：未记录");
+  });
+
   it("filters logical calls and bounds payload output", () => {
     const directory = temporaryDirectory();
     writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [
@@ -336,7 +354,7 @@ function runTraffic(args: string[]) {
   });
 }
 
-function interaction(id: number, prompt: string) {
+function interaction(id: number, prompt: string, upstreamProvider?: string) {
   return {
     requestBody: JSON.stringify({ input: [prompt], model: "deepseek-flash" }),
     responseBody: JSON.stringify({ response: { model: "deepseek-flash", output: [] }, type: "response.completed" }),
@@ -348,6 +366,7 @@ function interaction(id: number, prompt: string) {
     response: {
       durationMs: 12, id, kind: "response", responseModels: ["deepseek-flash"],
       state: "completed", status: 200,
+      ...(upstreamProvider === undefined ? {} : { upstreamProvider }),
     },
   };
 }

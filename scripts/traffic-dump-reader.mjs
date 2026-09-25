@@ -409,12 +409,19 @@ function summaryOf(interaction, body) {
     ...(requestKind === undefined ? {} : { requestKind }),
     category: request.method === "GET" && request.path?.split("?")[0] === "/models"
       ? "models" : requestKind === "prewarm" ? "prewarm" : "model",
+    ...(upstreamProviderOf(response) === undefined ? {} : { upstreamProvider: upstreamProviderOf(response) }),
     responseModels: response?.responseModels ?? [],
     state: response?.state ?? "pending",
     status: response?.status,
     durationMs: response?.durationMs,
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
+}
+
+/** 索引里的 Chat 上游提供商；只有明确记录过字符串值时返回，缺失或类型无效一律省略。 */
+function upstreamProviderOf(response) {
+  const value = response?.upstreamProvider;
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function readPayload(directory, payload, maxBytes) {
