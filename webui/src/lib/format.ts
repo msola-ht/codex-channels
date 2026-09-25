@@ -1,3 +1,5 @@
+import type { CacheUsage } from "./types"
+
 export type DisplayLanguage = "zh" | "en"
 
 export function formatTokensPerSecond(value: number | null | undefined): string {
@@ -182,3 +184,14 @@ export function shortThreadId(threadId: string): string {
   return threadId.length <= 14 ? threadId : `${threadId.slice(0, 8)}…${threadId.slice(-4)}`
 }
 export { formatElapsedDuration } from "../../../src/surfaces/elapsed-duration.js"
+
+export function formatCacheUsage(usage: CacheUsage | null) {
+  const cached = formatTokens(usage?.cachedInputTokens ?? null)
+  const rate = usage !== null && usage.inputTokens > 0 && usage.cachedInputTokens !== null
+    ? `${(usage.cachedInputTokens / usage.inputTokens * 100).toFixed(1)}%`
+    : "—"
+  return {
+    cached,
+    rate,
+  }
+}

@@ -32,6 +32,7 @@ import {
   formatCount,
   formatErrorType,
   formatFailureRate,
+  formatCacheUsage,
   formatPlanType,
   formatSuccessRate,
   formatTime,
@@ -55,9 +56,7 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
       </Alert>
     )
   }
-  const cacheHitRate = global.inputTokens > 0 && global.cachedInputTokens !== null
-    ? `${(global.cachedInputTokens / global.inputTokens * 100).toFixed(1)}%`
-    : "—"
+  const cache = formatCacheUsage(global.cacheUsage)
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
@@ -66,7 +65,7 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
       />
       <StatCard
         value={formatTokens(global.inputTokens)}
-        description={`输入 Token · 其中缓存 ${formatTokens(global.cachedInputTokens)} · 命中率 ${cacheHitRate}`}
+        description={`输入 Token · 其中缓存 ${cache.cached} · 命中率 ${cache.rate}`}
       />
       <StatCard
         value={formatTokens(global.outputTokens)}

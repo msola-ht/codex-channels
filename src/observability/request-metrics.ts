@@ -169,7 +169,15 @@ export interface StoredThreadTurnSummary extends StoredTurnRequestMetricsSummary
   recordedAtMs: number;
 }
 
+/** 已观测缓存样本；不把缺失字段视为零。 */
+export interface StoredCacheUsage {
+  cachedInputTokens: number | null;
+  inputTokens: number;
+  missingRequestCount: number;
+}
+
 export interface StoredThreadListItem {
+  cacheUsage: StoredCacheUsage;
   tokensPerSecond?: number | null;
   threadId: string;
   provider: string | null;
@@ -222,6 +230,7 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 }
 
 export interface StoredModelRequestMetricsAggregate {
+  cacheUsage: StoredCacheUsage;
   tokensPerSecond?: number | null;
   requestCount: number;
   unsuccessfulRequestCount: number;

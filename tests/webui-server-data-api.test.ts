@@ -290,7 +290,7 @@ describe("webui server data API", () => {
       { ...metricSample(), recordedAtMs: startAtMs - 1, model: "old" },
       { ...metricSample(), recordedAtMs: startAtMs, model: "matching" },
       { ...metricSample(), recordedAtMs: startAtMs + 1, model: "matching", turnId: "turn-2", status: "failed" },
-      { ...metricSample(), recordedAtMs: startAtMs + 2, model: "matching", threadId: "thread-2" },
+      { ...metricSample(), recordedAtMs: startAtMs + 2, model: "matching", threadId: "thread-2", cachedInputTokens: null },
       { ...metricSample(), recordedAtMs: endAtMs, model: "outside" },
     ]);
     store.close();
@@ -303,7 +303,10 @@ describe("webui server data API", () => {
     };
     const threads = await read(`threads?${scope}&limit=1&sort=requests`);
     expect(threads).toMatchObject({ total: 2, nextOffset: 1, turnCount: 3, aggregate: { requestCount: 3 } });
-    expect(threads.threads[0]).toMatchObject({ threadId: "thread-1", requestCount: 2, turnCount: 2, model: "matching" });
+    expect(threads.threads[0]).toMatchObject({ threadId: "thread-1", requestCount: 2, turnCount: 2, model: "matching", inputTokens: 2000, cacheUsage: { inputTokens: 2000, cachedInputTokens: 1800, missingRequestCount: 0 } });
+    expect(threads.aggregate.cacheUsage).toEqual({ inputTokens: 2000, cachedInputTokens: 1800, missingRequestCount: 1 });
+    const unknownCache = await read(`threads?${scope}&threadId=thread-2`);
+    expect(unknownCache.threads[0]).toMatchObject({ inputTokens: 1000, cacheUsage: { inputTokens: 0, cachedInputTokens: null, missingRequestCount: 1 } });
     const turns = await read(`threads/thread-1/turns?${scope}&limit=1`);
     expect(turns).toMatchObject({ total: 2, nextOffset: 1, aggregate: { requestCount: 2, unsuccessfulRequestCount: 1 } });
     expect(turns.turns[0].turnId).toBe("turn-2");

@@ -12,6 +12,7 @@ import {
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { Badge } from "@/components/ui/badge"
 import {
+  formatCacheUsage,
   formatTime,
   formatTokens,
   formatTokensPerSecond,
@@ -32,6 +33,7 @@ const COLUMN_LABELS: Record<string, string> = {
   turns: "Turn",
   requests: "请求",
   input: "输入 Token",
+  cacheHitRate: "缓存命中率",
   output: "输出 Token",
   tokensPerSecond: "平均 Token/s",
   compact: "压缩",
@@ -142,6 +144,16 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
+      id: "cacheHitRate",
+      enableSorting: false,
+      header: "缓存命中率",
+      cell: ({ row }) => (
+        <span className="whitespace-nowrap tabular-nums">
+          {formatCacheUsage(row.original.cacheUsage).rate}
+        </span>
+      ),
+    },
+    {
       id: "output",
       accessorFn: (thread) => thread.outputTokens,
       header: ({ column }) => (
@@ -204,7 +216,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
 
   return (
     <DataTable
-      numericColumnIds={["turns", "requests", "input", "output", "tokensPerSecond", "compact"]}
+      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "tokensPerSecond", "compact"]}
       loading={loading}
       title="会话列表"
       description={({ total }) =>

@@ -1,4 +1,5 @@
 import type {
+  StoredCacheUsage,
   StoredCompactRequestMetricsSummary,
   StoredModelRequestMetric,
   StoredModelRequestMetricsAggregate,
@@ -79,7 +80,21 @@ export interface TurnSummaryRow extends CompactSummaryRow {
   reasoning_output_tokens: number | null;
 }
 
-export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count"> {
+export interface CacheUsageRow {
+  known_cached_input_tokens: number | null;
+  cache_observed_input_tokens: number | null;
+  cache_missing_request_count: number;
+}
+
+export function toStoredCacheUsage(row: CacheUsageRow): StoredCacheUsage {
+  return {
+    cachedInputTokens: row.known_cached_input_tokens,
+    inputTokens: row.cache_observed_input_tokens ?? 0,
+    missingRequestCount: row.cache_missing_request_count,
+  };
+}
+
+export interface AggregateRow extends Omit<TurnSummaryRow, "turn_id" | "turn_count">, CacheUsageRow {
   provider: string | null;
   model: string | null;
   total_group_count: number;
@@ -227,6 +242,7 @@ export function toStoredMetricsGroup(row: AggregateRow): StoredModelRequestMetri
 
 export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestMetricsAggregate {
   return {
+    cacheUsage: toStoredCacheUsage(row),
     tokensPerSecond: row.tokens_per_second,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,

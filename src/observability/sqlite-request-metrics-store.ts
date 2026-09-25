@@ -17,6 +17,8 @@ import {
   toStoredCompactSummary,
   toStoredMetric,
   toStoredMetricsAggregate,
+  toStoredCacheUsage,
+  type CacheUsageRow,
   toStoredMetricsGroup,
   toStoredThreadAggregate,
   toStoredTurnSummary,
@@ -124,7 +126,13 @@ const normalizedStatusSql = `
     ELSE status
   END
 `;
+const cacheUsageSql = `
+  SUM(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS known_cached_input_tokens,
+  SUM(CASE WHEN cached_input_tokens IS NOT NULL THEN input_tokens END) AS cache_observed_input_tokens,
+  SUM(CASE WHEN input_tokens IS NULL OR cached_input_tokens IS NULL THEN 1 ELSE 0 END) AS cache_missing_request_count
+`;
 const metricsAggregateSql = `
+  ${cacheUsageSql},
   COUNT(*) AS request_count,
   SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END) AS unsuccessful_request_count,
   SUM(input_tokens) AS input_tokens,
@@ -1118,6 +1126,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return {
       ...page,
       threads: rows.map((row) => ({
+        cacheUsage: toStoredCacheUsage(row),
         threadId: row.thread_id,
         provider: row.provider ?? null,
         model: row.model ?? null,
@@ -1181,7 +1190,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
       ORDER BY ${sortColumn} ${direction}, grouped.${group} ${direction}
       LIMIT ? OFFSET ?
-    `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & {
+    `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & CacheUsageRow & {
       thread_id: string;
       first_request_started_at_ms: number;
       recorded_at_ms: number;
@@ -1303,6 +1312,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       SELECT
         group_provider AS provider,
         group_model AS model,
+        ${cacheUsageSql},
         COUNT(*) AS request_count,
         SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
           AS unsuccessful_request_count,
