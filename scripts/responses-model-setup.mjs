@@ -26,7 +26,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
     if (configure) {
       const name = await prompts.text({ message: `${id} 显示名称`, initialValue: old?.name ?? id });
       if (prompts.isCancel(name)) return undefined;
-      const maximumContext = template?.snapshot?.max_context_window ?? 100_000_000;
+      const maximumContext = old?.maxContextWindow ?? 100_000_000;
       const context = template?.followContext ? old.contextWindow : await prompts.text({ message: `${id} 上下文窗口（Token，请按平台说明填写）`, initialValue: String(old?.contextWindow ?? ""), validate: value => Number.isSafeInteger(Number(value)) && Number(value) >= 1024 && Number(value) <= maximumContext ? undefined : `请输入 1024-${maximumContext} 的整数` });
       if (prompts.isCancel(context)) return undefined;
       const reasoning = await prompts.text({ message: "支持的思考等级（逗号分隔；留空表示不支持，请求使用 none）", initialValue: old?.reasoningEfforts.join(",") ?? "" });
@@ -36,7 +36,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(defaultReasoning)) return undefined;
       const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
       if (prompts.isCancel(images)) return undefined;
-      models.push({ id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) });
+      models.push({ id, name: String(name), contextWindow: Number(context), ...(old?.maxContextWindow === undefined ? {} : {maxContextWindow: old.maxContextWindow}), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) });
     }
     if (index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });

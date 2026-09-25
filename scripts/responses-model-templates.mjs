@@ -31,10 +31,11 @@ export function responsesModelTemplatesFromCatalog(catalog, source = "official")
     id: model.slug,
     name: model.display_name,
     contextWindow: model.context_window,
+    ...(model.max_context_window == null ? {} : {maxContextWindow: model.max_context_window}),
     reasoningEfforts: model.supported_reasoning_levels?.map(entry => entry.effort).filter(effort => effort !== "ultra" && effort !== "persistent"),
     defaultReasoningEffort: model.default_reasoning_level ?? null,
     supportsImages: model.input_modalities?.includes("image") === true,
-    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false, snapshot: structuredClone(model)}}),
+    ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false}}),
   }));
   return validateResponsesModels(models, models[0]?.id);
 }

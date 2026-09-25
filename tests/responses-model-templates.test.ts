@@ -9,7 +9,7 @@ import { loadResponsesModelTemplates, promptResponsesModelImport, responsesModel
 
 const baseModel = {id:"deepseek-flash",name:"DeepSeek Flash",contextWindow:1048576,reasoningEfforts:["low","high"],defaultReasoningEffort:"high",supportsImages:true};
 
-const model = {...baseModel,template:{source:"deepseek" as const,model:baseModel.id,followContext:false,snapshot:createResponsesModelCatalog([baseModel],baseModel.id).models[0]!}};
+const model = {...baseModel,maxContextWindow:1048576,template:{source:"deepseek" as const,model:baseModel.id,followContext:false}};
 
 describe("Responses model template import", () => {
   it("copies only declared RS capabilities, excluding source instructions and credentials", () => {
@@ -17,23 +17,24 @@ describe("Responses model template import", () => {
     expect(responsesModelTemplatesFromCatalog(catalog)).toEqual([baseModel]);
     expect(catalog.models[0]?.slug).toBe(model.id);
   });
-  it.each([true,false])("preserves snapshots when CLI capability editing is %s",async edit=>{
+  it.each([true,false])("preserves the maximum window when CLI capability editing is %s",async edit=>{
     const texts=["Edited", "32768", "high"];
     const confirms=edit ? [false,false,false] : [false,false];
     const ui={confirm:async()=>confirms.shift(),text:async()=>texts.shift(),select:async()=>"high",password:vi.fn(),isCancel:()=>false};
     const result=await promptResponsesModels(ui,model.id,[model],edit ? [] : [model.id]);
-    expect(result?.[0]?.template?.snapshot).toEqual(model.template.snapshot);
+    expect(result?.[0]?.maxContextWindow).toBe(1048576);
+    expect(result?.[0]?.template).not.toHaveProperty("snapshot");
     expect(result?.[0]?.contextWindow).toBe(edit ? 32768 : model.contextWindow);
   });
 
-  it.each([["deepseek","deepseek"]] as const)("reads the complete %s template from its own private catalog",async(source,directory)=>{
+  it.each([["deepseek","deepseek"]] as const)("reads only basic %s fields from its private catalog",async(source,directory)=>{
     const root=mkdtempSync(join(tmpdir(),"responses-template-"));
     try {
       const environment={CODEX_CONNECT_HOME:root,CODEX_HOME:join(root,"codex")};
-      const snapshot={...model.template.snapshot,description:`${source} local template`};
+      const snapshot={...createResponsesModelCatalog([baseModel],baseModel.id).models[0],description:`${source} local template`};
       writePrivateFileAtomicSync(join(root,"providers",directory,"models.json"),JSON.stringify({models:[snapshot]}));
       const loaded=await loadResponsesModelTemplates(source,environment);
-      expect(loaded[0]?.template).toEqual({source,model:model.id,followContext:false,snapshot});
+      expect(loaded[0]?.template).toEqual({source,model:model.id,followContext:false});
       writePrivateFileAtomicSync(join(root,"providers",directory,"models.json"),"invalid JSON");
       await expect(loadResponsesModelTemplates(source,environment)).rejects.toThrow("无法安全读取");
     } finally {rmSync(root,{recursive:true,force:true});}

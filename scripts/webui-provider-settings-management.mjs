@@ -312,6 +312,7 @@ function redactCatalog(provider) {
   if (provider.catalog !== "custom") return provider.catalog === undefined ? {} : { catalog: provider.catalog };
   return { catalog: "custom", models: (provider.models ?? []).map((model) => ({
     id: model.id, name: model.name, contextWindow: model.contextWindow,
+    ...(model.maxContextWindow === undefined ? {} : {maxContextWindow: model.maxContextWindow}),
     reasoningEfforts: model.reasoningEfforts, defaultReasoningEffort: model.defaultReasoningEffort,
     supportsImages: model.supportsImages,
     ...(model.template === undefined ? {} : {template: structuredClone(model.template)}),

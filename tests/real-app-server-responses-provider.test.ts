@@ -25,13 +25,13 @@ describe("real custom Responses provider", () => {
     expect(models.length).toBeGreaterThan(0);
     expect(models.every(model=>!model.reasoningEfforts.includes("ultra") && !model.reasoningEfforts.includes("persistent"))).toBe(true);
   });
-  contract("validates complete snapshots against the native catalog contract before saving",async()=>{
+  contract("validates generated metadata against the native catalog contract before saving",async()=>{
     const definition={id:"test-model",name:"Test",contextWindow:64000,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false};
     const source=createResponsesModelCatalog([definition],definition.id).models[0]!;
     await expect(validateModelCatalogWithCodex({models:[source]})).resolves.toBeUndefined();
     for(const patch of [{apply_patch_tool_type:"not-a-tool"},{support_verbosity:"yes"},{truncation_policy:undefined}]) {
       const snapshot=JSON.parse(JSON.stringify({...source,...patch})) as Record<string,unknown>;
-      const catalog=createResponsesModelCatalog([{...definition,template:{source:"deepseek",model:definition.id,followContext:false,snapshot}}],definition.id);
+      const catalog={models:[snapshot]};
       await expect(validateModelCatalogWithCodex(catalog)).rejects.toThrow("Codex CLI 校验");
     }
   });
@@ -106,9 +106,10 @@ describe("real custom Responses provider", () => {
         const requests=bodies.filter(body=>body.model===runtime.model);
         expect(requests).toHaveLength(2);
         if (runtime.id === "rs-template") {
-          expect(requests[0]?.instructions).toContain("Complete DS fixture instructions");
-          expect(requests[0]?.text?.verbosity).toBe("low");
-          expect(requests[0]?.tools).toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
+          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
+          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.text?.verbosity).toBeUndefined();
+          expect(requests[0]?.tools).not.toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
         }
         expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
         expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));

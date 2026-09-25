@@ -1,4 +1,4 @@
-import { createResponsesModelCatalog, finishResponsesModelCatalogWrite, readResponsesModelCatalog, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { finishResponsesModelCatalogWrite, readResponsesModelCatalog, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { writeFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -190,7 +190,7 @@ describe("DeepSeek managed accounts", () => {
   it("requires detaching RS followers before removing the final DS account",async()=>{
     const options=fixture();
     await applyDeepseekAccountConfiguration(input,options);
-    const model={id:"platform/flash",name:"Mapped",contextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-flash",followContext:true,snapshot:createResponsesModelCatalog([{id:"deepseek-flash",name:"DS",contextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false}],"deepseek-flash").models[0]!}};
+    const model={id:"platform/flash",name:"Mapped",contextWindow:1048576,maxContextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-flash",followContext:true}};
     finishResponsesModelCatalogWrite(writeResponsesModelCatalog(options.environment,"rs-linked",[model],model.id));
     await expect(removeDeepseekAccount({accountId:input.accountId,confirmRemove:true},options)).rejects.toThrow("关闭关联 RS 模型");
     expect(existsSync(options.paths.catalog)).toBe(true);
@@ -204,7 +204,7 @@ describe("DeepSeek managed accounts", () => {
   });
   it("does not rebuild a missing DS source while RS followers reference it",async()=>{
     const options=fixture();
-    const model={id:"platform/flash",name:"Mapped",contextWindow:524288,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-flash",followContext:true,snapshot:createResponsesModelCatalog([{id:"deepseek-flash",name:"DS",contextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false}],"deepseek-flash").models[0]!}};
+    const model={id:"platform/flash",name:"Mapped",contextWindow:524288,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-flash",followContext:true}};
     finishResponsesModelCatalogWrite(writeResponsesModelCatalog(options.environment,"rs-linked",[model],model.id));
     await expect(applyDeepseekAccountConfiguration(input,options)).rejects.toThrow("重建 DS 目录前");
     expect(options.downloadCatalog).not.toHaveBeenCalled();

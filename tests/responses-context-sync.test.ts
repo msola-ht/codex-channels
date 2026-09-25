@@ -27,7 +27,7 @@ vi.mock("../runtime/private-file.mjs",async original=>{
   }};
 });
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { createResponsesModelCatalog, finishResponsesModelCatalogWrite, removeResponsesModelCatalog, readResponsesModelCatalog, responsesContextSyncPath, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import { finishResponsesModelCatalogWrite, removeResponsesModelCatalog, readResponsesModelCatalog, responsesContextSyncPath, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { recoverResponsesContextSync } from "../runtime/responses-context-sync.mjs";
 import { writeManagedModelWindowGlobal, loadManagedModelProviderSettings } from "../runtime/model-provider-runtime.mjs";
 import { applyModelWindowChange, previewModelWindowChange } from "../scripts/model-window-management.mjs";
@@ -38,7 +38,7 @@ afterEach(()=>{writes.length=0;failures.path="";failures.rollback=false;failures
 async function fixture() {
   const home=await configuredHome("switching");roots.push(home,connectHomeFor(home));
   const environment=testEnvironment(home);
-  const definition={id:"vendor/flash",name:"Mapped",contextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-v4-flash",followContext:true,snapshot:{...createResponsesModelCatalog([{id:"deepseek-v4-flash",name:"DS",contextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false}],"deepseek-v4-flash").models[0]}}};
+  const definition={id:"vendor/flash",name:"Mapped",contextWindow:1048576,maxContextWindow:1048576,reasoningEfforts:[],defaultReasoningEffort:null,supportsImages:false,template:{source:"deepseek" as const,model:"deepseek-v4-flash",followContext:true}};
   for(const id of ["rs-one","rs-two"]) finishResponsesModelCatalogWrite(writeResponsesModelCatalog(environment,id,[definition,{...definition,id:"vendor/independent",template:{...definition.template,followContext:false}}],definition.id));
   return {environment,home,source:providerCatalogPath(home)};
 }
@@ -53,7 +53,7 @@ describe("DS context propagation to mapped RS models",()=>{
       expect(catalog.definitions[0]).toMatchObject({id:"vendor/flash",contextWindow:786432,supportsImages:false,reasoningEfforts:[]});
       expect(catalog.definitions[1]?.contextWindow).toBe(1048576);
       expect(catalog.models[0]).toMatchObject({context_window:786432,max_context_window:1048576});
-      expect(catalog.models[0]?.model_messages).toEqual(catalog.definitions[0]?.template?.snapshot?.model_messages);
+      expect(catalog.definitions[0]?.template).not.toHaveProperty("snapshot");
     }
     expect(existsSync(responsesContextSyncPath(environment))).toBe(false);
     expect(existsSync(`${responsesContextSyncPath(environment)}.backup`)).toBe(true);
@@ -136,7 +136,7 @@ describe("DS context propagation to mapped RS models",()=>{
   it("limits repair to the selected source model",async()=>{
     const {environment}=await fixture();
     const catalog=readResponsesModelCatalog(environment,"rs-one");
-    const extra={...catalog.definitions[0]!,id:"vendor/other",contextWindow:1024,template:{source:"deepseek" as const,model:"deepseek-v4-pro",followContext:true,snapshot:{...catalog.definitions[0]!.template!.snapshot,slug:"deepseek-v4-pro"}}};
+    const extra={...catalog.definitions[0]!,id:"vendor/other",contextWindow:1024,template:{source:"deepseek" as const,model:"deepseek-v4-pro",followContext:true}};
     finishResponsesModelCatalogWrite(writeResponsesModelCatalog(environment,"rs-one",[...catalog.definitions,extra],catalog.defaultModel,catalog.revision));
     await applyModelWindowChange({model:"deepseek-v4-flash",windowPercent:50},{environment});
     expect(readResponsesModelCatalog(environment,"rs-one").definitions.find(model=>model.id === extra.id)?.contextWindow).toBe(1024);

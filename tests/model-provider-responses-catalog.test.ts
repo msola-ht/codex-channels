@@ -56,13 +56,13 @@ describe("Responses provider catalog and lifecycle", () => {
   it("rejects unsupported catalog versions and invalid template links", () => {
     const {options,input}=fixture();
     const catalog=createResponsesModelCatalog([model],model.id);
-    expect(catalog.schemaVersion).toBe(3);
-    writePrivateFileAtomicSync(responsesProviderCatalogPath(options.environment,input.providerId),JSON.stringify({...catalog,schemaVersion:2}));
+    expect(catalog.schemaVersion).toBe(4);
+    writePrivateFileAtomicSync(responsesProviderCatalogPath(options.environment,input.providerId),JSON.stringify({...catalog,schemaVersion:3}));
     expect(()=>readResponsesModelCatalog(options.environment,input.providerId)).toThrow("版本");
     expect(()=>validateResponsesModels([{...model,template:{source:"official",model:"source",followContext:true}}],model.id)).toThrow("模板关联");
   });
 
-  it.each(["deepseek"] as const)("preserves the complete %s snapshot through import, WebUI edit and rollback", async source => {
+  it.each(["deepseek"] as const)("preserves only basic %s capabilities through import, WebUI edit and rollback", async source => {
     const {options,input}=fixture();
     const snapshot={...createResponsesModelCatalog([model],model.id).models[0]!,
       max_context_window:1048576, shell_type:"shell_command", priority:7,
@@ -74,7 +74,10 @@ describe("Responses provider catalog and lifecycle", () => {
       supported_reasoning_levels:[{effort:"high",description:"Detailed source description"}],default_reasoning_level:"high"};
     const definition=responsesModelTemplatesFromCatalog({models:[snapshot]},source)[0]!;
     const mapped={...definition,id:"platform/custom"};
-    expect(createResponsesModelCatalog([mapped],mapped.id).models).toEqual([{...snapshot,slug:mapped.id}]);
+    const generated=createResponsesModelCatalog([mapped],mapped.id);
+    expect(generated.models[0]).toMatchObject({slug:mapped.id,context_window:64000,max_context_window:1048576,input_modalities:["text","image"],default_reasoning_level:"high"});
+    for(const marker of ["Original base instructions","Complete source instructions","source-hash","Detailed source description"]) expect(JSON.stringify(generated)).not.toContain(marker);
+    expect(generated.models[0]).toMatchObject({shell_type:"unified_exec",support_verbosity:false,apply_patch_tool_type:null});
     await applyCustomPrimaryProviderSave({...input,model:mapped.id,catalog:{kind:"custom",models:[mapped]}},options);
     const state=await loadModelProviderManagementState({...options,readUserConfig:async()=>({config:{model_provider:"openai"}})});
     const resource=projectProviderSettings(state);
@@ -82,22 +85,18 @@ describe("Responses provider catalog and lifecycle", () => {
     const mutation=normalizeProviderSettingsMutation({operation:"primary.custom.save",provider:{...input,operation:"update",model:mapped.id,catalog:{kind:"custom",models:[edited]}}});
     await applyCustomPrimaryProviderSave(mutation.provider,options);
     const saved=readResponsesModelCatalog(options.environment,input.providerId);
-    expect(saved.models).toEqual([{...snapshot,slug:mapped.id,display_name:"Edited",context_window:32000,input_modalities:["text","audio"]}]);
-    expect(saved.definitions[0]?.template?.snapshot).toEqual(snapshot);
+    expect(saved.models[0]).toMatchObject({slug:mapped.id,display_name:"Edited",context_window:32000,max_context_window:1048576,input_modalities:["text"]});
+    expect(saved.definitions[0]?.template).toEqual({source:"deepseek",model:model.id,followContext:false});
     const transaction=writeResponsesModelCatalog(options.environment,input.providerId,[{...edited,contextWindow:16000}],mapped.id,saved.revision);
     finishResponsesModelCatalogWrite(transaction,true);
     expect(readResponsesModelCatalog(options.environment,input.providerId).content).toBe(saved.content);
     expect(()=>createResponsesModelCatalog([{...mapped,contextWindow:1048577}],mapped.id)).toThrow("最大上下文");
   });
 
-  it("rejects unsafe or oversized snapshots before creating transaction files", () => {
+  it("rejects removed snapshots and invalid maximum windows before writing files", () => {
     const {options,input}=fixture();
-    const snapshot=createResponsesModelCatalog([model],model.id).models[0]!;
-    for (const extra of [{apiKey:"secret"},{guardian:{}},{unknown_field:true}]) {
-      expect(()=>responsesModelTemplatesFromCatalog({models:[{...snapshot,...extra}]},"deepseek")).toThrow("快照");
-    }
-    const definition=responsesModelTemplatesFromCatalog({models:[{...snapshot,base_instructions:"x".repeat(1024*1024)}]},"deepseek")[0]!;
-    expect(()=>writeResponsesModelCatalog(options.environment,input.providerId,[definition],definition.id)).toThrow("2 MiB");
+    expect(()=>writeResponsesModelCatalog(options.environment,input.providerId,[{...model,template:{source:"deepseek",model:model.id,followContext:false,snapshot:{}}} as never],model.id)).toThrow("模板关联");
+    for(const maxContextWindow of [1024,0,100000001,1.5,null]) expect(()=>validateResponsesModels([{...model,maxContextWindow}],model.id)).toThrow("最大上下文");
     const path=responsesProviderCatalogPath(options.environment,input.providerId);
     expect(existsSync(path)).toBe(false);
     expect(existsSync(`${path}.pending`)).toBe(false);
