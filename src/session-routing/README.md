@@ -9,7 +9,8 @@
   稳定快照；快照保留 App Server 返回的 `historyMode`（`legacy` 或 `paginated`），新建 Thread 使用分页
   历史，既有 legacy Thread 不宣称支持 Revert；官方分区裁剪为稳定 `id/name/builtIn`，内置 Pinned 另投影为 `isPinned`，运行中 Turn 以 `activeTurnId` 表示，恢复会话另携带
   模型 Provider、实际 Default/Plan 协作模式、更新时间/最近活跃时间；可选 `parentThreadId` 保留官方派生父子关系供本机归档识别，
-  压缩 Item ID，不向业务层暴露完整官方 Turn。
+  压缩 Item ID，不向业务层暴露完整官方 Turn。端口可选声明已配置的模型 Provider 判定，用于把
+  Provider 已被移除的历史 Thread 排除在自动接续之外，未实现的部署视为不做限制。
 - `router.ts`：选择、搜索、绑定、恢复、归档和解绑 Thread，把 Workspace 权限（沙箱、审批策略、
   权限 Profile）作为启动参数传给新建或恢复的 Thread，协调持久化映射、订阅恢复、Provider/模型设置、
   压缩 Item ID、新建前台 Thread 的动态工具注册及 `thread/unsubscribe`，并按 Thread 向 Core 提供已绑定
@@ -20,6 +21,8 @@
   `newSession` 解除当前绑定并保留原 Thread，下一 Turn 由对应 App Server 以精确 Provider 和模型新建 Thread；
   不使用 `thread/fork` 复制 Provider 专属历史。自动接续收到渠道保留的 Provider 时只恢复相同
   Provider 的候选 Thread；没有兼容候选时按该 Provider 新建，避免把模型交给错误的 App Server。
+  Provider 已由操作员移除的历史 Thread 属于永久不可用，不会被自动接续选中，此时改用其余
+  兼容候选或新建 Thread，避免 Conversation 永久卡在恢复失败上。
   `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
   `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
   后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。

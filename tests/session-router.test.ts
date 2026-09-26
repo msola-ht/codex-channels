@@ -499,6 +499,56 @@ describe("SessionRouter", () => {
     }]);
   });
 
+  it("skips idle candidates whose Provider is no longer configured", async () => {
+    const store = new MemoryBindingStore();
+    const started: unknown[] = [];
+    const orphaned = {
+      ...thread("orphaned", { type: "notLoaded" }),
+      modelProvider: "clp-main",
+    };
+    const usable = {
+      ...thread("usable", { type: "notLoaded" }),
+      modelProvider: "ds-main",
+    };
+    const client = threadPort({
+      isProviderConfigured: (provider) => provider === "ds-main",
+      listThreads: async () => [orphaned, usable],
+      readThread: async (id) => (id === "usable" ? usable : orphaned),
+      resumeThread: async (threadId) => session(
+        threadId === "usable" ? usable : orphaned,
+        { modelProvider: threadId === "usable" ? "ds-main" : "clp-main" },
+      ),
+      startThread: async (cwd, options) => {
+        started.push({ cwd, options });
+        return session(thread("fresh", { type: "idle" }));
+      },
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    expect((await router.ensure(target)).threadId).toBe("usable");
+    expect(started).toEqual([]);
+  });
+
+  it("starts a Thread when every idle candidate Provider was removed", async () => {
+    const store = new MemoryBindingStore();
+    const readThread = vi.fn(async () => thread("orphaned", { type: "notLoaded" }));
+    const startThread = vi.fn(async () => session(thread("fresh", { type: "idle" })));
+    const client = threadPort({
+      isProviderConfigured: () => false,
+      listThreads: async () => [{
+        ...thread("orphaned", { type: "notLoaded" }),
+        modelProvider: "clp-main",
+      }],
+      readThread,
+      startThread,
+    });
+    const router = new SessionRouter(client, store, registry);
+
+    expect((await router.ensure(target)).threadId).toBe("fresh");
+    expect(readThread).not.toHaveBeenCalled();
+    expect(startThread).toHaveBeenCalledWith("/workspace", {});
+  });
+
   it("does not auto-resume a Thread from another Provider when a channel model is retained", async () => {
     const store = new MemoryBindingStore();
     const resumed: string[] = [];

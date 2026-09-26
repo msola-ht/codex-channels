@@ -325,7 +325,8 @@ export class SessionRouter {
           && (
             startOptions.modelProvider === undefined
             || thread.modelProvider === startOptions.modelProvider
-          ),
+          )
+          && this.isProviderSelectable(thread.modelProvider),
       );
       if (candidate) {
         return this.withThreadLifecycle([candidate.id], async () => {
@@ -863,6 +864,16 @@ export class SessionRouter {
   private shouldForceNew(target: ConversationTarget): boolean {
     return this.forceNew.has(this.key(target))
       || this.bindings.idleState(target).forceNew;
+  }
+
+  /**
+   * 自动接续的候选必须落在当前仍然可用的模型 Provider 上。
+   * 操作员移除某个 Provider 后，其历史 Thread 属于永久不可用（与
+   * `isUnavailableRestoreError` 的分类一致），不能被空闲候选选中，
+   * 否则会话会一直卡在恢复失败上而无法新建 Thread。
+   */
+  private isProviderSelectable(provider: string): boolean {
+    return this.codex.isProviderConfigured?.(provider) ?? true;
   }
 
   private sameBinding(expected: ConversationBinding, current: ConversationBinding | undefined): boolean {
