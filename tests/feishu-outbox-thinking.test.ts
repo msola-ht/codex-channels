@@ -27,6 +27,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+async function drain(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
 describe("Feishu outbox thinking and runtime display", () => {
   it("streams the thinking status as one streaming card per segment", async () => {
     const created: Array<{ chatId: string; initialText: string }> = [];
@@ -78,9 +84,13 @@ describe("Feishu outbox thinking and runtime display", () => {
       });
     };
     reasoning(0);
+    await drain();
     reasoning(3_000);
+    await drain();
     reasoning(15_000, true);
+    await drain();
     reasoning(0);
+    await drain();
     reasoning(2_000, true);
     await outbox.close();
 
@@ -115,6 +125,61 @@ describe("Feishu outbox thinking and runtime display", () => {
         cardId: "om_reason_2",
         sequence: 2,
         summary: "**思考完成**\n\n---\n**耗时：** 2 s",
+      },
+    ]);
+  });
+
+  it("coalesces queued thinking updates for one segment", async () => {
+    const created: string[] = [];
+    const updated: Array<{ cardId: string; content: string; sequence: number }> = [];
+    let releaseCreate!: () => void;
+    const createGate = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const outbox = new FeishuOutbox(
+      "cli_app",
+      {
+        ...cardMethods,
+        sendText: async () => {},
+        sendPost: async () => {},
+        createStreamingCard: async (_chatId, initialText) => {
+          created.push(initialText);
+          await createGate;
+          return { cardId: `om_reason_${created.length}`, messageId: `om_reason_msg_${created.length}` };
+        },
+        updateStreamingCard: async (cardId, content, sequence) => {
+          updated.push({ cardId, content, sequence });
+        },
+      },
+      pino({ level: "silent" }),
+    );
+    const reasoning = (elapsedMs: number): void => {
+      outbox.handle({
+        type: "turn.reasoning",
+        target,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        summary: "",
+        elapsedMs,
+      });
+    };
+
+    // 首段创建流式卡仍在进行时，后续同段快照都排在队列里。
+    reasoning(3_000);
+    await drain();
+    reasoning(6_000);
+    reasoning(9_000);
+    await drain();
+    expect(updated).toEqual([]);
+    releaseCreate();
+    await outbox.close();
+
+    expect(created).toEqual(["**思考中…**\n\n---\n**耗时：** 3 s"]);
+    expect(updated).toEqual([
+      {
+        cardId: "om_reason_1",
+        content: "**思考中…**\n\n---\n**耗时：** 9 s",
+        sequence: 1,
       },
     ]);
   });

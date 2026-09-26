@@ -13,7 +13,6 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import type {
-  OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
@@ -76,9 +75,6 @@ export interface WeixinSurfaceOptions {
   files?: WeixinFilePort;
   audios?: WeixinAudioPort;
   startupNotification?: WeixinStartupNotification;
-  operationUpdateDisplay?: OperationUpdateDisplay;
-  planUpdatesEnabled?: boolean;
-  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
@@ -149,21 +145,6 @@ export class WeixinSurface implements SurfaceAdapter {
           ? {}
           : { fileClient: options.fileSendClient }),
         ...(typing === undefined ? {} : { typing }),
-        ...(options.operationUpdateDisplay === undefined
-          ? {}
-          : {
-              operationUpdateDisplay: options.operationUpdateDisplay,
-            }),
-        ...(options.planUpdatesEnabled === undefined
-          ? {}
-          : {
-              planUpdatesEnabled: options.planUpdatesEnabled,
-            }),
-        ...(options.reasoningEnabled === undefined
-          ? {}
-          : {
-              reasoningEnabled: options.reasoningEnabled,
-            }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),

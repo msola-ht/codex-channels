@@ -5,7 +5,11 @@ import {
   type OutputEvent,
   type TurnStartIdentity,
 } from "../../conversation-core/index.js";
-import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import {
+  ConversationDeliveryQueue,
+  type ConversationDeliveryOptions,
+} from "../conversation-delivery-queue.js";
+import { surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
 } from "../../application/index.js";
@@ -95,6 +99,8 @@ interface FeishuReasoningCard {
   chatId: string;
   threadId: string;
   turnId: string;
+  /** 同一 Turn 内每段“思考中”卡片的分段编号，用于隔离可合并的中间状态。 */
+  segment: number;
   cardId?: string;
   sequence: number;
   lastText?: string;
@@ -165,6 +171,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly streams = new Map<string, FeishuStreamState>();
   private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
+  private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly operationDisplays = new Map<string, string>();
@@ -519,6 +526,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         chatId,
         threadId: event.threadId,
         turnId: event.turnId,
+        segment: this.nextReasoningSegment++,
         sequence: 0,
       };
       this.reasoningCards.set(event.threadId, state);
@@ -569,6 +577,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.final === true) {
       this.reasoningCards.delete(event.threadId);
     }
+    const options = this.reasoningDeliveryOptions(event, existing.segment);
     this.delivery.enqueue(
       chatId,
       async (signal) => {
@@ -637,7 +646,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
         }
       },
       true,
+      options,
     );
+  }
+
+  private reasoningDeliveryOptions(
+    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+    segment: number,
+  ): ConversationDeliveryOptions {
+    const coalesceKey = surfaceDeliveryCoalesceKey(event, segment);
+    return coalesceKey === undefined ? {} : { coalesceKey };
   }
 
   private async sendImage(

@@ -216,6 +216,24 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual([]);
   });
 
+  it("delivers a thread rename through the Conversation queue", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+
+    outbox.handle({
+      type: "thread.name",
+      target,
+      threadId: "thread-1",
+      name: "新名称",
+    });
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+
+    expect(api.sent[0]).toContain("Session 名称已更新：新名称");
+    expect(api.sent[1]).toEqual(turnCompletedPanel);
+  });
+
   it("replies to the originating input when acknowledging Turn start", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -260,6 +278,7 @@ describe("TelegramOutbox", () => {
       summary: "",
       elapsedMs: 0,
     });
+    await drain();
     outbox.handle({
       type: "turn.reasoning",
       target,
@@ -268,6 +287,7 @@ describe("TelegramOutbox", () => {
       summary: "",
       elapsedMs: 3_000,
     });
+    await drain();
     outbox.handle({
       type: "turn.reasoning",
       target,
@@ -285,6 +305,42 @@ describe("TelegramOutbox", () => {
       "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
       "<b>思考完成</b>\n\n<b>耗时：</b>15 s",
     ]);
+  });
+
+  it("coalesces unprocessed reasoning snapshots for the same Turn", async () => {
+    const api = new FakeTelegramApi();
+    const originalSendMessage = api.sendMessage.bind(api);
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    api.sendMessage = async (chatId, text, options) => {
+      await sendGate;
+      return originalSendMessage(chatId, text, options);
+    };
+    const outbox = createOutbox(api);
+    const reasoning = (elapsedMs: number): Extract<OutputEvent, { type: "turn.reasoning" }> => ({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs,
+    });
+
+    // 首条快照正在创建“思考中”消息时，后续快照都还在队列里等待。
+    outbox.handle(reasoning(3_000));
+    await settle();
+    outbox.handle(reasoning(6_000));
+    outbox.handle(reasoning(9_000));
+    await settle();
+    // 平台持续变慢导致同一 Turn 的快照在队列里等待时，只保留最新一份中间状态。
+    expect(api.edits).toEqual([]);
+    releaseSend();
+    await outbox.close();
+
+    expect(api.sent).toEqual(["<b>思考中…</b>\n\n<b>耗时：</b>3 s"]);
+    expect(api.edits).toEqual(["<b>思考中…</b>\n\n<b>耗时：</b>9 s"]);
   });
 
   it("starts an independent thinking message after tool execution begins", async () => {
@@ -1815,6 +1871,12 @@ function userInputInteraction() {
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function drain(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 function tokenBreakdown(totalTokens: number) {

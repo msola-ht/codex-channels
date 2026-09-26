@@ -536,6 +536,113 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("coalesces unavailable reasoning snapshots per Turn while keeping approvals and completion", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      if (event.type === "turn.reasoning") {
+        received.push(`reasoning:${event.turnId}:${event.summary}`);
+      }
+      if (event.type === "turn.completed") {
+        received.push(`completed:${event.turnId}`);
+      }
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      maximumPendingCriticalOutput: 2,
+    });
+    const reasoning = (turnId: string, summary: string): OutputEvent => ({
+      type: "turn.reasoning",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId,
+      summary,
+      elapsedMs: 1_000,
+    });
+    const completed = (turnId: string): OutputEvent => ({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId,
+      status: "completed",
+    });
+
+    output.publish(reasoning("turn-1", "旧快照"));
+    output.publish(reasoning("turn-1", "新快照"));
+    output.publish(reasoning("turn-2", "另一轮"));
+    output.publish(completed("turn-1"));
+    output.publish(completed("turn-2"));
+    // 让输出总线在 Surface 仍不可用时真正处理完这批事件，否则事件会在启动后才被
+    // 读取，从而绕过恢复缓冲。
+    await flushEventBus();
+    await manager.start();
+    await settle();
+
+    expect(received).toEqual([
+      "reasoning:turn-1:新快照",
+      "reasoning:turn-2:另一轮",
+      "completed:turn-1",
+      "completed:turn-2",
+    ]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("buffers exactly what a Surface would deliver while unavailable", async () => {
+    const weixin = surface("weixin", "default", []);
+    const received: string[] = [];
+    weixin.output.handle = (event) => {
+      received.push(event.type);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([weixin], output, {
+      maximumPendingCriticalOutput: 2,
+    });
+    const target = {
+      surface: "weixin",
+      accountId: "default",
+      conversationId: "chat-1",
+    };
+
+    // 微信白名单内的开始确认与完成事件必须保留；被忽略的推理状态不占用恢复缓冲。
+    output.publish({
+      type: "turn.started",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+    });
+    output.publish({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      summary: "",
+      elapsedMs: 1_000,
+    });
+    output.publish({
+      type: "turn.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await flushEventBus();
+    await manager.start();
+    await settle();
+
+    expect(received).toEqual(["turn.started", "turn.completed"]);
+    await manager.stop();
+    await output.close();
+  });
+
   it("adds the current Git branch to completed Turns before routing", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
@@ -844,6 +951,12 @@ function surface(
 async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function flushEventBus(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 function scheduledTaskPreview(): ScheduledTaskConfirmation {

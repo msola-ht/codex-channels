@@ -167,9 +167,6 @@ function createWeixinModule(
         ));
       },
     },
-    operationUpdateDisplay: options.config.operationUpdateDisplay,
-    planUpdatesEnabled: options.config.planUpdatesEnabled,
-    reasoningEnabled: options.config.reasoningEnabled,
     debugEnabled: isDebugLogLevel(options.config.logLevel),
     autoCompactPercent: options.autoCompactPercent,
     fetchImpl: createProxyFetch(options.config.networkProxy),

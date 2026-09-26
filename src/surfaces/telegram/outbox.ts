@@ -8,7 +8,11 @@ import {
   type OperationUpdate,
   type OutputEvent,
 } from "../../conversation-core/index.js";
-import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import {
+  ConversationDeliveryQueue,
+  type ConversationDeliveryOptions,
+} from "../conversation-delivery-queue.js";
+import { surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { readGeneratedImage } from "../generated-image.js";
 import {
   OperationUpdateBuffer,
@@ -93,6 +97,8 @@ interface TelegramReasoningMessage {
   chatId: string;
   threadId: string;
   turnId: string;
+  /** 同一 Turn 内每段“思考中”消息的分段编号，用于隔离可合并的中间状态。 */
+  segment: number;
   text: string;
   sealed: boolean;
   messageId?: number | undefined;
@@ -125,6 +131,7 @@ export class TelegramOutbox {
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly planProgress = new TurnPlanProgressState();
   private readonly reasoningMessages = new Map<string, TelegramReasoningMessage>();
+  private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly replyTargets = new TurnReplyTargets<number>();
@@ -178,7 +185,7 @@ export class TelegramOutbox {
     this.replyTargets.set(this.turnKey(threadId, turnId), messageId);
   }
 
-  async handle(event: OutputEvent): Promise<void> {
+  handle(event: OutputEvent): void {
     if (
       this.closed
       || event.target.surface !== "telegram"
@@ -594,10 +601,17 @@ export class TelegramOutbox {
       case "thread.status":
         return;
       case "thread.name":
-        await this.sendPanel(
+        // 与其他输出一致：同步入队后由 Conversation 队列串行发送，不在共享输出路由线程里
+        // 等待平台请求（否则一次改名会阻塞所有渠道的输出投递）。
+        this.enqueue(
           chatId,
-          `Session 名称已更新：${event.name ?? "未命名"}`,
-          undefined,
+          (signal) => this.sendPanel(
+            chatId,
+            `Session 名称已更新：${event.name ?? "未命名"}`,
+            undefined,
+            true,
+            signal,
+          ).then(() => undefined),
           true,
         );
         return;
@@ -771,8 +785,9 @@ export class TelegramOutbox {
     chatId: string,
     run: (signal: AbortSignal) => Promise<void>,
     critical: boolean,
+    options?: ConversationDeliveryOptions,
   ): boolean {
-    return this.delivery.enqueue(chatId, run, critical);
+    return this.delivery.enqueue(chatId, run, critical, options);
   }
 
   private async sendNotificationPanel(
@@ -1205,6 +1220,7 @@ export class TelegramOutbox {
         chatId,
         threadId: event.threadId,
         turnId: event.turnId,
+        segment: this.nextReasoningSegment++,
         text,
         sealed: false,
       };
@@ -1232,6 +1248,7 @@ export class TelegramOutbox {
       this.reasoningMessages.delete(event.threadId);
     }
     existing.text = text;
+    const options = this.reasoningDeliveryOptions(event, existing.segment);
     this.enqueue(
       chatId,
       async (signal) => {
@@ -1266,7 +1283,16 @@ export class TelegramOutbox {
         }
       },
       true,
+      options,
     );
+  }
+
+  private reasoningDeliveryOptions(
+    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
+    segment: number,
+  ): ConversationDeliveryOptions {
+    const coalesceKey = surfaceDeliveryCoalesceKey(event, segment);
+    return coalesceKey === undefined ? {} : { coalesceKey };
   }
 
   private sealReasoningMessage(threadId: string, turnId: string): void {

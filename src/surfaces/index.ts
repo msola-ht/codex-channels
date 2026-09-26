@@ -21,7 +21,15 @@ export {
 export {
   ConversationDeliveryQueue,
   type ConversationDeliveryQueueOptions,
+  type ConversationDeliveryOptions,
 } from "./conversation-delivery-queue.js";
+export {
+  isWeixinWindowEvent,
+  resolveSurfaceDelivery,
+  surfaceDeliveryCoalesceKey,
+  type SurfaceDeliveryDecision,
+  type SurfaceDeliveryDisposition,
+} from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,
   type SurfaceInputBatchResult,

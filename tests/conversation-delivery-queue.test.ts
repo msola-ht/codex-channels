@@ -296,6 +296,76 @@ describe("ConversationDeliveryQueue", () => {
     await delivery.close();
     expect(calls).toEqual(["first", "second"]);
   });
+
+  it("coalesces pending same-key output per Conversation while keeping other keys", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    const calls: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("in-flight");
+      await firstGate;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("reasoning-1");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("reasoning-2");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("approval");
+    }, true);
+
+    releaseFirst();
+    await delivery.close();
+    expect(calls).toEqual(["in-flight", "reasoning-2", "approval"]);
+  });
+
+  it("keeps coalesce keys scoped to a single Conversation", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    const calls: string[] = [];
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const gateB = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("a:in-flight");
+      await gateA;
+    }, true);
+    delivery.enqueue("b", async () => {
+      calls.push("b:in-flight");
+      await gateB;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("a:reasoning-1");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("a:reasoning-2");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("b", async () => {
+      calls.push("b:reasoning");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+
+    releaseA();
+    releaseB();
+    await delivery.close();
+    expect([...calls].sort()).toEqual([
+      "a:in-flight",
+      "a:reasoning-2",
+      "b:in-flight",
+      "b:reasoning",
+    ]);
+  });
 });
 
 async function settle(): Promise<void> {

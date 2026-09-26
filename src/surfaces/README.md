@@ -41,7 +41,9 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 只用于 Gateway 关闭，必须可在部分启动后
 安全调用并保持幂等。首次启动和故障恢复期间的关键输出只保存在 Bootstrap 有界内存中，不写入
-StateStore；临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
+StateStore；恢复缓冲按策略合并键折叠可合并中间状态（例如按秒刷新的思考状态），
+审批、错误与完成事件始终逐个保留，达到告警阈值时记录日志而不静默丢弃。临时连接故障只能取消
+当前交互，不能把可恢复端口永久关闭。
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
@@ -52,6 +54,10 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
 不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。新增 Surface 时应实现统一输入、
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
+`delivery-policy.ts` 是渠道投递策略的唯一判定点：`resolveSurfaceDelivery` 决定事件是投递、按合并键
+合并还是忽略，并给出是否关键；渠道差异只保留微信回复窗口白名单和思考状态的合并键两张表，
+Surface 不再各自维护允许列表或在 `handle` 内散落关键性字面量。Telegram 与飞书对同一 Turn 的
+思考状态按分段合并，仅合并尚未执行的中间快照，创建首条状态和终态始终执行。
 Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
 只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
@@ -95,9 +101,10 @@ Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正�
 Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
-`plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；Telegram 与微信
-复用同一个按 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态；各渠道只决定
-完整计划是原地更新还是追加紧凑进度。
+`plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；Telegram 复用
+同一个按 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态；微信不展示
+结构化计划，其回复窗口只保留生命周期、终态与全局空闲通知。各渠道只决定完整计划是原地更新还是
+追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
 开始/继续/完成通知和 Turn 结束汇报；OpenAI 启动传输探测全部失败时，上线通知增加代理检查提醒，
 官方主路由缺少鉴权时增加未登录提示和 `codex login` 或 `/model` 的操作建议，不显示目标地址或

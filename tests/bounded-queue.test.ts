@@ -105,7 +105,61 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe(1);
     expect(await queue.shift()).toBeUndefined();
   });
+
+  it("replaces a pending entry with the same coalesce key in place", async () => {
+    const queue = new BoundedAsyncQueue<string>(3);
+    queue.push("first", true, "k");
+    queue.push("other", true, "o");
+    expect(queue.push("first-latest", true, "k")).toBe(true);
+    expect(queue.size).toBe(2);
+    expect(await queue.shift()).toBe("first-latest");
+    expect(await queue.shift()).toBe("other");
+  });
+
+  it("keeps non-critical accounting consistent when coalescing changes criticality", () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("non-critical", false, "k");
+    expect(nonCriticalCount(queue)).toBe(1);
+    queue.push("critical", true, "k");
+    expect(nonCriticalCount(queue)).toBe(0);
+    queue.push("non-critical-again", false, "k");
+    expect(nonCriticalCount(queue)).toBe(1);
+  });
+
+  it("drops the coalesce key after the entry is shifted", async () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("a", true, "k");
+    expect(await queue.shift()).toBe("a");
+    expect(queue.push("b", true, "k")).toBe(true);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("b");
+  });
+
+  it("drops the coalesce key after the entry is removed", async () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("a", true, "k");
+    expect(queue.remove("a")).toBe(true);
+    expect(queue.push("b", true, "k")).toBe(true);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("b");
+  });
+
+  it("drops the coalesce key after the entry is evicted by overflow", async () => {
+    const queue = new BoundedAsyncQueue<string>(1);
+    queue.push("disposable", false, "k");
+    queue.push("critical", true);
+    expect(queue.size).toBe(1);
+    expect(queue.push("replacement", true, "k")).toBe(true);
+    // 已淘汰条目的键必须失效，否则新载荷会写入一个不在队列里的旧条目并丢失。
+    expect(queue.size).toBe(2);
+    expect(await queue.shift()).toBe("critical");
+    expect(await queue.shift()).toBe("replacement");
+  });
 });
+
+function nonCriticalCount(queue: BoundedAsyncQueue<unknown>): number {
+  return (queue as unknown as { nonCriticalCount: number }).nonCriticalCount;
+}
 
 describe("EventBus", () => {
   it("rejects new subscriptions after close", async () => {

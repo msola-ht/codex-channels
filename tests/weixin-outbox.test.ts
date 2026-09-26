@@ -103,14 +103,7 @@ describe("WeixinOutbox", () => {
   });
 
   it("reserves the reply window for lifecycle output", async () => {
-    const { outbox, sendImage, sendText } = outboxFixture(
-      { value: true },
-      {
-        operationUpdateDisplay: "full",
-        planUpdatesEnabled: true,
-        reasoningEnabled: true,
-      },
-    );
+    const { outbox, sendImage, sendText } = outboxFixture({ value: true });
 
     outbox.handle({
       type: "turn.reasoning",
@@ -333,11 +326,8 @@ describe("WeixinOutbox", () => {
     }, expect.any(AbortSignal));
   });
 
-  it("hides operation updates without suppressing Turn completion", async () => {
-    const { outbox, sendText } = outboxFixture(
-      { value: true },
-      { operationUpdateDisplay: "hidden" },
-    );
+  it("keeps operation updates out of the reply window without suppressing Turn completion", async () => {
+    const { outbox, sendText } = outboxFixture({ value: true });
 
     outbox.handle(operationUpdated("running"));
     outbox.handle(operationUpdated("completed"));

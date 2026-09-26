@@ -2,7 +2,6 @@ import type { Logger } from "pino";
 
 import type { ScheduledTaskConfirmation } from "../application/index.js";
 import {
-  isCriticalOutputEvent,
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
@@ -10,9 +9,10 @@ import {
   type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
-import type {
-  SurfaceAdapter,
-  SurfaceConfigurationChange,
+import {
+  resolveSurfaceDelivery,
+  type SurfaceAdapter,
+  type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
@@ -21,7 +21,13 @@ interface SurfaceRuntime {
   state: "idle" | "starting" | "running" | "retrying";
   retryAttempt: number;
   retryTimer?: NodeJS.Timeout;
-  pendingCriticalOutput: OutputEvent[];
+  pendingCriticalOutput: PendingOutputEntry[];
+}
+
+interface PendingOutputEntry {
+  event: OutputEvent;
+  /** 可合并中间状态在故障期只保留同键的最新一份。 */
+  coalesceKey?: string;
 }
 
 export interface SurfaceManagerOptions {
@@ -340,19 +346,9 @@ export class SurfaceManager {
     }
     if (!this.active.has(surface)) {
       const runtime = this.requireRuntime(surface);
-      if (isCriticalOutputEvent(routedEvent)) {
-        if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
-          this.logger.error(
-            {
-              surface: surface.surface,
-              accountId: surface.accountId,
-              eventType: routedEvent.type,
-              pending: runtime.pendingCriticalOutput.length,
-            },
-            "Surface 恢复队列达到告警阈值，关键输出继续保留",
-          );
-        }
-        runtime.pendingCriticalOutput.push(routedEvent);
+      const decision = resolveSurfaceDelivery(surface.surface, routedEvent);
+      if (decision.disposition !== "ignore" && decision.critical) {
+        this.bufferPendingOutput(surface, runtime, routedEvent, decision.coalesceKey);
       } else {
         this.logger.debug(
           {
@@ -366,6 +362,43 @@ export class SurfaceManager {
       return;
     }
     await this.deliverOutput(surface, routedEvent);
+  }
+
+  /**
+   * 渠道不可用时暂存必须保留的输出。可合并的中间状态（例如每秒刷新的思考状态）
+   * 按策略合并键保留最新一份，避免长时间断线时内存按秒增长；审批、错误和
+   * 完成事件仍然全部保留，超过阈值只告警不静默丢弃。被渠道策略忽略的事件（例如
+   * 微信的推理状态）不进入缓冲。
+   */
+  private bufferPendingOutput(
+    surface: SurfaceAdapter,
+    runtime: SurfaceRuntime,
+    event: OutputEvent,
+    coalesceKey: string | undefined,
+  ): void {
+    if (coalesceKey !== undefined) {
+      const existing = runtime.pendingCriticalOutput.findIndex(
+        (entry) => entry.coalesceKey === coalesceKey,
+      );
+      if (existing >= 0) {
+        runtime.pendingCriticalOutput[existing] = { event, coalesceKey };
+        return;
+      }
+    }
+    if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
+      this.logger.error(
+        {
+          surface: surface.surface,
+          accountId: surface.accountId,
+          eventType: event.type,
+          pending: runtime.pendingCriticalOutput.length,
+        },
+        "Surface 恢复队列达到告警阈值，关键输出继续保留",
+      );
+    }
+    runtime.pendingCriticalOutput.push(
+      coalesceKey === undefined ? { event } : { event, coalesceKey },
+    );
   }
 
   private resolveCompletionMetrics<T>(
@@ -437,8 +470,8 @@ export class SurfaceManager {
     this.setInteractionAvailable(surface, true);
     this.active.add(surface);
     const pending = runtime.pendingCriticalOutput.splice(0);
-    for (const event of pending) {
-      void this.deliverOutput(surface, event);
+    for (const entry of pending) {
+      void this.deliverOutput(surface, entry.event);
     }
     this.logger.info(
       {

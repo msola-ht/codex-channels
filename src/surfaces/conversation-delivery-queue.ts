@@ -8,6 +8,14 @@ interface DeliveryOperation {
   run(signal: AbortSignal): Promise<void>;
 }
 
+export interface ConversationDeliveryOptions {
+  /**
+   * 同一 Conversation 内仍在等待执行的同键输出只保留最新一份。
+   * 用于按秒刷新的中间状态：既不让它无限积压，也不在平台变慢时静默丢弃。
+   */
+  coalesceKey?: string;
+}
+
 interface ConversationWorker {
   queue: BoundedAsyncQueue<DeliveryOperation>;
   controller: AbortController;
@@ -48,12 +56,13 @@ export class ConversationDeliveryQueue {
     conversationId: string,
     run: (signal: AbortSignal) => Promise<void>,
     critical: boolean,
+    options?: ConversationDeliveryOptions,
   ): boolean {
     if (this.closed) {
       return false;
     }
     const worker = this.worker(conversationId);
-    const accepted = worker.queue.push({ critical, run }, critical);
+    const accepted = worker.queue.push({ critical, run }, critical, options?.coalesceKey);
     if (!accepted) {
       this.logger.warn(
         {

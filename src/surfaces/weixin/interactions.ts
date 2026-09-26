@@ -23,7 +23,7 @@ import {
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatWeixinCommandText } from "./command-renderer.js";
 import { PendingInteractionRegistry, waitForInteractionPreparation } from "../pending-interaction-registry.js";
-import { sanitizeWeixinMarkdownText } from "./operation-format.js";
+import { sanitizeWeixinMarkdownText } from "./markdown-sanitize.js";
 
 type ApprovalRequest = Extract<InteractionRequest, { type: "approval" }>;
 type UserInputRequest = Extract<InteractionRequest, { type: "user-input" }>;
