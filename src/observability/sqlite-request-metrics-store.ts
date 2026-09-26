@@ -1,3 +1,4 @@
+import { createAccountQuotaEstimator } from "./account-quota-estimate.js";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
@@ -36,6 +37,7 @@ import {
 } from "./sqlite-request-metrics-schema.js";
 
 import type {
+  AccountQuotaWindowEstimate,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
@@ -589,6 +591,58 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     `).run(snapshot.sourceId, snapshot.observedAtMs, snapshot.available ? 1 : 0,
       JSON.stringify(snapshot.usage), JSON.stringify(snapshot.limits));
     this.cleanupAccountSnapshots(snapshot.observedAtMs);
+  }
+
+  accountQuotaEstimates(provider: string, nowMs = Date.now()): AccountQuotaWindowEstimate[] {
+    this.requireOpen();
+    if (!provider || provider.length > 128 || !Number.isSafeInteger(nowMs) || nowMs < 0) {
+      throw new Error("账户额度估算查询无效");
+    }
+    // A savepoint also works inside an existing readSnapshot transaction. History,
+    // retention boundary and metrics must all come from the same SQLite snapshot.
+    this.database.exec("SAVEPOINT account_quota_estimate");
+    try {
+      const firstRetained = this.database.prepare(`
+        SELECT id, recorded_at_ms FROM model_request_metrics ORDER BY id LIMIT 1
+      `).get() as { id: number; recorded_at_ms: number } | undefined;
+      // AUTOINCREMENT IDs survive cleanup and reopening. A missing prefix means
+      // earlier account intervals no longer have a complete request history.
+      const coverageStart = firstRetained === undefined ? nowMs
+        : firstRetained.id > 1 ? firstRetained.recorded_at_ms : 0;
+      const rows = this.database.prepare(`
+        SELECT a.observed_at_ms, a.available, a.usage_json
+        FROM account_snapshots a JOIN account_sources s ON s.source_id = a.source_id
+        WHERE s.provider = ? AND a.observed_at_ms <= ? AND a.observed_at_ms >= ?
+        ORDER BY a.observed_at_ms DESC LIMIT 2048
+      `).all(provider, nowMs, coverageStart) as Array<{ observed_at_ms: number; available: number; usage_json: string }>;
+      const snapshots = rows.reverse().map(row => ({
+        observedAtMs: row.observed_at_ms, available: row.available === 1,
+        usage: JSON.parse(row.usage_json) as unknown,
+      }));
+      const estimator = createAccountQuotaEstimator(snapshots, nowMs);
+      if (snapshots.length > 1) {
+        // Include late writes after the last account observation. Assignment uses
+        // actual request timestamps, never the time spent waiting for persistence.
+        const metrics = this.iterateRows(`
+          SELECT request_started_at_ms, response_completed_at_ms, input_tokens, output_tokens
+          FROM model_request_metrics
+          WHERE provider = ? AND recorded_at_ms >= ? AND recorded_at_ms <= ?
+        `, provider, snapshots[0]!.observedAtMs, nowMs);
+        for (const raw of metrics) {
+          const row = raw as { request_started_at_ms: number; response_completed_at_ms: number;
+            input_tokens: number | null; output_tokens: number | null };
+          estimator.observe({ requestStartedAtMs: row.request_started_at_ms,
+            responseCompletedAtMs: row.response_completed_at_ms,
+            inputTokens: row.input_tokens, outputTokens: row.output_tokens });
+        }
+      }
+      const result = estimator.result();
+      this.database.exec("RELEASE account_quota_estimate");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK TO account_quota_estimate; RELEASE account_quota_estimate");
+      throw error;
+    }
   }
 
   latestAccountSnapshot(provider: string, accountId?: string) {

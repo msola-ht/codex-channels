@@ -16,6 +16,7 @@
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
   `firstContentMs` 保留代理单请求首内容延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
   `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
+- `account-quota-estimate.ts`：从官方账户历史快照与本地请求流计算各额度窗口的 Token/百分点；按请求开始时间归属，只累计已闭合且 Token 完整的区间；跨快照请求排除涉及区间，重置、比例倒退或无效快照断开采样。
 - `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
@@ -78,7 +79,7 @@
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
   失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。账户快照历史使用
   相同的保留期限清理，但每个账户源保留最新一条确认状态，避免把历史到期误作订阅恢复；OpenCode Go 账户窗口的本机 Token 汇总按精确
-  Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。
+  Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。`accountQuotaEstimates` 按精确 Provider 读取最近最多 2048 条账户快照，并共用一次请求流为所有窗口生成只读估算；通过同一 SQLite 读快照检查历史清理边界，排除被裁剪的区间，接纳迟到写入。不增加持久化字段。
   普通 `/responses` 上由受控元数据标记的 remote compaction v2
   以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或

@@ -230,8 +230,14 @@ export function formatConversationUsage(
               || window.localTokens === null
               ? ""
               : ` · 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}`;
+            const estimate = window.tokenEstimate;
+            const conversion = estimate?.status === "ready"
+              ? `\n  - 每 1%：约 ${formatTokenCount(estimate.tokensPerPercent)} Token；满额约 ${formatTokenCount(estimate.tokensPerPercent * 100)} Token\n  - 观测：${formatPercent(estimate.observedDeltaPercent)} · ${estimate.intervalCount} 个区间 · ${estimate.requestCount} 次请求`
+              : estimate ? `\n  - Token 换算：${estimate.status === "sampling" ? "正在采样，使用后刷新额度以形成有效区间" : "暂不可用，官方额度不受影响"}` : "";
+            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}${conversion}`;
           })),
+      ...(result.result.windows.some(window => window.tokenEstimate)
+        ? ["按本机输入与输出 Token 观测估算，非官方固定兑换率；其他设备用量及模型、缓存差异会影响结果。"] : []),
     ].join("\n"));
   }
   const daily = [...result.result.usage.daily]

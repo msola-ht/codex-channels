@@ -166,6 +166,7 @@ OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usag
 Thread 时并行读取账户摘要和精确 Thread 官方估算，估算失败隔离为可辨识状态；待生效 Provider
 选择仍决定账户来源，只有账户选择和实际绑定都属于 OpenAI 时才附加 Thread 估算；无 Thread 只读取摘要。
 新增第三方时实现 `ProviderAccountAdapter` 并在 Bootstrap 登记，不能伪造 OpenAI Thread 估算；未提供的账户能力保持不支持。
+OCG 与 Cline Pass 账户查询先持久化原始官方快照，再通过注入的只读查询附加各窗口 Token/百分点估算；估算失败只标记不可用，不影响官方额度，派生结果不写回快照。
 Application 和 Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
 `providers`、`models` 和 `errors` 统一使用 `24h`、`7d`、`30d`、`90d` 或全部保留历史；`errors` 只展示

@@ -1,3 +1,4 @@
+import type { QuotaTokenEstimate } from "../runtime/quota-token-estimate.mjs"
 import type { ResponsesModelDefinition } from "../runtime/model-provider-responses-catalog.mjs"
 export type RangeName =
   | "today" | "yesterday" | "24h" | "7d" | "30d" | "90d" | "all"
@@ -795,6 +796,7 @@ export interface OpencodeGoQuotaWindow {
   resetsAt: number | null
   status: string | null
   localTokens?: number | null
+  tokenEstimate?: QuotaTokenEstimate
 }
 
 export interface QuotaAccountUsage {

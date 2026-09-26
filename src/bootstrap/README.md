@@ -16,6 +16,7 @@
 - `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
+  在官方账户快照写入后，为 OCG／CLP 注入指标库的只读 Token 换算，并与 WebUI 复用估算字段合并逻辑；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
   仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，

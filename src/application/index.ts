@@ -1,4 +1,5 @@
 export {
+  type QuotaTokenEstimate,
   type AccountMetric,
   type AccountPlanType,
   type AccountQueryPort,

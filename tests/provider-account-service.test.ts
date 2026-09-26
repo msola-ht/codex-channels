@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { withQuotaTokenEstimates } from "../runtime/quota-token-estimate.mjs";
 
 import {
   ProviderAccountService,
@@ -34,6 +35,25 @@ describe("ProviderAccountService", () => {
     await restarted.refreshAccountSnapshot("ocg-main");
     expect(written.at(-1)).toMatchObject({ available: true, usage: normal });
   });
+  it("persists official quota before enrichment and isolates an estimate failure", async () => {
+    const provider = "clp-main";
+    const quota = { kind: "quota-windows" as const, provider, available: true,
+      windows: [{ windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: 9999999999, status: null }] };
+    const written: OfficialAccountSnapshot[] = [];
+    const estimate = { status: "ready" as const, tokensPerPercent: 1000, observedDeltaPercent: 2, intervalCount: 1, requestCount: 2 };
+    const read = vi.fn(() => {
+      expect(written.at(-1)?.usage).toEqual(quota);
+      return [{ windowId: "weekly", resetsAt: 9999999999, tokenEstimate: estimate }];
+    });
+    const service = new ProviderAccountService([{ provider, accountUsage: async () => quota }], {
+      writeOfficialAccountSnapshot: snapshot => { written.push(snapshot); },
+    }, windows => withQuotaTokenEstimates(windows, read));
+    await expect(service.accountUsage(provider)).resolves.toMatchObject({ windows: [{ tokenEstimate: estimate }] });
+    read.mockImplementationOnce(() => { throw new Error("fixture metrics failure"); });
+    await expect(service.accountUsage(provider)).resolves.toMatchObject({ available: true, windows: [{ tokenEstimate: { status: "unavailable" } }] });
+    expect(written.every(snapshot => JSON.stringify(snapshot.usage) === JSON.stringify(quota))).toBe(true);
+  });
+
   it("routes OpenAI account queries and keeps unknown providers unsupported", async () => {
     const usage = { summary: {
       lifetimeTokens: 10,

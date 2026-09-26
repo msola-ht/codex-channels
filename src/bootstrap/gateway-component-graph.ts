@@ -11,6 +11,7 @@ import {
   ensureAppServerProvider,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
+import { withQuotaTokenEstimates } from "../../runtime/quota-token-estimate.mjs";
 import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
 import {
   effectiveCodexBinary,
@@ -547,7 +548,9 @@ export abstract class GatewayComponentGraph {
           limits: snapshot.limits,
         });
       },
-    });
+    }, (windows, provider) => /^(?:ocg|clp)-[a-z0-9_-]+$/u.test(provider)
+      ? withQuotaTokenEstimates(windows, () => metricsStore.accountQuotaEstimates(provider))
+      : [...windows]);
     const service = new ConversationService(
       this.codex,
       this.router,

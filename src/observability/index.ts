@@ -4,6 +4,8 @@ export {
   type SafeErrorMetadata,
 } from "./logger.js";
 export type {
+  AccountQuotaWindowEstimate,
+  QuotaTokenEstimate,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,

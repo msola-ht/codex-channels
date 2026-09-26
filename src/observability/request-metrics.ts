@@ -1,3 +1,6 @@
+import type { AccountQuotaWindowEstimate } from "../../runtime/quota-token-estimate.mjs";
+export type { AccountQuotaWindowEstimate, QuotaTokenEstimate } from "../../runtime/quota-token-estimate.mjs";
+
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
@@ -465,6 +468,7 @@ export interface StoredModelRequestAccountSnapshot {
 }
 
 export interface ModelRequestMetricsQuotaAccountStore {
+  accountQuotaEstimates(provider: string, nowMs?: number): AccountQuotaWindowEstimate[];
   weeklyQuotaEstimate(
     query: WeeklyQuotaEstimateQuery,
   ): StoredWeeklyQuotaEstimate | null;

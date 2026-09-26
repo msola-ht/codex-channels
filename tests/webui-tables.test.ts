@@ -29,7 +29,7 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
-        const { GlobalCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { GlobalCards, ClinePassUsageCard } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
@@ -69,6 +69,8 @@ describe("WebUI metrics table presentation", () => {
         const accountManagement = { settings: accountSettings, loading: false, busy: false, pendingPreview: null,
           actionError: null, error: null, mutate: noop, confirm: noop, cancel: noop, refetch: noop };
         const result = {
+          quotaReady: render(ClinePassUsageCard, { account: { provider: "clp-main", displayName: "CLP main", account: "main", default: true, subscriptionRequired: false, available: true, observedAtMs: Date.now(), windows: [{ windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: Date.now() + 3600000, status: null, tokenEstimate: { status: "ready", tokensPerPercent: 1000, observedDeltaPercent: 2, intervalCount: 1, requestCount: 3 } }] } }),
+          quotaSampling: render(ClinePassUsageCard, { account: { provider: "clp-main", displayName: "CLP main", account: "main", default: true, subscriptionRequired: false, available: true, observedAtMs: Date.now(), windows: [{ windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: Date.now() + 3600000, status: null, tokenEstimate: { status: "sampling" } }, { windowId: "monthly", label: "月度", usedPercent: 0, resetsAt: null, status: null, tokenEstimate: { status: "unavailable" } }] } }),
           accountSettings: render(AccountSettingsManagement, { management: accountManagement }),
           accountSettingsBusy: render(AccountSettingsManagement, { management: { ...accountManagement, busy: true } }),
           accountSettingsLegacy: render(AccountSettingsManagement, { management: { ...accountManagement, settings: { ...accountSettings, deepseek: { ...accountSettings.deepseek, legacyConfigurationPresent: true } } } }),
@@ -229,6 +231,15 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.traceDiagnosticsOnly).not.toContain('title="routing.finalProvider"');
     expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
     expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("distinguishes quota estimates from sampling and unavailable metrics", () => {
+    expect(markup.quotaReady).toContain("每 1%");
+    expect(markup.quotaReady).toContain("满额约");
+    expect(markup.quotaReady).toContain("非官方固定兑换率");
+    expect(markup.quotaSampling).toContain("Token 换算正在采样");
+    expect(markup.quotaSampling).toContain("Token 换算暂不可用");
+    expect(markup.quotaSampling).not.toContain("满额约");
   });
 
   it("shares managed account controls while isolating the DS legacy action", () => {
