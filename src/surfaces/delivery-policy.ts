@@ -79,3 +79,29 @@ export function surfaceDeliveryCoalesceKey(
     ? `reasoning:${event.threadId}:${event.turnId}:${segment}`
     : undefined;
 }
+
+const backlogSheddableEventTypes: ReadonlySet<OutputEvent["type"]> =
+  new Set<OutputEvent["type"]>([
+    "turn.reasoning",
+    "user.message",
+    "thread.status",
+    "thread.name",
+    "thread.availability",
+    "connection.lost",
+    "connection.restored",
+    "account.updated",
+    "account.rateLimits.updated",
+    "mcp.status.updated",
+  ]);
+
+/**
+ * 渠道长时间不可用时，恢复缓冲超过硬上限后可以丢弃的事件。
+ *
+ * 只覆盖过程、状态与生命周期通知：它们描述的是"发生过什么"，重新连接后不影响用户
+ * 对结果的判断。最终回答、Turn 完成、操作终态、子代理完成、MCP 授权结果、警告和全局
+ * 空闲通知属于结果或错误，始终保留。未列出的新事件类型默认按保留处理，避免协议新增
+ * 能力时被静默丢弃。
+ */
+export function isSheddableBacklogEvent(event: OutputEvent): boolean {
+  return backlogSheddableEventTypes.has(event.type);
+}

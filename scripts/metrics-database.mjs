@@ -225,9 +225,7 @@ export function cleanupMetricsDatabase(environment = process.env, options = {}) 
     `).run(Math.max(0, beforeMs)).changes);
     deletedByLimit = Number(database.prepare(`
       DELETE FROM model_request_metrics
-      WHERE id <= COALESCE((
-        SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
-      ), 0)
+      WHERE id <= (SELECT MAX(id) FROM model_request_metrics) - ?
     `).run(maxRows).changes);
     database.exec("COMMIT");
     if (options.vacuum === true) database.exec("VACUUM");

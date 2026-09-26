@@ -102,6 +102,66 @@ describe("WeixinOutbox", () => {
     );
   });
 
+  it("retries a platform rejection that proves the message was not delivered", async () => {
+    let attempts = 0;
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
+      },
+    );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText.mock.calls[1]?.[0].text).toBe("final reply");
+  });
+
+  it("does not retry an ambiguous WeChat failure", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError("timeout", "微信发送超时");
+      },
+    );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an invalid reply context", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "微信发送失败（返回码 -2）",
+          undefined,
+          -2,
+        );
+      },
+    );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
+
   it("reserves the reply window for lifecycle output", async () => {
     const { outbox, sendImage, sendText } = outboxFixture({ value: true });
 

@@ -155,6 +155,22 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe("critical");
     expect(await queue.shift()).toBe("replacement");
   });
+
+  it("reports coalesced replacements with the current queue depth", async () => {
+    const coalesced: Array<{ coalesceKey: string; queued: number }> = [];
+    const queue = new BoundedAsyncQueue<string>(
+      3,
+      undefined,
+      (state) => coalesced.push(state),
+    );
+    queue.push("first", true, "k");
+    expect(coalesced).toEqual([]);
+    queue.push("other", true, "o");
+    queue.push("latest", true, "k");
+    expect(coalesced).toEqual([{ coalesceKey: "k", queued: 2 }]);
+    expect(await queue.shift()).toBe("latest");
+    expect(await queue.shift()).toBe("other");
+  });
 });
 
 function nonCriticalCount(queue: BoundedAsyncQueue<unknown>): number {

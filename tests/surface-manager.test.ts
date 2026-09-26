@@ -643,6 +643,57 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("sheds process output only after the recovery buffer passes its hard limit", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      if (event.type === "turn.reasoning") {
+        received.push(`reasoning:${event.turnId}`);
+      }
+      if (event.type === "turn.completed") {
+        received.push(`completed:${event.turnId}`);
+      }
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    // 告警阈值 1，硬上限为十倍即 10 条。
+    const manager = createManager([feishu], output, {
+      maximumPendingCriticalOutput: 1,
+    });
+    const target = {
+      surface: "feishu",
+      accountId: "tenant-a",
+      conversationId: "chat-1",
+    };
+
+    for (let index = 0; index < 12; index += 1) {
+      output.publish({
+        type: "turn.reasoning",
+        target,
+        threadId: "thread-1",
+        turnId: `turn-${index}`,
+        summary: "",
+        elapsedMs: 1_000,
+      });
+    }
+    output.publish({
+      type: "turn.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-result",
+      status: "completed",
+    });
+    await flushEventBus();
+    await manager.start();
+    await settle();
+
+    const reasoning = received.filter((entry) => entry.startsWith("reasoning:"));
+    expect(reasoning.length).toBeLessThanOrEqual(10);
+    expect(received).toContain("reasoning:turn-11");
+    expect(received).toContain("completed:turn-result");
+    await manager.stop();
+    await output.close();
+  });
+
   it("adds the current Git branch to completed Turns before routing", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];

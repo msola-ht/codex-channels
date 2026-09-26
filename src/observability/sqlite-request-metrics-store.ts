@@ -1385,11 +1385,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.cleanupAccountSnapshots(nowMs);
+      // 行数裁剪按 id 上界一次定位，避免 ORDER BY ... OFFSET 在每次清理时
+      // 对主键做全表倒扫；id 出现空洞时只会更早清掉最旧记录，不会删掉更新的记录。
       this.database.prepare(`
         DELETE FROM model_request_metrics
-        WHERE id <= COALESCE((
-          SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
-        ), 0)
+        WHERE id <= (SELECT MAX(id) FROM model_request_metrics) - ?
       `).run(this.maximumRows);
       this.database.exec("COMMIT");
       this.recordsSinceCleanup = 0;

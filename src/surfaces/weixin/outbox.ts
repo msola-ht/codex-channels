@@ -8,6 +8,7 @@ import type {
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { resolveSurfaceDelivery } from "../delivery-policy.js";
+import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type { SurfaceOutputPort } from "../types.js";
 import {
@@ -79,23 +80,40 @@ export interface WeixinOutboxOptions {
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
   readImage?: typeof readWeixinOutboundImage;
-  typing?: Pick<WeixinTypingController, "close" | "start" | "stop">;
+  typing?: Pick<WeixinTypingController, "close" | "stop">;
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly accountId: string;
+  private readonly client: Pick<WeixinProtocolClient, "sendText">;
   private closed = false;
 
   constructor(
     accountId: string,
-    private readonly client: Pick<WeixinProtocolClient, "sendText">,
+    client: Pick<WeixinProtocolClient, "sendText">,
     private readonly contexts: WeixinReplyContextStore,
     private readonly access: SurfaceAccessPolicy,
     logger: Logger,
     private readonly options: WeixinOutboxOptions = {},
   ) {
     this.accountId = validateWeixinAccountId(accountId);
+    this.client = {
+      sendText: (input, signal) => withDeliveryRetry(
+        {
+          component: "Weixin",
+          maximumAttempts: 3,
+          maximumDelayMs: 5_000,
+          delayMs: weixinSendRetryDelay,
+          logger,
+          metadata: weixinOutputErrorMetadata,
+        },
+        () => (signal === undefined
+          ? client.sendText(input)
+          : client.sendText(input, signal)),
+        signal,
+      ),
+    };
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Weixin",
       ...(options.capacity === undefined
@@ -574,4 +592,25 @@ function isRejectedReplyContext(error: unknown): boolean {
   return error instanceof WeixinProtocolError
     && error.code === "api-error"
     && error.returnCode === -2;
+}
+
+/**
+ * 只有能证明消息未送达的失败才重试：平台业务返回码拒绝，以及 429 或 5xx 服务端拒绝。
+ * 超时、网络中断和响应不可解析都可能已经送达，重试会产生重复气泡；回复上下文失效
+ * （返回码 -2）是永久错误，由调用方作废上下文后交给用户重新发送。
+ */
+function weixinSendRetryDelay(error: unknown, attempt: number): number | undefined {
+  if (!(error instanceof WeixinProtocolError)) {
+    return undefined;
+  }
+  if (error.code === "api-error" && error.returnCode !== -2) {
+    return exponentialRetryDelay(attempt);
+  }
+  if (
+    error.code === "http-error"
+    && (error.status === 429 || (error.status !== undefined && error.status >= 500))
+  ) {
+    return exponentialRetryDelay(attempt);
+  }
+  return undefined;
 }

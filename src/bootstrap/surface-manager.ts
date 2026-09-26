@@ -10,6 +10,7 @@ import {
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
+  isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   type SurfaceAdapter,
   type SurfaceConfigurationChange,
@@ -29,6 +30,8 @@ interface SurfaceRuntime {
   retryAttempt: number;
   retryTimer?: NodeJS.Timeout;
   pendingCriticalOutput: PendingOutputEntry[];
+  shedBacklogCount: number;
+  nextShedBacklogReport: number;
 }
 
 interface PendingOutputEntry {
@@ -67,6 +70,7 @@ export class SurfaceManager {
   private readonly runtimeBySurface = new Map<SurfaceAdapter, SurfaceRuntime>();
   private readonly retryDelaysMs: readonly number[];
   private readonly maximumPendingCriticalOutput: number;
+  private readonly shedPendingOutputAt: number;
   private removeOutputSubscription: (() => void) | undefined;
   private acceptingOutput = true;
   private stopping = false;
@@ -85,6 +89,7 @@ export class SurfaceManager {
       : defaultRetryDelaysMs;
     this.maximumPendingCriticalOutput = options.maximumPendingCriticalOutput
       ?? 100;
+    this.shedPendingOutputAt = this.maximumPendingCriticalOutput * 10;
     for (const surface of surfaces) {
       const key = surfaceAccountKey(surface.surface, surface.accountId);
       if (this.surfacesByAccount.has(key)) {
@@ -95,6 +100,8 @@ export class SurfaceManager {
         state: "idle",
         retryAttempt: 0,
         pendingCriticalOutput: [],
+        shedBacklogCount: 0,
+        nextShedBacklogReport: 1,
       });
     }
     this.removeOutputSubscription = output.subscribe(
@@ -203,6 +210,8 @@ export class SurfaceManager {
         delete runtime.retryTimer;
       }
       runtime.pendingCriticalOutput.length = 0;
+      runtime.shedBacklogCount = 0;
+      runtime.nextShedBacklogReport = 1;
     }
     for (const surface of this.surfaces) {
       this.setInteractionAvailable(surface, false, "Gateway 已停止");
@@ -396,6 +405,9 @@ export class SurfaceManager {
         return;
       }
     }
+    if (this.shedBacklogOutput(surface, runtime, event)) {
+      return;
+    }
     if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
       this.logger.error(
         {
@@ -409,6 +421,60 @@ export class SurfaceManager {
     }
     runtime.pendingCriticalOutput.push(
       coalesceKey === undefined ? { event } : { event, coalesceKey },
+    );
+  }
+
+  /**
+   * 恢复缓冲的硬上限。只丢弃过程、状态与生命周期输出，结果与错误始终保留，
+   * 因此长时间断线只会让过程通知缺席，不会丢掉最终回答或完成统计。
+   * 返回 true 表示当前事件本身被丢弃。
+   */
+  private shedBacklogOutput(
+    surface: SurfaceAdapter,
+    runtime: SurfaceRuntime,
+    incoming: OutputEvent,
+  ): boolean {
+    if (runtime.pendingCriticalOutput.length < this.shedPendingOutputAt) {
+      return false;
+    }
+    const index = runtime.pendingCriticalOutput.findIndex(
+      (entry) => isSheddableBacklogEvent(entry.event),
+    );
+    if (index >= 0) {
+      const [shed] = runtime.pendingCriticalOutput.splice(index, 1);
+      this.reportShedBacklogOutput(surface, runtime, shed?.event, incoming);
+      return false;
+    }
+    if (!isSheddableBacklogEvent(incoming)) {
+      return false;
+    }
+    this.reportShedBacklogOutput(surface, runtime, incoming, incoming);
+    return true;
+  }
+
+  private reportShedBacklogOutput(
+    surface: SurfaceAdapter,
+    runtime: SurfaceRuntime,
+    shed: OutputEvent | undefined,
+    incoming: OutputEvent,
+  ): void {
+    runtime.shedBacklogCount += 1;
+    // 与队列溢出告警一致：只在首次和数量翻倍时记录，避免长时间断线刷屏。
+    if (runtime.shedBacklogCount < runtime.nextShedBacklogReport) {
+      return;
+    }
+    runtime.nextShedBacklogReport = runtime.shedBacklogCount * 2;
+    this.logger.warn(
+      {
+        surface: surface.surface,
+        accountId: surface.accountId,
+        shedEventType: shed?.type,
+        incomingEventType: incoming.type,
+        shedCount: runtime.shedBacklogCount,
+        pending: runtime.pendingCriticalOutput.length,
+        shedPendingOutputAt: this.shedPendingOutputAt,
+      },
+      "Surface 恢复队列超过硬上限，已丢弃过程状态输出",
     );
   }
 
@@ -508,6 +574,8 @@ export class SurfaceManager {
     runtime.retryAttempt = 0;
     this.setInteractionAvailable(surface, true);
     this.active.add(surface);
+    runtime.shedBacklogCount = 0;
+    runtime.nextShedBacklogReport = 1;
     const pending = runtime.pendingCriticalOutput.splice(0);
     for (const entry of pending) {
       void this.deliverOutput(surface, entry.event);

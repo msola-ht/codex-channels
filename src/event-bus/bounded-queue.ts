@@ -16,6 +16,11 @@ interface QueueOverflow {
   oldestWaitMs: number;
 }
 
+interface QueueCoalesce {
+  coalesceKey: string;
+  queued: number;
+}
+
 export class BoundedAsyncQueue<T> {
   private entries: QueueEntry<T>[] = [];
   private nonCriticalCount = 0;
@@ -27,6 +32,7 @@ export class BoundedAsyncQueue<T> {
   constructor(
     readonly capacity: number,
     private readonly onOverflow?: (state: QueueOverflow) => void,
+    private readonly onCoalesce?: (state: QueueCoalesce) => void,
   ) {
     this.nextOverflowWarning = capacity + 1;
     if (!Number.isInteger(capacity) || capacity <= 0) {
@@ -54,6 +60,7 @@ export class BoundedAsyncQueue<T> {
           this.nonCriticalCount += critical ? -1 : 1;
         }
         pending.value = value;
+        this.onCoalesce?.({ coalesceKey, queued: this.entries.length });
         return true;
       }
     }

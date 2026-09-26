@@ -69,6 +69,8 @@ export class ConversationDeliveryQueue {
           component: this.options.component,
           conversationId,
           critical,
+          pending: worker.queue.size,
+          capacity: this.capacity,
         },
         "Surface Conversation 输出队列已满，输出未入队",
       );
@@ -136,6 +138,8 @@ export class ConversationDeliveryQueue {
             component: this.options.component,
             conversationId,
             critical: true,
+            pending: worker.queue.size,
+            capacity: this.capacity,
           },
           "Surface Conversation 输出队列已满，优先操作未入队",
         );
@@ -152,6 +156,12 @@ export class ConversationDeliveryQueue {
       const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity, (state) => {
         this.logger.warn({ component: this.options.component, conversationId, ...state },
           "关键输出积压超过队列容量，继续保留待投递输出");
+      }, (state) => {
+        // 平台变慢时同键中间状态会被就地替换；记录深度便于判断是否需要调整容量。
+        this.logger.debug(
+          { component: this.options.component, conversationId, ...state },
+          "Surface Conversation 输出队列合并了同键输出",
+        );
       });
       const controller = new AbortController();
       worker = {

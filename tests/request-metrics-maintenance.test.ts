@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +41,39 @@ describe("request metrics maintenance and query boundaries", () => {
     first.close();
     const reopened = new SqliteModelRequestMetricsStore(path, undefined, { maximumRows: 1 });
     expect(reopened.count()).toBe(1);
+    reopened.close();
+  });
+
+  it("trims the oldest rows by id upper bound and keeps the newest", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const first = new SqliteModelRequestMetricsStore(path);
+    for (let index = 0; index < 5; index += 1) {
+      first.record({ ...sample(), threadId: `thread-${index}`, turnId: `turn-${index}` });
+    }
+    first.close();
+
+    const reopened = new SqliteModelRequestMetricsStore(path, undefined, { maximumRows: 2 });
+    expect(reopened.recent(10).map((record) => record.id)).toEqual([5, 4]);
+    reopened.close();
+  });
+
+  it("may retain fewer than the maximum when an id hole is introduced", () => {
+    const directory = temporaryDirectory();
+    const path = join(directory, "request-metrics.sqlite3");
+    const first = new SqliteModelRequestMetricsStore(path);
+    for (let index = 0; index < 5; index += 1) {
+      first.record({ ...sample(), threadId: `thread-${index}`, turnId: `turn-${index}` });
+    }
+    first.close();
+
+    const raw = new DatabaseSync(path);
+    raw.exec("DELETE FROM model_request_metrics WHERE id = 4");
+    raw.close();
+
+    const reopened = new SqliteModelRequestMetricsStore(path, undefined, { maximumRows: 2 });
+    // id 空洞只会更早清掉最旧记录，绝不会删除更新的记录。
+    expect(reopened.recent(10).map((record) => record.id)).toEqual([5]);
     reopened.close();
   });
 

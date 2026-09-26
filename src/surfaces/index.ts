@@ -24,11 +24,9 @@ export {
   type ConversationDeliveryOptions,
 } from "./conversation-delivery-queue.js";
 export {
-  isWeixinWindowEvent,
+  isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
-  type SurfaceDeliveryDecision,
-  type SurfaceDeliveryDisposition,
 } from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,

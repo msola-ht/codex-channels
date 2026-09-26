@@ -5,10 +5,11 @@ import {
   type OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
-  isWeixinWindowEvent,
+  isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
 } from "../src/surfaces/index.js";
+import { isWeixinWindowEvent } from "../src/surfaces/delivery-policy.js";
 
 const target = {
   surface: "telegram",
@@ -290,5 +291,40 @@ describe("resolveSurfaceDelivery", () => {
         eventsByType["operation.updated"],
       ),
     ).toEqual({ disposition: "deliver", critical: false });
+  });
+});
+
+describe("isSheddableBacklogEvent", () => {
+  it("never sheds results, errors or completion notices", () => {
+    const retained = [
+      "text.completed",
+      "operation.updated",
+      "subagent.completed",
+      "turn.completed",
+      "mcp.oauth.completed",
+      "warning",
+      "conversation.idle.released",
+    ] as const;
+    for (const type of retained) {
+      expect(isSheddableBacklogEvent(eventsByType[type])).toBe(false);
+    }
+  });
+
+  it("sheds process, status and lifecycle notices", () => {
+    const sheddable = [
+      "turn.reasoning",
+      "user.message",
+      "thread.status",
+      "thread.name",
+      "thread.availability",
+      "connection.lost",
+      "connection.restored",
+      "account.updated",
+      "account.rateLimits.updated",
+      "mcp.status.updated",
+    ] as const;
+    for (const type of sheddable) {
+      expect(isSheddableBacklogEvent(eventsByType[type])).toBe(true);
+    }
   });
 });
