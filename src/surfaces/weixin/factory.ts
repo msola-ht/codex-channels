@@ -59,7 +59,6 @@ export function createWeixinSurface(
     lifecycleClient: client,
     fileSendClient: client,
     imageSendClient: client,
-    typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(options.cursorDirectory),
     service: options.service,
     commands: options.commands,

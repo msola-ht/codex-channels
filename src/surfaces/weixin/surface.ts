@@ -37,7 +37,6 @@ import type {
   WeixinImageSendProtocolClient,
   WeixinLifecycleProtocolClient,
   WeixinProtocolClient,
-  WeixinTypingProtocolClient,
 } from "./protocol-client.js";
 import { WeixinProtocolError } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
@@ -48,7 +47,6 @@ import {
 } from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
-import { WeixinTypingController } from "./typing-controller.js";
 
 export interface WeixinStartupNotification {
   targets(): readonly ConversationTarget[];
@@ -60,7 +58,6 @@ export interface WeixinSurfaceOptions {
   client: WeixinProtocolClient;
   fileSendClient?: WeixinFileSendProtocolClient;
   imageSendClient?: WeixinImageSendProtocolClient;
-  typingClient?: WeixinTypingProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
@@ -122,14 +119,6 @@ export class WeixinSurface implements SurfaceAdapter {
     this.audios = options.audios;
     this.lifecycleClient = options.lifecycleClient;
     this.accountId = options.accountId;
-    const typing = options.typingClient === undefined
-      ? undefined
-      : new WeixinTypingController(
-          options.typingClient,
-          replyContexts,
-          options.access,
-          options.logger,
-        );
     this.output = new WeixinOutbox(
       options.accountId,
       options.client,
@@ -144,7 +133,6 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.fileSendClient === undefined
           ? {}
           : { fileClient: options.fileSendClient }),
-        ...(typing === undefined ? {} : { typing }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),

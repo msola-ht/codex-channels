@@ -248,6 +248,18 @@ export function validateNetworkProxyValue(field, value) {
   return field === "no_proxy" ? validateNoProxy(normalized) : validateCodexProxyValue(field, normalized);
 }
 
+/**
+ * 只有 Telegram（已配置 bot_token）与已启用的飞书消费 `display.*` 设置，与运行时重载判定
+ * （`classifyConfigReload`）保持一致：只启用微信或未配置渠道时改这些设置没有渠道受影响，
+ * 无需重建 Gateway 连接，只需重新读取配置。
+ */
+function displaySettingActivation(document) {
+  return stringValue(table(document.telegram).bot_token) !== ""
+    || table(document.feishu).enabled === true
+    ? "restart-gateway"
+    : "reload";
+}
+
 function applySetting(document, input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw invalid("input", "invalid-input", "设置输入必须是对象");
@@ -260,17 +272,17 @@ function applySetting(document, input) {
     case "display.operation-updates": {
       const value = enumValue(input.value, operationUpdateValues, "value", "操作详情显示");
       document.display = { ...table(document.display), operation_updates: value };
-      return changed(value, "restart-gateway");
+      return changed(value, displaySettingActivation(document));
     }
     case "display.plan-updates": {
       const value = booleanValue(input.value, "value", "计划更新显示");
       document.display = { ...table(document.display), plan_updates: value };
-      return changed(value, "restart-gateway");
+      return changed(value, displaySettingActivation(document));
     }
     case "display.reasoning": {
       const value = booleanValue(input.value, "value", "思考状态显示");
       document.display = { ...table(document.display), reasoning: value };
-      return changed(value, "restart-gateway");
+      return changed(value, displaySettingActivation(document));
     }
     case "telegram.message-format": {
       const value = enumValue(input.value, messageFormatValues, "value", "Telegram 消息格式");

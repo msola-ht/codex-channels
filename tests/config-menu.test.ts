@@ -612,7 +612,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ operationUpdates: "full", configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
+    expect(result).toEqual({ operationUpdates: "full", configPath: fixture.configPath, activation: "reload", activationResult: configActivationResult("reload") });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       operation_updates: "full",
     });
@@ -639,7 +639,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ planUpdatesEnabled: false, configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
+    expect(result).toEqual({ planUpdatesEnabled: false, configPath: fixture.configPath, activation: "reload", activationResult: configActivationResult("reload") });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       plan_updates: false,
     });
@@ -665,7 +665,7 @@ describe("Codex Connect config menu", () => {
       prompts,
     });
 
-    expect(result).toEqual({ reasoningEnabled: true, configPath: fixture.configPath, activation: "restart-gateway", activationResult: configActivationResult("restart-gateway") });
+    expect(result).toEqual({ reasoningEnabled: true, configPath: fixture.configPath, activation: "reload", activationResult: configActivationResult("reload") });
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({
       reasoning: true,
     });

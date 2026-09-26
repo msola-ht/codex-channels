@@ -32,6 +32,7 @@ interface SurfaceRuntime {
   pendingCriticalOutput: PendingOutputEntry[];
   shedBacklogCount: number;
   nextShedBacklogReport: number;
+  nextPendingThresholdReport: number;
 }
 
 interface PendingOutputEntry {
@@ -102,6 +103,7 @@ export class SurfaceManager {
         pendingCriticalOutput: [],
         shedBacklogCount: 0,
         nextShedBacklogReport: 1,
+        nextPendingThresholdReport: this.maximumPendingCriticalOutput,
       });
     }
     this.removeOutputSubscription = output.subscribe(
@@ -212,6 +214,7 @@ export class SurfaceManager {
       runtime.pendingCriticalOutput.length = 0;
       runtime.shedBacklogCount = 0;
       runtime.nextShedBacklogReport = 1;
+      runtime.nextPendingThresholdReport = this.maximumPendingCriticalOutput;
     }
     for (const surface of this.surfaces) {
       this.setInteractionAvailable(surface, false, "Gateway 已停止");
@@ -321,54 +324,11 @@ export class SurfaceManager {
       );
       return;
     }
-    let routedEvent = event;
-    if (event.type === "turn.completed") {
-      const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
-      const timingResult = this.resolveCompletionMetrics(
-        event,
-        "turn",
-        () => this.options.completionTiming?.(
-          event.threadId,
-          event.turnId,
-          event.timing,
-        ),
-        enrichmentDeadline,
-        event.timing,
-      );
-      const timing = timingResult instanceof Promise
-        ? await timingResult
-        : timingResult;
-      const taskAggregateResult = this.resolveCompletionMetrics(
-        event,
-        "task",
-        () => this.options.taskAggregate?.(event.threadId, event.turnId),
-        enrichmentDeadline,
-      );
-      const taskAggregate = taskAggregateResult instanceof Promise
-        ? await taskAggregateResult
-        : taskAggregateResult;
-      const sessionAggregateResult = this.resolveCompletionMetrics(
-        event,
-        "session",
-        () => this.options.sessionAggregate?.(event.threadId),
-        enrichmentDeadline,
-      );
-      const sessionAggregate = sessionAggregateResult instanceof Promise
-        ? await sessionAggregateResult
-        : sessionAggregateResult;
-      routedEvent = {
-        ...event,
-        gitBranch: this.currentGitBranch?.(event.target),
-        ...(timing === undefined ? {} : { timing }),
-        ...(taskAggregate === undefined ? {} : { taskAggregate }),
-        ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
-      };
-    }
     if (!this.active.has(surface)) {
       const runtime = this.requireRuntime(surface);
-      const decision = resolveSurfaceDelivery(surface.surface, routedEvent);
+      const decision = resolveSurfaceDelivery(surface.surface, event);
       if (decision.disposition !== "ignore" && decision.critical) {
-        this.bufferPendingOutput(surface, runtime, routedEvent, decision.coalesceKey);
+        this.bufferPendingOutput(surface, runtime, event, decision.coalesceKey);
       } else {
         this.logger.debug(
           {
@@ -381,7 +341,7 @@ export class SurfaceManager {
       }
       return;
     }
-    await this.deliverOutput(surface, routedEvent);
+    await this.deliverOutput(surface, event);
   }
 
   /**
@@ -408,13 +368,17 @@ export class SurfaceManager {
     if (this.shedBacklogOutput(surface, runtime, event)) {
       return;
     }
-    if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
+    const pending = runtime.pendingCriticalOutput.length;
+    if (pending >= runtime.nextPendingThresholdReport) {
+      // 与队列溢出告警一致：首次越过阈值和之后数量翻倍时各记录一次，避免断线期间刷屏。
+      runtime.nextPendingThresholdReport = pending * 2;
       this.logger.error(
         {
           surface: surface.surface,
           accountId: surface.accountId,
           eventType: event.type,
-          pending: runtime.pendingCriticalOutput.length,
+          pending,
+          threshold: this.maximumPendingCriticalOutput,
         },
         "Surface 恢复队列达到告警阈值，关键输出继续保留",
       );
@@ -576,6 +540,7 @@ export class SurfaceManager {
     this.active.add(surface);
     runtime.shedBacklogCount = 0;
     runtime.nextShedBacklogReport = 1;
+    runtime.nextPendingThresholdReport = this.maximumPendingCriticalOutput;
     const pending = runtime.pendingCriticalOutput.splice(0);
     for (const entry of pending) {
       void this.deliverOutput(surface, entry.event);
@@ -612,14 +577,15 @@ export class SurfaceManager {
     surface: SurfaceAdapter,
     event: OutputEvent,
   ): Promise<void> {
+    const routedEvent = await this.enrichCompletionOutput(event);
     try {
-      await surface.output.handle(event);
-      if (event.type !== "text.delta") {
+      await surface.output.handle(routedEvent);
+      if (routedEvent.type !== "text.delta") {
         this.logger.debug(
           {
             surface: surface.surface,
             accountId: surface.accountId,
-            eventType: event.type,
+            eventType: routedEvent.type,
           },
           "输出事件已提交到 Surface 队列",
         );
@@ -630,11 +596,63 @@ export class SurfaceManager {
           err: error,
           surface: surface.surface,
           accountId: surface.accountId,
-          eventType: event.type,
+          eventType: routedEvent.type,
         },
         "Surface 拒绝输出事件",
       );
     }
+  }
+
+  /**
+   * Turn 完成卡片需要指标写入落库后才读取聚合，整组读取共享一次总预算。
+   *
+   * 富化放在投递前而不是入队前：渠道不可用期间不读取指标库，被恢复缓冲裁掉的过程事件
+   * 也不会触发读取，真正投递时再按当时已经落库的结果生成卡片。
+   */
+  private async enrichCompletionOutput(event: OutputEvent): Promise<OutputEvent> {
+    if (event.type !== "turn.completed") {
+      return event;
+    }
+    const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
+    const timingResult = this.resolveCompletionMetrics(
+      event,
+      "turn",
+      () => this.options.completionTiming?.(
+        event.threadId,
+        event.turnId,
+        event.timing,
+      ),
+      enrichmentDeadline,
+      event.timing,
+    );
+    const timing = timingResult instanceof Promise
+      ? await timingResult
+      : timingResult;
+    const taskAggregateResult = this.resolveCompletionMetrics(
+      event,
+      "task",
+      () => this.options.taskAggregate?.(event.threadId, event.turnId),
+      enrichmentDeadline,
+    );
+    const taskAggregate = taskAggregateResult instanceof Promise
+      ? await taskAggregateResult
+      : taskAggregateResult;
+    const sessionAggregateResult = this.resolveCompletionMetrics(
+      event,
+      "session",
+      () => this.options.sessionAggregate?.(event.threadId),
+      enrichmentDeadline,
+    );
+    const sessionAggregate = sessionAggregateResult instanceof Promise
+      ? await sessionAggregateResult
+      : sessionAggregateResult;
+    return {
+      ...event,
+      gitBranch: this.currentGitBranch?.(event.target),
+      ...(timing === undefined ? {} : { timing }),
+      ...(taskAggregate === undefined ? {} : { taskAggregate }),
+      ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
+    };
   }
 
   private requireRuntime(surface: SurfaceAdapter): SurfaceRuntime {

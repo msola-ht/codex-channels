@@ -44,7 +44,6 @@ import {
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
-import type { WeixinTypingController } from "./typing-controller.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
@@ -80,7 +79,6 @@ export interface WeixinOutboxOptions {
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
   readImage?: typeof readWeixinOutboundImage;
-  typing?: Pick<WeixinTypingController, "close" | "stop">;
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
@@ -224,7 +222,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     this.closed = true;
-    await this.options.typing?.close();
     await this.delivery.close();
     this.contexts.clear();
   }
@@ -269,15 +266,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
     context: WeixinReplyContext | undefined,
   ): Promise<void> {
     signal = this.closed ? undefined : signal;
-    if (
-      event.type === "turn.completed"
-      || (
-        event.type === "text.completed"
-        && event.phase === "final_answer"
-      )
-    ) {
-      await this.options.typing?.stop(event.target);
-    }
     if (
       event.type === "text.completed"
       && event.phase === "final_answer"

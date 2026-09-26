@@ -536,6 +536,44 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("reports the recovery buffer threshold only when the retained count doubles", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const output = new EventBus<OutputEvent>(logger);
+    const thresholds: number[] = [];
+    const managerLogger = {
+      debug() {},
+      warn() {},
+      error: (fields: { pending?: number }, message: string) => {
+        if (message === "Surface 恢复队列达到告警阈值，关键输出继续保留") {
+          thresholds.push(fields.pending ?? -1);
+        }
+      },
+    } as unknown as Logger;
+    // 告警阈值 2：越过 2、4、8 时各记录一次，其余保留期不再重复告警。
+    const manager = new SurfaceManager([feishu], output, managerLogger, undefined, {
+      maximumPendingCriticalOutput: 2,
+    });
+
+    for (let index = 0; index < 12; index += 1) {
+      output.publish({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "tenant-a",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-1",
+        turnId: `turn-${index}`,
+        status: "completed",
+      });
+    }
+    await flushEventBus();
+
+    expect(thresholds).toEqual([2, 4, 8]);
+    await manager.stop();
+    await output.close();
+  });
+
   it("coalesces unavailable reasoning snapshots per Turn while keeping approvals and completion", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];
@@ -745,7 +783,7 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
-  it("adds the current Git branch to completed Turns before routing", async () => {
+  it("adds the current Git branch to completed Turns before delivery", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
     feishu.output.handle = (event) => {
@@ -778,6 +816,46 @@ describe("SurfaceManager", () => {
         type: "turn.completed",
         gitBranch: "feature/weixin-surface",
       }),
+    ]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("defers Turn completion enrichment until the buffered event is delivered", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const reads: string[] = [];
+    const received: OutputEvent[] = [];
+    feishu.output.handle = (event) => {
+      received.push(event);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      taskAggregate: (_threadId, turnId) => {
+        reads.push(turnId);
+        return undefined;
+      },
+    });
+
+    // 渠道尚未启动：完成事件进入恢复缓冲，此时不读取指标库。
+    output.publish({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await flushEventBus();
+    expect(reads).toEqual([]);
+
+    await manager.start();
+    await flushEventBus();
+    expect(reads).toEqual(["turn-1"]);
+    expect(received).toEqual([
+      expect.objectContaining({ type: "turn.completed" }),
     ]);
     await manager.stop();
     await output.close();

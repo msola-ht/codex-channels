@@ -18,8 +18,8 @@
 - `updates-cursor-store.ts`：在 `data/weixin-updates` 下按账号 SHA-256 文件名保存严格版本 1
   `get_updates_buf`；目录 `0700`、文件 `0600`，临时文件原子替换，损坏、未知版本和符号链接
   失败关闭。
-- `protocol-client.ts`：实现固定 `v2.4.9` 的 `getupdates`、`sendmessage`、`getuploadurl`、
-  `getconfig` 和 `sendtyping` HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
+- `protocol-client.ts`：实现固定 `v2.4.9` 的 `getupdates`、`sendmessage` 和 `getuploadurl`
+  HTTP 合同，并按官方 AES-128-ECB、CDN 二进制 `POST` 与
   双层 key 编码发送生成图片和受限内存文件；图片与文件复用同一媒体上传管线，只在验证和
   最终消息项结构处区分；成功长轮询响应给出的下一轮建议超时只在
   1 至 120 秒边界内采用，越界响应失败关闭；出站文本限制为已验证的 4000 个 UTF-16 码元。
@@ -111,8 +111,6 @@
   macOS 使用独立 Keychain Service，Linux 使用独立
   `credentials/weixin-reply-context` AES-256-GCM 私有目录，Windows 使用同目录语义的当前用户 DPAPI
   主密钥与 AES-256-GCM 记录。载荷、密文或身份不匹配失败关闭。
-- `typing-controller.ts`：实现只在内存按 Actor 缓存、续期和取消 `typing_ticket` 的协议边界；
-  当前 Outbox 为保留微信单次回复窗口预算，不主动启动输入状态。
 - `outbox.ts`：只主动发送匹配账号的 Turn 开始确认、最终正文、完成/停止/失败统计、会话空闲解除
   和全局空闲通知。推理、计划、操作、子代理、连接、账户、额度、MCP 状态、CLI/TUI 输入镜像以及
   App Server 生成图片事件不占用微信单次回复窗口；判定集中在目录级 `delivery-policy.ts`，
@@ -143,7 +141,7 @@
   上游提供的范围接受 `/批准一次 <id>`、`/批准会话 <id>` 或 `/始终允许 <id>`，不要求填写
   JSON；URL 模式只显示 HTTP(S) 链接并接受 `/完成 <id>`。各类交互均可用 `/取消 <id>` 安全取消，答案和表单正文
   不写入日志或持久化存储。
-- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox、Typing 与 InteractionPort；启停时通过
+- `surface.ts`：共享一个内存回复上下文组合 Input、Outbox 与 InteractionPort；启停时通过
   官方 `notifystart` / `notifystop` 合同完成在线状态对账；启动时只为当前允许名单中已知且存在
   加密回复上下文的私聊恢复收件人并发送上线通知，不要求当前仍有 Thread 绑定。状态对账或聊天
   通知失败不停止长轮询；

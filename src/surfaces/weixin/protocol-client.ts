@@ -77,26 +77,6 @@ export interface WeixinFileSendProtocolClient {
   ): Promise<void>;
 }
 
-export type WeixinTypingStatus = "cancel" | "typing";
-
-export interface WeixinTypingProtocolClient {
-  getTypingTicket(
-    input: {
-      actorId: string;
-      contextToken?: string;
-    },
-    signal?: AbortSignal,
-  ): Promise<string>;
-  setTyping(
-    input: {
-      actorId: string;
-      typingTicket: string;
-      status: WeixinTypingStatus;
-    },
-    signal?: AbortSignal,
-  ): Promise<void>;
-}
-
 export interface WeixinLifecycleProtocolClient {
   notifyStart(signal?: AbortSignal): Promise<void>;
   notifyStop(signal?: AbortSignal): Promise<void>;
@@ -106,7 +86,6 @@ export type WeixinRuntimeProtocolClient =
   & WeixinProtocolClient
   & WeixinImageSendProtocolClient
   & WeixinFileSendProtocolClient
-  & WeixinTypingProtocolClient
   & WeixinLifecycleProtocolClient;
 
 export interface CreateWeixinProtocolClientOptions {
@@ -117,7 +96,6 @@ export interface CreateWeixinProtocolClientOptions {
   getUpdatesTimeoutMs?: number;
   sendTimeoutMs?: number;
   imageUploadTimeoutMs?: number;
-  typingTimeoutMs?: number;
   randomBytesImpl?: typeof randomBytes;
   nowImpl?: () => number;
 }
@@ -156,10 +134,6 @@ export function createWeixinProtocolClient(
   const imageUploadTimeoutMs = positiveTimeout(
     options.imageUploadTimeoutMs ?? 30_000,
     "微信图片上传超时时间无效",
-  );
-  const typingTimeoutMs = positiveTimeout(
-    options.typingTimeoutMs ?? 10_000,
-    "微信输入状态请求超时时间无效",
   );
   const randomBytesImpl = options.randomBytesImpl ?? randomBytes;
   const nowImpl = options.nowImpl ?? Date.now;
@@ -430,64 +404,6 @@ export function createWeixinProtocolClient(
       parseSendResponse(raw);
     },
 
-    async getTypingTicket(input, signal) {
-      const actorId = validateActorInput(input.actorId);
-      const contextToken = optionalContextToken(
-        input.contextToken,
-        "微信输入状态上下文无效",
-        65_536,
-      );
-      const raw = await request({
-        fetchImpl,
-        randomBytesImpl,
-        baseUrl,
-        botToken,
-        endpoint: "getconfig",
-        body: {
-          ilink_user_id: actorId,
-          ...(contextToken === undefined ? {} : { context_token: contextToken }),
-          base_info: baseInfo(),
-        },
-        timeoutMs: typingTimeoutMs,
-        maximumResponseBytes: maximumSendResponseBytes,
-        ...(signal === undefined ? {} : { signal }),
-        operation: "微信输入状态配置",
-      });
-      return parseTypingTicketResponse(raw);
-    },
-
-    async setTyping(input, signal) {
-      const actorId = validateActorInput(input.actorId);
-      const typingTicket = requiredInputString(
-        input.typingTicket,
-        "微信输入状态票据无效",
-        65_536,
-      );
-      if (input.status !== "typing" && input.status !== "cancel") {
-        throw new WeixinProtocolError(
-          "invalid-input",
-          "微信输入状态值无效",
-        );
-      }
-      const raw = await request({
-        fetchImpl,
-        randomBytesImpl,
-        baseUrl,
-        botToken,
-        endpoint: "sendtyping",
-        body: {
-          ilink_user_id: actorId,
-          typing_ticket: typingTicket,
-          status: input.status === "typing" ? 1 : 2,
-          base_info: baseInfo(),
-        },
-        timeoutMs: typingTimeoutMs,
-        maximumResponseBytes: maximumSendResponseBytes,
-        ...(signal === undefined ? {} : { signal }),
-        operation: "微信输入状态",
-      });
-      parseSendResponse(raw);
-    },
   };
 }
 
@@ -811,29 +727,17 @@ function parseLifecycleResponse(raw: string, operation: string): void {
   throwForApiError(value, operation);
 }
 
-function parseTypingTicketResponse(raw: string): string {
-  const value = parseJsonRecord(raw, "微信输入状态配置响应");
-  throwForApiError(value, "微信输入状态配置");
-  return requiredResponseString(
-    value.typing_ticket,
-    "微信输入状态配置票据无效",
-    65_536,
-  );
-}
-
 async function request(options: {
   fetchImpl: typeof fetch;
   randomBytesImpl: typeof randomBytes;
   baseUrl: string;
   botToken: string;
   endpoint:
-    | "getconfig"
     | "getupdates"
     | "getuploadurl"
     | "msg/notifystart"
     | "msg/notifystop"
-    | "sendmessage"
-    | "sendtyping";
+    | "sendmessage";
   body: unknown;
   timeoutMs: number;
   maximumResponseBytes: number;
@@ -953,21 +857,6 @@ function optionalContextToken(
 ): string | undefined {
   if (value === undefined) return undefined;
   return requiredInputString(value, message, maximumLength);
-}
-
-function requiredResponseString(
-  value: unknown,
-  message: string,
-  maximumLength: number,
-): string {
-  if (
-    typeof value !== "string"
-    || value.length === 0
-    || value.length > maximumLength
-  ) {
-    throw new WeixinProtocolError("invalid-response", message);
-  }
-  return value;
 }
 
 function optionalInputString(
