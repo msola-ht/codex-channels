@@ -58,6 +58,11 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 合并还是忽略，并给出是否关键；渠道差异只保留微信回复窗口白名单和思考状态的合并键两张表，
 Surface 不再各自维护允许列表或在 `handle` 内散落关键性字面量。Telegram 与飞书对同一 Turn 的
 思考状态按分段合并，仅合并尚未执行的中间快照，创建首条状态和终态始终执行。
+投递关键性有三个层次，不能互相替代：Core 的 `isCriticalOutputEvent` 区分完整输出与可丢弃的
+增量或过程事件；`SurfaceDeliveryDecision.critical` 表示该事件在本渠道不得静默丢失，微信白名单
+事件恒为真，其他渠道沿用 Core 判定；`ConversationDeliveryQueue` 的排队关键性决定队列满时该平台
+发送能否被丢弃，由渠道按用户可见结果选择。收紧或合并任意两层前，必须先确认对应渠道的用户可见
+结果。
 Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
 只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，

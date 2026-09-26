@@ -5,10 +5,7 @@ import {
   type OutputEvent,
   type TurnStartIdentity,
 } from "../../conversation-core/index.js";
-import {
-  ConversationDeliveryQueue,
-  type ConversationDeliveryOptions,
-} from "../conversation-delivery-queue.js";
+import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
 import { surfaceDeliveryCoalesceKey } from "../delivery-policy.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
 import type {
@@ -577,7 +574,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (event.final === true) {
       this.reasoningCards.delete(event.threadId);
     }
-    const options = this.reasoningDeliveryOptions(event, existing.segment);
+    const coalesceKey = surfaceDeliveryCoalesceKey(event, existing.segment);
     this.delivery.enqueue(
       chatId,
       async (signal) => {
@@ -646,16 +643,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
         }
       },
       true,
-      options,
+      coalesceKey === undefined ? undefined : { coalesceKey },
     );
-  }
-
-  private reasoningDeliveryOptions(
-    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
-    segment: number,
-  ): ConversationDeliveryOptions {
-    const coalesceKey = surfaceDeliveryCoalesceKey(event, segment);
-    return coalesceKey === undefined ? {} : { coalesceKey };
   }
 
   private async sendImage(

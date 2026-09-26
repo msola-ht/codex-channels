@@ -1248,7 +1248,7 @@ export class TelegramOutbox {
       this.reasoningMessages.delete(event.threadId);
     }
     existing.text = text;
-    const options = this.reasoningDeliveryOptions(event, existing.segment);
+    const coalesceKey = surfaceDeliveryCoalesceKey(event, existing.segment);
     this.enqueue(
       chatId,
       async (signal) => {
@@ -1283,16 +1283,8 @@ export class TelegramOutbox {
         }
       },
       true,
-      options,
+      coalesceKey === undefined ? undefined : { coalesceKey },
     );
-  }
-
-  private reasoningDeliveryOptions(
-    event: Extract<OutputEvent, { type: "turn.reasoning" }>,
-    segment: number,
-  ): ConversationDeliveryOptions {
-    const coalesceKey = surfaceDeliveryCoalesceKey(event, segment);
-    return coalesceKey === undefined ? {} : { coalesceKey };
   }
 
   private sealReasoningMessage(threadId: string, turnId: string): void {
