@@ -33,7 +33,7 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
-  tokensPerSecond: "平均 Token/s",
+  generationTokensPerSecond: "生成 Token/s",
   compact: "压缩",
 }
 
@@ -175,10 +175,10 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       },
     },
     {
-      id: "tokensPerSecond",
-      accessorFn: (turn) => turn.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求速率的算术平均；按各次请求总耗时计算。">平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
+      id: "generationTokensPerSecond",
+      accessorFn: (turn) => turn.generationTokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求合计输出除以合计解码窗口（总耗时减去首字耗时）。">生成 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.generationTokensPerSecond)}</span>,
     },
     {
       id: "compact",
@@ -198,7 +198,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "output", "tokensPerSecond", "compact"]}
+      numericColumnIds={["requests", "failures", "input", "output", "generationTokensPerSecond", "compact"]}
       loading={loading}
       title="每轮明细"
       description={({ total, matched, pageSize }) =>

@@ -1,5 +1,6 @@
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
 import {
   GatewayAccountRefreshError,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -253,9 +254,16 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       () => loadCcgAccounts(environment),
       warnings,
       "ccg",
-      "CCG 账户元数据暂不可用",
+      "CommandCode Go 账户元数据暂不可用",
+    );
+    const clineAccounts = loadAccountRegistry(
+      () => loadClinePassAccounts(environment),
+      warnings,
+      "clp",
+      "Cline Pass 配置暂不可用",
     );
     const accountMetadata = [
+      ...(clineAccounts ?? []).map(account => ({ provider: clinePassProviderId(account.id), accountId: account.id, displayName: `Cline Pass ${account.id}`, default: account.default })),
       ...(dsAccounts ?? []).map((account) => ({
         provider: deepseekProviderId(account.id),
         accountId: account.id,
@@ -271,13 +279,15 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
       ...(ccgAccounts ?? []).map((account) => ({
         provider: ccgProviderId(account.id),
         accountId: account.id,
-        displayName: `CCG ${account.id}`,
+        displayName: `CommandCode Go ${account.id}`,
         default: account.default,
       })),
     ];
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
+        if (snapshot.provider === "clp") return false;
+        if (snapshot.provider.startsWith("clp-")) return clineAccounts === null || metadataByProvider.has(snapshot.provider);
         const legacyRegistry = snapshot.provider === "deepseek"
           ? dsAccounts
           : snapshot.provider === "ocg"
@@ -366,6 +376,7 @@ function providerSettingsAuditTarget(input) {
 }
 
 function accountSettingsAuditTarget(input) {
+  if (input.operation.startsWith("clp.")) return clinePassProviderId(input.accountId);
   if (input.operation.startsWith("opencode.account.")) return String(input.accountId ?? "unknown");
   return input.operation.startsWith("deepseek.") ? "deepseek" : "unknown";
 }

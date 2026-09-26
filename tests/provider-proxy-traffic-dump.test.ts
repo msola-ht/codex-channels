@@ -23,9 +23,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 
 import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
+import { ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, listDumpFiles, readDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupProviderProxyTestServers,
   type ProviderProxyTestServer,
@@ -77,6 +78,61 @@ describe("ModelTrafficDump V2", () => {
     await proxy.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
     expect(detail.response.callTiming.totalMs).toBe(metrics[0]?.totalDurationMs);
+  });
+
+  it("indexes the Chat upstream provider reported by diagnostics", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-chat-upstream-"));
+    temporaryDirectories.push(directory);
+    const diagnostics = new ChatDiagnosticsChannel();
+    const server = createServer((request, response) => {
+      const observer = request.headers["x-codexc-chat-observer"];
+      if (typeof observer === "string") {
+        diagnostics.publish(observer, { fields: { "routing.finalProvider": "deepseek" }, truncated: false });
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-1", status: "completed" } })}\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "clp" }, chatDiagnostics: diagnostics,
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: '{"model":"fixture"}' });
+    await proxy.close();
+    const index = await readDumpExchange(listDumpFiles(directory), 1);
+    expect(index.response.upstreamProvider).toBe("deepseek");
+    expect((await describeDumpExchange(listDumpFiles(directory), 1)).upstreamProvider).toBe("deepseek");
+  });
+
+  it("omits the indexed Chat upstream provider when no diagnostics are reported", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-chat-upstream-absent-"));
+    temporaryDirectories.push(directory);
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-1", status: "completed" } })}\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "openai" },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: '{"model":"fixture"}' });
+    await proxy.close();
+    const index = await readDumpExchange(listDumpFiles(directory), 1);
+    expect(index.response).not.toHaveProperty("upstreamProvider");
+    expect(await describeDumpExchange(listDumpFiles(directory), 1)).not.toHaveProperty("upstreamProvider");
   });
 
   it("captures stages through a real reused WebSocket without changing forwarding", async () => {

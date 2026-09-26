@@ -88,7 +88,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go 多账户和 DeepSeek 配置读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
@@ -151,7 +151,7 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 转储失败详情与 `codexc traffic` 根据已记录的传输阶段、HTTP 状态或上游终态显示失败阶段；该分类不推断代理、账户或模型的根因。
 “请求明细”另有可排序的“总耗时”列，Schema v18 新增可空 `total_duration_ms`，JSON/CSV 导出为 `totalDurationMs`。由采集端单调时钟计算代理请求入口至首次模型终态，无终态则到结束或失败；不含终态后的指标投递、客户端显示或下一次重试，不是整个 Turn 耗时。不依赖调用记录开关；无实际模型请求的失败不伪造值，历史为空时显示 `—`，不从旧墙钟差补算。
 指标库只接受当前 Schema v19；旧库不迁移，可停止相关进程后使用 `codexc metrics reset` 归档，再启动 Gateway 创建当前结构。
-请求明细的可排序 `Token/s` 为 `outputTokens × 1000 / totalDurationMs`；会话列表与每轮表格的可排序“平均 Token/s”是当前筛选范围内自身有效请求速率的算术平均，会话详情顶部累计沿用递归纳入子代理的范围。仅输出与耗时都大于零的样本参与计算，不扣首字等待、不减推理 Token，不是纯生成速度或会话墙钟吞吐量。页面显示两位小数，未知为 `—`；API 与 JSON/CSV 使用可空派生字段 `tokensPerSecond`，不新增数据库列，不补算历史耗时。CLI 请求、会话和每轮导出及完成卡片使用同一查询口径。
+请求明细的可排序“生成 Token/s”为 `outputTokens × 1000 / (totalDurationMs - firstContentMs)`，可排序“端到端 Token/s”为 `outputTokens × 1000 / totalDurationMs`；会话列表与每轮表格的可排序“生成 Token/s”是当前筛选范围内自身有效请求的合计输出除以合计解码窗口，会话详情顶部累计沿用递归纳入子代理的范围。两个速率的分子分母都只取自输出 Token 与对应时间窗同时大于零的记录，缺采样的记录整条退出；按合计相除而不是先算逐请求速率再取算术平均，避免极短解码窗口的单条记录放大汇总。不减推理 Token，生成速率不是含首字等待的产出率，端到端不是纯生成速度或会话墙钟吞吐量。页面显示两位小数，未知为 `—`；API 与 JSON/CSV 使用可空派生字段 `generationTokensPerSecond` 与 `tokensPerSecond`，不新增数据库列，不补算历史时间窗。CLI 请求、会话和每轮导出及完成卡片使用同一查询口径。
 调用详情顶部优先显示单请求首字；上游轮次首 Token 保留在独立的上游统计区，取自 `first_sampled_message_ttft_ms`。两者均按毫秒来源自适应展示，不代表客户端显示时间，缺失时显示“未提供”，不反推历史值。
 调用列表将模型、状态与独立总耗时列放在请求地址和线程标识之前；模型名称仅在已提供的请求与响应名称不一致时强调。长标识支持聚焦提示，原始正文限制显示高度并可内部滚动。
 同一提供商、批次与调用编号的原始事件翻页保留已展开的详情区域，加载或失败时不展示旧页事件；切换调用不沿用旧摘要。首次进入读取完整明细；已结束且已有终态响应的调用翻页使用 `GET /api/v1/traffic/trace?id=&label=&session=&traceOffset=`，只返回调用编号、事件页与分页信息，不重读正文或重新提取输出、模型证据，仍扫描轨迹以计算事件总数。进行中的调用翻页继续读取完整明细，使终态、输出、用量与耗时一同更新。列表和详情查询错误均可按当前条件重试，详情手动刷新及失败重试会重新读取完整明细。
@@ -159,6 +159,9 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 耗时摘要分为“本次调用”和“上游轮次统计”，CLI 调用详情采用相同分组。新调用响应索引的可选 `callTiming` 保存同一次调用的单调时钟偏移：HTTP 入口或 WS 请求帧接收入口为零点，记录转发开始、HTTP 请求体收齐/响应头、WS 提交发送、首字事件和结束。首字口径保持不变，首字节点复用原观测值与转发起点，不从 trace 反推。
 本次调用展示转发前准备、转发至首字、首字至结束与总耗时；缺少首字或中断前未走到的阶段不补值。HTTP 请求接收与转发可重叠，响应头至结束也包含背压暂停，均不解释为纯生成耗时。WS 另列进入转发时连接是否就绪、至提交发送的等待及提交至首字；每次调用独立记录，不复用连接握手耗时，提交发送不表示上游已收到。
 结束优先复用首次模型终态的总耗时；无终态时为上游结束或观察失败的时间，不包含其后客户端收到全部内容的耗时。历史调用没有 `callTiming` 时保留原墙钟耗时并明确未记录新阶段；无效或倒序节点不计算对应差值，不混用墙钟与单调时钟。V2 记录仅增加可选字段，原记录无需改写，回滚程序可忽略该字段。总耗时独立经指标 IPC 保存到 Schema v18，其余分段只保存在调用记录；需加载新版本 App Server 采集端才能产生节点。
+
+调用详情、调用列表、请求明细列表与错误列表都在模型名称旁显示 `routing.finalProvider` 对应的“上游”小标签，不单列一列；字段缺失或只有备用提供商记录时都不显示，也不从备用提供商推断。调用列表与调用详情直接读索引与 trace 里的诊断；调用记录的响应索引因此新增可选字段 `upstreamProvider`：只在同一次调用的 `chat_diagnostics` 明确记录过该值时写入，旧记录无需改写，读取端缺失即省略。请求明细列表与错误列表在读取时按记录的 `traffic` 只关联本页出现的批次索引、不读正文，批次较多时按需读取对应清单；调用记录缺失、批次已清理或版本不支持时只是不显示该标签，不阻断指标页、不回填历史，也不改变请求导出的字段。CLI `codexc traffic` 的调用列表同样在“模型”后显示 `上游=`（缺失为 `-`），`--exchange` 与 `--all` 的详情另起一行“上游提供商：”，缺失为“未记录”。
+Chat 转换渠道的调用详情另有“Chat 上游信息”，展示上游原始模型名、实际路由提供商及有界诊断字段，独立于转换后的 Responses 模型名。费用字段保持上游口径，不作为套餐扣费或账户余额；备用提供商列表不表示实际调用。该信息仅随新请求的调用记录采集，历史没有时不补推。输入省略、正文截断和页面展示上限仍按现有调用记录规则执行。
 上游首 Token、最大排队、轮次累计生成、logical turn 和客户端工具暂停保持独立分组，不能与本次调用阶段相加或相减来估算网络延迟。
 上游 timing 事件只在请求带 `x-responsesapi-include-timing-metrics` 时下发。该内部头不由网关请求或
 注入：App Server 默认不带（Codex 的 `runtime_metrics` 特性默认关闭），代理只按客户端原样透传，
@@ -245,8 +248,8 @@ Threads 和每轮明细默认全部保留历史，控制台、请求和错误页
 `K`、`M`、`B` 英文紧凑单位：Token 的 `K` / `M` 最多保留两位小数、`B` 最多保留三位小数，
 汇总请求数最多保留两位小数；明细表请求数仍显示精确整数。
 四张卡片下方显示活动热力图和用量趋势图；活动热力图固定展示最近 90 天。控制台默认最近 30 天，顶部时间范围统一切换汇总卡片、趋势图、Provider 和错误汇总。
-控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；DS、OCG 与 CCG
-快照超过 15 分钟时，账户标题显示“数据已过期”；尚未采集时显示空状态，不以零用量代替。控制台首次打开时自动刷新已配置的 DS、OCG 与 CCG
+控制台同时显示本机错误和官方账户额度。官方配额窗口不在 WebUI 展示费用估算；DeepSeek、OpenCode Go、CommandCode 与 Cline Pass
+快照超过 15 分钟时，账户标题显示“数据已过期”；尚未采集时显示空状态，不以零用量代替。控制台首次打开时自动刷新已配置的 DeepSeek、OpenCode Go、CommandCode 与 Cline Pass
 账户；汇总范围旁的刷新按钮同时更新本地指标、固定 90 天热力图和账户快照。WebUI 通过私有 Gateway
 IPC 发起账户查询，不读取凭据、不直接调用官方接口，也不定时轮询。查询失败时
 保留最后一次有效快照，在对应账户卡片内显示“刷新失败”与单账户重试；刷新期间禁用刷新按钮，
@@ -334,7 +337,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 前端只在有补充信息时提供悬浮提示：长文本实际截断或 ID 被缩写、存在 Token 分项、错误详情或模型差异时保留；已完整展示的文字、普通数值、空值和缺少分项的 Token 不重复提示。耗时和速率的统计口径集中在列标题；图表数据点、纯图标按钮、折叠导航及数据过期原因保留必要说明。组件提示停留 400 ms 后显示，支持键盘聚焦。`Fast` 使用小号标签，请求列表和错误页仅在响应明确回报非 Fast 层级时提示差异；调用详情已分别展示请求和响应层级，不再重复提示。
-支持服务端组合筛选、排序与分页及列显隐，不提供无对应批量操作的行选择。请求列按时间、Provider、模型、状态、输入/输出 Token、首字/总耗时、Token/s、调用详情排列；User-Agent、操作、HTTP、错误和推理输出默认隐藏，异常状态保留可聚焦的错误摘要。会话与轮次列表同样将身份信息放在用量和速率之前，父会话及压缩等次要列默认隐藏；已有列显隐偏好保持不变。排序表头提供可访问的方向状态。表格在视口内内部滚动，输入、输出与
+支持服务端组合筛选、排序与分页及列显隐，不提供无对应批量操作的行选择。请求列按时间、Provider、模型、状态、输入/输出 Token、首字/总耗时、生成/端到端 Token/s、调用详情排列；User-Agent、操作、HTTP、错误和推理输出默认隐藏，异常状态保留可聚焦的错误摘要。会话与轮次列表同样将身份信息放在用量和速率之前，父会话及压缩等次要列默认隐藏；已有列显隐偏好保持不变。排序表头提供可访问的方向状态。表格在视口内内部滚动，输入、输出与
 缓存提示支持悬浮及键盘聚焦；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
 悬浮查看完整值，Schema v13 起入库，当前 Schema v19 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“期间首次请求”表示匹配条件中首个请求的
@@ -355,3 +358,5 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 开发入口会读取 `[webui]` 配置并让 `/api` 代理跟随实际 API 端口；也可以手动先运行
 `codexc webui`，再 `cd webui && npm run dev`（手动启动时代理默认指向 `8787`）。
 开发代理会将设置管理请求的 Origin 还原为后端地址，因此预览和低风险修改与生产静态托管使用同一套回环 Origin 约束。
+
+控制台账户卡片使用完整提供商名称 CommandCode Go、Cline Pass，并附账户 ID；`ccg-<账户>`、`clp-<账户>` 继续作为内部 Provider 标识。

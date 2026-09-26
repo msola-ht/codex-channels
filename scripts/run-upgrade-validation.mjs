@@ -66,6 +66,7 @@ export const defaultUpgradeValidationStages = [
       "tests/real-app-server-supervised-thread-state.test.ts",
       "tests/real-app-server-supervised-tools.test.ts",
       "tests/real-app-server-responses-provider.test.ts",
+      "tests/real-app-server-chat-provider.test.ts",
     ],
     environment: {
       RUN_CODEX_CONTRACT: "1",

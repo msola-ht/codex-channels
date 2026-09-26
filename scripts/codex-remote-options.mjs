@@ -251,6 +251,8 @@ function reservedManagedProfileArgument(args, index) {
     || profile?.startsWith("sf-opencode-go-")
     || profile === "sf-ocg"
     || profile?.startsWith("sf-ocg-")
+    || profile === "sf-clp"
+    || profile?.startsWith("sf-clp-")
     || profile === "sf-ccg"
     || profile?.startsWith("sf-ccg-")
     ? profile

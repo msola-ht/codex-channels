@@ -9,6 +9,7 @@ import { QueryFilters } from "@/components/metrics/query-filters"
 import { StatCard } from "@/components/metrics/stat-card"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { TableHint, TruncatedText } from "@/components/metrics/data-table"
+import { TrafficModel } from "@/components/traffic/traffic-model"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import {
@@ -112,7 +113,7 @@ export function ErrorsPage() {
                         <TableRow key={record.id}>
                           <ErrorCell loading={loading} className="whitespace-nowrap tabular-nums text-muted-foreground">{formatTime(record.recordedAtMs)}</ErrorCell>
                           <ErrorCell loading={loading}><ProviderBadge provider={record.provider} /></ErrorCell>
-                          <ErrorCell loading={loading}><span className="flex items-center gap-2 whitespace-nowrap"><TruncatedText text={record.model} className="max-w-48" /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></ErrorCell>
+                          <ErrorCell loading={loading}><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel request={record.model} responses={[]} upstream={record.upstreamProvider} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></ErrorCell>
                           <ErrorCell loading={loading}><StatusBadge status={record.status} /></ErrorCell>
                           <ErrorCell loading={loading} className="text-right tabular-nums">{record.httpStatus ?? "—"}</ErrorCell>
                           <ErrorCell loading={loading} className="max-w-md">

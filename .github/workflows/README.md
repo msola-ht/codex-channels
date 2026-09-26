@@ -56,4 +56,4 @@ hook 配置；随后直接调用 `npm run verify:commit`。本地 `npm ci`、`np
 文档，因此将文档索引检查记录为跳过；正式适配后必须由 `npm run verify:commit` 完成文档和全部
 提交门禁。
 
-真实 App Server 合同还覆盖自定义 Responses Provider：两个独立模型目录、配置读取、模型选择与函数工具往返；升级验证复用同一合同。
+真实 App Server 合同还覆盖自定义 Responses Provider：两个独立模型目录、配置读取、模型选择与函数工具往返；升级验证复用同一合同。Cline Pass 的隔离 Chat 合同也进入两份执行清单，覆盖工具往返与正文/推理流式条目归属。

@@ -129,8 +129,17 @@ describe("Codex release upgrade preview", () => {
         "tests/real-app-server-supervised-thread-state.test.ts",
         "tests/real-app-server-supervised-tools.test.ts",
         "tests/real-app-server-responses-provider.test.ts",
+        "tests/real-app-server-chat-provider.test.ts",
       ]),
     });
+  });
+
+  it("keeps CI and upgrade isolated contract lists aligned", () => {
+    const workflow = readFileSync(join(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+    const ciContracts = [...workflow.matchAll(/tests\/real-app-server[\w-]*\.test\.ts/gu)].map(match => match[0]);
+    const contract = defaultUpgradeValidationStages.find((stage: { id: string }) => stage.id === "contract-tests");
+    expect(ciContracts.sort()).toEqual(contract.args.filter((arg: string) => arg.startsWith("tests/real-app-server")).sort());
+    expect(workflow).toContain("RUN_CODEX_CONTRACT=1");
   });
 
   it("accepts only the requested official stable release", () => {

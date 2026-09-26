@@ -174,6 +174,8 @@ codexc primary-provider switch <Provider ID> [模型] [--yes]
 Codex 主配置的 `model_provider` / `model`；传 `--yes` 跳过确认（适合脚本化调用），
 仅命令行 switch 支持 `--yes`，交互式 Setup 菜单仍会确认。
 
+添加账户时，Setup 与 WebUI 已有的多账户配置入口均提供 `main`（主账户）、`work`（工作账户）、`other`（其他账户）和“自定义”；已占用的预设不再显示。名称仅作账户 ID，不决定默认账户或自动切换行为。
+
 DeepSeek、OpenCode Go、自定义 Provider 和多账户说明分别见 [`DeepSeek 使用说明`](deepseek.md)、[`OpenCode Go 使用说明`](opencode-go.md)、[`Provider 接入指南`](provider-integration-guide.md) 和 [`OpenCode Go 多账户`](opencode-go-multi-account.md)。
 
 继续使用聊天会话：

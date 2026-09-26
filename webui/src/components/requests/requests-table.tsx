@@ -1,8 +1,7 @@
 import * as React from "react"
 import { Link } from "react-router"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
+import { TrafficModel } from "@/components/traffic/traffic-model"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { SortingState } from "@tanstack/react-table"
 
@@ -48,7 +47,8 @@ const COLUMN_LABELS: Record<string, string> = {
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
   totalDuration: "总耗时",
-  tokensPerSecond: "Token/s",
+  tokensPerSecond: "端到端 Token/s",
+  generationTokensPerSecond: "生成 Token/s",
   traffic: "调用详情",
 }
 
@@ -124,17 +124,12 @@ export function RequestsTable({
       ),
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
-          {modelNameComparison(row.original.requestModel, row.original.responseModel) !== "名称不一致"
-            ? <TruncatedText text={row.original.requestModel ?? row.original.responseModel ?? row.original.model} className="max-w-64" />
-            : <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
-            <span className="min-w-0 truncate">
-              {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-                ? `${row.original.requestModel} → ${row.original.responseModel}`
-                : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
-            </span>
-            {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-              ? <Badge variant="outline">名称不一致</Badge> : null}
-          </span></TableHint>}
+          <TrafficModel
+            request={row.original.requestModel}
+            responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
+            fallback={row.original.model ?? undefined}
+            upstream={row.original.upstreamProvider}
+          />
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),
@@ -250,9 +245,15 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
+      id: "generationTokensPerSecond",
+      accessorFn: (record) => record.generationTokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 首字之后的解码窗口，不含首字等待。">生成 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.generationTokensPerSecond)}</span>,
+    },
+    {
       id: "tokensPerSecond",
       accessorFn: (record) => record.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 请求总耗时，包含首字等待。">Token/s</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 请求总耗时，包含首字等待。">端到端 Token/s</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
@@ -350,7 +351,7 @@ export function RequestsTable({
 
   return (
     <DataTable
-      numericColumnIds={["input", "output", "firstContent", "totalDuration", "tokensPerSecond", "http", "reasoningOutput"]}
+      numericColumnIds={["input", "output", "firstContent", "totalDuration", "generationTokensPerSecond", "tokensPerSecond", "http", "reasoningOutput"]}
       loading={loading}
       title="记录"
       description={({ pageNumber: currentPage }) =>

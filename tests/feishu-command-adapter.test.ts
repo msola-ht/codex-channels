@@ -445,7 +445,7 @@ describe("Feishu command adapter", () => {
     });
   });
 
-  it("renders provider choices before any provider is chosen", async () => {
+  it.each([["deepseek", "DeepSeek"], ["clp-main", "clp-main"]])("renders provider choice %s with its canonical label", async (provider, label) => {
     const fixture = createOutbox();
     const modelState = vi.fn(async () => modelSelectionState({
       models: [
@@ -463,7 +463,7 @@ describe("Feishu command adapter", () => {
         modelOption({
           id: "deepseek-v4",
           model: "deepseek-v4",
-          provider: "deepseek",
+          provider,
           displayName: "DeepSeek V4",
           supportedReasoningEfforts: [{ effort: "high", description: "深入" }],
           defaultReasoningEffort: "high",
@@ -504,7 +504,7 @@ describe("Feishu command adapter", () => {
     expect(response.description).toContain("Fast 模式：开启（下一次 Turn 生效）");
     expect(response.choices).toEqual([
       expect.objectContaining({ action: "model", input: "openai" }),
-      expect.objectContaining({ action: "model", input: "deepseek" }),
+      expect.objectContaining({ action: "model", input: provider, label: `${label} · 1 个模型` }),
     ]);
     await fixture.outbox.close();
   });

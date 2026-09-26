@@ -187,6 +187,7 @@ export async function describeDumpExchange(
   return {
     ...summaryOf(interaction, requestBody),
     modelEvidence: models.result(),
+    chatDiagnostics: trace.chatDiagnostics,
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
@@ -408,12 +409,19 @@ function summaryOf(interaction, body) {
     ...(requestKind === undefined ? {} : { requestKind }),
     category: request.method === "GET" && request.path?.split("?")[0] === "/models"
       ? "models" : requestKind === "prewarm" ? "prewarm" : "model",
+    ...(upstreamProviderOf(response) === undefined ? {} : { upstreamProvider: upstreamProviderOf(response) }),
     responseModels: response?.responseModels ?? [],
     state: response?.state ?? "pending",
     status: response?.status,
     durationMs: response?.durationMs,
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
+}
+
+/** 索引里的 Chat 上游提供商；只有明确记录过字符串值时返回，缺失或类型无效一律省略。 */
+function upstreamProviderOf(response) {
+  const value = response?.upstreamProvider;
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function readPayload(directory, payload, maxBytes) {
@@ -481,12 +489,16 @@ async function* traceRecords(directory) {
 async function readTrace(directory, id, offset, limit, maxBytes, output) {
   const items = [];
   const milestones = {};
+  let chatDiagnostics;
   let remaining = maxBytes;
   let total = 0;
   for await (const record of traceRecords(directory)) {
     if (record?.interaction !== id) continue;
     if (["request_end", "response_head", "response_end"].includes(record.kind)) {
       milestones[record.kind] = record.ts;
+    }
+    if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
+      chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
     }
     output?.consume(record);
     if (total >= offset && items.length < limit && remaining > 0) {
@@ -502,6 +514,7 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
   return {
     items,
     milestones,
+    chatDiagnostics,
     page: {
       offset,
       total,

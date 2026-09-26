@@ -1,3 +1,5 @@
+import { opencodeGoReservedAccountIds } from "../runtime/managed-provider-account-options.mjs";
+import { promptManagedAccountId } from "./managed-provider-account-prompt.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "./opencode-go-account-management.mjs";
 import {
@@ -137,6 +139,7 @@ export async function runOpenCodeGoSetup({
     .some((candidate) => isOpencodeGoProvider(candidate.provider));
   const prompt = prompter ?? createPrompter(prompts, {
     allowBack,
+    accounts,
     hasModelSettings,
     hasAccounts: accounts.length > 0,
     legacyBackup: hasLegacyBackup(environment),
@@ -655,7 +658,7 @@ function printAccounts(environment, output) {
   printOpencodeGoAccounts(environment, output);
 }
 
-function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, legacyBackup, legacy = false }) {
+function createPrompter(prompts, { accounts = [], allowBack, hasModelSettings, hasAccounts, legacyBackup, legacy = false }) {
   return {
     select: async () => {
       const options = [];
@@ -689,17 +692,7 @@ function createPrompter(prompts, { allowBack, hasModelSettings, hasAccounts, leg
       return value;
     },
     accountId: async () => {
-      const value = await prompts.text({
-        message: "新账户 id（小写字母/数字/`-`/`_`，1-32 位）",
-        validate: (candidate) => {
-          try {
-            validateOpencodeGoAccountId(candidate);
-            return undefined;
-          } catch (error) {
-            return error instanceof Error ? error.message : "账户 id 无效";
-          }
-        },
-      });
+      const value = await promptManagedAccountId(prompts, accounts, opencodeGoReservedAccountIds);
       if (prompts.isCancel(value)) throw new OpenCodeGoSetupCancelled();
       return value;
     },

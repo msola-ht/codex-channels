@@ -6,10 +6,11 @@ import {
 } from "./opencode-go-accounts.mjs";
 import { loadDeepseekAccounts, deepseekProviderId, deepseekApiKeyEnvironmentKey } from "./deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId, ccgApiKeyEnvironmentKey } from "./ccg-accounts.mjs";
+import { loadClinePassAccounts, clinePassProviderId, clinePassApiKeyEnvironmentKey } from "./cline-pass-accounts.mjs";
 
 const managedProviderCapabilityKinds = Object.freeze({
-  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg"]),
-  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts"]),
+  accountAdapters: new Set(["none", "deepseek", "opencode-go", "ccg", "clp"]),
+  instanceAdapters: new Set(["single", "opencode-go-accounts", "deepseek-accounts", "ccg-accounts", "clp-accounts"]),
 });
 
 const deepseekProviderCapabilities = Object.freeze({
@@ -64,7 +65,7 @@ export const opencodeGoProviderDefinition = Object.freeze({
 
 export const commandCodeProviderDefinition = Object.freeze({
   id: "ccg",
-  displayName: "CCG",
+  displayName: "CommandCode Go",
   profileName: "sf-ccg",
   profileFileName: "sf-ccg.config.toml",
   catalogFileName: "models.json",
@@ -81,15 +82,29 @@ export const commandCodeProviderDefinition = Object.freeze({
   }),
 });
 
+export const clinePassProviderDefinition = Object.freeze({
+  id: "clp", displayName: "Cline Pass",
+  profileName: "sf-clp", profileFileName: "sf-clp.config.toml",
+  catalogFileName: "models.json", catalogManifestFileName: "models.manifest.json",
+  managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
+  baseUrl: "https://api.cline.bot/api/v1", wireApi: "responses",
+  upstreamWireApi: "chat_completions",
+  apiKeyEnvironmentKey: "CODEX_CONNECT_CLP_API_KEY",
+  defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "high",
+  supportsWebsockets: false,
+  capabilities: Object.freeze({ accountAdapter: "clp", instanceAdapter: "clp-accounts" }),
+});
+
 export function isManagedProviderApiKeyValid(definition, apiKey) {
   return typeof apiKey === "string"
     && apiKey.length <= 4_096
-    && ((definition.storageId ?? definition.id) === "ccg"
+    && (["ccg", "clp"].includes(definition.storageId ?? definition.id)
       ? /^[A-Za-z0-9._~+/-]+=*$/u.test(apiKey)
       : /^sk-[^\s"]+$/u.test(apiKey));
 }
 
 export function isManagedProviderModelValid(definition, model) {
+  if ((definition.storageId ?? definition.id) === "clp") return model === clinePassProviderDefinition.defaultModel;
   return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
@@ -99,6 +114,7 @@ export const managedModelProviderDefinitions = Object.freeze([
   deepseekProviderDefinition,
   opencodeGoProviderDefinition,
   commandCodeProviderDefinition,
+  clinePassProviderDefinition,
 ]);
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
@@ -137,6 +153,8 @@ export function expandManagedModelProviderDefinitions(
         return loadOpencodeGoAccountDefinitions(environment);
       case "deepseek-accounts":
         return loadDeepseekAccounts(environment).map((account) => deepseekAccountDefinition(account.id));
+      case "clp-accounts":
+        return loadClinePassAccounts(environment).map((account) => clinePassAccountDefinition(account.id));
       case "ccg-accounts":
         return loadCcgAccounts(environment).map((account) => ccgAccountDefinition(account.id));
       default:
@@ -163,9 +181,20 @@ export function ccgAccountDefinition(accountId) {
   const profileName = `sf-${id}`;
   return Object.freeze({
     ...commandCodeProviderDefinition,
-    id, accountId, storageId: "ccg", displayName: `CCG ${accountId}`,
+    id, accountId, storageId: "ccg", displayName: `CommandCode Go ${accountId}`,
     profileName, profileFileName: `${profileName}.config.toml`,
     apiKeyEnvironmentKey: ccgApiKeyEnvironmentKey(accountId),
+  });
+}
+
+export function clinePassAccountDefinition(accountId) {
+  const id = clinePassProviderId(accountId);
+  const profileName = `sf-${id}`;
+  return Object.freeze({
+    ...clinePassProviderDefinition,
+    id, accountId, storageId: "clp", displayName: `Cline Pass ${accountId}`,
+    profileName, profileFileName: `${profileName}.config.toml`,
+    apiKeyEnvironmentKey: clinePassApiKeyEnvironmentKey(accountId),
   });
 }
 

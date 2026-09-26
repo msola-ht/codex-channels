@@ -1,4 +1,9 @@
-import type { ManagedModelProviderId } from "./model-provider-definitions.mjs";
+import type { ManagedModelProviderId, ModelProviderDefinition } from "./model-provider-definitions.mjs";
+
+export function readManagedMarker(environment: NodeJS.ProcessEnv, definition: ModelProviderDefinition): {
+  provider: ManagedModelProviderId;
+  mode: "switching" | "exclusive";
+} | undefined;
 
 export interface ManagedModelProviderRuntime {
   provider: ManagedModelProviderId;

@@ -466,7 +466,6 @@ describe("Feishu output renderer", () => {
       "- 提供商：OpenAI 官方",
       "- 最近请求缓存命中率：50.00%",
       "- **性能**",
-      "  - Token/s：未提供",
       "  - 总耗时：1 min 5 s",
       "",
       "### 当前会话",

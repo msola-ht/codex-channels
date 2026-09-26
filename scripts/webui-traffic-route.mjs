@@ -30,6 +30,56 @@ const maximumSectionBytes = 4 * 1_048_576;
 /** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
 const maximumTracePageSize = 100;
 
+/** 指标记录与调用记录共用的关联键；引用缺失或形态无效时返回 null，不猜测其他批次。 */
+export function dumpReferenceKey(reference) {
+  if (reference === null || reference === undefined) return null;
+  const { label, session, interaction } = reference;
+  if (typeof label !== "string" || label === "" || typeof session !== "string" || session === ""
+    || !Number.isSafeInteger(interaction) || interaction <= 0) {
+    return null;
+  }
+  return `${label}\u0000${session}\u0000${interaction}`;
+}
+
+/**
+ * 请求明细列表按需关联调用记录里的 Chat 上游提供商：只读本页出现的批次索引，
+ * 调用记录缺失、格式不支持或读取失败时返回空表，既不阻断指标展示，也不回填历史。
+ */
+export async function readDumpUpstreamProviders(environment, references) {
+  const providers = new Map();
+  const groups = new Map();
+  for (const reference of references) {
+    if (dumpReferenceKey(reference) === null) continue;
+    const key = `${reference.label}\u0000${reference.session}`;
+    if (!groups.has(key)) groups.set(key, { label: reference.label, session: reference.session });
+  }
+  if (groups.size === 0) return providers;
+  const located = locateOptionalUserConfig(environment);
+  const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
+  let catalog;
+  try {
+    catalog = dumpCatalog(directory);
+  } catch {
+    return providers;
+  }
+  for (const group of groups.values()) {
+    const files = selectFilesOfLabel(catalog.files, group.label, group.session);
+    if (files.length === 0) continue;
+    let page;
+    try {
+      page = await summarizeDumpFiles(files, {});
+    } catch {
+      continue;
+    }
+    for (const exchange of page.exchanges) {
+      if (exchange.upstreamProvider === undefined) continue;
+      const key = dumpReferenceKey({ label: group.label, session: group.session, interaction: exchange.id });
+      if (key !== null) providers.set(key, exchange.upstreamProvider);
+    }
+  }
+  return providers;
+}
+
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
   if (!["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {

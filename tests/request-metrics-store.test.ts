@@ -63,7 +63,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     `, join(directory, "metrics.sqlite3")], { cwd: process.cwd(), stdio: "pipe", timeout: 15000 });
   });
 
-  it("derives request speed and averages only eligible raw requests across scopes", () => {
+  it("derives request speed and pools output over eligible request time across scopes", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
     const base = { ...sample(), recordedAtMs: 2_000 };
     store.recordBatch([
@@ -76,15 +76,49 @@ describe("SqliteModelRequestMetricsStore", () => {
       { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000 },
     ]);
     expect(store.recent(7).map((row) => row.tokensPerSecond)).toEqual([900, null, null, null, null, 300, 100]);
-    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
-    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(200);
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(250);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(250);
     const scope = { startAtMs: 1_000, endAtMs: 3_000, limit: 1, sortKey: "tokensPerSecond" as const, sortDirection: "desc" as const };
     expect(store.threadList(scope).threads[0]).toMatchObject({ threadId: "other", tokensPerSecond: 900 });
-    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(200);
+    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(250);
     expect(store.page(scope).records[0]?.tokensPerSecond).toBe(900);
     store.recordSubagentThread({ agentThreadId: "other", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
-    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBeCloseTo(1300 / 3);
-    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(200);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(380);
+    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(250);
+    store.close();
+  });
+  it("derives decode-window speed and pools output over eligible decode windows", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    const base = { ...sample(), recordedAtMs: 2_000 };
+    store.recordBatch([
+      { ...base, outputTokens: 100, totalDurationMs: 1_000, firstContentMs: 200 },
+      { ...base, outputTokens: 900, totalDurationMs: 3_000, firstContentMs: 1_000 },
+      { ...base, outputTokens: 100, totalDurationMs: 1_000, firstContentMs: 1_000 },
+      { ...base, outputTokens: 100, totalDurationMs: 1_000 },
+      { ...base, outputTokens: 0, totalDurationMs: 1_000, firstContentMs: 200 },
+      { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000, firstContentMs: 100 },
+    ]);
+    expect(store.recent(6).map((row) => row.generationTokensPerSecond))
+      .toEqual([1_000, null, null, null, 450, 125]);
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.generationTokensPerSecond)
+      .toBeCloseTo(1_000_000 / 2_800);
+    // 端到端口径只看请求总耗时，缺少首字样本的记录仍然参与。
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
+    expect(store.threadSummary("thread-1").threadAggregate?.generationTokensPerSecond)
+      .toBeCloseTo(1_000_000 / 2_800);
+    const scope = {
+      startAtMs: 1_000,
+      endAtMs: 3_000,
+      limit: 1,
+      sortKey: "generationTokensPerSecond" as const,
+      sortDirection: "desc" as const,
+    };
+    expect(store.threadList(scope).threads[0])
+      .toMatchObject({ threadId: "other", generationTokensPerSecond: 1_000 });
+    expect(store.page(scope).records[0]?.generationTokensPerSecond).toBe(1_000);
+    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.generationTokensPerSecond)
+      .toBeCloseTo(1_000_000 / 2_800);
+    expect(store.page(scope).aggregate?.generationTokensPerSecond).toBeCloseTo(1_900_000 / 3_700);
     store.close();
   });
   it("persists TTFT and restores the first eligible sample for the exact Turn", () => {

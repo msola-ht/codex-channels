@@ -112,6 +112,7 @@ export interface StoredQuotaPeriod {
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
   tokensPerSecond?: number | null;
+  generationTokensPerSecond?: number | null;
   id: number;
   recordedAtMs: number;
   uncachedInputTokens: number | null;
@@ -129,8 +130,10 @@ export interface StoredCompactRequestMetricsSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
-  /** 有效请求输出速率的算术平均，不是会话墙钟吞吐量。 */
+  /** 有效请求合计输出除以合计请求耗时，合并口径；不是会话墙钟吞吐量。 */
   tokensPerSecond?: number | null;
+  /** 有效请求合计输出除以合计解码窗口（总耗时减去首内容延迟），合并口径。 */
+  generationTokensPerSecond?: number | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
   upstreamTtftMs?: number | null;
   provider: string | null;
@@ -148,6 +151,7 @@ export interface StoredTurnRequestMetricsSummary {
 
 export interface StoredThreadRequestMetricsAggregate {
   tokensPerSecond?: number | null;
+  generationTokensPerSecond?: number | null;
   provider: string | null;
   turnCount: number;
   requestCount: number;
@@ -179,6 +183,7 @@ export interface StoredCacheUsage {
 export interface StoredThreadListItem {
   cacheUsage: StoredCacheUsage;
   tokensPerSecond?: number | null;
+  generationTokensPerSecond?: number | null;
   threadId: string;
   provider: string | null;
   model: string | null;
@@ -232,6 +237,7 @@ export interface ModelRequestMetricsAggregationQuery extends ModelRequestMetrics
 export interface StoredModelRequestMetricsAggregate {
   cacheUsage: StoredCacheUsage;
   tokensPerSecond?: number | null;
+  generationTokensPerSecond?: number | null;
   requestCount: number;
   unsuccessfulRequestCount: number;
   inputTokens: number;
@@ -279,6 +285,7 @@ export interface ModelRequestMetricsPageQuery extends ModelRequestMetricsScope {
 
 export type ModelRequestMetricsSortKey =
   | "tokensPerSecond"
+  | "generationTokensPerSecond"
   | "totalDurationMs"
   | "recordedAtMs"
   | "provider"
@@ -302,6 +309,7 @@ export interface StoredModelRequestMetricsPage {
 
 export type ModelRequestMetricsThreadSortKey =
   | "tokensPerSecond"
+  | "generationTokensPerSecond"
   | "time" | "last" | "thread" | "turn" | "provider" | "model"
   | "turns" | "requests" | "failures" | "input" | "output" | "compact";
 

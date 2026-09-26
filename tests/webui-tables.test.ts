@@ -20,6 +20,7 @@ describe("WebUI metrics table presentation", () => {
         } }],
       });
       try {
+        const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
@@ -59,6 +60,10 @@ describe("WebUI metrics table presentation", () => {
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
         const result = {
+          newAccount: render(AccountIdField, { id: "account", value: "main", accounts: [], disabled: false, editing: false, onChange: noop }),
+          reservedAccount: render(AccountIdField, { id: "account", value: "openai", accounts: [], reservedIds: ["openai", "deepseek", "ocg"], disabled: false, editing: false, onChange: noop }),
+          customAccount: render(AccountIdField, { id: "account", value: "team_a", accounts: [{ id: "team-a" }], disabled: false, editing: false, onChange: noop }),
+          editingAccount: render(AccountIdField, { id: "account", value: "main", accounts: [{ id: "main" }], disabled: false, editing: true, onChange: noop }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
           shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
@@ -79,10 +84,14 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "tokensPerSecond", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
@@ -137,6 +146,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].requestServiceTier = "priority";
         errorsData.records[0].serviceTier = "default";
         result.fastErrors = render(ErrorsPage, {});
+        errorsData.records[0].upstreamProvider = "deepseek";
+        result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
@@ -178,6 +189,44 @@ describe("WebUI metrics table presentation", () => {
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
 
+  it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
+    for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
+      const html = markup[key]!;
+      expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+      expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+      expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
+    }
+    expect(markup.requests).not.toContain('title="routing.finalProvider"');
+    expect(markup.traffic).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the recorded upstream provider on the error list without adding a column", () => {
+    const html = markup.errorsUpstream!;
+    expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+    expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+    expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
+    expect(markup.errors).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
+    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
+    expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
+    expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("renders account presets, custom validation and an immutable existing ID", () => {
+    expect(markup.newAccount).toContain('role="combobox"');
+    expect(markup.newAccount).not.toContain("自定义账户 ID");
+    expect(markup.reservedAccount).toContain("该账户 ID 为保留名称");
+    expect(markup.reservedAccount).toContain('aria-invalid="true"');
+    expect(markup.customAccount).toContain("自定义账户 ID");
+    expect(markup.customAccount).toContain("账户 ID 或凭据变量名已被使用");
+    expect(markup.customAccount).toContain('aria-invalid="true"');
+    expect(markup.editingAccount).toMatch(/<input[^>]*disabled=""[^>]*value="main"/);
+    expect(markup.editingAccount).not.toContain("自定义");
+  });
+
   it("renders a single-row filter toolbar with flexible search and collapsed secondary fields", () => {
     expect(markup.filters).toContain("flex-row flex-nowrap items-center gap-2");
     expect(markup.filters).toContain("min-w-0 flex-1");
@@ -217,7 +266,7 @@ describe("WebUI metrics table presentation", () => {
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
       "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
-      "首字耗时", "总耗时", "Token/s", "调用详情",
+      "首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
@@ -257,10 +306,10 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "平均 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "生成 Token/s", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "平均 Token/s",
+      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "生成 Token/s",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -285,7 +334,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("时间");
-    const speedIndex = headers(markup.ascending!).indexOf("Token/s");
+    const speedIndex = headers(markup.ascending!).indexOf("端到端 Token/s");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -307,7 +356,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首字耗时", "总耗时", "Token/s", "调用详情"]) {
+    for (const label of ["首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");

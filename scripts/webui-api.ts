@@ -62,6 +62,7 @@ export interface CacheUsage {
 export interface Aggregate {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -158,6 +159,7 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 export interface ThreadListItem {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -182,6 +184,7 @@ export interface ThreadsResponse extends MetricsPageSummary {
 
 export interface TurnSummary {
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -215,6 +218,9 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 
 export interface RequestRecord {
   tokensPerSecond?: number | null
+  generationTokensPerSecond?: number | null
+  /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
+  upstreamProvider?: string
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
   firstContentMs: number | null
@@ -249,6 +255,7 @@ export interface RequestRecord {
 
 export type RequestSortKey =
   | "tokensPerSecond"
+  | "generationTokensPerSecond"
   | "totalDuration"
   | "time"
   | "provider"
@@ -680,6 +687,10 @@ export interface ManagementAccountSettingsResponse {
       default: boolean
     }>
   }
+  clinePass: {
+    configured: boolean
+    accounts: Array<{ id: string; default: boolean; mode: "switching" | "exclusive" | null; model: string | null }>
+  }
   deepseek: {
     configured: boolean
     legacyConfigurationPresent: boolean
@@ -703,14 +714,14 @@ export type ManagementAccountSettingsMutationInput =
   | { operation: "opencode.account.stop"; accountId: string }
   | { operation: "opencode.account.remove"; accountId: string; confirmHistoryLoss?: boolean }
   | {
-      operation: "deepseek.configure"
+      operation: "deepseek.configure" | "clp.configure"
       accountId: string
       reconfigure?: boolean
       mode?: "switching" | "exclusive"
       apiKey: string
       confirmExclusiveConfigChange?: boolean
     }
-  | { operation: "deepseek.default" | "deepseek.remove"; accountId: string }
+  | { operation: "deepseek.default" | "deepseek.remove" | "clp.default" | "clp.remove"; accountId: string }
   | { operation: "deepseek.legacy.remove" }
 
 export interface ManagementAccountSettingsPreview {
@@ -786,7 +797,7 @@ export interface OpencodeGoQuotaWindow {
   localTokens?: number | null
 }
 
-export interface OpencodeGoAccountUsage {
+export interface QuotaAccountUsage {
   subscriptionRequired: boolean
   provider: string
   account: string | null
@@ -798,7 +809,7 @@ export interface OpencodeGoAccountUsage {
 }
 
 export interface OpencodeGoUsageResponse {
-  accounts: OpencodeGoAccountUsage[]
+  accounts: QuotaAccountUsage[]
 }
 
 export interface CcgCreditAccountUsage {
@@ -835,7 +846,7 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "deepseek" | "opencode-go" | "ccg"
+    source: "deepseek" | "opencode-go" | "ccg" | "clp"
     code: "registry_unavailable"
     message: string
   }>
@@ -868,6 +879,8 @@ export interface TrafficExchangeSummary {
   hasError: boolean
   requestModel?: string
   responseModels: string[]
+  /** Chat 上游诊断记录的实际上游提供商；缺失表示没有诊断或不适用。 */
+  upstreamProvider?: string
 }
 
 export interface TrafficListResponse {
@@ -894,6 +907,7 @@ export interface TrafficTurnStatesResponse {
 export type TrafficHeaderValue = string | string[]
 
 export interface TrafficExchangeDetail {
+  chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
     safetyModels: Array<{ source: string; model: string }>
@@ -911,6 +925,8 @@ export interface TrafficExchangeDetail {
   category: "models" | "prewarm" | "model"
   requestModel?: string
   responseModels: string[]
+  /** 与调用列表同源的 Chat 上游提供商；详情同时保留完整诊断字段。 */
+  upstreamProvider?: string
   state: "completed" | "failed" | "incomplete" | "pending"
   url?: string
   request: {

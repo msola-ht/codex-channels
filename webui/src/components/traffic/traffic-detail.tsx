@@ -37,6 +37,7 @@ export function TrafficDetail({
   traceError?: boolean
   onRetry: () => void
 }) {
+  const finalProvider = detail.chatDiagnostics?.fields["routing.finalProvider"]
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const copyReference = async () => {
     setCopyState("pending")
@@ -62,7 +63,10 @@ export function TrafficDetail({
         <StateBadge state={detail.state} />
         <Badge variant="outline">{detail.category === "models" ? "模型列表查询"
           : detail.category === "prewarm" ? "连接预热" : detail.requestKind ?? "模型请求"}</Badge>
-        <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <TrafficModel request={detail.requestModel} responses={detail.responseModels} />
+          {typeof finalProvider === "string" && finalProvider.trim() !== "" ? <Badge variant="outline" className="whitespace-normal break-all" title="routing.finalProvider">上游：{finalProvider}</Badge> : null}
+        </div>
         <span className="min-w-0 break-all text-muted-foreground">
           线程 {detail.threadId ?? "未提供"} · 轮次 {detail.turnId ?? "未提供"}
           {detail.account === undefined ? "" : ` · 账户 ${detail.account}`}
@@ -155,6 +159,13 @@ export function TrafficDetail({
           </CardContent>
         </Card>
       )}
+
+      {detail.chatDiagnostics ? <TrafficDisclosure title="Chat 上游信息">
+        <p className="text-sm">实际上游：{String(detail.chatDiagnostics.fields["routing.finalProvider"] ?? "未提供")} · 上游模型：{String(detail.chatDiagnostics.fields.model ?? "未提供")}</p>
+        <p className="text-xs text-muted-foreground">上游回报的路由、标识和费用；不同费用字段保持各自口径，不代表套餐实际扣费。备用提供商不代表已调用。</p>
+        <TrafficContent title="上游诊断字段" text={JSON.stringify(detail.chatDiagnostics.fields, null, 2)} json />
+        {detail.chatDiagnostics.truncated ? <p className="text-xs text-muted-foreground">部分诊断字段超出限制或格式无效，未保留。</p> : null}
+      </TrafficDisclosure> : null}
 
       <TrafficDisclosure title="诊断信息：详细耗时、模型声明与参数对照">
         {detail.response === null ? null : <TimingSummary response={detail.response} />}

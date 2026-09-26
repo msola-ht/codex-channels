@@ -10,7 +10,7 @@ Codex Connect 支持在一个 Gateway 内配置多个 OpenCode Go 账户。每�
 
 ## Provider 与 Thread 语义
 
-首次和后续添加都必须输入账户 ID。所有账户使用 `ocg-<accountId>`；默认账户只由注册表中的
+首次和后续添加都必须选择预设或输入自定义账户 ID。`openai`、`deepseek`、`ocg` 是保留名称，CLI、WebUI 与配置写入均拒绝使用。所有账户使用 `ocg-<accountId>`；默认账户只由注册表中的
 `default: true` 标记决定：
 
 ```text
