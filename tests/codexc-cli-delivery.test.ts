@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { DeliveryJournal } from "../src/surfaces/index.js";
 import { cli, mkdtempSync, updateGatewayConfig } from "./codexc-cli-test-fixture.js";
 
-it("provides redacted live status and refuses recovery or rollback without exclusive ownership and acknowledgement", () => {
+it("provides redacted live status and refuses recovery or rollback without exclusive ownership and acknowledgement", async () => {
   const root = mkdtempSync(join(tmpdir(), "delivery-cli-test-"));
   const data = join(root, "connect");
   const workspace = join(root, "workspace"); mkdirSync(workspace);
@@ -27,10 +27,25 @@ it("provides redacted live status and refuses recovery or rollback without exclu
     expect(status.stdout).not.toContain("secret body");
     expect(status.stdout).not.toContain("private-chat");
     expect(run("delivery", "resolve", id, "--acknowledge").status).toBe(1);
+    const deliveryRecoveryWarning = async (environment: NodeJS.ProcessEnv) => {
+      const moduleUrl = new URL("../scripts/delivery-command.mjs", import.meta.url).href;
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e",
+        `const { deliveryRecoveryWarning } = await import(${JSON.stringify(moduleUrl)}); console.log(await deliveryRecoveryWarning() ?? "");`],
+      { env: environment, encoding: "utf8", timeout: 10_000 });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim() || undefined;
+    };
+    expect(await deliveryRecoveryWarning(env)).toBeUndefined();
+    journal.mark(id, "uncertain");
+    expect(await deliveryRecoveryWarning(env)).toContain("未决记录=1");
+    journal.fail();
+    expect(await deliveryRecoveryWarning(env)).toContain("恢复保护=开启");
     journal.close();
     expect(run("delivery", "check-rollback").status).toBe(1);
     expect(run("delivery", "resolve", id).status).toBe(1);
     expect(run("delivery", "resolve", id, "--acknowledge").status).toBe(0);
+    expect(run("delivery", "clear-fault", "--acknowledge").status).toBe(0);
+    expect(await deliveryRecoveryWarning(env)).toBeUndefined();
     expect(run("delivery", "check-rollback").status).toBe(0);
     for (const command of ["status", "resolve", "clear-fault", "check-rollback"]) {
       for (const help of ["-h", "--help"]) expect(run("delivery", command, help).status).toBe(0);

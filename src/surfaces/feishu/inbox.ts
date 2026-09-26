@@ -1,5 +1,5 @@
 import type { DeliveryJournal } from "../delivery-journal.js";
-import { DurableInputQueue } from "../durable-input-queue.js";
+import { DurableInputQueue, type DeliveryFailureMetadata } from "../durable-input-queue.js";
 import { conversationTargetKey, type ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -68,7 +68,7 @@ export type FeishuInboxReceiveResult =
 
 export interface FeishuInboxOptions {
   journal?: DeliveryJournal | undefined;
-  onUncertain?(id: string): void;
+  onUncertain?(id: string, metadata?: DeliveryFailureMetadata): void;
   accountId: string;
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
@@ -151,7 +151,7 @@ export class FeishuInbox {
           if (!options.access.isAllowed({ target: message.target, actorId: message.actorId })) return;
           options.actorRegistry?.rememberActor(message.target, message.actorId);
           await options.handle(message);
-        }, onUncertain: id => options.onUncertain?.(id),
+        }, onUncertain: (id, metadata) => options.onUncertain?.(id, metadata),
       });
     }
   }

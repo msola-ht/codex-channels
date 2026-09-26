@@ -1624,14 +1624,14 @@ export class TelegramOutbox {
     if (this.closed) {
       return;
     }
-    this.enqueue(chatId, async (signal) => {
+    this.delivery.enqueueAuxiliary(chatId, async (signal) => {
       if (!isCurrent()) return;
       await this.executor.call(
         { chatId, operation: "sendChatAction", critical: false },
         (requestSignal) => this.api.sendChatAction(chatId, "typing", requestSignal as never),
         signal,
       );
-    }, false);
+    });
   }
 
   private clearThreadOutput(chatId: string, threadId: string): void {

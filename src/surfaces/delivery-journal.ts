@@ -33,8 +33,8 @@ export interface DeliveryJournalOptions {
   maintenance?: boolean;
 }
 export class DeliveryJournalError extends Error {
-  constructor(readonly code: "full" | "invalid" | "closed") {
-    super(code === "full" ? "消息待处理日志已满" : code === "closed" ? "消息待处理日志已关闭" : "消息待处理日志校验失败");
+  constructor(readonly code: "full" | "invalid" | "closed" | "recovery-required") {
+    super(code === "recovery-required" ? "消息交付恢复保护尚未解除" : code === "full" ? "消息待处理日志已满" : code === "closed" ? "消息待处理日志已关闭" : "消息待处理日志校验失败");
     this.name = "DeliveryJournalError";
   }
 }
@@ -167,7 +167,7 @@ export class DeliveryJournal {
     this.assertOpen();
     const id = DeliveryJournal.id(input.id);
     if (this.db.prepare("SELECT 1 FROM entries WHERE id=?").get(id)) return false;
-    if (this.failed && purpose === "input" && !input.control) throw new DeliveryJournalError("invalid");
+    if (this.failed && purpose === "input" && !input.control) throw new DeliveryJournalError("recovery-required");
     const payload = this.seal(id, JSON.stringify(input));
     this.db.exec("BEGIN IMMEDIATE");
     try {

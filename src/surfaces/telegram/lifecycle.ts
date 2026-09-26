@@ -1,5 +1,5 @@
 import { conversationTargetKey } from "../../conversation-core/index.js";
-import type { DeliveryJournal } from "../delivery-journal.js";
+import { DeliveryJournalError, type DeliveryJournal } from "../delivery-journal.js";
 import { DurableInputQueue } from "../durable-input-queue.js";
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
@@ -88,7 +88,7 @@ export class TelegramLifecycle {
         if (groupSize > 1) updateGroupSizes.set(update, groupSize);
         await this.handleUpdate(update, signal);
       },
-      onUncertain: id => this.logger.error({ deliveryId: id }, "Telegram 输入结果待核对，未自动重发"),
+      onUncertain: (id, metadata) => this.logger.error({ ...metadata, deliveryId: id }, "Telegram 输入结果待核对，未自动重发"),
     });
   }
 
@@ -256,10 +256,13 @@ export class TelegramLifecycle {
   private async pollUpdates(signal: AbortSignal): Promise<void> {
     let offset = 0;
     let consecutiveFailures = 0;
+    let admissionFailures = 0;
+    let admissionReason: string | undefined;
     const pending = this.unconfirmedUpdates;
     const inputSignal = this.inputAbort.signal;
     const maximumFailures = 12;
     while (!this.stopping && !signal.aborted) {
+      let phase: "fetch" | "admission" = "fetch";
       try {
         await this.waitForUpdateCapacity(signal);
         if (this.stopping || signal.aborted) {
@@ -283,6 +286,7 @@ export class TelegramLifecycle {
         if (signal.aborted || this.stopping) return;
         consecutiveFailures = 0;
         if (this.durable) {
+          phase = "admission";
           for (const id of this.rejectedUpdates) if (id < offset) this.rejectedUpdates.delete(id);
           let failed = false;
           let failure: unknown;
@@ -303,6 +307,9 @@ export class TelegramLifecycle {
             if (!failed) offset = update.update_id + 1;
           }
           if (failed) throw failure;
+          if (admissionFailures > 0) this.logger.info({ phase, attempts: admissionFailures }, "Telegram 消息接纳已恢复");
+          admissionFailures = 0;
+          admissionReason = undefined;
           continue;
         }
         // Only a successful fetch proves that Telegram saw this offset. Keep
@@ -343,6 +350,19 @@ export class TelegramLifecycle {
       } catch (error) {
         if (this.stopping || signal.aborted) {
           return;
+        }
+        if (phase === "admission") {
+          const reason = error instanceof DeliveryJournalError ? error.code : "storage-error";
+          if (reason !== admissionReason) admissionFailures = 0;
+          admissionReason = reason;
+          admissionFailures += 1;
+          const retryAfterMs = Math.min(30_000, 1_000 * 2 ** Math.min(admissionFailures - 1, 5));
+          if (admissionFailures === 1 || admissionFailures % 10 === 0) {
+            this.logger.warn({ phase, reason, attempt: admissionFailures, retryAfterMs,
+              ...telegramErrorMetadata(error) }, "Telegram 消息未接纳，保留确认位置并退避等待；请检查 codexc delivery status --json");
+          }
+          await waitWithAbort(retryAfterMs, signal);
+          continue;
         }
         consecutiveFailures += 1;
         if (consecutiveFailures >= maximumFailures) {

@@ -241,3 +241,85 @@ it.each([false, true])("Feishu recovers an image group and confirms or quarantin
     if (fails) await vi.waitFor(() => expect(journal.usage().uncertain).toBe(2));
   } finally { release(); await restored.close(); }
 });
+
+it("TG typing network failure does not quarantine durable input or block the next message", async () => {
+  const { UserFacingError } = await import("../src/conversation-core/index.js");
+  const { DurableInputQueue } = await import("../src/surfaces/durable-input-queue.js");
+  const { createTelegramSurfaceFixture, cleanupTelegramSurfaceTestDirectories, telegramChat, telegramUser } = await import("./telegram-surface-test-fixture.js");
+  const journal = journalFixture();
+  const directories: string[] = [];
+  let typingFailed!: () => void;
+  const failed = new Promise<void>(resolve => { typingFailed = resolve; });
+  const submit = vi.fn(async () => {
+    await failed;
+    throw new UserFacingError("audio.unsupported", "safe rejection");
+  });
+  const fixture = createTelegramSurfaceFixture(directories, submit, vi.fn(), {}, vi.fn(), vi.fn(), undefined, false, undefined, journal);
+  fixture.surface.bot.api.config.use(async (previous, method, payload, signal) => {
+    if (method === "sendChatAction") {
+      typingFailed();
+      throw Object.assign(new Error("private network details"), { code: "ECONNRESET" });
+    }
+    return previous(method, payload, signal);
+  });
+  const onUncertain = vi.fn();
+  const queue = new DurableInputQueue<number>({ journal, stream: "tg-test", onUncertain,
+    handle: async id => fixture.surface.bot.handleUpdate({ update_id: id,
+      message: { message_id: id, date: 1, chat: telegramChat(), from: telegramUser(), text: "hello" } }),
+  });
+  try {
+    queue.start();
+    queue.accept("1", "chat", 1);
+    queue.accept("2", "chat", 2);
+    await vi.waitFor(() => expect(journal.usage().records).toBe(0), { timeout: 4000 });
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(onUncertain).not.toHaveBeenCalled();
+    expect(fixture.sentTexts).toHaveLength(2);
+  } finally { typingFailed(); await queue.close(); await fixture.surface.stop(); await fixture.output.close(); cleanupTelegramSurfaceTestDirectories(directories); }
+});
+
+it.each(["recovery-required", "full", "storage-error"])("TG separates %s admission failures, backs off and preserves controls and offset", async reason => {
+  const { DeliveryJournalError } = await import("../src/surfaces/index.js");
+  vi.useFakeTimers();
+  const journal = journalFixture();
+  const accept = journal.accept.bind(journal);
+  let blocked = true;
+  vi.spyOn(journal, "accept").mockImplementation((input, purpose) => {
+    if (blocked && !input.control) throw reason === "storage-error" ? new Error("secret path") : new DeliveryJournalError(reason as "full" | "recovery-required");
+    return accept(input, purpose);
+  });
+  const entries: Array<Record<string, unknown>> = [];
+  const log = pino({ level: "info" }, { write: value => entries.push(JSON.parse(value)) });
+  const offsets: number[] = [];
+  const handled: number[] = [];
+  const updates = [1, 2].map(id => ({ update_id: id, message: { message_id: id, date: 1,
+    chat: { id: 1, type: "private" }, from: { id: 1, is_bot: false, first_name: "User" }, text: id === 2 ? "/stop" : "secret body" } }));
+  const bot = { botInfo: { username: "test_bot" }, init: async () => {},
+    handleUpdate: async (update: { update_id: number }) => { handled.push(update.update_id); },
+    api: { setMyCommands: async () => true, getUpdates: async ({ offset }: { offset: number }, signal: AbortSignal) => {
+      offsets.push(offset);
+      if (offset < 3) return updates;
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      return [];
+    } },
+  };
+  const fatal = vi.fn();
+  const lifecycle = new TelegramLifecycle(bot as unknown as Bot, log, undefined, fatal, { journal });
+  try {
+    lifecycle.start();
+    await vi.advanceTimersByTimeAsync(62_000);
+    expect(offsets.length).toBeLessThanOrEqual(8);
+    expect(new Set(offsets)).toEqual(new Set([0]));
+    expect(handled).toEqual([2]);
+    expect(fatal).not.toHaveBeenCalled();
+    const warnings = entries.filter(entry => entry.level === 40);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ phase: "admission", reason, attempt: 1, retryAfterMs: 1000 });
+    expect(JSON.stringify(entries)).not.toMatch(/secret|Long Polling 请求失败/);
+    blocked = false;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(handled).toEqual([2, 1]);
+    expect(offsets.at(-1)).toBe(3);
+    expect(entries.some(entry => entry.msg === "Telegram 消息接纳已恢复")).toBe(true);
+  } finally { await lifecycle.stop(); vi.useRealTimers(); }
+});

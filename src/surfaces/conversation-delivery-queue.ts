@@ -97,6 +97,11 @@ export class ConversationDeliveryQueue {
     return accepted;
   }
 
+  /** Auxiliary status must never participate in durable message acknowledgement. */
+  enqueueAuxiliary(conversationId: string, run: (signal: AbortSignal) => Promise<void>): boolean {
+    return this.tracking.exit(() => this.enqueue(conversationId, run, false));
+  }
+
   async track(conversationId: string, enqueue: () => Promise<void> | void): Promise<void> {
     if (this.closed) throw new Error("输出队列已关闭");
     const tracking = { conversationId, tasks: [] as Promise<void>[] };

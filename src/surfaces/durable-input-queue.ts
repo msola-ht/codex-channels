@@ -1,4 +1,19 @@
+import { surfaceErrorMetadata } from "./error-metadata.js";
 import { DeliveryJournal, type DeliveryRecord } from "./delivery-journal.js";
+
+export interface DeliveryFailureMetadata {
+  phase: "processing" | "handoff" | "confirmation";
+  purpose: "input" | "output";
+  lane: string;
+  control: boolean;
+  groupSize: number;
+  queueWaitMs: number;
+  elapsedMs: number;
+  aborted: boolean;
+  recoveryRequired: boolean;
+  errorType: string;
+  errorCode?: string | number;
+}
 
 export interface DurableInputQueueOptions<T> {
   journal: DeliveryJournal;
@@ -8,7 +23,7 @@ export interface DurableInputQueueOptions<T> {
   handle(payload: T, signal: AbortSignal, groupSize: number, sequence: number): Promise<void>;
   handleBatch?(payloads: readonly T[], signal: AbortSignal): Promise<void>;
   groupKey?(payload: T): string | undefined;
-  onUncertain(id: string): void;
+  onUncertain(id: string, metadata?: DeliveryFailureMetadata): void;
   concurrency?: number;
   available?(): boolean;
 }
@@ -103,35 +118,55 @@ export class DurableInputQueue<T> {
     if (this.options.handleBatch && this.options.groupKey?.(batch[0]!.payload) !== undefined) {
       if (this.abort.signal.aborted || this.inputPaused(batch[0]!.control)) return;
       const ids = batch.map(record => record.id);
+      const startedAt = Date.now();
+      let phase: DeliveryFailureMetadata["phase"] = "processing";
       try {
         this.options.journal.markMany(ids, "processing");
+        phase = "handoff";
         await this.options.handleBatch(batch.map(record => record.payload), this.abort.signal);
+        phase = "confirmation";
         if (this.abort.signal.aborted || this.inputPaused(batch[0]!.control)) throw new Error("输入组交接需要核对");
         this.options.journal.markMany(ids, "done");
-      } catch {
+      } catch (error) {
         try { this.options.journal.markMany(ids, "uncertain"); }
         catch {
           this.abort.abort();
           try { this.options.journal.fail(); } catch { /* Keep the startup guard. */ }
         }
-        for (const id of ids) this.options.onUncertain(id);
+        for (const record of batch) this.reportFailure(record, batch.length, startedAt, phase, error);
       }
       return;
     }
     await Promise.all(batch.map(async record => {
       if (this.abort.signal.aborted || this.inputPaused(record.control)) return;
+      const startedAt = Date.now();
+      let phase: DeliveryFailureMetadata["phase"] = "processing";
       try {
         this.options.journal.mark(record.id, "processing");
+        phase = "handoff";
         await this.options.handle(record.payload, this.abort.signal, batch.length, record.sequence);
+        phase = "confirmation";
         if (this.abort.signal.aborted || this.inputPaused(record.control)) throw new Error("输入交接需要核对");
         this.options.journal.mark(record.id, "done");
-      } catch {
+      } catch (error) {
         try { this.options.journal.mark(record.id, "uncertain"); } catch {
           this.abort.abort();
           try { this.options.journal.fail(); } catch { /* Keep the startup guard. */ }
         }
-        this.options.onUncertain(record.id);
+        this.reportFailure(record, batch.length, startedAt, phase, error);
       }
     }));
   }
+
+  private reportFailure(record: DeliveryRecord<T>, groupSize: number, startedAt: number,
+    phase: DeliveryFailureMetadata["phase"], error: unknown): void {
+    const { errorType, errorCode } = surfaceErrorMetadata(error);
+    this.options.onUncertain(record.id, {
+      phase, purpose: this.options.purpose ?? "input", lane: DeliveryJournal.id(record.lane), control: record.control, groupSize,
+      queueWaitMs: Math.max(0, startedAt - record.createdAt), elapsedMs: Math.max(0, Date.now() - startedAt),
+      aborted: this.abort.signal.aborted, recoveryRequired: this.options.journal.recoveryRequired,
+      errorType, ...(errorCode === undefined ? {} : { errorCode }),
+    });
+  }
+
 }

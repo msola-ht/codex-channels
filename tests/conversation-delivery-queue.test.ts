@@ -451,3 +451,28 @@ it("associates nested output with its own tracking context on an existing worker
   })).rejects.toThrow("nested failed");
   await queue.close();
 });
+
+it("isolates auxiliary failure, capacity rejection and in-flight waits from tracked acknowledgement", async () => {
+  const entries: Array<Record<string, unknown>> = [];
+  const log = pino({ level: "warn" }, { write: value => { entries.push(JSON.parse(value)); } });
+  const queue = new ConversationDeliveryQueue(log, { component: "Test", capacity: 1 });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  try {
+    await queue.track("chat", () => {
+      queue.enqueueAuxiliary("chat", async () => { await gate; throw new Error("private body"); });
+    });
+    await settle();
+    await queue.track("chat", () => {
+      expect(queue.enqueueAuxiliary("chat", async () => {})).toBe(true);
+      expect(queue.enqueueAuxiliary("chat", async () => {})).toBe(false);
+    });
+    release();
+    await vi.waitFor(() => expect(entries.some(entry => entry.msg === "Surface Conversation 输出失败")).toBe(true));
+    expect(entries.find(entry => entry.msg === "Surface Conversation 输出失败")).toMatchObject({ critical: false });
+    expect(JSON.stringify(entries)).not.toContain("private body");
+    await expect(queue.track("chat", () => {
+      queue.enqueue("chat", async () => { throw new Error("required reply failed"); }, false);
+    })).rejects.toThrow("required reply failed");
+  } finally { release(); await queue.close(); }
+});

@@ -540,4 +540,4 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
 
-- `delivery-command.mjs`：通过 Surface 公共入口查看脱敏待处理清单；停服独占后核对完成、清理故障和检查回滚条件，不自动重发消息。
+- `delivery-command.mjs`：通过 Surface 公共入口查看脱敏待处理清单；停服独占后核对完成、清理故障和检查回滚条件，并提供启动后的只读恢复告警，不自动重发消息。

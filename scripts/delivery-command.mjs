@@ -13,6 +13,19 @@ export const deliveryUsage = `用法：codexc delivery <status|resolve|clear-fau
 resolve 会清理对应暂存正文。执行前必须核对 App Server/渠道结果；无法核对时保留记录。
 已停止、未确认的交接不会自动重发。所有命令支持 -h 和 --help。`;
 
+export async function deliveryRecoveryWarning(environment = process.env) {
+  const { DeliveryJournal } = await import("../dist/surfaces/index.js");
+  const { configPath } = runtimeConfig(environment);
+  const config = validateGatewayConfigDocument(readGatewayConfig(configPath));
+  const directory = join(dirname(resolveConfiguredPath(config.storage.database_path, dirname(configPath))), "delivery-v1");
+  if (!existsSync(directory)) return undefined;
+  const status = DeliveryJournal.status(directory);
+  const uncertain = status.records.filter(record => record.state === "uncertain").length;
+  if (!status.recoveryRequired && uncertain === 0) return undefined;
+  return `Gateway 进程已就绪，但消息交付受限：恢复保护=${status.recoveryRequired ? "开启" : "关闭"}，未决记录=${uncertain}。`
+    + "请运行 codexc delivery status --json；在本机终端停止 Gateway、核对并 resolve 未决记录、clear-fault 后再启动。不要删除 pending 或日志数据库。";
+}
+
 export async function runDeliveryCommand(args, environment = process.env) {
   const [command, ...rest] = args;
   if (!command || args.includes("--help") || args.includes("-h")) {

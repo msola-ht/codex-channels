@@ -114,7 +114,7 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 必须保持纯内存、有界且严格验证 UTF-8。
 网络故障不触发格式回退；格式回退仅处理明确的 Telegram 400 响应，已成功应用的重复编辑不另发新消息。
 命令回复和消息编辑与普通输出共用 Conversation 队列及 API 执行器。
-关闭时普通输出最多排空 5 秒，交互等待者立即取消；超时后停止后续发送。输出仅存于内存，不保证重启后补发。
+关闭时普通输出最多排空 5 秒，交互等待者立即取消；超时后停止后续发送。非关键输出仅存于内存；生产关键输出由独立交接日志恢复，未决记录须核对后解除。
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
 遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责

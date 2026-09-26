@@ -219,3 +219,45 @@ it("cancels a grouped submission as one unresolved unit and never replays it on 
   expect(batch).toHaveBeenCalledOnce();
   await restored.close();
 });
+
+it.each([false, true])("reports safe correlated handoff diagnostics for grouped=%s failures", async grouped => {
+  const { journal } = fixture();
+  const onUncertain = vi.fn();
+  const fail = async () => { throw Object.assign(new Error("secret message and token"), { code: "ECONNRESET" }); };
+  const queue = new DurableInputQueue<string>({ journal, stream: "input", onUncertain, handle: fail,
+    ...(grouped ? { groupKey: () => "album", handleBatch: fail } : {}),
+  });
+  queue.accept("1", "private-chat", "secret body");
+  queue.accept("2", "private-chat", "secret body");
+  queue.start();
+  try {
+    await vi.waitFor(() => expect(onUncertain).toHaveBeenCalledTimes(grouped ? 2 : 1));
+    expect(onUncertain.mock.calls[0]).toEqual([DeliveryJournal.id("1"), expect.objectContaining({
+      phase: "handoff", purpose: "input", lane: DeliveryJournal.id("private-chat"),
+      groupSize: grouped ? 2 : 1, errorType: "Error", errorCode: "ECONNRESET", aborted: false,
+      recoveryRequired: false, queueWaitMs: expect.any(Number), elapsedMs: expect.any(Number),
+    })]);
+    expect(JSON.stringify(onUncertain.mock.calls)).not.toMatch(/secret|private-chat/);
+    expect(journal.inspect().map(record => record.state)).toEqual(grouped ? ["uncertain", "uncertain"] : ["uncertain", "pending"]);
+  } finally { await queue.close(); }
+});
+
+it.each(["processing", "confirmation"] as const)("identifies %s storage failure without claiming remote rejection", async phase => {
+  const { journal } = fixture();
+  const mark = journal.mark.bind(journal);
+  vi.spyOn(journal, "mark").mockImplementation((id, state) => {
+    if (state === (phase === "processing" ? "processing" : "done")) throw new Error("private disk path");
+    mark(id, state);
+  });
+  const onUncertain = vi.fn();
+  const handle = vi.fn(async () => {});
+  const queue = new DurableInputQueue<string>({ journal, stream: "output", purpose: "output", onUncertain, handle });
+  queue.accept("record", "chat", "private body");
+  queue.start();
+  try {
+    await vi.waitFor(() => expect(onUncertain).toHaveBeenCalledOnce());
+    expect(onUncertain.mock.calls[0]?.[1]).toMatchObject({ phase, purpose: "output", errorType: "Error" });
+    expect(handle).toHaveBeenCalledTimes(phase === "processing" ? 0 : 1);
+    expect(JSON.stringify(onUncertain.mock.calls)).not.toContain("private");
+  } finally { await queue.close(); }
+});

@@ -319,7 +319,7 @@ export class FeishuSurface implements SurfaceAdapter {
     );
     this.inbox = new FeishuInbox({
       journal: options.journal,
-      onUncertain: id => options.logger.error({ deliveryId: id }, "飞书输入结果待核对，未自动重发"),
+      onUncertain: (id, metadata) => options.logger.error({ ...metadata, deliveryId: id }, "飞书输入结果待核对，未自动重发"),
       accountId: options.appId,
       access: options.access,
       ...(options.actorRegistry

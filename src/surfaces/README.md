@@ -53,7 +53,7 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
-不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。所有关键项占满后明确拒绝，持久化调用方保留未决记录；`track` 通过异步调用上下文关联输入处理后产生的提示与关键事件发送，等待实际操作并在关闭、失败或容量拒绝时失败。新增 Surface 时应实现统一输入、
+不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。所有关键项占满后明确拒绝，持久化调用方保留未决记录；`track` 通过异步调用上下文关联输入处理后产生的提示与关键事件发送，等待实际操作并在关闭、失败或容量拒绝时失败。`enqueueAuxiliary` 将 typing 等辅助状态排除出交接确认，但仍使用相同的有界队列、取消和错误日志。新增 Surface 时应实现统一输入、
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
 Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
 只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像；渠道交接日志只暂存尚未交接成功的输入正文。

@@ -11,7 +11,8 @@ import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
-import { cli, execFileAsync, mkdtempSync } from "./codexc-cli-test-fixture.js";
+import { DeliveryJournal } from "../src/surfaces/index.js";
+import { cli, execFileAsync, mkdtempSync, updateGatewayConfig } from "./codexc-cli-test-fixture.js";
 
 const linuxIt = process.platform === "linux" ? it : it.skip;
 const temporaryDirectories: string[] = [];
@@ -159,6 +160,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
       join(home, "config.toml"),
       environment,
     );
+    updateGatewayConfig(join(home, "config.toml"), document => {
+      document.telegram = { bot_token: "123:fixture", allowed_user_ids: [1], message_format: "html" };
+    });
+    const journal = new DeliveryJournal(join(home, "data", "delivery-v1"));
+    journal.fail();
     try {
       const { stdout } = await execFileAsync(
         process.execPath,
@@ -174,6 +180,8 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         },
       );
       expect(stdout).toContain("Gateway 已就绪；Codex App Server 保持运行");
+      expect(stdout).toContain("恢复保护=开启");
+      expect(stdout).toContain("codexc delivery status --json");
       expect(readFileSync(systemctlLog, "utf8")).toContain(
         "--user restart codex-connect-gateway.service",
       );
@@ -181,6 +189,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
         "codex-connect-app-server.service",
       );
     } finally {
+      journal.close();
       await readiness.close();
     }
   }, 15_000);

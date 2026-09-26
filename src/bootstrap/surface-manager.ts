@@ -102,7 +102,7 @@ export class SurfaceManager {
           stream: `${surface.surface}:${surface.accountId}:output`,
           available: () => this.active.has(surface),
           handle: async (event, signal) => { await this.routeOutput(event, signal); },
-          onUncertain: id => this.logger.error({ deliveryId: id, surface: surface.surface, accountId: surface.accountId }, "关键输出结果待核对，未自动重发"),
+          onUncertain: (id, metadata) => this.logger.error({ ...metadata, deliveryId: id, surface: surface.surface, accountId: surface.accountId }, "关键输出结果待核对，未自动重发"),
         });
         this.durableOutput.set(surface, queue);
         queue.start();

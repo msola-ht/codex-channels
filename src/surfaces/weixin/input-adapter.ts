@@ -161,7 +161,7 @@ export class WeixinInputAdapter {
         }
         await this.handle(message, signal);
       }),
-      onUncertain: id => options.logger?.error?.({ deliveryId: id }, "微信输入结果待核对，未自动重发"),
+      onUncertain: (id, metadata) => options.logger?.error?.({ ...metadata, deliveryId: id }, "微信输入结果待核对，未自动重发"),
     });
     this.monitor = createWeixinUpdatesMonitor({
       isControlMessage: isWeixinControlMessage,
