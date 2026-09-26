@@ -75,6 +75,7 @@
     "scripts/desktop-app-command.mjs",
     "scripts/desktop-app-proxy.mjs",
     "scripts/dev-all.mjs",
+    "scripts/delivery-command.mjs",
     "scripts/doctor.mjs",
     "scripts/doctor-output.mjs",
     "scripts/feishu-application.mjs",

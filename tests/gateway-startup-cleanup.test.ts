@@ -47,6 +47,7 @@ function createGatewayApplicationFixture(
     {
       asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() },
       completionMetrics: { close: vi.fn(async () => undefined) },
+      deliveryJournal: { close: vi.fn() },
     },
     properties,
   ) as GatewayApplicationFixture;
@@ -395,7 +396,11 @@ describe("GatewayApplication startup cleanup", () => {
         calls.push("recovery:settled");
         return [];
       },
-      overrides: { bindings: { close: () => { calls.push("store:closed"); } } },
+      overrides: {
+        bindings: { close: () => { calls.push("store:closed"); } },
+        surfaceManager: { stop: async () => { calls.push("surface:closed"); } },
+        deliveryJournal: { close: () => { calls.push("journal:closed"); } },
+      },
     });
     Object.assign(Reflect.get(application, "codex") as object, { close: async () => {
       calls.push("client:closed");
@@ -405,7 +410,7 @@ describe("GatewayApplication startup cleanup", () => {
     const restoring = coordinator.restore();
     await application.stop();
     await restoring;
-    expect(calls).toEqual(["client:closed", "recovery:settled", "store:closed"]);
+    expect(calls).toEqual(["surface:closed", "journal:closed", "client:closed", "recovery:settled", "store:closed"]);
   });
 
   it("cancels connectivity before waiting for startup to settle", async () => {

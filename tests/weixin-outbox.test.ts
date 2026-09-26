@@ -26,6 +26,16 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- 
 const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
+  it("preserves suppressed operation output and confirms the visible final reply", async () => {
+    const { outbox, sendText } = outboxFixture();
+    try {
+      await outbox.deliver(operationUpdated("completed", "mcpTool"));
+      expect(sendText).not.toHaveBeenCalled();
+      await outbox.deliver({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "reply", phase: "final_answer", text: "final reply" });
+      expect(sendText).toHaveBeenCalledOnce();
+    } finally { await outbox.close(); }
+  });
+
   it("cancels a draining send and stops the remaining chunks at the close deadline", async () => {
     vi.useFakeTimers();
     try {
@@ -546,7 +556,7 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it("retains critical output without interrupting in-flight delivery", async () => {
+  it("rejects excess critical output without interrupting admitted delivery", async () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
     let releaseFirst!: () => void;
@@ -576,11 +586,11 @@ describe("WeixinOutbox", () => {
       expect(sent).toEqual(["first"]);
     });
     expect(outbox.notifyText(target, "second")).toBe(true);
-    expect(outbox.notifyText(target, "overloaded")).toBe(true);
+    expect(outbox.notifyText(target, "overloaded")).toBe(false);
 
     releaseFirst();
     await outbox.close();
-    expect(sent).toEqual(["first", "second", "overloaded"]);
+    expect(sent).toEqual(["first", "second"]);
   });
 
   it("rechecks authorization and tolerates a missing reply context", async () => {

@@ -12,6 +12,7 @@ interface Subscription<T> {
 }
 
 export class EventBus<T> {
+  private readonly immediate = new Map<string, (event: T) => void>();
   private readonly subscriptions = new Set<Subscription<T>>();
   private readonly workers = new Set<Promise<void>>();
   private closed = false;
@@ -20,7 +21,15 @@ export class EventBus<T> {
   constructor(
     private readonly logger: Logger,
     private readonly defaultCapacity = 1_000,
+    private readonly onCriticalOverflow?: (consumer: string) => void,
   ) {}
+
+  /** Synchronous local admission only; never perform platform network work here. */
+  subscribeImmediate(name: string, accept: (event: T) => void): () => void {
+    if (this.closed || this.immediate.has(name)) throw new Error("事件接收端不可注册");
+    this.immediate.set(name, accept);
+    return () => { this.immediate.delete(name); };
+  }
 
   subscribe(
     name: string,
@@ -32,7 +41,7 @@ export class EventBus<T> {
     }
     const queue = new BoundedAsyncQueue<T>(capacity, (state) => {
       this.logger.warn({ consumer: name, ...state }, "关键事件积压超过队列容量，继续保留待投递事件");
-    });
+    }, this.onCriticalOverflow !== undefined);
     const controller = new AbortController();
     const worker = this.runWorker(name, queue, handler, controller.signal);
     this.workers.add(worker);
@@ -55,11 +64,24 @@ export class EventBus<T> {
   }
 
   publish(event: T, critical = false): void {
+    if (this.closed) return;
+    for (const [name, accept] of this.immediate) {
+      try { accept(event); } catch {
+        if (critical) this.reportCriticalOverflow(name);
+        this.logger.error({ consumer: name }, "同步事件接纳失败，需要恢复核对");
+      }
+    }
     for (const subscription of this.subscriptions) {
       if (!subscription.queue.push(event, critical)) {
+        if (critical) this.reportCriticalOverflow(subscription.name);
         this.logger.warn({ consumer: subscription.name, critical }, "事件队列已满，事件未入队");
       }
     }
+  }
+
+  private reportCriticalOverflow(consumer: string): void {
+    try { this.onCriticalOverflow?.(consumer); }
+    catch { this.logger.error({ consumer }, "关键事件故障标记写入失败，保留启动恢复保护"); }
   }
 
   close(): Promise<void> {
@@ -67,6 +89,7 @@ export class EventBus<T> {
       return this.closePromise;
     }
     this.closed = true;
+    this.immediate.clear();
     for (const subscription of this.subscriptions) {
       subscription.queue.close();
       subscription.controller.abort();

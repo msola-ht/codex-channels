@@ -33,12 +33,12 @@ export class ImageReferenceUpload {
     for (const pending of this.pending.values()) pending.controller.abort();
   }
 
-  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>): Promise<T> {
+  async submit<T>(threadId: string, input: UserInput[], submit: (input: UserInput[]) => Promise<T>, preparationSignal?: AbortSignal): Promise<T> {
     if (this.pending.has(threadId) || this.pending.size >= 4) {
       throw failure("图片上传繁忙，请稍后重试。");
     }
     const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60_000)]);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(60_000), ...(preparationSignal ? [preparationSignal] : [])]);
     const pending: PendingUpload = { controller, signal, dirty: false };
     this.pending.set(threadId, pending);
     let dispatched = false;

@@ -1,4 +1,6 @@
-import { Bot, type Context } from "grammy";
+import { isResolvedInputError } from "../error-metadata.js";
+import type { DeliveryJournal } from "../delivery-journal.js";
+import { Bot, Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 
@@ -103,6 +105,7 @@ export interface TelegramAudioPort {
 }
 
 export interface TelegramSurfaceOptions {
+  journal?: DeliveryJournal | undefined;
   gatewayVersion: string;
   appServerTimezone?: string;
   commands: ConversationCommandExecutor;
@@ -178,6 +181,8 @@ export class TelegramSurface {
   private readonly debugEnabled: boolean;
   private nextInputSequence = 0;
   private notificationRecipients: ReadonlySet<number>;
+  private stopping = false;
+  private readonly durableEnabled: boolean;
 
   constructor(
     token: string,
@@ -190,6 +195,7 @@ export class TelegramSurface {
     private readonly logger: Logger,
     options: TelegramSurfaceOptions,
   ) {
+    this.durableEnabled = options.journal !== undefined;
     this.bot = new Bot(token, {
       client: {
         timeoutSeconds: 30,
@@ -213,6 +219,9 @@ export class TelegramSurface {
       );
       return next();
     });
+    this.bot.use((context, next) => options.journal && context.chat
+      ? this.outbox.trackInput(String(context.chat.id), next)
+      : next());
     this.bot.use((context, next) => this.authorize(context, next));
     this.bot.use((context, next) => {
       if (context.chat && context.from) {
@@ -271,7 +280,7 @@ export class TelegramSurface {
       return next();
     });
     this.inputs = new SurfaceInputCoalescer(
-      (inputTarget, input) => service.submit(inputTarget, input),
+      (inputTarget, input, signal) => service.submit(inputTarget, input, signal),
       {
         quietWindowMs: options.inputQuietWindowMs ?? 1_000,
       },
@@ -319,6 +328,10 @@ export class TelegramSurface {
         })),
       },
       options.onFatal,
+      { journal: options.journal, acceptUpdate: update => {
+        const context = new Context(update, this.bot.api, this.bot.botInfo);
+        return Boolean(context.chat?.type === "private" && context.from && access.isAllowed({ target: target(context), actorId: String(context.from.id) }));
+      } },
     );
     this.registerHandlers();
   }
@@ -356,6 +369,7 @@ export class TelegramSurface {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     const lifecycleStop = this.lifecycle.stop();
     await this.inputs.close();
     this.imageStore.close();
@@ -1136,7 +1150,7 @@ export class TelegramSurface {
             }
           : {}),
         localAudios: [{ path: audio.path }],
-      });
+      }, telegramUpdateSignal(context.update));
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget(inputTarget.conversationId);
       throw error;
@@ -1196,9 +1210,9 @@ export class TelegramSurface {
       : undefined;
     if (!accessContext || !this.access.isAllowed(accessContext)) {
       if (context.message) {
-        await context.reply("无权使用此 Gateway。可用 /whoami 查看自己的 Telegram 用户 ID。");
+        await context.api.sendMessage(context.message.chat.id, "无权使用此 Gateway。可用 /whoami 查看自己的 Telegram 用户 ID。", {}, telegramUpdateSignal(context.update) as never);
       } else if (context.callbackQuery) {
-        await context.answerCallbackQuery({ text: "无权执行此操作" });
+        await context.api.answerCallbackQuery(context.callbackQuery.id, { text: "无权执行此操作" }, telegramUpdateSignal(context.update) as never);
       }
       return;
     }
@@ -1209,6 +1223,7 @@ export class TelegramSurface {
       this.actorRegistry?.rememberActor(accessContext.target, accessContext.actorId);
       await next();
     } catch (error) {
+      if (this.stopping || telegramUpdateSignal(context.update)?.aborted) return;
       this.logger.error(
         {
           ...telegramErrorMetadata(error),
@@ -1223,6 +1238,7 @@ export class TelegramSurface {
             : formatOperationFailure(gatewayRequestFailedText),
         );
       }
+      if (this.durableEnabled && !isResolvedInputError(error)) throw error;
     } finally {
       stopTyping?.();
     }

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Logger } from "pino";
 
 import { BoundedAsyncQueue } from "../event-bus/index.js";
@@ -7,6 +8,7 @@ interface DeliveryOperation {
   critical: boolean;
   enqueuedAt: number;
   run(signal: AbortSignal): Promise<void>;
+  cancel?(): void;
 }
 
 interface ConversationWorker {
@@ -26,6 +28,7 @@ export interface ConversationDeliveryQueueOptions {
 
 export class ConversationDeliveryQueue {
   private readonly workers = new Map<string, ConversationWorker>();
+  private readonly tracking = new AsyncLocalStorage<{ conversationId: string; tasks: Promise<void>[] }>();
   private readonly capacity: number;
   private readonly closeTimeoutMs: number;
   private closed = false;
@@ -58,9 +61,30 @@ export class ConversationDeliveryQueue {
     if (this.closed) {
       return false;
     }
+    let cancel: (() => void) | undefined;
+    const tracking = this.tracking.getStore();
+    if (tracking?.conversationId === conversationId) {
+      critical = true;
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      const completed = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+      // Observe immediately, including when a later synchronous enqueue throws.
+      void completed.catch(() => undefined);
+      tracking.tasks.push(completed);
+      cancel = () => { reject(new Error("输出操作未完成")); this.orderedCancellations.delete(cancel!); };
+      this.orderedCancellations.add(cancel);
+      const cancelTracked = cancel;
+      const operation = run;
+      run = async signal => {
+        try { signal.throwIfAborted(); await this.tracking.run(tracking, () => operation(signal)); resolve(); }
+        catch (error) { reject(error); throw error; }
+        finally { this.orderedCancellations.delete(cancelTracked); }
+      };
+    }
     const worker = this.worker(conversationId);
-    const accepted = worker.queue.push({ critical, run, enqueuedAt: performance.now() }, critical);
+    const accepted = worker.queue.push({ critical, run, enqueuedAt: performance.now(), ...(cancel ? { cancel } : {}) }, critical);
     if (!accepted) {
+      cancel?.();
       this.logger.warn(
         {
           component: this.options.component,
@@ -71,6 +95,24 @@ export class ConversationDeliveryQueue {
       );
     }
     return accepted;
+  }
+
+  async track(conversationId: string, enqueue: () => Promise<void> | void): Promise<void> {
+    if (this.closed) throw new Error("输出队列已关闭");
+    const tracking = { conversationId, tasks: [] as Promise<void>[] };
+    let failure: unknown;
+    let failed = false;
+    try { await this.tracking.run(tracking, enqueue); }
+    catch (error) { failed = true; failure = error; }
+    let observed = 0;
+    while (observed < tracking.tasks.length) {
+      const batch = tracking.tasks.slice(observed);
+      observed = tracking.tasks.length;
+      for (const result of await Promise.allSettled(batch)) {
+        if (result.status === "rejected" && !failed) { failed = true; failure = result.reason; }
+      }
+    }
+    if (failed) throw failure;
   }
 
   runOrdered<T>(
@@ -152,13 +194,13 @@ export class ConversationDeliveryQueue {
     if (!worker) {
       const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity, (state) => {
         this.logger.warn({ component: this.options.component, conversationId, ...state },
-          "关键输出积压超过队列容量，继续保留待投递输出");
-      });
+          "关键输出积压达到队列容量");
+      }, true);
       const controller = new AbortController();
       worker = {
         queue,
         controller,
-        done: this.runWorker(conversationId, queue, controller.signal),
+        done: this.tracking.exit(() => this.runWorker(conversationId, queue, controller.signal)),
       };
       this.workers.set(conversationId, worker);
     }
@@ -189,7 +231,7 @@ export class ConversationDeliveryQueue {
       this.stopped = true;
       for (const worker of this.workers.values()) {
         worker.controller.abort();
-        while (worker.queue.size > 0) await worker.queue.shift();
+        while (worker.queue.size > 0) (await worker.queue.shift())?.cancel?.();
       }
       this.logger.warn(
         {

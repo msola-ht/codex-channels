@@ -68,6 +68,7 @@ describe("Telegram media input", () => {
         "当前消息：",
         "这句话是什么意思？",
       ].join("\n"),
+      expect.any(AbortSignal),
     );
     await surface.stop();
     await output.close();
@@ -104,6 +105,7 @@ describe("Telegram media input", () => {
         text: "检查右上角的错误",
         images: [{ url: jpegDataUrl }],
       },
+      expect.any(AbortSignal),
     );
     expect(rememberActor).toHaveBeenCalledWith(
       { surface: "telegram", accountId: "default", conversationId: "100" },
@@ -157,6 +159,7 @@ describe("Telegram media input", () => {
       {
         localAudios: [{ path: "/private/uploads/voice.ogg" }],
       },
+      undefined,
     );
     await surface.stop();
     await output.close();
@@ -217,6 +220,7 @@ describe("Telegram media input", () => {
         ].join("\n"),
         images: [{ url: jpegDataUrl }],
       },
+      expect.any(AbortSignal),
     );
     await surface.stop();
     await output.close();
@@ -314,6 +318,7 @@ describe("Telegram media input", () => {
           { url: jpegDataUrl },
         ],
       },
+      expect.any(AbortSignal),
     );
     await surface.stop();
     await output.close();
@@ -371,6 +376,7 @@ describe("Telegram media input", () => {
         "",
         "部署说明",
       ].join("\n"),
+      expect.any(AbortSignal),
     );
     await surface.stop();
     await output.close();

@@ -149,6 +149,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
     });
   }
 
+  trackInput(conversationId: string, handle: () => Promise<void>): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(conversationId, handle);
+  }
+
+  deliver(event: OutputEvent): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(event.target.conversationId, () => this.handle(event));
+  }
+
   handle(event: OutputEvent): void {
     if (
       this.closed

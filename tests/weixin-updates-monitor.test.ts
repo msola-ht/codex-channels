@@ -11,6 +11,74 @@ import {
 const accountId = "account-fixture@im.bot";
 
 describe("WeixinUpdatesMonitor", () => {
+  it("commits a batch after durable admission without waiting for business processing", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture(null, async () => { controller.abort(); });
+    const acceptMessage = vi.fn();
+    const handleMessage = vi.fn(async () => { throw new Error("must not process on the poller"); });
+    const monitor = createWeixinUpdatesMonitor({ accountId, cursorStore, acceptMessage, handleMessage,
+      client: clientFixture([{ cursor: "next", messages: [textMessage("1", "slow"), textMessage("2", "/stop")] }]),
+    });
+    await monitor.run(controller.signal);
+    expect(acceptMessage).toHaveBeenCalledTimes(2);
+    expect(handleMessage).not.toHaveBeenCalled();
+    expect(cursorStore.set).toHaveBeenCalledWith(accountId, "next");
+  });
+
+  it("does not advance the cursor when durable admission fails", async () => {
+    const controller = new AbortController();
+    const cursorStore = cursorStoreFixture(null);
+    const monitor = createWeixinUpdatesMonitor({ accountId, cursorStore,
+      acceptMessage: () => { controller.abort(); throw new Error("disk full"); },
+      handleMessage: vi.fn(async () => {}),
+      client: clientFixture([{ cursor: "next", messages: [textMessage("1", "input")] }]),
+    });
+    await expect(monitor.run(controller.signal)).rejects.toThrow("disk full");
+    expect(cursorStore.set).not.toHaveBeenCalled();
+  });
+
+  it("limits simultaneous ordinary conversation lanes to eight", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let active = 0;
+    let maximum = 0;
+    const cursorStore = cursorStoreFixture(null, async () => { controller.abort(); });
+    const monitor = createWeixinUpdatesMonitor({ accountId,
+      client: clientFixture([{ cursor: "next", messages: Array.from({ length: 20 }, (_, index) => ({
+        ...textMessage(String(index), "input"), conversationId: String(index),
+      })) }]), cursorStore,
+      handleMessage: async () => { active++; maximum = Math.max(maximum, active); await gate; active--; },
+    });
+    const running = monitor.run(controller.signal);
+    await vi.waitFor(() => expect(active).toBe(8));
+    release();
+    await running;
+    expect(maximum).toBe(8);
+    expect(cursorStore.set).toHaveBeenCalledOnce();
+  });
+
+  it("isolates conversations with bounded concurrency and commits only after all finish", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const handled: string[] = [];
+    const cursorStore = cursorStoreFixture(null, async () => { controller.abort(); });
+    const messages = [textMessage("1", "slow"),
+      { ...textMessage("2", "other chat"), conversationId: "other" }, textMessage("3", "same chat")];
+    const monitor = createWeixinUpdatesMonitor({ accountId,
+      client: clientFixture([{ cursor: "next", messages }]), cursorStore,
+      handleMessage: async message => { handled.push(message.messageId); if (message.messageId === "1") await gate; },
+    });
+    const running = monitor.run(controller.signal);
+    await vi.waitFor(() => expect(handled).toEqual(["1", "2"]));
+    expect(cursorStore.set).not.toHaveBeenCalled();
+    release();
+    await running;
+    expect(handled).toEqual(["1", "2", "3"]);
+    expect(cursorStore.set).toHaveBeenCalledOnce();
+  });
+
   it("delivers stop while ordinary input is blocked without acknowledging the batch early", async () => {
     const controller = new AbortController();
     let release!: () => void;
@@ -612,3 +680,27 @@ function clientFixture(
     sendText: vi.fn(async () => {}),
   };
 }
+
+it("preserves the batch cursor but admits controls after a failed ordinary prefix", async () => {
+  const controller = new AbortController();
+  const cursorStore = cursorStoreFixture(null, async () => { controller.abort(); });
+  const seen = new Set<string>();
+  const admitted: string[] = [];
+  let failing = true;
+  const messages = [textMessage("1", "first"), textMessage("2", "second"), textMessage("3", "/stop"), textMessage("4", "approval")];
+  const options = { accountId, cursorStore, handleMessage: vi.fn(async () => {}),
+    isControlMessage: (message: WeixinInboundMessage) => message.messageId === "3" || message.messageId === "4",
+    acceptMessage: (message: WeixinInboundMessage) => {
+      if (failing && message.messageId === "1") throw new Error("ordinary full");
+      if (!seen.has(message.messageId)) admitted.push(message.messageId);
+      seen.add(message.messageId);
+    },
+  };
+  await expect(createWeixinUpdatesMonitor({ ...options, client: clientFixture([{ cursor: "next", messages }]) }).run(controller.signal)).rejects.toThrow("ordinary full");
+  expect(admitted).toEqual(["3", "4"]);
+  expect(cursorStore.set).not.toHaveBeenCalled();
+  failing = false;
+  await createWeixinUpdatesMonitor({ ...options, client: clientFixture([{ cursor: "next", messages }]) }).run(controller.signal);
+  expect(admitted).toEqual(["3", "4", "1", "2"]);
+  expect(cursorStore.set).toHaveBeenCalledWith(accountId, "next");
+});

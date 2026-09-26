@@ -111,7 +111,7 @@ describe("WeixinSurface", () => {
     surface.output.handle(turnCompleted());
     await surface.stop();
 
-    expect(service.submit).toHaveBeenCalledWith(target, "hello");
+    expect(service.submit).toHaveBeenCalledWith(target, "hello", expect.any(AbortSignal));
     expect(actorRegistry.rememberActor).toHaveBeenCalledWith(target, actorId);
     expect(replyContextPersistence.set).toHaveBeenCalledWith(
       target,
@@ -256,6 +256,7 @@ describe("WeixinSurface", () => {
       expect(service.submit).toHaveBeenCalledWith(
         target,
         "建立审批上下文",
+        expect.any(AbortSignal),
       );
     });
     const pending = surface.interactions.request(target, {
@@ -515,6 +516,7 @@ describe("WeixinSurface", () => {
     expect(service.submit).toHaveBeenCalledWith(
       target,
       "refresh reply context",
+      expect.any(AbortSignal),
     );
     expect(onFatal).not.toHaveBeenCalled();
     await surface.stop();

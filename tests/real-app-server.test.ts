@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { ModelSelectionService } from "../src/application/model-selection-service.js";
@@ -28,6 +29,54 @@ const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const deepseekCatalogPath = process.env.CODEX_DEEPSEEK_MODEL_CATALOG;
 const contractTest = runContract ? it : it.skip;
 const deepseekCatalogContractTest = runContract ? it : it.skip;
+
+contractTest("cancels image preparation against an isolated real stdio App Server before Turn dispatch", async () => {
+  const runtimeRoot = resolve(".runtime");
+  mkdirSync(runtimeRoot, { recursive: true });
+  const temporary = mkdtempSync(join(runtimeRoot, "delivery-contract-"));
+  const home = join(temporary, "codex-home");
+  mkdirSync(home, { mode: 0o700 });
+  writeFileSync(join(home, "config.toml"), [
+    'model = "fixture"', 'model_provider = "fixture"',
+    '[model_providers.fixture]', 'name = "fixture"', 'base_url = "http://127.0.0.1:9/v1"',
+    'wire_api = "responses"',
+  ].join("\n"), { mode: 0o600 });
+  let release!: () => void;
+  const gate = new Promise<void>(resolveGate => { release = resolveGate; });
+  let reading!: () => void;
+  const ready = new Promise<void>(resolveReady => { reading = resolveReady; });
+  const writes: string[] = [];
+  class PreparationTransport extends StdioTransport {
+    override async send(message: string): Promise<void> {
+      const request = JSON.parse(message) as { method?: string };
+      if (request.method === "thread/read") { reading(); await gate; }
+      if (request.method?.startsWith("turn/")) writes.push(request.method);
+      await super.send(message);
+    }
+  }
+  const transport = new PreparationTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: temporary,
+    environment: { ...process.env, CODEX_HOME: home } });
+  const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" }, { upload: async () => { throw new Error("unexpected upload"); } });
+  try {
+    await client.connect();
+    const session = await client.startThread(temporary, { ephemeral: true });
+    const controller = new AbortController();
+    const pending = client.startTurn(session.thread.id, [{ type: "image", url: "data:image/png;base64,AQID" }], "fixture", temporary, undefined, controller.signal);
+    const rejected = expect(pending).rejects.toBeDefined();
+    await ready;
+    controller.abort();
+    release();
+    await rejected;
+    const thread = await client.readThread(session.thread.id);
+    expect(thread.activeTurnId).toBeNull();
+    expect(writes).toEqual([]);
+    await client.unsubscribeThread(session.thread.id);
+  } finally {
+    release();
+    await client.close();
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}, 30_000);
 
 describe("real App Server test process cleanup", () => {
   it("stops descendant processes before temporary directory cleanup", async () => {
@@ -325,6 +374,11 @@ deepseekCatalogContractTest(
         const params = notification.params as { threadId?: unknown } | undefined;
         if (params?.threadId === threadId) turnCompleted = true;
       });
+      const cancelled = new AbortController();
+      cancelled.abort(new Error("cancelled surface input"));
+      await expect(conversations.submit(target, "Must never reach the provider.", cancelled.signal))
+        .rejects.toThrow("cancelled surface input");
+      expect(upstreamRequests).toBe(0);
       const submission = await conversations.submit(target, "Persist the contract fixture.");
       expect(submission.threadId).toBe(threadId);
       await waitFor(() => turnCompleted, 10_000);

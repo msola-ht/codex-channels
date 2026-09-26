@@ -176,6 +176,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
+  private confirmingDelivery = false;
   private closeFinished = false;
 
   constructor(
@@ -188,6 +189,19 @@ export class FeishuOutbox implements SurfaceOutputPort {
       component: "Feishu",
       drainOnClose: true,
       operationTimeoutMs: 120_000,
+    });
+  }
+
+  trackInput(conversationId: string, handle: () => Promise<void>): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(conversationId, handle);
+  }
+
+  deliver(event: OutputEvent): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(event.target.conversationId, () => {
+      this.confirmingDelivery = true;
+      try { this.handle(event); } finally { this.confirmingDelivery = false; }
     });
   }
 
@@ -302,7 +316,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       if (
         event.operation.status !== "running"
-        && this.operationUpdates.accept(event, event.target.conversationId)
+        && !this.confirmingDelivery && this.operationUpdates.accept(event, event.target.conversationId)
       ) {
         return;
       }
@@ -1506,7 +1520,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         if (state.completionFooter !== undefined) {
           await this.sendMarkdown(state.chatId, state.completionFooter, maximumFeishuMessageChunks, undefined, undefined, signal);
         }
-        return;
+        throw new Error("流式消息投递结果待核对");
       }
       if (!state.cardId) {
         await this.recoverFailedStream(key, state, fallbackPost, signal);

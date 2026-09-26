@@ -168,6 +168,18 @@ describe("TelegramOutbox", () => {
     }
   });
 
+  it("confirms completed operations only after their platform send rather than a timer or summary buffer", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }));
+    try {
+      await outbox.deliver(operationUpdated("tool", "completed", "mcpTool", "fixture tool"));
+      expect(api.sent).toHaveLength(1);
+      await outbox.deliver(operationUpdated("command", "completed", "command", "fixture command"));
+      expect(api.sent).toHaveLength(2);
+    } finally { await outbox.close(); }
+    await expect(outbox.deliver(operationUpdated("closed", "completed", "command"))).rejects.toThrow("关闭");
+  });
+
   it("shows one initial plan and one message for each completed step", async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox(

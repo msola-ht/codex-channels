@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 
 import type { ScheduledTaskConfirmation } from "../application/index.js";
@@ -13,6 +14,8 @@ import {
 import type { EventBus } from "../event-bus/index.js";
 import {
   ConversationDeliveryQueue,
+  DurableInputQueue,
+  type DeliveryJournal,
   type SurfaceAdapter,
   type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
@@ -24,9 +27,12 @@ interface SurfaceRuntime {
   retryAttempt: number;
   retryTimer?: NodeJS.Timeout;
   pendingCriticalOutput: OutputEvent[];
+  nextPendingOutputWarning: number;
 }
 
 export interface SurfaceManagerOptions {
+  journal?: DeliveryJournal;
+  canDeliver?(event: OutputEvent): boolean;
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -50,6 +56,7 @@ export interface SurfaceManagerOptions {
 }
 
 export class SurfaceManager {
+  private readonly durableOutput = new Map<SurfaceAdapter, DurableInputQueue<OutputEvent>>();
   private readonly attempted = new Set<SurfaceAdapter>();
   private readonly active = new Set<SurfaceAdapter>();
   private readonly surfacesByAccount = new Map<string, SurfaceAdapter>();
@@ -86,7 +93,36 @@ export class SurfaceManager {
         state: "idle",
         retryAttempt: 0,
         pendingCriticalOutput: [],
+        nextPendingOutputWarning: this.maximumPendingCriticalOutput,
       });
+    }
+    if (options.journal) {
+      for (const surface of surfaces) {
+        const queue = new DurableInputQueue<OutputEvent>({ journal: options.journal, purpose: "output",
+          stream: `${surface.surface}:${surface.accountId}:output`,
+          available: () => this.active.has(surface),
+          handle: async (event, signal) => { await this.routeOutput(event, signal); },
+          onUncertain: id => this.logger.error({ deliveryId: id, surface: surface.surface, accountId: surface.accountId }, "关键输出结果待核对，未自动重发"),
+        });
+        this.durableOutput.set(surface, queue);
+        queue.start();
+      }
+      this.removeOutputSubscription = output.subscribeImmediate("surface-output-router", event => {
+        if (!this.acceptingOutput) return;
+        const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
+        if (!surface) return;
+        if (isCriticalOutputEvent(event)) {
+          try { this.durableOutput.get(surface)!.accept(randomUUID(), conversationTargetKey(event.target), event); }
+          catch {
+            options.journal!.fail();
+            this.setInteractionAvailable(surface, false, "消息交付存储故障，请在本机核对待处理记录");
+            throw new Error("关键消息未可靠接纳，需要核对 App Server 权威状态");
+          }
+        } else if (!options.journal!.hasPending(`${surface.surface}:${surface.accountId}:output`, conversationTargetKey(event.target))) {
+          this.routing.enqueue(conversationTargetKey(event.target), signal => this.routeOutput(event, signal), false);
+        }
+      });
+      return;
     }
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
@@ -193,6 +229,7 @@ export class SurfaceManager {
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
     const routingClosed = this.routing.close();
+    const durableClosed = Promise.all([...this.durableOutput.values()].map(queue => queue.close()));
     for (const runtime of this.runtimeBySurface.values()) {
       if (runtime.retryTimer) {
         clearTimeout(runtime.retryTimer);
@@ -222,6 +259,7 @@ export class SurfaceManager {
       }
     }
     await routingClosed;
+    await durableClosed;
     if (failures.length > 0) {
       for (const { surface } of failures.reverse()) {
         this.attempted.add(surface);
@@ -357,11 +395,16 @@ export class SurfaceManager {
         };
       } finally { clearTimeout(timer); }
     }
-    if (!this.acceptingOutput || signal.aborted) return;
+    if (!this.acceptingOutput || signal.aborted) {
+      if (this.options.journal && isCriticalOutputEvent(event)) throw new Error("输出交接已取消");
+      return;
+    }
     if (!this.active.has(surface)) {
+      if (this.options.journal && isCriticalOutputEvent(event)) throw new Error("输出交接期间渠道已离线");
       const runtime = this.requireRuntime(surface);
       if (isCriticalOutputEvent(routedEvent)) {
-        if (runtime.pendingCriticalOutput.length >= this.maximumPendingCriticalOutput) {
+        if (runtime.pendingCriticalOutput.length >= runtime.nextPendingOutputWarning) {
+          runtime.nextPendingOutputWarning = Math.max(1, runtime.pendingCriticalOutput.length * 2);
           this.logger.error(
             {
               surface: surface.surface,
@@ -458,7 +501,9 @@ export class SurfaceManager {
     runtime.retryAttempt = 0;
     this.setInteractionAvailable(surface, true);
     this.active.add(surface);
+    this.durableOutput.get(surface)?.wake();
     const pending = runtime.pendingCriticalOutput.splice(0);
+    runtime.nextPendingOutputWarning = this.maximumPendingCriticalOutput;
     for (const event of pending) {
       void this.deliverOutput(surface, event);
     }
@@ -495,7 +540,11 @@ export class SurfaceManager {
     event: OutputEvent,
   ): Promise<void> {
     try {
-      await surface.output.handle(event);
+      if (this.options.journal && isCriticalOutputEvent(event)) {
+        if (this.options.canDeliver?.(event) === false) throw new Error("消息接收方的当前授权或会话绑定已改变，请人工核对");
+        if (!surface.output.deliver) throw new Error("Surface 缺少投递确认接口");
+        await surface.output.deliver(event);
+      } else await surface.output.handle(event);
       if (event.type !== "text.delta") {
         this.logger.debug(
           {
@@ -516,6 +565,7 @@ export class SurfaceManager {
         },
         "Surface 拒绝输出事件",
       );
+      if (this.options.journal) throw error;
     }
   }
 

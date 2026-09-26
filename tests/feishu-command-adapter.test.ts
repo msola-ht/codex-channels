@@ -40,9 +40,7 @@ describe("Feishu command adapter", () => {
         "飞书命令不受支持",
       );
     });
-    await expect(
-      adapter.handle({ ...message, text: "/status" }),
-    ).rejects.toMatchObject({ code: "command.unsupported" });
+    await adapter.handle({ ...message, text: "/status" });
 
     expect(notifyMarkdown).toHaveBeenCalledOnce();
     expect(notifyMarkdown).toHaveBeenCalledWith(

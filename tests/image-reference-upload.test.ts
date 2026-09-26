@@ -68,6 +68,25 @@ describe("official image reference upload", () => {
     expect(requests).toHaveLength(count);
   });
 
+  it.each(["start", "steer"])("cancels %s during preparation without dispatching a write", async mode => {
+    const { client, transport, fetchImpl } = await fixture();
+    const controller = new AbortController();
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    fetchImpl.mockImplementationOnce(async (_url, init) => new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(new Error("cancelled upload")), { once: true });
+      started();
+    }));
+    const submitting = mode === "start"
+      ? client.startTurn("thread-1", input, "message", "/tmp", undefined, controller.signal)
+      : client.steerTurn("thread-1", "turn-1", input, "message", controller.signal);
+    const rejected = expect(submitting).rejects.toBeDefined();
+    await ready;
+    controller.abort();
+    await rejected;
+    expect(transport.sent.some(request => request.method === `turn/${mode}`)).toBe(false);
+  });
+
   it.each(["api", "third-party", "text"])("keeps %s on its existing path", async kind => {
     const { client, transport, fetchImpl } = await fixture();
     if (kind === "api") transport.accountResult = { account: { type: "apiKey" }, requiresOpenaiAuth: true, workspaceRouting: null };

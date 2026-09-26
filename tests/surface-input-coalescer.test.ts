@@ -70,7 +70,7 @@ describe("SurfaceInputCoalescer", () => {
       expect(submit).toHaveBeenCalledWith(target, {
         text: "查看图片",
         images: [{ url: "data:image/png;base64,iVBORw0KGgo=" }],
-      });
+      }, expect.any(AbortSignal));
       expect(JSON.stringify(submit.mock.calls[0])).not.toContain(imagePath);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -102,7 +102,7 @@ describe("SurfaceInputCoalescer", () => {
       expect(submit).toHaveBeenCalledWith(target, {
         text: "请查看这张图片并根据图片内容协助我。",
         images: [{ url: `data:${mimeType};base64,${bytes.toString("base64")}` }],
-      });
+      }, expect.any(AbortSignal));
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -262,7 +262,7 @@ describe("SurfaceInputCoalescer", () => {
         { url: "data:image/png;base64,iVBORw0KGgo=" },
         { url: "data:image/png;base64,iVBORw0KGgo=" },
       ],
-    });
+    }, expect.any(AbortSignal));
     rmSync(firstImage.directory, { recursive: true, force: true });
     rmSync(secondImage.directory, { recursive: true, force: true });
   });
@@ -294,46 +294,35 @@ describe("SurfaceInputCoalescer", () => {
     await Promise.all([first, second]);
 
     expect(submit).toHaveBeenCalledTimes(2);
-    expect(submit).toHaveBeenCalledWith(target, "first");
-    expect(submit).toHaveBeenCalledWith(target, "second");
+    expect(submit).toHaveBeenCalledWith(target, "first", expect.any(AbortSignal));
+    expect(submit).toHaveBeenCalledWith(target, "second", expect.any(AbortSignal));
   });
 
-  it("flushes pending input during close and rejects later input", async () => {
-    const image = writeTinyPng("only.png");
-    const submit = vi.fn(async () => ({
-      threadId: "thread",
-      turnId: "turn",
-      steered: false,
-    }));
-    const coalescer = new SurfaceInputCoalescer(submit, {
-      quietWindowMs: 1_000,
-    });
-    const pending = coalescer.enqueue({
-      target,
-      actorId: "actor-1",
-      sequence: 1,
-      aggregationKey: "platform-batch",
-      localImages: [{
-        path: image.path,
-        mimeType: "image/png",
-        bytes: tinyPng.length,
-      }],
-    });
-
+  it("cancels pending batches on close without starting a submission", async () => {
+    const submit = vi.fn();
+    const coalescer = new SurfaceInputCoalescer(submit);
+    const pending = coalescer.enqueue({ target, actorId: "actor", sequence: 1,
+      aggregationKey: "album", aggregationSize: 2, text: "pending" });
+    const rejected = expect(pending).rejects.toThrow("输入聚合器已关闭");
     await coalescer.close();
+    await rejected;
+    expect(submit).not.toHaveBeenCalled();
+    await expect(coalescer.enqueue({ target, actorId: "actor", sequence: 2, text: "late" }))
+      .rejects.toThrow("输入聚合器已关闭");
+  });
 
-    await expect(pending).resolves.toMatchObject({ tail: true });
-    expect(submit).toHaveBeenCalledWith(target, {
-      text: "请查看这张图片并根据图片内容协助我。",
-      images: [{ url: "data:image/png;base64,iVBORw0KGgo=" }],
-    });
-    rmSync(image.directory, { recursive: true, force: true });
-    await expect(coalescer.enqueue({
-      target,
-      actorId: "actor-1",
-      sequence: 2,
-      text: "late",
-    })).rejects.toThrow("输入聚合器已关闭");
+  it("closes a stuck submission and observes late rejection", async () => {
+    let reject!: (error: Error) => void;
+    const submit = vi.fn(() => new Promise<never>((_resolve, fail) => { reject = fail; }));
+    const coalescer = new SurfaceInputCoalescer(submit);
+    const pending = coalescer.enqueue({ target, actorId: "actor", sequence: 1, text: "input" });
+    const rejected = expect(pending).rejects.toThrow("输入聚合器已关闭");
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await coalescer.close();
+    await rejected;
+    expect((submit.mock.calls[0] as unknown as [unknown, unknown, AbortSignal])[2].aborted).toBe(true);
+    reject(new Error("late RPC failure"));
+    await Promise.resolve();
   });
 
   it("rejects the whole pending batch when a later image exceeds its limits", async () => {

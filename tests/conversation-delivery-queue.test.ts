@@ -6,6 +6,36 @@ import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("tracks asynchronous input replies and exposes their platform failure to the durable owner", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    const handle = async (): Promise<void> => {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      delivery.enqueue("a", async () => { throw new Error("delivery failed"); }, true);
+    };
+    try { await expect(delivery.track("a", handle)).rejects.toThrow("delivery failed"); }
+    finally { await delivery.close(); }
+  });
+
+  it("tracks actual completion, rejects overload and cancels queued tracked work on close", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", capacity: 1 });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const completed = vi.fn();
+    const first = delivery.track("a", () => { delivery.enqueue("a", async () => { await gate; }, true); }).then(completed);
+    await settle();
+    expect(completed).not.toHaveBeenCalled();
+    const pending = delivery.track("a", () => { delivery.enqueue("a", vi.fn(async () => {}), true); });
+    const rejectedPending = expect(pending).rejects.toThrow("未完成");
+    await expect(delivery.track("a", () => { delivery.enqueue("a", vi.fn(async () => {}), true); })).rejects.toThrow("未完成");
+    const rejectedFirst = expect(first).rejects.toThrow("未完成");
+    const closing = delivery.close();
+    release();
+    await rejectedFirst;
+    await rejectedPending;
+    await closing;
+    expect(completed).not.toHaveBeenCalled();
+  });
+
   it("reports slow queue waits and failed ordered work without exposing error text", async () => {
     vi.useFakeTimers();
     const entries: Array<Record<string, unknown>> = [];
@@ -198,7 +228,7 @@ describe("ConversationDeliveryQueue", () => {
     expect(calls).toEqual(["first", "critical"]);
   });
 
-  it("retains critical operations when the bounded queue is full of critical work", async () => {
+  it("rejects excess critical work explicitly so durable callers retain unresolved records", async () => {
     const delivery = new ConversationDeliveryQueue(logger, {
       component: "Test",
       capacity: 1,
@@ -219,11 +249,11 @@ describe("ConversationDeliveryQueue", () => {
     }, true)).toBe(true);
     expect(delivery.enqueue("a", async () => {
       calls.push("third");
-    }, true)).toBe(true);
+    }, true)).toBe(false);
 
     releaseFirst();
     await delivery.close();
-    expect(calls).toEqual(["first", "second", "third"]);
+    expect(calls).toEqual(["first", "second"]);
   });
 
   it("aborts the Conversation worker when closing", async () => {
@@ -394,3 +424,30 @@ function activeWorkerCount(delivery: ConversationDeliveryQueue): number {
     }
   ).workers.size;
 }
+
+it("waits for admitted error replies even when the input handler throws", async () => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "Test" });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let settled = false;
+  const failure = new Error("input failed");
+  const tracking = queue.track("chat", () => {
+    queue.enqueue("chat", () => gate, true);
+    throw failure;
+  });
+  const observed = tracking.catch(error => { settled = true; expect(error).toBe(failure); });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(settled).toBe(false);
+  release(); await observed; await queue.close();
+});
+
+it("associates nested output with its own tracking context on an existing worker", async () => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "Test" });
+  await queue.track("chat", () => { queue.enqueue("chat", async () => {}, true); });
+  await expect(queue.track("chat", () => {
+    queue.enqueue("chat", async () => {
+      queue.enqueue("chat", async () => { throw new Error("nested failed"); }, true);
+    }, true);
+  })).rejects.toThrow("nested failed");
+  await queue.close();
+});

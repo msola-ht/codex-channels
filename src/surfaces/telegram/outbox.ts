@@ -148,6 +148,7 @@ export class TelegramOutbox {
   private readonly notifiedTurns = new Set<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
+  private confirmingDelivery = false;
 
   constructor(
     private readonly api: Api,
@@ -192,6 +193,26 @@ export class TelegramOutbox {
       return;
     }
     this.replyTargets.set(this.turnKey(threadId, turnId), messageId);
+  }
+
+  trackInput(conversationId: string, handle: () => Promise<void>): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(conversationId, handle);
+  }
+
+  deliver(event: OutputEvent): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(event.target.conversationId, () => {
+      this.confirmingDelivery = true;
+      try { this.handle(event); } finally { this.confirmingDelivery = false; }
+      if (event.type === "operation.updated") {
+        const key = this.turnKey(event.threadId, event.turnId);
+        this.delivery.enqueue(event.target.conversationId, () => {
+          if (this.uncertainOperationItems.get(key)?.has(event.operation.itemId)) return Promise.reject(new Error("操作消息投递结果待核对"));
+          return Promise.resolve();
+        }, true);
+      }
+    });
   }
 
   handle(event: OutputEvent): void {
@@ -388,7 +409,7 @@ export class TelegramOutbox {
           return;
         }
         flushStreamBeforeOutput();
-        if (this.operationUpdates.accept(event, chatId)) {
+        if (!this.confirmingDelivery && this.operationUpdates.accept(event, chatId)) {
           return;
         }
         const state = this.operationLogs.get(turnKey) ?? this.createOperationLog(chatId, turnKey);
@@ -411,6 +432,10 @@ export class TelegramOutbox {
           state.timer.unref();
         }
         this.operationLogs.set(turnKey, state);
+        if (this.confirmingDelivery) {
+          if (state.timer) { clearTimeout(state.timer); state.timer = undefined; }
+          this.enqueueOperationRefresh(state, true);
+        }
         return;
       }
       case "plan.updated": {
@@ -834,7 +859,10 @@ export class TelegramOutbox {
     if (!state) return;
     try {
       signal?.throwIfAborted();
-      if (state.deliveryUncertain) return;
+      if (state.deliveryUncertain) {
+        if (final) throw new Error("流式消息投递结果待核对");
+        return;
+      }
       await this.flushStream(chatId, key, final, standaloneState, signal);
     } catch (error) {
       if (state.messageId === undefined && isTelegramDeliveryUncertain(error)) state.deliveryUncertain = true;

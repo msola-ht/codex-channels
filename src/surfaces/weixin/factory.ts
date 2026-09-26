@@ -1,3 +1,4 @@
+import type { DeliveryJournal } from "../delivery-journal.js";
 import type { Logger } from "pino";
 
 import type {
@@ -23,6 +24,7 @@ import {
 import { FileWeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 
 export interface CreateWeixinSurfaceOptions {
+  journal?: DeliveryJournal | undefined;
   accountId: string;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
   commands: ConversationCommandExecutor;
@@ -58,6 +60,7 @@ export function createWeixinSurface(
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
   return new WeixinSurface({
+    journal: options.journal,
     accountId: options.accountId,
     client,
     lifecycleClient: client,

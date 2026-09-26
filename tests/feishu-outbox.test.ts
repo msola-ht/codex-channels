@@ -29,6 +29,15 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("confirms a completed tool only after sending it instead of retaining a summary in memory", async () => {
+    const sendMarkdownCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", { ...cardMethods, sendMarkdownCard, sendText: async () => {}, sendPost: async () => {} }, pino({ level: "silent" }));
+    try {
+      await outbox.deliver(operationUpdated("completed", "mcpTool"));
+      expect(sendMarkdownCard).toHaveBeenCalledOnce();
+    } finally { await outbox.close(); }
+  });
+
   it("cancels a draining send and does not start later chunks after the close deadline", async () => {
     vi.useFakeTimers();
     let complete!: () => void;

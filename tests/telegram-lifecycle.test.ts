@@ -8,6 +8,101 @@ import {
 } from "../src/surfaces/telegram/lifecycle.js";
 
 describe("TelegramLifecycle", () => {
+  it.each([false, true])("retains update processing across reconnect (initially blocked: %s)", async blocked => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    vi.useFakeTimers();
+    const handled: number[] = [];
+    let first = true;
+    let recovering = false;
+    const bot = { botInfo: { username: "test_bot" }, init: async () => {},
+      handleUpdate: async (update: { update_id: number }) => { handled.push(update.update_id); if (blocked) await gate; },
+      api: { setMyCommands: async () => true,
+        getUpdates: async ({ offset }: { offset: number }, signal: AbortSignal) => {
+          if (first) { first = false; return [telegramUpdate(1)]; }
+          if (!recovering) throw new Error("network failure");
+          if (offset <= 1) return [telegramUpdate(1)];
+          await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }), undefined,
+      () => { recovering = true; lifecycle.start(); });
+    lifecycle.start();
+    try {
+      await vi.advanceTimersByTimeAsync(150_000);
+      expect(recovering).toBe(true);
+      release();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(handled).toEqual([1]);
+    } finally { release(); await lifecycle.stop(); vi.useRealTimers(); }
+  });
+
+  it("lets approval callbacks bypass slow input while keeping command callbacks ordered", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const handled: number[] = [];
+    const callback = (id: number, data: string) => ({ update_id: id, callback_query: {
+      id: String(id), from: { id: 1, is_bot: false, first_name: "Actor" },
+      message: telegramUpdate(1).message, chat_instance: "chat", data,
+    } });
+    let updates = [telegramUpdate(1), callback(2, "ws:selection"), callback(3, "ix:approval")];
+    const bot = { botInfo: { username: "test_bot" }, init: async () => {},
+      handleUpdate: async (update: { update_id: number }) => {
+        handled.push(update.update_id);
+        if (update.update_id === 1) await gate;
+      },
+      api: { setMyCommands: async () => true, getUpdates: async (_options: unknown, signal: AbortSignal) => {
+        if (updates.length) { const result = updates; updates = []; return result; }
+        await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+        return [];
+      } },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }));
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(handled).toContain(3));
+      expect(handled).not.toContain(2);
+      release();
+      await vi.waitFor(() => expect(handled).toContain(2));
+    } finally { release(); await lifecycle.stop(); }
+  });
+
+  it("confirms only completed updates and deduplicates an unconfirmed polling window", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const offsets: number[] = [];
+    const handled: number[] = [];
+    const updates = [telegramUpdate(1), telegramUpdate(2, undefined, "/stop")];
+    const bot = { botInfo: { username: "test_bot" }, init: async () => {},
+      handleUpdate: async (update: { update_id: number }) => {
+        handled.push(update.update_id);
+        if (update.update_id === 1) await gate;
+      },
+      api: { setMyCommands: async () => true,
+        getUpdates: async ({ offset }: { offset: number }, signal: AbortSignal) => {
+          offsets.push(offset);
+          const result = updates.filter(update => update.update_id >= offset);
+          if (result.length) return result;
+          await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }));
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(offsets.length).toBeGreaterThanOrEqual(2));
+      expect(offsets.every(offset => offset === 0)).toBe(true);
+      expect(handled.filter(id => id === 1)).toHaveLength(1);
+      expect(handled.filter(id => id === 2)).toHaveLength(1);
+      release();
+      await vi.waitFor(() => expect(offsets).toContain(3));
+      expect(handled).toHaveLength(2);
+    } finally { release(); await lifecycle.stop(); }
+  });
+
   it("isolates chats and never starts an old queued update after stop or restart", async () => {
     const handled: number[] = [];
     let release!: () => void;

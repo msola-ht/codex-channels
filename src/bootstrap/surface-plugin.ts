@@ -9,12 +9,13 @@ import type {
 import type { ConfigChange, GatewayConfig } from "../config/index.js";
 import type { ConversationTarget } from "../conversation-core/index.js";
 import type { BindingStore } from "../storage/index.js";
-import type { SurfaceAdapter } from "../surfaces/index.js";
+import type { DeliveryJournal, SurfaceAdapter } from "../surfaces/index.js";
 
 import type { OpenAiConnectivityStatus } from "./openai-connectivity.js";
 
 export interface SurfaceRuntimeModule {
   readonly adapter: SurfaceAdapter;
+  canDeliver?(target: ConversationTarget): boolean;
   /** Safe recipients for global lifecycle notifications, if the Surface has them. */
   notificationTargets?(): readonly ConversationTarget[];
   applyHotReload(next: GatewayConfig, changes: readonly ConfigChange[]): void;
@@ -22,6 +23,7 @@ export interface SurfaceRuntimeModule {
 }
 
 export interface SurfacePluginContext {
+  journal?: DeliveryJournal | undefined;
   config: GatewayConfig;
   service: SurfaceConversationUseCases;
   commands: ConversationCommandExecutor;

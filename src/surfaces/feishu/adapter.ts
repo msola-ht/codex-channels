@@ -1,3 +1,4 @@
+import { isResolvedInputError } from "../error-metadata.js";
 import {
   fastServiceTierId,
   isConversationCommandName,
@@ -84,6 +85,8 @@ export class FeishuConversationAdapter {
   private readonly inputs: SurfaceInputCoalescer;
   private nextInputSequence = 0;
 
+  private readonly inputAbort = new AbortController();
+
   constructor(
     private readonly conversations: Pick<
       ConversationTurnUseCases,
@@ -127,7 +130,7 @@ export class FeishuConversationAdapter {
     } = { quietWindowMs: 0 },
   ) {
     this.inputs = new SurfaceInputCoalescer(
-      (target, input) => conversations.submit(target, input),
+      (target, input, signal) => conversations.submit(target, input, signal),
       inputOptions,
     );
   }
@@ -148,6 +151,7 @@ export class FeishuConversationAdapter {
   }
 
   async handle(message: FeishuInboxMessage): Promise<void> {
+    if (this.inputAbort.signal.aborted) return;
     try {
       this.conversations.touchActivity?.(message.target);
       if (message.kind === "file") {
@@ -260,9 +264,11 @@ export class FeishuConversationAdapter {
       );
       let submission;
       try {
+        this.inputAbort.signal.throwIfAborted();
         submission = await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, quotedText),
+          this.inputAbort.signal,
         );
       } catch (error) {
         this.outbox.discardPendingTurnReplyTarget?.(
@@ -294,6 +300,7 @@ export class FeishuConversationAdapter {
         formatTurnInputAppended("text", false, message.text),
       );
     } catch (error) {
+      if (this.inputAbort.signal.aborted) return;
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
@@ -306,20 +313,21 @@ export class FeishuConversationAdapter {
         message.target.conversationId,
         formatOperationFailure(detail),
       );
-      throw error;
+      if (!isResolvedInputError(error) && !(error instanceof FeishuFileInputError)) throw error;
     }
   }
 
   async handleImageBatch(
     messages: readonly Extract<FeishuInboxMessage, { kind: "image" }>[],
   ): Promise<void> {
-    if (messages.length === 0) {
+    if (messages.length === 0 || this.inputAbort.signal.aborted) {
       return;
     }
     this.conversations.touchActivity?.(messages[0]!.target);
     try {
       await this.submitImageBatch(messages);
     } catch (error) {
+      if (this.inputAbort.signal.aborted) return;
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
@@ -330,11 +338,12 @@ export class FeishuConversationAdapter {
         messages[0]!.target.conversationId,
         formatOperationFailure(detail),
       );
-      throw error;
+      if (!isResolvedInputError(error) && !(error instanceof FeishuFileInputError)) throw error;
     }
   }
 
   close(): Promise<void> {
+    this.inputAbort.abort();
     return this.inputs.close();
   }
 
@@ -476,6 +485,7 @@ export class FeishuConversationAdapter {
         this.notifyMarkdown(target.conversationId, rendered);
       }
     } catch (error) {
+      if (this.inputAbort.signal.aborted) return;
       if (error instanceof FeishuOutputQueueError) {
         throw error;
       }
@@ -486,7 +496,7 @@ export class FeishuConversationAdapter {
         target.conversationId,
         formatOperationFailure(detail),
       );
-      throw error;
+      if (!isResolvedInputError(error) && !(error instanceof FeishuFileInputError)) throw error;
     }
   }
 
@@ -799,6 +809,7 @@ export class FeishuConversationAdapter {
     );
     let submission;
     try {
+      this.inputAbort.signal.throwIfAborted();
       submission = await this.conversations.submit(message.target, {
         ...(quotedText === undefined
           ? {}
@@ -809,7 +820,7 @@ export class FeishuConversationAdapter {
               ),
             }),
         localAudios: [{ path: audio.path }],
-      });
+      }, this.inputAbort.signal);
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget?.(
         message.target.conversationId,

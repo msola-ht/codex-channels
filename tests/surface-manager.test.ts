@@ -566,7 +566,9 @@ describe("SurfaceManager", () => {
       }
     };
     const output = new EventBus<OutputEvent>(logger);
-    const manager = createManager([feishu], output, {
+    const error = vi.fn();
+    const testLogger = { ...logger, error } as Logger;
+    const manager = new SurfaceManager([feishu], output, testLogger, undefined, {
       maximumPendingCriticalOutput: 1,
     });
     const event = (turnId: string): OutputEvent => ({
@@ -581,13 +583,13 @@ describe("SurfaceManager", () => {
       status: "completed",
     });
 
-    output.publish(event("turn-1"));
-    output.publish(event("turn-2"));
+    for (let index = 1; index <= 16; index++) output.publish(event(`turn-${index}`));
     await settle();
     await manager.start();
     await settle();
 
-    expect(received).toEqual(["turn-1", "turn-2"]);
+    expect(received).toEqual(Array.from({ length: 16 }, (_, index) => `turn-${index + 1}`));
+    expect(error).toHaveBeenCalledTimes(4);
     await manager.stop();
     await output.close();
   });

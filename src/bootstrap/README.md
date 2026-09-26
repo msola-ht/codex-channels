@@ -4,6 +4,8 @@
 
 ## 文件
 
+- `delivery-journal-setup.ts`：独占开启独立消息日志，首次启用前备份配置和绑定数据库，校验私有权限与备份完整性。
+
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，强制创建 `automation` 后台 Thread 并启动单个 Turn；写请求结果未知时失败关闭。
@@ -153,7 +155,8 @@
   的 Git 分支、递归包含子代理后代的 Session 累计统计及显式父 Turn 任务合计；单项指标写入或读取
   失败时保留 Core 已归约的本轮统计并省略不可靠的累计值，不阻断原始完成事件；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
-  首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
+  生产组合根通过独立加密日志接纳关键输出，渠道就绪后按会话顺序投递并等待实际发送确认；积压期间的可替换增量不排在持久关键事件前面。
+  未执行记录恢复后重新核对当前 Actor 授权；执行结果不明确时保留未决记录，不自动重发。硬配额、落盘失败或事件总线关键溢出会记录交付故障并关闭新普通输入的接纳。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据

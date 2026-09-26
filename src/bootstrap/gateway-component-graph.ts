@@ -1,3 +1,5 @@
+import { prepareDeliveryJournal } from "./delivery-journal-setup.js";
+import type { DeliveryJournal } from "../surfaces/index.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
@@ -152,6 +154,7 @@ export abstract class GatewayComponentGraph {
   protected readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
   protected readonly surfaceManager: SurfaceManager;
+  protected readonly deliveryJournal: DeliveryJournal;
   private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
@@ -312,8 +315,14 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
-    this.inbound = new EventBus<RpcNotification>(logger, 2_000);
-    this.output = new EventBus<OutputEvent>(logger, 1_000);
+    this.deliveryJournal = prepareDeliveryJournal(config, configPath);
+    const deliveryFailure = (consumer: string): void => {
+      logger.error({ consumer }, "关键事件未完成交接，停止接纳普通输入并要求权威状态核对");
+      this.deliveryJournal.fail();
+    };
+    this.inbound = new EventBus<RpcNotification>(logger, 2_000, deliveryFailure);
+    this.output = new EventBus<OutputEvent>(logger, 1_000, deliveryFailure);
+    try {
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
@@ -834,6 +843,7 @@ export abstract class GatewayComponentGraph {
     const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
     const commands = new ConversationCommandService(service, scheduledTaskUseCases);
     this.surfaceModules = createSurfaceModules({
+      journal: this.deliveryJournal,
       config,
       service,
       commands,
@@ -861,6 +871,18 @@ export abstract class GatewayComponentGraph {
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
       {
+        journal: this.deliveryJournal,
+        canDeliver: event => {
+          const authorized = this.surfaceModules.some(module => module.adapter.surface === event.target.surface
+            && module.adapter.accountId === event.target.accountId && module.canDeliver?.(event.target) === true);
+          if (!authorized) return false;
+          const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
+          const owner = threadId ? this.router.targetForThread(threadId) : undefined;
+          // Completed background bindings may already have been released. A
+          // still-bound Thread must never replay to its previous owner.
+          return !owner || (owner.surface === event.target.surface && owner.accountId === event.target.accountId
+            && owner.conversationId === event.target.conversationId);
+        },
         setInteractionAvailable: (
           surface,
           accountId,
@@ -1117,6 +1139,7 @@ export abstract class GatewayComponentGraph {
         ),
     );
     this.bindingRestoreCoordinator();
+    } catch (error) { this.deliveryJournal.close(); throw error; }
   }
 
   protected bindingRestoreCoordinator(): BindingRestoreCoordinator {
@@ -1282,6 +1305,7 @@ export abstract class GatewayComponentGraph {
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
       ["Surface", () => this.surfaceManager.stop()],
+      ["Delivery Journal", () => Promise.resolve(this.deliveryJournal.close())],
       ["Completion Metrics", () => this.completionMetrics.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],

@@ -1,4 +1,5 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+import { deliveryUsage, runDeliveryCommand } from "../scripts/delivery-command.mjs";
 
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -86,6 +87,7 @@ const helpText = {
   setup [--json]               配置 Provider、通讯渠道与项目技能（接入向导）
   config [--json]              管理 Codex 新会话偏好与 Gateway 日常设置
   timezone                     设置 App Server、WebUI 或网关时区
+  delivery                     核对消息待处理日志与回滚条件
   doctor                       诊断安装、配置和服务
   security                     修复本机私有路径权限
 
@@ -172,6 +174,7 @@ all 只包含 App Server 与 Gateway；WebUI 需单独指定。`,
 指标存储、Telegram 消息格式与配置路径查看。
 非交互终端（脚本或管道）直接显示用户目录与配置文件路径；--json 输出路径和文件存在状态。`,
   timezone: timezoneCommandUsage,
+  delivery: deliveryUsage,
   doctor: `用法：codexc doctor [--json]
 
 只诊断当前安装、配置和服务状态，不修改配置；--json 输出结构化检查结果；
@@ -412,6 +415,9 @@ async function executeCommand(command, args) {
         break;
       }
       await runTimezoneCommand(args);
+      break;
+    case "delivery":
+      await runDeliveryCommand(args);
       break;
     case "doctor":
       if (showRequestedHelp(args, "doctor")) {

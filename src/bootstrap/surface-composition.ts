@@ -114,6 +114,7 @@ function createWeixinModule(
     options.logger.warn({ removedBindings }, "已清理不再授权的微信会话绑定");
   }
   const adapter = createWeixinSurface({
+    journal: options.journal,
     accountId: config.accountId,
     service: options.service,
     commands: options.commands,
@@ -176,11 +177,14 @@ function createWeixinModule(
     logger: options.logger,
     onFatal: (error) => options.onFatal("weixin", config.accountId, error),
   });
-  return createWeixinRuntimeModule(
-    adapter,
-    access,
-    options.bindings,
-  );
+  return {
+    ...createWeixinRuntimeModule(
+      adapter,
+      access,
+      options.bindings,
+    ),
+    canDeliver: target => options.bindings.actors(target).some(actorId => access.isAllowed({ target, actorId })),
+  };
 }
 
 function createFeishuModule(
@@ -208,6 +212,7 @@ function createFeishuModule(
     options.logger.warn({ removedBindings }, "已清理不再授权的飞书会话绑定");
   }
   const adapter = createFeishuSurface({
+    journal: options.journal,
     appId: config.appId,
     appSecret: config.appSecret,
     service: options.service,
@@ -285,12 +290,15 @@ function createFeishuModule(
       })),
     },
   });
-  return createFeishuRuntimeModule(
-    adapter,
-    access,
-    options.bindings,
-    options.logger,
-  );
+  return {
+    ...createFeishuRuntimeModule(
+      adapter,
+      access,
+      options.bindings,
+      options.logger,
+    ),
+    canDeliver: target => options.bindings.actors(target).some(actorId => access.isAllowed({ target, actorId })),
+  };
 }
 
 function createFeishuProxyAgent(
@@ -329,6 +337,7 @@ function createTelegramModule(
     telegramDefaultAccountId,
   );
   const adapter = createTelegramSurface({
+    journal: options.journal,
     token: config.telegramBotToken,
     ...(proxyUrl === undefined ? {} : { proxyUrl }),
     service: options.service,
@@ -352,11 +361,14 @@ function createTelegramModule(
     officialOpenAiAuthenticated: options.officialOpenAiAuthenticated,
     openAiConnectivity: options.openAiConnectivity,
   });
-  return createTelegramRuntimeModule(
-    adapter,
-    access,
-    config.telegramAllowedUserIds,
-  );
+  return {
+    ...createTelegramRuntimeModule(
+      adapter,
+      access,
+      config.telegramAllowedUserIds,
+    ),
+    canDeliver: target => options.bindings.actors(target).some(actorId => access.isAllowed({ target, actorId })),
+  };
 }
 
 export function createTelegramRuntimeModule(

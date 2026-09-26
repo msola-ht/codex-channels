@@ -1,3 +1,4 @@
+import { UserFacingError } from "../src/conversation-core/index.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,7 +105,7 @@ describe("WeixinConversationAdapter", () => {
 
     await adapter.handle(message);
 
-    expect(submit).toHaveBeenCalledWith(target, "继续开发");
+    expect(submit).toHaveBeenCalledWith(target, "继续开发", undefined);
     expect(notifyText).not.toHaveBeenCalled();
   });
 
@@ -160,7 +161,7 @@ describe("WeixinConversationAdapter", () => {
 
     await adapter.handle(message);
 
-    expect(submit).toHaveBeenCalledWith(target, "继续开发");
+    expect(submit).toHaveBeenCalledWith(target, "继续开发", undefined);
     await adapter.close();
     vi.useRealTimers();
   });
@@ -188,7 +189,7 @@ describe("WeixinConversationAdapter", () => {
       "",
       "当前消息：",
       "这句话是什么意思？",
-    ].join("\n"));
+    ].join("\n"), undefined);
   });
 
   it("submits mixed text and multiple downloaded images together", async () => {
@@ -242,7 +243,7 @@ describe("WeixinConversationAdapter", () => {
         { url: pngDataUrl },
         { url: jpegDataUrl },
       ],
-    });
+    }, expect.any(AbortSignal));
     expect(notifyText).toHaveBeenCalledWith(
       target,
       "已将图片和补充要求追加到当前 Turn。",
@@ -306,11 +307,11 @@ describe("WeixinConversationAdapter", () => {
     expect(submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
       images: [{ url: pngDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     expect(submit).toHaveBeenNthCalledWith(2, target, {
       text: "请查看这张图片并根据图片内容协助我。",
       images: [{ url: jpegDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     await adapter.close();
     vi.useRealTimers();
   });
@@ -372,7 +373,7 @@ describe("WeixinConversationAdapter", () => {
     expect(submit).toHaveBeenCalledWith(otherTarget, {
       text: "请查看这张图片并根据图片内容协助我。",
       images: [{ url: jpegDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     await adapter.close();
   });
 
@@ -486,7 +487,7 @@ describe("WeixinConversationAdapter", () => {
       "{",
       "  \"enabled\": true",
       "}",
-    ].join("\n"));
+    ].join("\n"), expect.any(AbortSignal));
     expect(JSON.stringify(submit.mock.calls)).not.toContain("/uploads/");
     expect(notifyText).toHaveBeenCalledWith(
       target,
@@ -527,7 +528,7 @@ describe("WeixinConversationAdapter", () => {
       "",
       "当前消息：",
       "语音转写内容",
-    ].join("\n"));
+    ].join("\n"), undefined);
     expect(download).not.toHaveBeenCalled();
   });
 
@@ -565,7 +566,7 @@ describe("WeixinConversationAdapter", () => {
 
     expect(submit).toHaveBeenCalledWith(target, {
       localAudios: [{ path: "/private/weixin/voice.ogg" }],
-    });
+    }, undefined);
     expect(notifyText).toHaveBeenCalledWith(
       target,
       "已将语音追加到当前 Turn。",
@@ -838,3 +839,14 @@ function serviceFixture(
 ): ConversationMethodOverrides {
   return methods;
 }
+
+it.each(["revert.result-unknown", "queue.failed"] as const)("keeps Weixin %s unresolved after its safe error reply", async code => {
+  const notify = vi.fn(() => true);
+  const error = new UserFacingError(code, "private details");
+  const adapter = new WeixinConversationAdapter({ submit: async () => { throw error; } }, { notifyText: notify });
+  try {
+    await expect(adapter.handle(message)).rejects.toBe(error);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(JSON.stringify(notify.mock.calls)).not.toContain("private details");
+  } finally { await adapter.close(); }
+});

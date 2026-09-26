@@ -24,6 +24,7 @@ export class BoundedAsyncQueue<T> {
   constructor(
     readonly capacity: number,
     private readonly onOverflow?: (state: QueueOverflow) => void,
+    private readonly hardLimit = false,
   ) {
     this.nextOverflowWarning = capacity + 1;
     if (!Number.isInteger(capacity) || capacity <= 0) {
@@ -55,6 +56,7 @@ export class BoundedAsyncQueue<T> {
     // 关键事件不能因普通容量耗尽而丢失；容量只限制可丢弃的中间事件。
     const disposableIndex = this.nonCriticalCount === 0
       ? -1 : this.entries.findIndex((entry) => !entry.critical);
+    if (disposableIndex === -1 && this.hardLimit) return false;
     if (disposableIndex !== -1) {
       this.entries.splice(disposableIndex, 1);
       this.nonCriticalCount -= 1;

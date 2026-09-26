@@ -1,3 +1,4 @@
+import { isResolvedInputError } from "../error-metadata.js";
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
@@ -111,7 +112,7 @@ export class WeixinConversationAdapter {
     private readonly audios?: Pick<WeixinAudioPort, "download">,
   ) {
     this.inputs = new SurfaceInputCoalescer(
-      (target, input) => conversations.submit(target, input),
+      (target, input, signal) => conversations.submit(target, input, signal),
       inputOptions,
     );
   }
@@ -140,6 +141,7 @@ export class WeixinConversationAdapter {
               message.audio.transcript,
               message.quotedText,
             ),
+            signal,
           );
           return;
         }
@@ -161,7 +163,7 @@ export class WeixinConversationAdapter {
                 ),
               }),
           localAudios: [{ path: audio.path }],
-        });
+        }, signal);
         if (result.steered) {
           this.notify(
             message.target,
@@ -267,6 +269,7 @@ export class WeixinConversationAdapter {
         await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, message.quotedText),
+          signal,
         );
         return;
       }
@@ -348,6 +351,7 @@ export class WeixinConversationAdapter {
         message.target,
         formatOperationFailure(renderWeixinUserFacingError(error)),
       );
+      if (!isResolvedInputError(error)) throw error;
     }
   }
 
