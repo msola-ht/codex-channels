@@ -248,14 +248,18 @@ export function validateNetworkProxyValue(field, value) {
   return field === "no_proxy" ? validateNoProxy(normalized) : validateCodexProxyValue(field, normalized);
 }
 
+/** 已配置 bot_token 的 Telegram 才会创建 Surface；只留空表时没有消费者。 */
+function telegramSurfaceEnabled(document) {
+  return stringValue(table(document.telegram).bot_token) !== "";
+}
+
 /**
  * 只有 Telegram（已配置 bot_token）与已启用的飞书消费 `display.*` 设置，与运行时重载判定
  * （`classifyConfigReload`）保持一致：只启用微信或未配置渠道时改这些设置没有渠道受影响，
  * 无需重建 Gateway 连接，只需重新读取配置。
  */
 function displaySettingActivation(document) {
-  return stringValue(table(document.telegram).bot_token) !== ""
-    || table(document.feishu).enabled === true
+  return telegramSurfaceEnabled(document) || table(document.feishu).enabled === true
     ? "restart-gateway"
     : "reload";
 }
@@ -287,7 +291,7 @@ function applySetting(document, input) {
     case "telegram.message-format": {
       const value = enumValue(input.value, messageFormatValues, "value", "Telegram 消息格式");
       document.telegram = { ...table(document.telegram), message_format: value };
-      return changed(value, "restart-gateway");
+      return changed(value, telegramSurfaceEnabled(document) ? "restart-gateway" : "reload");
     }
     case "system.approval-timeout": {
       const value = integerValue(input.value, 30, 3_600, "value", "审批超时");

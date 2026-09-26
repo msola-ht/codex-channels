@@ -210,6 +210,43 @@ describe("Gateway Config management", () => {
     expect(readGatewayConfig(fixture.configPath).display).toMatchObject({ reasoning: true });
   });
 
+  it("requires a restart for the Telegram message format only when Telegram is configured", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+
+    expect(updateGatewaySetting({
+      kind: "telegram.message-format",
+      value: "rich",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      value: "rich",
+      activation: "reload",
+      activationResult: configActivationResult("reload"),
+    });
+
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "telegram-token",
+      allowed_user_ids: [],
+      message_format: "rich",
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    settings = loadGatewaySettings(fixture.environment);
+    expect(updateGatewaySetting({
+      kind: "telegram.message-format",
+      value: "html",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      value: "html",
+      activation: "restart-gateway",
+      activationResult: configActivationResult("restart-gateway"),
+    });
+  });
+
   it("updates the global conversation idle release minutes", () => {
     const fixture = createFixture();
     const settings = loadGatewaySettings(fixture.environment);
