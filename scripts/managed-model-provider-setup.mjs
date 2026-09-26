@@ -1,4 +1,5 @@
 import {
+  createManagedProviderMarker,
   createManagedProviderProfile,
   createModelProviderConfig,
 } from "../runtime/model-provider-profile.mjs";
@@ -6,6 +7,8 @@ import {
   withManagedModelCatalogSettings,
   withPreservedManagedModelCatalogSettings,
 } from "../runtime/model-provider-runtime.mjs";
+import { stringify } from "smol-toml";
+import { applyProviderFileUpdates } from "./managed-provider-files.mjs";
 
 const managedRootKeys = Object.freeze([
   "model",
@@ -93,6 +96,38 @@ export function createManagedProviderConfiguration(current, initial, definition,
       apiKey, catalogPath, model, reasoningEffort,
     }),
   };
+}
+
+/** Build account file updates without writing; callers retain catalog and archive policy. */
+export function planManagedProviderAccountConfiguration(current, backup, definition, {
+  paths, mode, previousMode, apiKey, catalog, model,
+}) {
+  const replacesInitial = previousMode === undefined
+    || (previousMode === "switching" && mode === "exclusive");
+  if (!replacesInitial && backup === undefined) {
+    throw new Error(`${definition.displayName} 账户初始备份缺失`);
+  }
+  const initial = replacesInitial ? { config: current } : backup;
+  const { config, profile } = createManagedProviderConfiguration(current, initial.config, definition, {
+    mode, previousMode, apiKey, catalogPath: paths.catalog, catalog, model,
+  });
+  const updates = new Map([
+    [paths.backup, `${JSON.stringify(initial)}\n`],
+    [paths.profile, profile === undefined ? undefined : stringify(profile)],
+    [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
+  ]);
+  if (mode === "exclusive" || previousMode === "exclusive") updates.set(paths.config, stringify(config));
+  return { initial, replacesInitial, updates };
+}
+
+/** Publish references only after their dependencies, with the primary config last. */
+export async function applyManagedProviderAccountConfiguration(updates, snapshots, paths) {
+  const publishPaths = [paths.profile, paths.marker, paths.registry, paths.config];
+  const ordered = new Map([...updates].filter(([path]) => !publishPaths.includes(path)));
+  for (const path of publishPaths) {
+    if (updates.has(path)) ordered.set(path, updates.get(path));
+  }
+  await applyProviderFileUpdates(ordered, snapshots);
 }
 
 export function createManagedProviderCatalog(catalog, definition, {

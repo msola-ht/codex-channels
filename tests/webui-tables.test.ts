@@ -20,6 +20,7 @@ describe("WebUI metrics table presentation", () => {
         } }],
       });
       try {
+        const { AccountSettingsManagement } = await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
@@ -59,7 +60,18 @@ describe("WebUI metrics table presentation", () => {
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
+        const accountSettings = {
+          observedAt: "fixture", resourceRevision: "fixture",
+          opencodeGo: { configured: false, defaultAccountId: null, accounts: [] },
+          deepseek: { configured: true, legacyConfigurationPresent: false, accounts: [{ id: "ds-main", default: true, mode: "switching", model: "deepseek-flash" }] },
+          clinePass: { configured: true, accounts: [{ id: "clp-main", default: true, mode: "switching", model: "cline-pass/deepseek-v4.1-flash" }] },
+        };
+        const accountManagement = { settings: accountSettings, loading: false, busy: false, pendingPreview: null,
+          actionError: null, error: null, mutate: noop, confirm: noop, cancel: noop, refetch: noop };
         const result = {
+          accountSettings: render(AccountSettingsManagement, { management: accountManagement }),
+          accountSettingsBusy: render(AccountSettingsManagement, { management: { ...accountManagement, busy: true } }),
+          accountSettingsLegacy: render(AccountSettingsManagement, { management: { ...accountManagement, settings: { ...accountSettings, deepseek: { ...accountSettings.deepseek, legacyConfigurationPresent: true } } } }),
           newAccount: render(AccountIdField, { id: "account", value: "main", accounts: [], disabled: false, editing: false, onChange: noop }),
           reservedAccount: render(AccountIdField, { id: "account", value: "openai", accounts: [], reservedIds: ["openai", "deepseek", "ocg"], disabled: false, editing: false, onChange: noop }),
           customAccount: render(AccountIdField, { id: "account", value: "team_a", accounts: [{ id: "team-a" }], disabled: false, editing: false, onChange: noop }),
@@ -84,7 +96,9 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
-          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, upstreamProvider: "deepseek", chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceIndexOnly: render(TrafficDetail, { detail: { ...detail, upstreamProvider: "deepseek" }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceDiagnosticsOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
@@ -211,8 +225,23 @@ describe("WebUI metrics table presentation", () => {
   it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
     expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider">上游：deepseek/);
     expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
+    expect(markup.traceIndexOnly).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceDiagnosticsOnly).not.toContain('title="routing.finalProvider"');
     expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
     expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shares managed account controls while isolating the DS legacy action", () => {
+    for (const id of ["deepseek-api-key", "cline-api-key"]) {
+      expect(markup.accountSettings).toContain(`for="${id}"`);
+      expect(markup.accountSettings).toMatch(new RegExp(`<input[^>]*id="${id}"[^>]*value=""`));
+      expect(markup.accountSettingsBusy).toMatch(new RegExp(`<input[^>]*id="${id}"[^>]*disabled=""`));
+    }
+    expect(markup.accountSettings).toContain("ds-main");
+    expect(markup.accountSettings).toContain("clp-main");
+    expect(markup.accountSettingsLegacy).toContain("移除旧账户");
+    expect(markup.accountSettingsLegacy).not.toContain('id="deepseek-api-key"');
+    expect(markup.accountSettingsLegacy).toContain('id="cline-api-key"');
   });
 
   it("renders account presets, custom validation and an immutable existing ID", () => {

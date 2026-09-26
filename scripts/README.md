@@ -277,7 +277,7 @@
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 高级设置选择完整日志等级，不改写显示设置或凭据。
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、`codexc ccg account remove` / `legacy remove` 确认移除入口、默认账户及删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
-- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：受管 Provider 共用的私有文件读取、写入、快照、备份归档、逐文件并发复核和失败回滚；归档拒绝覆盖已有目标，并先于原备份替换执行。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，保留目录字段和窗口设置；导出账户菜单与目录刷新入口。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户与删除事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
@@ -287,7 +287,7 @@
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；OCG 与
-  CCG 共用完整模式配置生成，DeepSeek 复用配置原语，账户注册和历史备份格式仍由各自适配层负责。
+  CCG 共用完整模式配置生成；DS、CCG、CLP 共用账户初始配置选择与文件写入计划，先准备目录和备份，再发布 Profile、标记与账户注册，最后写入主配置；账户注册和历史备份格式仍由各自适配层负责。
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
   路径与 Profile 文件名；私有文件事务使用 `managed-provider-files.mjs`。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go

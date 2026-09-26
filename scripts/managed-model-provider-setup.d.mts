@@ -1,4 +1,5 @@
 import type { ModelProviderDefinition } from "../runtime/model-provider-definitions.mjs";
+import type { ProviderFileSnapshot } from "./managed-provider-files.mjs";
 
 export class ManagedModelProviderSetupError extends Error {
   code: string;
@@ -62,6 +63,25 @@ export function resolveManagedCatalogModel(
   definition: ModelProviderDefinition,
   preferred?: string,
 ): string;
+
+export function planManagedProviderAccountConfiguration(
+  current: Record<string, unknown>,
+  backup: { config: Record<string, unknown> } | undefined,
+  definition: ModelProviderDefinition,
+  options: Omit<Parameters<typeof createManagedProviderConfiguration>[3], "catalogPath"> & {
+    paths: { config: string; profile: string; marker: string; backup: string; catalog: string };
+  },
+): {
+  initial: { config: Record<string, unknown> };
+  replacesInitial: boolean;
+  updates: Map<string, string | Uint8Array | undefined>;
+};
+
+export function applyManagedProviderAccountConfiguration(
+  updates: Map<string, string | Uint8Array | undefined>,
+  snapshots: ProviderFileSnapshot[],
+  paths: { profile: string; marker: string; registry: string; config: string },
+): Promise<void>;
 
 export function applyExclusiveProviderConfig(
   current: Record<string, unknown>,

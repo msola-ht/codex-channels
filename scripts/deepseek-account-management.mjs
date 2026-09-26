@@ -11,14 +11,13 @@ import {
   loadDeepseekAccounts, validateDeepseekAccounts,
 } from "../runtime/deepseek-accounts.mjs";
 import { deepseekAccountDefinition, deepseekProviderDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
-import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import {
   loadManagedModelProviderSettings, loadPrimaryModelProvider,
   managedProviderDirectory,
 } from "../runtime/model-provider-runtime.mjs";
 import { readPrivateFileSync } from "../runtime/private-file.mjs";
-import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
-import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
+import { addProviderFileArchive, applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
+import { applyManagedProviderAccountConfiguration, planManagedProviderAccountConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
 import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
@@ -111,16 +110,7 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     if (!previous && (hasProviderBaseConfig(current, definition) || existsSync(paths.profile) || existsSync(paths.marker))) throw new Error("DeepSeek 账户配置路径已被占用");
     const backup = readBackup(paths.backup);
     if (previous && !backup) throw new Error("DeepSeek 账户初始备份缺失");
-    const entersExclusiveMode = previous?.mode === "switching" && preview.mode === "exclusive";
-    const initial = previous && !entersExclusiveMode ? backup : { config: current };
-    const updates = new Map();
-    if ((!previous || entersExclusiveMode) && backup) {
-      const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
-      const [snapshot] = snapshotProviderFiles([archive]);
-      if (snapshot.content !== undefined) throw new Error("DeepSeek 备份归档路径已被占用");
-      snapshots.push(snapshot);
-      updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
-    }
+    const catalogUpdates = new Map();
     let catalog;
     if (existsSync(paths.catalog)) {
       catalog = JSON.parse(readPrivateFileSync(paths.catalog, 2_097_152));
@@ -128,20 +118,19 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
       assertNoResponsesContextFollowers(environment,"重建 DS 目录");
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);
       catalog = createManagedDeepseekCatalog(downloaded.catalog);
-      updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
-      updates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
+      catalogUpdates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
+      catalogUpdates.set(paths.manifest, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
     }
     const model = resolveManagedCatalogModel(catalog, definition, previous?.model);
-    const configured = createManagedProviderConfiguration(current, initial.config, definition, {
-      mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey,
-      catalogPath: paths.catalog, catalog, model,
+    const { replacesInitial, updates } = planManagedProviderAccountConfiguration(current, backup, definition, {
+      paths, mode: preview.mode, previousMode: previous?.mode, apiKey: input.apiKey, catalog, model,
     });
-    updates.set(paths.backup, `${JSON.stringify(initial)}\n`);
-    updates.set(paths.profile, configured.profile === undefined ? undefined : stringify(configured.profile));
-    updates.set(paths.marker, stringify(createManagedProviderMarker(definition, preview.mode)));
-    if (preview.mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(configured.config));
+    if (replacesInitial && backup) {
+      addProviderFileArchive(updates, snapshots, paths.backup, join(dirname(paths.backup), `config-${randomUUID()}.json`));
+    }
+    for (const [path, content] of catalogUpdates) updates.set(path, content);
     if (!previous) updates.set(paths.registry, `${JSON.stringify(validateDeepseekAccounts([...accounts, { id: input.accountId, default: accounts.length === 0 }]))}\n`);
-    await applyProviderFileUpdates(updates, snapshots);
+    await applyManagedProviderAccountConfiguration(updates, snapshots, paths);
     return { ...preview, action: "configured", model };
   });
 }

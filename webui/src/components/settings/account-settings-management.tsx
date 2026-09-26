@@ -1,6 +1,6 @@
 import { AccountIdField } from "@/components/settings/account-id-field"
 import { newManagedAccountIdError, opencodeGoReservedAccountIds } from "../../../../runtime/managed-provider-account-options.mjs"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/settings/settings-feedback"
 import type { AccountSettingsController } from "@/lib/settings-management"
+import type { ManagementAccountSettingsResponse } from "@/lib/types"
 
 export function AccountSettingsManagement({ management, onChanged }: { management: AccountSettingsController; onChanged?: () => void }) {
   const settings = management.settings
@@ -26,14 +27,8 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
   const [accountMode, setAccountMode] = useState<"switching" | "exclusive">("switching")
   const [accountKey, setAccountKey] = useState("")
   const [accountReconfigure, setAccountReconfigure] = useState(false)
-  const [deepseekMode, setDeepseekMode] = useState<"switching" | "exclusive">("switching")
-  const [deepseekKey, setDeepseekKey] = useState("")
-  const [dsAccountId, setDsAccountId] = useState("")
-  const [dsReconfigure, setDsReconfigure] = useState(false)
-  const [clineAccountId, setClineAccountId] = useState("")
-  const [clineMode, setClineMode] = useState<"switching" | "exclusive">("switching")
-  const [clineKey, setClineKey] = useState("")
-  const [clineReconfigure, setClineReconfigure] = useState(false)
+  const deepseekForm = useManagedAccountForm()
+  const clineForm = useManagedAccountForm()
   const pending = management.pendingPreview
 
   const configureAccount = async () => {
@@ -46,15 +41,6 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
       apiKey: accountKey,
     })
   }
-  const configureDeepseek = async () => {
-    await management.mutate({
-      operation: "deepseek.configure",
-      mode: deepseekMode,
-      apiKey: deepseekKey,
-      accountId: dsAccountId.trim(),
-      reconfigure: dsReconfigure,
-    })
-  }
   const confirmPending = async () => {
     const result = await management.confirm()
     if (result !== null && pending?.input.operation === "opencode.account.configure") {
@@ -62,20 +48,18 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
       setAccountReconfigure(false)
     }
     if (result !== null && pending?.input.operation === "deepseek.configure") {
-      setDeepseekKey("")
-      setDsReconfigure(false)
+      deepseekForm.complete()
     }
     if (result !== null && pending?.input.operation === "clp.configure") {
-      setClineKey("")
-      setClineReconfigure(false)
+      clineForm.complete()
     }
     if (result !== null) onChanged?.()
   }
   const cancelPending = () => {
     management.cancel()
-    setClineKey("")
+    clineForm.clearKey()
     setAccountKey("")
-    setDeepseekKey("")
+    deepseekForm.clearKey()
   }
   const editAccount = (account: typeof settings.opencodeGo.accounts[number]) => {
     setAccountId(account.id)
@@ -99,31 +83,87 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
         <div className="flex flex-wrap gap-2"><Button disabled={disabled || (!accountReconfigure && Boolean(newManagedAccountIdError(accountId, settings.opencodeGo.accounts, opencodeGoReservedAccountIds))) || contact.trim() === "" || accountKey.trim() === ""} onClick={() => void configureAccount()}>{accountReconfigure ? "重新配置账户" : "新增账户"}</Button>{accountReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setAccountId(""); setContact(""); setAccountKey(""); setAccountReconfigure(false) }}>取消编辑</Button> : null}</div>
       </section>
       <Separator />
-      <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">DeepSeek 多账户</h3><p className="text-xs text-muted-foreground">账户分别保存 Key、模型选择与统计，共用 DS 官方模型目录。</p></div>
-        {settings.deepseek.accounts.map((account) => <div key={account.id} className="flex flex-wrap items-center justify-between gap-2"><div>{account.id} {account.default ? <Badge variant="outline">默认</Badge> : null}<p className="text-xs text-muted-foreground">{account.model} · {account.mode}</p></div><div className="flex gap-2"><Button variant="outline" disabled={disabled} onClick={() => { setDsAccountId(account.id); setDeepseekMode(account.mode ?? "switching"); setDsReconfigure(true); setDeepseekKey("") }}>重新配置</Button><Button variant="outline" disabled={disabled || account.default} onClick={() => void management.mutate({ operation: "deepseek.default", accountId: account.id })}>设为默认</Button><Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.remove", accountId: account.id })}>删除</Button></div></div>)}
-        {settings.deepseek.legacyConfigurationPresent ? <Alert><AlertDescription>请先移除旧 DS 账户，再重新添加。移除会删除旧配置和 Key，保留备份与历史统计。</AlertDescription></Alert> : null}
-        {!settings.deepseek.legacyConfigurationPresent ? <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <AccountIdField id="ds-account-id" value={dsAccountId} accounts={settings.deepseek.accounts} disabled={disabled} editing={dsReconfigure} onChange={setDsAccountId} />
-          <ManagedSelect label="运行模式" value={deepseekMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={(value) => setDeepseekMode(value as "switching" | "exclusive")} /><Field data-disabled={disabled}><FieldLabel htmlFor="deepseek-api-key">DeepSeek API Key</FieldLabel><Input id="deepseek-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={deepseekKey} disabled={disabled} onChange={(event) => setDeepseekKey(event.target.value)} /></Field>
-        </FieldGroup> : null}
-        <div className="flex gap-2">{settings.deepseek.legacyConfigurationPresent ? <Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.legacy.remove" })}>移除旧账户</Button> : <Button disabled={disabled || (!dsReconfigure && Boolean(newManagedAccountIdError(dsAccountId, settings.deepseek.accounts))) || deepseekKey.trim() === ""} onClick={() => void configureDeepseek()}>{dsReconfigure ? "重新配置账户" : "新增账户"}</Button>}{dsReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setDsAccountId(""); setDsReconfigure(false); setDeepseekKey("") }}>取消编辑</Button> : null}</div>
-      </section>
+      <ManagedAccountSection
+        name="DeepSeek" id="deepseek" description="账户分别保存 Key、模型选择与统计，共用 DS 官方模型目录。"
+        accounts={settings.deepseek.accounts} form={deepseekForm} disabled={disabled}
+        onConfigure={() => void management.mutate({ operation: "deepseek.configure", ...deepseekForm.input() })}
+        onDefault={accountId => void management.mutate({ operation: "deepseek.default", accountId })}
+        onRemove={accountId => void management.mutate({ operation: "deepseek.remove", accountId })}
+        legacy={settings.deepseek.legacyConfigurationPresent ? <>
+          <Alert><AlertDescription>请先移除旧 DS 账户，再重新添加。移除会删除旧配置和 Key，保留备份与历史统计。</AlertDescription></Alert>
+          <Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "deepseek.legacy.remove" })}>移除旧账户</Button>
+        </> : undefined}
+      />
       <Separator />
-      <section className="flex flex-col gap-3">
-        <div><h3 className="font-medium">Cline Pass 多账户</h3><p className="text-xs text-muted-foreground">各账户独立使用 Key、会话和额度，共享模型目录及 DS 上下文设置。</p></div>
-        {settings.clinePass.accounts.length === 0 ? <SettingsEmpty>尚未配置 Cline Pass 账户。</SettingsEmpty> : settings.clinePass.accounts.map(account => <div key={account.id} className="flex flex-wrap items-center justify-between gap-2"><div>{account.id} {account.default ? <Badge variant="outline">默认</Badge> : null}<p className="text-xs text-muted-foreground">{account.model} · {account.mode}</p></div><div className="flex gap-2"><Button variant="outline" disabled={disabled} onClick={() => { setClineAccountId(account.id); setClineMode(account.mode ?? "switching"); setClineReconfigure(true); setClineKey("") }}>重新配置</Button><Button variant="outline" disabled={disabled || account.default} onClick={() => void management.mutate({ operation: "clp.default", accountId: account.id })}>设为默认</Button><Button variant="destructive" disabled={disabled} onClick={() => void management.mutate({ operation: "clp.remove", accountId: account.id })}>删除</Button></div></div>)}
-        <FieldGroup className="grid gap-3 md:grid-cols-3">
-          <AccountIdField id="cline-account-id" value={clineAccountId} accounts={settings.clinePass.accounts} disabled={disabled} editing={clineReconfigure} onChange={setClineAccountId} />
-          <ManagedSelect label="运行模式" value={clineMode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={value => setClineMode(value as "switching" | "exclusive")} />
-          <Field data-disabled={disabled}><FieldLabel htmlFor="cline-api-key">Cline Pass API Key</FieldLabel><Input id="cline-api-key" type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={clineKey} disabled={disabled} onChange={event => setClineKey(event.target.value)} /></Field>
-        </FieldGroup>
-        <div className="flex gap-2"><Button disabled={disabled || (!clineReconfigure && Boolean(newManagedAccountIdError(clineAccountId, settings.clinePass.accounts))) || clineKey.trim() === ""} onClick={() => void management.mutate({ operation: "clp.configure", accountId: clineAccountId.trim(), apiKey: clineKey, mode: clineMode, reconfigure: clineReconfigure })}>{clineReconfigure ? "重新配置账户" : "新增账户"}</Button>{clineReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setClineAccountId(""); setClineReconfigure(false); setClineKey("") }}>取消编辑</Button> : null}</div>
-      </section>
+      <ManagedAccountSection
+        name="Cline Pass" id="cline" description="各账户独立使用 Key、会话和额度，共享模型目录及 DS 上下文设置。"
+        accounts={settings.clinePass.accounts} form={clineForm} disabled={disabled}
+        onConfigure={() => void management.mutate({ operation: "clp.configure", ...clineForm.input() })}
+        onDefault={accountId => void management.mutate({ operation: "clp.default", accountId })}
+        onRemove={accountId => void management.mutate({ operation: "clp.remove", accountId })}
+      />
       {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     </CardContent>
   </Card>
+}
+
+type ManagedAccount = ManagementAccountSettingsResponse["deepseek"]["accounts"][number]
+type ManagedAccountFormValue = { accountId: string; apiKey: string; mode: "switching" | "exclusive"; reconfigure: boolean }
+
+function useManagedAccountForm() {
+  const [value, setValue] = useState<ManagedAccountFormValue>({ accountId: "", apiKey: "", mode: "switching", reconfigure: false })
+  return {
+    value,
+    change: (change: Partial<ManagedAccountFormValue>) => setValue(previous => ({ ...previous, ...change })),
+    edit: (account: ManagedAccount) => setValue({ accountId: account.id, apiKey: "", mode: account.mode ?? "switching", reconfigure: true }),
+    clearKey: () => setValue(previous => ({ ...previous, apiKey: "" })),
+    complete: () => setValue(previous => ({ ...previous, apiKey: "", reconfigure: false })),
+    cancelEdit: () => setValue(previous => ({ ...previous, accountId: "", apiKey: "", reconfigure: false })),
+    input: () => ({ ...value, accountId: value.accountId.trim() }),
+  }
+}
+
+function ManagedAccountSection({ name, id, description, accounts, form, disabled, legacy, onConfigure, onDefault, onRemove }: {
+  name: string
+  id: string
+  description: string
+  accounts: ManagedAccount[]
+  form: ReturnType<typeof useManagedAccountForm>
+  disabled: boolean
+  legacy?: ReactNode
+  onConfigure: () => void
+  onDefault: (accountId: string) => void
+  onRemove: (accountId: string) => void
+}) {
+  const { value } = form
+  return <section className="flex flex-col gap-3">
+    <div><h3 className="font-medium">{name} 多账户</h3><p className="text-xs text-muted-foreground">{description}</p></div>
+    {accounts.length === 0 ? <SettingsEmpty>尚未配置 {name} 账户。</SettingsEmpty> : accounts.map(account => (
+      <div key={account.id} className="flex flex-wrap items-center justify-between gap-2">
+        <div>{account.id} {account.default ? <Badge variant="outline">默认</Badge> : null}<p className="text-xs text-muted-foreground">{account.model} · {account.mode}</p></div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={disabled} onClick={() => form.edit(account)}>重新配置</Button>
+          <Button variant="outline" disabled={disabled || account.default} onClick={() => onDefault(account.id)}>设为默认</Button>
+          <Button variant="destructive" disabled={disabled} onClick={() => onRemove(account.id)}>删除</Button>
+        </div>
+      </div>
+    ))}
+    {legacy ?? <>
+      <FieldGroup className="grid gap-3 md:grid-cols-3">
+        <AccountIdField id={`${id}-account-id`} value={value.accountId} accounts={accounts} disabled={disabled} editing={value.reconfigure} onChange={accountId => form.change({ accountId })} />
+        <ManagedSelect label="运行模式" value={value.mode} options={[["switching", "可切换"], ["exclusive", "固定主 Provider"]]} disabled={disabled} onChange={mode => form.change({ mode: mode as ManagedAccountFormValue["mode"] })} />
+        <Field data-disabled={disabled}>
+          <FieldLabel htmlFor={`${id}-api-key`}>{name} API Key</FieldLabel>
+          <Input id={`${id}-api-key`} type="password" autoComplete="new-password" placeholder="仅写入，不会回显" value={value.apiKey} disabled={disabled} onChange={event => form.change({ apiKey: event.target.value })} />
+        </Field>
+      </FieldGroup>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={disabled || (!value.reconfigure && Boolean(newManagedAccountIdError(value.accountId, accounts))) || value.apiKey.trim() === ""} onClick={onConfigure}>{value.reconfigure ? "重新配置账户" : "新增账户"}</Button>
+        {value.reconfigure ? <Button variant="outline" disabled={disabled} onClick={form.cancelEdit}>取消编辑</Button> : null}
+      </div>
+    </>}
+  </section>
 }
 
 export function AccountSettingsConfirmationDialog({
