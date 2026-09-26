@@ -1,8 +1,9 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
+import * as metricsObserver from "../src/provider-proxy/response-metrics-observer.js";
 
 import {
   ProviderProxy,
@@ -12,12 +13,66 @@ import {
 const openServers: Array<{ close(): Promise<void> }> = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   while (openServers.length > 0) {
     const server = openServers.pop()!;
     await server.close();
   }
 });
 describe("ProviderProxy WebSocket metrics", () => {
+  it("starts queued and reused requests at send rather than while waiting for the connection", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(100);
+    let signalCreated!: () => void;
+    const created = new Promise<void>(resolve => { signalCreated = resolve; });
+    const createMetrics = metricsObserver.createMetricsState;
+    vi.spyOn(metricsObserver, "createMetricsState").mockImplementation((...args) => {
+      const state = createMetrics(...args);
+      signalCreated();
+      return state;
+    });
+    const server = createServer();
+    const sockets = new WebSocketServer({ noServer: true });
+    let allowUpgrade!: () => void;
+    const upgradePending = new Promise<void>(resolve => {
+      server.on("upgrade", (request, socket, head) => {
+        allowUpgrade = () => sockets.handleUpgrade(request, socket, head, peer => sockets.emit("connection", peer, request));
+        resolve();
+      });
+    });
+    let requests = 0;
+    sockets.on("connection", socket => socket.on("message", () => {
+      clock.mockReturnValue(++requests === 1 ? 550 : 950);
+      socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "ok" }));
+      socket.send(JSON.stringify({ type: "response.completed", response: { usage: { output_tokens: 2 } } }));
+    }));
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>(resolve => sockets.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    } });
+    const metrics: ProviderProxyMetrics[] = [];
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port, upstreamProtocol: "http",
+      onMetrics: metric => { metrics.push(metric); },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    try {
+      await new Promise<void>((resolve, reject) => { client.once("open", resolve); client.once("error", reject); });
+      client.send('{"type":"response.create","model":"fixture"}');
+      await Promise.all([created, upgradePending]);
+      clock.mockReturnValue(500);
+      allowUpgrade();
+      await vi.waitFor(() => expect(metrics).toHaveLength(1));
+      expect(metrics[0]).toMatchObject({ firstContentMs: 50, totalDurationMs: 50 });
+      clock.mockReturnValue(900);
+      client.send('{"type":"response.create","model":"fixture"}');
+      await vi.waitFor(() => expect(metrics).toHaveLength(2));
+      expect(metrics[1]).toMatchObject({ firstContentMs: 50, totalDurationMs: 50 });
+    } finally { client.terminate(); }
+  });
   it("classifies remote compaction v2 WebSocket traffic and strips private metadata", async () => {
     const upstreamServer = createServer();
     const upstreamWebSocket = new WebSocketServer({ server: upstreamServer });

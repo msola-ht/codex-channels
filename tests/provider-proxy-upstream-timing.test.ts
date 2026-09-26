@@ -5,19 +5,29 @@ import {
   inspectResponseEvent,
   observeResponseEvent,
   HttpResponseMetricsObserver,
+  startMetricsRequest,
+  markMetricsFailed,
 } from "../src/provider-proxy/response-metrics-observer.js";
 import { TurnTimingAccumulator } from "../src/conversation-core/turn-timing-accumulator.js";
 
 describe("OpenAI upstream TTFT", () => {
-  it("measures total duration from request entry and freezes it at the first terminal", () => {
-    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 120, 100);
+  it("measures first content and total duration from the same submission and freezes the first terminal", () => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null);
+    startMetricsRequest(metrics, 120);
     metrics.responseFormat = "sse";
     const observer = new HttpResponseMetricsObserver(metrics);
     observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'), 500, 150);
     observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"status":"completed"}}\n\n'), 400, 200);
     observer.finish(300, 250);
     expect(metrics.firstContentMs).toBe(30);
-    expect(metrics.totalDurationMs).toBe(100);
+    expect(metrics.totalDurationMs).toBe(80);
+    expect(metrics.totalDurationMs! - metrics.firstContentMs!).toBe(50);
+  });
+  it.each(["http", "websocket"] as const)("does not invent %s timing before submission", transport => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null);
+    markMetricsFailed(metrics, "upstream_handshake_error", 1200, undefined, 300);
+    expect(metrics.firstContentMs).toBeUndefined();
+    expect(metrics.totalDurationMs).toBeUndefined();
   });
   it.each([
     { type: "response.output_text.done", text: "answer" },
@@ -65,7 +75,7 @@ describe("OpenAI upstream TTFT", () => {
     'data: {"type":"response.metadata","metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
     'event: response.metadata\ndata: {"metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
   ])("waits for content after HTTP metadata: %s", (metadata) => {
-    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100, 100);
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
     metrics.responseFormat = "sse";
     const observer = new HttpResponseMetricsObserver(metrics);
     observer.observeChunk(Buffer.from(metadata), 1010, 110);

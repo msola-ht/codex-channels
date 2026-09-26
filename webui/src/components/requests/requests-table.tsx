@@ -230,7 +230,7 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: () => <TableHint hint="从开始转发到收到首个有效响应事件；不代表页面显示时间。">首字耗时</TableHint>,
+      header: () => <TableHint hint="从代理提交上游请求到收到首个有效响应事件，与请求总耗时使用同一起点；不代表页面显示时间。">首字耗时</TableHint>,
       cell: ({ row }) => (
         <TableHint hint={row.original.upstreamTtftMs == null ? null : `上游轮次首 Token：${formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
           {row.original.firstContentMs == null ? "—"
@@ -241,7 +241,7 @@ export function RequestsTable({
     {
       id: "totalDuration",
       accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column} hint="从代理收到请求到模型完成或请求结束；不包含页面显示时间。">总耗时</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="从代理提交上游请求到模型完成或请求结束；不含发送前的本地准备与 WebSocket 连接等待，也不含页面显示时间。">总耗时</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {

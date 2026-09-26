@@ -18,16 +18,17 @@ export class TrafficCallTiming {
   submitted(at: number): void { this.submittedMs = at - this.startedAt; }
 
   finish(at: number, firstContentMs: number | undefined, totalDurationMs?: number) {
+    const sentMs = this.submittedMs ?? this.forwardingMs;
     return {
       clock: "monotonic" as const,
-      endMs: totalDurationMs ?? at - this.startedAt,
+      endMs: sentMs !== undefined && totalDurationMs !== undefined ? sentMs + totalDurationMs : at - this.startedAt,
       ...(this.forwardingMs === undefined ? {} : { forwardingMs: this.forwardingMs }),
       ...(this.requestBodyEndMs === undefined ? {} : { requestBodyEndMs: this.requestBodyEndMs }),
       ...(this.responseHeadMs === undefined ? {} : { responseHeadMs: this.responseHeadMs }),
       ...(this.submittedMs === undefined ? {} : { submittedMs: this.submittedMs }),
       ...(this.connectionReady === undefined ? {} : { connectionReady: this.connectionReady }),
-      ...(this.forwardingMs === undefined || firstContentMs === undefined ? {} : {
-        firstEventMs: this.forwardingMs + firstContentMs,
+      ...(sentMs === undefined || firstContentMs === undefined ? {} : {
+        firstEventMs: sentMs + firstContentMs,
       }),
     };
   }

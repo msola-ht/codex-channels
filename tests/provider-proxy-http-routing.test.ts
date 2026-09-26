@@ -222,6 +222,7 @@ describe("ProviderProxy HTTP routing", () => {
       expect(sample).toMatchObject({ status: "failed", httpStatus: 502,
         errorType: "provider_proxy_route_error", model: null, inputTokens: null });
       expect(sample.firstContentMs).toBeUndefined();
+      expect(sample.totalDurationMs).toBeUndefined();
     }
     failing = false;
     await expect(requestProxy(port, "/responses", "POST")).resolves.toEqual({ status: 200 });

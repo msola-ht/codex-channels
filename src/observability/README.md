@@ -38,7 +38,7 @@
   Schema v15 增加可空 `upstream_ttft_ms`，逐请求保留上游原值，Turn 汇总仅选择自身首个有效 OpenAI
   普通响应样本，不合计或平均。Schema v16 增加可空 `first_content_ms`、`request_model`、`response_model`。
   Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
-  Schema v18 增加可空 `total_duration_ms`，逐请求保存代理入口至首次模型终态或结束/失败的单调时钟总耗时，支持明细排序与导出，不聚合为 Turn 耗时。
+  Schema v18 增加可空 `total_duration_ms`，逐请求保存提交上游请求至首次模型终态或结束/失败的单调时钟总耗时，支持明细排序与导出，不聚合为 Turn 耗时。
   数据库使用严格 Schema v19、Unix `0600` / Windows 当前 SID 私有文件权限，
   v19 的可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL

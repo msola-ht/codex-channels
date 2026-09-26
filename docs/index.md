@@ -339,7 +339,7 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 WebSocket 使用 token-event 判定，具体口径及差异见[WebUI 请求明细](webui.md)；不替代上游轮次 TTFT。
 Schema v17 保存可空转储标签、实际 writer session 与 interaction，由 Provider Proxy 绑定并经 IPC、指标库、导出和 WebUI 精确定位调用；不根据历史时间猜配，也不新增 App Server RPC。
 转储读取器通过 `traffic-dump-presentation.mjs` 分开投影当前调用的服务端模型声明与安全缓冲候选；CLI 与 WebUI 复用 `runtime/model-name-comparison.mjs` 比较请求和响应名称，候选不作为实际换模证据，不改变转发或存储协议。
-单次调用阶段由 `src/provider-proxy/traffic-call-timing.ts` 记录单调时钟节点，`traffic-dump.ts` 写入 V2 响应索引的可选 `callTiming`；共享读取器向 CLI 与 WebUI 投影阶段，与上游 logical-turn 统计分组。Schema v18 新增可空 `total_duration_ms`，总耗时由 `response-metrics-observer.ts` 从请求入口到首次终态或结束/失败观测，经指标 IPC、Store、请求明细和导出贯通；不依赖调用记录开关，旧记录为 NULL，不新增 App Server RPC。
+单次调用阶段由 `src/provider-proxy/traffic-call-timing.ts` 记录单调时钟节点，`traffic-dump.ts` 写入 V2 响应索引的可选 `callTiming`；共享读取器向 CLI 与 WebUI 投影阶段，与上游 logical-turn 统计分组。Schema v18 新增可空 `total_duration_ms`，总耗时由 `response-metrics-observer.ts` 从提交上游请求到首次终态或结束/失败观测，与首内容耗时共用单调时钟起点；HTTP 提交 request，WS 在连接就绪后提交 send，未发送的失败不采样。耗时经指标 IPC、Store、请求明细和导出贯通；不依赖调用记录开关，旧记录为 NULL，不新增 App Server RPC。
 Schema v19 的 `request_service_tier` 由 `provider-proxy/proxy.ts` 从 HTTP/WS 出站请求独立采集，经指标 IPC、Store 与 JSON/CSV 导出传递；WebUI 请求和错误明细按请求层级显示 FAST，不被响应 `default` 覆盖。请求层级缺失时为 NULL；由 `provider-proxy-http-metrics.test.ts`、`provider-proxy-websocket-metrics.test.ts`、`provider-proxy-metrics.test.ts` 和 `webui-tables.test.ts` 验证，不新增 App Server RPC。
 指标库只接受当前 Schema，不提供历史升级；新安装直接建库。
 

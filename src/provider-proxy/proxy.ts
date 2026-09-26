@@ -40,6 +40,7 @@ import {
   inspectResponseEvent,
   markMetricsFailed,
   observeResponseEvent,
+  startMetricsRequest,
   parseJsonPayload,
   websocketCloseErrorType,
   weeklyQuotaFromEvent,
@@ -301,7 +302,7 @@ export class ProviderProxy {
       const metadata = parseTurnMetadata(request.headers["x-codex-turn-metadata"]);
       const metrics = createMetricsState(metadata, startedAtMs, "http",
         metadata.operation,
-        effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs, startedAtMonotonicMs);
+        effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent));
       metrics.httpStatus = 502;
       markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error, failedAtMonotonicMs);
       const exchange = this.trafficDump?.beginHttpExchange({
@@ -322,7 +323,6 @@ export class ProviderProxy {
     }
     request.removeListener("error", onPendingError);
     if (this.stopped || response.destroyed) return;
-    const forwardingStartedAtMonotonicMs = performance.now();
     const turnMetadata = parseTurnMetadata(
       request.headers["x-codex-turn-metadata"],
     );
@@ -332,8 +332,6 @@ export class ProviderProxy {
       "http",
       turnMetadata.operation,
       effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
-      forwardingStartedAtMonotonicMs,
-      startedAtMonotonicMs,
     );
     const exchange = this.trafficDump?.beginHttpExchange({
       ...(route.accountId === undefined ? {} : { accountId: route.accountId }),
@@ -343,7 +341,6 @@ export class ProviderProxy {
       startedAtMs,
       startedAtMonotonicMs,
     });
-    exchange?.callTiming?.forwarding(forwardingStartedAtMonotonicMs);
     exchange?.observeRequestMetrics(metrics);
     const requestModelScanner = createTopLevelStringFieldScanner("model");
     const requestTierScanner = createTopLevelStringFieldScanner("service_tier");
@@ -366,6 +363,9 @@ export class ProviderProxy {
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
     delete upstreamHeaders[chatDiagnosticsHeader];
     if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
+    const submittedAtMonotonicMs = performance.now();
+    startMetricsRequest(metrics, submittedAtMonotonicMs);
+    exchange?.callTiming?.forwarding(submittedAtMonotonicMs);
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
       hostname: upstreamTarget.host,
@@ -498,7 +498,6 @@ export class ProviderProxy {
     head: Buffer,
   ): Promise<void> {
     const startedAtMs = Date.now();
-    const startedAtMonotonicMs = performance.now();
     const route = resolveProxyRoute(
       request.url,
       this.accountIds,
@@ -532,7 +531,7 @@ export class ProviderProxy {
         const metrics = createMetricsState(
           { threadId: null, turnId: null, operation: "response" }, startedAtMs,
           "websocket", "response",
-          effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent), startedAtMonotonicMs,
+          effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
         );
         metrics.httpStatus = 502;
         markMetricsFailed(metrics, "provider_proxy_route_error", Date.now(), error);
@@ -590,7 +589,7 @@ export class ProviderProxy {
       ),
       handshakeTimeout: this.timeoutMs,
     });
-    const pending: Array<{ data: RawData | string; isBinary: boolean; timing: TrafficCallTiming | undefined }> = [];
+    const pending: Array<{ data: RawData; isBinary: boolean; timing: TrafficCallTiming | undefined; metrics: MetricsState | undefined }> = [];
     let activeMetrics: MetricsState | undefined;
     let forwarding: Promise<void> | undefined;
     const failForwarding = (error: unknown): void => {
@@ -613,6 +612,7 @@ export class ProviderProxy {
         : undefined;
       const startedAtMonotonicMs = performance.now();
       const callTiming = inspected?.metadata ? exchange?.callTiming : undefined;
+      let messageMetrics: MetricsState | undefined;
       callTiming?.forwarding(startedAtMonotonicMs, upstream.readyState === WebSocket.OPEN);
       if (inspected?.metadata) {
         activeMetrics = inspected.recordsMetrics === false
@@ -623,9 +623,8 @@ export class ProviderProxy {
               "websocket",
               inspected.metadata.operation,
               effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
-              startedAtMonotonicMs,
-              receivedAtMonotonicMs,
             );
+        messageMetrics = activeMetrics;
         if (activeMetrics) {
           activeMetrics.model = inspected.model ?? null;
           activeMetrics.requestModel = inspected.model ?? null;
@@ -636,15 +635,19 @@ export class ProviderProxy {
         }
       }
       if (upstream.readyState === WebSocket.OPEN) {
-        callTiming?.submitted(performance.now());
+        const submittedAt = performance.now();
+        callTiming?.submitted(submittedAt);
+        if (messageMetrics) startMetricsRequest(messageMetrics, submittedAt);
         upstream.send(data, { binary: isBinary });
       } else if (upstream.readyState === WebSocket.CONNECTING) {
-        pending.push({ data, isBinary, timing: callTiming });
+        pending.push({ data, isBinary, timing: callTiming, metrics: messageMetrics });
       }
     });
     upstream.on("open", () => {
       for (const message of pending.splice(0)) {
-        message.timing?.submitted(performance.now());
+        const submittedAt = performance.now();
+        message.timing?.submitted(submittedAt);
+        if (message.metrics) startMetricsRequest(message.metrics, submittedAt);
         upstream.send(message.data, { binary: message.isBinary });
       }
     });
@@ -672,7 +675,6 @@ export class ProviderProxy {
           "websocket",
           "response",
           effectiveUpstreamUserAgent(request.headers, this.upstreamUserAgent),
-          receivedAtMonotonicMs,
         );
         fallback.httpStatus = statusCode;
         markMetricsFailed(fallback, "upstream_handshake_error", Date.now());

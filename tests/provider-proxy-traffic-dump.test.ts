@@ -77,7 +77,8 @@ describe("ModelTrafficDump V2", () => {
     await vi.waitFor(() => expect(metrics).toHaveLength(1));
     await proxy.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
-    expect(detail.response.callTiming.totalMs).toBe(metrics[0]?.totalDurationMs);
+    const timing = detail.response.callTiming;
+    expect(timing.totalMs - timing.preForwardMs - (timing.submitWaitMs ?? 0)).toBeCloseTo(metrics[0]!.totalDurationMs!);
   });
 
   it("indexes the Chat upstream provider reported by diagnostics", async () => {
@@ -178,7 +179,7 @@ describe("ModelTrafficDump V2", () => {
     const files = listDumpFiles(directory);
     for (const id of [1, 2]) {
       const detail = await describeDumpExchange(files, id);
-      expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
+      expect(detail.response.callTiming.submittedToFirstEventMs).toBeCloseTo(detail.response.firstContentMs);
       expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
       expect(detail.response.callTiming.submittedToFirstEventMs).toBeGreaterThanOrEqual(0);
     }
@@ -192,11 +193,11 @@ describe("ModelTrafficDump V2", () => {
     exchange.callTiming!.forwarding(110);
     exchange.callTiming!.requestBodyEnd(120);
     exchange.callTiming!.responseHead(130);
-    exchange.observeRequestMetrics({ firstContentMs: 25 });
+    exchange.observeRequestMetrics({ firstContentMs: 25, totalDurationMs: 50 });
     exchange.requestEnd();
     exchange.responseHead(200, {});
     vi.setSystemTime(5000);
-    exchange.responseEnd(160);
+    exchange.responseEnd(900);
     await dump.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
     expect(detail.response.callTiming).toMatchObject({
@@ -212,12 +213,12 @@ describe("ModelTrafficDump V2", () => {
     const first = exchange.callTiming!;
     first.forwarding(110, false);
     first.submitted(150);
-    exchange.observeRequestMetrics({ firstContentMs: 70 });
+    exchange.observeRequestMetrics({ firstContentMs: 30, totalDurationMs: 100 });
     exchange.webSocketFrame("upstream", Buffer.from('{"type":"response.completed","response":{}}'), false, 250);
     exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 300);
     exchange.callTiming!.forwarding(310, true);
     exchange.callTiming!.submitted(311);
-    exchange.observeRequestMetrics({ firstContentMs: 10 });
+    exchange.observeRequestMetrics({ firstContentMs: 9, totalDurationMs: 29 });
     exchange.failure("upstream_error", undefined, 340);
     await dump.close();
     const paths = listDumpFiles(directory);

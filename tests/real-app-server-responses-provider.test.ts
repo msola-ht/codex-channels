@@ -107,10 +107,12 @@ describe("real custom Responses provider", () => {
         const requests=bodies.filter(body=>body.model===runtime.model);
         expect(requests).toHaveLength(2);
         if (runtime.id === "rs-template") {
-          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
-          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.instructions).toBe("Complete DS fixture instructions. Use exec_command for commands.");
           expect(requests[0]?.text?.verbosity).toBeUndefined();
           expect(requests[0]?.tools).not.toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
+        } else {
+          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
         }
         expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
         expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));

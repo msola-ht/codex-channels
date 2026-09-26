@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript route helper intentionally has no declaration file.
+import { dumpReferenceKey, readDumpUpstreamProviders } from "../scripts/webui-traffic-route.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 import {
@@ -122,6 +124,29 @@ describe("webui server data API", () => {
         expect(body[key!]![0]?.[field]).toBe(expected);
       }
     }
+  });
+  it("joins only requested upstream labels without reading WebSocket payloads", async () => {
+    const fixture = createFixture();
+    const session = "index-only";
+    const directory = join(fixture.home, "traffic", `openai-${session}`);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ version: 2, label: "openai", session, createdAtMs: 1 }));
+    const records = Array.from({ length: 100 }, (_, index) => {
+      const id = index + 1;
+      return [
+        { version: 2, id, kind: "request", transport: "websocket", startedAtMs: 1,
+          payload: { parts: [{ file: "payload-1.bin", offset: 0, bytes: 10, encoding: "utf8" }] } },
+        { version: 2, id, kind: "response", upstreamProvider: `provider-${id}` },
+      ];
+    }).flat();
+    // No payload file exists: any attempt to read page or off-page bodies fails.
+    writeFileSync(join(directory, "interactions.jsonl"), records.map(record => JSON.stringify(record)).join("\n"));
+    const references = [3, 50, 3, 101].map(interaction => ({ label: "openai", session, interaction }));
+    const providers = await readDumpUpstreamProviders(fixture.environment, references);
+    expect(providers).toEqual(new Map([
+      [dumpReferenceKey(references[0]), "provider-3"],
+      [dumpReferenceKey(references[1]), "provider-50"],
+    ]));
   });
   it("attaches the recorded Chat upstream provider to the request list without changing the export", async () => {
     const fixture = createFixture();

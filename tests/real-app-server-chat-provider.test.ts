@@ -242,7 +242,11 @@ contract("isolates two real Cline App Servers behind one shared Chat proxy", asy
     const metricsAccounts: Array<string | undefined> = [];
     proxy = new ProviderProxy("127.0.0.1:0", { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http",
       accountIds: ["main", "work"], defaultAccountId: "main", chatDiagnostics: bridge.diagnostics,
-      onMetrics: (_metrics, account) => { metricsAccounts.push(account); } });
+      onMetrics: (metrics, account) => {
+        expect(metrics.firstContentMs).toBeGreaterThanOrEqual(0);
+        expect(metrics.totalDurationMs).toBeGreaterThanOrEqual(metrics.firstContentMs!);
+        metricsAccounts.push(account);
+      } });
     await proxy.start();
     writePrivateFileAtomicSync(join(environment.CODEX_CONNECT_HOME, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
       slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,

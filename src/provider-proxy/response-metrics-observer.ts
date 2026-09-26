@@ -46,9 +46,9 @@ export interface ProviderProxyMetrics {
   totalTokens: number | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
-  /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
+  /** 本次请求提交上游发送至首个符合传输协议口径的事件；不是客户端显示时间。 */
   firstContentMs?: number;
-  /** 代理收到请求至首个终态或结束/失败；单调时钟，不含终态后的投递。 */
+  /** 本次请求提交上游发送至首个终态或结束/失败；未发送时缺失。 */
   totalDurationMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
@@ -73,7 +73,6 @@ export interface MetricsState extends ProviderProxyMetrics {
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 const requestClocks = new WeakMap<MetricsState, number>();
-const totalRequestClocks = new WeakMap<MetricsState, number>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -81,8 +80,7 @@ export function createMetricsState(
   transport: ProviderProxyMetrics["transport"],
   operation: ProviderProxyMetrics["operation"],
   userAgent: string | null,
-  startedAtMonotonicMs: number,
-  totalStartedAtMonotonicMs?: number,
+  startedAtMonotonicMs?: number,
 ): MetricsState {
   const metrics: MetricsState = {
     ...metadata,
@@ -109,13 +107,17 @@ export function createMetricsState(
     weeklyQuota: null,
     quotaWindows: null,
   };
-  requestClocks.set(metrics, startedAtMonotonicMs);
-  if (totalStartedAtMonotonicMs !== undefined) totalRequestClocks.set(metrics, totalStartedAtMonotonicMs);
+  if (startedAtMonotonicMs !== undefined) startMetricsRequest(metrics, startedAtMonotonicMs);
   return metrics;
 }
 
+/** HTTP 提交请求、WS 提交当前逻辑请求帧时启动同一个时钟，排除本地准备和连接等待队列。 */
+export function startMetricsRequest(metrics: MetricsState, at: number): void {
+  if (!requestClocks.has(metrics)) requestClocks.set(metrics, at);
+}
+
 function observeTotalDuration(metrics: MetricsState, at: number): void {
-  const started = totalRequestClocks.get(metrics);
+  const started = requestClocks.get(metrics);
   if (started !== undefined) metrics.totalDurationMs ??= at - started;
 }
 
