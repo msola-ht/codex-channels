@@ -694,6 +694,57 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("drops a new process event when the recovery buffer holds only results", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      if (event.type === "turn.reasoning") {
+        received.push(`reasoning:${event.turnId}`);
+      }
+      if (event.type === "turn.completed") {
+        received.push(`completed:${event.turnId}`);
+      }
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      maximumPendingCriticalOutput: 1,
+    });
+    const target = {
+      surface: "feishu",
+      accountId: "tenant-a",
+      conversationId: "chat-1",
+    };
+
+    // 十条完成事件已经占满硬上限（告警阈值 1 的十倍），且都是必须保留的结果。
+    for (let index = 0; index < 10; index += 1) {
+      output.publish({
+        type: "turn.completed",
+        target,
+        threadId: "thread-1",
+        turnId: `turn-${index}`,
+        status: "completed",
+      });
+    }
+    output.publish({
+      type: "turn.reasoning",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-reasoning",
+      summary: "",
+      elapsedMs: 1_000,
+    });
+    await flushEventBus();
+    await manager.start();
+    await settle();
+
+    // 结果类事件不能被过程事件挤出缓冲，因此被丢弃的是新到达的过程事件。
+    expect(received).toEqual(
+      Array.from({ length: 10 }, (_value, index) => `completed:turn-${index}`),
+    );
+    await manager.stop();
+    await output.close();
+  });
+
   it("adds the current Git branch to completed Turns before routing", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
