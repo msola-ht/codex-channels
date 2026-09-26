@@ -17,6 +17,13 @@ import {
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
 
+/**
+ * Turn 完成卡片需要指标写入落库后才读取聚合。共享输出路由只有一个消费者，
+ * 因此整组读取必须有一次总预算，超时回退到当前可用值，避免一个慢指标库
+ * 阻塞所有 Surface 与 Conversation 的输出路由。
+ */
+const completionEnrichmentTimeoutMs = 250;
+
 interface SurfaceRuntime {
   state: "idle" | "starting" | "running" | "retrying";
   retryAttempt: number;
@@ -307,6 +314,7 @@ export class SurfaceManager {
     }
     let routedEvent = event;
     if (event.type === "turn.completed") {
+      const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
       const timingResult = this.resolveCompletionMetrics(
         event,
         "turn",
@@ -315,6 +323,7 @@ export class SurfaceManager {
           event.turnId,
           event.timing,
         ),
+        enrichmentDeadline,
         event.timing,
       );
       const timing = timingResult instanceof Promise
@@ -324,6 +333,7 @@ export class SurfaceManager {
         event,
         "task",
         () => this.options.taskAggregate?.(event.threadId, event.turnId),
+        enrichmentDeadline,
       );
       const taskAggregate = taskAggregateResult instanceof Promise
         ? await taskAggregateResult
@@ -332,6 +342,7 @@ export class SurfaceManager {
         event,
         "session",
         () => this.options.sessionAggregate?.(event.threadId),
+        enrichmentDeadline,
       );
       const sessionAggregate = sessionAggregateResult instanceof Promise
         ? await sessionAggregateResult
@@ -405,6 +416,7 @@ export class SurfaceManager {
     event: Extract<OutputEvent, { type: "turn.completed" }>,
     scope: "turn" | "task" | "session",
     read: () => T | undefined | Promise<T | undefined>,
+    deadlineAtMs: number,
     fallback?: T,
   ): T | undefined | Promise<T | undefined> {
     const recover = (error: unknown): T | undefined => {
@@ -419,14 +431,41 @@ export class SurfaceManager {
       );
       return fallback;
     };
+    let result: T | undefined | Promise<T | undefined>;
     try {
-      const result = read();
-      return result instanceof Promise
-        ? result.then((value) => value ?? fallback, recover)
-        : result ?? fallback;
+      result = read();
     } catch (error) {
       return recover(error);
     }
+    if (!(result instanceof Promise)) {
+      return result ?? fallback;
+    }
+    const remainingMs = deadlineAtMs - Date.now();
+    if (remainingMs <= 0) {
+      return this.expireCompletionMetrics(event, scope, fallback);
+    }
+    return withDeadline(
+      result.then((value) => value ?? fallback, recover),
+      remainingMs,
+      () => this.expireCompletionMetrics(event, scope, fallback),
+    );
+  }
+
+  private expireCompletionMetrics<T>(
+    event: Extract<OutputEvent, { type: "turn.completed" }>,
+    scope: "turn" | "task" | "session",
+    fallback: T | undefined,
+  ): T | undefined {
+    this.logger.warn(
+      {
+        threadId: event.threadId,
+        turnId: event.turnId,
+        scope,
+        timeoutMs: completionEnrichmentTimeoutMs,
+      },
+      "Turn 完成统计读取超时，使用当前可用值",
+    );
+    return fallback;
   }
 
   private async startSurface(surface: SurfaceAdapter): Promise<void> {
@@ -582,4 +621,23 @@ function configurationChangeForSurface(
     ...change,
     changes,
   };
+}
+
+async function withDeadline<T>(
+  operation: Promise<T>,
+  milliseconds: number,
+  onTimeout: () => T,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(onTimeout()), milliseconds);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }

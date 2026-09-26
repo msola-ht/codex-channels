@@ -834,6 +834,48 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("bounds completion metric reads so a stalled store cannot block routing", async () => {
+    vi.useFakeTimers();
+    try {
+      const feishu = surface("feishu", "tenant-a", []);
+      const received: OutputEvent[] = [];
+      feishu.output.handle = (event) => {
+        received.push(event);
+      };
+      const output = new EventBus<OutputEvent>(logger);
+      const manager = createManager([feishu], output, {
+        taskAggregate: () => new Promise(() => {}),
+      });
+      await manager.start();
+
+      output.publish({
+        type: "turn.completed",
+        target: {
+          surface: "feishu",
+          accountId: "tenant-a",
+          conversationId: "chat-1",
+        },
+        threadId: "thread-1",
+        turnId: "turn-1",
+        status: "completed",
+      });
+      await settle();
+      expect(received).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(250);
+      await settle();
+      expect(received).toEqual([
+        expect.objectContaining({ type: "turn.completed" }),
+      ]);
+      expect(received[0]).not.toHaveProperty("taskAggregate");
+
+      await manager.stop();
+      await output.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("isolates a Surface output rejection from later events", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];
