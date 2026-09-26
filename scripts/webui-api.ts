@@ -63,7 +63,6 @@ export interface CacheUsage {
 export interface Aggregate {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
-  generationTokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -160,7 +159,6 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 export interface ThreadListItem {
   cacheUsage: CacheUsage
   tokensPerSecond?: number | null
-  generationTokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -185,7 +183,6 @@ export interface ThreadsResponse extends MetricsPageSummary {
 
 export interface TurnSummary {
   tokensPerSecond?: number | null
-  generationTokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -219,7 +216,6 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 
 export interface RequestRecord {
   tokensPerSecond?: number | null
-  generationTokensPerSecond?: number | null
   /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
   upstreamProvider?: string
   totalDurationMs: number | null
@@ -256,7 +252,6 @@ export interface RequestRecord {
 
 export type RequestSortKey =
   | "tokensPerSecond"
-  | "generationTokensPerSecond"
   | "totalDuration"
   | "time"
   | "provider"

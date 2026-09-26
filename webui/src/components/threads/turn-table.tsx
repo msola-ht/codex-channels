@@ -33,7 +33,7 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
-  generationTokensPerSecond: "生成 Token/s",
+  tokensPerSecond: "输出 Token/s",
   compact: "压缩",
 }
 
@@ -175,10 +175,10 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       },
     },
     {
-      id: "generationTokensPerSecond",
-      accessorFn: (turn) => turn.generationTokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求合计输出除以合计解码窗口（总耗时减去首字耗时）。">生成 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.generationTokensPerSecond)}</span>,
+      id: "tokensPerSecond",
+      accessorFn: (turn) => turn.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column} hint="该轮合格请求的合计输出 Token（含推理）除以合计请求耗时，含首字等待；只有同时具备输出 Token 与总耗时的记录参与。">输出 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "compact",
@@ -198,7 +198,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "output", "generationTokensPerSecond", "compact"]}
+      numericColumnIds={["requests", "failures", "input", "output", "tokensPerSecond", "compact"]}
       loading={loading}
       title="每轮明细"
       description={({ total, matched, pageSize }) =>

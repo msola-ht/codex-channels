@@ -886,7 +886,6 @@ export abstract class GatewayComponentGraph {
           return {
             requestCount: summary.requestCount,
             tokensPerSecond: summary.tokensPerSecond ?? null,
-            generationTokensPerSecond: summary.generationTokensPerSecond ?? null,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
             cachedInputTokens: summary.cachedInputTokens,
@@ -902,7 +901,6 @@ export abstract class GatewayComponentGraph {
           return {
             requestCount: aggregate.requestCount,
             tokensPerSecond: aggregate.tokensPerSecond ?? null,
-            generationTokensPerSecond: aggregate.generationTokensPerSecond ?? null,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
             cachedInputTokens: aggregate.cachedInputTokens,

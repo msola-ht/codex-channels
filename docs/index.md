@@ -335,8 +335,9 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 当前采集和展示合同；Schema v15 新增可空 `upstream_ttft_ms`，保留 OpenAI 上游首 Token 统计，
 完成卡片取当前 Turn 首个有效样本，不由 App Server 通知或本地时间估算。Schema v16 新增可空
 `first_content_ms`、`request_model`、`response_model`，由 Provider Proxy 独立观测单请求首内容和请求/响应模型名称，
-贯通指标 IPC、明细、导出及转储，不新增 App Server RPC。单请求首字耗时参考 sub2api：HTTP/SSE 使用 semantic、
-WebSocket 使用 token-event 判定，具体口径及差异见[WebUI 请求明细](webui.md)；不替代上游轮次 TTFT。
+贯通指标 IPC、明细、导出及转储，不新增 App Server RPC。单请求首字耗时参考 sub2api 的内容帧口径：
+HTTP 与 WebSocket 都只认 `response.*` 中以 `.delta` 或 `.done` 结尾的内容事件，不计生命周期、条目与分片边界、
+终态及旁路元数据，具体口径及差异见[WebUI 请求明细](webui.md)；不替代上游轮次 TTFT。
 Schema v17 保存可空转储标签、实际 writer session 与 interaction，由 Provider Proxy 绑定并经 IPC、指标库、导出和 WebUI 精确定位调用；不根据历史时间猜配，也不新增 App Server RPC。
 转储读取器通过 `traffic-dump-presentation.mjs` 分开投影当前调用的服务端模型声明与安全缓冲候选；CLI 与 WebUI 复用 `runtime/model-name-comparison.mjs` 比较请求和响应名称，候选不作为实际换模证据，不改变转发或存储协议。
 单次调用阶段由 `src/provider-proxy/traffic-call-timing.ts` 记录单调时钟节点，`traffic-dump.ts` 写入 V2 响应索引的可选 `callTiming`；共享读取器向 CLI 与 WebUI 投影阶段，与上游 logical-turn 统计分组。Schema v18 新增可空 `total_duration_ms`，总耗时由 `response-metrics-observer.ts` 从提交上游请求到首次终态或结束/失败观测，与首内容耗时共用单调时钟起点；HTTP 提交 request，WS 在连接就绪后提交 send，未发送的失败不采样。耗时经指标 IPC、Store、请求明细和导出贯通；不依赖调用记录开关，旧记录为 NULL，不新增 App Server RPC。

@@ -35,7 +35,7 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   cacheHitRate: "缓存命中率",
   output: "输出 Token",
-  generationTokensPerSecond: "生成 Token/s",
+  tokensPerSecond: "输出 Token/s",
   compact: "压缩",
   last: "最后记录",
 }
@@ -166,10 +166,10 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
-      id: "generationTokensPerSecond",
-      accessorFn: (thread) => thread.generationTokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内，该会话自身有效请求合计输出除以合计解码窗口（总耗时减去首字耗时）。">生成 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.generationTokensPerSecond)}</span>,
+      id: "tokensPerSecond",
+      accessorFn: (thread) => thread.tokensPerSecond,
+      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内该会话合格请求的合计输出 Token（含推理）除以合计请求耗时，含首字等待；各会话只统计自身请求。">输出 Token/s</SortableHeader>,
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
       id: "last",
@@ -216,7 +216,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
 
   return (
     <DataTable
-      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "generationTokensPerSecond", "compact"]}
+      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "tokensPerSecond", "compact"]}
       loading={loading}
       title="会话列表"
       description={({ total }) =>

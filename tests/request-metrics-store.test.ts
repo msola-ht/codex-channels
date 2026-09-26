@@ -87,38 +87,19 @@ describe("SqliteModelRequestMetricsStore", () => {
     expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(250);
     store.close();
   });
-  it("derives decode-window speed and pools output over eligible decode windows", () => {
+  it("counts reasoning tokens in the output rate and ignores the first-content window", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
-    const base = { ...sample(), recordedAtMs: 2_000 };
+    const base = { ...sample(), recordedAtMs: 2_000, turnId: "turn-rate" };
     store.recordBatch([
-      { ...base, outputTokens: 100, totalDurationMs: 1_000, firstContentMs: 200 },
-      { ...base, outputTokens: 900, totalDurationMs: 3_000, firstContentMs: 1_000 },
-      { ...base, outputTokens: 100, totalDurationMs: 1_000, firstContentMs: 1_000 },
-      { ...base, outputTokens: 100, totalDurationMs: 1_000 },
-      { ...base, outputTokens: 0, totalDurationMs: 1_000, firstContentMs: 200 },
-      { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000, firstContentMs: 100 },
+      { ...base, outputTokens: 100, reasoningOutputTokens: 40, totalDurationMs: 1_000, firstContentMs: 200 },
+      { ...base, outputTokens: 100, reasoningOutputTokens: null, totalDurationMs: 1_000, firstContentMs: 800 },
+      { ...base, outputTokens: 100, reasoningOutputTokens: 0, totalDurationMs: 1_000, firstContentMs: 901 },
+      { ...base, outputTokens: 40, reasoningOutputTokens: 40, totalDurationMs: 1_000 },
     ]);
-    expect(store.recent(6).map((row) => row.generationTokensPerSecond))
-      .toEqual([1_000, null, null, null, 450, 125]);
-    expect(store.threadTurnSummary("thread-1", "turn-1")?.generationTokensPerSecond)
-      .toBeCloseTo(1_000_000 / 2_800);
-    // 端到端口径只看请求总耗时，缺少首字样本的记录仍然参与。
-    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
-    expect(store.threadSummary("thread-1").threadAggregate?.generationTokensPerSecond)
-      .toBeCloseTo(1_000_000 / 2_800);
-    const scope = {
-      startAtMs: 1_000,
-      endAtMs: 3_000,
-      limit: 1,
-      sortKey: "generationTokensPerSecond" as const,
-      sortDirection: "desc" as const,
-    };
-    expect(store.threadList(scope).threads[0])
-      .toMatchObject({ threadId: "other", generationTokensPerSecond: 1_000 });
-    expect(store.page(scope).records[0]?.generationTokensPerSecond).toBe(1_000);
-    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.generationTokensPerSecond)
-      .toBeCloseTo(1_000_000 / 2_800);
-    expect(store.page(scope).aggregate?.generationTokensPerSecond).toBeCloseTo(1_900_000 / 3_700);
+    // 推理 Token 计入分子；首字耗时只体现在分母的总耗时里，不再单独扣解码窗口。
+    expect(store.recent(4).map((row) => row.tokensPerSecond)).toEqual([40, 100, 100, 100]);
+    // 合计相除：340 Token / 4 秒，缺少首字样本的记录同样参与。
+    expect(store.threadTurnSummary("thread-1", "turn-rate")?.tokensPerSecond).toBe(85);
     store.close();
   });
   it("persists TTFT and restores the first eligible sample for the exact Turn", () => {

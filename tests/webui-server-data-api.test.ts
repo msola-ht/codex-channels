@@ -92,13 +92,11 @@ describe("webui server data API", () => {
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
         firstContentMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         tokensPerSecond: 1_000_000 / 1234.5,
-        generationTokensPerSecond: 1_000_000 / 1222,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
         firstContentMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
         tokensPerSecond: null,
-        generationTokensPerSecond: null,
         requestServiceTier: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
@@ -109,20 +107,17 @@ describe("webui server data API", () => {
     const speeds = await fetch(`${origin}/api/v1/requests?range=all&sort=tokensPerSecond&direction=desc`);
     expect(speeds.status).toBe(200);
     expect(((await speeds.json()) as { records: Array<{ tokensPerSecond: number | null }> }).records[0]?.tokensPerSecond).toBe(1_000_000 / 1234.5);
-    const generation = await fetch(`${origin}/api/v1/requests?range=all&sort=generationTokensPerSecond&direction=desc`);
-    expect(generation.status).toBe(200);
-    expect(((await generation.json()) as { records: Array<{ generationTokensPerSecond: number | null }> })
-      .records[0]?.generationTokensPerSecond).toBe(1_000_000 / 1222);
+    expect((await fetch(`${origin}/api/v1/requests?range=all&sort=generationTokensPerSecond`)).status).toBe(400);
     for (const [path, key] of [["threads", "threads"], ["threads/thread-1/turns", "turns"]]) {
       for (const [sort, field, expected] of [
         ["tokensPerSecond", "tokensPerSecond", 1_000_000 / 1234.5],
-        ["generationTokensPerSecond", "generationTokensPerSecond", 1_000_000 / 1222],
       ] as const) {
         const response = await fetch(`${origin}/api/v1/${path}?range=all&sort=${sort}&direction=desc`);
         expect(response.status).toBe(200);
         const body = await response.json() as Record<string, Array<Record<string, number | null>>>;
         expect(body[key!]![0]?.[field]).toBe(expected);
       }
+      expect((await fetch(`${origin}/api/v1/${path}?range=all&sort=generationTokensPerSecond`)).status).toBe(400);
     }
   });
   it("joins only requested upstream labels without reading WebSocket payloads", async () => {

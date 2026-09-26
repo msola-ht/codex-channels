@@ -306,7 +306,7 @@ describe("WebUI metrics table presentation", () => {
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
       "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
-      "首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情",
+      "首字耗时", "总耗时", "输出 Token/s", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
@@ -346,10 +346,10 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "生成 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "输出 Token/s", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "生成 Token/s",
+      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "输出 Token/s",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -374,7 +374,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("时间");
-    const speedIndex = headers(markup.ascending!).indexOf("端到端 Token/s");
+    const speedIndex = headers(markup.ascending!).indexOf("输出 Token/s");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -396,7 +396,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情"]) {
+    for (const label of ["首字耗时", "总耗时", "输出 Token/s", "调用详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");

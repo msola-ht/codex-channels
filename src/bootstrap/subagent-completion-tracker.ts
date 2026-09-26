@@ -32,7 +32,6 @@ interface SubagentMetricsSummary {
   } | null;
   threadAggregate: {
     tokensPerSecond?: number | null;
-    generationTokensPerSecond?: number | null;
     requestCount: number;
     unsuccessfulRequestCount: number;
     inputTokens: number;
@@ -634,9 +633,6 @@ export class SubagentCompletionTracker {
       cachedInputTokens: aggregate?.cachedInputTokens ?? null,
       outputTokens: aggregate?.outputTokens ?? 0,
       ...(aggregate?.tokensPerSecond == null ? {} : { tokensPerSecond: aggregate.tokensPerSecond }),
-      ...(aggregate?.generationTokensPerSecond == null
-        ? {}
-        : { generationTokensPerSecond: aggregate.generationTokensPerSecond }),
       reasoningOutputTokens: aggregate?.reasoningOutputTokens ?? 0,
     };
     if (!detached) this.active.delete(agentThreadId);

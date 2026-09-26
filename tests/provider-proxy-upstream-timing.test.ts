@@ -89,21 +89,40 @@ describe("OpenAI upstream TTFT", () => {
 
   it.each([
     { type: "response.output_item.added", item: { type: "reasoning", summary: [] } },
+    { type: "response.output_item.done", item: { type: "message" } },
     { type: "response.content_part.added", part: { type: "output_text", text: "" } },
     { type: "response.reasoning_summary_part.added", part: { type: "summary_text", text: "" } },
-    { type: "response.reasoning_text.done", text: "thinking" },
-    { type: "response.custom_tool_call_input.done", input: "command" },
+    { type: "response.reasoning_summary_part.done", part: { type: "summary_text", text: "summary" } },
     { type: "response.completed", response: { output: [], usage: { output_tokens: 100 } } },
     { type: "response.incomplete", response: { output: [{ type: "message", content: [{ type: "output_text", text: "partial" }] }] } },
-  ])("counts HTTP semantic progress but not WS non-token events: $type", (event) => {
+  ])("excludes structural and terminal frames from first content on both transports: $type", (event) => {
     const http = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
     http.responseFormat = "sse";
     new HttpResponseMetricsObserver(http).observeChunk(Buffer.from(`data: ${JSON.stringify(event)}\n\n`), 1250, 350);
-    expect(http.firstContentMs).toBe(250);
+    expect(http.firstContentMs).toBeUndefined();
     const ws = state();
     const parsed = inspectResponseEvent(JSON.stringify(event), "", true);
     observeResponseEvent(ws, parsed.type, parsed.event, 1250, 350);
     expect(ws.firstContentMs).toBeUndefined();
+  });
+
+  it.each([
+    { type: "response.reasoning_text.done", text: "thinking" },
+    { type: "response.custom_tool_call_input.done", input: "command" },
+    { type: "response.reasoning_summary_text.delta", delta: "thinking" },
+  ])("counts content frames on both transports: $type", (event) => {
+    for (const transport of ["http", "websocket"] as const) {
+      const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null, 100);
+      const payload = JSON.stringify(event);
+      if (transport === "http") {
+        metrics.responseFormat = "sse";
+        new HttpResponseMetricsObserver(metrics).observeChunk(Buffer.from(`data: ${payload}\n\n`), 1250, 350);
+      } else {
+        const parsed = inspectResponseEvent(payload, "", true);
+        observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
+      }
+      expect(metrics.firstContentMs).toBe(250);
+    }
   });
 
   it("uses valid top-level event types or explicit SSE event headers, not nested types", () => {
@@ -113,10 +132,14 @@ describe("OpenAI upstream TTFT", () => {
       observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
       expect(metrics.firstContentMs).toBeUndefined();
     }
-    const http = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
-    http.responseFormat = "sse";
-    new HttpResponseMetricsObserver(http).observeChunk(Buffer.from('event: response.output_item.added\ndata: {"item":{"type":"reasoning"}}\n\n'), 1250, 350);
-    expect(http.firstContentMs).toBe(250);
+    const structural = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
+    structural.responseFormat = "sse";
+    new HttpResponseMetricsObserver(structural).observeChunk(Buffer.from('event: response.output_item.added\ndata: {"item":{"type":"reasoning"}}\n\n'), 1250, 350);
+    expect(structural.firstContentMs).toBeUndefined();
+    const content = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
+    content.responseFormat = "sse";
+    new HttpResponseMetricsObserver(content).observeChunk(Buffer.from('event: response.output_text.delta\ndata: {"delta":"hi"}\n\n'), 1250, 350);
+    expect(content.firstContentMs).toBe(250);
   });
   it("uses captured request and receive times even when parsing runs later", () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(900);

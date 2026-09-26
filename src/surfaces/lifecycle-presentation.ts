@@ -326,10 +326,7 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  fields.push(...completionRateFields(
-    event.generationTokensPerSecond,
-    event.tokensPerSecond,
-  ));
+  fields.push(...completionRateFields(event.tokensPerSecond));
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -612,10 +609,7 @@ export function createTurnCompletedPresentation(
     runFields.push({
       title: "性能",
       fields: [
-        ...completionRateFields(
-          event.timing?.generationTokensPerSecond,
-          event.timing?.tokensPerSecond,
-        ),
+        ...completionRateFields(event.timing?.tokensPerSecond),
         ...(event.durationMs === undefined ? [] : [{
           label: "总耗时",
           value: formatElapsedDuration(event.durationMs),
@@ -667,10 +661,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    taskFields.push(...completionRateFields(
-      task.generationTokensPerSecond,
-      task.tokensPerSecond,
-    ));
+    taskFields.push(...completionRateFields(task.tokensPerSecond));
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -693,10 +684,7 @@ export function createTurnCompletedPresentation(
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
           }]),
-        ...completionRateFields(
-          session.generationTokensPerSecond,
-          session.tokensPerSecond,
-        ),
+        ...completionRateFields(session.tokensPerSecond),
       ],
     });
   }
@@ -716,23 +704,18 @@ export function createTurnCompletedPresentation(
 }
 
 /**
- * 生成与端到端两个速度读数各自独立省略：没有采样的读数不出现在卡片上，
- * 不把缺失值渲染成占位文本（与 DeepSeek Harness 的读数省略规则一致）。
+ * 输出速率读数在未采样时整行省略，不把缺失值渲染成占位文本
+ * （与 DeepSeek Harness 的读数省略规则一致）。
  */
 function completionRateFields(
-  generation: number | null | undefined,
-  endToEnd: number | null | undefined,
+  tokensPerSecond: number | null | undefined,
 ): LifecyclePresentationField[] {
-  return [
-    ...(generation == null ? [] : [{
-      label: "生成 Token/s",
-      value: formatCompletionTokenRate(generation),
-    }]),
-    ...(endToEnd == null ? [] : [{
-      label: "端到端 Token/s",
-      value: formatCompletionTokenRate(endToEnd),
-    }]),
-  ];
+  return tokensPerSecond == null
+    ? []
+    : [{
+        label: "输出 Token/s",
+        value: formatCompletionTokenRate(tokensPerSecond),
+      }];
 }
 
 function formatCompletionTokenRate(value: number): string {

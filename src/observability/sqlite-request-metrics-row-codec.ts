@@ -64,7 +64,6 @@ export interface CompactSummaryRow {
 
 export interface TurnSummaryRow extends CompactSummaryRow {
   tokens_per_second: number | null;
-  generation_tokens_per_second: number | null;
   upstream_ttft_ms?: number | null;
   provider?: string | null;
   model?: string | null;
@@ -140,10 +139,6 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     totalDurationMs: row.total_duration_ms,
     tokensPerSecond: row.total_duration_ms !== null && row.total_duration_ms > 0 && row.output_tokens !== null && row.output_tokens > 0
       ? row.output_tokens * 1000 / row.total_duration_ms : null,
-    generationTokensPerSecond: row.first_content_ms !== null
-      && row.total_duration_ms !== null && row.total_duration_ms > row.first_content_ms
-      && row.output_tokens !== null && row.output_tokens > 0
-      ? row.output_tokens * 1000 / (row.total_duration_ms - row.first_content_ms) : null,
     requestModel: row.request_model,
     responseModel: row.response_model,
     traffic: row.traffic_label === null ? null : {
@@ -198,7 +193,6 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
 export function toStoredTurnSummary(row: TurnSummaryRow): StoredTurnRequestMetricsSummary {
   return {
     tokensPerSecond: row.tokens_per_second,
-    generationTokensPerSecond: row.generation_tokens_per_second,
     ...(row.upstream_ttft_ms === undefined ? {} : { upstreamTtftMs: row.upstream_ttft_ms }),
     provider: row.provider ?? null,
     model: row.model ?? null,
@@ -227,7 +221,6 @@ export function toStoredThreadAggregate(
   return {
     provider: summary.provider,
     tokensPerSecond: row.tokens_per_second,
-    generationTokensPerSecond: row.generation_tokens_per_second,
     turnCount: row.turn_count,
     requestCount: summary.requestCount,
     unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
@@ -251,7 +244,6 @@ export function toStoredMetricsAggregate(row: AggregateRow): StoredModelRequestM
   return {
     cacheUsage: toStoredCacheUsage(row),
     tokensPerSecond: row.tokens_per_second,
-    generationTokensPerSecond: row.generation_tokens_per_second,
     requestCount: row.request_count,
     unsuccessfulRequestCount: row.unsuccessful_request_count,
     inputTokens: row.input_tokens ?? 0,

@@ -17,7 +17,8 @@
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
   转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
-  HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
+  HTTP 与 WebSocket 共用内容帧口径，只认 `response.*` 中以 `.delta` 或 `.done` 结尾的内容事件，
+  不计生命周期、条目与分片边界、终态以及旁路元数据，不要求事件已经携带可见文本。
   此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败

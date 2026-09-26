@@ -120,9 +120,13 @@ HTTP 请求从当前调用的本地 trace 提取“代理收齐请求体”“�
 它参考 sub2api 的 HTTP semantic 与 WebSocket token-event 口径，使用单调时钟逐请求独立计时。
 HTTP 从代理提交上游 HTTP 请求开始（包含随后建立连接的时间）；WS 从连接就绪、提交该请求帧发送开始。两者均排除发送前的本地准备，WS 还排除等待上游连接就绪的时间，与请求总耗时共用同一计时起点。
 终点使用接收回调入口的时间，不把响应解析、转储或指标投递耗时算进去。
-HTTP/SSE 跳过 `response.created` / `response.in_progress`，首个其他合法 `response.*` 语义事件计入，
-包括空 item/part、空 delta、仅含 usage 的 completed 和 incomplete，不要求已经返回可见文本。
-WebSocket 只计 `response.*.delta`、`response.output_text.done`、`response.function_call_arguments.done`，同样不要求文本非空。
+HTTP 与 WebSocket 共用同一套内容帧口径：只接受 `response.*` 中以 `.delta` 或 `.done` 结尾的内容事件
+（`output_text`、`reasoning_summary_text`、`reasoning_text`、`function_call_arguments`、`custom_tool_call_input` 等），
+不要求事件已经携带可见文本。
+生命周期（`response.created`、`response.in_progress`）、条目与分片边界
+（`output_item.added`、`output_item.done`、`content_part.added`、`content_part.done`、
+`reasoning_summary_part.added`、`reasoning_summary_part.done`）、
+终态（`response.completed`、`response.failed`、`response.incomplete`）与 `response.metadata` 都不计入首内容。
 与 sub2api 部分错误分支不同，本项目不把纯错误（`error` / `response.failed`）、额度、timing、metadata（`response.metadata` / `codex.response.metadata`）、
 畸形 JSON 或无有效事件类型的数据计入；响应头、SSE 注释、空 data 与 `[DONE]` 也不计入。没有先前命中事件的 WS 终态不补算首字。
 非流式 JSON 不按流式首字计算；历史记录不补算，旧版已采集的非空增量耗时保持原值。
@@ -151,7 +155,7 @@ Schema v17 保存转储标签、实际批次和调用编号，JSON 导出为可�
 转储失败详情与 `codexc traffic` 根据已记录的传输阶段、HTTP 状态或上游终态显示失败阶段；该分类不推断代理、账户或模型的根因。
 “请求明细”另有可排序的“总耗时”列，Schema v18 新增可空 `total_duration_ms`，JSON/CSV 导出为 `totalDurationMs`。由采集端单调时钟计算提交上游请求至首次模型终态，无终态则到结束或失败；不含终态后的指标投递、客户端显示或下一次重试，不是整个 Turn 耗时。不依赖调用记录开关；未提交发送的路由或握手失败不伪造值，历史为空时显示 `—`，不从旧墙钟差补算。统一发送起点仅适用于更新采集端后的新请求，历史已采集值保留原口径，不改写或补算。
 指标库只接受当前 Schema v19；旧库不迁移，可停止相关进程后使用 `codexc metrics reset` 归档，再启动 Gateway 创建当前结构。
-请求明细的可排序“生成 Token/s”为 `outputTokens × 1000 / (totalDurationMs - firstContentMs)`，可排序“端到端 Token/s”为 `outputTokens × 1000 / totalDurationMs`；会话列表与每轮表格的可排序“生成 Token/s”是当前筛选范围内自身有效请求的合计输出除以合计解码窗口，会话详情顶部累计沿用递归纳入子代理的范围。两个速率的分子分母都只取自输出 Token 与对应时间窗同时大于零的记录，缺采样的记录整条退出；按合计相除而不是先算逐请求速率再取算术平均，避免极短解码窗口的单条记录放大汇总。不减推理 Token，生成速率不是含首字等待的产出率，端到端不是纯生成速度或会话墙钟吞吐量。页面显示两位小数，未知为 `—`；API 与 JSON/CSV 使用可空派生字段 `generationTokensPerSecond` 与 `tokensPerSecond`，不新增数据库列，不补算历史时间窗。CLI 请求、会话和每轮导出及完成卡片使用同一查询口径。
+请求明细、会话列表、每轮表格与会话详情顶部只有一个可排序速率“输出 Token/s”，公式为 `outputTokens × 1000 / totalDurationMs`：分子是全部输出 Token（含推理 Token 与工具调用参数），分母是提交上游请求到首次模型终态的总耗时，因此含首字等待与上游排队。Turn/Thread 与范围汇总按「合计输出 Token ÷ 合计请求耗时」合并计算，只在输出 Token 与总耗时同时大于零的记录上取样，缺采样的记录整条退出；不先把逐请求速率平均，避免耗时极短的单条记录放大汇总。失败请求通常没有用量样本，因此不参与；压缩请求沿用原统计范围。页面显示两位小数，未知为 `—`；API 与 JSON/CSV 使用可空派生字段 `tokensPerSecond`，不新增数据库列，派生值按当前公式重算并包含历史记录。该读数不是首字之后的纯解码速度，也不是会话墙钟吞吐量（不含请求之间的编排、工具与空闲时间）。CLI 请求、会话和每轮导出及完成卡片使用同一查询口径。
 调用详情顶部优先显示单请求首字；上游轮次首 Token 保留在独立的上游统计区，取自 `first_sampled_message_ttft_ms`。两者均按毫秒来源自适应展示，不代表客户端显示时间，缺失时显示“未提供”，不反推历史值。
 调用列表将模型、状态与独立总耗时列放在请求地址和线程标识之前；模型名称仅在已提供的请求与响应名称不一致时强调。长标识支持聚焦提示，原始正文限制显示高度并可内部滚动。
 同一提供商、批次与调用编号的原始事件翻页保留已展开的详情区域，加载或失败时不展示旧页事件；切换调用不沿用旧摘要。首次进入读取完整明细；已结束且已有终态响应的调用翻页使用 `GET /api/v1/traffic/trace?id=&label=&session=&traceOffset=`，只返回调用编号、事件页与分页信息，不重读正文或重新提取输出、模型证据，仍扫描轨迹以计算事件总数。进行中的调用翻页继续读取完整明细，使终态、输出、用量与耗时一同更新。列表和详情查询错误均可按当前条件重试，详情手动刷新及失败重试会重新读取完整明细。
@@ -341,7 +345,7 @@ Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOM
 
 请求明细与每轮明细共用共享数据表格组件（TanStack Table v9 组合 shadcn 基础组件），
 前端只在有补充信息时提供悬浮提示：长文本实际截断或 ID 被缩写、存在 Token 分项、错误详情或模型差异时保留；已完整展示的文字、普通数值、空值和缺少分项的 Token 不重复提示。耗时和速率的统计口径集中在列标题；图表数据点、纯图标按钮、折叠导航及数据过期原因保留必要说明。组件提示停留 400 ms 后显示，支持键盘聚焦。`Fast` 使用小号标签，请求列表和错误页仅在响应明确回报非 Fast 层级时提示差异；调用详情已分别展示请求和响应层级，不再重复提示。
-支持服务端组合筛选、排序与分页及列显隐，不提供无对应批量操作的行选择。请求列按时间、Provider、模型、状态、输入/输出 Token、首字/总耗时、生成/端到端 Token/s、调用详情排列；User-Agent、操作、HTTP、错误和推理输出默认隐藏，异常状态保留可聚焦的错误摘要。会话与轮次列表同样将身份信息放在用量和速率之前，父会话及压缩等次要列默认隐藏；已有列显隐偏好保持不变。排序表头提供可访问的方向状态。表格在视口内内部滚动，输入、输出与
+支持服务端组合筛选、排序与分页及列显隐，不提供无对应批量操作的行选择。请求列按时间、Provider、模型、状态、输入/输出 Token、首字/总耗时、输出 Token/s、调用详情排列；User-Agent、操作、HTTP、错误和推理输出默认隐藏，异常状态保留可聚焦的错误摘要。会话与轮次列表同样将身份信息放在用量和速率之前，父会话及压缩等次要列默认隐藏；已有列显隐偏好保持不变。排序表头提供可访问的方向状态。表格在视口内内部滚动，输入、输出与
 缓存提示支持悬浮及键盘聚焦；请求明细的 `User-Agent` 列展示该请求实际发往模型上游的 UA（截断显示，
 悬浮查看完整值，Schema v13 起入库，当前 Schema v19 继续保留，早期历史记录显示 `—`）；请求明细的列排序作用于所选时间范围的全部记录，再由服务端偏移
 分页，每页条数支持 10–500。Threads 的“期间首次请求”表示匹配条件中首个请求的

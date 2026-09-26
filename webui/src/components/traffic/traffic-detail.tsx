@@ -277,7 +277,7 @@ function TimingSummary({ response }: { response: NonNullable<TrafficExchangeDeta
       </dl>
       <p className="text-xs text-muted-foreground">
         {timing === null ? "未提取到与此响应匹配的上游 logical_turn 耗时。" : "上游统计范围：logical_turn。"}
-        上游轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 取跳过 created/in_progress 的首个 Responses 语义事件，WS 取 delta 或 output_text/function_call_arguments.done。不要求文本非空，不计纯错误、响应头或旁路元数据，均不代表客户端显示时间；历史值不从 trace 反推。
+        上游轮次首 Token 取自上游 first_sampled_message_ttft_ms；单请求首字从上游转发开始计时，HTTP 与 WS 共用内容帧口径，只认以 delta 或 done 结尾的内容事件，不计 lifecycle、条目与分片边界、终态、纯错误、响应头或旁路元数据。不要求事件已携带可见文本，均不代表客户端显示时间；历史值不从 trace 反推。
         各项口径不同且可能重叠，不能相加；不代表整轮对话耗时，差值也不等于网络延迟。
       </p>
     </section>

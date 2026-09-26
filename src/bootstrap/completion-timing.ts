@@ -15,11 +15,6 @@ export function mergeCompletionTiming(
   };
   reconcileModelRequestStatuses(timing, latestTurn);
   assignOptionalMetric(timing, "tokensPerSecond", latestTurn.tokensPerSecond ?? null);
-  assignOptionalMetric(
-    timing,
-    "generationTokensPerSecond",
-    latestTurn.generationTokensPerSecond ?? null,
-  );
   assignOptionalMetric(timing, "upstreamTtftMs", latestTurn.upstreamTtftMs ?? null);
   assignOptionalMetric(
     timing,

@@ -47,8 +47,7 @@ const COLUMN_LABELS: Record<string, string> = {
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
   totalDuration: "总耗时",
-  tokensPerSecond: "端到端 Token/s",
-  generationTokensPerSecond: "生成 Token/s",
+  tokensPerSecond: "输出 Token/s",
   traffic: "调用详情",
 }
 
@@ -230,7 +229,7 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: () => <TableHint hint="从代理提交上游请求到收到首个有效响应事件，与请求总耗时使用同一起点；不代表页面显示时间。">首字耗时</TableHint>,
+      header: () => <TableHint hint="从代理提交上游请求到收到首个内容帧，不计结构帧与终态帧，与请求总耗时使用同一起点；不代表页面显示时间。">首字耗时</TableHint>,
       cell: ({ row }) => (
         <TableHint hint={row.original.upstreamTtftMs == null ? null : `上游轮次首 Token：${formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
           {row.original.firstContentMs == null ? "—"
@@ -245,15 +244,9 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "generationTokensPerSecond",
-      accessorFn: (record) => record.generationTokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 首字之后的解码窗口，不含首字等待。">生成 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.generationTokensPerSecond)}</span>,
-    },
-    {
       id: "tokensPerSecond",
       accessorFn: (record) => record.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 请求总耗时，包含首字等待。">端到端 Token/s</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="输出 Token（含推理）÷ 从提交上游请求到首个终态的总耗时，包含首字等待与上游排队；不是纯生成速度，也不含请求之间的编排、工具与空闲时间。">输出 Token/s</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {
@@ -351,7 +344,7 @@ export function RequestsTable({
 
   return (
     <DataTable
-      numericColumnIds={["input", "output", "firstContent", "totalDuration", "generationTokensPerSecond", "tokensPerSecond", "http", "reasoningOutput"]}
+      numericColumnIds={["input", "output", "firstContent", "totalDuration", "tokensPerSecond", "http", "reasoningOutput"]}
       loading={loading}
       title="记录"
       description={({ pageNumber: currentPage }) =>

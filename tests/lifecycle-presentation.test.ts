@@ -15,21 +15,21 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
-  it("shows distinct run and session request speeds without restoring TTFT", () => {
+  it("shows run and session output speed without restoring TTFT", () => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
       threadId: "thread-1", turnId: "turn-1", status: "completed", durationMs: 999_000,
-      timing: { modelRequestCount: 2, tokensPerSecond: 200, generationTokensPerSecond: 240 },
+      timing: { modelRequestCount: 2, tokensPerSecond: 200 },
       sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
-        outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300, generationTokensPerSecond: 360 },
+        outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300 },
     }));
-    expect(rendered).toContain("生成 Token/s：240/s");
-    expect(rendered).toContain("端到端 Token/s：200/s");
-    expect(rendered).toContain("生成 Token/s：360/s");
-    expect(rendered).toContain("端到端 Token/s：300/s");
+    expect(rendered).toContain("输出 Token/s：200/s");
+    expect(rendered).toContain("输出 Token/s：300/s");
+    expect(rendered).not.toContain("生成 Token/s");
+    expect(rendered).not.toContain("端到端 Token/s");
     expect(rendered).not.toContain("本次运行：");
     expect(rendered).not.toContain("200.00 Token/s");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K\n  生成 Token/s：360/s\n  端到端 Token/s：300/s");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K\n  输出 Token/s：300/s");
     expect(rendered).not.toContain("会话统计（含子代理）");
     expect(rendered).not.toContain("\nToken/s：");
     expect(rendered).not.toContain("上游轮次首 Token");
@@ -817,7 +817,6 @@ describe("shared Surface lifecycle presentation", () => {
           outputTokens: 2_000,
           reasoningOutputTokens: 500,
           tokensPerSecond: 20.125,
-          generationTokensPerSecond: 25.125,
         },
       }),
     );
@@ -826,7 +825,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：9 次");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
-    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%\n  生成 Token/s：25.13/s\n  端到端 Token/s：20.13/s");
+    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%\n  输出 Token/s：20.13/s");
   });
 
   it("separates completed, interrupted and unobservable model attempts", () => {

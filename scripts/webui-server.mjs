@@ -92,7 +92,6 @@ const requestSortKeys = {
   reasoningOutput: "reasoningOutputTokens",
   totalDuration: "totalDurationMs",
   tokensPerSecond: "tokensPerSecond",
-  generationTokensPerSecond: "generationTokensPerSecond",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
@@ -824,7 +823,7 @@ function parseThreadQuery(url, threadId) {
   const sortKeys = threadId === undefined
     ? ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]
     : ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"];
-  if (![...sortKeys, "tokensPerSecond", "generationTokensPerSecond"].includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
+  if (![...sortKeys, "tokensPerSecond"].includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
   if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");
   return {
     ...parseMetricsFilters(url, threadId),
