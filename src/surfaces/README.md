@@ -52,8 +52,10 @@ StateStore；恢复缓冲按策略合并键折叠可合并中间状态（例如�
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
-不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。新增 Surface 时应实现统一输入、
-输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
+不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。入队时可携带合并键，仍在等待
+执行的同键条目会就地替换为最新载荷并保持顺序与容量计数，用于按秒刷新的中间状态。新增 Surface
+时应实现统一输入、输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或
+提供等价约束。
 `delivery-policy.ts` 是渠道投递策略的唯一判定点：`resolveSurfaceDelivery` 决定事件是投递、按合并键
 合并还是忽略，并给出是否关键；渠道差异只保留微信回复窗口白名单和思考状态的合并键两张表，
 Surface 不再各自维护允许列表或在 `handle` 内散落关键性字面量。Telegram 与飞书对同一 Turn 的

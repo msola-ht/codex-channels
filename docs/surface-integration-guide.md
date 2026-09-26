@@ -230,9 +230,13 @@ Core 输出由 `SurfaceManager` 按精确 `surface + accountId` 路由。Adapter
 
 - 同一 Conversation 串行，不同 Conversation 可以并行。
 - 队列有容量上限，平台发送有超时。
-- `OutputEvent` 的关键性必须使用 Conversation Core 公开的 `isCriticalOutputEvent()` 判断，不在
-  Surface 复制事件类型清单；由关键事件派生的平台发送操作不得被降级为非关键。
-- 只有该函数判定为非关键的中间事件才可以合并或替换；关键事件不得静默丢弃。
+- `OutputEvent` 的渠道处置必须来自 [`delivery-policy.ts`](../src/surfaces/delivery-policy.ts)：
+  `resolveSurfaceDelivery()` 决定投递、按合并键合并还是忽略并给出本渠道的投递关键性，
+  `surfaceDeliveryCoalesceKey()` 给出按 Turn 分段的合并键；不在 Surface 复制事件类型清单或
+  自行维护允许列表。传给 `ConversationDeliveryQueue` 的排队关键性由渠道按用户可见结果选择。
+- 判定为忽略的事件不进入平台发送；关键输出及其派生发送操作不得降级或静默丢弃；只有策略标记为
+  可合并的中间状态才能按合并键替换。投递关键性的三个层次见
+  [`src/surfaces/README.md`](../src/surfaces/README.md)。
 - 平台限流只做有限重试，不能阻塞 App Server Reader。
 - 关闭时拒绝新输出，等待同一个有限关闭任务，不能提前报告完成。
 
@@ -357,7 +361,8 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 撤权只清理对应 Actor；禁用 Surface 或账号保留绑定但不恢复订阅。
 - 普通输入、命令和结构化用户错误主路径。
 - 同 Conversation 顺序、不同 Conversation 并行、队列过载和平台超时隔离。
-- `isCriticalOutputEvent()` 判定的事件及其派生发送操作不被降级或丢弃，非关键事件才允许合并。
+- `resolveSurfaceDelivery()` 判定为忽略的事件不投递，判定为关键的输出及其派生发送操作不被降级
+  或丢弃，只有标记可合并的中间状态才允许按合并键替换。
 - 审批请求不被丢弃或悬挂。
 - 审批超时、一次性令牌、跨客户端失效和关闭取消。
 - 部分启动失败反向回滚，重复关闭安全，关闭等待有上限。

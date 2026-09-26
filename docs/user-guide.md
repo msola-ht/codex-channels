@@ -70,7 +70,7 @@ enabled = true
 | 设置 | 作用 |
 | --- | --- |
 | `tools.update_plan.enabled` | 模型是否拥有创建/更新待办清单的工具，默认关闭 |
-| `display.plan_updates` | Gateway 是否把 `turn/plan/updated` 通知展示到渠道，默认开启 |
+| `display.plan_updates` | Telegram 与飞书是否把 `turn/plan/updated` 通知展示到渠道，默认开启 |
 | `/plan` | 是否使用官方 Plan 协作模式 |
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。

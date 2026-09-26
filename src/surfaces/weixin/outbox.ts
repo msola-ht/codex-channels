@@ -253,7 +253,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal = this.closed ? undefined : signal;
     if (
       event.type === "turn.completed"
-      || event.type === "connection.lost"
       || (
         event.type === "text.completed"
         && event.phase === "final_answer"
