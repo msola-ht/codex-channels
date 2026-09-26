@@ -92,7 +92,8 @@ interface OperationLogState {
   messageIds: Map<string, number>;
   deliveredText: Map<string, string>;
   uncertainItems: Set<string>;
-  refreshQueued: boolean;
+  queuedItems: Set<string>;
+  final: boolean;
   timer: NodeJS.Timeout | undefined;
 }
 
@@ -689,7 +690,7 @@ export class TelegramOutbox {
       }
       if ([...state.records.values()].every((record) => record.status !== "running")) {
         this.operationLogs.delete(key);
-        this.enqueue(state.chatId, (signal) => this.flushOperationLog(state, true, signal), true);
+        this.enqueueOperationRefresh(state, true);
       }
     }
     this.typing.close();
@@ -973,7 +974,8 @@ export class TelegramOutbox {
       messageIds: new Map(),
       deliveredText: new Map(),
       uncertainItems,
-      refreshQueued: false,
+      queuedItems: new Set(),
+      final: false,
       timer: undefined,
     };
   }
@@ -1024,7 +1026,7 @@ export class TelegramOutbox {
   }
 
   private sealOperationLogBeforeInteraction(
-    chatId: string,
+    _chatId: string,
     turnKey: string,
     state: OperationLogState,
   ): void {
@@ -1033,7 +1035,7 @@ export class TelegramOutbox {
       state.timer = undefined;
     }
     this.operationLogs.delete(turnKey);
-    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true);
+    this.enqueueOperationRefresh(state, true);
   }
 
   private removeOperationFromLog(
@@ -1072,7 +1074,7 @@ export class TelegramOutbox {
     }
   }
 
-  private sealOperationLog(chatId: string, turnKey: string): void {
+  private sealOperationLog(_chatId: string, turnKey: string): void {
     const state = this.operationLogs.get(turnKey);
     if (!state) {
       return;
@@ -1082,7 +1084,7 @@ export class TelegramOutbox {
       state.timer = undefined;
     }
     this.operationLogs.delete(turnKey);
-    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true);
+    this.enqueueOperationRefresh(state, true);
   }
 
   private flushOperationUpdates(
@@ -1132,86 +1134,75 @@ export class TelegramOutbox {
     );
   }
 
-  private enqueueOperationRefresh(state: OperationLogState): void {
-    if (state.refreshQueued) return;
-    state.refreshQueued = true;
-    // This batch can acquire completed Items while it waits. Keep it critical,
-    // but retain at most one pending refresh and read the latest state on execution.
-    const accepted = this.enqueue(state.chatId, async signal => {
-      state.refreshQueued = false;
-      await this.flushOperationLog(state, false, signal);
-    }, true);
-    if (!accepted) state.refreshQueued = false;
+  private enqueueOperationRefresh(state: OperationLogState, final = false): void {
+    state.final ||= final;
+    for (const itemId of state.order) {
+      const record = state.records.get(itemId);
+      if (!record || state.queuedItems.has(itemId) || state.uncertainItems.has(itemId)) continue;
+      if (state.messageIds.has(itemId) && state.deliveredText.get(itemId) === this.operationText(record)) continue;
+      state.queuedItems.add(itemId);
+      // Each message receives its own deadline, in the same Conversation order.
+      // Read the latest record when execution starts, including completed Items.
+      if (!this.enqueue(state.chatId, async signal => {
+        state.queuedItems.delete(itemId);
+        const latest = state.records.get(itemId);
+        if (latest) await this.flushOperationRecord(state, latest, signal);
+      }, true)) state.queuedItems.delete(itemId);
+    }
   }
 
-  private async flushOperationLog(
-    state: OperationLogState,
-    final: boolean,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (state.records.size === 0) {
-      return;
-    }
-    const { chatId, turnKey } = state;
-    const display = this.options.operationUpdateDisplay === "compact"
-      ? "compact"
-      : "full";
-    const records = state.order
-      .map((itemId) => state.records.get(itemId))
-      .filter((record): record is OperationUpdate => record !== undefined);
-    for (const record of records) {
-      signal?.throwIfAborted();
-      if (state.uncertainItems.has(record.itemId)) continue;
-      let creating = !state.messageIds.has(record.itemId);
+  private operationText(record: OperationUpdate): string {
+    return formatOperationLog({ order: [record.itemId], records: new Map([[record.itemId, record]]) },
+      this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
+  }
+
+  private async flushOperationRecord(state: OperationLogState, record: OperationUpdate, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (state.uncertainItems.has(record.itemId)) return;
+    const { chatId, final } = state;
+    let creating = !state.messageIds.has(record.itemId);
+    try {
+      const text = this.operationText(record);
+      const messageId = state.messageIds.get(record.itemId);
+      if (messageId !== undefined && state.deliveredText.get(record.itemId) === text) return;
+      if (messageId === undefined) {
+        state.messageIds.set(
+          record.itemId,
+          await this.sendOperationMessage(chatId, text, undefined, signal, final),
+        );
+        state.deliveredText.set(record.itemId, text);
+        return;
+      }
       try {
-        const text = formatOperationLog({
-          order: [record.itemId],
-          records: new Map([[record.itemId, record]]),
-        }, display);
-        const messageId = state.messageIds.get(record.itemId);
-        if (messageId !== undefined && state.deliveredText.get(record.itemId) === text) continue;
-        if (messageId === undefined) {
+        await this.executor.call(
+          { chatId, operation: "editMessageText", critical: final },
+          (requestSignal) => this.api.editMessageText(
+            chatId,
+            messageId,
+            text,
+            operationEditOptions(),
+            requestSignal as never,
+          ),
+          signal,
+        );
+      } catch (error) {
+        if (!isMessageNotModified(error)) {
+          if (!final || !canFallbackTelegramFormat(error)) {
+            throw error;
+          }
+          creating = true;
           state.messageIds.set(
             record.itemId,
             await this.sendOperationMessage(chatId, text, undefined, signal, final),
           );
-          state.deliveredText.set(record.itemId, text);
-          continue;
         }
-        try {
-          await this.executor.call(
-            { chatId, operation: "editMessageText", critical: final },
-            (requestSignal) => this.api.editMessageText(
-              chatId,
-              messageId,
-              text,
-              operationEditOptions(),
-              requestSignal as never,
-            ),
-            signal,
-          );
-        } catch (error) {
-          if (!isMessageNotModified(error)) {
-            if (!final || !canFallbackTelegramFormat(error)) {
-              throw error;
-            }
-            creating = true;
-            state.messageIds.set(
-              record.itemId,
-              await this.sendOperationMessage(chatId, text, undefined, signal, final),
-            );
-          }
-        }
-        state.deliveredText.set(record.itemId, text);
-      } catch (error) {
-        if (creating && isTelegramDeliveryUncertain(error)) state.uncertainItems.add(record.itemId);
-        this.logger.warn({ chatId, itemId: record.itemId, ...telegramErrorMetadata(error),
-          deliveryUncertain: state.uncertainItems.has(record.itemId) }, "Telegram 操作消息投递失败，继续处理其他操作");
-        signal?.throwIfAborted();
       }
-    }
-    if (final && this.operationLogs.get(turnKey) === state) {
-      this.operationLogs.delete(turnKey);
+      state.deliveredText.set(record.itemId, text);
+    } catch (error) {
+      if (creating && isTelegramDeliveryUncertain(error)) state.uncertainItems.add(record.itemId);
+      this.logger.warn({ chatId, itemId: record.itemId, ...telegramErrorMetadata(error),
+        deliveryUncertain: state.uncertainItems.has(record.itemId) }, "Telegram 操作消息投递失败，继续处理其他操作");
+      throw error;
     }
   }
 

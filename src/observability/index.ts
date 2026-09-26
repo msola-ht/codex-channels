@@ -88,3 +88,4 @@ export {
   modelRequestMetricsTableSql,
   requireCurrentModelRequestMetricsSchema,
 } from "./sqlite-request-metrics-schema.js";
+export { CompletionMetricsReader } from "./completion-metrics-reader.js";

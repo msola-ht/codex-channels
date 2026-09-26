@@ -1024,10 +1024,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (child === undefined) return null;
     const row = this.database.prepare(`
       WITH RECURSIVE task_threads(thread_id, turn_id) AS (
-        SELECT child.thread_id, child.turn_id
-        FROM subagent_turns AS child
-        WHERE child.parent_thread_id = ?
-          AND child.parent_turn_id = ?
+        SELECT ?, ?
         UNION
         SELECT child.thread_id, child.turn_id
         FROM subagent_turns AS child
@@ -1036,17 +1033,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AND child.parent_turn_id = parent.turn_id
       ), scoped AS (
         SELECT metric.*
-        FROM model_request_metrics AS metric
-        WHERE (
-          metric.thread_id = ? AND metric.turn_id = ?
-        ) OR (
-          EXISTS (
-            SELECT 1
-            FROM task_threads AS task
-            WHERE task.thread_id = metric.thread_id
-              AND task.turn_id = metric.turn_id
-          )
-        )
+        FROM task_threads AS task
+        -- Keep the small task set outermost; ordinary JOIN can scan all metrics.
+        CROSS JOIN model_request_metrics AS metric
+          ON metric.thread_id = task.thread_id AND metric.turn_id = task.turn_id
       )
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
@@ -1068,7 +1058,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         ${generationTokensPerSecondAggregateSql} AS generation_tokens_per_second,
         ${compactAggregateSql}
       FROM scoped
-    `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
+    `).get(threadId, turnId, turnId) as TurnSummaryRow | undefined;
     // The direct-child probe above is the display gate. Keep a zero summary
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.

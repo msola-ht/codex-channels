@@ -1204,6 +1204,25 @@ describe("TelegramOutbox", () => {
     });
   });
 
+  it("gives each operation its own deadline when a batch exceeds two minutes", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const original = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementation(async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, 4_000));
+      return original(...args);
+    });
+    const outbox = createOutbox(api);
+    for (let index = 0; index < 50; index++) {
+      outbox.handle(operationUpdated(`command-${index}`, "completed", "command", `echo ${index}`));
+    }
+    outbox.handle(textCompleted("reply", "DONE"));
+    await vi.advanceTimersByTimeAsync(205_000);
+    expect(api.sent).toHaveLength(51);
+    expect(api.sent.at(-1)).toBe("DONE");
+    await outbox.close();
+  });
+
   it("does not re-edit unchanged operations as a long turn grows or completes", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();

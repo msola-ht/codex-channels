@@ -6,6 +6,29 @@ import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("reports slow queue waits and failed ordered work without exposing error text", async () => {
+    vi.useFakeTimers();
+    const entries: Array<Record<string, unknown>> = [];
+    const log = pino({ level: "debug" }, { write: value => { entries.push(JSON.parse(value)); } });
+    const delivery = new ConversationDeliveryQueue(log, { component: "Test" });
+    let release!: () => void;
+    delivery.enqueue("a", () => new Promise<void>(resolve => { release = resolve; }), true);
+    const pending = delivery.runOrdered("a", async () => { throw new Error("secret-payload"); });
+    const rejected = expect(pending).rejects.toThrow("secret-payload");
+    try {
+      await vi.advanceTimersByTimeAsync(6_000);
+      release();
+      await rejected;
+      await delivery.close();
+      expect(entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ msg: "Surface Conversation 输出排队延迟", queueWaitMs: 6_000, queued: 0 }),
+        expect.objectContaining({ msg: "Surface Conversation 输出任务已结束", outcome: "failed" }),
+        expect.objectContaining({ msg: "Surface Conversation 输出执行缓慢", outcome: "completed" }),
+      ]));
+      expect(JSON.stringify(entries)).not.toContain("secret-payload");
+    } finally { vi.useRealTimers(); }
+  });
+
   it("shares one deadline across fragments and releases the Conversation after cancellation", async () => {
     vi.useFakeTimers();
     const delivery = new ConversationDeliveryQueue(logger, { component: "Test", operationTimeoutMs: 100 });

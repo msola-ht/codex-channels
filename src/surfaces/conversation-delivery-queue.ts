@@ -120,6 +120,7 @@ export class ConversationDeliveryQueue {
                 ? error
                 : new Error(`${this.options.component} Conversation 输出操作失败`),
             );
+            throw error;
           } finally {
             settled = true;
             cleanup();
@@ -213,6 +214,12 @@ export class ConversationDeliveryQueue {
         return;
       }
       const startedAt = performance.now();
+      const queueWaitMs = Math.round(startedAt - operation.enqueuedAt);
+      if (queueWaitMs >= 5_000) {
+        this.logger.warn({ component: this.options.component, conversationId,
+          critical: operation.critical, queueWaitMs, queued: queue.size }, "Surface Conversation 输出排队延迟");
+      }
+      let outcome: "completed" | "failed" = "completed";
       const deadline = new AbortController();
       const timer = this.options.operationTimeoutMs === undefined ? undefined
         : setTimeout(() => deadline.abort(new Error("渠道投递任务超过恢复预算")), this.options.operationTimeoutMs);
@@ -221,6 +228,7 @@ export class ConversationDeliveryQueue {
       try {
         await operation.run(deliverySignal);
       } catch (error) {
+        outcome = "failed";
         this.logger.warn(
           {
             ...(this.options.errorMetadata?.(error)
@@ -236,10 +244,13 @@ export class ConversationDeliveryQueue {
         );
       } finally {
         clearTimeout(timer);
-        if (operation.critical && this.options.operationTimeoutMs !== undefined) {
-          this.logger.debug({ component: this.options.component, conversationId,
-            queueWaitMs: Math.round(startedAt - operation.enqueuedAt), elapsedMs: Math.round(performance.now() - startedAt),
-            deadlineExceeded: deadline.signal.aborted }, "Surface Conversation 输出任务已结束");
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        const metadata = { component: this.options.component, conversationId, critical: operation.critical,
+          queueWaitMs, elapsedMs, queued: queue.size, outcome, deadlineExceeded: deadline.signal.aborted };
+        if (outcome === "completed" && elapsedMs >= 5_000) {
+          this.logger.warn(metadata, "Surface Conversation 输出执行缓慢");
+        } else if (outcome === "failed" || (operation.critical && this.options.operationTimeoutMs !== undefined)) {
+          this.logger.debug(metadata, "Surface Conversation 输出任务已结束");
         }
       }
       if (queue.size === 0) {

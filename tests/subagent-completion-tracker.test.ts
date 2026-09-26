@@ -971,6 +971,25 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 
+  it("does not publish a pending asynchronous summary after close", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    let resolve!: (value: ReturnType<typeof summary>) => void;
+    const readSummary = vi.fn(() => new Promise<ReturnType<typeof summary>>(done => { resolve = done; }));
+    const tracker = new SubagentCompletionTracker({ readSummary, publish, settleDelayMs: 20 });
+    try {
+      tracker.handle(spawned());
+      tracker.metricsAvailable("agent-1");
+      tracker.handleInput(completedActivity());
+      await vi.advanceTimersByTimeAsync(20);
+      expect(readSummary).toHaveBeenCalledTimes(1);
+      tracker.close();
+      resolve(summary());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(publish).not.toHaveBeenCalled();
+    } finally { tracker.close(); vi.useRealTimers(); }
+  });
+
   it("marks metrics unavailable when the summary cannot be read", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();

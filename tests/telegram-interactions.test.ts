@@ -329,6 +329,7 @@ describe("TelegramInteractionPort", () => {
   it("offers and resolves an explicit session approval", async () => {
     const logger = {
       info: vi.fn(),
+      debug: vi.fn(),
       warn: vi.fn(),
     } as unknown as Logger;
     const sendMessage = vi.fn(async (
@@ -400,6 +401,7 @@ describe("TelegramInteractionPort", () => {
   it("logs a failed approval delivery without logging its content", async () => {
     const logger = {
       info: vi.fn(),
+      debug: vi.fn(),
       warn: vi.fn(),
     } as unknown as Logger;
     const sendMessage = vi.fn(async () => {
@@ -977,6 +979,7 @@ describe("TelegramInteractionPort", () => {
   it("safely cancels when the next user-input question cannot be delivered", async () => {
     const logger = {
       info: vi.fn(),
+      debug: vi.fn(),
       warn: vi.fn(),
     } as unknown as Logger;
     let nextMessageId = 30;

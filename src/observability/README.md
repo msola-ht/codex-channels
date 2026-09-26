@@ -24,6 +24,7 @@
   每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
   持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
   返回该范围内的实际写入结果。
+- `completion-metrics-reader.ts` / `completion-metrics-worker.ts`：完成卡片和子代理完成统计在独立只读线程复用 Store 查询；最多 32 个待处理查询，每个包含排队在内限时 4 秒，超时终止线程并冷却 30 秒，关闭最多等待 1 秒。查询失败由调用方降级，不阻塞渠道收发，不更改 Schema。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁

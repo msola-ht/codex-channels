@@ -34,6 +34,8 @@ export class TelegramApiExecutor {
         budgetMs - (attemptStartedAt - startedAt)));
       try {
         const result = await callAttempt(operation, signal, timeoutMs, onLateResult);
+        this.logger.debug({ ...context, attempt, elapsedMs: Math.round(performance.now() - startedAt),
+          outcome: "confirmed" }, "Telegram API 已确认成功");
         if (attempt > 1) this.logger.info({ ...context, attempt,
           elapsedMs: Math.round(performance.now() - startedAt) }, "Telegram API 重试后已恢复");
         return result;

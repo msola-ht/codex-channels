@@ -94,6 +94,7 @@ import {
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
+  CompletionMetricsReader,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
@@ -160,6 +161,7 @@ export abstract class GatewayComponentGraph {
   private readonly core: ConversationCore;
   private readonly conversations: ConversationService;
   readonly refreshProviderModels: () => void;
+  private readonly completionMetrics: CompletionMetricsReader;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -342,6 +344,7 @@ export abstract class GatewayComponentGraph {
         maximumRows: config.metricsStorage.maxRows,
       },
     );
+    const completionMetrics = this.completionMetrics = new CompletionMetricsReader(metricsStore.path);
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
@@ -399,15 +402,15 @@ export abstract class GatewayComponentGraph {
       logger,
     });
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId, terminalTurnId) => {
-        if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
-        const latestTurn = metricsStore.threadTurnSummary(
+      readSummary: async (agentThreadId, terminalTurnId) => {
+        if (!terminalTurnId) return completionMetrics.query("threadSummary", agentThreadId);
+        const latestTurn = await completionMetrics.query("threadTurnSummary",
           agentThreadId,
           terminalTurnId,
         );
         return {
           latestTurn,
-          threadAggregate: metricsStore.threadTurnTaskSummary(
+          threadAggregate: await completionMetrics.query("threadTurnTaskSummary",
             agentThreadId,
             terminalTurnId,
           ) ?? latestTurn,
@@ -870,7 +873,7 @@ export abstract class GatewayComponentGraph {
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadTurnSummary(threadId, turnId);
+          const summary = await completionMetrics.query("threadTurnSummary", threadId, turnId);
           return mergeCompletionTiming(summary, turnId, current);
         },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
@@ -878,7 +881,7 @@ export abstract class GatewayComponentGraph {
           // writer, and the potentially large task tree must be aggregated only once.
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          const summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          const summary = await completionMetrics.query("threadTurnTaskSummary", threadId, turnId);
           if (summary === null) return undefined;
           return {
             requestCount: summary.requestCount,
@@ -894,7 +897,7 @@ export abstract class GatewayComponentGraph {
         sessionAggregate: async (threadId): Promise<TurnTaskMetricsSummary | undefined> => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
+          const aggregate = (await completionMetrics.query("threadSummary", threadId)).threadAggregate;
           if (aggregate === null) return undefined;
           return {
             requestCount: aggregate.requestCount,
@@ -1281,6 +1284,7 @@ export abstract class GatewayComponentGraph {
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
       ["Surface", () => this.surfaceManager.stop()],
+      ["Completion Metrics", () => this.completionMetrics.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
