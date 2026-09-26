@@ -50,6 +50,7 @@ import {
   type ProviderQuotaWindowSnapshot,
 } from "./response-metrics-observer.js";
 import { ModelTrafficDump } from "./traffic-dump.js";
+import { WebSocketBackpressure } from "./websocket-backpressure.js";
 import type { TrafficCallTiming } from "./traffic-call-timing.js";
 import { createTopLevelStringFieldScanner, scanTopLevelStringField } from "./traffic-dump-content.js";
 
@@ -589,22 +590,42 @@ export class ProviderProxy {
       ),
       handshakeTimeout: this.timeoutMs,
     });
-    const pending: Array<{ data: RawData; isBinary: boolean; timing: TrafficCallTiming | undefined; metrics: MetricsState | undefined }> = [];
+    const pending: Array<{ data: RawData; isBinary: boolean; timing: TrafficCallTiming | undefined; metrics: MetricsState | undefined; release: () => void }> = [];
     let activeMetrics: MetricsState | undefined;
     let forwarding: Promise<void> | undefined;
+    let cancelForwarding: (() => void) | undefined;
+    let failed = false;
     const failForwarding = (error: unknown): void => {
+      if (failed) return;
+      failed = true;
+      cancelForwarding?.();
+      outbound.close();
+      inbound.close();
+      pending.length = 0;
       this.onError?.(asError(error));
       client.terminate();
       upstream.terminate();
     };
-    const forwardImmediately = (data: RawData, isBinary: boolean): void => {
-      if (client.readyState !== WebSocket.OPEN) return;
+    const outbound = new WebSocketBackpressure(client, this.timeoutMs, failForwarding);
+    const inbound = new WebSocketBackpressure(upstream, this.timeoutMs, failForwarding);
+    let releaseHandshake: (() => void) | undefined;
+    const sendUpstream = (data: RawData, isBinary: boolean, release: () => void): void => {
+      upstream.send(data, { binary: isBinary }, error => {
+        release();
+        if (error) failForwarding(error);
+      });
+    };
+    const forwardImmediately = (data: RawData, isBinary: boolean, release: () => void): void => {
+      if (client.readyState !== WebSocket.OPEN) { release(); return; }
       client.send(data, { binary: isBinary }, (error) => {
+        release();
         if (error) failForwarding(error);
       });
     };
 
     client.on("message", (data, isBinary) => {
+      const release = outbound.reserve(data);
+      if (!release) return;
       const receivedAtMonotonicMs = performance.now();
       exchange?.webSocketFrame("client", data, isBinary, receivedAtMonotonicMs);
       const inspected = recordsResponseMetrics
@@ -638,9 +659,12 @@ export class ProviderProxy {
         const submittedAt = performance.now();
         callTiming?.submitted(submittedAt);
         if (messageMetrics) startMetricsRequest(messageMetrics, submittedAt);
-        upstream.send(data, { binary: isBinary });
+        sendUpstream(data, isBinary, release);
       } else if (upstream.readyState === WebSocket.CONNECTING) {
-        pending.push({ data, isBinary, timing: callTiming, metrics: messageMetrics });
+        releaseHandshake ??= outbound.hold();
+        pending.push({ data, isBinary, timing: callTiming, metrics: messageMetrics, release });
+      } else {
+        release();
       }
     });
     upstream.on("open", () => {
@@ -648,8 +672,10 @@ export class ProviderProxy {
         const submittedAt = performance.now();
         message.timing?.submitted(submittedAt);
         if (message.metrics) startMetricsRequest(message.metrics, submittedAt);
-        upstream.send(message.data, { binary: message.isBinary });
+        sendUpstream(message.data, message.isBinary, message.release);
       }
+      releaseHandshake?.();
+      releaseHandshake = undefined;
     });
     upstream.on("unexpected-response", (_request, response) => {
       const receivedAtMonotonicMs = performance.now();
@@ -686,6 +712,8 @@ export class ProviderProxy {
       upstream.terminate();
     });
     upstream.on("message", (data, isBinary) => {
+      const release = inbound.reserve(data);
+      if (!release) return;
       const receivedAtMonotonicMs = performance.now();
       const receivedAtMs = Date.now();
       let completedMetrics: MetricsState | undefined;
@@ -704,17 +732,24 @@ export class ProviderProxy {
       }
       exchange?.webSocketFrame("upstream", data, isBinary, receivedAtMonotonicMs);
       if (!completedMetrics && !forwarding) {
-        forwardImmediately(data, isBinary);
+        forwardImmediately(data, isBinary, release);
         return;
       }
+      const releaseHold = inbound.hold();
       const queued = (forwarding ?? Promise.resolve()).then(async () => {
+        if (failed || client.readyState !== WebSocket.OPEN) return;
         if (completedMetrics) {
-          await this.deliverMetrics(completedMetrics, route.accountId);
+          const cancelled = new Promise<void>(resolve => { cancelForwarding = resolve; });
+          try {
+            await Promise.race([this.deliverMetrics(completedMetrics, route.accountId), cancelled]);
+          } finally {
+            cancelForwarding = undefined;
+          }
         }
         if (client.readyState === WebSocket.OPEN) {
           await sendWebSocket(client, data, isBinary);
         }
-      }).catch(failForwarding);
+      }).catch(failForwarding).finally(() => { release(); releaseHold(); });
       forwarding = queued;
       void queued.finally(() => {
         if (forwarding === queued) forwarding = undefined;
@@ -739,15 +774,26 @@ export class ProviderProxy {
     };
     client.on("close", (code, reason) => {
       const closedAtMonotonicMs = performance.now();
+      cancelForwarding?.();
       noteFailureType("client_disconnected", closedAtMonotonicMs);
       exchange?.webSocketClose("client", code, reason, closedAtMonotonicMs);
+      outbound.close();
+      inbound.close();
+      pending.length = 0;
       closePeer(upstream, code, reason);
     });
     upstream.on("close", (code, reason) => {
       const closedAtMonotonicMs = performance.now();
       noteFailureType("websocket_closed", closedAtMonotonicMs);
       exchange?.webSocketClose("upstream", code, reason, closedAtMonotonicMs);
-      closePeer(client, code, reason);
+      outbound.close();
+      pending.length = 0;
+      if (forwarding) {
+        void forwarding.finally(() => { inbound.close(); closePeer(client, code, reason); });
+      } else {
+        inbound.close();
+        closePeer(client, code, reason);
+      }
       if (!activeMetrics) return;
       const reasonType = websocketCloseErrorType(reason);
       if (reasonType) {

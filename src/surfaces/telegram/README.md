@@ -36,7 +36,7 @@
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
   分支、官方 Turn 总耗时、模型请求与 Token 统计、当前 Goal、上下文压缩总次数和用量；不显示
   模型请求聚合耗时、首段回复延迟或生成速度。已完成且非 commentary 的短回复默认使用兼容 HTML，未携带 phase 时也会转换；也可选择
-  Telegram 原生 Rich Markdown。长回复使用折叠原文或 Markdown 文件，明确的格式拒绝允许回退纯文本；完成的原生 `imageGeneration`
+  Telegram 原生 Rich Markdown。普通长回复分段渲染 HTML，超大正文或长代码使用 Markdown 文件，明确的格式拒绝允许回退纯文本；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
@@ -50,7 +50,8 @@
 - `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；
   HTTP(S) 链接转换为可点击链接，Markdown 表格降级为紧凑的粗体表头与项目符号行；
   仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
-- `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
+  长正文先完整转换，再在 Unicode/实体边界按 3500 个 UTF-16 码元分片，跨片标签闭合并重开；明确格式拒绝只回退当前片段。
+- `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用完整 HTML 转换与安全分片，超长代码与内容使用预览加内存文件；文件被明确拒绝时保留折叠原文回退。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并按完整或单行摘要模式渲染为 Telegram
   HTML；完整模式同时显示状态、耗时和退出码。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。

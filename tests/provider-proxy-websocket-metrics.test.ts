@@ -20,6 +20,56 @@ afterEach(async () => {
   }
 });
 describe("ProviderProxy WebSocket metrics", () => {
+  it.each([false, true])("drains queued frames or bounds stalled metrics before upstream close (stall=%s)", async stall => {
+    const server = createServer();
+    const sockets = new WebSocketServer({ server });
+    sockets.on("connection", socket => socket.on("message", () => {
+      socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "first" }));
+      socket.send(JSON.stringify({ type: "response.completed", response: { usage: { output_tokens: 1 } } }));
+      for (let index = 0; index < 32; index++) {
+        const frame = Buffer.alloc(65_536, index);
+        socket.send(frame, { binary: true });
+      }
+      socket.close(1000);
+    }));
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>(resolve => sockets.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    } });
+    let release!: () => void;
+    const metricsGate = new Promise<void>(resolve => { release = resolve; });
+    const metrics = vi.fn(() => metricsGate);
+    const onError = vi.fn();
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", onMetrics: metrics, onError, timeoutMs: stall ? 150 : 2_000,
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    const client = new WebSocket(`ws://${proxy.address()}/responses`);
+    const received: Array<string | number> = [];
+    client.on("message", (data, binary) => received.push(binary ? (data as Buffer)[0]! : JSON.parse(data.toString()).type));
+    const closed = new Promise<void>(resolve => client.once("close", () => resolve()));
+    try {
+      await new Promise<void>((resolve, reject) => { client.once("open", resolve); client.once("error", reject); });
+      client.send('{"type":"response.create","model":"fixture"}');
+      await vi.waitFor(() => expect(metrics).toHaveBeenCalledOnce());
+      expect(received).toEqual(["response.output_text.delta"]);
+      expect(client.readyState).toBe(WebSocket.OPEN);
+      if (!stall) release();
+      await closed;
+      if (stall) {
+        expect(onError).toHaveBeenCalledOnce();
+        expect(received).toEqual(["response.output_text.delta"]);
+      } else {
+        expect(onError).not.toHaveBeenCalled();
+        expect(received).toEqual(["response.output_text.delta", "response.completed", ...Array.from({ length: 32 }, (_, i) => i)]);
+      }
+    } finally { release(); client.terminate(); }
+  });
+
   it("starts queued and reused requests at send rather than while waiting for the connection", async () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(100);
     let signalCreated!: () => void;

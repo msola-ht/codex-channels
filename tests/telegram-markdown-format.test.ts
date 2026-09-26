@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMarkdownAsTelegramHtml } from "../src/surfaces/telegram/markdown-format.js";
+import { formatMarkdownAsTelegramHtml, formatMarkdownAsTelegramHtmlChunks, telegramFormattedHtmlText } from "../src/surfaces/telegram/markdown-format.js";
 
 describe("Telegram Markdown compatibility formatter", () => {
   it("preserves code blocks and links when excluding the reserved bold heading", () => {
@@ -108,5 +108,29 @@ describe("Telegram Markdown compatibility formatter", () => {
       "<code>DESKTOP\\_TO\\_CHANNEL\\_OK</code>",
       "<pre><code class=\"language-text\">DESKTOP\\_TO\\_CHANNEL\\_OK</code></pre>",
     ].join("\n"));
+  });
+});
+
+
+describe("Telegram long Markdown HTML", () => {
+  it("preserves formatting tags, code, entities and Unicode across boundaries", () => {
+    const text = "# 标题\n\n**" + "粗体<&𠮷".repeat(650) + "**\n\n```ts\n" + "const x = '<&>';\n".repeat(150) + "```";
+    const chunks = formatMarkdownAsTelegramHtmlChunks(text)!;
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const stack: string[] = [];
+      for (const tag of chunk.match(/<[^>]+>/gu) ?? []) {
+        const name = /^<\/?([a-z]+)/u.exec(tag)![1]!;
+        if (tag.startsWith("</")) expect(stack.pop()).toBe(name);
+        else stack.push(name);
+      }
+      expect(stack).toEqual([]);
+      expect(telegramFormattedHtmlText(chunk).length).toBeLessThanOrEqual(3500);
+      expect(chunk).not.toMatch(/[\uD800-\uDBFF]$/u);
+    }
+    expect(chunks.join("")).not.toContain("**");
+    expect(chunks.join("")).not.toContain("```");
+    expect(chunks.map(telegramFormattedHtmlText).join("")).toContain("粗体<&𠮷".repeat(650));
+    expect(chunks.map(telegramFormattedHtmlText).join("")).toContain("const x = '<&>';\n".repeat(149));
   });
 });

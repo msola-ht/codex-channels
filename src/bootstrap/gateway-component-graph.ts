@@ -870,18 +870,15 @@ export abstract class GatewayComponentGraph {
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadSummary(threadId);
-          return mergeCompletionTiming(summary.latestTurn, turnId, current);
+          const summary = metricsStore.threadTurnSummary(threadId, turnId);
+          return mergeCompletionTiming(summary, turnId, current);
         },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
-          let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
-          if (summary === null) return undefined;
-          // The completion event can outrun the buffered request writer. Once
-          // a child is known, wait for the current queue watermark so the
-          // parent task total includes the root Turn's just-finished samples.
+          // Wait before querying: the completion event can outrun the buffered
+          // writer, and the potentially large task tree must be aggregated only once.
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          const summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
             requestCount: summary.requestCount,

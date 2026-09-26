@@ -56,6 +56,7 @@ import {
 import {
   decodeMarkdownBackslashEscapes,
   formatMarkdownAsTelegramHtml,
+  telegramFormattedHtmlText,
 } from "./markdown-format.js";
 import { formatTelegramPanelChunks, hasTelegramReplyHeading } from "./html-format.js";
 import {
@@ -857,7 +858,7 @@ export class TelegramOutbox {
           }
           return;
         } catch (error) {
-          if (!canFallbackTelegramFormat(error)) throw error;
+          if (longMessage.kind === "html" || !canFallbackTelegramFormat(error)) throw error;
           this.logger.warn(
             { chatId, ...telegramErrorMetadata(error) },
             "Telegram 长回复优化发送失败，回退普通文本",
@@ -1470,6 +1471,26 @@ export class TelegramOutbox {
     plan: LongFinalMessagePlan,
     signal?: AbortSignal,
   ): Promise<number> {
+    if (plan.kind === "html") {
+      for (const [index, html] of plan.chunks.entries()) {
+        try {
+          if (index === 0) state.messageId = await this.sendHtmlFinal(chatId, state, html, signal);
+          else await this.sendOperationMessage(chatId, html, undefined, signal);
+        } catch (error) {
+          if (isMessageNotModified(error) && index === 0 && state.messageId !== undefined) continue;
+          if (!canFallbackTelegramFormat(error)) throw error;
+          const text = telegramFormattedHtmlText(html);
+          if (index === 0 && state.messageId !== undefined) {
+            await this.executor.call({ chatId, operation: "editMessageText", critical: true },
+              requestSignal => this.api.editMessageText(chatId, state.messageId!, text, undefined, requestSignal as never), signal);
+          } else {
+            const id = await this.sendFirstChunk(chatId, state, text, signal);
+            if (index === 0) state.messageId = id;
+          }
+        }
+      }
+      return state.messageId!;
+    }
     if (plan.kind === "expandable") {
       return this.sendExpandableFinal(chatId, state, plan.chunks, signal);
     }

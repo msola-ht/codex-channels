@@ -774,11 +774,11 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
-  it("collapses long final text regardless of where the turn started", async () => {
+  it("renders long final text as HTML regardless of where the turn started", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
-    const text = Array.from({ length: 500 }, (_, index) => `第 ${index + 1} 行说明`).join("\n");
+    const text = Array.from({ length: 500 }, (_, index) => `**第 ${index + 1} 行说明**`).join("\n");
 
     outbox.handle({
       type: "user.message",
@@ -797,11 +797,33 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[0]).toMatchObject({ disable_notification: true });
     expect(api.sent.slice(1).length).toBeGreaterThan(1);
     expect(api.sendOptions.slice(1, -1).every((options) =>
-      hasEntityType(options, "expandable_blockquote")
+      hasHtmlParseMode(options)
     )).toBe(true);
     expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
     expect(api.sendOptions.slice(2).every(isSilent)).toBe(true);
+    expect(api.sent.slice(1, -1).join("")).not.toContain("**");
+    expect(api.sent[1]).toContain("<b>第 1 行说明</b>");
     expect(api.documents).toEqual([]);
+  });
+
+  it("falls back only the rejected HTML chunk without replaying earlier chunks", async () => {
+    const api = new FakeTelegramApi();
+    const original = api.sendMessage.bind(api);
+    let calls = 0;
+    vi.spyOn(api, "sendMessage").mockImplementation(async (...args) => {
+      if (++calls === 2) throw telegramBadRequest("Bad Request: can't parse entities");
+      return original(...args);
+    });
+    const outbox = createOutbox(api);
+    const text = "# 独有开头\n" + Array.from({ length: 400 }, (_, i) => `**第 ${i} 项长回复正文**`).join("\n");
+    outbox.handle(textCompleted("final", text, "final_answer"));
+    await outbox.close();
+    expect(api.sent.filter(chunk => chunk.includes("独有开头"))).toHaveLength(1);
+    expect(api.sent.length).toBeGreaterThan(1);
+    expect(api.sendOptions[0]).toMatchObject({ parse_mode: "HTML" });
+    expect(api.sendOptions[1]).not.toHaveProperty("parse_mode");
+    expect(api.sent[1]).not.toContain("**");
+    expect(api.sent.at(-1)).toContain("第 399 项长回复正文");
   });
 
   it("previews large code and sends the complete response as a Markdown document", async () => {

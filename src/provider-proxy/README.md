@@ -55,6 +55,10 @@
   `network.proxy` 选择传入上游 Agent。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按具体账户 Provider Socket 上报。
+- `websocket-backpressure.ts`：双向统计应用层待转发与 SDK 尚未确认发送的帧，1 MiB 或 64 帧开始暂停读取，
+  回落到 256 KiB 且 16 帧以内恢复；握手和终态指标确认期间暂停相应方向。
+  已从同一网络读取中解码的剩余帧仍受每方向 128 MiB / 4096 帧硬上限约束；超限或超过上游超时期限无发送进展时结束连接并报告错误。
+  上游正常关闭前先排空已接受的终态和后续帧；客户端断开会取消确认等待并释放积压。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
