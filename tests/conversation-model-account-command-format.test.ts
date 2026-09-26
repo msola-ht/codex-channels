@@ -415,6 +415,22 @@ describe("conversation model and account command formatting", () => {
     expect(rendered).not.toContain("累计 Tokens");
   });
 
+  it.each(["ocg-main", "clp-test"])("renders %s quota token estimates with sampling and failure states", (provider) => {
+    const rendered = formatConversationUsage({ kind: "usage", result: {
+      kind: "quota-windows", provider, available: true, windows: [
+        { windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: 1790922837, status: null,
+          tokenEstimate: { status: "ready", tokensPerPercent: 1000, observedDeltaPercent: 2, intervalCount: 1, requestCount: 3 } },
+        { windowId: "monthly", label: "月度", usedPercent: 0, resetsAt: 1790922837, status: null, tokenEstimate: { status: "sampling" } },
+        { windowId: "rolling", label: "5小时", usedPercent: 0, resetsAt: 1790922837, status: null, tokenEstimate: { status: "unavailable" } },
+      ],
+    } });
+    expect(rendered).toContain("每 1%");
+    expect(rendered).toContain("满额约");
+    expect(rendered).toContain("正在采样");
+    expect(rendered).toContain("暂不可用");
+    expect(rendered).toContain("非官方固定兑换率");
+  });
+
   it("renders Cline quota windows and reset times without invented token totals", () => {
     const rendered = formatConversationUsage({ kind: "usage", result: {
       kind: "quota-windows", provider: "clp-test", available: true,

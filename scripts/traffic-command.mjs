@@ -144,6 +144,7 @@ function summaryLine(summary) {
     `线程=${shortId(summary.threadId)}`,
     `轮次=${shortId(summary.turnId)}`,
     `模型=${summary.requestModel ?? "-"}→${summary.responseModels.join("、") || "-"}`,
+    `上游=${summary.upstreamProvider ?? "-"}`,
     `类型=${summary.category === "models" ? "模型列表" : summary.category === "prewarm" ? "连接预热" : summary.requestKind ?? "模型请求"}`,
     `结果=${stateLabel(summary.state)}`,
   ].join("  ");
@@ -158,6 +159,7 @@ function renderDetail(detail) {
     `#${detail.id} ${formatTime(detail.startedAtMs)} ${requestTarget}`,
     `线程：${detail.threadId ?? "未提供"}  轮次：${detail.turnId ?? "未提供"}  类型：${detail.requestKind ?? "未提供"}`,
     `模型：${detail.requestModel ?? "未提供"} → ${detail.responseModels.join("、") || "未提供"}`,
+    `上游提供商：${detail.upstreamProvider ?? "未记录"}`,
     `模型对照：${modelNameComparison(detail.requestModel, detail.responseModels.length === 1 ? detail.responseModels[0] : undefined)}（仅比较名称，不验证模型身份）`,
   ];
   for (const [label, entries] of [["服务端模型声明", detail.modelEvidence.serverModels], ["安全缓冲候选声明", detail.modelEvidence.safetyModels]]) {

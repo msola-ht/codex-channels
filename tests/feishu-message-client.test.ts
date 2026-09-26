@@ -473,7 +473,7 @@ describe("FeishuMessageClient", () => {
     });
   });
 
-  it("reports a stable error before message send when static CardKit creation fails", async () => {
+  it.each(["sendMarkdownCard", "createStreamingCard"] as const)("reports a safe pre-publication failure when %s cannot create its resource", async method => {
     const createMessage = vi.fn(async () => ({
       data: { message_id: "om_fallback" },
     }));
@@ -496,10 +496,9 @@ describe("FeishuMessageClient", () => {
     );
 
     await expect(
-      client.sendMarkdownCard("oc_chat", "**状态**\n\n- 正常"),
+      client[method]("oc_chat", "**状态**\n\n- 正常"),
     ).rejects.toMatchObject({
       code: "card-create-failed",
-      message: "飞书静态卡片创建失败",
     });
 
     expect(createMessage).not.toHaveBeenCalled();
@@ -1018,6 +1017,24 @@ describe("FeishuMessageClient", () => {
     const sending = client.sendText("oc_chat", "queued", controller.signal);
     controller.abort();
     await expect(sending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("does not start SDK writes with an already cancelled delivery signal", async () => {
+    const createMessage = vi.fn();
+    const createStreamingCard = vi.fn();
+    const updateStreamingCard = vi.fn();
+    const createFile = vi.fn();
+    const client = new FeishuMessageClient({ appId: "cli_0123456789abcdef", appSecret: "secret" }, {
+      sendTimeoutMs: 10_000,
+      createSdkClient: () => ({ createMessage, createStreamingCard, updateStreamingCard, createFile,
+        patchMessage: successfulPatch, downloadResource: successfulDownload }),
+    });
+    const signal = AbortSignal.abort();
+    await expect(client.sendText("oc_chat", "text", signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(client.createStreamingCard("oc_chat", "text", signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(client.updateStreamingCard("123", "text", 1, signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(client.sendFile("oc_chat", "reply.txt", Buffer.from("text"), signal)).rejects.toMatchObject({ name: "AbortError" });
+    for (const method of [createMessage, createStreamingCard, updateStreamingCard, createFile]) expect(method).not.toHaveBeenCalled();
   });
 
   it("neutralizes platform-native mention tags in rich Markdown", async () => {

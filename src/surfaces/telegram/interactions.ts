@@ -176,6 +176,10 @@ export class TelegramInteractionPort implements InteractionPort {
             { chatId: target.conversationId, operation: "sendMessage", critical: true },
             (requestSignal) => this.bot.api.sendMessage(target.conversationId, chunk, options, requestSignal as never),
             signal,
+            (late) => {
+              this.rememberTextReplyMessage(target, request, late.message_id);
+              return this.updateInteractionMessage(target, request.requestId, late.message_id, chunk, "请求已失效");
+            },
           );
         }
         return sent;
@@ -699,6 +703,10 @@ export class TelegramInteractionPort implements InteractionPort {
               requestSignal as never,
             ),
             signal,
+            (late) => {
+              this.rememberTextReplyMessage(target, request, late.message_id);
+              return this.updateInteractionMessage(target, request.requestId, late.message_id, chunk, "请求已失效");
+            },
           );
         }
         return sent;

@@ -10,17 +10,17 @@ describe("Telegram long final message planner", () => {
     expect(planLongFinalMessage("简短回复")).toBeUndefined();
   });
 
-  it("splits ordinary long text into collapsed Telegram-safe chunks", () => {
+  it("splits ordinary long text into HTML chunks without losing text", () => {
     const text = Array.from({ length: 500 }, (_, index) => `第 ${index + 1} 行普通说明`).join("\n");
     const plan = planLongFinalMessage(text);
 
-    expect(plan?.kind).toBe("expandable");
-    if (plan?.kind !== "expandable") {
-      throw new Error("预期生成折叠消息");
+    expect(plan?.kind).toBe("html");
+    if (plan?.kind !== "html") {
+      throw new Error("预期生成 HTML 消息");
     }
     expect(plan.chunks.length).toBeGreaterThan(1);
     expect(plan.chunks.every((chunk) => chunk.length <= 3_800)).toBe(true);
-    expect(plan.chunks.join("\n")).toBe(text);
+    expect(plan.chunks.join("")).toBe(text);
   });
 
   it("uses a Markdown document for large fenced code", () => {

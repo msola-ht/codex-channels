@@ -1,4 +1,6 @@
-import type { ConversationTarget } from "../../conversation-core/index.js";
+import type { DeliveryJournal } from "../delivery-journal.js";
+import { DurableInputQueue, type DeliveryFailureMetadata } from "../durable-input-queue.js";
+import { conversationTargetKey, type ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
@@ -65,6 +67,8 @@ export type FeishuInboxReceiveResult =
   | { status: "retry"; reason: "overloaded" };
 
 export interface FeishuInboxOptions {
+  journal?: DeliveryJournal | undefined;
+  onUncertain?(id: string, metadata?: DeliveryFailureMetadata): void;
   accountId: string;
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
@@ -93,6 +97,7 @@ interface ConversationWorker {
 
 export class FeishuInbox {
   private readonly capacity: number;
+  private readonly durable?: DurableInputQueue<FeishuInboxMessage>;
   private readonly closeTimeoutMs: number;
   private readonly deduplicationCapacity: number;
   private readonly deduplicationTtlMs: number;
@@ -129,6 +134,26 @@ export class FeishuInbox {
       "输入聚合静默窗口",
     );
     this.now = options.now ?? Date.now;
+    if (options.journal) {
+      this.durable = new DurableInputQueue({ journal: options.journal, stream: `feishu:${options.accountId}:input`, blockedByStream: `feishu:${options.accountId}:output`,
+        ...(options.handleImageBatch ? {
+          groupKey: (message: FeishuInboxMessage) => message.kind === "image"
+            ? JSON.stringify([message.actorId, message.parentId ?? null]) : undefined,
+          handleBatch: async (messages: readonly FeishuInboxMessage[]) => {
+            const images = messages.filter((message): message is Extract<FeishuInboxMessage, { kind: "image" }> => message.kind === "image");
+            if (images.length !== messages.length) throw new Error("飞书图片组包含非图片输入");
+            if (images.some(message => !options.access.isAllowed({ target: message.target, actorId: message.actorId }))) return;
+            for (const message of images) options.actorRegistry?.rememberActor(message.target, message.actorId);
+            await options.handleImageBatch!(images);
+          },
+        } : {}),
+        handle: async message => {
+          if (!options.access.isAllowed({ target: message.target, actorId: message.actorId })) return;
+          options.actorRegistry?.rememberActor(message.target, message.actorId);
+          await options.handle(message);
+        }, onUncertain: (id, metadata) => options.onUncertain?.(id, metadata),
+      });
+    }
   }
 
   receive(event: FeishuMessageEvent): FeishuInboxReceiveResult {
@@ -210,6 +235,11 @@ export class FeishuInbox {
       ...(event.parentId === undefined ? {} : { parentId: event.parentId }),
       ...content,
     };
+    if (this.durable) {
+      this.durable.accept(`feishu:${this.options.accountId}:${deduplicationKey}`, conversationTargetKey(message.target), message,
+        message.kind === "text" && isEmergencyStopCommand(message.text));
+      return { status: "accepted" };
+    }
     if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
       if (this.urgentTasks.size >= this.capacity) {
         return { status: "retry", reason: "overloaded" };
@@ -227,12 +257,14 @@ export class FeishuInbox {
     return { status: "accepted" };
   }
 
+  start(): void { this.durable?.start(); }
+
   close(): Promise<void> {
     if (this.closePromise !== undefined) {
       return this.closePromise;
     }
     this.closed = true;
-    this.closePromise = this.finishClose();
+    this.closePromise = this.durable ? this.durable.close() : this.finishClose();
     return this.closePromise;
   }
 

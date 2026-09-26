@@ -1,8 +1,7 @@
 import * as React from "react"
 import { Link } from "react-router"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { modelNameComparison } from "../../../../runtime/model-name-comparison.mjs"
+import { TrafficModel } from "@/components/traffic/traffic-model"
 import { trafficDetailPath } from "@/lib/traffic-state"
 import type { SortingState } from "@tanstack/react-table"
 
@@ -48,7 +47,7 @@ const COLUMN_LABELS: Record<string, string> = {
   reasoningOutput: "推理输出",
   firstContent: "首字耗时",
   totalDuration: "总耗时",
-  tokensPerSecond: "Token/s",
+  tokensPerSecond: "输出 Token/s",
   traffic: "调用详情",
 }
 
@@ -124,17 +123,12 @@ export function RequestsTable({
       ),
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
-          {modelNameComparison(row.original.requestModel, row.original.responseModel) !== "名称不一致"
-            ? <TruncatedText text={row.original.requestModel ?? row.original.responseModel ?? row.original.model} className="max-w-64" />
-            : <TableHint hint={`请求：${row.original.requestModel ?? "未知"}；响应回显：${row.original.responseModel ?? "未提供"}。仅比较名称，不验证模型身份。`}><span className="flex max-w-64 items-center gap-2 whitespace-nowrap">
-            <span className="min-w-0 truncate">
-              {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-                ? `${row.original.requestModel} → ${row.original.responseModel}`
-                : row.original.requestModel ?? row.original.responseModel ?? row.original.model ?? "—"}
-            </span>
-            {modelNameComparison(row.original.requestModel, row.original.responseModel) === "名称不一致"
-              ? <Badge variant="outline">名称不一致</Badge> : null}
-          </span></TableHint>}
+          <TrafficModel
+            request={row.original.requestModel}
+            responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
+            fallback={row.original.model ?? undefined}
+            upstream={row.original.upstreamProvider}
+          />
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),
@@ -235,7 +229,7 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstContentMs,
       enableSorting: false,
-      header: () => <TableHint hint="从开始转发到收到首个有效响应事件；不代表页面显示时间。">首字耗时</TableHint>,
+      header: () => <TableHint hint="从代理提交上游请求到收到首个内容帧，不计结构帧与终态帧，与请求总耗时使用同一起点；不代表页面显示时间。">首字耗时</TableHint>,
       cell: ({ row }) => (
         <TableHint hint={row.original.upstreamTtftMs == null ? null : `上游轮次首 Token：${formatElapsedDuration(row.original.upstreamTtftMs)}`}><span className="tabular-nums">
           {row.original.firstContentMs == null ? "—"
@@ -246,13 +240,13 @@ export function RequestsTable({
     {
       id: "totalDuration",
       accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column} hint="从代理收到请求到模型完成或请求结束；不包含页面显示时间。">总耗时</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="从代理提交上游请求到模型完成或请求结束；不含发送前的本地准备与 WebSocket 连接等待，也不含页面显示时间。">总耗时</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "tokensPerSecond",
       accessorFn: (record) => record.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="输出 Token ÷ 请求总耗时，包含首字等待。">Token/s</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="输出 Token（含推理）÷ 从提交上游请求到首个终态的总耗时，包含首字等待与上游排队；不是纯生成速度，也不含请求之间的编排、工具与空闲时间。">输出 Token/s</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {

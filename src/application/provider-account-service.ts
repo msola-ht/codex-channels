@@ -1,4 +1,5 @@
 import type {
+  ProviderQuotaWindow,
   AccountQueryPort,
   AccountThreadUsage,
   ProviderAccountAdapter,
@@ -17,6 +18,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   constructor(
     adapters: readonly ProviderAccountAdapter[],
     private readonly snapshotWriter?: OfficialAccountSnapshotWriter,
+    private readonly quotaEstimates?: (windows: readonly ProviderQuotaWindow[], provider: string) => ProviderQuotaWindow[],
   ) {
     for (const adapter of adapters) {
       if (!adapter.provider || this.adapters.has(adapter.provider)) {
@@ -40,7 +42,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
       this.persist(result, { kind: "unsupported", provider: modelProvider });
-      return result;
+      return result.kind === "quota-windows" && this.quotaEstimates
+        ? { ...result, windows: this.quotaEstimates(result.windows, result.provider) }
+        : result;
     }
     const [usage, threadUsage]: [ProviderAccountUsage, AccountThreadUsage] = await Promise.all([
       accountUsage,

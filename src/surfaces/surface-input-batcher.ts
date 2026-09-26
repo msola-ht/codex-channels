@@ -47,6 +47,7 @@ export interface SurfaceInputBatcherOptions {
 type SubmitConversationInput = (
   target: ConversationTarget,
   input: string | ConversationInput,
+  signal?: AbortSignal,
 ) => Promise<Submission>;
 
 interface PendingPart extends SurfaceInputPart {
@@ -71,6 +72,7 @@ export class SurfaceInputBatcher {
   private readonly inFlight = new Set<Promise<void>>();
   private nextOrder = 0;
   private closed = false;
+  private readonly abort = new AbortController();
 
   constructor(
     private readonly submit: SubmitConversationInput,
@@ -187,13 +189,16 @@ export class SurfaceInputBatcher {
   }
 
   async close(): Promise<void> {
-    if (!this.closed) {
-      this.closed = true;
-      for (const [key, batch] of [...this.pending]) {
-        clearTimeout(batch.timer);
-        void this.flush(key, batch);
-      }
+    if (this.closed) return;
+    this.closed = true;
+    this.abort.abort(new Error("输入聚合器已关闭"));
+    for (const batch of this.pending.values()) {
+      clearTimeout(batch.timer);
+      for (const part of batch.parts) part.reject(this.abort.signal.reason);
     }
+    this.pending.clear();
+    // submitBatch races cancellation and observes late RPC settlement. Closing
+    // never flushes a new submission or waits indefinitely for an existing RPC.
     await Promise.allSettled([...this.inFlight]);
   }
 
@@ -233,6 +238,23 @@ export class SurfaceInputBatcher {
     return task;
   }
 
+  private async untilClosed<T>(operation: Promise<T>): Promise<T> {
+    const signal = this.abort.signal;
+    let cancel: (() => void) | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_resolve, reject) => {
+          cancel = () => reject(new Error("输入聚合器已关闭"));
+          if (signal.aborted) cancel();
+          else signal.addEventListener("abort", cancel, { once: true });
+        }),
+      ]);
+    } finally {
+      if (cancel) signal.removeEventListener("abort", cancel);
+    }
+  }
+
   private async submitBatch(batch: PendingBatch): Promise<void> {
     const parts = [...batch.parts].sort(
       (left, right) => left.sequence - right.sequence || left.order - right.order,
@@ -245,7 +267,8 @@ export class SurfaceInputBatcher {
       ? "请查看这张图片并根据图片内容协助我。"
       : "请查看这些图片并根据图片内容协助我。");
     try {
-      const images = await Promise.all(localImages.map(toInlineImage));
+      const images = await this.untilClosed(Promise.all(localImages.map(toInlineImage)));
+      this.abort.signal.throwIfAborted();
       const limitError = imageBatchLimitError(
         images,
         this.maximumImages,
@@ -260,7 +283,7 @@ export class SurfaceInputBatcher {
             text,
             images: images.map(({ url }) => ({ url })),
           };
-      const submission = await this.submit(batch.target, value);
+      const submission = await this.untilClosed(this.submit(batch.target, value, this.abort.signal));
       parts.forEach((part, index) => {
         part.resolve({
           submission,
@@ -268,7 +291,7 @@ export class SurfaceInputBatcher {
         });
       });
     } catch (error) {
-      this.options.onSubmissionFailure?.({
+      if (!this.abort.signal.aborted) this.options.onSubmissionFailure?.({
         target: batch.target,
         actorId: parts[0]!.actorId,
         sequence: parts[0]!.sequence,

@@ -108,6 +108,20 @@ describe("BoundedAsyncQueue", () => {
 });
 
 describe("EventBus", () => {
+  it("reports critical overflow to its owner instead of growing a protected queue indefinitely", async () => {
+    const overflow = vi.fn();
+    const bus = new EventBus<number>(pino({ level: "silent" }), 1, overflow);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const seen: number[] = [];
+    bus.subscribe("slow", async value => { seen.push(value); if (value === 1) await gate; });
+    bus.publish(1, true); bus.publish(2, true); bus.publish(3, true);
+    expect(overflow).toHaveBeenCalledWith("slow");
+    release();
+    await bus.close();
+    expect(seen).toEqual([1, 2]);
+  });
+
   it("rejects new subscriptions after close", async () => {
     const bus = new EventBus<number>(pino({ level: "silent" }));
     await bus.close();

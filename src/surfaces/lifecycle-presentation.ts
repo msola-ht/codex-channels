@@ -326,7 +326,7 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  fields.push({ label: "Token/s", value: formatCompletionTokenRate(event.tokensPerSecond) });
+  fields.push(...completionRateFields(event.tokensPerSecond));
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -609,7 +609,7 @@ export function createTurnCompletedPresentation(
     runFields.push({
       title: "性能",
       fields: [
-        { label: "Token/s", value: formatCompletionTokenRate(event.timing?.tokensPerSecond) },
+        ...completionRateFields(event.timing?.tokensPerSecond),
         ...(event.durationMs === undefined ? [] : [{
           label: "总耗时",
           value: formatElapsedDuration(event.durationMs),
@@ -661,7 +661,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    taskFields.push({ label: "Token/s", value: formatCompletionTokenRate(task.tokensPerSecond) });
+    taskFields.push(...completionRateFields(task.tokensPerSecond));
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -684,7 +684,7 @@ export function createTurnCompletedPresentation(
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
           }]),
-        { label: "Token/s", value: formatCompletionTokenRate(session.tokensPerSecond) },
+        ...completionRateFields(session.tokensPerSecond),
       ],
     });
   }
@@ -703,8 +703,23 @@ export function createTurnCompletedPresentation(
   };
 }
 
-function formatCompletionTokenRate(value: number | null | undefined): string {
-  return value == null ? formatTokensPerSecond(value) : `${Number(formatTokensPerSecond(value))}/s`;
+/**
+ * 输出速率读数在未采样时整行省略，不把缺失值渲染成占位文本
+ * （与 DeepSeek Harness 的读数省略规则一致）。
+ */
+function completionRateFields(
+  tokensPerSecond: number | null | undefined,
+): LifecyclePresentationField[] {
+  return tokensPerSecond == null
+    ? []
+    : [{
+        label: "输出 Token/s",
+        value: formatCompletionTokenRate(tokensPerSecond),
+      }];
+}
+
+function formatCompletionTokenRate(value: number): string {
+  return `${Number(formatTokensPerSecond(value))}/s`;
 }
 
 export function renderPlainLifecyclePresentation(

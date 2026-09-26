@@ -406,6 +406,53 @@ describe("Feishu outbox streaming lifecycle", () => {
     expect(posts).toEqual([]);
   });
 
+  it("does not recreate an uncertain streaming message when its final content arrives", async () => {
+    vi.useFakeTimers();
+    const sendPost = vi.fn(async () => {});
+    const sendMarkdownCard = vi.fn(async () => {});
+    const createStreamingCard = vi.fn(async () => { throw new FeishuMessageError("send-timeout", "投递结果未知"); });
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {}, sendPost, sendMarkdownCard, createStreamingCard,
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("部分"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "部分正文", "item-1"));
+    outbox.handle(turnCompleted());
+    await vi.advanceTimersByTimeAsync(0);
+    expect((outbox as unknown as { streams: Map<string, unknown> }).streams.size).toBe(0);
+    await outbox.close();
+    expect(createStreamingCard).toHaveBeenCalledOnce();
+    expect(sendPost).not.toHaveBeenCalled();
+    expect(sendMarkdownCard).toHaveBeenCalledOnce();
+    expect(sendMarkdownCard.mock.calls[0]).toContain(turnCompletedMarkdown);
+  });
+
+  it("recovers a known card with one terminal update after an intermediate timeout", async () => {
+    vi.useFakeTimers();
+    const createStreamingCard = vi.fn(cardMethods.createStreamingCard);
+    const updateStreamingCard = vi.fn(async () => {}).mockRejectedValueOnce(new FeishuMessageError("send-timeout", "timeout"));
+    const finishStreamingCard = vi.fn(async () => {});
+    const sendMarkdownCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", { ...cardMethods,
+      sendText: async () => {}, sendPost: async () => {}, sendMarkdownCard,
+      createStreamingCard, updateStreamingCard, finishStreamingCard,
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("部分"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta("正文"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "最终正文", "item-1"));
+    outbox.handle(turnCompleted());
+    await vi.advanceTimersByTimeAsync(0);
+    expect((outbox as unknown as { streams: Map<string, unknown> }).streams.size).toBe(0);
+    await outbox.close();
+    expect(createStreamingCard).toHaveBeenCalledOnce();
+    expect(updateStreamingCard).toHaveBeenCalledTimes(2);
+    expect(updateStreamingCard.mock.calls[1]).toEqual(["7355372766134157313", "最终正文", 2, expect.any(AbortSignal)]);
+    expect(finishStreamingCard).toHaveBeenCalledOnce();
+    expect(sendMarkdownCard).not.toHaveBeenCalled();
+  });
+
   it("falls back to the complete rich post after streaming creation fails", async () => {
     vi.useFakeTimers();
     const posts: string[] = [];
@@ -418,7 +465,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream resource creation failed");
         },
       },
       pino({ level: "silent" }),
@@ -446,7 +493,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream resource creation failed");
         },
       },
       pino({ level: "silent" }),
@@ -475,7 +522,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream resource creation failed");
         },
       },
       pino({ level: "silent" }),
@@ -503,7 +550,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         updateStreamingCard: async () => {
-          throw new Error("stream update failed");
+          throw new FeishuMessageError("client-create-failed", "stream client unavailable");
         },
         finishStreamingCard,
       },
@@ -521,6 +568,8 @@ describe("Feishu outbox streaming lifecycle", () => {
       "7355372766134157313",
       2,
       "部分",
+      undefined,
+      expect.any(AbortSignal),
     );
     expect(posts).toEqual(["部分正文"]);
   });
@@ -574,6 +623,8 @@ describe("Feishu outbox streaming lifecycle", () => {
       "7355372766134157313",
       3,
       "部分正文继续",
+      undefined,
+      expect.any(AbortSignal),
     );
     expect(posts).toEqual([]);
   });

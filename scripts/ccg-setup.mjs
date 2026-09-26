@@ -25,7 +25,6 @@ import {
   isManagedProviderApiKeyValid,
   isManagedProviderModelValid,
 } from "../runtime/model-provider-definitions.mjs";
-import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import {
   loadManagedModelProviderSettings,
   loadPrimaryModelProvider,
@@ -38,11 +37,12 @@ import { configActivationResult } from "./config-activation-result.mjs";
 import { writeGatewayConfigActivationNotice } from "./config-activation-notice.mjs";
 import { deepseekSetupScriptUrl, downloadDeepseekCatalog } from "./deepseek-setup.mjs";
 import {
-  createManagedProviderConfiguration,
+  applyManagedProviderAccountConfiguration, planManagedProviderAccountConfiguration,
   hasProviderBaseConfig,
   restoreProviderBaseConfig,
 } from "./managed-model-provider-setup.mjs";
 import {
+  addProviderFileArchive,
   applyProviderFileUpdates,
   readOptionalProviderFile,
   snapshotProviderFiles,
@@ -151,8 +151,6 @@ export async function applyCcgConfiguration({
     }
     const backup = await readInitialConfig(paths.backup);
     if (previous && !backup) throw new Error("CCG 账户初始配置备份缺失，请先恢复原始备份");
-    const entersExclusiveMode = previous?.mode === "switching" && mode === "exclusive";
-    const initial = previous && !entersExclusiveMode ? backup : { config: current };
     let catalog;
     let writesCatalog = false;
     if (existsSync(paths.catalog)) {
@@ -168,21 +166,12 @@ export async function applyCcgConfiguration({
       throw new Error("请选择 CCG 模型目录中的模型");
     }
     await validateCcgCatalog(catalog, environment);
-    const { config: nextConfig, profile } = createManagedProviderConfiguration(
-      current, initial.config, definition, {
-        mode, previousMode: previous?.mode,
-        apiKey, catalogPath: paths.catalog, catalog, model: selectedModel,
-      },
-    );
-    const updates = new Map();
-    if ((!previous || entersExclusiveMode) && backup) {
-      const archive = join(dirname(paths.backup), `config-${randomUUID()}.json`);
-      const [snapshot] = snapshotProviderFiles([archive]);
-      if (snapshot.content !== undefined) throw new Error("CCG 备份归档路径已被占用");
-      snapshots.push(snapshot);
-      updates.set(archive, snapshots.find((item) => item.path === paths.backup).content);
+    const { replacesInitial, updates } = planManagedProviderAccountConfiguration(current, backup, definition, {
+      paths, mode, previousMode: previous?.mode, apiKey, catalog, model: selectedModel,
+    });
+    if (replacesInitial && backup) {
+      addProviderFileArchive(updates, snapshots, paths.backup, join(dirname(paths.backup), `config-${randomUUID()}.json`));
     }
-    updates.set(paths.backup, `${JSON.stringify(initial)}\n`);
     if (writesCatalog) {
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       updates.set(paths.manifest, `${JSON.stringify({
@@ -190,16 +179,11 @@ export async function applyCcgConfiguration({
         downloadedAt: new Date().toISOString(),
       }, null, 2)}\n`);
     }
-    updates.set(paths.profile, profile === undefined ? undefined : stringify(profile));
-    updates.set(paths.marker, stringify(createManagedProviderMarker(definition, mode)));
-    if (mode === "exclusive" || previous?.mode === "exclusive") {
-      updates.set(paths.config, stringify(nextConfig));
-    }
     const nextAccounts = existing
       ? accounts
       : [...accounts, { id: accountId, default: accounts.length === 0 }];
     updates.set(paths.registry, `${JSON.stringify(validateCcgAccounts(nextAccounts), null, 2)}\n`);
-    await applyProviderFileUpdates(updates, snapshots);
+    await applyManagedProviderAccountConfiguration(updates, snapshots, paths);
     return {
       action: "configured",
       account: { id: accountId, provider: definition.id, default: existing?.default ?? accounts.length === 0 },

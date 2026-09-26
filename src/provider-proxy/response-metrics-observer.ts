@@ -46,9 +46,9 @@ export interface ProviderProxyMetrics {
   totalTokens: number | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
-  /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
+  /** 本次请求提交上游发送至首个承载模型内容的帧；不计结构帧与终态帧，不是客户端显示时间。 */
   firstContentMs?: number;
-  /** 代理收到请求至首个终态或结束/失败；单调时钟，不含终态后的投递。 */
+  /** 本次请求提交上游发送至首个终态或结束/失败；未发送时缺失。 */
   totalDurationMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
@@ -73,7 +73,6 @@ export interface MetricsState extends ProviderProxyMetrics {
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 const requestClocks = new WeakMap<MetricsState, number>();
-const totalRequestClocks = new WeakMap<MetricsState, number>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -81,8 +80,7 @@ export function createMetricsState(
   transport: ProviderProxyMetrics["transport"],
   operation: ProviderProxyMetrics["operation"],
   userAgent: string | null,
-  startedAtMonotonicMs: number,
-  totalStartedAtMonotonicMs?: number,
+  startedAtMonotonicMs?: number,
 ): MetricsState {
   const metrics: MetricsState = {
     ...metadata,
@@ -109,13 +107,17 @@ export function createMetricsState(
     weeklyQuota: null,
     quotaWindows: null,
   };
-  requestClocks.set(metrics, startedAtMonotonicMs);
-  if (totalStartedAtMonotonicMs !== undefined) totalRequestClocks.set(metrics, totalStartedAtMonotonicMs);
+  if (startedAtMonotonicMs !== undefined) startMetricsRequest(metrics, startedAtMonotonicMs);
   return metrics;
 }
 
+/** HTTP 提交请求、WS 提交当前逻辑请求帧时启动同一个时钟，排除本地准备和连接等待队列。 */
+export function startMetricsRequest(metrics: MetricsState, at: number): void {
+  if (!requestClocks.has(metrics)) requestClocks.set(metrics, at);
+}
+
 function observeTotalDuration(metrics: MetricsState, at: number): void {
-  const started = totalRequestClocks.get(metrics);
+  const started = requestClocks.get(metrics);
   if (started !== undefined) metrics.totalDurationMs ??= at - started;
 }
 
@@ -205,7 +207,7 @@ export function observeResponseEvent(
   receivedAtMs: number,
   receivedAtMonotonicMs: number,
 ): boolean {
-  if (metrics.firstContentMs === undefined && startsFirstToken(metrics.transport, type, event)) {
+  if (metrics.firstContentMs === undefined && startsFirstContent(type, event)) {
     const started = requestClocks.get(metrics);
     if (started !== undefined) metrics.firstContentMs = receivedAtMonotonicMs - started;
   }
@@ -523,19 +525,36 @@ export function inspectResponseEvent(
   };
 }
 
-function startsFirstToken(
-  transport: ProviderProxyMetrics["transport"],
+/**
+ * 结构性事件不承载模型内容：生命周期帧、条目与分片边界，以及终态帧。
+ * HTTP 与 WS 共用同一份名单，避免结构帧提前首内容、把生成窗口拉长。
+ */
+const structuralEventTypes = new Set([
+  "response.created",
+  "response.in_progress",
+  "response.metadata",
+  "response.completed",
+  "response.failed",
+  "response.incomplete",
+  "response.output_item.added",
+  "response.output_item.done",
+  "response.content_part.added",
+  "response.content_part.done",
+  "response.reasoning_summary_part.added",
+  "response.reasoning_summary_part.done",
+]);
+
+/**
+ * 首个内容帧：只认带内容的增量或内容终帧，不接受结构帧与终态帧。
+ * 未列举的新内容事件只要以 `.delta`/`.done` 结尾仍会被接受。
+ */
+function startsFirstContent(
   type: string,
   event: Record<string, unknown> | undefined,
 ): boolean {
-  // 参考 sub2api 的 HTTP semantic / WS token-event 口径；不把旁路元数据或纯错误计为首字。
   if (!event || !type.startsWith("response.")) return false;
-  if (transport === "websocket") {
-    return type.endsWith(".delta") || type === "response.output_text.done"
-      || type === "response.function_call_arguments.done";
-  }
-  return type !== "response.created" && type !== "response.in_progress"
-    && type !== "response.failed" && type !== "response.metadata";
+  if (structuralEventTypes.has(type)) return false;
+  return type.endsWith(".delta") || type.endsWith(".done");
 }
 
 const responseEventBodyTypeNames = [

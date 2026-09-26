@@ -76,6 +76,7 @@ interface FeishuStreamState {
   lastSentText?: string;
   timer?: NodeJS.Timeout;
   failed: boolean;
+  deliveryUncertain?: boolean;
   completionFooter?: string;
 }
 
@@ -175,6 +176,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly replyTargets = new TurnReplyTargets<string>();
   private streamCapacityWarningIssued = false;
   private closed = false;
+  private confirmingDelivery = false;
   private closeFinished = false;
 
   constructor(
@@ -185,6 +187,21 @@ export class FeishuOutbox implements SurfaceOutputPort {
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Feishu",
+      drainOnClose: true,
+      operationTimeoutMs: 120_000,
+    });
+  }
+
+  trackInput(conversationId: string, handle: () => Promise<void>): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(conversationId, handle);
+  }
+
+  deliver(event: OutputEvent): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(event.target.conversationId, () => {
+      this.confirmingDelivery = true;
+      try { this.handle(event); } finally { this.confirmingDelivery = false; }
     });
   }
 
@@ -299,7 +316,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       if (
         event.operation.status !== "running"
-        && this.operationUpdates.accept(event, event.target.conversationId)
+        && !this.confirmingDelivery && this.operationUpdates.accept(event, event.target.conversationId)
       ) {
         return;
       }
@@ -445,7 +462,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     const card = renderFeishuComputerUseCard(
       event.operation,
       this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
@@ -778,7 +795,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       this.delivery.enqueue(
         state.chatId,
-        () => this.flushStream(key, true, false),
+        (signal) => this.flushStream(key, true, false, signal),
         true,
       );
     }
@@ -908,7 +925,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private async sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     for (const chunk of splitFeishuText(text)) {
       await this.messagePort.sendText(chatId, chunk, signal);
     }
@@ -920,7 +937,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     maximumChunks = maximumFeishuMessageChunks,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     for (const chunk of splitFeishuPost(markdown, maximumChunks)) {
       await this.messagePort.sendPost(chatId, chunk, signal);
     }
@@ -934,9 +951,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     onFirstMessageId?: (messageId: string) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     let first = true;
     for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
+      signal?.throwIfAborted();
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
           const messageId = await this.messagePort.replyMarkdownCard(replyTo, chunk, signal);
@@ -981,7 +999,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     if (event.type === "turn.started") {
       const current = this.threadStatusMessages.get(event.threadId);
       this.logger.info(
@@ -1194,6 +1212,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         signal,
       );
     } catch (error) {
+      if (!canFallbackFeishuDelivery(error)) throw error;
       await this.sendMarkdown(
         chatId,
         `${feishuFileFailureNotice}${tail}`,
@@ -1210,7 +1229,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     event: Extract<OutputEvent, { type: "thread.status" }>,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     const current = this.threadStatusMessages.get(event.threadId);
     const card = renderFeishuThreadStatusCard(event.status, current?.identity);
     if (
@@ -1243,6 +1262,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           "飞书状态卡已原地更新",
         );
       } catch (error) {
+        if (!canFallbackFeishuDelivery(error)) throw error;
         this.logger.warn(
           {
             component: "Feishu",
@@ -1488,16 +1508,26 @@ export class FeishuOutbox implements SurfaceOutputPort {
     fallbackPost: boolean,
     signal?: AbortSignal,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     const state = this.streams.get(key);
     if (!state) {
       return;
     }
     if (state.failed) {
-      if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost);
+      if (!terminal) return;
+      if (state.deliveryUncertain) {
+        this.streams.delete(key);
+        if (state.completionFooter !== undefined) {
+          await this.sendMarkdown(state.chatId, state.completionFooter, maximumFeishuMessageChunks, undefined, undefined, signal);
+        }
+        throw new Error("流式消息投递结果待核对");
       }
-      return;
+      if (!state.cardId) {
+        await this.recoverFailedStream(key, state, fallbackPost, signal);
+        return;
+      }
+      // A known card can receive one terminal update without creating a new message.
+      state.failed = false;
     }
     if (!state.cardId && terminal) {
       this.streams.delete(key);
@@ -1515,6 +1545,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           remainingMessageBudget,
           replyTo,
           undefined,
+          signal,
         );
       }
       if (state.completionFooter !== undefined) {
@@ -1549,8 +1580,14 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     } catch (error) {
       state.failed = true;
-      if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost);
+      state.deliveryUncertain = !state.cardId && !canFallbackFeishuDelivery(error);
+      if (terminal) {
+        this.streams.delete(key);
+        if (canFallbackFeishuDelivery(error) && !signal?.aborted) {
+          await this.recoverFailedStream(key, state, fallbackPost, signal);
+        } else if (state.completionFooter !== undefined) {
+          await this.sendMarkdown(state.chatId, state.completionFooter, maximumFeishuMessageChunks, undefined, undefined, signal);
+        }
       }
       throw error;
     }
@@ -1563,6 +1600,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
             state.cardId!,
             state.sequence,
             state.cardText,
+            undefined,
+            signal,
           );
         } else {
           await this.messagePort.finishStreamingCard(
@@ -1570,6 +1609,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
             state.sequence,
             state.cardText,
             footerAtStart,
+            signal,
           );
         }
         if (
@@ -1664,6 +1704,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
         state.cardId!,
         state.sequence,
         head,
+        undefined,
+        signal,
       );
       delete state.cardId;
       delete state.lastSentText;
@@ -1703,6 +1745,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         : await this.messagePort.createStreamingCard(
             state.chatId,
             initialText,
+            signal,
           );
     state.cardId = created.cardId;
     state.lastSentText = initialText;
@@ -1749,7 +1792,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     }
     if (state.completionFooter !== undefined) {
-          await this.sendMarkdown(state.chatId, state.completionFooter);
+      await this.sendMarkdown(state.chatId, state.completionFooter, maximumFeishuMessageChunks, undefined, undefined, signal);
     }
     if (finishError) {
       throw finishError instanceof Error
@@ -1765,4 +1808,9 @@ function streamKey(threadId: string, turnId: string, itemId: string): string {
 
 function turnKey(threadId: string, turnId: string): string {
   return `${threadId}:${turnId}`;
+}
+
+function canFallbackFeishuDelivery(error: unknown): boolean {
+  return error instanceof FeishuMessageError
+    && (error.code === "card-create-failed" || error.code === "client-create-failed");
 }

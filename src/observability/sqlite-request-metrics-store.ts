@@ -1,3 +1,4 @@
+import { createAccountQuotaEstimator } from "./account-quota-estimate.js";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
@@ -36,6 +37,7 @@ import {
 } from "./sqlite-request-metrics-schema.js";
 
 import type {
+  AccountQuotaWindowEstimate,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
@@ -71,7 +73,12 @@ const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const quotaResetJitterSeconds = 5 * 60;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
-const tokensPerSecondSql = "CASE WHEN total_duration_ms > 0 AND output_tokens > 0 THEN output_tokens * 1000.0 / total_duration_ms END";
+// 速率一律用「合计输出 Token ÷ 合计请求耗时」的合并口径：分子与分母只取同时具备输出与耗时的记录，
+// 缺采样的请求整条退出；先算逐请求速率再取算术平均会被耗时极短的记录放大，让汇总失真。
+const tokensPerSecondSampleSql = "total_duration_ms > 0 AND output_tokens > 0";
+/** 输出速率：分子含推理 Token，分母是提交上游请求到首个终态的总耗时，包含首字等待。 */
+const tokensPerSecondSql = `CASE WHEN ${tokensPerSecondSampleSql} THEN output_tokens * 1000.0 / total_duration_ms END`;
+const tokensPerSecondAggregateSql = `SUM(CASE WHEN ${tokensPerSecondSampleSql} THEN output_tokens END) * 1000.0 / SUM(CASE WHEN ${tokensPerSecondSampleSql} THEN total_duration_ms END)`;
 const pageSortSql = {
   recordedAtMs: "recorded_at_ms",
   provider: "provider",
@@ -141,7 +148,7 @@ const metricsAggregateSql = `
   COUNT(cached_input_tokens) AS cached_input_token_count,
   SUM(output_tokens) AS output_tokens,
   SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-  AVG(${tokensPerSecondSql}) AS tokens_per_second,
+  ${tokensPerSecondAggregateSql} AS tokens_per_second,
   ${compactAggregateSql}
 `;
 
@@ -579,6 +586,58 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     this.cleanupAccountSnapshots(snapshot.observedAtMs);
   }
 
+  accountQuotaEstimates(provider: string, nowMs = Date.now()): AccountQuotaWindowEstimate[] {
+    this.requireOpen();
+    if (!provider || provider.length > 128 || !Number.isSafeInteger(nowMs) || nowMs < 0) {
+      throw new Error("账户额度估算查询无效");
+    }
+    // A savepoint also works inside an existing readSnapshot transaction. History,
+    // retention boundary and metrics must all come from the same SQLite snapshot.
+    this.database.exec("SAVEPOINT account_quota_estimate");
+    try {
+      const firstRetained = this.database.prepare(`
+        SELECT id, recorded_at_ms FROM model_request_metrics ORDER BY id LIMIT 1
+      `).get() as { id: number; recorded_at_ms: number } | undefined;
+      // AUTOINCREMENT IDs survive cleanup and reopening. A missing prefix means
+      // earlier account intervals no longer have a complete request history.
+      const coverageStart = firstRetained === undefined ? nowMs
+        : firstRetained.id > 1 ? firstRetained.recorded_at_ms : 0;
+      const rows = this.database.prepare(`
+        SELECT a.observed_at_ms, a.available, a.usage_json
+        FROM account_snapshots a JOIN account_sources s ON s.source_id = a.source_id
+        WHERE s.provider = ? AND a.observed_at_ms <= ? AND a.observed_at_ms >= ?
+        ORDER BY a.observed_at_ms DESC LIMIT 2048
+      `).all(provider, nowMs, coverageStart) as Array<{ observed_at_ms: number; available: number; usage_json: string }>;
+      const snapshots = rows.reverse().map(row => ({
+        observedAtMs: row.observed_at_ms, available: row.available === 1,
+        usage: JSON.parse(row.usage_json) as unknown,
+      }));
+      const estimator = createAccountQuotaEstimator(snapshots, nowMs);
+      if (snapshots.length > 1) {
+        // Include late writes after the last account observation. Assignment uses
+        // actual request timestamps, never the time spent waiting for persistence.
+        const metrics = this.iterateRows(`
+          SELECT request_started_at_ms, response_completed_at_ms, input_tokens, output_tokens
+          FROM model_request_metrics
+          WHERE provider = ? AND recorded_at_ms >= ? AND recorded_at_ms <= ?
+        `, provider, snapshots[0]!.observedAtMs, nowMs);
+        for (const raw of metrics) {
+          const row = raw as { request_started_at_ms: number; response_completed_at_ms: number;
+            input_tokens: number | null; output_tokens: number | null };
+          estimator.observe({ requestStartedAtMs: row.request_started_at_ms,
+            responseCompletedAtMs: row.response_completed_at_ms,
+            inputTokens: row.input_tokens, outputTokens: row.output_tokens });
+        }
+      }
+      const result = estimator.result();
+      this.database.exec("RELEASE account_quota_estimate");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK TO account_quota_estimate; RELEASE account_quota_estimate");
+      throw error;
+    }
+  }
+
   latestAccountSnapshot(provider: string, accountId?: string) {
     const row = this.database.prepare(`
       SELECT s.provider, s.account_id, a.observed_at_ms, a.available,
@@ -927,7 +986,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
+        ${tokensPerSecondAggregateSql} AS tokens_per_second,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -957,10 +1016,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     if (child === undefined) return null;
     const row = this.database.prepare(`
       WITH RECURSIVE task_threads(thread_id, turn_id) AS (
-        SELECT child.thread_id, child.turn_id
-        FROM subagent_turns AS child
-        WHERE child.parent_thread_id = ?
-          AND child.parent_turn_id = ?
+        SELECT ?, ?
         UNION
         SELECT child.thread_id, child.turn_id
         FROM subagent_turns AS child
@@ -969,17 +1025,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
           AND child.parent_turn_id = parent.turn_id
       ), scoped AS (
         SELECT metric.*
-        FROM model_request_metrics AS metric
-        WHERE (
-          metric.thread_id = ? AND metric.turn_id = ?
-        ) OR (
-          EXISTS (
-            SELECT 1
-            FROM task_threads AS task
-            WHERE task.thread_id = metric.thread_id
-              AND task.turn_id = metric.turn_id
-          )
-        )
+        FROM task_threads AS task
+        -- Keep the small task set outermost; ordinary JOIN can scan all metrics.
+        CROSS JOIN model_request_metrics AS metric
+          ON metric.thread_id = task.thread_id AND metric.turn_id = task.turn_id
       )
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
@@ -997,10 +1046,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
+        ${tokensPerSecondAggregateSql} AS tokens_per_second,
         ${compactAggregateSql}
       FROM scoped
-    `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
+    `).get(threadId, turnId, turnId) as TurnSummaryRow | undefined;
     // The direct-child probe above is the display gate. Keep a zero summary
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.
@@ -1077,7 +1126,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
+        ${tokensPerSecondAggregateSql} AS tokens_per_second,
         ${compactAggregateSql}
       FROM model_request_metrics
       WHERE thread_id = ? AND turn_id = ?
@@ -1330,7 +1379,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
+        ${tokensPerSecondAggregateSql} AS tokens_per_second,
         ${compactAggregateSql},
         COUNT(*) OVER () AS total_group_count
       FROM filtered

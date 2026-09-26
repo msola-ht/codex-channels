@@ -1,3 +1,4 @@
+import { FeishuMessageError } from "../src/surfaces/feishu/client.js";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -162,6 +163,7 @@ describe("Feishu outbox thread status", () => {
           })],
         }),
       }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -205,6 +207,7 @@ describe("Feishu outbox thread status", () => {
           })],
         }),
       }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -245,7 +248,7 @@ describe("Feishu outbox thread status", () => {
         },
         updateCard: async () => {
           updateAttempts += 1;
-          throw new Error("update failed");
+          throw new FeishuMessageError("client-create-failed", "update client unavailable");
         },
       },
       pino({ level: "silent" }),

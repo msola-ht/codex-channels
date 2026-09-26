@@ -1,3 +1,6 @@
+import { conversationTargetKey } from "../../conversation-core/index.js";
+import { DeliveryJournalError, type DeliveryJournal } from "../delivery-journal.js";
+import { DurableInputQueue } from "../durable-input-queue.js";
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
 
@@ -23,6 +26,11 @@ const commands = [
 ];
 
 const updateGroupSizes = new WeakMap<object, number>();
+const updateSignals = new WeakMap<object, AbortSignal>();
+
+export function telegramUpdateSignal(update: object): AbortSignal | undefined {
+  return updateSignals.get(update);
+}
 const maximumPendingUpdates = 1_000;
 const maximumUrgentUpdates = 100;
 const defaultCloseTimeoutMs = 5_000;
@@ -44,16 +52,24 @@ export interface TelegramStartupNotification {
 
 export interface TelegramLifecycleOptions {
   closeTimeoutMs?: number;
+  journal?: DeliveryJournal | undefined;
+  acceptUpdate?(update: Parameters<Bot["handleUpdate"]>[0]): boolean;
 }
 
 export class TelegramLifecycle {
   private polling: Promise<void> | undefined;
+  private readonly durable?: DurableInputQueue<Parameters<Bot["handleUpdate"]>[0]>;
   private startupNotificationTask: Promise<void> | undefined;
   private lifecycleAbort: AbortController | undefined;
-  private updateProcessing = Promise.resolve();
+  private inputAbort = new AbortController();
+  private readonly updateProcessing = new Map<string, Promise<void>>();
+  private readonly updateTasks = new Set<Promise<void>>();
+  private readonly rejectedUpdateTasks = new Set<Promise<void>>();
+  private readonly rejectedUpdates = new Set<number>();
   private readonly urgentUpdateTasks = new Set<Promise<void>>();
   private readonly capacityWaiters = new Set<() => void>();
   private pendingUpdateCount = 0;
+  private readonly unconfirmedUpdates = new Map<number, boolean>();
   private stopping = false;
   private readonly closeTimeoutMs: number;
 
@@ -62,14 +78,33 @@ export class TelegramLifecycle {
     private readonly logger: Logger,
     private readonly startupNotification?: TelegramStartupNotification,
     private readonly onFatal?: (error: Error) => void,
-    options: TelegramLifecycleOptions = {},
+    private readonly options: TelegramLifecycleOptions = {},
   ) {
     this.closeTimeoutMs = options.closeTimeoutMs ?? defaultCloseTimeoutMs;
+    if (options.journal) this.durable = new DurableInputQueue({
+      journal: options.journal, stream: "telegram:default:input", blockedByStream: "telegram:default:output",
+      groupKey: update => update.message?.media_group_id,
+      handle: async (update, signal, groupSize) => {
+        if (groupSize > 1) updateGroupSizes.set(update, groupSize);
+        await this.handleUpdate(update, signal);
+      },
+      onUncertain: (id, metadata) => this.logger.error({ ...metadata, deliveryId: id }, "Telegram 输入结果待核对，未自动重发"),
+    });
   }
 
   start(): void {
     this.stopping = false;
+    if (this.inputAbort.signal.aborted) {
+      this.inputAbort = new AbortController();
+      this.updateProcessing.clear();
+      this.updateTasks.clear();
+      this.urgentUpdateTasks.clear();
+      this.pendingUpdateCount = 0;
+      this.unconfirmedUpdates.clear();
+    }
+    this.lifecycleAbort?.abort();
     this.lifecycleAbort = new AbortController();
+    const generation = this.lifecycleAbort;
     this.polling = this.run(this.lifecycleAbort.signal);
     this.logger.info("Telegram Gateway 正在连接");
     void this.polling.catch((error) => {
@@ -77,7 +112,7 @@ export class TelegramLifecycle {
         telegramErrorMetadata(error),
         "Telegram Long Polling 已停止",
       );
-      if (!this.stopping) {
+      if (!this.stopping && this.lifecycleAbort === generation) {
         this.onFatal?.(
           error instanceof TelegramLifecycleError
             ? error
@@ -89,13 +124,20 @@ export class TelegramLifecycle {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.inputAbort.abort();
     this.lifecycleAbort?.abort();
     this.lifecycleAbort = undefined;
-    await this.polling?.catch(() => undefined);
+    const polling = this.polling;
+    const startup = this.startupNotificationTask;
     this.polling = undefined;
+    this.startupNotificationTask = undefined;
     const updatesCompleted = await waitAtMost(Promise.allSettled([
-      this.updateProcessing,
+      polling,
+      startup,
+      ...this.updateTasks,
       ...this.urgentUpdateTasks,
+      ...this.rejectedUpdateTasks,
+      this.durable?.close(),
     ]), this.closeTimeoutMs);
     if (!updatesCompleted) {
       this.logger.warn(
@@ -106,8 +148,6 @@ export class TelegramLifecycle {
         "Telegram 更新处理未在关闭等待上限内完成",
       );
     }
-    await this.startupNotificationTask?.catch(() => undefined);
-    this.startupNotificationTask = undefined;
   }
 
   private async run(signal: AbortSignal): Promise<void> {
@@ -118,6 +158,7 @@ export class TelegramLifecycle {
     this.logger.info({ username: this.bot.botInfo.username }, "Telegram Gateway 已启动");
     void this.registerCommandMenu(signal);
     this.startupNotificationTask = this.sendStartupNotification(signal);
+    this.durable?.start();
     await this.pollUpdates(signal);
   }
 
@@ -140,6 +181,7 @@ export class TelegramLifecycle {
     for (const { chatId, text } of messages) {
       try {
         for (const chunk of formatTelegramPanelChunks(text)) {
+          signal.throwIfAborted();
           await this.bot.api.sendMessage(
             chatId,
             chunk,
@@ -214,55 +256,113 @@ export class TelegramLifecycle {
   private async pollUpdates(signal: AbortSignal): Promise<void> {
     let offset = 0;
     let consecutiveFailures = 0;
+    let admissionFailures = 0;
+    let admissionReason: string | undefined;
+    const pending = this.unconfirmedUpdates;
+    const inputSignal = this.inputAbort.signal;
     const maximumFailures = 12;
     while (!this.stopping && !signal.aborted) {
+      let phase: "fetch" | "admission" = "fetch";
       try {
         await this.waitForUpdateCapacity(signal);
         if (this.stopping || signal.aborted) {
           return;
         }
+        for (const [id, completed] of pending) {
+          if (!completed) break;
+          offset = id + 1;
+        }
         const updates = await this.bot.api.getUpdates(
           {
             offset,
             timeout: 20,
-            limit: Math.max(
-              1,
-              Math.min(
-                100,
-                maximumPendingUpdates - this.pendingUpdateCount,
-                maximumUrgentUpdates - this.urgentUpdateTasks.size,
-              ),
-            ),
+            // Replayed entries already occupy capacity. Shrinking the fetch
+            // limit by in-flight count can hide fresh controls behind them.
+            limit: 100,
             allowed_updates: [],
           },
           signal as never,
         );
+        if (signal.aborted || this.stopping) return;
         consecutiveFailures = 0;
-        const emergencyStops = new Set(
-          updates.filter((update) => isTelegramEmergencyStopUpdate(
+        if (this.durable) {
+          phase = "admission";
+          for (const id of this.rejectedUpdates) if (id < offset) this.rejectedUpdates.delete(id);
+          let failed = false;
+          let failure: unknown;
+          for (const update of updates) {
+            const control = isTelegramUrgentUpdate(update, this.bot.botInfo.username);
+            if (this.options.acceptUpdate?.(update) === false) {
+              this.handleRejectedUpdate(update, inputSignal);
+            } else {
+              // Preserve the ordinary prefix, but still admit controls already in this batch.
+              if (failed && !control) continue;
+              try {
+                this.durable.accept(`telegram:default:${update.update_id}`, durableConversationKey(update), update, control);
+              } catch (error) {
+                if (!failed) failure = error;
+                failed = true;
+              }
+            }
+            if (!failed) offset = update.update_id + 1;
+          }
+          if (failed) throw failure;
+          if (admissionFailures > 0) this.logger.info({ phase, attempts: admissionFailures }, "Telegram 消息接纳已恢复");
+          admissionFailures = 0;
+          admissionReason = undefined;
+          continue;
+        }
+        // Only a successful fetch proves that Telegram saw this offset. Keep
+        // completed IDs across network failures and in-process reconnection.
+        for (const id of pending.keys()) {
+          if (id < offset) pending.delete(id);
+        }
+        // Only confirm the contiguous completed prefix. A later completed chat
+        // must not acknowledge an earlier queued/unfinished update.
+        const fresh = updates.filter(update => !pending.has(update.update_id));
+        for (const update of fresh) pending.set(update.update_id, false);
+        const complete = (ids: number[]): void => {
+          if (inputSignal.aborted || inputSignal !== this.inputAbort.signal) return;
+          for (const id of ids) pending.set(id, true);
+        };
+        const urgentUpdates = new Set(
+          fresh.filter((update) => isTelegramUrgentUpdate(
             update,
             this.bot.botInfo.username,
           )),
         );
-        for (const update of emergencyStops) {
-          this.runUrgentUpdate(update);
+        for (const update of urgentUpdates) {
+          void this.runUrgentUpdate(update).then(() => complete([update.update_id]));
         }
         for (const group of groupTelegramUpdates(
-          updates.filter((update) => !emergencyStops.has(update)),
+          fresh.filter((update) => !urgentUpdates.has(update)),
         )) {
           if (group.length > 1) {
             for (const update of group) {
               updateGroupSizes.set(update, group.length);
             }
           }
-          this.enqueueUpdateGroup(group);
+          void this.enqueueUpdateGroup(group).then(() => complete(group.map(update => update.update_id)));
         }
-        for (const update of updates) {
-          offset = update.update_id + 1;
-        }
+        // Unconfirmed updates are returned immediately, even with long polling.
+        // Avoid a hot loop while retaining access to controls in this window.
+        if (updates.length > 0 && fresh.length === 0) await waitWithAbort(250, signal);
       } catch (error) {
         if (this.stopping || signal.aborted) {
           return;
+        }
+        if (phase === "admission") {
+          const reason = error instanceof DeliveryJournalError ? error.code : "storage-error";
+          if (reason !== admissionReason) admissionFailures = 0;
+          admissionReason = reason;
+          admissionFailures += 1;
+          const retryAfterMs = Math.min(30_000, 1_000 * 2 ** Math.min(admissionFailures - 1, 5));
+          if (admissionFailures === 1 || admissionFailures % 10 === 0) {
+            this.logger.warn({ phase, reason, attempt: admissionFailures, retryAfterMs,
+              ...telegramErrorMetadata(error) }, "Telegram 消息未接纳，保留确认位置并退避等待；请检查 codexc delivery status --json");
+          }
+          await waitWithAbort(retryAfterMs, signal);
+          continue;
         }
         consecutiveFailures += 1;
         if (consecutiveFailures >= maximumFailures) {
@@ -288,27 +388,37 @@ export class TelegramLifecycle {
 
   private enqueueUpdateGroup(
     group: ReadonlyArray<Parameters<Bot["handleUpdate"]>[0]>,
-  ): void {
+  ): Promise<void> {
+    const signal = this.inputAbort.signal;
+    const key = updateConversationKey(group[0]!);
     this.pendingUpdateCount += group.length;
-    const processing = this.updateProcessing.then(async () => {
-      await Promise.all(group.map((update) => this.handleUpdate(update)));
+    const processing = (this.updateProcessing.get(key) ?? Promise.resolve()).then(async () => {
+      if (signal.aborted) return;
+      await Promise.all(group.map((update) => this.handleUpdate(update, signal)));
     });
-    this.updateProcessing = processing.finally(() => {
-      this.pendingUpdateCount -= group.length;
+    const task = processing.finally(() => {
+      if (signal === this.inputAbort.signal) this.pendingUpdateCount -= group.length;
+      this.updateTasks.delete(task);
+      if (this.updateProcessing.get(key) === task) this.updateProcessing.delete(key);
       this.notifyUpdateCapacity();
     });
+    this.updateProcessing.set(key, task);
+    this.updateTasks.add(task);
+    return task;
   }
 
   private runUrgentUpdate(
     update: Parameters<Bot["handleUpdate"]>[0],
-  ): void {
+  ): Promise<void> {
+    const signal = this.inputAbort.signal;
     const task = Promise.resolve()
-      .then(() => this.handleUpdate(update))
+      .then(() => this.handleUpdate(update, signal))
       .finally(() => {
         this.urgentUpdateTasks.delete(task);
         this.notifyUpdateCapacity();
       });
     this.urgentUpdateTasks.add(task);
+    return task;
   }
 
   private async waitForUpdateCapacity(signal: AbortSignal): Promise<void> {
@@ -335,9 +445,27 @@ export class TelegramLifecycle {
     for (const notify of [...this.capacityWaiters]) notify();
   }
 
+  private handleRejectedUpdate(update: Parameters<Bot["handleUpdate"]>[0], signal: AbortSignal): void {
+    if (this.rejectedUpdates.has(update.update_id)) return;
+    this.rejectedUpdates.add(update.update_id);
+    if (this.rejectedUpdates.size > maximumPendingUpdates) this.rejectedUpdates.delete(this.rejectedUpdates.values().next().value!);
+    if (this.rejectedUpdateTasks.size >= 8) {
+      this.logger.warn("Telegram 授权提示并发已满，省略非关键提示");
+      return;
+    }
+    const deadline = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+    const task = this.handleUpdate(update, deadline).catch(() => undefined).finally(() => {
+      this.rejectedUpdateTasks.delete(task);
+    });
+    this.rejectedUpdateTasks.add(task);
+  }
+
   private async handleUpdate(
     update: Parameters<Bot["handleUpdate"]>[0],
+    signal: AbortSignal,
   ): Promise<void> {
+    if (signal.aborted) return;
+    updateSignals.set(update, signal);
     try {
       await this.bot.handleUpdate(update);
     } catch (error) {
@@ -348,14 +476,16 @@ export class TelegramLifecycle {
         },
         "Telegram 更新处理失败",
       );
+      if (this.durable) throw error;
     }
   }
 }
 
-function isTelegramEmergencyStopUpdate(
+function isTelegramUrgentUpdate(
   update: Parameters<Bot["handleUpdate"]>[0],
   botUsername: string,
 ): boolean {
+  if (update.callback_query?.data?.startsWith("ix:")) return true;
   const text = update.message?.text;
   if (text === undefined) {
     return false;
@@ -379,16 +509,25 @@ async function waitAtMost(operation: Promise<unknown>, timeoutMs: number): Promi
   }
 }
 
-function groupTelegramUpdates<T extends {
-  message?: { media_group_id?: string };
-}>(updates: readonly T[]): T[][] {
-  const groups: T[][] = [];
+function durableConversationKey(update: Parameters<Bot["handleUpdate"]>[0]): string {
+  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat;
+  return conversationTargetKey({ surface: "telegram", accountId: "default", conversationId: chat ? String(chat.id) : `update:${update.update_id}` });
+}
+
+function updateConversationKey(update: Parameters<Bot["handleUpdate"]>[0]): string {
+  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat;
+  return chat ? `chat:${chat.id}` : `update:${update.update_id}`;
+}
+
+function groupTelegramUpdates(updates: ReadonlyArray<Parameters<Bot["handleUpdate"]>[0]>): Array<Array<Parameters<Bot["handleUpdate"]>[0]>> {
+  const groups: Array<Array<Parameters<Bot["handleUpdate"]>[0]>> = [];
   for (const update of updates) {
     const mediaGroupId = update.message?.media_group_id;
     const previous = groups.at(-1);
     if (
       mediaGroupId !== undefined
       && previous?.at(-1)?.message?.media_group_id === mediaGroupId
+      && updateConversationKey(previous.at(-1)!) === updateConversationKey(update)
     ) {
       previous.push(update);
       continue;

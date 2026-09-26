@@ -16,6 +16,7 @@
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
   `firstContentMs` 保留代理单请求首内容延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
   `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
+- `account-quota-estimate.ts`：从官方账户历史快照与本地请求流计算各额度窗口的 Token/百分点；按请求开始时间归属，只累计已闭合且 Token 完整的区间；跨快照请求排除涉及区间，重置、比例倒退或无效快照断开采样。
 - `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
@@ -23,6 +24,7 @@
   每 10 ms 最多取 32 条并优先在一个 SQLite 事务中写入，关闭时排空，减少逐请求事务开销；公开
   持久化水位只等待调用时该 Thread 或 Turn 已经入队的最后一条记录，不被后续无关请求延长，并
   返回该范围内的实际写入结果。
+- `completion-metrics-reader.ts` / `completion-metrics-worker.ts`：完成卡片和子代理完成统计在独立只读线程复用 Store 查询；最多 32 个待处理查询，每个包含排队在内限时 4 秒，超时终止线程并冷却 30 秒，关闭最多等待 1 秒。查询失败由调用方降级，不阻塞渠道收发，不更改 Schema。
 - `request-metrics-database.ts`：集中保存指标 Schema 版本、固定路径和进程级独占锁；Gateway 与 reset
   共用独立 SQLite 锁库中的排他事务，由操作系统在进程退出时释放，不依赖 PID 或失效锁删除；真实
   运行中持有者与并发重建均失败关闭。升级时会检查旧 JSON 锁：失效 PID、Linux 跨系统重启遗留锁
@@ -38,7 +40,7 @@
   Schema v15 增加可空 `upstream_ttft_ms`，逐请求保留上游原值，Turn 汇总仅选择自身首个有效 OpenAI
   普通响应样本，不合计或平均。Schema v16 增加可空 `first_content_ms`、`request_model`、`response_model`。
   Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
-  Schema v18 增加可空 `total_duration_ms`，逐请求保存代理入口至首次模型终态或结束/失败的单调时钟总耗时，支持明细排序与导出，不聚合为 Turn 耗时。
+  Schema v18 增加可空 `total_duration_ms`，逐请求保存提交上游请求至首次模型终态或结束/失败的单调时钟总耗时，支持明细排序与导出，不聚合为 Turn 耗时。
   数据库使用严格 Schema v19、Unix `0600` / Windows 当前 SID 私有文件权限，
   v19 的可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
@@ -50,7 +52,13 @@
   最多短暂超出 99 条。每条记录保存提供商、模型、思考等级、服务层级、状态与错误类型；路由层在
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列；人类可读 CLI、
-  渠道卡片和 WebUI 页面展示派生 `tokensPerSecond`：单请求输出 Token 除以总耗时秒数，Turn/Thread 为范围内有效请求速率的算术平均，仅输出与耗时都大于零的记录参与，不新增存储列；不是纯生成速度或会话墙钟吞吐量。单请求首内容不合成为轮次指标，完成卡片的官方 Turn 总耗时
+  渠道卡片和 WebUI 页面展示一个派生输出速率 `tokensPerSecond`，都不新增存储列。它是输出 Token（含推理
+  Token，不做扣除）除以请求总耗时（提交上游请求到首次模型终态，含首字等待），Turn/Thread 汇总按
+  「合计输出 ÷ 合计总耗时」合并计算。该速率只要求输出 Token 与总耗时同时大于零，缺采样的记录整条退出而不是
+  按零参与，也不先把逐请求速率平均再汇总：逐请求速率会被耗时极短的单条记录放大，分子分母取自同一批记录后
+  相除才不会被短请求等权拉偏。失败请求通常没有用量样本，因此不参与；压缩请求沿用原统计范围。
+  `tokensPerSecond` 不是首字之后的纯解码速度，也不是会话墙钟吞吐量（不含请求之间的编排、工具与空闲时间）。
+  单请求首内容不合成为轮次指标，完成卡片的官方 Turn 总耗时
   不来自本指标库。内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合和指标库保留范围内的 Thread 会话累计分开返回，由
@@ -72,7 +80,7 @@
   上游请求的 Turn 级失败（如用量上限）也以 failed 记录落库：前者保留 HTTP 状态，后者无 Token
   失败记录还保存提供商、模型与受限长度的错误消息，供 WebUI 与导出展示详情。账户快照历史使用
   相同的保留期限清理，但每个账户源保留最新一条确认状态，避免把历史到期误作订阅恢复；OpenCode Go 账户窗口的本机 Token 汇总按精确
-  Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。
+  Provider 对相关时间范围执行一次流式读取，不复用带总数统计的页面查询。`accountQuotaEstimates` 按精确 Provider 读取最近最多 2048 条账户快照，并共用一次请求流为所有窗口生成只读估算；通过同一 SQLite 读快照检查历史清理边界，排除被裁剪的区间，接纳迟到写入。不增加持久化字段。
   普通 `/responses` 上由受控元数据标记的 remote compaction v2
   以 `operation = 'compact'` 独立分类，但其请求、Usage 与额度快照仍参与汇总、异常报告、
   会话指标和周额度估算；Turn、Thread 及时间范围聚合还从相同明细派生独立压缩摘要，不新增或

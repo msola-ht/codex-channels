@@ -542,6 +542,11 @@ type ParsedInteractionCommand =
   | { action: "submit-form"; token: string; content: string }
   | { action: "complete"; token: string };
 
+export function isWeixinInteractionCommand(text: string): boolean {
+  const command = parseInteractionCommand(text);
+  return command !== null && command !== "invalid";
+}
+
 function parseInteractionCommand(
   text: string,
 ): ParsedInteractionCommand | "invalid" | null {

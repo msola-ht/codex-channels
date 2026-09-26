@@ -2,9 +2,9 @@ import { previewDeepseekAccountConfiguration, applyDeepseekAccountConfiguration 
 import { responsesContextSyncPath } from "../runtime/model-provider-responses-catalog.mjs";
 import { createManagedProviderProfile } from "../runtime/model-provider-profile.mjs";
 import { deepseekAccountDefinition } from "../runtime/model-provider-definitions.mjs";
-import { mkdtempSync, readFileSync, rmSync, statSync, existsSync, unlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "smol-toml";
 import { applyClinePassConfiguration, clinePassSetupPaths, removeClinePassConfiguration, createClinePassCatalog, runClinePassSetup } from "../scripts/cline-pass-setup.mjs";
@@ -20,6 +20,7 @@ function fixture() {
     slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,
     context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
     default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort, description: effort })),
+    model_messages: { instructions_template: "DS fixture prompt" },
   }] }));
   const paths = clinePassSetupPaths(environment, "test");
   writePrivateFileAtomicSync(paths.config, 'model_provider = "openai"\nmodel = "fixture-original"\n');
@@ -32,7 +33,7 @@ it("isolates switching credentials and restores exclusive configuration on remov
   await applyClinePassConfiguration(input, { environment });
   expect(readFileSync(paths.config, "utf8")).toBe(original);
   expect(readFileSync(paths.profile, "utf8")).toContain('wire_api = "responses"');
-  expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"], default_reasoning_level: "high", supported_reasoning_levels: ["none", "low", "high", "max"].map(effort => ({ effort })) }] });
+  expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"], default_reasoning_level: "high", apply_patch_tool_type: "freeform", supports_search_tool: true, model_messages: { instructions_template: "DS fixture prompt" }, supported_reasoning_levels: ["none", "low", "high", "max"].map(effort => ({ effort })) }] });
   expect(parse(readFileSync(paths.profile, "utf8")).model_reasoning_effort).toBe("high");
   expect(loadManagedModelProviderSettings(environment)).toContainEqual(expect.objectContaining({ provider: "clp-test", mode: "switching" }));
   if (process.platform !== "win32") expect(statSync(paths.profile).mode & 0o777).toBe(0o600);
@@ -52,6 +53,28 @@ it("rejects invalid keys and preserves existing configuration", async () => {
   await expect(applyClinePassConfiguration({accountId:"test", apiKey: 'secret\ninvalid' }, { environment })).rejects.toThrow("API Key 无效");
   expect(readFileSync(paths.config, "utf8")).toBe(before);
   expect(existsSync(paths.marker)).toBe(false);
+});
+
+it("archives the prior baseline once and restores the configuration from entry into exclusive mode", async () => {
+  const { environment, paths } = fixture();
+  const input = { accountId: "test", apiKey: "sk_fixture-key" };
+  await applyClinePassConfiguration(input, { environment });
+  const originalBackup = readFileSync(paths.backup, "utf8");
+  const current = { model_provider: "openai", model: "new-original", unrelated: "preserved" };
+  writePrivateFileAtomicSync(paths.config, stringify(current));
+  const fixed = { ...input, reconfigure: true, mode: "exclusive" as const, confirmExclusiveConfigChange: true };
+  await applyClinePassConfiguration(fixed, { environment });
+  const backup = readFileSync(paths.backup, "utf8");
+  expect(JSON.parse(backup)).toEqual({ config: current });
+  const archives = readdirSync(dirname(paths.backup)).filter(name => name.startsWith("config.json."));
+  expect(archives).toHaveLength(1);
+  expect(readFileSync(join(dirname(paths.backup), archives[0]!), "utf8")).toBe(originalBackup);
+  await applyClinePassConfiguration({ ...fixed, apiKey: "sk_updated-key" }, { environment });
+  await applyClinePassConfiguration({ ...input, reconfigure: true }, { environment });
+  expect(parse(readFileSync(paths.config, "utf8"))).toEqual(current);
+  expect(readFileSync(paths.backup, "utf8")).toBe(backup);
+  expect(readdirSync(dirname(paths.backup)).filter(name => name.startsWith("config.json."))).toEqual(archives);
+  expect(existsSync(paths.profile)).toBe(true);
 });
 
 it("reads DS context automatically and preserves the shared catalog on credential updates", async () => {

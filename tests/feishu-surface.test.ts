@@ -325,6 +325,7 @@ describe("Feishu Surface", () => {
     await starting;
 
     fixture.emitImage();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
     await fixture.surface.stop();
 
     expect(fixture.imageDownload).toHaveBeenCalledWith(
@@ -338,7 +339,7 @@ describe("Feishu Surface", () => {
     }, {
       text: "请查看这张图片并根据图片内容协助我。",
       images: [{ url: imageDataUrl }],
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("submits a private rich-post code block as text", async () => {
@@ -368,7 +369,7 @@ describe("Feishu Surface", () => {
       surface: "feishu",
       accountId: "cli_0123456789abcdef",
       conversationId: "oc_chat",
-    }, "git status --short");
+    }, "git status --short", expect.any(AbortSignal));
   });
 
   it("notifies the user when a message type is unsupported", async () => {
@@ -425,6 +426,7 @@ describe("Feishu Surface", () => {
     await starting;
 
     fixture.emitFile();
+    await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce());
     await fixture.surface.stop();
 
     expect(fixture.fileDownload).toHaveBeenCalledWith(
@@ -441,7 +443,7 @@ describe("Feishu Surface", () => {
       "文件名：settings.json",
       "",
       "{\"enabled\":true}",
-    ].join("\n"));
+    ].join("\n"), expect.any(AbortSignal));
   });
 
   it("reports card callback verification only after observing a valid callback event", async () => {

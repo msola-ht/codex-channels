@@ -169,6 +169,15 @@ export async function runServiceCommand(args) {
   if (readinessTarget) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));
+    if (readinessTarget === "gateway" || readinessTarget === "all") {
+      try {
+        const { deliveryRecoveryWarning } = await import("./delivery-command.mjs");
+        const warning = await deliveryRecoveryWarning(controlEnvironment);
+        if (warning) printCliMessage("remediation", warning);
+      } catch {
+        printCliMessage("remediation", "Gateway 进程已就绪，但消息恢复状态核查失败；请运行 codexc delivery status --json 核查，不代表消息渠道已恢复。");
+      }
+    }
   } else if (action === "start" || action === "restart") {
     const httpTarget = serviceArgs[0] === "webui" ? "webui" : undefined;
     if (httpTarget !== undefined) {

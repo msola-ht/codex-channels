@@ -125,6 +125,18 @@ describe("webui traffic V2 API", () => {
     expect(list.body.exchanges.find((entry) => entry.id === 2)?.turnStateLengths).toEqual([]);
   });
 
+  it("exposes the recorded Chat upstream provider in the list without inferring it", async () => {
+    const fixture = createFixture();
+    const reported = httpInteraction(1);
+    reported.response.upstreamProvider = "deepseek";
+    writeSession(fixture.trafficDir, "clp", "upstream-provider", [reported, httpInteraction(2)]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.status).toBe(200);
+    expect(list.body.exchanges.find((entry) => entry.id === 1)?.upstreamProvider).toBe("deepseek");
+    expect(list.body.exchanges.find((entry) => entry.id === 2)).not.toHaveProperty("upstreamProvider");
+  });
+
   it("loads the list without reading response payloads or traces for character counts", async () => {
     const fixture = createFixture();
     writeSession(fixture.trafficDir, "openai", "independent-counts", [httpInteraction(1)]);

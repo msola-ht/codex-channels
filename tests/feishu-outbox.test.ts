@@ -29,6 +29,35 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("confirms a completed tool only after sending it instead of retaining a summary in memory", async () => {
+    const sendMarkdownCard = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", { ...cardMethods, sendMarkdownCard, sendText: async () => {}, sendPost: async () => {} }, pino({ level: "silent" }));
+    try {
+      await outbox.deliver(operationUpdated("completed", "mcpTool"));
+      expect(sendMarkdownCard).toHaveBeenCalledOnce();
+    } finally { await outbox.close(); }
+  });
+
+  it("cancels a draining send and does not start later chunks after the close deadline", async () => {
+    vi.useFakeTimers();
+    let complete!: () => void;
+    let requestSignal: AbortSignal | undefined;
+    const sendMarkdownCard = vi.fn(async (_chat: string, _text: string, signal?: AbortSignal) => {
+      requestSignal = signal;
+      await new Promise<void>(resolve => { complete = resolve; });
+    });
+    const outbox = new FeishuOutbox("cli_app", { ...cardMethods, sendMarkdownCard,
+      sendText: async () => {}, sendPost: async () => {} }, pino({ level: "silent" }));
+    outbox.handle(completed({}, "long paragraph\n".repeat(2_000)));
+    const closing = outbox.close();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await closing;
+    expect(requestSignal?.aborted).toBe(true);
+    complete();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendMarkdownCard).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps one plan card and updates it in place", async () => {
     const sent: FeishuCardDocument[] = [];
     const updated: FeishuCardDocument[] = [];

@@ -23,9 +23,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 
 import { ProviderProxy, type ProviderProxyMetrics } from "../src/provider-proxy/index.js";
+import { ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
 import { ModelTrafficDump } from "../src/provider-proxy/traffic-dump.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange, listDumpFiles, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, listDumpFiles, readDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupProviderProxyTestServers,
   type ProviderProxyTestServer,
@@ -76,7 +77,63 @@ describe("ModelTrafficDump V2", () => {
     await vi.waitFor(() => expect(metrics).toHaveLength(1));
     await proxy.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
-    expect(detail.response.callTiming.totalMs).toBe(metrics[0]?.totalDurationMs);
+    const timing = detail.response.callTiming;
+    expect(timing.totalMs - timing.preForwardMs - (timing.submitWaitMs ?? 0)).toBeCloseTo(metrics[0]!.totalDurationMs!);
+  });
+
+  it("indexes the Chat upstream provider reported by diagnostics", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-chat-upstream-"));
+    temporaryDirectories.push(directory);
+    const diagnostics = new ChatDiagnosticsChannel();
+    const server = createServer((request, response) => {
+      const observer = request.headers["x-codexc-chat-observer"];
+      if (typeof observer === "string") {
+        diagnostics.publish(observer, { fields: { "routing.finalProvider": "deepseek" }, truncated: false });
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-1", status: "completed" } })}\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "clp" }, chatDiagnostics: diagnostics,
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: '{"model":"fixture"}' });
+    await proxy.close();
+    const index = await readDumpExchange(listDumpFiles(directory), 1);
+    expect(index.response.upstreamProvider).toBe("deepseek");
+    expect((await describeDumpExchange(listDumpFiles(directory), 1)).upstreamProvider).toBe("deepseek");
+  });
+
+  it("omits the indexed Chat upstream provider when no diagnostics are reported", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-chat-upstream-absent-"));
+    temporaryDirectories.push(directory);
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ type: "response.completed", response: { id: "resp-1", status: "completed" } })}\n\n`);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    openServers.push({ close: async () => {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } });
+    const proxy = new ProviderProxy("127.0.0.1:0", {
+      upstreamHost: "127.0.0.1", upstreamPort: (server.address() as AddressInfo).port,
+      upstreamProtocol: "http", trafficDump: { directory, label: "openai" },
+    });
+    await proxy.start();
+    openServers.push(proxy);
+    await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: '{"model":"fixture"}' });
+    await proxy.close();
+    const index = await readDumpExchange(listDumpFiles(directory), 1);
+    expect(index.response).not.toHaveProperty("upstreamProvider");
+    expect(await describeDumpExchange(listDumpFiles(directory), 1)).not.toHaveProperty("upstreamProvider");
   });
 
   it("captures stages through a real reused WebSocket without changing forwarding", async () => {
@@ -122,7 +179,7 @@ describe("ModelTrafficDump V2", () => {
     const files = listDumpFiles(directory);
     for (const id of [1, 2]) {
       const detail = await describeDumpExchange(files, id);
-      expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
+      expect(detail.response.callTiming.submittedToFirstEventMs).toBeCloseTo(detail.response.firstContentMs);
       expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
       expect(detail.response.callTiming.submittedToFirstEventMs).toBeGreaterThanOrEqual(0);
     }
@@ -136,11 +193,11 @@ describe("ModelTrafficDump V2", () => {
     exchange.callTiming!.forwarding(110);
     exchange.callTiming!.requestBodyEnd(120);
     exchange.callTiming!.responseHead(130);
-    exchange.observeRequestMetrics({ firstContentMs: 25 });
+    exchange.observeRequestMetrics({ firstContentMs: 25, totalDurationMs: 50 });
     exchange.requestEnd();
     exchange.responseHead(200, {});
     vi.setSystemTime(5000);
-    exchange.responseEnd(160);
+    exchange.responseEnd(900);
     await dump.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
     expect(detail.response.callTiming).toMatchObject({
@@ -156,12 +213,12 @@ describe("ModelTrafficDump V2", () => {
     const first = exchange.callTiming!;
     first.forwarding(110, false);
     first.submitted(150);
-    exchange.observeRequestMetrics({ firstContentMs: 70 });
+    exchange.observeRequestMetrics({ firstContentMs: 30, totalDurationMs: 100 });
     exchange.webSocketFrame("upstream", Buffer.from('{"type":"response.completed","response":{}}'), false, 250);
     exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 300);
     exchange.callTiming!.forwarding(310, true);
     exchange.callTiming!.submitted(311);
-    exchange.observeRequestMetrics({ firstContentMs: 10 });
+    exchange.observeRequestMetrics({ firstContentMs: 9, totalDurationMs: 29 });
     exchange.failure("upstream_error", undefined, 340);
     await dump.close();
     const paths = listDumpFiles(directory);

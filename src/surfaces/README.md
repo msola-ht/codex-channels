@@ -12,6 +12,9 @@ Doctor、菜单、输入状态、连接健康和平台媒体传输属于渠道�
 
 当前实现：
 
+- `delivery-journal.ts`：独立加密待处理存储、单写者锁、硬配额、脱敏核对与异常退出保护；不保存完整会话历史或绑定。
+- `durable-input-queue.ts`：输入与关键输出共用的有界后台交接处理器，显式区分故障期间暂停的普通输入与继续接纳的关键输出，按会话有序、控制入口独立，未执行记录可恢复、结果不明确的记录停止自动重发；可成组处理明确的媒体批次，并原子更新组内交接状态。
+
 - [`telegram/`](telegram/README.md)：Telegram Bot 输入、输出、交互、图片、一次性音频、UTF-8 文本文件和生命周期。
 - [`feishu/`](feishu/README.md)：飞书官方 SDK 长连接、私聊文本、PNG/JPEG/WebP/非动画 GIF、一次性音频与 UTF-8 文本文件到
   Application 的窄 Adapter、富文本最终回复、纯文本安全提示、有界输出队列、私聊交互卡片、平台权限中心、
@@ -35,13 +38,13 @@ DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥�
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
 Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
-`SurfaceOutputPort` 接收平台无关的 `OutputEvent`，只负责同步入队，不得等待平台网络请求。
+`SurfaceOutputPort.handle` 接收平台无关的 `OutputEvent` 并同步入队；`deliver` 由后台处理器调用，等待该事件实际平台操作完成，Reader 不等待平台网络请求。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。
 只有成功启动且仍处于运行状态的 Surface 才会收到输出；单个输出端口拒绝事件不得中断后续路由。
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 只用于 Gateway 关闭，必须可在部分启动后
-安全调用并保持幂等。首次启动和故障恢复期间的关键输出只保存在 Bootstrap 有界内存中，不写入
-StateStore；临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
+安全调用并保持幂等。生产组合根为三渠道注入独立加密交接日志，首次启动和故障恢复期间的关键输出在其中等待，不写入
+绑定 StateStore；临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待
@@ -50,10 +53,10 @@ StateStore；临时连接故障只能取消当前交互，不能把可恢复端�
 Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台私有原因的生命周期通知。
 
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
-不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。新增 Surface 时应实现统一输入、
+不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。所有关键项占满后明确拒绝，持久化调用方保留未决记录；`track` 通过异步调用上下文关联输入处理后产生的提示与关键事件发送，等待实际操作并在关闭、失败或容量拒绝时失败。`enqueueAuxiliary` 将 typing 等辅助状态排除出交接确认，但仍使用相同的有界队列、取消和错误日志。新增 Surface 时应实现统一输入、
 输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或提供等价约束。
 Thread Queue 属于 App Server，由 Application 负责授权、25 条分页和五分钟数字选择快照；Surface
-只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像或消息正文。
+只渲染共享的 `/queue add|list|update|delete|reorder|start` 结果，不保存 Queue 镜像；渠道交接日志只暂存尚未交接成功的输入正文。
 分页历史 Revert 同样由 Application 统一编排；三个 Surface 只渲染 `/revert list`、预览和一次性确认结果，
 统一提示仅支持新建分页历史 Thread、执行前会复核并且不会恢复工作区文件。Surface 不保存 Turn 历史、
 确认令牌或 Queue/历史快照；按钮和菜单只能提交当前绑定 Actor 的规范选择器。
@@ -71,18 +74,30 @@ Telegram 和飞书在交互消息创建成功或失败时
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出，立即结束 `runOrdered` 等待者并限时等待在途发送；超时记录告警，
 清除余下积压且不再执行发送回调。并发关闭调用等待同一个关闭结果，不能提前报告完成。
+队列默认关闭时立即取消在途操作；三个渠道均启用普通输出最多 5 秒排空，`runOrdered` 交互仍立即取消。
+排空截止后保留取消信号，后续分片、卡片收尾与回退不能绕过取消继续发送。
+三个渠道每项输出从出队开始共用 120 秒取消预算；排队时间单独记录，不在每个分片重新启动预算。
+Telegram 的独立操作消息各自作为一项输出，整批操作不共用一个截止时间。
+排队或执行达到 5 秒时记录告警，包含队列剩余数量和耗时；调试日志区分任务执行完成与失败，
+`runOrdered` 调用者收到的拒绝也计入失败。队列任务完成不代表平台已确认消息，平台确认由渠道 API 日志记录。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
 明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次
 flush 时由该共享边界一次读取并复核可信 MIME、PNG/JPEG/WebP/非动画 GIF 签名、单张 10 MiB 与整批 20 MiB，转换为
 有界 Base64 Data URL 再交给 Application；Gateway 只在本次 Turn 内存中持有 Base64，
 不写入自身日志或独立存储，也不向 App Server 发送本地路径，不在 Surface 维护另一套识图会话或重试队列。
+关闭聚合器会取消尚未提交的批次，并结束在途提交的本地等待；不会在关闭时 flush 新输入。
+取消信号传给 Application，在会话锁内及实际 start/steer 前复核；已发出的 RPC 不因本地取消而自动重试，
+也不声称取消了 App Server 已接受的任务。
 三渠道共享的 `/metrics` 分开展示当前 Thread 最近 Turn 的运行聚合、指标库保留范围内的会话累计，
 `global/providers/models` 支持自然日/周/月、24 小时至 365 天滚动窗口和全部保留历史，
 按同一请求口径聚合指标库记录，最多展示请求量最高的 20 组；`errors` 用同一
 范围展示异常率及按提供商、模型、状态、HTTP 状态和错误类型形成的前 20 组异常，附带最近发生时间。
 不把请求累计输入误写成上下文占用；聚合中的上下文压缩摘要单列请求数与 Token，不显示模型请求
-聚合耗时、首段回复延迟、纯生成速度、本地价格或费用；运行与会话摘要以及完成卡片展示有效请求输出速率的算术平均 `Token/s`，复用查询结果，不用会话墙钟耗时重新计算。信息类聊天指令（`/status`、`/usage`、
+聚合耗时、首段回复延迟、纯生成速度、本地价格或费用；完成卡片的运行、任务与会话摘要展示指标库派生的
+输出 `Token/s`（合计输出 Token 含推理，除以合计请求耗时，含首字等待），未采样时整行省略、不渲染占位文本；
+`/metrics` 的最近运行聚合与当前会话累计使用同一读数，直接复用查询结果，不用会话墙钟耗时重新计算。
+信息类聊天指令（`/status`、`/usage`、
 `/limits`、`/models`、`/sessions`、`/skills`、`/mcp`、`/plugin`、`/permissions`、`/goal`、
 `/metrics` 等）输出统一为 Markdown 列表：首行为 `##` 标题、小节为 `###`
 标题、字段为 `-` 列表项、明细缩进嵌套；`/diff` 与操作结果保持原文。三个渠道分别用飞书卡片
@@ -156,7 +171,7 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 Telegram 使用当前页按钮和绑定 Actor 的十分钟一次性 ForceReply，微信提供可复制的编号任务命令；
 各 Surface 都不拼装 Plugin mention 路径。
 `user-facing-error-format.ts` 统一三个渠道的结构化用户错误文案，只保留渠道名称差异；
-`error-metadata.ts` 统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
+`error-metadata.ts` 区分明确输入拒绝与远端结果未确认的结构化错误，并统一渠道日志中的受约束异常类型、机器错误码和锁定 App Server
 白名单拒绝分类，拒绝异常正文、堆栈、请求标识及上游自定义名称进入日志；Bootstrap
 继续通过注入的 Pino `err` 序列化器处理组合根异常。
 `input-copy.ts` 统一补充文字、文件、图片与音频追加到当前 Turn 的确认文案，以及

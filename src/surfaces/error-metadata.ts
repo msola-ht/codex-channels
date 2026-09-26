@@ -1,5 +1,12 @@
 import { UserFacingError } from "../conversation-core/index.js";
 
+/** Presentation-safe does not imply a confirmed remote write result. */
+export function isResolvedInputError(error: unknown): error is UserFacingError {
+  return error instanceof UserFacingError
+    && error.code !== "revert.result-unknown"
+    && error.code !== "queue.failed";
+}
+
 export interface SurfaceErrorMetadata extends Record<string, unknown> {
   errorType: string;
   errorCode?: string | number;

@@ -26,6 +26,37 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- 
 const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
+  it("preserves suppressed operation output and confirms the visible final reply", async () => {
+    const { outbox, sendText } = outboxFixture();
+    try {
+      await outbox.deliver(operationUpdated("completed", "mcpTool"));
+      expect(sendText).not.toHaveBeenCalled();
+      await outbox.deliver({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "reply", phase: "final_answer", text: "final reply" });
+      expect(sendText).toHaveBeenCalledOnce();
+    } finally { await outbox.close(); }
+  });
+
+  it("cancels a draining send and stops the remaining chunks at the close deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let complete!: () => void;
+      let requestSignal: AbortSignal | undefined;
+      const fixture = outboxFixture({ value: true }, { includeFileClient: false, closeTimeoutMs: 50 }, async (_input, signal) => {
+        requestSignal = signal;
+        await new Promise<void>(resolve => { complete = resolve; });
+      });
+      fixture.outbox.handle({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "i",
+        phase: "final_answer", text: "a".repeat(9_000) });
+      const closing = fixture.outbox.close();
+      await vi.advanceTimersByTimeAsync(50);
+      await closing;
+      expect(requestSignal?.aborted).toBe(true);
+      complete();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fixture.sendText).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps reply contexts private to one account and Conversation", () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
@@ -171,7 +202,7 @@ describe("WeixinOutbox", () => {
 
     expect(sendText).toHaveBeenCalledWith(expect.objectContaining({
       text: "已使用 GitHub Plugin 开始处理。",
-    }));
+    }), expect.any(AbortSignal));
   });
 
   it("compacts single-line fenced code in final answers", async () => {
@@ -204,7 +235,7 @@ describe("WeixinOutbox", () => {
         "const second = 2;",
         "```",
       ].join("\n"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("normalizes supported Markdown for Weixin final answers", async () => {
@@ -249,7 +280,7 @@ describe("WeixinOutbox", () => {
         "|---|---|",
         "| 1 | 2 |",
       ].join("\n"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("leaves Markdown inside code intact and degrades an unclosed fence", async () => {
@@ -281,7 +312,7 @@ describe("WeixinOutbox", () => {
         "未闭合代码：",
         "const value = 1;",
       ].join("\n"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("renders terminal status when no final text was produced", async () => {
@@ -294,7 +325,7 @@ describe("WeixinOutbox", () => {
       actorId,
       contextToken: "context-secret",
       text: turnCompletedText,
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("renders stopped and failed Turn notifications", async () => {
@@ -381,7 +412,7 @@ describe("WeixinOutbox", () => {
       contextToken: "context-secret",
       fileName: "codex-final-answer.txt",
       file: Buffer.from(longText, "utf8"),
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("keeps bounded text truncation when file sending is unavailable", async () => {
@@ -412,7 +443,7 @@ describe("WeixinOutbox", () => {
       async () => {},
       async () => {
         throw new WeixinProtocolError(
-          "network-error",
+          "invalid-input",
           "private upload response",
         );
       },
@@ -437,6 +468,21 @@ describe("WeixinOutbox", () => {
       .replace(/\n\n\[内容过长，已截断\]$/u, "");
     const deliveredText = previewText + fallbackText;
     expect(deliveredText).toBe(longText.slice(0, deliveredText.length));
+  });
+
+  it.each([
+    new WeixinProtocolError("network-error", "private response"),
+    new WeixinProtocolError("timeout", "private response"),
+    new WeixinProtocolError("invalid-response", "private response"),
+    new WeixinProtocolError("http-error", "private response", 503),
+    new WeixinProtocolError("http-error", "private response", 429),
+  ])("does not send fallback text after an uncertain or throttled file delivery: %s", async error => {
+    const fixture = outboxFixture({ value: true }, {}, async () => {}, async () => {}, async () => { throw error; });
+    fixture.outbox.handle(completed("final_answer", "测".repeat(20_001)));
+    await fixture.outbox.close();
+    expect(fixture.sendFile).toHaveBeenCalledOnce();
+    expect(fixture.sendText).toHaveBeenCalledOnce();
+    expect(fixture.sendText.mock.calls[0]![0].text).toContain("[内容预览]");
   });
 
   it("does not retry a rejected context with a long-answer text fallback", async () => {
@@ -510,7 +556,7 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it("retains critical output without interrupting in-flight delivery", async () => {
+  it("rejects excess critical output without interrupting admitted delivery", async () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
     let releaseFirst!: () => void;
@@ -540,11 +586,11 @@ describe("WeixinOutbox", () => {
       expect(sent).toEqual(["first"]);
     });
     expect(outbox.notifyText(target, "second")).toBe(true);
-    expect(outbox.notifyText(target, "overloaded")).toBe(true);
+    expect(outbox.notifyText(target, "overloaded")).toBe(false);
 
     releaseFirst();
     await outbox.close();
-    expect(sent).toEqual(["first", "second", "overloaded"]);
+    expect(sent).toEqual(["first", "second"]);
   });
 
   it("rechecks authorization and tolerates a missing reply context", async () => {

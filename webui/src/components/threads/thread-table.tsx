@@ -35,7 +35,7 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   cacheHitRate: "缓存命中率",
   output: "输出 Token",
-  tokensPerSecond: "平均 Token/s",
+  tokensPerSecond: "输出 Token/s",
   compact: "压缩",
   last: "最后记录",
 }
@@ -168,7 +168,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     {
       id: "tokensPerSecond",
       accessorFn: (thread) => thread.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内，该会话自身有效请求速率的算术平均。">平均 Token/s</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内该会话合格请求的合计输出 Token（含推理）除以合计请求耗时，含首字等待；各会话只统计自身请求。">输出 Token/s</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {

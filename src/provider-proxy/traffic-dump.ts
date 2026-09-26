@@ -204,6 +204,8 @@ export class ModelTrafficExchange {
   } | undefined;
   private requestModel: string | undefined;
   private responseModels: string[] = [];
+  /** Chat 上游诊断里的实际上游提供商；只在诊断到达时记录，缺失不推断。 */
+  private upstreamProvider: string | undefined;
   private websocketHandshake: {
     headers: Record<string, string | string[]>;
     url: string;
@@ -274,6 +276,10 @@ export class ModelTrafficExchange {
         headers: record.headers as Record<string, string | string[]>,
         url: String(record.url),
       };
+    } else if (record.kind === "chat_diagnostics") {
+      const fields = record.fields as Record<string, unknown> | undefined;
+      const final = fields?.["routing.finalProvider"];
+      if (typeof final === "string" && final !== "") this.upstreamProvider = final;
     }
     this.writeTrace(record);
   }
@@ -557,6 +563,7 @@ export class ModelTrafficExchange {
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
+      ...(this.upstreamProvider === undefined ? {} : { upstreamProvider: this.upstreamProvider }),
       responseModels: terminal === undefined
         ? this.responseModels
         : responseModelsOf(parseJsonValue(terminal.text)),

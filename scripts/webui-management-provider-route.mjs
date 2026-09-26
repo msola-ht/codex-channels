@@ -1,3 +1,4 @@
+import { withQuotaTokenEstimates } from "../runtime/quota-token-estimate.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
@@ -309,6 +310,11 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
         const account = metadataByProvider.get(snapshot.provider);
         return {
           ...snapshot,
+          usage: snapshot.usage?.kind === "quota-windows" && Array.isArray(snapshot.usage.windows)
+            && /^(?:ocg|clp)-[a-z0-9_-]+$/u.test(snapshot.provider)
+            ? { ...snapshot.usage, windows: withQuotaTokenEstimates(snapshot.usage.windows,
+                () => store.accountQuotaEstimates(snapshot.provider)) }
+            : snapshot.usage,
           displayName: account?.displayName
             ?? (snapshot.provider === "deepseek" ? "DeepSeek" : snapshot.provider),
           default: account?.default ?? false,

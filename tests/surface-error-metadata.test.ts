@@ -1,3 +1,4 @@
+import { isResolvedInputError } from "../src/surfaces/error-metadata.js";
 import { describe, expect, it } from "vitest";
 
 import { JsonRpcError } from "../src/codex-client/index.js";
@@ -82,4 +83,12 @@ describe("surfaceErrorMetadata", () => {
       errorMessage: "当前模型 deepseek-v4-flash 不支持图片输入",
     });
   });
+});
+
+it("keeps safe presentation separate from confirmed input rejection", () => {
+  expect(isResolvedInputError(new UserFacingError("audio.unsupported", "unsupported"))).toBe(true);
+  expect(isResolvedInputError(new UserFacingError("revert.queue-unknown", "preflight rejected"))).toBe(true);
+  expect(isResolvedInputError(new UserFacingError("revert.result-unknown", "unknown"))).toBe(false);
+  expect(isResolvedInputError(new UserFacingError("queue.failed", "unknown"))).toBe(false);
+  expect(isResolvedInputError(new Error("unknown"))).toBe(false);
 });

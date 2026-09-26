@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { CodexAppServerClient } from "../src/codex-client/client.js";
+import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { FakeTransport } from "./support/json-rpc-fixtures.js";
 
 import {
   ConversationService,
@@ -54,6 +57,67 @@ function queryPort(overrides: Partial<ConversationQueryPort> = {}): Conversation
 }
 
 describe("ConversationService conversation service input control", () => {
+  it.each([false, true])("propagates cancellation into Client image preparation (active Turn: %s)", async active => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let reading!: () => void;
+    const ready = new Promise<void>(resolve => { reading = resolve; });
+    class SlowTransport extends FakeTransport {
+      override async send(message: string): Promise<void> {
+        if ((JSON.parse(message) as { method?: string }).method === "thread/read") { reading(); await gate; }
+        await super.send(message);
+      }
+    }
+    const transport = new SlowTransport();
+    transport.threadReadData.modelProvider = "third-party";
+    const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "read-only" }, { upload: vi.fn() });
+    await client.connect();
+    const service = new ConversationService(client,
+      { ensure: async () => ({ threadId: "thread-1" }), workspace: () => main } as unknown as SessionRouter,
+      { activeTurn: () => active ? { threadId: "thread-1", turnId: "turn-1" } : undefined } as unknown as ConversationCore,
+      { requireInputModality: async () => {}, turnOverrides: () => ({}) } as unknown as ModelSelectionService, queryPort());
+    const controller = new AbortController();
+    try {
+      const pending = service.submit(target, { images: [{ url: "data:image/png;base64,AQID" }] }, controller.signal);
+      const rejected = expect(pending).rejects.toBeDefined();
+      await ready;
+      controller.abort(); release();
+      await rejected;
+      expect(transport.sent.some(request => request.method === "turn/start" || request.method === "turn/steer")).toBe(false);
+    } finally { release(); await client.close(); }
+  });
+
+  it("cancels input waiting for the conversation lock before it reaches App Server", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const steerTurn = vi.fn(async () => { await gate; return { turnId: "turn" }; });
+    const service = new ConversationService(turnPort({ steerTurn }),
+      {} as SessionRouter,
+      { activeTurn: () => ({ threadId: "thread", turnId: "turn" }) } as unknown as ConversationCore,
+      {} as ModelSelectionService, queryPort());
+    const first = service.submit(target, "first");
+    await vi.waitFor(() => expect(steerTurn).toHaveBeenCalledOnce());
+    const controller = new AbortController();
+    const second = service.submit(target, "cancelled", controller.signal);
+    const rejected = expect(second).rejects.toThrow("cancelled input");
+    controller.abort(new Error("cancelled input"));
+    release();
+    await first;
+    await rejected;
+    expect(steerTurn).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks cancellation after session preparation before starting a Turn", async () => {
+    const controller = new AbortController();
+    const startTurn = vi.fn();
+    const service = new ConversationService(turnPort({ startTurn }),
+      { ensure: async () => { controller.abort(new Error("cancelled input")); return { threadId: "thread" }; }, workspace: () => main } as unknown as SessionRouter,
+      { activeTurn: () => undefined } as unknown as ConversationCore,
+      { turnOverrides: () => ({}) } as unknown as ModelSelectionService, queryPort());
+    await expect(service.submit(target, "input", controller.signal)).rejects.toThrow("cancelled input");
+    expect(startTurn).not.toHaveBeenCalled();
+  });
+
   it("stops pending image preparation before a Turn exists", async () => {
     const cancelPendingInput = vi.fn(() => true);
     const interruptTurn = vi.fn();

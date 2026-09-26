@@ -25,9 +25,9 @@ export function ThreadRunSummary({
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
-        title="平均 Token/s"
+        title="输出 Token/s"
         value={formatTokensPerSecond(threadAggregate.tokensPerSecond)}
-        description="有效请求速率的算术平均，含已关联子代理"
+        description="输出 Token（含推理）除以请求总耗时，含首字等待，含已关联子代理"
       />
       <StatCard
         title="Turn"

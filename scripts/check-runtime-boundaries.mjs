@@ -20,6 +20,7 @@ const allowedDistEntries = new Map([
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",
     "dist/storage/index.js",
+    "dist/surfaces/index.js",
     "dist/surfaces/feishu/index.js",
     "dist/surfaces/token-format.js",
     "dist/surfaces/elapsed-duration.js",

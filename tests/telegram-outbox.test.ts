@@ -1,4 +1,4 @@
-import { InputFile, type Api, type Bot, type Context } from "grammy";
+import { GrammyError, HttpError, InputFile, type Api, type Bot, type Context } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +49,7 @@ class FakeTelegramApi {
 
   async sendMessage(_chatId: string, text: string, options?: unknown): Promise<{ message_id: number }> {
     if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-      throw new Error("Bad Request: can't parse entities");
+      throw telegramBadRequest("Bad Request: can't parse entities");
     }
     this.sent.push(text);
     this.sendOptions.push(options);
@@ -63,7 +63,7 @@ class FakeTelegramApi {
   ): Promise<{ message_id: number }> {
     this.richMessages.push(richMessage);
     if (this.rejectRichMessages) {
-      throw new Error("Bad Request: can't parse rich message");
+      throw telegramBadRequest("Bad Request: can't parse rich message");
     }
     this.sent.push(richMessage.markdown ?? richMessage.html ?? "[rich blocks]");
     this.sendOptions.push(options);
@@ -78,13 +78,13 @@ class FakeTelegramApi {
   ): Promise<true> {
     if (typeof text === "string") {
       if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-        throw new Error("Bad Request: can't parse entities");
+        throw telegramBadRequest("Bad Request: can't parse entities");
       }
       this.edits.push(text);
     } else {
       this.richEdits.push(text);
       if (this.rejectRichMessages) {
-        throw new Error("Bad Request: can't parse rich message");
+        throw telegramBadRequest("Bad Request: can't parse rich message");
       }
       this.edits.push(text.markdown ?? text.html ?? "[rich blocks]");
     }
@@ -103,7 +103,7 @@ class FakeTelegramApi {
     options?: unknown,
   ): Promise<{ message_id: number }> {
     if (this.rejectDocuments) {
-      throw new Error("Bad Request: document upload failed");
+      throw telegramBadRequest("Bad Request: document upload failed");
     }
     const raw = await document.toRaw();
     if (!(raw instanceof Uint8Array)) {
@@ -166,6 +166,18 @@ describe("TelegramOutbox", () => {
       await interactions.close();
       vi.useRealTimers();
     }
+  });
+
+  it("confirms completed operations only after their platform send rather than a timer or summary buffer", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }));
+    try {
+      await outbox.deliver(operationUpdated("tool", "completed", "mcpTool", "fixture tool"));
+      expect(api.sent).toHaveLength(1);
+      await outbox.deliver(operationUpdated("command", "completed", "command", "fixture command"));
+      expect(api.sent).toHaveLength(2);
+    } finally { await outbox.close(); }
+    await expect(outbox.deliver(operationUpdated("closed", "completed", "command"))).rejects.toThrow("关闭");
   });
 
   it("shows one initial plan and one message for each completed step", async () => {
@@ -248,6 +260,131 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual(["<b>已使用 GitHub Plugin 开始处理。</b>"]);
   });
 
+  it("coalesces thinking updates behind a slow create and preserves the final state", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const original = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementationOnce(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    const reasoning = { type: "turn.reasoning" as const, target, threadId: "thread-1", turnId: "turn-1", summary: "" };
+    outbox.handle({ ...reasoning, elapsedMs: 0 });
+    await settle();
+    for (let i = 1; i <= 20; i++) outbox.handle({ ...reasoning, elapsedMs: i * 1_000 });
+    outbox.handle({ ...reasoning, elapsedMs: 21_000, final: true });
+    release();
+    await settle();
+    await outbox.close();
+    expect(api.sent).toHaveLength(1);
+    expect(api.edits).toEqual(["<b>思考完成</b>\n\n<b>耗时：</b>21 s"]);
+  });
+
+  it("seals a thinking message when its slow create finishes after the tool starts", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const original = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementationOnce(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    outbox.handle({ type: "turn.reasoning", target, threadId: "thread-1", turnId: "turn-1", summary: "", elapsedMs: 0 });
+    await settle();
+    outbox.handle(operationUpdated("command-1", "running", "command", "fixture"));
+    release();
+    await settle();
+    await outbox.close();
+    expect(api.sent[0]).toBe("<b>思考中…</b>");
+    expect(api.edits).toEqual(["<b>思考完成</b>"]);
+  });
+
+  it("does not recreate an uncertain thinking message on final update", async () => {
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValueOnce(new HttpError("fixture", new Error("reset")));
+    const outbox = createOutbox(api);
+    const reasoning = { type: "turn.reasoning" as const, target, threadId: "thread-1", turnId: "turn-1", summary: "" };
+    outbox.handle({ ...reasoning, elapsedMs: 0 });
+    await settle();
+    outbox.handle({ ...reasoning, elapsedMs: 1_000, final: true });
+    await settle();
+    await outbox.close();
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("discards queued typing after the activity ends", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const pending = outbox.runOrdered("100", () => gate);
+    const stop = outbox.beginTyping("100");
+    await vi.advanceTimersByTimeAsync(450);
+    stop();
+    release();
+    await pending;
+    await outbox.close();
+    expect(api.actions).toEqual([]);
+  });
+
+  it("does not edit an unchanged visible stream prefix but still renders its final HTML", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const text = "**" + "x".repeat(5_000) + "**";
+    for (const delta of [text, "tail-1", "tail-2"]) {
+      outbox.handle(textDelta("item-1", delta));
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(api.sent).toHaveLength(1);
+    expect(api.edits).toHaveLength(0);
+    outbox.handle(textCompleted("item-1", text + "tail-1tail-2"));
+    await settle();
+    await outbox.close();
+    expect(api.edits[0]).toContain("<b>");
+    expect(api.sent.at(-1)).toContain("tail-1tail-2");
+  });
+
+  it("continues other operation results after one create is rejected", async () => {
+    const api = new FakeTelegramApi();
+    const original = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementation(async (...args) => {
+      if (args[1].includes("FIRST")) throw telegramBadRequest("Bad Request: message is too long");
+      return original(...args);
+    });
+    const outbox = createOutbox(api);
+    outbox.handle(operationUpdated("first", "completed", "command", "FIRST"));
+    outbox.handle(operationUpdated("second", "completed", "command", "SECOND"));
+    outbox.handle(textCompleted("reply", "DONE"));
+    await settle();
+    await outbox.close();
+    expect(api.sent[0]).toContain("SECOND");
+    expect(api.sent.at(-1)).toBe("DONE");
+  });
+
+  it("does not recreate an uncertain operation on subsequent or final refresh", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValueOnce(new HttpError("fixture", new Error("reset")));
+    const outbox = createOutbox(api);
+    outbox.handle(operationUpdated("first", "running", "command", "FIRST"));
+    await vi.advanceTimersByTimeAsync(750);
+    outbox.handle(textCompleted("commentary", "继续处理", "commentary"));
+    await settle();
+    outbox.handle(operationUpdated("first", "completed", "command", "FIRST"));
+    await vi.advanceTimersByTimeAsync(750);
+    outbox.handle(textCompleted("reply", "DONE"));
+    await settle();
+    await outbox.close();
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(api.sent).toEqual(["继续处理", "DONE"]);
+  });
+
   it("streams the thinking status as a panel updated in place", async () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
@@ -260,6 +397,7 @@ describe("TelegramOutbox", () => {
       summary: "",
       elapsedMs: 0,
     });
+    await settle();
     outbox.handle({
       type: "turn.reasoning",
       target,
@@ -268,6 +406,7 @@ describe("TelegramOutbox", () => {
       summary: "",
       elapsedMs: 3_000,
     });
+    await settle();
     outbox.handle({
       type: "turn.reasoning",
       target,
@@ -774,11 +913,11 @@ describe("TelegramOutbox", () => {
     ]);
   });
 
-  it("collapses long final text regardless of where the turn started", async () => {
+  it("renders long final text as HTML regardless of where the turn started", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
-    const text = Array.from({ length: 500 }, (_, index) => `第 ${index + 1} 行说明`).join("\n");
+    const text = Array.from({ length: 500 }, (_, index) => `**第 ${index + 1} 行说明**`).join("\n");
 
     outbox.handle({
       type: "user.message",
@@ -797,11 +936,33 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions[0]).toMatchObject({ disable_notification: true });
     expect(api.sent.slice(1).length).toBeGreaterThan(1);
     expect(api.sendOptions.slice(1, -1).every((options) =>
-      hasEntityType(options, "expandable_blockquote")
+      hasHtmlParseMode(options)
     )).toBe(true);
     expect(api.sendOptions[1]).not.toHaveProperty("disable_notification");
     expect(api.sendOptions.slice(2).every(isSilent)).toBe(true);
+    expect(api.sent.slice(1, -1).join("")).not.toContain("**");
+    expect(api.sent[1]).toContain("<b>第 1 行说明</b>");
     expect(api.documents).toEqual([]);
+  });
+
+  it("falls back only the rejected HTML chunk without replaying earlier chunks", async () => {
+    const api = new FakeTelegramApi();
+    const original = api.sendMessage.bind(api);
+    let calls = 0;
+    vi.spyOn(api, "sendMessage").mockImplementation(async (...args) => {
+      if (++calls === 2) throw telegramBadRequest("Bad Request: can't parse entities");
+      return original(...args);
+    });
+    const outbox = createOutbox(api);
+    const text = "# 独有开头\n" + Array.from({ length: 400 }, (_, i) => `**第 ${i} 项长回复正文**`).join("\n");
+    outbox.handle(textCompleted("final", text, "final_answer"));
+    await outbox.close();
+    expect(api.sent.filter(chunk => chunk.includes("独有开头"))).toHaveLength(1);
+    expect(api.sent.length).toBeGreaterThan(1);
+    expect(api.sendOptions[0]).toMatchObject({ parse_mode: "HTML" });
+    expect(api.sendOptions[1]).not.toHaveProperty("parse_mode");
+    expect(api.sent[1]).not.toContain("**");
+    expect(api.sent.at(-1)).toContain("第 399 项长回复正文");
   });
 
   it("previews large code and sends the complete response as a Markdown document", async () => {
@@ -895,6 +1056,97 @@ describe("TelegramOutbox", () => {
     expect(api.edits).toContain("# 标题\n\n最终内容");
   });
 
+  it("renders completed replies without a phase as HTML", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(textCompleted("final", "# 标题\n\n**正文**"));
+    await outbox.close();
+    expect(api.sent).toEqual(["<b>标题</b>\n\n<b>正文</b>"]);
+    expect(api.sendOptions[0]).toMatchObject({ parse_mode: "HTML" });
+  });
+
+  it("does not recreate an uncertain initial stream on later delta or completion", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValueOnce(new HttpError("lost", new Error("reset")));
+    const outbox = createOutbox(api);
+    outbox.handle(textDelta("final", "部分", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textDelta("final", "后续", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textCompleted("final", "部分后续正文", "final_answer"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(api.sent).toEqual([turnCompletedPanel]);
+  });
+
+  it("passes cancellation in the SDK signal slot for plain and rich edits", async () => {
+    vi.useFakeTimers();
+    const editMessageText = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true);
+    const outbox = new TelegramOutbox({
+      sendMessage: async () => ({ message_id: 1 }), editMessageText,
+    } as unknown as Api, pino({ level: "silent" }), undefined, { finalMessageFormat: "rich" });
+    outbox.handle(textDelta("final", "部分", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textDelta("final", "正文", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textCompleted("final", "**最终正文**", "final_answer"));
+    await outbox.close();
+    expect(editMessageText).toHaveBeenCalledTimes(2);
+    for (const args of editMessageText.mock.calls) {
+      expect(args[3]).toBeUndefined();
+      expect(args[4]).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it("cancels lifecycle delivery at shutdown and does not send later fragments", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let release!: () => void;
+    const sendMessage = vi.fn(async (_chat: string, _text: string, _options: unknown, requestSignal: AbortSignal) => {
+      signal = requestSignal;
+      await new Promise<void>(resolve => { release = resolve; });
+      return { message_id: 1 };
+    });
+    const outbox = new TelegramOutbox({ sendMessage } as unknown as Api, pino({ level: "silent" }));
+    outbox.handle({ type: "user.message", target, threadId: "t", turnId: "u", itemId: "input", text: "长".repeat(10_000) });
+    await vi.advanceTimersByTimeAsync(0);
+    const close = outbox.close();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await close;
+    expect(signal?.aborted).toBe(true);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("does not replay a failed final reply as plain text after uncertain network delivery", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValue(new HttpError("secret URL", new Error("lost response")));
+    const outbox = createOutbox(api);
+    outbox.handle(textCompleted("final", "# Final answer", "final_answer"));
+    await vi.runAllTimersAsync();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls.every(call => hasHtmlParseMode(call[2]))).toBe(true);
+    await outbox.close();
+  });
+
+  it("does not create a duplicate when a formatted final edit is already applied", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(textDelta("final", "answer", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    vi.spyOn(api, "editMessageText").mockRejectedValue(telegramBadRequest("Bad Request: message is not modified"));
+    outbox.handle(textCompleted("final", "answer", "final_answer"));
+    await settle();
+    expect(api.sent).toEqual(["answer"]);
+    await outbox.close();
+  });
+
   it("falls back to plain text when Telegram rejects a Rich Message", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -962,6 +1214,86 @@ describe("TelegramOutbox", () => {
         allow_sending_without_reply: true,
       },
     });
+  });
+
+  it("gives each operation its own deadline when a batch exceeds two minutes", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const original = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementation(async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, 4_000));
+      return original(...args);
+    });
+    const outbox = createOutbox(api);
+    for (let index = 0; index < 50; index++) {
+      outbox.handle(operationUpdated(`command-${index}`, "completed", "command", `echo ${index}`));
+    }
+    outbox.handle(textCompleted("reply", "DONE"));
+    await vi.advanceTimersByTimeAsync(205_000);
+    expect(api.sent).toHaveLength(51);
+    expect(api.sent.at(-1)).toBe("DONE");
+    await outbox.close();
+  });
+
+  it("does not re-edit unchanged operations as a long turn grows or completes", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    for (let index = 0; index < 50; index++) {
+      outbox.handle(operationUpdated(`command-${index}`, "completed", "command", `echo ${index}`));
+      await vi.advanceTimersByTimeAsync(750);
+    }
+    outbox.handle(textCompleted("reply-1", "完成"));
+    await settle();
+    await outbox.close();
+    expect(api.sent).toHaveLength(51);
+    expect(api.edits).toHaveLength(0);
+  });
+
+  it("refreshes the latest operation after a slow in-flight edit and skips queued duplicates", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(operationUpdated("command-1", "running", "command", "first"));
+    await vi.advanceTimersByTimeAsync(750);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const original = api.editMessageText.bind(api);
+    vi.spyOn(api, "editMessageText").mockImplementationOnce(async (...args) => {
+      await gate;
+      return original(...args);
+    });
+    outbox.handle(operationUpdated("command-1", "running", "command", "second"));
+    await vi.advanceTimersByTimeAsync(750);
+    for (let index = 0; index < 4; index++) {
+      outbox.handle(operationUpdated("command-1", "running", "command", `progress-${index}`));
+      await vi.advanceTimersByTimeAsync(750);
+    }
+    outbox.handle(operationUpdated("command-1", "completed", "command", "latest"));
+    outbox.handle(textCompleted("reply-1", "完成"));
+    release();
+    await settle();
+    await outbox.close();
+    expect(api.edits).toHaveLength(2);
+    expect(api.edits[1]).toContain("latest");
+    expect(api.edits[1]).toContain("已完成");
+    expect(api.sent.at(-1)).toBe("完成");
+  });
+
+  it("does not cache failed operation edits as successfully delivered", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(operationUpdated("command-1", "running", "command", "first"));
+    await vi.advanceTimersByTimeAsync(750);
+    const edit = vi.spyOn(api, "editMessageText").mockRejectedValueOnce(telegramBadRequest("Bad Request: message to edit not found"));
+    outbox.handle(operationUpdated("command-1", "completed", "command", "latest"));
+    await vi.advanceTimersByTimeAsync(750);
+    outbox.handle(textCompleted("reply-1", "完成"));
+    await settle();
+    await outbox.close();
+    expect(edit).toHaveBeenCalledTimes(2);
+    expect(api.edits[0]).toContain("latest");
   });
 
   it("keeps each operation in its own editable workflow message", async () => {
@@ -1813,8 +2145,9 @@ function userInputInteraction() {
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  // Let the bounded API attempt and its queue continuation settle without
+  // advancing timers (which would also trigger typing and stream timers).
+  await new Promise<void>((resolve) => process.nextTick(resolve));
 }
 
 function tokenBreakdown(totalTokens: number) {
@@ -1853,4 +2186,8 @@ function isSilent(value: unknown): boolean {
     value !== null &&
     "disable_notification" in value &&
     value.disable_notification === true;
+}
+
+function telegramBadRequest(description: string): GrammyError {
+  return new GrammyError("fixture", { ok: false, error_code: 400, description }, "sendMessage", {});
 }

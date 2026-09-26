@@ -1,3 +1,5 @@
+import { prepareDeliveryJournal } from "./delivery-journal-setup.js";
+import type { DeliveryJournal } from "../surfaces/index.js";
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
@@ -11,6 +13,7 @@ import {
   ensureAppServerProvider,
   releaseAppServerProvider,
 } from "../../runtime/app-server-supervisor.mjs";
+import { withQuotaTokenEstimates } from "../../runtime/quota-token-estimate.mjs";
 import { hasCodexAuthFile } from "../../runtime/codex-home.mjs";
 import {
   effectiveCodexBinary,
@@ -93,6 +96,7 @@ import {
 import { EventBus } from "../event-bus/index.js";
 import {
   BufferedModelRequestMetricsWriter,
+  CompletionMetricsReader,
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
@@ -150,6 +154,7 @@ export abstract class GatewayComponentGraph {
   protected readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
   protected readonly surfaceManager: SurfaceManager;
+  protected readonly deliveryJournal: DeliveryJournal;
   private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
@@ -159,6 +164,7 @@ export abstract class GatewayComponentGraph {
   private readonly core: ConversationCore;
   private readonly conversations: ConversationService;
   readonly refreshProviderModels: () => void;
+  private readonly completionMetrics: CompletionMetricsReader;
   private readonly providerMetrics: ProviderMetricsComposition;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
@@ -309,8 +315,14 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
-    this.inbound = new EventBus<RpcNotification>(logger, 2_000);
-    this.output = new EventBus<OutputEvent>(logger, 1_000);
+    this.deliveryJournal = prepareDeliveryJournal(config, configPath);
+    const deliveryFailure = (consumer: string): void => {
+      logger.error({ consumer }, "关键事件未完成交接，停止接纳普通输入并要求权威状态核对");
+      this.deliveryJournal.fail();
+    };
+    this.inbound = new EventBus<RpcNotification>(logger, 2_000, deliveryFailure);
+    this.output = new EventBus<OutputEvent>(logger, 1_000, deliveryFailure);
+    try {
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
@@ -341,6 +353,7 @@ export abstract class GatewayComponentGraph {
         maximumRows: config.metricsStorage.maxRows,
       },
     );
+    const completionMetrics = this.completionMetrics = new CompletionMetricsReader(metricsStore.path);
     const metricsWriter = new BufferedModelRequestMetricsWriter(
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
@@ -398,15 +411,15 @@ export abstract class GatewayComponentGraph {
       logger,
     });
     this.subagentCompletion = new SubagentCompletionTracker({
-      readSummary: (agentThreadId, terminalTurnId) => {
-        if (!terminalTurnId) return metricsStore.threadSummary(agentThreadId);
-        const latestTurn = metricsStore.threadTurnSummary(
+      readSummary: async (agentThreadId, terminalTurnId) => {
+        if (!terminalTurnId) return completionMetrics.query("threadSummary", agentThreadId);
+        const latestTurn = await completionMetrics.query("threadTurnSummary",
           agentThreadId,
           terminalTurnId,
         );
         return {
           latestTurn,
-          threadAggregate: metricsStore.threadTurnTaskSummary(
+          threadAggregate: await completionMetrics.query("threadTurnTaskSummary",
             agentThreadId,
             terminalTurnId,
           ) ?? latestTurn,
@@ -547,7 +560,9 @@ export abstract class GatewayComponentGraph {
           limits: snapshot.limits,
         });
       },
-    });
+    }, (windows, provider) => /^(?:ocg|clp)-[a-z0-9_-]+$/u.test(provider)
+      ? withQuotaTokenEstimates(windows, () => metricsStore.accountQuotaEstimates(provider))
+      : [...windows]);
     const service = new ConversationService(
       this.codex,
       this.router,
@@ -828,6 +843,7 @@ export abstract class GatewayComponentGraph {
     const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
     const commands = new ConversationCommandService(service, scheduledTaskUseCases);
     this.surfaceModules = createSurfaceModules({
+      journal: this.deliveryJournal,
       config,
       service,
       commands,
@@ -855,6 +871,18 @@ export abstract class GatewayComponentGraph {
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
       {
+        journal: this.deliveryJournal,
+        canDeliver: event => {
+          const authorized = this.surfaceModules.some(module => module.adapter.surface === event.target.surface
+            && module.adapter.accountId === event.target.accountId && module.canDeliver?.(event.target) === true);
+          if (!authorized) return false;
+          const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
+          const owner = threadId ? this.router.targetForThread(threadId) : undefined;
+          // Completed background bindings may already have been released. A
+          // still-bound Thread must never replay to its previous owner.
+          return !owner || (owner.surface === event.target.surface && owner.accountId === event.target.accountId
+            && owner.conversationId === event.target.conversationId);
+        },
         setInteractionAvailable: (
           surface,
           accountId,
@@ -867,18 +895,15 @@ export abstract class GatewayComponentGraph {
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadSummary(threadId);
-          return mergeCompletionTiming(summary.latestTurn, turnId, current);
+          const summary = await completionMetrics.query("threadTurnSummary", threadId, turnId);
+          return mergeCompletionTiming(summary, turnId, current);
         },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
-          let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
-          if (summary === null) return undefined;
-          // The completion event can outrun the buffered request writer. Once
-          // a child is known, wait for the current queue watermark so the
-          // parent task total includes the root Turn's just-finished samples.
+          // Wait before querying: the completion event can outrun the buffered
+          // writer, and the potentially large task tree must be aggregated only once.
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
+          const summary = await completionMetrics.query("threadTurnTaskSummary", threadId, turnId);
           if (summary === null) return undefined;
           return {
             requestCount: summary.requestCount,
@@ -893,7 +918,7 @@ export abstract class GatewayComponentGraph {
         sessionAggregate: async (threadId): Promise<TurnTaskMetricsSummary | undefined> => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId);
           if (!persisted) return undefined;
-          const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
+          const aggregate = (await completionMetrics.query("threadSummary", threadId)).threadAggregate;
           if (aggregate === null) return undefined;
           return {
             requestCount: aggregate.requestCount,
@@ -1114,6 +1139,7 @@ export abstract class GatewayComponentGraph {
         ),
     );
     this.bindingRestoreCoordinator();
+    } catch (error) { this.deliveryJournal.close(); throw error; }
   }
 
   protected bindingRestoreCoordinator(): BindingRestoreCoordinator {
@@ -1279,6 +1305,8 @@ export abstract class GatewayComponentGraph {
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
       ["Surface", () => this.surfaceManager.stop()],
+      ["Delivery Journal", () => Promise.resolve(this.deliveryJournal.close())],
+      ["Completion Metrics", () => this.completionMetrics.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],

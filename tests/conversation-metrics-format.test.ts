@@ -51,8 +51,8 @@ describe("conversation metrics formatting", () => {
     });
 
     expect(rendered).toContain("模型请求：3 次（异常 1 次）");
-    expect(rendered).toContain("平均 Token/s：123.46");
-    expect(rendered).toContain("平均 Token/s：234.57");
+    expect(rendered).toContain("输出 Token/s：123.46");
+    expect(rendered).toContain("输出 Token/s：234.57");
     expect(rendered).toContain("缓存命中率：80.00%");
     expect(rendered).toContain("其中推理输出：300");
     expect(rendered).toContain("其中推理输出：1.8 K");

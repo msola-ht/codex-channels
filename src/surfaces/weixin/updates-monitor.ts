@@ -1,3 +1,4 @@
+import { isEmergencyStopCommand } from "../slash-command.js";
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
   WeixinProtocolError,
@@ -26,7 +27,10 @@ export interface CreateWeixinUpdatesMonitorOptions {
   cursorStore: WeixinUpdatesCursorStore;
   handleMessage(message: Extract<WeixinInboundMessage, {
     kind: "text" | "image" | "file" | "audio";
-  }>): Promise<void>;
+  }>, signal?: AbortSignal, sequence?: number): Promise<void>;
+  acceptMessage?(message: Extract<WeixinInboundMessage, { kind: "text" | "image" | "file" | "audio" }>, sequence: number): void;
+  prepareBatch?(messages: readonly WeixinInboundMessage[], signal: AbortSignal): Promise<void>;
+  isControlMessage?(message: WeixinInboundMessage): boolean;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
   retryDelayMs?: number;
@@ -64,6 +68,7 @@ export function createWeixinUpdatesMonitor(
     "微信失效凭据暂停时间无效",
   );
   const recentMessageIds = new RecentMessageIds(recentMessageCapacity);
+  let nextSequence = 0;
 
   return {
     async run(signal) {
@@ -143,36 +148,63 @@ export function createWeixinUpdatesMonitor(
           batchMessageIds.add(message.messageId);
           messages.push(message);
         }
-        for (let index = 0; index < messages.length;) {
-          const message = messages[index]!;
-          if (message.kind === "image") {
-            const imageMessages: Array<Extract<
-              WeixinInboundMessage,
-              { kind: "image" }
-            >> = [];
-            while (messages[index]?.kind === "image") {
-              imageMessages.push(messages[index] as Extract<
-                WeixinInboundMessage,
-                { kind: "image" }
-              >);
-              index += 1;
-            }
-            for (const imageMessage of imageMessages) {
-              await options.handleMessage(imageMessage);
-              recentMessageIds.add(imageMessage.messageId);
-            }
-            continue;
+        if (signal.aborted) return;
+        const ordered = messages.map(message => ({ message, sequence: ++nextSequence }));
+        if (options.acceptMessage) {
+          await options.prepareBatch?.(messages, signal);
+          if (signal.aborted) return;
+          let failed = false;
+          let failure: unknown;
+          for (const { message, sequence } of ordered) {
+            if (signal.aborted) return;
+            const control = options.isControlMessage?.(message)
+              ?? (message.kind === "text" && isEmergencyStopCommand(message.text));
+            if (message.kind === "ignored" || (failed && !control)) continue;
+            try { options.acceptMessage(message, sequence); }
+            catch (error) { if (!failed) failure = error; failed = true; }
           }
-          if (
-            message.kind === "text"
-            || message.kind === "file"
-            || message.kind === "audio"
-          ) {
-            await options.handleMessage(message);
+          if (failed) throw failure;
+          if (batch.cursor.length > 0 && batch.cursor !== cursor) {
+            await options.cursorStore.set(accountId, batch.cursor);
+            cursor = batch.cursor;
           }
-          recentMessageIds.add(message.messageId);
-          index += 1;
+          continue;
         }
+        const isUrgent = (message: WeixinInboundMessage): boolean => message.kind === "text" && isEmergencyStopCommand(message.text);
+        const process = async (entries: typeof ordered): Promise<void> => {
+          for (const { message, sequence } of entries) {
+            if (signal.aborted) return;
+            if (message.kind === "text" || message.kind === "image" || message.kind === "file" || message.kind === "audio") {
+              await options.handleMessage(message, signal, sequence);
+            }
+            if (!signal.aborted) recentMessageIds.add(message.messageId);
+          }
+        };
+        const conversations = new Map<string, typeof ordered>();
+        for (const entry of ordered.filter(({ message }) => !isUrgent(message))) {
+          const key = "conversationId" in entry.message
+            ? entry.message.conversationId : entry.message.messageId;
+          const entries = conversations.get(key) ?? [];
+          entries.push(entry);
+          conversations.set(key, entries);
+        }
+        const lanes = [...conversations.values()];
+        let nextLane = 0;
+        const worker = async (): Promise<void> => {
+          while (nextLane < lanes.length && !signal.aborted) {
+            const entries = lanes[nextLane++]!;
+            await process(entries);
+          }
+        };
+        // Bounded cross-conversation concurrency, ordered within each chat.
+        // Commit the cursor only after every lane, including controls, finishes.
+        const results = await Promise.allSettled([
+          ...Array.from({ length: Math.min(8, lanes.length) }, worker),
+          process(ordered.filter(({ message }) => isUrgent(message))),
+        ]);
+        const failure = results.find(result => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+        if (signal.aborted) return;
         if (batch.cursor.length > 0 && batch.cursor !== cursor) {
           await options.cursorStore.set(accountId, batch.cursor);
           cursor = batch.cursor;

@@ -14,6 +14,7 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
+  /** 本轮有效请求合计输出 Token（含推理）除以合计请求耗时，含首字等待。 */
   tokensPerSecond?: number | null;
   /** 上游轮次首 Token，不是单请求首内容延迟。 */
   upstreamTtftMs?: number | null;

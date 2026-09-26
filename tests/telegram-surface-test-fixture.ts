@@ -1,3 +1,4 @@
+import type { DeliveryJournal } from "../src/surfaces/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +66,7 @@ export function createTelegramSurfaceFixture(
   now?: () => number,
   debugEnabled = false,
   scheduledTasks?: ScheduledTaskUseCases,
+  journal?: DeliveryJournal,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -94,6 +96,7 @@ export function createTelegramSurfaceFixture(
   const rememberActor = vi.fn();
   directories.push(directory);
   const surfaceOptions = {
+    journal,
     gatewayVersion: "0.146.0",
     commands: conversationCommandExecutor({ submit, ...serviceOverrides }, scheduledTasks),
     inputQuietWindowMs: 0,

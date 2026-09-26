@@ -35,6 +35,19 @@ export function snapshotProviderFiles(paths) {
   }));
 }
 
+export function addProviderFileArchive(updates, snapshots, sourcePath, archivePath) {
+  const source = snapshots.find((snapshot) => snapshot.path === sourcePath);
+  if (source?.content === undefined) throw new Error(`Provider 备份归档缺少源快照：${sourcePath}`);
+  const [archive] = snapshotProviderFiles([archivePath]);
+  if (archive.content !== undefined) throw new Error(`Provider 备份归档路径已被占用：${archivePath}`);
+  snapshots.push(archive);
+  // Persist the old baseline before any update can replace the source backup.
+  const pending = [...updates];
+  updates.clear();
+  updates.set(archivePath, source.content);
+  for (const [path, content] of pending) updates.set(path, content);
+}
+
 export async function assertProviderFileSnapshots(snapshots) {
   for (const snapshot of snapshots) {
     const current = await readOptionalProviderFile(snapshot.path);

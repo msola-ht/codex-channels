@@ -7,13 +7,12 @@ import * as clackPrompts from "@clack/prompts";
 import { parse, stringify } from "smol-toml";
 import { codexHomePath } from "../runtime/codex-home.mjs";
 import { deepseekProviderDefinition, clinePassProviderDefinition as definition, clinePassAccountDefinition, isManagedProviderApiKeyValid } from "../runtime/model-provider-definitions.mjs";
-import { createManagedProviderMarker } from "../runtime/model-provider-profile.mjs";
 import { downloadDeepseekCatalog, createManagedDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "./responses-model-templates.mjs";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { managedProviderDirectory, loadManagedModelProviderSettings, loadPrimaryModelProvider } from "../runtime/model-provider-runtime.mjs";
-import { createManagedProviderConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
-import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
+import { applyManagedProviderAccountConfiguration, planManagedProviderAccountConfiguration, hasProviderBaseConfig, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
+import { addProviderFileArchive, applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provider-files.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { validateModelCatalogWithCodex } from "./model-catalog-validation.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
@@ -44,6 +43,9 @@ export function createClinePassCatalog(templates) {
     contextWindow: template.contextWindow, maxContextWindow: template.maxContextWindow,
     reasoningEfforts: [...new Set(["none", ...template.reasoningEfforts])],
     defaultReasoningEffort: template.defaultReasoningEffort, supportsImages: template.supportsImages,
+    applyPatchToolType: "freeform",
+    ...(template.instructions === undefined ? {} : {instructions: template.instructions}),
+    supportsSearchTool: true,
   }], definition.defaultModel).models };
 }
 
@@ -98,15 +100,9 @@ export async function applyClinePassConfiguration(input, { environment = process
         : await loadTemplates("deepseek", environment));
     }
     await validateModelCatalogWithCodex(catalog, environment);
-    const initial = previous && !(previous.mode === "switching" && mode === "exclusive") ? backup.config : current;
-    const { config, profile } = createManagedProviderConfiguration(current, initial, definition, {
-      mode, previousMode: previous?.mode, apiKey, catalogPath: paths.catalog, catalog, model: definition.defaultModel,
+    const { initial, updates } = planManagedProviderAccountConfiguration(current, backup, definition, {
+      paths, mode, previousMode: previous?.mode, apiKey, catalog, model: definition.defaultModel,
     });
-    const updates = new Map([
-      [paths.backup, `${JSON.stringify({ config: initial })}\n`],
-      [paths.profile, profile === undefined ? undefined : stringify(profile)],
-      [paths.marker, stringify(createManagedProviderMarker(definition, mode))],
-    ]);
     if (writesCatalog) {
       updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
       updates.set(paths.manifest, `${JSON.stringify({ source: "deepseek", model: "deepseek-flash" })}\n`);
@@ -116,13 +112,11 @@ export async function applyClinePassConfiguration(input, { environment = process
       updates.set(dsCatalogPath, `${JSON.stringify(downloadedDs, null, 2)}\n`);
       updates.set(dsManifestPath, `${JSON.stringify({ source: deepseekSetupScriptUrl, downloadedAt: new Date().toISOString() })}\n`);
     }
-    if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial)) {
+    if (content("backup") !== undefined && JSON.stringify(backup.config) !== JSON.stringify(initial.config)) {
       const archive = `${paths.backup}.${randomUUID()}`;
-      snapshots.push(...snapshotProviderFiles([archive]));
-      updates.set(archive, content("backup"));
+      addProviderFileArchive(updates, snapshots, paths.backup, archive);
     }
-    if (mode === "exclusive" || previous?.mode === "exclusive") updates.set(paths.config, stringify(config));
-    await applyProviderFileUpdates(updates, snapshots);
+    await applyManagedProviderAccountConfiguration(updates, snapshots, paths);
     return { ...preview, action: "configured" };
   });
 }

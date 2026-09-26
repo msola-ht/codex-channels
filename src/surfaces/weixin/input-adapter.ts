@@ -1,3 +1,6 @@
+import type { DeliveryJournal } from "../delivery-journal.js";
+import { DurableInputQueue } from "../durable-input-queue.js";
+import { isEmergencyStopCommand } from "../slash-command.js";
 import type { Logger } from "pino";
 
 import type {
@@ -24,7 +27,7 @@ import { WeixinConversationAdapter } from "./conversation-adapter.js";
 import type { WeixinAudioPort } from "./audio-store.js";
 import type { WeixinFilePort } from "./file-input.js";
 import type { WeixinImagePort } from "./image-store.js";
-import type { WeixinInteractionPort } from "./interactions.js";
+import { isWeixinInteractionCommand, type WeixinInteractionPort } from "./interactions.js";
 import type { WeixinOutbox } from "./outbox.js";
 import {
   createWeixinDoctor,
@@ -58,12 +61,13 @@ export class WeixinInputFatalError extends Error {
 }
 
 export interface WeixinInputAdapterOptions {
+  journal?: DeliveryJournal | undefined;
   accountId: string;
   client: WeixinProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
   commands: ConversationCommandExecutor;
-  outbox: Pick<WeixinOutbox, "notifyText">;
+  outbox: Pick<WeixinOutbox, "notifyText"> & Partial<Pick<WeixinOutbox, "trackInput">>;
   access: SurfaceAccessPolicy;
   replyContexts: WeixinReplyContextStore;
   persistReplyContext?(
@@ -71,6 +75,7 @@ export interface WeixinInputAdapterOptions {
     actorId: string,
     contextToken: string,
   ): Promise<void>;
+  readReplyContext?(target: ConversationTarget): Promise<{ actorId: string; contextToken: string } | null>;
   removePersistedReplyContext?(target: ConversationTarget): Promise<void>;
   actorRegistry?: ConversationActorRegistry;
   interactions?: Pick<WeixinInteractionPort, "handleText">;
@@ -87,16 +92,18 @@ export interface WeixinInputAdapterOptions {
   closeTimeoutMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
-  logger?: Pick<Logger, "debug">;
+  logger?: Pick<Logger, "debug"> & Partial<Pick<Logger, "error">>;
 }
 
 export class WeixinInputAdapter {
   readonly accountId: string;
 
   private readonly closeTimeoutMs: number;
+  private readonly latestContextSequence = new Map<string, number>();
   private readonly now: () => number;
   private readonly health = new WeixinPollingHealth();
   private readonly monitor;
+  private readonly durable?: DurableInputQueue<{ message: WeixinSupportedMessage; sequence: number }>;
   private readonly conversations: WeixinConversationAdapter;
   private controller: AbortController | undefined;
   private runTask: Promise<void> | undefined;
@@ -136,11 +143,38 @@ export class WeixinInputAdapter {
       options.files,
       options.audios,
     );
+    if (options.journal && (!options.persistReplyContext || !options.readReplyContext)) {
+      throw new Error("微信持久输入缺少回复上下文持久化接口");
+    }
+    if (options.journal && !options.outbox.trackInput) throw new Error("微信持久输入缺少输出确认接口");
+    if (options.journal) this.durable = new DurableInputQueue({
+      journal: options.journal, stream: `weixin:${options.accountId}:input`, blockedByStream: `weixin:${options.accountId}:output`,
+      handle: ({ message }, signal) => options.outbox.trackInput!(message.conversationId, async () => {
+        const target = { surface: "weixin", accountId: options.accountId, conversationId: message.conversationId };
+        if (options.access.isAllowed({ target, actorId: message.actorId }) && !options.replyContexts.get(target)) {
+          const stored = await options.readReplyContext!(target);
+          if (signal.aborted || this.stopping) return;
+          // A concurrently received batch may already have installed a newer context.
+          if (stored && stored.actorId === message.actorId && !options.replyContexts.get(target)) {
+            options.replyContexts.remember(target, stored.actorId, stored.contextToken);
+          }
+        }
+        await this.handle(message, signal);
+      }),
+      onUncertain: (id, metadata) => options.logger?.error?.({ ...metadata, deliveryId: id }, "微信输入结果待核对，未自动重发"),
+    });
     this.monitor = createWeixinUpdatesMonitor({
+      isControlMessage: isWeixinControlMessage,
+      ...(this.durable ? { prepareBatch: (messages: readonly WeixinInboundMessage[], signal: AbortSignal) => this.prepareReplyContexts(messages, signal), acceptMessage: (message: WeixinSupportedMessage, sequence: number) => {
+        const target = { surface: "weixin", accountId: options.accountId, conversationId: message.conversationId };
+        if (!options.access.isAllowed({ target, actorId: message.actorId })) return;
+        this.durable!.accept(`weixin:${options.accountId}:${message.messageId}`, conversationTargetKey(target), { message, sequence },
+          isWeixinControlMessage(message));
+      } } : {}),
       accountId: options.accountId,
       client: options.client,
       cursorStore: options.cursorStore,
-      handleMessage: (message) => this.handle(message),
+      handleMessage: (message, signal, sequence) => this.handle(message, signal, sequence),
       onPollStart: () => this.health.recordPollStart(),
       onPollSuccess: (atMs) => this.health.recordSuccess(atMs),
       onRetry: (event) => {
@@ -160,6 +194,7 @@ export class WeixinInputAdapter {
     const controller = new AbortController();
     this.controller = controller;
     this.health.start();
+    this.durable?.start();
     const task = this.monitor.run(controller.signal);
     this.runTask = task;
     void task
@@ -182,7 +217,8 @@ export class WeixinInputAdapter {
     return this.stopPromise;
   }
 
-  private async handle(message: WeixinSupportedMessage): Promise<void> {
+  private async handle(message: WeixinSupportedMessage, signal?: AbortSignal, sequence = 0): Promise<void> {
+    if (this.stopping || signal?.aborted) return;
     const receivedAtMs = this.now();
     this.options.logger?.debug(
       {
@@ -216,16 +252,24 @@ export class WeixinInputAdapter {
     if ("text" in message && message.text !== undefined) {
       this.rememberQuotedText(target, message.messageId, message.text);
     }
-    this.options.replyContexts.remember(
-      target,
-      message.actorId,
-      message.contextToken,
-    );
-    await this.persistReplyContext(
-      target,
-      message.actorId,
-      message.contextToken,
-    );
+    if (!this.durable && sequence >= (this.latestContextSequence.get(target.conversationId) ?? 0)) {
+      this.latestContextSequence.delete(target.conversationId);
+      this.latestContextSequence.set(target.conversationId, sequence);
+      if (this.latestContextSequence.size > 1_000) {
+        this.latestContextSequence.delete(this.latestContextSequence.keys().next().value!);
+      }
+      this.options.replyContexts.remember(
+        target,
+        message.actorId,
+        message.contextToken,
+      );
+      await this.persistReplyContext(
+        target,
+        message.actorId,
+        message.contextToken,
+      );
+    }
+    if (this.stopping || signal?.aborted) return;
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     if (
       message.kind === "text"
@@ -275,7 +319,7 @@ export class WeixinInputAdapter {
                 ...(quotedText === undefined ? {} : { quotedText }),
                 audio: message.audio,
               };
-      await this.conversations.handle(conversationMessage);
+      await this.conversations.handle(conversationMessage, signal);
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }
@@ -299,6 +343,24 @@ export class WeixinInputAdapter {
         break;
       }
       this.quotedTexts.delete(oldest);
+    }
+  }
+
+  private async prepareReplyContexts(messages: readonly WeixinInboundMessage[], signal: AbortSignal): Promise<void> {
+    const latest = new Map<string, WeixinSupportedMessage>();
+    for (const message of messages) {
+      if (message.kind === "ignored") continue;
+      const target = { surface: "weixin", accountId: this.accountId, conversationId: message.conversationId };
+      if (this.options.access.isAllowed({ target, actorId: message.actorId })) latest.set(message.conversationId, message);
+    }
+    for (const message of latest.values()) {
+      if (signal.aborted || this.stopping) return;
+      const target = { surface: "weixin", accountId: this.accountId, conversationId: message.conversationId };
+      if (this.options.replyContexts.get(target)?.contextToken === message.contextToken) continue;
+      // Persist before acknowledging any input. Replayed workers never write this state.
+      await this.persistReplyContext(target, message.actorId, message.contextToken);
+      if (signal.aborted || this.stopping) return;
+      this.options.replyContexts.remember(target, message.actorId, message.contextToken);
     }
   }
 
@@ -329,8 +391,11 @@ export class WeixinInputAdapter {
     this.stopping = true;
     this.health.stop();
     this.quotedTexts.clear();
+    this.latestContextSequence.clear();
     this.controller?.abort();
+    const durableClosing = this.durable?.close();
     await this.conversations.close();
+    await durableClosing;
     const task = this.runTask;
     if (task === undefined) {
       return;
@@ -402,4 +467,8 @@ async function waitAtMost<T>(
       clearTimeout(timer);
     }
   }
+}
+
+function isWeixinControlMessage(message: WeixinInboundMessage): boolean {
+  return message.kind === "text" && (isEmergencyStopCommand(message.text) || isWeixinInteractionCommand(message.text));
 }

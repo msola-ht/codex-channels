@@ -1,3 +1,4 @@
+import { formatMarkdownAsTelegramHtmlChunks } from "./markdown-format.js";
 import { escapeTelegramHtml } from "./html-format.js";
 
 const maximumInlineCharacters = 3_500;
@@ -9,6 +10,7 @@ const maximumEscapedPreviewCodeUnits = 2_600;
 const maximumDocumentBytes = 45 * 1024 * 1024;
 
 export type LongFinalMessagePlan =
+  | { kind: "html"; chunks: string[] }
   | { kind: "expandable"; chunks: string[] }
   | {
       kind: "document";
@@ -49,10 +51,10 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
     };
   }
 
-  return {
-    kind: "expandable",
-    chunks: splitExpandableMessage(text),
-  };
+  const html = formatMarkdownAsTelegramHtmlChunks(text);
+  return html === undefined
+    ? { kind: "expandable", chunks: splitExpandableMessage(text) }
+    : { kind: "html", chunks: html };
 }
 
 export function splitExpandableMessage(text: string): string[] {

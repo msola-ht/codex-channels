@@ -1,3 +1,4 @@
+import type { DeliveryJournal } from "../delivery-journal.js";
 import type { Logger } from "pino";
 
 import type {
@@ -57,6 +58,7 @@ export interface WeixinStartupNotification {
 }
 
 export interface WeixinSurfaceOptions {
+  journal?: DeliveryJournal | undefined;
   accountId: string;
   client: WeixinProtocolClient;
   fileSendClient?: WeixinFileSendProtocolClient;
@@ -189,6 +191,7 @@ export class WeixinSurface implements SurfaceAdapter {
       options.logger,
     );
     this.input = new WeixinInputAdapter({
+      journal: options.journal,
       accountId: options.accountId,
       client: options.client,
       cursorStore: options.cursorStore,
@@ -204,6 +207,7 @@ export class WeixinSurface implements SurfaceAdapter {
       ...(options.replyContextPersistence === undefined
         ? {}
         : {
+            readReplyContext: target => options.replyContextPersistence!.get(target),
             persistReplyContext: (target, actorId, contextToken) =>
               options.replyContextPersistence!.set(
                 target,

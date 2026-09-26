@@ -72,7 +72,7 @@ export interface SubagentCompletionTrackerOptions {
   readSummary: (
     agentThreadId: string,
     terminalTurnId?: string,
-  ) => SubagentMetricsSummary;
+  ) => SubagentMetricsSummary | Promise<SubagentMetricsSummary>;
   waitForMetrics?: (agentThreadId: string, agentTurnId?: string) => Promise<boolean>;
   onRunStarted?: (details: {
     agentThreadId: string;
@@ -599,7 +599,7 @@ export class SubagentCompletionTracker {
     let metricsStatus: SubagentCompletedEvent["metricsStatus"] = "unavailable";
     if (metricsPersisted) {
       try {
-        summary = this.options.readSummary(agentThreadId, entry.terminalTurnId);
+        summary = await this.options.readSummary(agentThreadId, entry.terminalTurnId);
         metricsStatus = summary.threadAggregate?.requestCount
           ? "available"
           : "empty";
@@ -607,6 +607,9 @@ export class SubagentCompletionTracker {
         this.options.onReadError?.(error, agentThreadId);
       }
     }
+    if (this.closed || (!detached && (
+      this.active.get(agentThreadId) !== entry || entry.revision !== revision
+    ))) return;
     const aggregate = summary?.threadAggregate ?? null;
     if (metricsStatus === "empty") {
       this.options.onMissingMetrics?.(agentThreadId);

@@ -46,18 +46,21 @@ export type { GoalStatus, ThreadGoal };
 export interface TurnExecutionPort {
   /** Cancels client-side preparation before an App Server Turn exists. */
   cancelPendingInput?(threadId: string): boolean;
+  /** Cancellation covers preparation only; dispatched writes retain their result. */
   startTurn(
     threadId: string,
     input: TurnInput[],
     clientUserMessageId: string,
     cwd: string,
     overrides?: TurnOverrides,
+    signal?: AbortSignal,
   ): Promise<TurnStarted>;
   steerTurn(
     threadId: string,
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    signal?: AbortSignal,
   ): Promise<TurnStarted>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   setThreadName(threadId: string, name: string): Promise<void>;

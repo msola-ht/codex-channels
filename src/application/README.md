@@ -18,6 +18,7 @@
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
   具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
+  `submit` 可接收 Surface 生命周期取消信号，在锁内和实际提交前复核，取消不自动重试已发出的 RPC；
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；
   Conversation 状态使用 Core 从 App Server 归约的当前 Goal 与上下文压缩总次数，
@@ -166,6 +167,7 @@ OpenAI 原生账户查询只依赖 `AccountQueryPort`；当前 Thread 的 `/usag
 Thread 时并行读取账户摘要和精确 Thread 官方估算，估算失败隔离为可辨识状态；待生效 Provider
 选择仍决定账户来源，只有账户选择和实际绑定都属于 OpenAI 时才附加 Thread 估算；无 Thread 只读取摘要。
 新增第三方时实现 `ProviderAccountAdapter` 并在 Bootstrap 登记，不能伪造 OpenAI Thread 估算；未提供的账户能力保持不支持。
+OCG 与 Cline Pass 账户查询先持久化原始官方快照，再通过注入的只读查询附加各窗口 Token/百分点估算；估算失败只标记不可用，不影响官方额度，派生结果不写回快照。
 Application 和 Surface 不解析 `account/usage/read`、`account/rateLimits/read` 或第三方完整响应。
 `/metrics` 只依赖 `RequestMetricsQueryPort`；无参数或 `session` 查询当前 Thread，`global`、
 `providers`、`models` 和 `errors` 统一使用 `24h`、`7d`、`30d`、`90d` 或全部保留历史；`errors` 只展示

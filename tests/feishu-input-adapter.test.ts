@@ -72,6 +72,23 @@ function createAudioMessage(): Extract<FeishuInboxMessage, { kind: "audio" }> {
 }
 
 describe("Feishu input adapter", () => {
+  it("does not submit input after a quoted-message lookup outlives close", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    let release!: (text: string) => void;
+    const lookup = vi.fn(() => new Promise<string>(resolve => { release = resolve; }));
+    const adapter = new FeishuConversationAdapter({ submit }, fixture.outbox, imagePort,
+      undefined, undefined, undefined, undefined, undefined, { readQuotedText: lookup });
+    const handling = adapter.handle({ ...message, parentId: "parent" });
+    await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+    await adapter.close();
+    release("quoted text");
+    await handling;
+    expect(submit).not.toHaveBeenCalled();
+    await fixture.outbox.close();
+    expect(fixture.sent).toEqual([]);
+  });
+
   it("submits an accepted private text message to Application", async () => {
     const fixture = createOutbox();
     const submit = vi.fn(async () => ({
@@ -88,7 +105,7 @@ describe("Feishu input adapter", () => {
     await expect(adapter.handle(message)).resolves.toBeUndefined();
     await fixture.outbox.close();
 
-    expect(submit).toHaveBeenCalledWith(message.target, "继续开发");
+    expect(submit).toHaveBeenCalledWith(message.target, "继续开发", expect.any(AbortSignal));
     expect(fixture.sent).toEqual([]);
   });
 
@@ -155,7 +172,7 @@ describe("Feishu input adapter", () => {
 
     expect(submit).toHaveBeenCalledTimes(inputs.length);
     for (const text of inputs) {
-      expect(submit).toHaveBeenCalledWith(message.target, text);
+      expect(submit).toHaveBeenCalledWith(message.target, text, expect.any(AbortSignal));
     }
     expect(fixture.sent).toEqual([]);
   });
@@ -194,7 +211,7 @@ describe("Feishu input adapter", () => {
       "",
       "当前消息：",
       "这句话是什么意思？",
-    ].join("\n"));
+    ].join("\n"), expect.any(AbortSignal));
   });
 
   it("submits the current Feishu message when quoted text cannot be read", async () => {
@@ -235,6 +252,7 @@ describe("Feishu input adapter", () => {
     expect(submit).toHaveBeenCalledWith(
       message.target,
       "只处理当前消息",
+      expect.any(AbortSignal),
     );
     expect(fixture.sent).toEqual([]);
   });
@@ -273,7 +291,7 @@ describe("Feishu input adapter", () => {
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "请查看这张图片并根据图片内容协助我。",
       images: [{ url: pngDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     expect(fixture.sent).toEqual([]);
   });
 
@@ -316,7 +334,7 @@ describe("Feishu input adapter", () => {
       "文件名：settings.json",
       "",
       "{\"enabled\":true}",
-    ].join("\n"));
+    ].join("\n"), expect.any(AbortSignal));
   });
 
   it("downloads private audio and submits its managed local path", async () => {
@@ -354,7 +372,7 @@ describe("Feishu input adapter", () => {
     );
     expect(submit).toHaveBeenCalledWith(message.target, {
       localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("preserves native quoted context for private audio", async () => {
@@ -401,7 +419,7 @@ describe("Feishu input adapter", () => {
         "请听取这段语音并根据内容协助我。",
       ].join("\n"),
       localAudios: [{ path: "/private/uploads/feishu/voice.ogg" }],
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("rejects private audio when Feishu omits its duration", async () => {
@@ -425,9 +443,7 @@ describe("Feishu input adapter", () => {
 
     const audioWithoutDuration = createAudioMessage();
     delete audioWithoutDuration.durationMs;
-    await expect(adapter.handle(audioWithoutDuration)).rejects.toMatchObject({
-      code: "audio.duration-missing",
-    });
+    await adapter.handle(audioWithoutDuration);
     await fixture.outbox.close();
 
     expect(download).not.toHaveBeenCalled();
@@ -470,7 +486,7 @@ describe("Feishu input adapter", () => {
     expect(submit).toHaveBeenCalledWith(message.target, {
       text: "收得到吗",
       images: [{ url: pngDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     expect(fixture.sent).toEqual([]);
   });
 
@@ -525,7 +541,7 @@ describe("Feishu input adapter", () => {
         { url: pngDataUrl },
         { url: jpegDataUrl },
       ],
-    });
+    }, expect.any(AbortSignal));
     expect(fixture.sent).toEqual([]);
   });
 
@@ -575,7 +591,7 @@ describe("Feishu input adapter", () => {
         { url: pngDataUrl },
         { url: jpegDataUrl },
       ],
-    });
+    }, expect.any(AbortSignal));
     expect(fixture.sent).toEqual([]);
   });
 
@@ -588,13 +604,13 @@ describe("Feishu input adapter", () => {
       { download },
     );
 
-    await expect(adapter.handleImageBatch(
+    await adapter.handleImageBatch(
       Array.from({ length: 5 }, (_, index) => createImageMessage({
         eventId: `event-${index}`,
         messageId: `om_${index}`,
         imageKeys: [`img_v2_${index}`],
       })),
-    )).rejects.toMatchObject({ code: "image.too-many" });
+    );
     await fixture.outbox.close();
 
     expect(download).not.toHaveBeenCalled();
@@ -685,7 +701,7 @@ describe("Feishu input adapter", () => {
       imagePort,
     );
 
-    await expect(adapter.handle(message)).rejects.toBe(failure);
+    await adapter.handle(message);
     await fixture.outbox.close();
 
     expect(fixture.sent).toEqual([{
@@ -717,4 +733,15 @@ describe("Feishu input adapter", () => {
     }]);
     expect(JSON.stringify(fixture.sent)).not.toContain("secret");
   });
+});
+
+it.each(["revert.result-unknown", "queue.failed"] as const)("keeps Feishu %s unresolved after its safe error reply", async code => {
+  const fixture = createOutbox();
+  const error = new UserFacingError(code, "private details");
+  const adapter = new FeishuConversationAdapter({ submit: async () => { throw error; } }, fixture.outbox, imagePort);
+  try {
+    await expect(fixture.outbox.trackInput(message.target.conversationId, () => adapter.handle(message))).rejects.toBe(error);
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.sent[0]!.text).not.toContain("private details");
+  } finally { await adapter.close(); await fixture.outbox.close(); }
 });

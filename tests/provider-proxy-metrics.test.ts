@@ -67,6 +67,24 @@ describe("Provider proxy metrics channel", () => {
     } finally { await server.close(); }
   });
   const unixIt = process.platform === "win32" ? it.skip : it;
+  unixIt("bounds the total acknowledgement wait despite partial receiver traffic", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-deadline-"));
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "metrics.sock");
+    const server = createServer(socket => {
+      const timer = setInterval(() => socket.write("."), 50);
+      socket.on("data", () => {});
+      socket.on("error", () => {});
+      socket.on("close", () => clearInterval(timer));
+    });
+    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+    try {
+      const started = performance.now();
+      await sendProviderProxyMetrics(socketPath, metrics());
+      expect(performance.now() - started).toBeLessThan(2_000);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+
   unixIt("delivers one bounded metrics record over a private Unix socket", async () => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-"));
     temporaryDirectories.push(directory);

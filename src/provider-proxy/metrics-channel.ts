@@ -151,10 +151,14 @@ export function sendProviderProxyMetrics(
         return;
       }
       settled = true;
+      clearTimeout(deadline);
       socket.destroy();
       resolve();
     };
-    socket.setTimeout(1_000, finish);
+    // This is a total acknowledgement budget, not an idle timeout: partial
+    // replies must never extend the model response's terminal-event wait.
+    const deadline = setTimeout(finish, 1_000);
+    deadline.unref();
     socket.once("connect", () => {
       socket.write(`${JSON.stringify(metrics)}\n`);
     });
@@ -165,6 +169,7 @@ export function sendProviderProxyMetrics(
     });
     socket.once("end", finish);
     socket.once("error", finish);
+    socket.once("close", finish);
   });
 }
 

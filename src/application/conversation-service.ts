@@ -217,7 +217,7 @@ export interface ConversationStatus {
 /** Stable Turn and user-input lifecycle boundary. */
 export interface ConversationTurnUseCases {
   touchActivity?(target: ConversationTarget): void;
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission>;
+  submit(target: ConversationTarget, value: string | ConversationInput, signal?: AbortSignal): Promise<Submission>;
   stop(target: ConversationTarget): Promise<boolean>;
   rename(target: ConversationTarget, name: string): Promise<void>;
   setPinned(target: ConversationTarget, pinned: boolean): Promise<boolean>;
@@ -535,7 +535,7 @@ export class ConversationService implements
     return this.accountMetrics.requestMetrics(target, query);
   }
 
-  submit(target: ConversationTarget, value: string | ConversationInput): Promise<Submission> {
+  submit(target: ConversationTarget, value: string | ConversationInput, signal?: AbortSignal): Promise<Submission> {
     let input: TurnInput[];
     try {
       input = normalizeInput(value);
@@ -547,7 +547,7 @@ export class ConversationService implements
     if (input.length === 0) {
       return Promise.reject(new UserFacingError("message.empty", "消息不能为空"));
     }
-    return this.submitInput(target, input);
+    return this.submitInput(target, input, undefined, signal);
   }
 
   submitAsyncAnswer(target: ConversationTarget, threadId: string, text: string, isCurrent: () => boolean): Promise<Submission> {
@@ -715,10 +715,11 @@ export class ConversationService implements
     target: ConversationTarget,
     input: TurnInput[],
     identity?: TurnStartIdentity,
+    signal?: AbortSignal,
   ): Promise<Submission> {
     return this.locked(
       target,
-      () => this.submitInputLocked(target, input, identity),
+      () => this.submitInputLocked(target, input, identity, () => signal?.throwIfAborted(), signal),
     );
   }
 
@@ -727,7 +728,9 @@ export class ConversationService implements
     input: TurnInput[],
     identity?: TurnStartIdentity,
     assertCurrent?: () => void,
+    signal?: AbortSignal,
   ): Promise<Submission> {
+    assertCurrent?.();
     this.touchActivity(target);
     if (input.some((item) => item.type === "image")) {
       await this.models.requireInputModality(target, "image");
@@ -741,14 +744,14 @@ export class ConversationService implements
       assertCurrent?.();
       this.invalidateSessionDisplayTurnCount(active.threadId);
       try {
-        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId);
+        await this.codex.steerTurn(active.threadId, active.turnId, input, clientUserMessageId, ...(signal ? [signal] as const : []));
       } catch (error) {
         this.recordTurnError("steer", target, active.threadId, active.turnId, error);
         throw error;
       }
       return { threadId: active.threadId, turnId: active.turnId, steered: true };
     }
-    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent);
+    return this.startNewTurn(target, input, clientUserMessageId, identity, assertCurrent, signal);
   }
 
   queueAdd(target: ConversationTarget, value: string): Promise<ThreadQueueItem> {
@@ -1677,7 +1680,9 @@ export class ConversationService implements
     clientUserMessageId: string,
     identity?: TurnStartIdentity,
     assertCurrent?: () => void,
+    signal?: AbortSignal,
   ): Promise<Submission> {
+    assertCurrent?.();
     this.touchActivity(target);
     const binding = await this.ensureSession(target);
     this.invalidateSessionDisplayTurnCount(binding.threadId);
@@ -1706,6 +1711,7 @@ export class ConversationService implements
         clientUserMessageId,
         workspace.cwd,
         overrides,
+        ...(signal ? [signal] as const : []),
       );
     } catch (error) {
       this.recordTurnError("start", target, binding.threadId, null, error);

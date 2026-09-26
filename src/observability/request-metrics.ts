@@ -1,3 +1,6 @@
+import type { AccountQuotaWindowEstimate } from "../../runtime/quota-token-estimate.mjs";
+export type { AccountQuotaWindowEstimate, QuotaTokenEstimate } from "../../runtime/quota-token-estimate.mjs";
+
 export type ModelRequestTransport = "http" | "websocket";
 export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
@@ -111,6 +114,7 @@ export interface StoredQuotaPeriod {
 }
 
 export interface StoredModelRequestMetric extends ModelRequestMetricSample {
+  /** 输出 Token（含推理）除以提交上游请求到首个终态的总耗时，含首字等待。 */
   tokensPerSecond?: number | null;
   id: number;
   recordedAtMs: number;
@@ -129,7 +133,7 @@ export interface StoredCompactRequestMetricsSummary {
 }
 
 export interface StoredTurnRequestMetricsSummary {
-  /** 有效请求输出速率的算术平均，不是会话墙钟吞吐量。 */
+  /** 有效请求合计输出 Token（含推理）除以合计请求耗时，合并口径；含首字等待，不是会话墙钟吞吐量。 */
   tokensPerSecond?: number | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
   upstreamTtftMs?: number | null;
@@ -457,6 +461,7 @@ export interface StoredModelRequestAccountSnapshot {
 }
 
 export interface ModelRequestMetricsQuotaAccountStore {
+  accountQuotaEstimates(provider: string, nowMs?: number): AccountQuotaWindowEstimate[];
   weeklyQuotaEstimate(
     query: WeeklyQuotaEstimateQuery,
   ): StoredWeeklyQuotaEstimate | null;

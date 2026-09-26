@@ -94,8 +94,10 @@ it("does not mark an unobservable HTTP 200 response as completed", async () => {
 
 it("attaches quota snapshots and measures forwarding through event arrival excluding route wait and parsing", async () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(100);
+    const arrivals: number[] = [];
     const observeChunk = HttpResponseMetricsObserver.prototype.observeChunk;
     vi.spyOn(HttpResponseMetricsObserver.prototype, "observeChunk").mockImplementation(function (this: HttpResponseMetricsObserver, ...args) {
+      arrivals.push(args[2]);
       clock.mockReturnValue(900);
       return observeChunk.apply(this, args);
     });
@@ -182,7 +184,7 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
       quotaWindows,
     });
     expect(metrics[0]?.firstContentMs).toBe(50);
-    expect(metrics[0]?.totalDurationMs).toBeGreaterThanOrEqual(50);
+    expect(metrics[0]?.totalDurationMs).toBe(arrivals.at(-1)! - 300);
   });
 
 it("recognizes SSE metadata when the upstream omits Content-Type", async () => {

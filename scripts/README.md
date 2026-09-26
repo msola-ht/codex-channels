@@ -147,7 +147,7 @@
   保留原 Key，Origin 变化时强制重新输入且写入前不复用旧 Key；新增拒绝覆盖 config 或私有备份中的已有 Provider ID。
   无效旧 URL 按不可复用 Key 处理，允许输入新 URL 与新 Key 修复。保留其他候选块，只移除与自定义
   主 Provider 冲突的顶层 `openai_base_url`。
-- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex、DeepSeek 模板，交互勾选并映射平台模型 ID；两类均只复制基础模型能力，独立保留最大上下文，不导入源指令与工具元数据。
+- `responses-model-templates.mjs` / `responses-model-templates.d.mts`：读取官方 Codex、DeepSeek 模板，交互勾选并映射平台模型 ID；两类均复制基础模型能力并独立保留最大上下文，不导入工具元数据。DeepSeek 另保留 `model_messages.instructions_template` 提示词；官方 Codex 模板不导入源指令。
 - `responses-websocket-probe.mjs` / `responses-websocket-probe.d.mts`：按锁定 Codex 协议探测第三方 Responses WS 握手、预热及可选文字请求；复用代理，限制超时与响应大小，取消时释放连接，不保存凭据或原始响应。
 - `responses-websocket-setup.mjs` / `responses-websocket-setup.d.mts`：新增、编辑自定义 Provider 时选择自动检测或手动 WS 开关，模型请求须确认可能计费，结果只进入最终保存预览。
 - `model-catalog-validation.mjs` / `model-catalog-validation.d.mts`：RS 与 CCG 共用的保存前 Codex 模型目录合同校验，使用隔离临时目录，限制运行时间并清理临时文件。
@@ -277,7 +277,7 @@
 - `debug-setup.mjs`：在严格配置中原子写入 `logging.level`；Config 高级设置选择完整日志等级，不改写显示设置或凭据。
 - `ccg-setup.mjs` / `ccg-setup.d.mts`：CCG 多账户配置、`codexc ccg account remove` / `legacy remove` 确认移除入口、默认账户及删除入口；账户隔离 Key/Profile/App Server 并共享目录与统计代理，写入前使用 Codex CLI 校验完整目录，目录思考等级同步账户 Profile，原生角色保留独立设置。
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
-- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
+- `managed-provider-files.mjs` / `managed-provider-files.d.mts`：受管 Provider 共用的私有文件读取、写入、快照、备份归档、逐文件并发复核和失败回滚；归档拒绝覆盖已有目标，并先于原备份替换执行。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
 - `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，保留目录字段和窗口设置；导出账户菜单与目录刷新入口。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户与删除事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
@@ -287,7 +287,7 @@
   SHA-256。该文件只作为审查留档，运行时开放哪些模型以 Setup 下载的官方目录为准。
 - `managed-model-provider-setup.mjs` / `managed-model-provider-setup.d.mts`：复用第三方 Provider 的
   受管模型目录默认值/逐模型设置保留、切换 Profile、固定配置、恢复影响摘要与稳定错误逻辑；OCG 与
-  CCG 共用完整模式配置生成，DeepSeek 复用配置原语，账户注册和历史备份格式仍由各自适配层负责。
+  CCG 共用完整模式配置生成；DS、CCG、CLP 共用账户初始配置选择与文件写入计划，先准备目录和备份，再发布 Profile、标记与账户注册，最后写入主配置；账户注册和历史备份格式仍由各自适配层负责。
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
   路径与 Profile 文件名；私有文件事务使用 `managed-provider-files.mjs`。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
@@ -437,7 +437,7 @@
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
-  分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。正文和独立 trace
+  分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。`readDumpResponseProviders` 只扫描响应索引并保留指定编号的上游标签，不读取正文。正文和独立 trace
   均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出；`describeDumpTurnStates` 按精确批次与编号独立读取字符数，不阻塞列表摘要接口。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
 - `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
@@ -539,3 +539,5 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
+
+- `delivery-command.mjs`：通过 Surface 公共入口查看脱敏待处理清单；停服独占后核对完成、清理故障和检查回滚条件，并提供启动后的只读恢复告警，不自动重发消息。

@@ -4,6 +4,8 @@
 
 ## 文件
 
+- `delivery-journal-setup.ts`：独占开启独立消息日志，首次启用前备份配置和绑定数据库，校验私有权限与备份完整性。
+
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
 - `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，强制创建 `automation` 后台 Thread 并启动单个 Turn；写请求结果未知时失败关闭。
@@ -16,6 +18,7 @@
 - `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
+  在官方账户快照写入后，为 OCG／CLP 注入指标库的只读 Token 换算，并与 WebUI 复用估算字段合并逻辑；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
   仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，
@@ -50,7 +53,7 @@
   View 都不读取请求正文、设置文件或价格目录。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、有效请求平均 Token/s 与压缩统计；
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、含首字等待的输出 Token/s 与压缩统计；
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
@@ -146,11 +149,14 @@
 - `service-restart-runner.ts`：统一执行 App Server 服务重启的异步子进程封装，Gateway 自动重启
   与未来 CLI 单 Provider 重启复用同一入口，输出脱敏后写入日志。
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
+  每个完整 Conversation 身份复用独立有界队列，同会话保持顺序，慢统计和慢 Surface 不阻塞其他会话或渠道。
+  完成统计补全共用 5 秒异步等待预算；本轮统计按精确 Thread/Turn 读取，任务聚合在写入水位完成后只查询一次，避免为单轮统计重复扫描整棵会话树；超时回退已有统计，关闭立即取消等待且不投递迟到结果。对
   `turn.completed` 等待对应 Turn 或 Thread 的指标写入水位，再依次注入可恢复的本轮统计、当前授权 Workspace
   的 Git 分支、递归包含子代理后代的 Session 累计统计及显式父 Turn 任务合计；单项指标写入或读取
   失败时保留 Core 已归约的本轮统计并省略不可靠的累计值，不阻断原始完成事件；并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
-  首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
+  生产组合根通过独立加密日志接纳关键输出，渠道就绪后按会话顺序投递并等待实际发送确认；积压期间的可替换增量不排在持久关键事件前面。
+  未执行记录恢复后重新核对当前 Actor 授权；执行结果不明确时保留未决记录，不自动重发。硬配额、落盘失败或事件总线关键溢出会记录交付故障并关闭新普通输入的接纳。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据

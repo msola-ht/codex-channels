@@ -89,6 +89,19 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
+/** 仅扫描响应索引，保留指定调用的上游标签；不读取正文或页外调用摘要。 */
+export async function readDumpResponseProviders(paths, ids) {
+  const selected = new Set(ids);
+  const providers = new Map();
+  await forEachDumpRecord(paths, (record) => {
+    if (record.kind !== "response" || !selected.has(record.id)) return;
+    const provider = upstreamProviderOf(record);
+    if (provider === undefined) providers.delete(record.id);
+    else providers.set(record.id, provider);
+  });
+  return providers;
+}
+
 export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
   const page = limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst)
@@ -409,12 +422,19 @@ function summaryOf(interaction, body) {
     ...(requestKind === undefined ? {} : { requestKind }),
     category: request.method === "GET" && request.path?.split("?")[0] === "/models"
       ? "models" : requestKind === "prewarm" ? "prewarm" : "model",
+    ...(upstreamProviderOf(response) === undefined ? {} : { upstreamProvider: upstreamProviderOf(response) }),
     responseModels: response?.responseModels ?? [],
     state: response?.state ?? "pending",
     status: response?.status,
     durationMs: response?.durationMs,
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
+}
+
+/** 索引里的 Chat 上游提供商；只有明确记录过字符串值时返回，缺失或类型无效一律省略。 */
+function upstreamProviderOf(response) {
+  const value = response?.upstreamProvider;
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 function readPayload(directory, payload, maxBytes) {

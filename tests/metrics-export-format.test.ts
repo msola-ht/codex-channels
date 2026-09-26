@@ -42,6 +42,14 @@ describe("metrics export display helpers", () => {
       expect(values[headings.indexOf(field)]).toBe(value);
     }
     const markdown = render("markdown");
+    const markdownLines = markdown.split("\n");
+    const headerIndex = markdownLines.findIndex((line) => line.startsWith("| 时间 |"));
+    expect(headerIndex).toBeGreaterThanOrEqual(0);
+    const cells = (line: string) => line.slice(1, -1).split("|").map((cell) => cell.trim());
+    const headerCells = cells(markdownLines[headerIndex]!);
+    expect(headerCells).toContain("输出 Token/s");
+    expect(cells(markdownLines[headerIndex + 1]!)).toHaveLength(headerCells.length);
+    expect(cells(markdownLines[headerIndex + 2]!)).toHaveLength(headerCells.length);
     expect(markdown).toContain("首字耗时");
     expect(markdown).toContain("12.5 ms | 1.23 s | 100.13 | 672 ms | requested | echoed");
     expect(markdown).toContain("openai / session-2 / #23");

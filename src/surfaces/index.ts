@@ -56,3 +56,6 @@ export type {
   SurfaceConfigurationChange,
   SurfaceOutputPort,
 } from "./types.js";
+
+export { DeliveryJournal, DeliveryJournalError } from "./delivery-journal.js";
+export { DurableInputQueue } from "./durable-input-queue.js";

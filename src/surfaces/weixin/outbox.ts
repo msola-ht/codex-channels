@@ -137,6 +137,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.accountId = validateWeixinAccountId(accountId);
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Weixin",
+      drainOnClose: true,
+      operationTimeoutMs: 120_000,
       ...(options.capacity === undefined
         ? {}
         : { capacity: options.capacity }),
@@ -145,6 +147,16 @@ export class WeixinOutbox implements SurfaceOutputPort {
         : { closeTimeoutMs: options.closeTimeoutMs }),
       errorMetadata: weixinOutputErrorMetadata,
     });
+  }
+
+  trackInput(conversationId: string, handle: () => Promise<void>): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(conversationId, handle);
+  }
+
+  deliver(event: OutputEvent): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("渠道输出已关闭"));
+    return this.delivery.track(event.target.conversationId, () => this.handle(event));
   }
 
   handle(event: OutputEvent): void {
@@ -485,7 +497,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal: AbortSignal | undefined,
     context: WeixinReplyContext | undefined,
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     if (
       event.type === "turn.completed"
       || event.type === "connection.lost"
@@ -513,7 +525,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
     context?: WeixinReplyContext,
   ): Promise<boolean> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     context ??= {
       actorId: target.conversationId,
       contextToken: undefined,
@@ -561,6 +573,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
         throw error;
       }
     } catch (error) {
+      if (!(error instanceof WeixinProtocolError)
+        || error.code === "network-error" || error.code === "timeout" || error.code === "aborted"
+        || error.code === "invalid-response" || (error.code === "http-error" && ((error.status ?? 500) >= 500 || error.status === 429))) throw error;
       if (isRejectedReplyContext(error)) {
         // 已确认上下文被拒绝时，回退文本仍会复用同一个失效 token，
         // 只会制造第二次无意义的 sendmessage 请求。
@@ -585,7 +600,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
     context = this.contexts.get(target),
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     // The upstream Weixin implementation treats context_token as optional.
     // A known, authorized Conversation can still receive a message after the
     // previous token has expired; omit the stale token until the next inbound
@@ -595,6 +610,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       contextToken: undefined,
     };
     for (const chunk of splitWeixinText(text, maximumChunkCount)) {
+      signal?.throwIfAborted();
       if (!this.access.isAllowed({
         target,
         actorId: context.actorId,
@@ -630,7 +646,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
     context = this.contexts.get(target),
   ): Promise<void> {
-    signal = this.closed ? undefined : signal;
+    signal?.throwIfAborted();
     context ??= {
       actorId: target.conversationId,
       contextToken: undefined,

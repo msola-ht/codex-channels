@@ -20,6 +20,7 @@ describe("WebUI metrics table presentation", () => {
         } }],
       });
       try {
+        const { AccountSettingsManagement } = await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
@@ -28,7 +29,7 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
-        const { GlobalCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { GlobalCards, ClinePassUsageCard } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
@@ -59,7 +60,20 @@ describe("WebUI metrics table presentation", () => {
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
+        const accountSettings = {
+          observedAt: "fixture", resourceRevision: "fixture",
+          opencodeGo: { configured: false, defaultAccountId: null, accounts: [] },
+          deepseek: { configured: true, legacyConfigurationPresent: false, accounts: [{ id: "ds-main", default: true, mode: "switching", model: "deepseek-flash" }] },
+          clinePass: { configured: true, accounts: [{ id: "clp-main", default: true, mode: "switching", model: "cline-pass/deepseek-v4.1-flash" }] },
+        };
+        const accountManagement = { settings: accountSettings, loading: false, busy: false, pendingPreview: null,
+          actionError: null, error: null, mutate: noop, confirm: noop, cancel: noop, refetch: noop };
         const result = {
+          quotaReady: render(ClinePassUsageCard, { account: { provider: "clp-main", displayName: "CLP main", account: "main", default: true, subscriptionRequired: false, available: true, observedAtMs: Date.now(), windows: [{ windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: Date.now() + 3600000, status: null, tokenEstimate: { status: "ready", tokensPerPercent: 1000, observedDeltaPercent: 2, intervalCount: 1, requestCount: 3 } }] } }),
+          quotaSampling: render(ClinePassUsageCard, { account: { provider: "clp-main", displayName: "CLP main", account: "main", default: true, subscriptionRequired: false, available: true, observedAtMs: Date.now(), windows: [{ windowId: "weekly", label: "7天", usedPercent: 12, resetsAt: Date.now() + 3600000, status: null, tokenEstimate: { status: "sampling" } }, { windowId: "monthly", label: "月度", usedPercent: 0, resetsAt: null, status: null, tokenEstimate: { status: "unavailable" } }] } }),
+          accountSettings: render(AccountSettingsManagement, { management: accountManagement }),
+          accountSettingsBusy: render(AccountSettingsManagement, { management: { ...accountManagement, busy: true } }),
+          accountSettingsLegacy: render(AccountSettingsManagement, { management: { ...accountManagement, settings: { ...accountSettings, deepseek: { ...accountSettings.deepseek, legacyConfigurationPresent: true } } } }),
           newAccount: render(AccountIdField, { id: "account", value: "main", accounts: [], disabled: false, editing: false, onChange: noop }),
           reservedAccount: render(AccountIdField, { id: "account", value: "openai", accounts: [], reservedIds: ["openai", "deepseek", "ocg"], disabled: false, editing: false, onChange: noop }),
           customAccount: render(AccountIdField, { id: "account", value: "team_a", accounts: [{ id: "team-a" }], disabled: false, editing: false, onChange: noop }),
@@ -84,10 +98,16 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, upstreamProvider: "deepseek", chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceIndexOnly: render(TrafficDetail, { detail: { ...detail, upstreamProvider: "deepseek" }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceDiagnosticsOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "tokensPerSecond", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
@@ -142,6 +162,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].requestServiceTier = "priority";
         errorsData.records[0].serviceTier = "default";
         result.fastErrors = render(ErrorsPage, {});
+        errorsData.records[0].upstreamProvider = "deepseek";
+        result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
@@ -182,6 +204,56 @@ describe("WebUI metrics table presentation", () => {
 
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
+
+  it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
+    for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
+      const html = markup[key]!;
+      expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+      expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+      expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
+    }
+    expect(markup.requests).not.toContain('title="routing.finalProvider"');
+    expect(markup.traffic).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the recorded upstream provider on the error list without adding a column", () => {
+    const html = markup.errorsUpstream!;
+    expect(html).toContain('title="routing.finalProvider">上游：deepseek');
+    expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+    expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
+    expect(markup.errors).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
+    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
+    expect(markup.traceIndexOnly).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceDiagnosticsOnly).not.toContain('title="routing.finalProvider"');
+    expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
+    expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("distinguishes quota estimates from sampling and unavailable metrics", () => {
+    expect(markup.quotaReady).toContain("每 1%");
+    expect(markup.quotaReady).toContain("满额约");
+    expect(markup.quotaReady).toContain("非官方固定兑换率");
+    expect(markup.quotaSampling).toContain("Token 换算正在采样");
+    expect(markup.quotaSampling).toContain("Token 换算暂不可用");
+    expect(markup.quotaSampling).not.toContain("满额约");
+  });
+
+  it("shares managed account controls while isolating the DS legacy action", () => {
+    for (const id of ["deepseek-api-key", "cline-api-key"]) {
+      expect(markup.accountSettings).toContain(`for="${id}"`);
+      expect(markup.accountSettings).toMatch(new RegExp(`<input[^>]*id="${id}"[^>]*value=""`));
+      expect(markup.accountSettingsBusy).toMatch(new RegExp(`<input[^>]*id="${id}"[^>]*disabled=""`));
+    }
+    expect(markup.accountSettings).toContain("ds-main");
+    expect(markup.accountSettings).toContain("clp-main");
+    expect(markup.accountSettingsLegacy).toContain("移除旧账户");
+    expect(markup.accountSettingsLegacy).not.toContain('id="deepseek-api-key"');
+    expect(markup.accountSettingsLegacy).toContain('id="cline-api-key"');
+  });
 
   it("renders account presets, custom validation and an immutable existing ID", () => {
     expect(markup.newAccount).toContain('role="combobox"');
@@ -234,7 +306,7 @@ describe("WebUI metrics table presentation", () => {
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
       "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
-      "首字耗时", "总耗时", "Token/s", "调用详情",
+      "首字耗时", "总耗时", "输出 Token/s", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
@@ -274,10 +346,10 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "平均 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "输出 Token/s", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "平均 Token/s",
+      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "输出 Token/s",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -302,7 +374,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("时间");
-    const speedIndex = headers(markup.ascending!).indexOf("Token/s");
+    const speedIndex = headers(markup.ascending!).indexOf("输出 Token/s");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -324,7 +396,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首字耗时", "总耗时", "Token/s", "调用详情"]) {
+    for (const label of ["首字耗时", "总耗时", "输出 Token/s", "调用详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");

@@ -44,7 +44,11 @@ function createGatewayApplicationFixture(
 ): GatewayApplicationFixture {
   return Object.assign(
     Object.create(GatewayApplication.prototype),
-    { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
+    {
+      asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() },
+      completionMetrics: { close: vi.fn(async () => undefined) },
+      deliveryJournal: { close: vi.fn() },
+    },
     properties,
   ) as GatewayApplicationFixture;
 }
@@ -287,12 +291,14 @@ describe("GatewayApplication startup cleanup", () => {
     const surfaceStart = vi.fn(stage === "surface" ? pause : async () => undefined);
     const spoolStart = vi.fn(stage === "spool" ? pause : async () => undefined);
     const idleStart = vi.fn();
+    const closeCompletionMetrics = vi.fn(async () => undefined);
     const application = createRestoreApplication({
       binding: { target: { surface: "feishu", accountId: "default", conversationId: "stop" },
         workspaceId: "default", threadId: "thread", sessionId: "thread" },
       published: [],
       restoreSubscriptions: async () => [],
       overrides: {
+        completionMetrics: { close: closeCompletionMetrics },
         providerMetrics: { start: stage === "metrics" ? pause : async () => undefined, close: async () => undefined },
         surfaceManager: { start: surfaceStart, stop: async () => undefined },
         channelImageSpool: { start: spoolStart, stop: async () => undefined },
@@ -310,6 +316,7 @@ describe("GatewayApplication startup cleanup", () => {
     if (stage === "metrics") expect(connect).not.toHaveBeenCalled();
     if (stage !== "spool") expect(spoolStart).not.toHaveBeenCalled();
     expect(idleStart).not.toHaveBeenCalled();
+    expect(closeCompletionMetrics).toHaveBeenCalledTimes(1);
   });
 
   it("cancels binding recovery when startup fails without an explicit stop", async () => {
@@ -389,7 +396,11 @@ describe("GatewayApplication startup cleanup", () => {
         calls.push("recovery:settled");
         return [];
       },
-      overrides: { bindings: { close: () => { calls.push("store:closed"); } } },
+      overrides: {
+        bindings: { close: () => { calls.push("store:closed"); } },
+        surfaceManager: { stop: async () => { calls.push("surface:closed"); } },
+        deliveryJournal: { close: () => { calls.push("journal:closed"); } },
+      },
     });
     Object.assign(Reflect.get(application, "codex") as object, { close: async () => {
       calls.push("client:closed");
@@ -399,7 +410,7 @@ describe("GatewayApplication startup cleanup", () => {
     const restoring = coordinator.restore();
     await application.stop();
     await restoring;
-    expect(calls).toEqual(["client:closed", "recovery:settled", "store:closed"]);
+    expect(calls).toEqual(["surface:closed", "journal:closed", "client:closed", "recovery:settled", "store:closed"]);
   });
 
   it("cancels connectivity before waiting for startup to settle", async () => {

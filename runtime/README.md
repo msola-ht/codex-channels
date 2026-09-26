@@ -2,6 +2,7 @@
 
 本目录保存 npm CLI 与已编译 Gateway 必须直接共享的稳定 JavaScript 模块，不承载会话业务。
 
+- `quota-token-estimate.mjs` / `quota-token-estimate.d.mts`：账户额度 Token 估算的共享展示类型与只读字段合并；精确匹配窗口和重置时间，区分采样与读取失败，不覆盖官方额度。
 - `model-name-comparison.mjs` / `model-name-comparison.d.mts`：CLI 与 WebUI 共用的请求/响应模型名称对照；区分一致、不一致和信息不足，不推断模型身份或别名。
 
 - `config-event-queue.mjs`：以有界、版本化、原子更新的队列保存待投递配置事件。

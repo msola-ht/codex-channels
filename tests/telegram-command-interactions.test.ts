@@ -27,6 +27,37 @@ afterEach(() => {
 });
 
 describe("Telegram command interactions", () => {
+  it("orders command replies behind active output in the same chat", async () => {
+    const { surface, output, sentTexts } = createSurface(vi.fn(), vi.fn());
+    let release!: () => void;
+    surface.bot.api.config.use(async (previous, method, payload, signal) => {
+      if (method === "sendMessage" && (payload as { text?: string }).text === "先发送") {
+        await new Promise<void>(resolve => { release = resolve; });
+      }
+      return previous(method, payload, signal);
+    });
+    surface.output.handle({ type: "text.completed",
+      target: { surface: "telegram", accountId: "default", conversationId: "100" },
+      threadId: "thread", turnId: "turn", itemId: "item", text: "先发送", phase: "final_answer" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const command = surface.bot.handleUpdate({ update_id: 100, message: {
+      message_id: 100, date: 1, chat: telegramChat(), from: telegramUser(), text: "/whoami",
+      entities: [{ type: "bot_command", offset: 0, length: 7 }],
+    } });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(sentTexts).toEqual([]);
+      release();
+      await command;
+      expect(sentTexts[0]).toBe("先发送");
+      expect(sentTexts[1]).toContain("Telegram 用户 ID");
+    } finally {
+      release();
+      await surface.stop();
+      await output.close();
+    }
+  });
+
   it("rejects an old marked form at the Bot entry point after restarting", async () => {
     const submit = vi.fn();
     const before = createSurface(submit, vi.fn());

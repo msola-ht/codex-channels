@@ -27,6 +27,8 @@ export interface SurfaceConfigurationChange {
 }
 
 export interface SurfaceOutputPort {
+  /** Resolves only after the event's queued platform operations finish. */
+  deliver?(event: OutputEvent): Promise<void>;
   handle(event: OutputEvent): Promise<void> | void;
 }
 

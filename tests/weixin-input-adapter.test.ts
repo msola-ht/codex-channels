@@ -97,6 +97,46 @@ afterAll(() => {
 });
 
 describe("WeixinInputAdapter", () => {
+  it("keeps the latest reply context when stop overtakes older ordinary messages", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const service = serviceFixture(async (_target, text) => {
+      if (text === "first") await gate;
+      return { threadId: "thread", turnId: "turn", steered: false };
+    });
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: async (_cursor, signal) => {
+        if (delivered) return waitForAbort(signal);
+        delivered = true;
+        return { cursor: "cursor", messages: ["first", "second", "/stop"].map((text, index) => ({
+          kind: "text" as const, messageId: String(index), actorId, conversationId: actorId,
+          contextToken: `context-${index}`, text,
+        })) };
+      }, sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const replyContexts = new WeixinReplyContextStore(accountId);
+    const persistReplyContext = vi.fn(async () => {});
+    const handleText = vi.fn(async (_target: ConversationTarget, _actor: string, text: string) => text === "/stop" ? "handled" as const : "not-command" as const);
+    const adapter = new WeixinInputAdapter({ accountId, client, cursorStore, service,
+      outbox: outboxFixture(), access: accessFixture(true), replyContexts, persistReplyContext,
+      interactions: { handleText }, onFatal: vi.fn(),
+    });
+    try {
+      await adapter.start();
+      await vi.waitFor(() => expect(handleText).toHaveBeenCalledWith(target, actorId, "/stop"));
+      expect(cursorStore.set).not.toHaveBeenCalled();
+      release();
+      await vi.waitFor(() => expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor"));
+      expect(replyContexts.get(target)?.contextToken).toBe("context-2");
+      expect(persistReplyContext.mock.calls.at(-1)).toEqual([target, actorId, "context-2"]);
+    } finally {
+      release();
+      await adapter.stop();
+    }
+  });
+
   it("authorizes, remembers the actor, submits text, and commits afterward", async () => {
     const events: string[] = [];
     const controller = clientFixture();
@@ -136,7 +176,7 @@ describe("WeixinInputAdapter", () => {
       "submit",
       "cursor:cursor-one",
     ]);
-    expect(service.submit).toHaveBeenCalledWith(target, "hello");
+    expect(service.submit).toHaveBeenCalledWith(target, "hello", expect.any(AbortSignal));
     expect(actorRegistry.rememberActor).toHaveBeenCalledWith(target, actorId);
     expect(replyContexts.get(target)).toEqual({
       actorId,
@@ -246,7 +286,7 @@ describe("WeixinInputAdapter", () => {
     });
     await adapter.stop();
 
-    expect(service.submit).toHaveBeenCalledWith(target, "1");
+    expect(service.submit).toHaveBeenCalledWith(target, "1", expect.any(AbortSignal));
   });
 
   it("composes live polling health into the shared /status reply", async () => {
@@ -370,12 +410,12 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenNthCalledWith(
       1,
       target,
-      original,
+      original, expect.any(AbortSignal),
     );
     expect(service.submit).toHaveBeenNthCalledWith(
       2,
       target,
-      expect.stringContaining(`\n> ${expected}`),
+      expect.stringContaining(`\n> ${expected}`), expect.any(AbortSignal),
     );
     const submitted = vi.mocked(service.submit).mock.calls[1]?.[1];
     expect(submitted).toEqual(expect.stringContaining("\n\n当前消息：\n引用测试"));
@@ -430,6 +470,7 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenCalledWith(
       target,
       "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：\n> [引用正文不在当前进程缓存中，请重新发送原文]\n\n当前消息：\n重启后的引用测试",
+      expect.any(AbortSignal),
     );
   });
 
@@ -497,6 +538,7 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenCalledWith(
       target,
       "以下引用来自平台原生引用关系，已由 Gateway 验证（仅作上下文）：\n> [引用正文不在当前进程缓存中，请重新发送原文]\n\n当前消息：\n当前已授权消息",
+      expect.any(AbortSignal),
     );
   });
 
@@ -613,7 +655,7 @@ describe("WeixinInputAdapter", () => {
         { url: pngDataUrl },
         { url: jpegDataUrl },
       ],
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("submits separate image messages immediately and persists reply contexts in order", async () => {
@@ -712,11 +754,11 @@ describe("WeixinInputAdapter", () => {
     expect(service.submit).toHaveBeenNthCalledWith(1, target, {
       text: "比较这些图片",
       images: [{ url: pngDataUrl }],
-    });
+    }, expect.any(AbortSignal));
     expect(service.submit).toHaveBeenNthCalledWith(2, target, {
       text: "请查看这张图片并根据图片内容协助我。",
       images: [{ url: jpegDataUrl }],
-    });
+    }, expect.any(AbortSignal));
   });
 
   it("commits an unauthorized image without contacting its CDN", async () => {
@@ -824,7 +866,7 @@ describe("WeixinInputAdapter", () => {
     });
     expect(service.submit).toHaveBeenCalledWith(
       target,
-      expect.stringContaining("{\"enabled\":true}"),
+      expect.stringContaining("{\"enabled\":true}"), expect.any(AbortSignal),
     );
   });
 
@@ -1177,3 +1219,130 @@ function outboxFixture() {
     notifyText: vi.fn(() => true),
   };
 }
+
+it.each([false, true])("preserves the latest encrypted context across admission failure and replay (Gateway restart: %s)", async restart => {
+  const { DeliveryJournal } = await import("../src/surfaces/delivery-journal.js");
+  const { EncryptedFileWeixinReplyContextPersistence } = await import("../src/surfaces/weixin/reply-context-persistence.js");
+  const directory = mkdtempSync(join(tmpdir(), "weixin-order-regression-"));
+  let journal = new DeliveryJournal(join(directory, "journal"));
+  const persistence = new EncryptedFileWeixinReplyContextPersistence(join(directory, "contexts"));
+  const writes = vi.spyOn(persistence, "set");
+  const originalAccept = journal.accept.bind(journal);
+  let refuse = true;
+  vi.spyOn(journal, "accept").mockImplementation((input, purpose) => {
+    if (!input.control && refuse) { refuse = false; throw new Error("temporary admission failure"); }
+    return originalAccept(input, purpose);
+  });
+  const older = { kind: "text" as const, messageId: "older", actorId, conversationId: actorId, contextToken: "older-context", text: "ordinary" };
+  const newer = { ...older, messageId: "newer", contextToken: "newer-context", text: "/stop" };
+  let contexts = new WeixinReplyContextStore(accountId);
+  const service = serviceFixture();
+  const fatal = vi.fn();
+  let fetches = 0;
+  const create = (recoverOnly = false) => new WeixinInputAdapter({
+    journal, accountId, replyContexts: contexts, service, access: accessFixture(true), onFatal: fatal,
+    client: { getUpdates: async (_cursor, signal) => {
+      if (!recoverOnly && ++fetches <= 2) return { cursor: "same-batch", messages: [older, newer] };
+      return waitForAbort(signal);
+    }, sendText: vi.fn(async () => {}) },
+    cursorStore: cursorStoreFixture(),
+    outbox: { ...outboxFixture(), trackInput: async (_id, operation) => operation() },
+    persistReplyContext: (t, actor, token) => persistence.set(t, actor, token),
+    readReplyContext: t => persistence.get(t),
+    interactions: { handleText: async (_t, _actor, text) => text === "/stop" ? "handled" : "not-command" },
+  });
+  let adapter = create();
+  try {
+    await adapter.start();
+    await vi.waitFor(() => expect(fatal).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(journal.usage().records).toBe(0));
+    expect((await persistence.get(target))?.contextToken).toBe("newer-context");
+    if (restart) {
+      await adapter.stop();
+      journal.accept({ id: "weixin-pending-old", stream: `weixin:${accountId}:input`, lane: JSON.stringify(["weixin", accountId, actorId]), control: false, payload: { message: older, sequence: 1 } });
+      journal.close();
+      journal = new DeliveryJournal(join(directory, "journal"));
+      contexts = new WeixinReplyContextStore(accountId);
+      adapter = create(true);
+    }
+    await adapter.start();
+    await vi.waitFor(() => expect(service.submit).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(journal.usage().records).toBe(0));
+    expect(contexts.get(target)?.contextToken).toBe("newer-context");
+    expect((await persistence.get(target))?.contextToken).toBe("newer-context");
+    expect(writes).toHaveBeenCalledOnce();
+  } finally { await adapter.stop(); journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it("does not admit or acknowledge input when its ingress context cannot be persisted", async () => {
+  const { DeliveryJournal } = await import("../src/surfaces/delivery-journal.js");
+  const directory = mkdtempSync(join(tmpdir(), "weixin-context-failure-"));
+  const journal = new DeliveryJournal(directory);
+  const service = serviceFixture();
+  const cursorStore = cursorStoreFixture();
+  const contexts = new WeixinReplyContextStore(accountId);
+  const fatal = vi.fn();
+  const adapter = new WeixinInputAdapter({ journal, accountId, service, cursorStore, replyContexts: contexts,
+    client: { getUpdates: async () => ({ cursor: "next", messages: [{ kind: "text", messageId: "1", actorId, conversationId: actorId, contextToken: "context", text: "/stop" }] }), sendText: vi.fn(async () => {}) },
+    outbox: { ...outboxFixture(), trackInput: async (_id, operation) => operation() },
+    access: accessFixture(true), onFatal: fatal,
+    persistReplyContext: async () => { throw new Error("disk failure"); }, readReplyContext: async () => null,
+  });
+  try {
+    await adapter.start(); await vi.waitFor(() => expect(fatal).toHaveBeenCalledOnce());
+    expect(journal.usage().records).toBe(0);
+    expect(cursorStore.set).not.toHaveBeenCalled();
+    expect(service.submit).not.toHaveBeenCalled();
+    expect(contexts.get(target)).toBeUndefined();
+  } finally { await adapter.stop(); journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it("cancels batch preparation without acknowledging messages or installing a late context", async () => {
+  const { DeliveryJournal } = await import("../src/surfaces/delivery-journal.js");
+  const directory = mkdtempSync(join(tmpdir(), "weixin-context-cancel-"));
+  const journal = new DeliveryJournal(directory);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const persist = vi.fn(async () => gate);
+  const cursorStore = cursorStoreFixture();
+  const contexts = new WeixinReplyContextStore(accountId);
+  const adapter = new WeixinInputAdapter({ journal, accountId, service: serviceFixture(), cursorStore, replyContexts: contexts,
+    client: { getUpdates: async () => ({ cursor: "next", messages: [{ kind: "text", messageId: "1", actorId, conversationId: actorId, contextToken: "context", text: "ordinary" }] }), sendText: vi.fn(async () => {}) },
+    outbox: { ...outboxFixture(), trackInput: async (_id, operation) => operation() },
+    access: accessFixture(true), onFatal: vi.fn(), persistReplyContext: persist, readReplyContext: async () => null,
+  });
+  try {
+    await adapter.start(); await vi.waitFor(() => expect(persist).toHaveBeenCalledOnce());
+    const closing = adapter.stop(); release(); await closing;
+    expect(journal.usage().records).toBe(0);
+    expect(cursorStore.set).not.toHaveBeenCalled();
+    expect(contexts.get(target)).toBeUndefined();
+  } finally { release(); await adapter.stop(); journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it("a delayed recovery read cannot replace the context installed by a newer incoming batch", async () => {
+  const { DeliveryJournal } = await import("../src/surfaces/delivery-journal.js");
+  const directory = mkdtempSync(join(tmpdir(), "weixin-context-race-"));
+  const journal = new DeliveryJournal(directory);
+  const older = { kind: "text" as const, messageId: "old", actorId, conversationId: actorId, contextToken: "old-context", text: "older" };
+  journal.accept({ id: "old", stream: `weixin:${accountId}:input`, lane: JSON.stringify(["weixin", accountId, actorId]), control: false, payload: { message: older, sequence: 1 } });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const contexts = new WeixinReplyContextStore(accountId);
+  const service = serviceFixture();
+  let delivered = false;
+  const adapter = new WeixinInputAdapter({ journal, accountId, service, cursorStore: cursorStoreFixture(), replyContexts: contexts,
+    client: { getUpdates: async (_cursor, signal) => {
+      if (delivered) return waitForAbort(signal);
+      delivered = true; return { cursor: "next", messages: [{ ...older, messageId: "new", contextToken: "new-context", text: "newer" }] };
+    }, sendText: vi.fn(async () => {}) },
+    outbox: { ...outboxFixture(), trackInput: async (_id, operation) => operation() },
+    access: accessFixture(true), onFatal: vi.fn(), persistReplyContext: async () => {},
+    readReplyContext: async () => { await gate; return { actorId, contextToken: "old-context" }; },
+  });
+  try {
+    await adapter.start(); await vi.waitFor(() => expect(contexts.get(target)?.contextToken).toBe("new-context"));
+    release(); await vi.waitFor(() => expect(service.submit).toHaveBeenCalledTimes(2));
+    expect(contexts.get(target)?.contextToken).toBe("new-context");
+  } finally { release(); await adapter.stop(); journal.close(); rmSync(directory, { recursive: true, force: true }); }
+});

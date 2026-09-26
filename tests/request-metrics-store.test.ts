@@ -63,7 +63,7 @@ describe("SqliteModelRequestMetricsStore", () => {
     `, join(directory, "metrics.sqlite3")], { cwd: process.cwd(), stdio: "pipe", timeout: 15000 });
   });
 
-  it("derives request speed and averages only eligible raw requests across scopes", () => {
+  it("derives request speed and pools output over eligible request time across scopes", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
     const base = { ...sample(), recordedAtMs: 2_000 };
     store.recordBatch([
@@ -76,15 +76,30 @@ describe("SqliteModelRequestMetricsStore", () => {
       { ...base, threadId: "other", outputTokens: 900, totalDurationMs: 1_000 },
     ]);
     expect(store.recent(7).map((row) => row.tokensPerSecond)).toEqual([900, null, null, null, null, 300, 100]);
-    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(200);
-    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(200);
+    expect(store.threadTurnSummary("thread-1", "turn-1")?.tokensPerSecond).toBe(250);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(250);
     const scope = { startAtMs: 1_000, endAtMs: 3_000, limit: 1, sortKey: "tokensPerSecond" as const, sortDirection: "desc" as const };
     expect(store.threadList(scope).threads[0]).toMatchObject({ threadId: "other", tokensPerSecond: 900 });
-    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(200);
+    expect(store.threadTurnSummaries("thread-1", scope).turns[0]?.tokensPerSecond).toBe(250);
     expect(store.page(scope).records[0]?.tokensPerSecond).toBe(900);
     store.recordSubagentThread({ agentThreadId: "other", parentThreadId: "thread-1", parentTurnId: "turn-1", agentPath: "/root/child" });
-    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBeCloseTo(1300 / 3);
-    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(200);
+    expect(store.threadSummary("thread-1").threadAggregate?.tokensPerSecond).toBe(380);
+    expect(store.threadList({ ...scope, threadId: "thread-1" }).threads[0]?.tokensPerSecond).toBe(250);
+    store.close();
+  });
+  it("counts reasoning tokens in the output rate and ignores the first-content window", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"), 5_000);
+    const base = { ...sample(), recordedAtMs: 2_000, turnId: "turn-rate" };
+    store.recordBatch([
+      { ...base, outputTokens: 100, reasoningOutputTokens: 40, totalDurationMs: 1_000, firstContentMs: 200 },
+      { ...base, outputTokens: 100, reasoningOutputTokens: null, totalDurationMs: 1_000, firstContentMs: 800 },
+      { ...base, outputTokens: 100, reasoningOutputTokens: 0, totalDurationMs: 1_000, firstContentMs: 901 },
+      { ...base, outputTokens: 40, reasoningOutputTokens: 40, totalDurationMs: 1_000 },
+    ]);
+    // 推理 Token 计入分子；首字耗时只体现在分母的总耗时里，不再单独扣解码窗口。
+    expect(store.recent(4).map((row) => row.tokensPerSecond)).toEqual([40, 100, 100, 100]);
+    // 合计相除：340 Token / 4 秒，缺少首字样本的记录同样参与。
+    expect(store.threadTurnSummary("thread-1", "turn-rate")?.tokensPerSecond).toBe(85);
     store.close();
   });
   it("persists TTFT and restores the first eligible sample for the exact Turn", () => {
@@ -315,6 +330,168 @@ describe("SqliteModelRequestMetricsStore", () => {
     `).get();
     inspection.close();
     expect(legacyView).toBeUndefined();
+  });
+
+  it.each(["ocg-main", "clp-main"])("derives %s quota ratios from persisted snapshots without mixing windows or open intervals", (provider) => {
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1000) + 3600;
+    const store = new SqliteModelRequestMetricsStore(path);
+    const snapshot = (offset: number, weekly: number, monthly: number, reset = resetsAt, available = true) => {
+      store.upsertAccountSnapshot({ sourceId: provider, provider, accountId: "main", displayName: provider,
+        enabled: true, observedAtMs: now + offset, available,
+        usage: { kind: available ? "quota-windows" : "subscription-required", provider, available,
+          windows: [{ windowId: "weekly", usedPercent: weekly, resetsAt: reset },
+            { windowId: "monthly", usedPercent: monthly, resetsAt: resetsAt + 3600 },
+            { windowId: "unknown-reset", usedPercent: 10, resetsAt: null }] },
+        limits: { kind: "unsupported", provider } });
+    };
+    const metric = (offset: number, tokens: number, target = provider) => store.record({
+      ...sample(), provider: target, recordedAtMs: now + offset, requestStartedAtMs: now + offset - 1, responseCompletedAtMs: now + offset,
+      inputTokens: tokens, outputTokens: 0, totalTokens: tokens,
+    });
+    snapshot(0, 10, 20);
+    expect(store.accountQuotaEstimates(provider, now)).toEqual([
+      { windowId: "weekly", resetsAt, tokenEstimate: { status: "sampling" } },
+      { windowId: "monthly", resetsAt: resetsAt + 3600, tokenEstimate: { status: "sampling" } },
+    ]);
+    metric(10, 1100);
+    snapshot(20, 10, 20);
+    metric(30, 900);
+    metric(31, 99999, "ocg-other");
+    snapshot(40, 12, 21);
+    metric(50, 9999);
+    snapshot(60, 12, 21);
+    let ready = store.accountQuotaEstimates(provider, now + 60);
+    expect(ready).toMatchObject([
+      { tokenEstimate: { status: "ready", tokensPerPercent: 1000, observedDeltaPercent: 2, intervalCount: 1, requestCount: 2 } },
+      { tokenEstimate: { status: "ready", tokensPerPercent: 2000, observedDeltaPercent: 1, intervalCount: 1, requestCount: 2 } },
+    ]);
+    snapshot(70, 13, 21);
+    ready = store.accountQuotaEstimates(provider, now + 70);
+    expect(ready[0]?.tokenEstimate).toEqual({ status: "ready", tokensPerPercent: 11999 / 3,
+      observedDeltaPercent: 3, intervalCount: 2, requestCount: 3 });
+    expect(ready[1]?.tokenEstimate).toMatchObject({ tokensPerPercent: 2000, intervalCount: 1 });
+    expect(JSON.stringify(store.latestAccountSnapshot(provider)?.usage)).not.toContain("tokenEstimate");
+    store.close();
+    const reopened = new SqliteModelRequestMetricsStore(path, now + 60, { readOnly: true });
+    expect(reopened.accountQuotaEstimates(provider, now + 70)).toEqual(ready);
+    expect(reopened.accountQuotaEstimates(provider, resetsAt * 1000)[0]?.tokenEstimate).toEqual({ status: "sampling" });
+    reopened.close();
+  });
+
+  it.each(["reset", "backwards", "missing", "no-local-tokens", "missing-tokens"])("does not invent quota ratios after %s", (condition) => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const now = Date.now();
+    const provider = "clp-main";
+    const resetsAt = Math.floor(now / 1000) + 3600;
+    const write = (at: number, percent: number, reset: number, available = true) => store.upsertAccountSnapshot({
+      sourceId: provider, provider, accountId: "main", displayName: provider, enabled: true,
+      observedAtMs: now + at, available, usage: { kind: available ? "quota-windows" : "subscription-required", available,
+        windows: [{ windowId: "weekly", resetsAt: reset, usedPercent: percent }] }, limits: {},
+    });
+    write(0, 10, resetsAt);
+    if (condition !== "no-local-tokens") store.record({ ...sample(), provider, recordedAtMs: now + 10, requestStartedAtMs: now + 5, responseCompletedAtMs: now + 9,
+      inputTokens: condition === "missing-tokens" ? null : 1000 });
+    if (condition === "missing") write(15, 10, resetsAt, false);
+    write(20, condition === "backwards" ? 9 : 12, condition === "reset" ? resetsAt + 100 : resetsAt);
+    expect(store.accountQuotaEstimates(provider, now + 20)[0]?.tokenEstimate).toEqual({ status: "sampling" });
+    store.close();
+  });
+
+  it.each(["ocg-main", "clp-main"])("assigns %s delayed writes by actual request time, including writes after the last snapshot", (provider) => {
+    const now = Date.now();
+    const resetsAt = Math.floor(now / 1000) + 3600;
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const snapshot = (at: number, usedPercent: number) => store.upsertAccountSnapshot({
+      sourceId: provider, provider, accountId: null, displayName: provider, enabled: true,
+      observedAtMs: now + at, available: true, limits: {}, usage: { kind: "quota-windows", available: true,
+        windows: [{ windowId: "weekly", resetsAt, usedPercent }] },
+    });
+    snapshot(0, 10);
+    snapshot(100, 12);
+    snapshot(200, 13);
+    store.recordBatch([
+      { ...sample(), provider, requestStartedAtMs: now + 20, responseCompletedAtMs: now + 80,
+        recordedAtMs: now + 110, inputTokens: 2000, outputTokens: 0 },
+      { ...sample(), provider, requestStartedAtMs: now + 140, responseCompletedAtMs: now + 160,
+        recordedAtMs: now + 210, inputTokens: 1000, outputTokens: 0 },
+      // Already completed before the baseline, even though persistence was delayed.
+      { ...sample(), provider, requestStartedAtMs: now - 20, responseCompletedAtMs: now - 10,
+        recordedAtMs: now + 50, inputTokens: 99999, outputTokens: 0 },
+    ]);
+    expect(store.accountQuotaEstimates(provider, now + 200)[0]?.tokenEstimate).toMatchObject({
+      status: "ready", tokensPerPercent: 1000, intervalCount: 1, requestCount: 1,
+    });
+    expect(store.readSnapshot(() => store.accountQuotaEstimates(provider, now + 220))[0]?.tokenEstimate).toEqual({
+      status: "ready", tokensPerPercent: 1000, observedDeltaPercent: 3, intervalCount: 2, requestCount: 2,
+    });
+    store.close();
+  });
+
+  it.each([-20, 20])("excludes every interval touched by a request starting at %s across snapshots, then recovers", (start) => {
+    const now = Date.now();
+    const provider = "clp-main";
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const snapshot = (at: number, usedPercent: number) => store.upsertAccountSnapshot({
+      sourceId: provider, provider, accountId: null, displayName: provider, enabled: true,
+      observedAtMs: now + at, available: true, limits: {}, usage: { kind: "quota-windows", available: true,
+        windows: [{ windowId: "weekly", resetsAt: Math.floor(now / 1000) + 3600, usedPercent }] },
+    });
+    snapshot(0, 10); snapshot(100, 12); snapshot(200, 14);
+    store.recordBatch([
+      { ...sample(), provider, requestStartedAtMs: now + start, responseCompletedAtMs: now + 150,
+        recordedAtMs: now + 160 },
+      { ...sample(), provider, requestStartedAtMs: now + 50, responseCompletedAtMs: now + 60,
+        recordedAtMs: now + 70 },
+      { ...sample(), provider, requestStartedAtMs: now + 170, responseCompletedAtMs: now + 180,
+        recordedAtMs: now + 190 },
+    ]);
+    expect(store.accountQuotaEstimates(provider, now + 200)[0]?.tokenEstimate).toEqual({ status: "sampling" });
+    store.record({ ...sample(), provider, requestStartedAtMs: now + 200, responseCompletedAtMs: now + 250,
+      recordedAtMs: now + 260, inputTokens: 1000, outputTokens: 0 });
+    snapshot(300, 15);
+    expect(store.accountQuotaEstimates(provider, now + 300)[0]?.tokenEstimate).toMatchObject({
+      status: "ready", tokensPerPercent: 1000, intervalCount: 1, requestCount: 1,
+    });
+    store.close();
+  });
+
+  it.each([false, true])("rebuilds the baseline after row retention (other provider: %s)", (otherProvider) => {
+    const now = Date.now();
+    const provider = "clp-main";
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    let store = new SqliteModelRequestMetricsStore(path, now, { maximumRows: 1 });
+    const snapshot = (at: number, usedPercent: number) => store.upsertAccountSnapshot({
+      sourceId: provider, provider, accountId: null, displayName: provider, enabled: true,
+      observedAtMs: now + at, available: true, limits: {}, usage: { kind: "quota-windows", available: true,
+        windows: [{ windowId: "weekly", resetsAt: Math.floor(now / 1000) + 3600, usedPercent }] },
+    });
+    snapshot(0, 10);
+    store.recordBatch([1100, 900].map((inputTokens, index) => ({ ...sample(), provider, inputTokens, outputTokens: 0,
+      requestStartedAtMs: now + 10 + index * 20, responseCompletedAtMs: now + 15 + index * 20,
+      recordedAtMs: now + 20 + index * 20 })));
+    snapshot(50, 12);
+    expect(store.accountQuotaEstimates(provider, now + 60)[0]?.tokenEstimate).toMatchObject({ tokensPerPercent: 1000 });
+    // A different provider can cause global cleanup of this account's requests.
+    if (otherProvider) store.record({ ...sample(), provider: "ocg-other", recordedAtMs: now + 55,
+      requestStartedAtMs: now + 51, responseCompletedAtMs: now + 54 });
+    store.close();
+    store = new SqliteModelRequestMetricsStore(path, now + 60, { maximumRows: 1 });
+    const truncated = store.accountQuotaEstimates(provider, now + 60);
+    if (otherProvider) expect(truncated).toEqual([]);
+    else expect(truncated[0]?.tokenEstimate).toEqual({ status: "sampling" });
+    snapshot(70, 12);
+    expect(store.accountQuotaEstimates(provider, now + 70)[0]?.tokenEstimate).toEqual({ status: "sampling" });
+    store.record({ ...sample(), provider, requestStartedAtMs: now + 80, responseCompletedAtMs: now + 90,
+      recordedAtMs: now + 95, inputTokens: 2000, outputTokens: 0 });
+    snapshot(100, 14);
+    const expected = store.accountQuotaEstimates(provider, now + 100);
+    expect(expected[0]?.tokenEstimate).toMatchObject({ tokensPerPercent: 1000, intervalCount: 1, requestCount: 1 });
+    store.close();
+    const reader = new SqliteModelRequestMetricsStore(path, now + 100, { readOnly: true });
+    expect(reader.accountQuotaEstimates(provider, now + 100)).toEqual(expected);
+    reader.close();
   });
 
   it("estimates one percent from adjacent weekly quota changes", () => {

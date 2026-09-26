@@ -315,6 +315,9 @@ function redactCatalog(provider) {
     ...(model.maxContextWindow === undefined ? {} : {maxContextWindow: model.maxContextWindow}),
     reasoningEfforts: model.reasoningEfforts, defaultReasoningEffort: model.defaultReasoningEffort,
     supportsImages: model.supportsImages,
+    ...(model.applyPatchToolType === undefined ? {} : {applyPatchToolType: model.applyPatchToolType}),
+    ...(model.instructions === undefined ? {} : {instructions: model.instructions}),
+    ...(model.supportsSearchTool === undefined ? {} : {supportsSearchTool: model.supportsSearchTool}),
     ...(model.template === undefined ? {} : {template: structuredClone(model.template)}),
   })) };
 }

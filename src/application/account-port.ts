@@ -1,3 +1,7 @@
+export type QuotaTokenEstimate =
+  | { status: "sampling" | "unavailable" }
+  | { status: "ready"; tokensPerPercent: number; observedDeltaPercent: number; intervalCount: number; requestCount: number };
+
 export type AccountMetric = bigint | number;
 export type AccountPlanType =
   | "free"
@@ -149,6 +153,7 @@ export interface ProviderQuotaWindow {
   resetsAt: number | null;
   status: string | null;
   localTokens?: number | null;
+  tokenEstimate?: QuotaTokenEstimate;
 }
 
 export type ProviderAccountUsage =

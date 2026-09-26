@@ -299,6 +299,7 @@ export class FeishuMessageClient implements
     file: Buffer,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) throw createAbortError();
     if (
       !this.sdkClient.createFile
       || file.length === 0
@@ -364,6 +365,7 @@ export class FeishuMessageClient implements
   }
 
   async sendImage(chatId: string, image: Buffer, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw createAbortError();
     if (
       !this.sdkClient.createImage
       || image.length === 0
@@ -615,6 +617,7 @@ export class FeishuMessageClient implements
     content: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) throw createAbortError();
     try {
       const response = await withTimeout(
         this.sdkClient.patchMessage({
@@ -662,6 +665,7 @@ export class FeishuMessageClient implements
     label: string,
     signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) throw createAbortError();
     try {
       const response = await withTimeout(
         operation(),
@@ -885,6 +889,7 @@ export class FeishuMessageClient implements
     initialText: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    if (signal?.aborted) throw createAbortError();
     if (!this.sdkClient.createStreamingCard) {
       throw new FeishuMessageError(
         "client-create-failed",
@@ -943,23 +948,18 @@ export class FeishuMessageClient implements
       }
       return candidate;
     } catch (error) {
-      if (error instanceof FeishuMessageError) {
-        throw error;
-      }
-      if (isSdkTimeout(error)) {
-        throw new FeishuMessageError(
-          "send-timeout",
-          "飞书流式卡片创建超时",
-        );
-      }
+      if (isAbortError(error)) throw error;
+      // A CardKit resource alone is not a chat message. Creation failed before
+      // publication, so a different message format cannot duplicate delivery.
       throw new FeishuMessageError(
-        "send-failed",
-        "飞书流式卡片创建失败",
+        "card-create-failed",
+        "飞书流式卡片资源创建失败",
       );
     }
   }
 
   private async createMarkdownCard(markdown: string, signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) throw createAbortError();
     if (!this.sdkClient.createStreamingCard) {
       throw new FeishuMessageError(
         "card-create-failed",
@@ -1024,6 +1024,7 @@ export class FeishuMessageClient implements
     content: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    if (signal?.aborted) throw createAbortError();
     if (!isSafeFeishuResourceIdentifier(messageId)) {
       throw new FeishuMessageError(
         "invalid-response",
@@ -1090,6 +1091,7 @@ export class FeishuMessageClient implements
     content: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    if (signal?.aborted) throw createAbortError();
     try {
       const response = await withTimeout(
         this.sdkClient.createMessage({

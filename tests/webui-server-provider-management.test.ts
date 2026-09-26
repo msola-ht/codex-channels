@@ -1,3 +1,4 @@
+import { sample } from "./request-metrics-fixtures.js";
 import { clinePassAccountsFilePath } from "../runtime/cline-pass-accounts.mjs";
 import {createResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -48,11 +49,12 @@ describe("webui server Provider and account management", () => {
     new SqliteModelRequestMetricsStore(fixture.databasePath).close();
     const marker = clinePassAccountsFilePath(fixture.environment);
     writePrivateFileAtomicSync(marker, JSON.stringify([{id:"test",default:true}]));
+    const resetsAt = Math.floor(Date.now() / 1000) + 3600;
     let fail = false;
     const service = new ProviderAccountService([{ provider: "clp-test", accountUsage: async () => {
       if (fail) throw new Error("upstream unavailable");
       return { kind: "quota-windows", provider: "clp-test", available: true,
-        windows: [{ windowId: "weekly", label: "7天", usedPercent: 12.5, resetsAt: 1790922837, status: null }] };
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 12.5, resetsAt, status: null }] };
     } }], { writeOfficialAccountSnapshot: snapshot => {
       const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
       try { store.upsertAccountSnapshot({ ...snapshot, sourceId: "clp-test:test", accountId: null,
@@ -67,9 +69,18 @@ describe("webui server Provider and account management", () => {
       body: JSON.stringify({ provider: "clp-test" }),
     });
     expect((await read()).snapshots).toContainEqual(expect.objectContaining({ provider: "clp-test", observedAtMs: 0 }));
+    const history = new SqliteModelRequestMetricsStore(fixture.databasePath);
+    const baselineAt = Date.now() - 2000;
+    history.upsertAccountSnapshot({ sourceId: "clp-test:test", provider: "clp-test", accountId: null,
+      displayName: "CLP", enabled: true, available: true, observedAtMs: baselineAt,
+      usage: { kind: "quota-windows", provider: "clp-test", available: true,
+        windows: [{ windowId: "weekly", label: "7天", usedPercent: 10, resetsAt, status: null }] }, limits: {} });
+    history.record({ ...sample(), provider: "clp-test", recordedAtMs: baselineAt + 1000,
+      requestStartedAtMs: baselineAt + 500, responseCompletedAtMs: baselineAt + 900 });
+    history.close();
     expect((await refresh()).status).toBe(200);
     const before = await read();
-    expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [{ usedPercent: 12.5 }] });
+    expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [{ usedPercent: 12.5, tokenEstimate: { status: "ready", tokensPerPercent: 440 } }] });
     fail = true;
     expect((await refresh()).status).toBe(503);
     expect(await read()).toEqual(before);

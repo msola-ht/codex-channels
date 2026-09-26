@@ -50,7 +50,8 @@ describe("real custom Responses provider", () => {
         const id=`responses-${bodies.length}`;
         const item=count===1 ? {type:"function_call",id:`call-${id}`,call_id:`tool-${body.model}`,name:"exec_command",arguments:JSON.stringify({cmd:"printf custom-response-ok",login:false,max_output_tokens:100})} : {type:"message",role:"assistant",id:`answer-${id}`,content:[{type:"output_text",text:"Tool round trip complete"}]};
         response.writeHead(200,{"content-type":"text/event-stream"});
-        for(const event of [{type:"response.created",response:{id}},{type:"response.output_item.done",item},completedResponseEvent(id)]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        const reasoning = { type: "reasoning", id: `thought-${id}`, summary: [], content: [{ type: "reasoning_text", text: `Full thought ${count}.` }] };
+        for(const event of [{type:"response.created",response:{id}}, {type:"response.output_item.done",item:reasoning}, {type:"response.output_item.done",item},completedResponseEvent(id)]) response.write(`data: ${JSON.stringify(event)}\n\n`);
         response.end();
       });
     });
@@ -106,13 +107,21 @@ describe("real custom Responses provider", () => {
         const requests=bodies.filter(body=>body.model===runtime.model);
         expect(requests).toHaveLength(2);
         if (runtime.id === "rs-template") {
-          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
-          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.instructions).toBe("Complete DS fixture instructions. Use exec_command for commands.");
           expect(requests[0]?.text?.verbosity).toBeUndefined();
           expect(requests[0]?.tools).not.toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
+        } else {
+          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
         }
         expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
         expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));
+        expect(requests[1]?.input).toContainEqual(expect.objectContaining({ type: "reasoning", content: [{ type: "reasoning_text", text: "Full thought 1." }] }));
+        const next = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Continue", text_elements: [] }] } });
+        await waitFor(() => turns.some(entry => entry.id === next.turn.id), 15000);
+        expect(turns).toContainEqual(expect.objectContaining({ id: next.turn.id, status: "completed" }));
+        const nextRequest = bodies.filter(body => body.model === runtime.model)[2];
+        for (const count of [1, 2]) expect(nextRequest?.input).toContainEqual(expect.objectContaining({ type: "reasoning", content: [{ type: "reasoning_text", text: `Full thought ${count}.` }] }));
         await rpc.close();rpc=undefined;
       }
     } finally {

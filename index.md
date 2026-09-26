@@ -41,6 +41,7 @@
   与 Gateway 共享主 OpenAI App Server 的桥接架构、实机限制、跨平台边界与下一阶段决策。
 - [`docs/index.md`](docs/index.md)：Codex 协议基线、支持矩阵和实现入口。
 - [`docs/channel-acceptance-matrix.md`](docs/channel-acceptance-matrix.md)：Telegram、飞书和微信验收状态。
+- [`docs/message-delivery-plan.md`](docs/message-delivery-plan.md)：消息链路独立加密待处理日志、配额、故障核对与回滚保护。
 - [`docs/upstream-sources.md`](docs/upstream-sources.md)：飞书与微信上游源码基线。
 - [`docs/codex-cli-upgrade.md`](docs/codex-cli-upgrade.md)：Codex CLI 升级流程。
 - [`docs/codex-cli-upgrade-decisions.md`](docs/codex-cli-upgrade-decisions.md)：当前项目的采用范围、

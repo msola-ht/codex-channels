@@ -33,7 +33,7 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
-  tokensPerSecond: "平均 Token/s",
+  tokensPerSecond: "输出 Token/s",
   compact: "压缩",
 }
 
@@ -177,7 +177,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     {
       id: "tokensPerSecond",
       accessorFn: (turn) => turn.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求速率的算术平均；按各次请求总耗时计算。">平均 Token/s</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint="该轮合格请求的合计输出 Token（含推理）除以合计请求耗时，含首字等待；只有同时具备输出 Token 与总耗时的记录参与。">输出 Token/s</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
     },
     {

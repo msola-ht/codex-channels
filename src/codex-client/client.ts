@@ -445,6 +445,7 @@ export class CodexAppServerClient implements
     clientUserMessageId: string,
     cwd: string,
     overrides: TurnOverrides = {},
+    signal?: AbortSignal,
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       const response = await this.rpc.request<TurnStartResponse>({
@@ -475,7 +476,7 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, signal);
   }
 
   async addQueueItem(
@@ -570,6 +571,7 @@ export class CodexAppServerClient implements
     turnId: string,
     input: TurnInput[],
     clientUserMessageId: string,
+    signal?: AbortSignal,
   ): Promise<TurnStarted> {
     return this.submitTurnInput(threadId, input, async (protocolInput) => {
       const response = await this.rpc.request<TurnSteerResponse>({
@@ -582,7 +584,7 @@ export class CodexAppServerClient implements
         },
       }, { retryOverload: false });
       return toTurnStarted(response);
-    });
+    }, signal);
   }
 
   cancelPendingInput(threadId: string): boolean {
@@ -593,10 +595,12 @@ export class CodexAppServerClient implements
     threadId: string,
     input: TurnInput[],
     submit: (input: ReturnType<typeof toProtocolTurnInput>) => Promise<TurnStarted>,
+    signal?: AbortSignal,
   ): Promise<TurnStarted> {
+    signal?.throwIfAborted();
     const protocolInput = toProtocolTurnInput(input);
     if (!this.imageUpload || !input.some(item => item.type === "image")) return submit(protocolInput);
-    return this.imageUpload.submit(threadId, protocolInput, submit);
+    return this.imageUpload.submit(threadId, protocolInput, submit, signal);
   }
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {

@@ -82,6 +82,8 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 
 ## 专题文档
 
+渠道消息积压或重启后待核对时，使用 `codexc delivery status`，处理步骤见[消息交接与恢复](docs/message-delivery-plan.md)。
+
 - [完整使用指导](docs/user-guide.md)
 - [源码安装与更新](docs/source-install.md)
 - [渠道展示与本地指标](docs/display.md)

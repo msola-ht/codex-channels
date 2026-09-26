@@ -47,7 +47,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `outbox-content.ts`：集中处理 Outbox 的纯文本缓冲、CardKit 字符分片、富文本字节分片与截断标记。
 - `message-event.ts`：SDK 消息事件的严格验证和稳定字段裁剪，保留回复事件的 `parent_id`。
 - `menu-event.ts`：严格裁剪 `application.bot.menu_v6` 的 App、Actor、事件和菜单 Key。
-- `inbox.ts`：私聊文本筛选、授权、同步有界入队、去重和按 Chat 顺序处理；不等待独立文字或图片，
+- `inbox.ts`：私聊文本筛选、授权、可靠接纳、去重和按 Chat 顺序处理；生产注入独立加密日志后，接收确认等待落盘，业务和结果提示在后台处理。不等待独立文字或图片，
   已在队列中明确相邻的图片可成批处理，普通文本与命令仍沿用既有顺序路径。
 - `idle-release-card.ts`：把渠道会话空闲自动解除通知生成为直接携带 `Session ID` 和
   `/r <Thread ID>` 命令的 CardKit 2.0 卡片。
@@ -195,7 +195,7 @@ Queue ID、有界页码和分组编号，条目标签只显示 Application 提�
 按顺序处理，不同 Chat 可以并行。永久无效、未授权、重复或过旧事件被明确忽略；全局输入容量
 耗尽时返回 `retry/overloaded`。由于当前没有经过真实合同验证的 SDK 重试响应通道，Surface
 通过同一有界 Outbox 提示用户稍后重试，不伪造平台自动重投；同一 Chat 在一个连续过载周期内
-最多排入一条提示，下一条消息成功接收后才允许再次提示。去重状态只存在于有界内存，关闭时等待
+最多排入一条提示，下一条消息成功接收后才允许再次提示。独立 Inbox 未注入日志时去重仅存在于有界内存；生产交接日志提供跨重启有限去重。关闭时等待
 已接受任务至有限超时；超时后只允许已经开始的任务自然结束，尚未开始的同 Chat 排队消息会被
 丢弃，不会在旧 Surface 上继续启动。不持久化消息正文。
 
@@ -215,7 +215,7 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 共享配置 `display.operation_updates` 为 `full` 时发送包含完整详情、状态和退出码的
 操作终态卡片，为 `compact` 时发送一行状态、元数据和最多 160 个字符的详情摘要；两种模式都完整
 显示本机路径，并把操作耗时单独放在分隔线后的底栏。网页搜索
-成功完成后立即发送；成功的 MCP 与动态工具按 Turn 延迟到最终回复前聚合，单项保留详情，
+成功完成后立即发送；独立显示模式可按 Turn 汇总 MCP 与动态工具；持久投递模式直接确认可见完成通知，单项保留详情，
 多项发送一次分类计数，并列出最多 8 个去重后的工具明细及各自次数；超出时明确省略数量。
 失败与拒绝仍即时发送。`hidden` 不发送命令、
 文件、工具或搜索操作终态卡片；审批、错误、最终回复和 Turn 完成统计保持原有行为。
@@ -226,7 +226,8 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
-已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
+已接收普通发送最多 5 秒，交互立即取消；截止后取消在途等待，后续分片、流式卡片收尾与回退保留取消信号。
+已取消的操作在调用 SDK 前拒绝，不因超时回退启动新发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
 平台输出顺序和关闭边界。生成图片路径来自 App Server `imageGeneration.savedPath` 或
 渠道 spool（`codexc channel send-image`），两者都在共享读取边界验证绝对路径、无符号链接

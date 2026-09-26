@@ -9,7 +9,7 @@ export class TelegramTypingIndicator {
   private nextActivityId = 1;
   private closed = false;
 
-  constructor(private readonly sendTyping: (chatId: string) => void) {}
+  constructor(private readonly sendTyping: (chatId: string, isCurrent: () => boolean) => void) {}
 
   show(chatId: string): void {
     if (this.closed) {
@@ -20,7 +20,9 @@ export class TelegramTypingIndicator {
       return;
     }
     this.lastSentAt.set(chatId, now);
-    this.sendTyping(chatId);
+    const state = this.states.get(chatId);
+    this.sendTyping(chatId, () => !this.closed && Date.now() - now < 4_000
+      && (!state || (this.states.get(chatId) === state && state.activityKeys.size > 0)));
   }
 
   begin(chatId: string): () => void {

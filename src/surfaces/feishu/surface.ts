@@ -1,3 +1,4 @@
+import type { DeliveryJournal } from "../delivery-journal.js";
 import type { Logger } from "pino";
 
 import type {
@@ -101,6 +102,7 @@ export interface FeishuStartupNotification {
 }
 
 export interface FeishuSurfaceOptions {
+  journal?: DeliveryJournal | undefined;
   appId: string;
   appSecret: string;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
@@ -316,15 +318,20 @@ export class FeishuSurface implements SurfaceAdapter {
       options.logger,
     );
     this.inbox = new FeishuInbox({
+      journal: options.journal,
+      onUncertain: (id, metadata) => options.logger.error({ ...metadata, deliveryId: id }, "飞书输入结果待核对，未自动重发"),
       accountId: options.appId,
       access: options.access,
       ...(options.actorRegistry
         ? { actorRegistry: options.actorRegistry }
         : {}),
-      handle: (message) => this.adapter.handle(message),
+      handle: (message) => options.journal
+        ? this.output.trackInput(message.target.conversationId, () => this.adapter.handle(message))
+        : this.adapter.handle(message),
       handleUrgent: (message) => this.adapter.handle(message),
-      handleImageBatch: (messages) =>
-        this.adapter.handleImageBatch(messages),
+      handleImageBatch: (messages) => options.journal
+        ? this.output.trackInput(messages[0]!.target.conversationId, () => this.adapter.handleImageBatch(messages))
+        : this.adapter.handleImageBatch(messages),
       inputQuietWindowMs: 0,
       handleError: (error) => {
         options.logger.warn(
@@ -507,6 +514,7 @@ export class FeishuSurface implements SurfaceAdapter {
     const imagesStarting = this.images.start();
     const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
+    this.inbox.start();
     const connectionStarting = this.connection.start();
     try {
       await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
@@ -527,8 +535,9 @@ export class FeishuSurface implements SurfaceAdapter {
   private async stopOnce(): Promise<void> {
     this.connectionReady = false;
     await this.connection.stop();
-    await this.inbox.close();
+    const inputClosing = this.inbox.close();
     await this.adapter.close();
+    await inputClosing;
     await this.applicationSetup.close();
     await this.oauth.close();
     this.images.close();

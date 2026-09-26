@@ -8,6 +8,47 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
     return undefined;
   }
 
+  return renderMarkdownAsTelegramHtml(markdown);
+}
+
+/** Split generated HTML only, preserving entities, Unicode and open formatting tags. */
+export function formatMarkdownAsTelegramHtmlChunks(markdown: string): string[] | undefined {
+  if (Array.from(markdown).length > 16_000) return undefined;
+  const html = renderMarkdownAsTelegramHtml(markdown);
+  const chunks: string[] = [];
+  const tags: Array<{ name: string; opening: string }> = [];
+  let chunk = "";
+  let length = 0;
+  const flush = (): void => {
+    if (length === 0) return;
+    chunks.push(protectTelegramReplyHeading(chunk + [...tags].reverse().map(tag => `</${tag.name}>`).join("")));
+    chunk = tags.map(tag => tag.opening).join("");
+    length = 0;
+  };
+  for (const token of html.match(/<[^>]+>|&(?:amp|lt|gt|quot);|[\s\S]/gu) ?? []) {
+    if (token.startsWith("<")) {
+      if (token.startsWith("</")) tags.pop();
+      else tags.push({ name: /^<([a-z]+)/u.exec(token)![1]!, opening: token });
+      chunk += token;
+      continue;
+    }
+    const size = token.startsWith("&") ? 1 : token.length;
+    if (length + size > 3_500) flush();
+    chunk += token;
+    length += size;
+    if (token === "\n" && length >= 3_000) flush();
+  }
+  flush();
+  return chunks;
+}
+
+export function telegramFormattedHtmlText(html: string): string {
+  return html.replace(/<[^>]+>/gu, "")
+    .replace(/&lt;/gu, "<").replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"').replace(/&amp;/gu, "&");
+}
+
+function renderMarkdownAsTelegramHtml(markdown: string): string {
   const lines = markdown.split("\n");
   const output: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {

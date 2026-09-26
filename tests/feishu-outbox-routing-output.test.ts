@@ -300,8 +300,8 @@ describe("Feishu outbox routing and bounded output", () => {
         },
         sendFile: async () => {
           throw new FeishuMessageError(
-            "send-failed",
-            "飞书文件发送失败",
+            "client-create-failed",
+            "飞书文件客户端未初始化",
           );
         },
       },
@@ -336,8 +336,8 @@ describe("Feishu outbox routing and bounded output", () => {
         },
         sendFile: async () => {
           throw new FeishuMessageError(
-            "send-failed",
-            "飞书文件发送失败",
+            "client-create-failed",
+            "飞书文件客户端未初始化",
           );
         },
       },

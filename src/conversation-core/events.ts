@@ -88,7 +88,7 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnOutputTiming {
-  /** 本轮有效模型请求输出速率的算术平均，由已持久化请求派生。 */
+  /** 本轮有效模型请求的输出速率（合计输出 Token 含推理，除以合计请求耗时），由已持久化请求派生。 */
   tokensPerSecond?: number;
   /** 本轮首个有效 OpenAI 上游 TTFT 样本，不累计。 */
   upstreamTtftMs?: number;

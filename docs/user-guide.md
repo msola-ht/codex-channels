@@ -425,6 +425,8 @@ codexc channel send-image /tmp/screenshot.png --thread <Thread ID>
 
 ## 8. 排障
 
+消息投递停滞时运行 `codexc delivery status --json` 查看脱敏未决记录。`uncertain` 不自动重发；先核对渠道与 App Server 会话，再停 Gateway 执行 `codexc delivery resolve <id> --acknowledge`。异常退出或交付存储故障后，需要按[消息交接与恢复](message-delivery-plan.md) 核对并解除故障；回滚前运行 `codexc delivery check-rollback`。
+
 ```bash
 codexc doctor
 codexc doctor --json

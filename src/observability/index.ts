@@ -4,6 +4,8 @@ export {
   type SafeErrorMetadata,
 } from "./logger.js";
 export type {
+  AccountQuotaWindowEstimate,
+  QuotaTokenEstimate,
   ModelRequestMetricSample,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
@@ -86,3 +88,4 @@ export {
   modelRequestMetricsTableSql,
   requireCurrentModelRequestMetricsSchema,
 } from "./sqlite-request-metrics-schema.js";
+export { CompletionMetricsReader } from "./completion-metrics-reader.js";
