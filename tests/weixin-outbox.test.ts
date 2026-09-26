@@ -386,6 +386,63 @@ describe("WeixinOutbox", () => {
     }, expect.any(AbortSignal));
   });
 
+  it("retries a channel image the platform rejected", async () => {
+    let attempts = 0;
+    const fixture = outboxFixture(
+      { value: true },
+      {},
+      async () => {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信图片发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
+      },
+    );
+
+    await fixture.outbox.sendChannelImage(
+      target,
+      "/private/generated/image.png",
+    );
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a rejected final-answer file before falling back to text", async () => {
+    const longText = "测".repeat(20_001);
+    let attempts = 0;
+    const fixture = outboxFixture(
+      { value: true },
+      {},
+      async () => {},
+      async () => {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信文件发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
+      },
+    );
+
+    fixture.outbox.handle(completed("final_answer", longText));
+    await fixture.outbox.close();
+
+    expect(fixture.sendFile).toHaveBeenCalledTimes(2);
+    expect(fixture.sendText).toHaveBeenCalledOnce();
+    expect(fixture.sendText.mock.calls[0]?.[0].text).toMatch(/\[内容预览\]$/u);
+  });
+
   it("keeps operation updates out of the reply window without suppressing Turn completion", async () => {
     const { outbox, sendText } = outboxFixture({ value: true });
 

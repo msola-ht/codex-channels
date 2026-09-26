@@ -47,6 +47,8 @@ import { formatWeixinFinalText } from "./final-text-format.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
+const maximumSendAttempts = 3;
+const maximumSendRetryDelayMs = 5_000;
 const truncationNotice = `\n\n[${contentTruncatedText}]`;
 const previewNotice = "\n\n[内容预览]";
 const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
@@ -85,6 +87,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private readonly delivery: ConversationDeliveryQueue;
   private readonly accountId: string;
   private readonly client: Pick<WeixinProtocolClient, "sendText">;
+  private readonly logger: Logger;
   private closed = false;
 
   constructor(
@@ -96,16 +99,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
     private readonly options: WeixinOutboxOptions = {},
   ) {
     this.accountId = validateWeixinAccountId(accountId);
+    this.logger = logger;
     this.client = {
-      sendText: (input, signal) => withDeliveryRetry(
-        {
-          component: "Weixin",
-          maximumAttempts: 3,
-          maximumDelayMs: 5_000,
-          delayMs: weixinSendRetryDelay,
-          logger,
-          metadata: weixinOutputErrorMetadata,
-        },
+      sendText: (input, signal) => this.withSendRetry(
         () => (signal === undefined
           ? client.sendText(input)
           : client.sendText(input, signal)),
@@ -226,6 +222,28 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.contexts.clear();
   }
 
+  /**
+   * 有界重试只覆盖能证明平台未接受请求的失败，文本、图片与文件共用同一判定；
+   * 超时与网络中断一律不重试，避免重复气泡或重复上传。
+   */
+  private withSendRetry<T>(
+    call: () => Promise<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    return withDeliveryRetry(
+      {
+        component: "Weixin",
+        maximumAttempts: maximumSendAttempts,
+        maximumDelayMs: maximumSendRetryDelayMs,
+        delayMs: weixinSendRetryDelay,
+        logger: this.logger,
+        metadata: weixinOutputErrorMetadata,
+      },
+      call,
+      signal,
+    );
+  }
+
   private render(event: OutputEvent): string | null {
     switch (event.type) {
       case "text.completed":
@@ -319,11 +337,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
         file,
       };
       try {
-        if (signal) {
-          await fileClient.sendFile(input, signal);
-        } else {
-          await fileClient.sendFile(input);
-        }
+        await this.withSendRetry(
+          () => (signal
+            ? fileClient.sendFile(input, signal)
+            : fileClient.sendFile(input)),
+          signal,
+        );
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);
@@ -434,11 +453,12 @@ export class WeixinOutbox implements SurfaceOutputPort {
       image,
     };
     try {
-      if (signal) {
-        await client.sendImage(input, signal);
-      } else {
-        await client.sendImage(input);
-      }
+      await this.withSendRetry(
+        () => (signal
+          ? client.sendImage(input, signal)
+          : client.sendImage(input)),
+        signal,
+      );
     } catch (error) {
       if (isRejectedReplyContext(error)) {
         await this.invalidateContext(target, context.contextToken);

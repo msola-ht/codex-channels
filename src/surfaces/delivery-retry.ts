@@ -46,7 +46,7 @@ export async function withDeliveryRetry<T>(
         },
         "渠道发送失败，稍后重试",
       );
-      await waitBeforeRetry(delayMs, signal);
+      await waitBeforeRetry(delayMs, signal, error);
     }
   }
 }
@@ -56,10 +56,14 @@ export function exponentialRetryDelay(attempt: number): number {
   return 500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 150);
 }
 
-function waitBeforeRetry(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
+function waitBeforeRetry(
+  milliseconds: number,
+  signal: AbortSignal | undefined,
+  cause: unknown,
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new Error("渠道发送重试已取消"));
+      reject(cancelledRetryError(cause));
       return;
     }
     let settled = false;
@@ -71,7 +75,7 @@ function waitBeforeRetry(milliseconds: number, signal: AbortSignal | undefined):
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error("渠道发送重试已取消"));
+      reject(cancelledRetryError(cause));
     };
     const timer = setTimeout(() => {
       if (settled) return;
@@ -82,4 +86,12 @@ function waitBeforeRetry(milliseconds: number, signal: AbortSignal | undefined):
     timer.unref?.();
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/**
+ * 等待重试期间被取消时，取消错误必须保留真正失败的发送错误作为 cause；
+ * 否则日志与 `errorChain` 只能看到一次无原因的取消，无法定位平台返回码。
+ */
+function cancelledRetryError(cause: unknown): Error {
+  return new Error("渠道发送重试已取消", { cause });
 }

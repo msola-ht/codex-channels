@@ -93,4 +93,28 @@ describe("withDeliveryRetry", () => {
     await expect(pending).rejects.toThrow("渠道发送重试已取消");
     expect(attempts).toBe(1);
   });
+
+  it("keeps the failed send as the cause when a retry wait is cancelled", async () => {
+    const controller = new AbortController();
+    const failure = new Error("平台拒绝");
+    const pending = withDeliveryRetry(
+      {
+        component: "Test",
+        maximumAttempts: 3,
+        maximumDelayMs: 5_000,
+        delayMs: () => 1_000,
+        logger,
+      },
+      async () => {
+        throw failure;
+      },
+      controller.signal,
+    );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    controller.abort();
+
+    // 取消不能掩盖真正失败的发送错误，否则日志里只剩一次无原因的取消。
+    await expect(pending).rejects.toMatchObject({ cause: failure });
+  });
 });
