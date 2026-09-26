@@ -39,6 +39,12 @@ export class TelegramApiExecutor {
         return result;
       } catch (error) {
         const metadata = telegramErrorMetadata(error);
+        if (context.operation === "editMessageText" && metadata.telegramErrorKind === "message_not_modified") {
+          // Callers recognize this as an already-visible result. Do not report
+          // a routine no-op as a delivery failure or retry it.
+          this.logger.debug({ ...context, ...metadata }, "Telegram 消息内容未变化");
+          throw error;
+        }
         const elapsedMs = performance.now() - startedAt;
         const delayMs = retryDelay(error, attempt);
         // A lost response to a create operation may already have created a message.

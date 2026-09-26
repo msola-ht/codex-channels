@@ -1,4 +1,4 @@
-import { HttpError } from "grammy";
+import { GrammyError, HttpError } from "grammy";
 import {
   surfaceErrorMetadata,
   type SurfaceErrorMetadata,
@@ -7,6 +7,7 @@ import {
 export interface TelegramErrorMetadata extends SurfaceErrorMetadata {
   networkCode?: string;
   networkErrorType?: string;
+  telegramErrorKind?: "message_not_modified" | "message_not_found" | "message_not_editable" | "invalid_entities" | "message_too_long" | "bad_request";
 }
 
 const networkCodes = new Set([
@@ -19,6 +20,15 @@ const networkTypes = new Set(["Error", "TypeError", "FetchError", "AbortError", 
 
 export function telegramErrorMetadata(error: unknown): TelegramErrorMetadata {
   const result: TelegramErrorMetadata = surfaceErrorMetadata(error);
+  if (error instanceof GrammyError && error.error_code === 400) {
+    const description = error.description.toLowerCase();
+    result.telegramErrorKind = description.includes("message is not modified") ? "message_not_modified"
+      : description.includes("message to edit not found") ? "message_not_found"
+      : description.includes("message can't be edited") ? "message_not_editable"
+      : description.includes("can't parse entities") ? "invalid_entities"
+      : description.includes("message is too long") ? "message_too_long"
+      : "bad_request";
+  }
   // grammY wraps fetch failures in HttpError.error. Inspect bounded causes only;
   // never include URLs, descriptions, headers, messages or arbitrary nested fields.
   let cause: unknown = error instanceof HttpError ? error.error : undefined;

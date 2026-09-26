@@ -125,6 +125,16 @@ describe("TelegramApiExecutor", () => {
     expect(entries.join("")).not.toContain("secret");
   });
 
+  it("does not warn or retry an edit whose content is already visible", async () => {
+    const entries: string[] = [];
+    const executor = new TelegramApiExecutor(pino({}, { write: value => { entries.push(value); } }));
+    const error = new GrammyError("secret", { ok: false, error_code: 400, description: "Bad Request: message is not modified" }, "editMessageText", {});
+    const operation = vi.fn().mockRejectedValue(error);
+    await expect(executor.call({ chatId: "100", operation: "editMessageText", critical: true }, operation)).rejects.toBe(error);
+    expect(operation).toHaveBeenCalledOnce();
+    expect(entries).toEqual([]);
+  });
+
   it("does not retry transient typing failures", async () => {
     const executor = new TelegramApiExecutor(pino({ level: "silent" }));
     const error = new HttpError("network failed", Object.assign(new Error("refused"), { code: "ECONNREFUSED" }));
