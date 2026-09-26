@@ -1,3 +1,4 @@
+import { isEmergencyStopCommand } from "../slash-command.js";
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
   WeixinProtocolError,
@@ -26,7 +27,7 @@ export interface CreateWeixinUpdatesMonitorOptions {
   cursorStore: WeixinUpdatesCursorStore;
   handleMessage(message: Extract<WeixinInboundMessage, {
     kind: "text" | "image" | "file" | "audio";
-  }>): Promise<void>;
+  }>, signal?: AbortSignal, sequence?: number): Promise<void>;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
   retryDelayMs?: number;
@@ -64,6 +65,7 @@ export function createWeixinUpdatesMonitor(
     "微信失效凭据暂停时间无效",
   );
   const recentMessageIds = new RecentMessageIds(recentMessageCapacity);
+  let nextSequence = 0;
 
   return {
     async run(signal) {
@@ -143,36 +145,25 @@ export function createWeixinUpdatesMonitor(
           batchMessageIds.add(message.messageId);
           messages.push(message);
         }
-        for (let index = 0; index < messages.length;) {
-          const message = messages[index]!;
-          if (message.kind === "image") {
-            const imageMessages: Array<Extract<
-              WeixinInboundMessage,
-              { kind: "image" }
-            >> = [];
-            while (messages[index]?.kind === "image") {
-              imageMessages.push(messages[index] as Extract<
-                WeixinInboundMessage,
-                { kind: "image" }
-              >);
-              index += 1;
+        if (signal.aborted) return;
+        const ordered = messages.map(message => ({ message, sequence: ++nextSequence }));
+        const isUrgent = (message: WeixinInboundMessage): boolean => message.kind === "text" && isEmergencyStopCommand(message.text);
+        const process = async (urgent: boolean): Promise<void> => {
+          for (const { message, sequence } of ordered) {
+            if (signal.aborted) return;
+            if (isUrgent(message) !== urgent) continue;
+            if (message.kind === "text" || message.kind === "image" || message.kind === "file" || message.kind === "audio") {
+              await options.handleMessage(message, signal, sequence);
             }
-            for (const imageMessage of imageMessages) {
-              await options.handleMessage(imageMessage);
-              recentMessageIds.add(imageMessage.messageId);
-            }
-            continue;
+            if (!signal.aborted) recentMessageIds.add(message.messageId);
           }
-          if (
-            message.kind === "text"
-            || message.kind === "file"
-            || message.kind === "audio"
-          ) {
-            await options.handleMessage(message);
-          }
-          recentMessageIds.add(message.messageId);
-          index += 1;
-        }
+        };
+        // The ordinary lane retains batch order. Control input can interrupt it,
+        // but never acknowledges the cursor ahead of unfinished ordinary input.
+        const results = await Promise.allSettled([process(false), process(true)]);
+        const failure = results.find(result => result.status === "rejected");
+        if (failure?.status === "rejected") throw failure.reason;
+        if (signal.aborted) return;
         if (batch.cursor.length > 0 && batch.cursor !== cursor) {
           await options.cursorStore.set(accountId, batch.cursor);
           cursor = batch.cursor;

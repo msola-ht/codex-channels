@@ -116,22 +116,24 @@ export class WeixinConversationAdapter {
     );
   }
 
-  handle(message: WeixinConversationMessage): Promise<void> {
+  handle(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     this.conversations.touchActivity?.(message.target);
     if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
-      return this.handleOnce(message);
+      return this.handleOnce(message, signal);
     }
     return this.handleOrdered(
       conversationTargetKey(message.target),
-      () => this.handleOnce(message),
+      () => this.handleOnce(message, signal),
     );
   }
 
-  private async handleOnce(message: WeixinConversationMessage): Promise<void> {
+  private async handleOnce(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
     try {
       if (message.kind === "audio") {
         await this.inputs.flushPending(message.target, message.actorId);
         if (message.audio.transcript !== undefined) {
+          signal?.throwIfAborted();
           await this.conversations.submit(
             message.target,
             formatQuotedInput(
@@ -148,6 +150,7 @@ export class WeixinConversationAdapter {
           );
         }
         const audio = await this.audios.download(message.audio);
+        signal?.throwIfAborted();
         const result = await this.conversations.submit(message.target, {
           ...(message.quotedText === undefined
             ? {}
@@ -189,6 +192,7 @@ export class WeixinConversationAdapter {
           "",
           file.text,
         ].join("\n");
+        signal?.throwIfAborted();
         const result = await this.inputs.enqueue({
           target: message.target,
           actorId: message.actorId,
@@ -234,6 +238,7 @@ export class WeixinConversationAdapter {
             bytes: image.bytes,
           });
         }
+        signal?.throwIfAborted();
         const result = await this.inputs.enqueue({
           target: message.target,
           actorId: message.actorId,
@@ -258,6 +263,7 @@ export class WeixinConversationAdapter {
       }
       const command = parseSlashCommand(message.text);
       if (command === null) {
+        signal?.throwIfAborted();
         await this.conversations.submit(
           message.target,
           formatQuotedInput(message.text, message.quotedText),
@@ -293,6 +299,7 @@ export class WeixinConversationAdapter {
           { command: command.name },
         );
       }
+      signal?.throwIfAborted();
       const result = await this.commands.execute(
         message.target,
         command.name,
@@ -318,6 +325,7 @@ export class WeixinConversationAdapter {
           : rendered,
       );
     } catch (error) {
+      if (signal?.aborted) return;
       if (error instanceof WeixinOutputQueueError) {
         throw error;
       }

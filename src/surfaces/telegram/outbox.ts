@@ -1,4 +1,4 @@
-import { InputFile, type Api } from "grammy";
+import { GrammyError, InputFile, type Api } from "grammy";
 import type { InlineKeyboardMarkup, InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
 
@@ -43,7 +43,7 @@ import {
 } from "../runtime-status-format.js";
 import { TurnPlanProgressState } from "../plan-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
-import { TelegramApiExecutor } from "./api-executor.js";
+import { TelegramApiExecutor, isTelegramDeliveryUncertain } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
 import { telegramDefaultAccountId } from "./constants.js";
@@ -70,6 +70,7 @@ import {
 import { TelegramTypingIndicator } from "./typing-indicator.js";
 
 interface StreamState {
+  deliveryUncertain?: boolean;
   chatId: string;
   turnKey: string;
   text: string;
@@ -143,6 +144,8 @@ export class TelegramOutbox {
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Telegram",
+      drainOnClose: true,
+      operationTimeoutMs: 120_000,
       errorMetadata: (error) => ({ ...telegramErrorMetadata(error) }),
     });
     this.typing = new TelegramTypingIndicator((chatId) => this.enqueueTyping(chatId));
@@ -178,7 +181,7 @@ export class TelegramOutbox {
     this.replyTargets.set(this.turnKey(threadId, turnId), messageId);
   }
 
-  async handle(event: OutputEvent): Promise<void> {
+  handle(event: OutputEvent): void {
     if (
       this.closed
       || event.target.surface !== "telegram"
@@ -198,7 +201,7 @@ export class TelegramOutbox {
         this.typing.start(chatId, this.turnActivityKey(event.threadId, event.turnId));
         this.enqueue(
           chatId,
-          async () => {
+          async (signal) => {
             await this.sendPanel(
               chatId,
               renderTelegramLifecyclePresentation(
@@ -209,6 +212,7 @@ export class TelegramOutbox {
               ),
               this.replyTargets.get(this.turnKey(event.threadId, event.turnId)),
               true,
+              signal,
             );
           },
           true,
@@ -228,12 +232,13 @@ export class TelegramOutbox {
         return;
       case "user.message": {
         const turnKey = this.turnKey(event.threadId, event.turnId);
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           const messageId = await this.sendPanel(
             chatId,
             formatTelegramCliInput(event.text),
             undefined,
             true,
+            signal,
           );
           if (messageId !== undefined) {
             this.replyTargets.set(turnKey, messageId);
@@ -480,9 +485,9 @@ export class TelegramOutbox {
           }
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           for (const key of keys) {
-            await this.flush(chatId, key, true);
+            await this.flush(chatId, key, true, undefined, signal);
           }
           const replyTo = this.replyTargets.get(turnKey);
           try {
@@ -497,6 +502,7 @@ export class TelegramOutbox {
               ),
               replyTo,
               true,
+              signal,
             );
           } finally {
             this.replyTargets.delete(turnKey);
@@ -507,27 +513,29 @@ export class TelegramOutbox {
         return;
       }
       case "warning":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.send(
             chatId,
             formatCodexWarning(visibleUpstreamMessage(event.message)),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "conversation.idle.released":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatIdleReleaseNotification(event.minutes, event.threadId),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "thread.availability":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.send(
             chatId,
             formatThreadAvailability(
@@ -537,69 +545,75 @@ export class TelegramOutbox {
             ),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "connection.lost":
         this.clearThreadOutput(chatId, event.threadId);
-        this.enqueue(chatId, async () => {
-          await this.send(chatId, formatConnectionLost(event.message));
+        this.enqueue(chatId, async (signal) => {
+          await this.send(chatId, formatConnectionLost(event.message), undefined, false, signal);
         }, true);
         return;
       case "connection.restored":
-        this.enqueue(chatId, async () => {
-          await this.send(chatId, formatConnectionRestored(event.message));
+        this.enqueue(chatId, async (signal) => {
+          await this.send(chatId, formatConnectionRestored(event.message), undefined, false, signal);
         }, true);
         return;
       case "account.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeAccountUpdate(event.authMode, event.planType),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "account.rateLimits.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeRateLimitUpdate(event.rateLimits),
             undefined,
             true,
+            signal,
           );
         }, true);
         return;
       case "mcp.status.updated":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeMcpStatusUpdate(event),
             undefined,
             event.status !== "failed",
+            signal,
           );
         }, event.status === "failed");
         return;
       case "mcp.oauth.completed":
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           await this.sendPanel(
             chatId,
             formatRuntimeMcpOAuthCompleted(event),
             undefined,
             event.success,
+            signal,
           );
         }, true);
         return;
       case "thread.status":
         return;
       case "thread.name":
-        await this.sendPanel(
+        this.enqueue(chatId, async (signal) => { await this.sendPanel(
           chatId,
           `Session 名称已更新：${event.name ?? "未命名"}`,
           undefined,
           true,
-        );
+          signal,
+        ); }, true);
         return;
     }
   }
@@ -796,6 +810,23 @@ export class TelegramOutbox {
   }
 
   private async flush(
+    chatId: string, key: string, final: boolean, standaloneState?: StreamState, signal?: AbortSignal,
+  ): Promise<void> {
+    const state = standaloneState ?? this.streams.get(key);
+    if (!state) return;
+    try {
+      signal?.throwIfAborted();
+      if (state.deliveryUncertain) return;
+      await this.flushStream(chatId, key, final, standaloneState, signal);
+    } catch (error) {
+      if (state.messageId === undefined && isTelegramDeliveryUncertain(error)) state.deliveryUncertain = true;
+      throw error;
+    } finally {
+      if (final && !standaloneState) this.streams.delete(key);
+    }
+  }
+
+  private async flushStream(
     chatId: string,
     key: string,
     final: boolean,
@@ -803,7 +834,7 @@ export class TelegramOutbox {
     signal?: AbortSignal,
   ): Promise<void> {
     const state = standaloneState ?? this.streams.get(key);
-    if (!state) {
+    if (!state || (!final && state.completed)) {
       return;
     }
     if (!state.text.trim()) {
@@ -826,13 +857,14 @@ export class TelegramOutbox {
           }
           return;
         } catch (error) {
+          if (!canFallbackTelegramFormat(error)) throw error;
           this.logger.warn(
             { chatId, ...telegramErrorMetadata(error) },
             "Telegram 长回复优化发送失败，回退普通文本",
           );
         }
       }
-      if (state.phase === "final_answer") {
+      {
         // Native Rich Markdown must not recreate the reserved interaction heading.
         const reservedHeading = hasTelegramReplyHeading(formatMarkdownAsTelegramHtml(text.split("\n", 1)[0]!) ?? "");
         const format = reservedHeading ? "html" : this.options.finalMessageFormat ?? "html";
@@ -849,6 +881,11 @@ export class TelegramOutbox {
             }
             return;
           } catch (error) {
+            if (state.messageId !== undefined && isMessageNotModified(error)) {
+              if (!standaloneState) this.streams.delete(key);
+              return;
+            }
+            if (!canFallbackTelegramFormat(error)) throw error;
             this.logger.warn(
               {
                 chatId,
@@ -869,20 +906,20 @@ export class TelegramOutbox {
       try {
         await this.executor.call(
           { chatId, operation: "editMessageText", critical: final },
-          (requestSignal) => this.api.editMessageText(chatId, state.messageId!, first, requestSignal as never),
+          (requestSignal) => this.api.editMessageText(chatId, state.messageId!, first, undefined, requestSignal as never),
           signal,
         );
       } catch (error) {
         if (isMessageNotModified(error)) {
           // The authoritative final text is already visible.
-        } else if (final) {
-          state.messageId = await this.sendFirstChunk(chatId, state, first, signal);
+        } else if (final && canFallbackTelegramFormat(error)) {
+          state.messageId = await this.sendFirstChunk(chatId, state, first, signal, final);
         } else {
           throw error;
         }
       }
     } else {
-      state.messageId = await this.sendFirstChunk(chatId, state, first, signal);
+      state.messageId = await this.sendFirstChunk(chatId, state, first, signal, final);
     }
     if (final) {
       for (const chunk of rest) {
@@ -1095,7 +1132,7 @@ export class TelegramOutbox {
       if (messageId === undefined) {
         state.messageIds.set(
           record.itemId,
-          await this.sendOperationMessage(chatId, text, undefined, signal),
+          await this.sendOperationMessage(chatId, text, undefined, signal, final),
         );
         continue;
       }
@@ -1113,12 +1150,12 @@ export class TelegramOutbox {
         );
       } catch (error) {
         if (!isMessageNotModified(error)) {
-          if (!final) {
+          if (!final || !canFallbackTelegramFormat(error)) {
             throw error;
           }
           state.messageIds.set(
             record.itemId,
-            await this.sendOperationMessage(chatId, text, undefined, signal),
+            await this.sendOperationMessage(chatId, text, undefined, signal, final),
           );
         }
       }
@@ -1258,7 +1295,7 @@ export class TelegramOutbox {
         } catch (error) {
           if (isMessageNotModified(error)) {
             // 最终文本已经可见，无需重复编辑。
-          } else if (event.final === true) {
+          } else if (event.final === true && canFallbackTelegramFormat(error)) {
             existing.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
           } else {
             throw error;
@@ -1350,11 +1387,11 @@ export class TelegramOutbox {
     this.approvalOperations.clearTurn(turnKey);
   }
 
-  private async sendFirstChunk(chatId: string, state: StreamState, text: string, signal?: AbortSignal): Promise<number> {
+  private async sendFirstChunk(chatId: string, state: StreamState, text: string, signal?: AbortSignal, critical = true): Promise<number> {
     const replyTo = this.replyTargets.get(state.turnKey);
     const silent = state.phase === "commentary" || this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
-      { chatId, operation: "sendMessage", critical: true },
+      { chatId, operation: "sendMessage", critical },
       (requestSignal) => this.api.sendMessage(chatId, text, replyOptions(replyTo, silent), requestSignal as never),
       signal,
     );
@@ -1374,7 +1411,7 @@ export class TelegramOutbox {
     if (state.messageId !== undefined) {
       await this.executor.call(
         { chatId, operation: "editMessageText", critical: true },
-        (requestSignal) => this.api.editMessageText(chatId, state.messageId!, richMessage, requestSignal as never),
+        (requestSignal) => this.api.editMessageText(chatId, state.messageId!, richMessage, undefined, requestSignal as never),
         signal,
       );
       return state.messageId;
@@ -1458,6 +1495,7 @@ export class TelegramOutbox {
       );
       return state.messageId;
     } catch (error) {
+      if (!canFallbackTelegramFormat(error)) throw error;
       this.logger.warn(
         { chatId, ...telegramErrorMetadata(error) },
         "Telegram 完整回复文件发送失败，回退折叠文本",
@@ -1553,9 +1591,9 @@ export class TelegramOutbox {
     return message.message_id;
   }
 
-  private async sendOperationMessage(chatId: string, text: string, replyTo?: number, signal?: AbortSignal): Promise<number> {
+  private async sendOperationMessage(chatId: string, text: string, replyTo?: number, signal?: AbortSignal, critical = true): Promise<number> {
     const message = await this.executor.call(
-      { chatId, operation: "sendMessage", critical: true },
+      { chatId, operation: "sendMessage", critical },
       (requestSignal) => this.api.sendMessage(chatId, text, htmlSendOptions(replyTo, true), requestSignal as never),
       signal,
     );
@@ -1707,4 +1745,8 @@ function isMessageNotModified(error: unknown): boolean {
   return errorMessageForClassification(error)
     .toLowerCase()
     .includes("message is not modified");
+}
+
+function canFallbackTelegramFormat(error: unknown): boolean {
+  return error instanceof GrammyError && error.error_code === 400;
 }

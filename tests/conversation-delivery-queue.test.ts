@@ -6,6 +6,30 @@ import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("shares one deadline across fragments and releases the Conversation after cancellation", async () => {
+    vi.useFakeTimers();
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", operationTimeoutMs: 100 });
+    const calls: string[] = [];
+    delivery.enqueue("a", async signal => {
+      for (let index = 0; index < 3; index++) {
+        signal.throwIfAborted();
+        calls.push(`fragment:${index}`);
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(resolve, 60);
+          signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+        });
+      }
+    }, true);
+    delivery.enqueue("a", async signal => { signal.throwIfAborted(); calls.push("next"); }, true);
+    try {
+      await vi.advanceTimersByTimeAsync(100);
+      expect(calls).toEqual(["fragment:0", "fragment:1", "next"]);
+      await delivery.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("removes a cancelled ordered operation without blocking later work", async () => {
     const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
     let release!: () => void;
@@ -49,6 +73,43 @@ describe("ConversationDeliveryQueue", () => {
       release();
       vi.useRealTimers();
     }
+  });
+
+  it("drains ordinary output while cancelling ordered interactions immediately", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", drainOnClose: true });
+    let requestSignal: AbortSignal | undefined;
+    const interaction = delivery.runOrdered("a", signal => new Promise<void>(resolve => {
+      requestSignal = signal;
+      signal.addEventListener("abort", () => resolve(), { once: true });
+    }));
+    const rejected = expect(interaction).rejects.toThrow("已取消");
+    const sent = vi.fn(async (signal: AbortSignal) => { expect(signal.aborted).toBe(false); });
+    delivery.enqueue("a", sent, true);
+    await settle();
+    await delivery.close();
+    await rejected;
+    expect(requestSignal?.aborted).toBe(true);
+    expect(sent).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a draining request at the close deadline and discards remaining work", async () => {
+    vi.useFakeTimers();
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", drainOnClose: true, closeTimeoutMs: 50 });
+    let signal: AbortSignal | undefined;
+    delivery.enqueue("a", value => new Promise<void>(resolve => {
+      signal = value;
+      value.addEventListener("abort", () => resolve(), { once: true });
+    }), true);
+    const queued = vi.fn(async () => undefined);
+    delivery.enqueue("a", queued, true);
+    await settle();
+    const close = delivery.close();
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(50);
+    await close;
+    expect(signal?.aborted).toBe(true);
+    expect(queued).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("serializes one Conversation while allowing different Conversations to progress", async () => {

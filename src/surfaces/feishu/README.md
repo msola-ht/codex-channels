@@ -226,7 +226,8 @@ Turn、warning 和 MCP 错误会显示 Client 边界已经统一脱敏并限长�
 
 `outbox.ts` 只同步接收匹配 `feishu + accountId` 的输出，并按 Chat ID 进入
 `ConversationDeliveryQueue`。同一 Chat 串行、不同 Chat 可并行；关闭后拒绝新输出并有限等待
-已接收发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
+已接收普通发送最多 5 秒，交互立即取消；截止后取消在途等待，后续分片、流式卡片收尾与回退保留取消信号。
+已取消的操作在调用 SDK 前拒绝，不因超时回退启动新发送。飞书 SDK 发送对象由 `FeishuMessageClient` 通过 `FeishuMessagePort`
 注入，Outbox 不持有完整 SDK Client。Adapter 的追加确认和错误提示也进入同一有界队列，不绕过
 平台输出顺序和关闭边界。生成图片路径来自 App Server `imageGeneration.savedPath` 或
 渠道 spool（`codexc channel send-image`），两者都在共享读取边界验证绝对路径、无符号链接

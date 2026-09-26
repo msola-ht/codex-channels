@@ -8,6 +8,32 @@ import {
 } from "../src/surfaces/telegram/lifecycle.js";
 
 describe("TelegramLifecycle", () => {
+  it("isolates chats and never starts an old queued update after stop or restart", async () => {
+    const handled: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let batch = [telegramUpdate(1), { ...telegramUpdate(2), message: { ...telegramUpdate(2).message, chat: { id: 2, type: "private" as const } } }, telegramUpdate(3)];
+    const bot = { botInfo: { username: "test_bot" }, init: async () => {},
+      handleUpdate: async (update: { update_id: number }) => { handled.push(update.update_id); if (update.update_id === 1) await gate; },
+      api: { setMyCommands: async () => true, getUpdates: async (_options: unknown, signal: AbortSignal) => {
+        if (batch.length) { const result = batch; batch = []; return result; }
+        await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener("abort", () => resolve(), { once: true }); });
+        return [];
+      } },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }), undefined, undefined, { closeTimeoutMs: 10 });
+    lifecycle.start();
+    await vi.waitFor(() => expect(handled).toEqual([1, 2]));
+    await lifecycle.stop();
+    batch = [telegramUpdate(4)];
+    lifecycle.start();
+    await vi.waitFor(() => expect(handled).toContain(4));
+    release();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(handled).not.toContain(3);
+    await lifecycle.stop();
+  });
+
   it("initializes the bot, registers commands and stops long polling by aborting it", async () => {
     const calls: string[] = [];
     let registeredCommands: ReadonlyArray<{ command: string }> = [];

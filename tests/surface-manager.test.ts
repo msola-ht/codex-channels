@@ -12,6 +12,62 @@ const interactions = {} as InteractionPort;
 const logger = pino({ level: "silent" });
 
 describe("SurfaceManager", () => {
+  it.each(["telegram", "feishu", "weixin"])("isolates slow %s completion metrics by full conversation identity", async (slowSurface) => {
+    const received: string[] = [];
+    const surfaces = ["telegram", "feishu", "weixin"].map(id => {
+      const adapter = surface(id, "default", []);
+      adapter.output.handle = event => { received.push(`${id}:${event.target.conversationId}:${event.type}`); };
+      return adapter;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager(surfaces, output, { completionTiming: async thread => {
+      if (thread === "slow") await gate;
+      return undefined;
+    } });
+    await manager.start();
+    const target = { surface: slowSurface, accountId: "default", conversationId: "same-id" };
+    output.publish({ type: "turn.completed", target, threadId: "slow", turnId: "turn", status: "completed" }, true);
+    output.publish({ type: "text.completed", target, threadId: "next", turnId: "next", itemId: "i", text: "next", phase: "final_answer" }, true);
+    for (const id of ["telegram", "feishu", "weixin"]) {
+      output.publish({ type: "turn.completed", target: { ...target, surface: id,
+        conversationId: id === slowSurface ? "another-chat" : "same-id" }, threadId: "fast", turnId: "turn", status: "completed" }, true);
+    }
+    await settle();
+    expect(received).toHaveLength(3);
+    expect(received).not.toContain(`${slowSurface}:same-id:turn.completed`);
+    release();
+    await settle();
+    expect(received.slice(-2)).toEqual([`${slowSurface}:same-id:turn.completed`, `${slowSurface}:same-id:text.completed`]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("bounds completion enrichment and ignores results arriving after shutdown", async () => {
+    vi.useFakeTimers();
+    const adapter = surface("telegram", "default", []);
+    const handle = vi.fn();
+    adapter.output.handle = handle;
+    const output = new EventBus<OutputEvent>(logger);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const manager = createManager([adapter], output, { completionTiming: async () => { await gate; return undefined; } });
+    await manager.start();
+    const event: OutputEvent = { type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "chat" },
+      threadId: "t", turnId: "turn", status: "completed" };
+    output.publish(event, true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(handle).toHaveBeenCalledTimes(1);
+    output.publish({ ...event, turnId: "later" }, true);
+    await settle();
+    await manager.stop();
+    release();
+    await settle();
+    expect(handle).toHaveBeenCalledTimes(1);
+    await output.close();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -842,8 +898,7 @@ function surface(
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise<void>((resolve) => process.nextTick(resolve));
 }
 
 function scheduledTaskPreview(): ScheduledTaskConfirmation {

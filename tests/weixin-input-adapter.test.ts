@@ -97,6 +97,46 @@ afterAll(() => {
 });
 
 describe("WeixinInputAdapter", () => {
+  it("keeps the latest reply context when stop overtakes older ordinary messages", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const service = serviceFixture(async (_target, text) => {
+      if (text === "first") await gate;
+      return { threadId: "thread", turnId: "turn", steered: false };
+    });
+    let delivered = false;
+    const client: WeixinProtocolClient = {
+      getUpdates: async (_cursor, signal) => {
+        if (delivered) return waitForAbort(signal);
+        delivered = true;
+        return { cursor: "cursor", messages: ["first", "second", "/stop"].map((text, index) => ({
+          kind: "text" as const, messageId: String(index), actorId, conversationId: actorId,
+          contextToken: `context-${index}`, text,
+        })) };
+      }, sendText: vi.fn(async () => {}),
+    };
+    const cursorStore = cursorStoreFixture();
+    const replyContexts = new WeixinReplyContextStore(accountId);
+    const persistReplyContext = vi.fn(async () => {});
+    const handleText = vi.fn(async (_target: ConversationTarget, _actor: string, text: string) => text === "/stop" ? "handled" as const : "not-command" as const);
+    const adapter = new WeixinInputAdapter({ accountId, client, cursorStore, service,
+      outbox: outboxFixture(), access: accessFixture(true), replyContexts, persistReplyContext,
+      interactions: { handleText }, onFatal: vi.fn(),
+    });
+    try {
+      await adapter.start();
+      await vi.waitFor(() => expect(handleText).toHaveBeenCalledWith(target, actorId, "/stop"));
+      expect(cursorStore.set).not.toHaveBeenCalled();
+      release();
+      await vi.waitFor(() => expect(cursorStore.set).toHaveBeenCalledWith(accountId, "cursor"));
+      expect(replyContexts.get(target)?.contextToken).toBe("context-2");
+      expect(persistReplyContext.mock.calls.at(-1)).toEqual([target, actorId, "context-2"]);
+    } finally {
+      release();
+      await adapter.stop();
+    }
+  });
+
   it("authorizes, remembers the actor, submits text, and commits afterward", async () => {
     const events: string[] = [];
     const controller = clientFixture();

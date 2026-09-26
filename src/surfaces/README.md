@@ -71,6 +71,9 @@ Telegram 和飞书在交互消息创建成功或失败时
 [`通讯渠道 Surface 接入指南`](../../docs/surface-integration-guide.md)。
 关闭队列时拒绝新输出，立即结束 `runOrdered` 等待者并限时等待在途发送；超时记录告警，
 清除余下积压且不再执行发送回调。并发关闭调用等待同一个关闭结果，不能提前报告完成。
+队列默认关闭时立即取消在途操作；三个渠道均启用普通输出最多 5 秒排空，`runOrdered` 交互仍立即取消。
+排空截止后保留取消信号，后续分片、卡片收尾与回退不能绕过取消继续发送。
+三个渠道每项输出从出队开始共用 120 秒取消预算；排队时间单独记录，不在每个分片重新启动预算。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface
 明确标识的图片批次，普通文字、单图和无批次标识的消息立即提交。图片落盘后仍由渠道管理，批次

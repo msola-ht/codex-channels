@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import type { ScheduledTaskConfirmation } from "../application/index.js";
 import {
   isCriticalOutputEvent,
+  conversationTargetKey,
   surfaceAccountKey,
   type ConversationTarget,
   type OutputEvent,
@@ -10,9 +11,10 @@ import {
   type TurnTaskMetricsSummary,
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
-import type {
-  SurfaceAdapter,
-  SurfaceConfigurationChange,
+import {
+  ConversationDeliveryQueue,
+  type SurfaceAdapter,
+  type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
@@ -57,6 +59,7 @@ export class SurfaceManager {
   private removeOutputSubscription: (() => void) | undefined;
   private acceptingOutput = true;
   private stopping = false;
+  private readonly routing: ConversationDeliveryQueue;
 
   constructor(
     private readonly surfaces: readonly SurfaceAdapter[],
@@ -72,6 +75,7 @@ export class SurfaceManager {
       : defaultRetryDelaysMs;
     this.maximumPendingCriticalOutput = options.maximumPendingCriticalOutput
       ?? 100;
+    this.routing = new ConversationDeliveryQueue(logger, { component: "SurfaceRouter", capacity: 1_000 });
     for (const surface of surfaces) {
       const key = surfaceAccountKey(surface.surface, surface.accountId);
       if (this.surfacesByAccount.has(key)) {
@@ -86,7 +90,11 @@ export class SurfaceManager {
     }
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
-      (event) => this.routeOutput(event),
+      (event) => {
+        if (!this.acceptingOutput) return;
+        this.routing.enqueue(conversationTargetKey(event.target),
+          (signal) => this.routeOutput(event, signal), isCriticalOutputEvent(event));
+      },
     );
   }
 
@@ -184,6 +192,7 @@ export class SurfaceManager {
     this.active.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
+    const routingClosed = this.routing.close();
     for (const runtime of this.runtimeBySurface.values()) {
       if (runtime.retryTimer) {
         clearTimeout(runtime.retryTimer);
@@ -212,6 +221,7 @@ export class SurfaceManager {
         );
       }
     }
+    await routingClosed;
     if (failures.length > 0) {
       for (const { surface } of failures.reverse()) {
         this.attempted.add(surface);
@@ -281,7 +291,7 @@ export class SurfaceManager {
     }
   }
 
-  private async routeOutput(event: OutputEvent): Promise<void> {
+  private async routeOutput(event: OutputEvent, signal: AbortSignal): Promise<void> {
     if (!this.acceptingOutput) {
       return;
     }
@@ -301,43 +311,53 @@ export class SurfaceManager {
     }
     let routedEvent = event;
     if (event.type === "turn.completed") {
-      const timingResult = this.resolveCompletionMetrics(
-        event,
-        "turn",
-        () => this.options.completionTiming?.(
-          event.threadId,
-          event.turnId,
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(new Error("完成统计读取超时")), 5_000);
+      timer.unref();
+      const deadline = AbortSignal.any([signal, timeout.signal]);
+      try {
+        const timingResult = this.resolveCompletionMetrics(
+          event,
+          "turn",
+          deadline,
+          () => this.options.completionTiming?.(
+            event.threadId,
+            event.turnId,
+            event.timing,
+          ),
           event.timing,
-        ),
-        event.timing,
-      );
-      const timing = timingResult instanceof Promise
-        ? await timingResult
-        : timingResult;
-      const taskAggregateResult = this.resolveCompletionMetrics(
-        event,
-        "task",
-        () => this.options.taskAggregate?.(event.threadId, event.turnId),
-      );
-      const taskAggregate = taskAggregateResult instanceof Promise
-        ? await taskAggregateResult
-        : taskAggregateResult;
-      const sessionAggregateResult = this.resolveCompletionMetrics(
-        event,
-        "session",
-        () => this.options.sessionAggregate?.(event.threadId),
-      );
-      const sessionAggregate = sessionAggregateResult instanceof Promise
-        ? await sessionAggregateResult
-        : sessionAggregateResult;
-      routedEvent = {
-        ...event,
-        gitBranch: this.currentGitBranch?.(event.target),
-        ...(timing === undefined ? {} : { timing }),
-        ...(taskAggregate === undefined ? {} : { taskAggregate }),
-        ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
-      };
+        );
+        const timing = timingResult instanceof Promise
+          ? await timingResult
+          : timingResult;
+        const taskAggregateResult = this.resolveCompletionMetrics(
+          event,
+          "task",
+          deadline,
+          () => this.options.taskAggregate?.(event.threadId, event.turnId),
+        );
+        const taskAggregate = taskAggregateResult instanceof Promise
+          ? await taskAggregateResult
+          : taskAggregateResult;
+        const sessionAggregateResult = this.resolveCompletionMetrics(
+          event,
+          "session",
+          deadline,
+          () => this.options.sessionAggregate?.(event.threadId),
+        );
+        const sessionAggregate = sessionAggregateResult instanceof Promise
+          ? await sessionAggregateResult
+          : sessionAggregateResult;
+        routedEvent = {
+          ...event,
+          gitBranch: this.currentGitBranch?.(event.target),
+          ...(timing === undefined ? {} : { timing }),
+          ...(taskAggregate === undefined ? {} : { taskAggregate }),
+          ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
+        };
+      } finally { clearTimeout(timer); }
     }
+    if (!this.acceptingOutput || signal.aborted) return;
     if (!this.active.has(surface)) {
       const runtime = this.requireRuntime(surface);
       if (isCriticalOutputEvent(routedEvent)) {
@@ -371,9 +391,11 @@ export class SurfaceManager {
   private resolveCompletionMetrics<T>(
     event: Extract<OutputEvent, { type: "turn.completed" }>,
     scope: "turn" | "task" | "session",
+    signal: AbortSignal,
     read: () => T | undefined | Promise<T | undefined>,
     fallback?: T,
   ): T | undefined | Promise<T | undefined> {
+    if (signal.aborted) return fallback;
     const recover = (error: unknown): T | undefined => {
       this.logger.warn(
         {
@@ -389,7 +411,7 @@ export class SurfaceManager {
     try {
       const result = read();
       return result instanceof Promise
-        ? result.then((value) => value ?? fallback, recover)
+        ? waitForCompletionMetrics(result, signal).then((value) => value ?? fallback, recover)
         : result ?? fallback;
     } catch (error) {
       return recover(error);
@@ -529,6 +551,18 @@ export class SurfaceManager {
       );
     }
   }
+}
+
+function waitForCompletionMetrics<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => {
+      signal.removeEventListener("abort", abort);
+      reject(new Error("完成统计读取已取消或超时"));
+    };
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    void operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 function configurationChangeForSurface(

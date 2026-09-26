@@ -14,6 +14,29 @@ import {
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
 
 describe("TelegramInteractionPort", () => {
+  it("invalidates a prompt returned after timeout without blindly creating a replacement", async () => {
+    vi.useFakeTimers();
+    let finishLate!: (value: { message_id: number }) => void;
+    const sendMessage = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finishLate = resolve; }))
+      .mockResolvedValue({ message_id: 2 });
+    const editMessageText = vi.fn(async () => true);
+    const bot = { callbackQuery: vi.fn(), api: { sendMessage, editMessageText } } as unknown as Bot;
+    const port = new TelegramInteractionPort(bot, pino({ level: "silent" }));
+    try {
+      const decision = expect(port.request(target, { type: "elicitation", mode: "form", requestId: "late-form",
+        threadId: "thread", turnId: "turn", title: "Form", message: "Enter JSON", expiresInMs: 60_000 }))
+        .rejects.toMatchObject({ code: "ETIMEDOUT" });
+      await vi.advanceTimersByTimeAsync(32_000);
+      await decision;
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      finishLate({ message_id: 1 });
+      await settle();
+      expect(editMessageText).toHaveBeenCalledWith("100", 1, expect.stringContaining("请求已失效"),
+        expect.objectContaining({ reply_markup: { inline_keyboard: [] } }), expect.any(AbortSignal));
+      expect(await port.handleText(textContext('{"late":true}', 1))).toBe(true);
+    } finally { await port.close(); vi.useRealTimers(); }
+  });
+
   it("recognizes an evicted form prompt without consuming unrelated replies", async () => {
     let messageId = 0;
     const bot = { callbackQuery: vi.fn(), api: {
@@ -1414,7 +1437,5 @@ function textContext(text: string, replyTo?: number): Context {
 }
 
 async function settle(): Promise<void> {
-  for (let index = 0; index < 10; index += 1) {
-    await Promise.resolve();
-  }
+  await new Promise<void>((resolve) => process.nextTick(resolve));
 }

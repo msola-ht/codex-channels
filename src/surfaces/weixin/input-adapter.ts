@@ -94,6 +94,7 @@ export class WeixinInputAdapter {
   readonly accountId: string;
 
   private readonly closeTimeoutMs: number;
+  private readonly latestContextSequence = new Map<string, number>();
   private readonly now: () => number;
   private readonly health = new WeixinPollingHealth();
   private readonly monitor;
@@ -140,7 +141,7 @@ export class WeixinInputAdapter {
       accountId: options.accountId,
       client: options.client,
       cursorStore: options.cursorStore,
-      handleMessage: (message) => this.handle(message),
+      handleMessage: (message, signal, sequence) => this.handle(message, signal, sequence),
       onPollStart: () => this.health.recordPollStart(),
       onPollSuccess: (atMs) => this.health.recordSuccess(atMs),
       onRetry: (event) => {
@@ -182,7 +183,8 @@ export class WeixinInputAdapter {
     return this.stopPromise;
   }
 
-  private async handle(message: WeixinSupportedMessage): Promise<void> {
+  private async handle(message: WeixinSupportedMessage, signal?: AbortSignal, sequence = 0): Promise<void> {
+    if (this.stopping || signal?.aborted) return;
     const receivedAtMs = this.now();
     this.options.logger?.debug(
       {
@@ -216,16 +218,24 @@ export class WeixinInputAdapter {
     if ("text" in message && message.text !== undefined) {
       this.rememberQuotedText(target, message.messageId, message.text);
     }
-    this.options.replyContexts.remember(
-      target,
-      message.actorId,
-      message.contextToken,
-    );
-    await this.persistReplyContext(
-      target,
-      message.actorId,
-      message.contextToken,
-    );
+    if (sequence >= (this.latestContextSequence.get(target.conversationId) ?? 0)) {
+      this.latestContextSequence.delete(target.conversationId);
+      this.latestContextSequence.set(target.conversationId, sequence);
+      if (this.latestContextSequence.size > 1_000) {
+        this.latestContextSequence.delete(this.latestContextSequence.keys().next().value!);
+      }
+      this.options.replyContexts.remember(
+        target,
+        message.actorId,
+        message.contextToken,
+      );
+      await this.persistReplyContext(
+        target,
+        message.actorId,
+        message.contextToken,
+      );
+    }
+    if (this.stopping || signal?.aborted) return;
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     if (
       message.kind === "text"
@@ -275,7 +285,7 @@ export class WeixinInputAdapter {
                 ...(quotedText === undefined ? {} : { quotedText }),
                 audio: message.audio,
               };
-      await this.conversations.handle(conversationMessage);
+      await this.conversations.handle(conversationMessage, signal);
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }
@@ -329,6 +339,7 @@ export class WeixinInputAdapter {
     this.stopping = true;
     this.health.stop();
     this.quotedTexts.clear();
+    this.latestContextSequence.clear();
     this.controller?.abort();
     await this.conversations.close();
     const task = this.runTask;

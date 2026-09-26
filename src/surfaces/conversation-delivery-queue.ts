@@ -5,6 +5,7 @@ import { surfaceErrorMetadata } from "./error-metadata.js";
 
 interface DeliveryOperation {
   critical: boolean;
+  enqueuedAt: number;
   run(signal: AbortSignal): Promise<void>;
 }
 
@@ -18,6 +19,8 @@ export interface ConversationDeliveryQueueOptions {
   component: string;
   capacity?: number;
   closeTimeoutMs?: number;
+  drainOnClose?: boolean;
+  operationTimeoutMs?: number;
   errorMetadata?(error: unknown): Record<string, unknown>;
 }
 
@@ -42,6 +45,9 @@ export class ConversationDeliveryQueue {
     if (!Number.isInteger(this.closeTimeoutMs) || this.closeTimeoutMs <= 0) {
       throw new Error("Conversation 输出队列关闭超时必须是正整数");
     }
+    if (options.operationTimeoutMs !== undefined && (!Number.isInteger(options.operationTimeoutMs) || options.operationTimeoutMs <= 0)) {
+      throw new Error("Conversation 输出操作超时必须是正整数");
+    }
   }
 
   enqueue(
@@ -53,7 +59,7 @@ export class ConversationDeliveryQueue {
       return false;
     }
     const worker = this.worker(conversationId);
-    const accepted = worker.queue.push({ critical, run }, critical);
+    const accepted = worker.queue.push({ critical, run, enqueuedAt: performance.now() }, critical);
     if (!accepted) {
       this.logger.warn(
         {
@@ -82,6 +88,7 @@ export class ConversationDeliveryQueue {
     }
     return new Promise<T>((resolve, reject) => {
       const worker = this.worker(conversationId);
+      const cancellation = new AbortController();
       let started = false;
       let settled = false;
       const cleanup = (): void => {
@@ -91,6 +98,7 @@ export class ConversationDeliveryQueue {
       const cancel = (): void => {
         if (settled) return;
         settled = true;
+        cancellation.abort();
         worker.queue.remove(operation);
         cleanup();
         reject(new Error(`${this.options.component} Conversation 输出操作已取消`));
@@ -98,11 +106,12 @@ export class ConversationDeliveryQueue {
       const cancelQueued = (): void => { if (!started) cancel(); };
       const operation: DeliveryOperation = {
         critical: true,
+        enqueuedAt: performance.now(),
         run: async (signal) => {
           if (settled) return;
           started = true;
           try {
-            const combined = requestSignal ? AbortSignal.any([signal, requestSignal]) : signal;
+            const combined = AbortSignal.any([signal, cancellation.signal, ...(requestSignal ? [requestSignal] : [])]);
             combined.throwIfAborted();
             resolve(await run(combined));
           } catch (error) {
@@ -163,7 +172,7 @@ export class ConversationDeliveryQueue {
     for (const cancel of [...this.orderedCancellations]) cancel();
     for (const worker of this.workers.values()) {
       worker.queue.close();
-      worker.controller.abort();
+      if (!this.options.drainOnClose) worker.controller.abort();
     }
     const conversationCount = this.workers.size;
     this.closePromise = this.finishClose(conversationCount);
@@ -178,6 +187,7 @@ export class ConversationDeliveryQueue {
     if (!completed) {
       this.stopped = true;
       for (const worker of this.workers.values()) {
+        worker.controller.abort();
         while (worker.queue.size > 0) await worker.queue.shift();
       }
       this.logger.warn(
@@ -202,8 +212,14 @@ export class ConversationDeliveryQueue {
       if (!operation || this.stopped) {
         return;
       }
+      const startedAt = performance.now();
+      const deadline = new AbortController();
+      const timer = this.options.operationTimeoutMs === undefined ? undefined
+        : setTimeout(() => deadline.abort(new Error("渠道投递任务超过恢复预算")), this.options.operationTimeoutMs);
+      timer?.unref();
+      const deliverySignal = AbortSignal.any([signal, deadline.signal]);
       try {
-        await operation.run(signal);
+        await operation.run(deliverySignal);
       } catch (error) {
         this.logger.warn(
           {
@@ -212,9 +228,19 @@ export class ConversationDeliveryQueue {
             component: this.options.component,
             conversationId,
             critical: operation.critical,
+            queueWaitMs: Math.round(startedAt - operation.enqueuedAt),
+            elapsedMs: Math.round(performance.now() - startedAt),
+            deadlineExceeded: deadline.signal.aborted,
           },
           "Surface Conversation 输出失败",
         );
+      } finally {
+        clearTimeout(timer);
+        if (operation.critical && this.options.operationTimeoutMs !== undefined) {
+          this.logger.debug({ component: this.options.component, conversationId,
+            queueWaitMs: Math.round(startedAt - operation.enqueuedAt), elapsedMs: Math.round(performance.now() - startedAt),
+            deadlineExceeded: deadline.signal.aborted }, "Surface Conversation 输出任务已结束");
+        }
       }
       if (queue.size === 0) {
         const current = this.workers.get(conversationId);

@@ -11,6 +11,38 @@ import {
 const accountId = "account-fixture@im.bot";
 
 describe("WeixinUpdatesMonitor", () => {
+  it("delivers stop while ordinary input is blocked without acknowledging the batch early", async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const handled: string[] = [];
+    const cursorStore = cursorStoreFixture(null, async () => { controller.abort(); });
+    const monitor = createWeixinUpdatesMonitor({ accountId,
+      client: clientFixture([{ cursor: "next", messages: [textMessage("1", "slow"), textMessage("2", "/stop"), textMessage("3", "later")] }]),
+      cursorStore, handleMessage: async message => { handled.push(message.messageId); if (message.messageId === "1") await gate; },
+    });
+    const running = monitor.run(controller.signal);
+    await vi.waitFor(() => expect(handled).toEqual(["1", "2"]));
+    expect(cursorStore.set).not.toHaveBeenCalled();
+    release();
+    await running;
+    expect(handled).toEqual(["1", "2", "3"]);
+    expect(cursorStore.set).toHaveBeenCalledOnce();
+  });
+
+  it("does not process the rest of a batch or commit its cursor after cancellation", async () => {
+    const controller = new AbortController();
+    const handleMessage = vi.fn(async () => { controller.abort(); });
+    const cursorStore = cursorStoreFixture(null);
+    const monitor = createWeixinUpdatesMonitor({ accountId,
+      client: clientFixture([{ cursor: "next", messages: [textMessage("1", "first"), textMessage("2", "later")] }]),
+      cursorStore, handleMessage,
+    });
+    await monitor.run(controller.signal);
+    expect(handleMessage).toHaveBeenCalledOnce();
+    expect(cursorStore.set).not.toHaveBeenCalled();
+  });
+
   it("reports each poll attempt and successful response for runtime health", async () => {
     const controller = new AbortController();
     const onPollStart = vi.fn();

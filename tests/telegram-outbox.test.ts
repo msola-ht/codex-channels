@@ -1,4 +1,4 @@
-import { InputFile, type Api, type Bot, type Context } from "grammy";
+import { GrammyError, HttpError, InputFile, type Api, type Bot, type Context } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +49,7 @@ class FakeTelegramApi {
 
   async sendMessage(_chatId: string, text: string, options?: unknown): Promise<{ message_id: number }> {
     if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-      throw new Error("Bad Request: can't parse entities");
+      throw telegramBadRequest("Bad Request: can't parse entities");
     }
     this.sent.push(text);
     this.sendOptions.push(options);
@@ -63,7 +63,7 @@ class FakeTelegramApi {
   ): Promise<{ message_id: number }> {
     this.richMessages.push(richMessage);
     if (this.rejectRichMessages) {
-      throw new Error("Bad Request: can't parse rich message");
+      throw telegramBadRequest("Bad Request: can't parse rich message");
     }
     this.sent.push(richMessage.markdown ?? richMessage.html ?? "[rich blocks]");
     this.sendOptions.push(options);
@@ -78,13 +78,13 @@ class FakeTelegramApi {
   ): Promise<true> {
     if (typeof text === "string") {
       if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-        throw new Error("Bad Request: can't parse entities");
+        throw telegramBadRequest("Bad Request: can't parse entities");
       }
       this.edits.push(text);
     } else {
       this.richEdits.push(text);
       if (this.rejectRichMessages) {
-        throw new Error("Bad Request: can't parse rich message");
+        throw telegramBadRequest("Bad Request: can't parse rich message");
       }
       this.edits.push(text.markdown ?? text.html ?? "[rich blocks]");
     }
@@ -103,7 +103,7 @@ class FakeTelegramApi {
     options?: unknown,
   ): Promise<{ message_id: number }> {
     if (this.rejectDocuments) {
-      throw new Error("Bad Request: document upload failed");
+      throw telegramBadRequest("Bad Request: document upload failed");
     }
     const raw = await document.toRaw();
     if (!(raw instanceof Uint8Array)) {
@@ -893,6 +893,97 @@ describe("TelegramOutbox", () => {
     expect(api.sent).toEqual(["# 标题", turnCompletedPanel]);
     expect(api.richEdits).toEqual([{ markdown: "# 标题\n\n最终内容" }]);
     expect(api.edits).toContain("# 标题\n\n最终内容");
+  });
+
+  it("renders completed replies without a phase as HTML", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(textCompleted("final", "# 标题\n\n**正文**"));
+    await outbox.close();
+    expect(api.sent).toEqual(["<b>标题</b>\n\n<b>正文</b>"]);
+    expect(api.sendOptions[0]).toMatchObject({ parse_mode: "HTML" });
+  });
+
+  it("does not recreate an uncertain initial stream on later delta or completion", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValueOnce(new HttpError("lost", new Error("reset")));
+    const outbox = createOutbox(api);
+    outbox.handle(textDelta("final", "部分", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textDelta("final", "后续", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textCompleted("final", "部分后续正文", "final_answer"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(api.sent).toEqual([turnCompletedPanel]);
+  });
+
+  it("passes cancellation in the SDK signal slot for plain and rich edits", async () => {
+    vi.useFakeTimers();
+    const editMessageText = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true);
+    const outbox = new TelegramOutbox({
+      sendMessage: async () => ({ message_id: 1 }), editMessageText,
+    } as unknown as Api, pino({ level: "silent" }), undefined, { finalMessageFormat: "rich" });
+    outbox.handle(textDelta("final", "部分", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textDelta("final", "正文", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1_000);
+    outbox.handle(textCompleted("final", "**最终正文**", "final_answer"));
+    await outbox.close();
+    expect(editMessageText).toHaveBeenCalledTimes(2);
+    for (const args of editMessageText.mock.calls) {
+      expect(args[3]).toBeUndefined();
+      expect(args[4]).toBeInstanceOf(AbortSignal);
+    }
+  });
+
+  it("cancels lifecycle delivery at shutdown and does not send later fragments", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    let release!: () => void;
+    const sendMessage = vi.fn(async (_chat: string, _text: string, _options: unknown, requestSignal: AbortSignal) => {
+      signal = requestSignal;
+      await new Promise<void>(resolve => { release = resolve; });
+      return { message_id: 1 };
+    });
+    const outbox = new TelegramOutbox({ sendMessage } as unknown as Api, pino({ level: "silent" }));
+    outbox.handle({ type: "user.message", target, threadId: "t", turnId: "u", itemId: "input", text: "长".repeat(10_000) });
+    await vi.advanceTimersByTimeAsync(0);
+    const close = outbox.close();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await close;
+    expect(signal?.aborted).toBe(true);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("does not replay a failed final reply as plain text after uncertain network delivery", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValue(new HttpError("secret URL", new Error("lost response")));
+    const outbox = createOutbox(api);
+    outbox.handle(textCompleted("final", "# Final answer", "final_answer"));
+    await vi.runAllTimersAsync();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls.every(call => hasHtmlParseMode(call[2]))).toBe(true);
+    await outbox.close();
+  });
+
+  it("does not create a duplicate when a formatted final edit is already applied", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    outbox.handle(textDelta("final", "answer", "final_answer"));
+    await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    vi.spyOn(api, "editMessageText").mockRejectedValue(telegramBadRequest("Bad Request: message is not modified"));
+    outbox.handle(textCompleted("final", "answer", "final_answer"));
+    await settle();
+    expect(api.sent).toEqual(["answer"]);
+    await outbox.close();
   });
 
   it("falls back to plain text when Telegram rejects a Rich Message", async () => {
@@ -1813,8 +1904,9 @@ function userInputInteraction() {
 }
 
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  // Let the bounded API attempt and its queue continuation settle without
+  // advancing timers (which would also trigger typing and stream timers).
+  await new Promise<void>((resolve) => process.nextTick(resolve));
 }
 
 function tokenBreakdown(totalTokens: number) {
@@ -1853,4 +1945,8 @@ function isSilent(value: unknown): boolean {
     value !== null &&
     "disable_notification" in value &&
     value.disable_notification === true;
+}
+
+function telegramBadRequest(description: string): GrammyError {
+  return new GrammyError("fixture", { ok: false, error_code: 400, description }, "sendMessage", {});
 }
