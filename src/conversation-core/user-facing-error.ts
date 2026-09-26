@@ -115,8 +115,9 @@ export class UserFacingError extends Error {
     readonly code: UserFacingErrorCode,
     message: string,
     readonly details: UserFacingErrorDetails = {},
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "UserFacingError";
   }
 }

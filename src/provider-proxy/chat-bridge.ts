@@ -6,15 +6,24 @@ import { request as httpsRequest } from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { ChatToResponses, ModelConversionError, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
-import { ChatUpstreamError, chatStreamError, readChatHttpError } from "./chat-errors.js";
+import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
+
+/**
+ * 桥自身的单次请求预算。面向桥的统计代理必须使用同一预算，否则本地代理会在上游响应头到达前
+ * 先按自己的空闲超时切断连接，把可归类的上游失败变成通用的本地超时。
+ */
+export const chatBridgeRequestTimeoutMs = 300_000;
 
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
   readonly diagnostics = new ChatDiagnosticsChannel();
   private readonly active = new Set<AbortController>();
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
-  constructor(private readonly options: ProviderProxyOptions) {}
+  private readonly requestTimeoutMs: number;
+  constructor(private readonly options: ProviderProxyOptions) {
+    this.requestTimeoutMs = options.timeoutMs ?? chatBridgeRequestTimeoutMs;
+  }
   async start(): Promise<void> {
     this.server.listen(0, "127.0.0.1");
     await once(this.server, "listening");
@@ -23,6 +32,18 @@ export class ChatCompletionsBridge {
     const address = this.server.address();
     if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
     return `127.0.0.1:${address.port}`;
+  }
+  /** 面向本桥的统计代理上游参数；空闲超时与桥自身预算一致。 */
+  proxyOptions(): ProviderProxyOptions {
+    const address = this.server.address();
+    if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
+    return {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: address.port,
+      upstreamProtocol: "http",
+      chatDiagnostics: this.diagnostics,
+      timeoutMs: this.requestTimeoutMs,
+    };
   }
   async close(): Promise<void> {
     for (const controller of this.active) controller.abort();
@@ -37,8 +58,9 @@ export class ChatCompletionsBridge {
     const controller = new AbortController();
     this.active.add(controller);
     const timer = setTimeout(() => {
-      controller.abort(); request.destroy(); response.destroy();
-    }, this.options.timeoutMs ?? 300_000);
+      // 只中止上游与等待中的写入，保留本地连接让下方按上游超时归类失败。
+      controller.abort(chatUpstreamError({ code: "upstream_timeout" }));
+    }, this.requestTimeoutMs);
     const abort = (): void => { controller.abort(); };
     response.once("close", abort);
     let status = 400;
@@ -79,7 +101,11 @@ export class ChatCompletionsBridge {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
         throw await readChatHttpError(incoming);
       }
-      if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) { incoming.destroy(); throw new Error("invalid upstream content type"); }
+      if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) {
+        // 200 但不是 SSE：上游没有按流式合同返回，按服务异常归类且不读取正文。
+        incoming.destroy();
+        throw chatUpstreamError({ code: "server_error" });
+      }
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames);
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
@@ -119,10 +145,13 @@ export class ChatCompletionsBridge {
       await emit(terminal);
       response.end();
     } catch (error) {
-      const message = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error.message : "Chat upstream request failed";
-      if (status === 502 && !controller.signal.aborted) this.options.onError?.(new Error(message));
-      const detail = { code: error instanceof ChatUpstreamError ? error.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
-      if (error instanceof ChatUpstreamError) diagnostics.error(error.code, response.headersSent ? "stream" : "http", error.retryable);
+      // 桥自身超时通过中止原因传递，与上游返回的错误使用同一套分类。
+      const aborted = controller.signal.reason instanceof ChatUpstreamError ? controller.signal.reason : undefined;
+      const failure = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error : aborted;
+      const message = failure?.message ?? "Chat upstream request failed";
+      if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
+      const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
+      if (failure instanceof ChatUpstreamError) diagnostics.error(failure.code, response.headersSent ? "stream" : "http", failure.retryable);
       publishDiagnostics();
       if (!response.destroyed) {
         if (response.headersSent) {

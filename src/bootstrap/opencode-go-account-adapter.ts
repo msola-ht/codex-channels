@@ -107,11 +107,12 @@ export function createOpencodeGoAccountAdapter(
               localTokens: localTokens.get(window.windowId) ?? null,
             }));
         return { ...usage, windows, provider };
-      } catch {
+      } catch (error) {
         throw new UserFacingError(
           "provider.account.unavailable",
           "OpenCode Go 账户查询失败",
           { provider: "OpenCode Go" },
+          { cause: error },
         );
       }
     },

@@ -10,4 +10,4 @@ export {
 } from "./metrics-channel.js";
 export { pruneModelTrafficDumpSessions } from "./traffic-dump.js";
 
-export { ChatCompletionsBridge } from "./chat-bridge.js";
+export { ChatCompletionsBridge, chatBridgeRequestTimeoutMs } from "./chat-bridge.js";

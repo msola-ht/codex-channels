@@ -104,7 +104,8 @@ export function isManagedProviderApiKeyValid(definition, apiKey) {
 }
 
 export function isManagedProviderModelValid(definition, model) {
-  if ((definition.storageId ?? definition.id) === "clp") return model === clinePassProviderDefinition.defaultModel;
+  // CLP 的共享目录只生成一个模型，因此该 Provider 的合法模型就是定义自带的默认模型。
+  if ((definition.storageId ?? definition.id) === "clp") return model === definition.defaultModel;
   return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
@@ -116,6 +117,13 @@ export const managedModelProviderDefinitions = Object.freeze([
   commandCodeProviderDefinition,
   clinePassProviderDefinition,
 ]);
+
+/** 共享代理键（如 clp、ocg）对应的基础定义；账户展开后的列表不包含这些键。 */
+export function sharedManagedProviderDefinition(proxyKey) {
+  return managedModelProviderDefinitions.find(
+    (definition) => definition.id === proxyKey || definition.storageId === proxyKey,
+  );
+}
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
   return loadOpencodeGoAccounts(environment).map((account) =>

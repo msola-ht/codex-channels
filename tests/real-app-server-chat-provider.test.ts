@@ -285,3 +285,57 @@ contract("isolates two real Cline App Servers behind one shared Chat proxy", asy
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }, 30000);
+
+contract("maps Codex structured output onto the Chat response format", async () => {
+  const root = mkdtempSync(join(tmpdir(), "chat-schema-contract-"));
+  const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
+  const schema = { type: "object", properties: { title: { type: "string", minLength: 1, maxLength: 36 } }, required: ["title"], additionalProperties: false };
+  const bodies: Array<{ response_format?: unknown }> = [];
+  const backend = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      expect(request.url).toBe("/v1/chat/completions");
+      bodies.push(JSON.parse(Buffer.concat(chunks).toString()) as typeof bodies[number]);
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '{"title":"Review structured output"}' }, finish_reason: "stop" }], usage: { prompt_tokens: 12, completion_tokens: 5 } })}\n\n`);
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  let rpc: JsonRpcClient | undefined;
+  let bridge: ChatCompletionsBridge | undefined;
+  try {
+    await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
+    const address = backend.address(); if (!address || typeof address === "string") throw new Error("No listener");
+    bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", upstreamBasePath: "/v1" });
+    await bridge.start();
+    writePrivateFileAtomicSync(join(environment.CODEX_CONNECT_HOME, "providers", "deepseek", "models.json"), JSON.stringify({ models: [{
+      slug: "deepseek-flash", display_name: "DeepSeek Flash", visibility: "list", supported_in_api: true,
+      context_window: 64000, max_context_window: 128000, input_modalities: ["text", "image"],
+      default_reasoning_level: "high", supported_reasoning_levels: ["low", "high", "max"].map(effort => ({ effort, description: effort })),
+    }] }));
+    writePrivateFileAtomicSync(join(environment.CODEX_HOME, "config.toml"), 'model_provider = "openai"\n');
+    await applyClinePassConfiguration({ accountId: "test", apiKey: "sk_fixture" }, { environment });
+    const managed = loadManagedProviderAppServers(environment)[0]!;
+    const runtime = { ...managed, arguments: withProviderBaseUrl(managed.arguments, managed.provider, `http://${bridge.address()}`) };
+    const turns: Array<{ id: string; status: string }> = [];
+    const completed: Array<{ type: string; text?: string }> = [];
+    rpc = new JsonRpcClient(new StdioTransport({ codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: root, environment: { ...environment, ...runtime.childEnvironment }, createCodexProcessInvocation: args => ({ file: process.env.CODEX_BINARY ?? "codex", args: [...args, ...runtime.arguments] }) }), 15000);
+    rpc.onNotification(notification => {
+      if (notification.method === "turn/completed") turns.push((notification.params as { turn: typeof turns[number] }).turn);
+      if (notification.method === "item/completed") completed.push((notification.params as { item: typeof completed[number] }).item);
+    });
+    await rpc.connect();
+    const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "clp-test", sandbox: "read-only", approvalPolicy: "never", ephemeral: true } });
+    const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, outputSchema: schema, input: [{ type: "text", text: "Name this thread", text_elements: [] }] } });
+    await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
+    expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: "completed" }));
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.response_format).toEqual({ type: "json_schema", json_schema: { name: "codex_output_schema", strict: true, schema } });
+    expect(completed.filter(item => item.type === "agentMessage")).toMatchObject([{ text: '{"title":"Review structured output"}' }]);
+  } finally {
+    await rpc?.close(); await bridge?.close();
+    backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}, 30000);

@@ -132,6 +132,20 @@ describe("CCG account adapter", () => {
     });
   });
 
+  it("keeps the underlying failure reason on the user-facing error", async () => {
+    const codexHome = await createCodexHome();
+    const adapter = createCcgAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => { throw new Error("fixture network failure"); },
+      provider: "ccg-work",
+    });
+
+    const failure: unknown = await adapter.accountUsage().catch((value: unknown) => value);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toContain("fixture network failure");
+    expect(((failure as Error).cause as Error).message).toBe("fixture network failure");
+  });
+
   it.each([null, {}, [], { error: { message: "private error" } },
     { credits: null }, { credits: [] }, { credits: "invalid" },
     { credits: {}, windowLimits: [] }, { credits: {}, windowLimits: { limited: "true" } },

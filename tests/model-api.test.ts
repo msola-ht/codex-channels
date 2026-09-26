@@ -392,3 +392,31 @@ it("preserves reasoning-only output on length termination", () => {
   converter.push(chunk({ reasoning: "partial thought" }, "length"));
   expect(converter.finish().at(-1)).toMatchObject({ response: { output: [{ summary: [{ text: "partial thought" }] }] } });
 });
+
+it("maps Codex structured output onto the Chat response format", () => {
+  const schema = { type: "object", properties: { title: { type: "string", minLength: 1, maxLength: 36 } }, required: ["title"], additionalProperties: false };
+  const converted = responsesToChat({ ...request("hello"), text: { format: { type: "json_schema", strict: true, schema, name: "codex_output_schema" } } });
+  expect(converted.request.response_format).toEqual({ type: "json_schema", json_schema: { name: "codex_output_schema", strict: true, schema } });
+});
+
+it.each([undefined, {}, { verbosity: "low" }, { verbosity: "high", format: { type: "json_schema", strict: false, schema: { type: "object" }, name: "codex_output_schema" } }])(
+  "accepts validated text controls and ignores verbosity (%s)",
+  text => {
+    const converted = responsesToChat({ ...request("hello"), text });
+    expect(Object.keys(converted.request)).not.toContain("verbosity");
+    expect(converted.request.response_format === undefined).toBe(text?.format === undefined);
+  },
+);
+
+it.each([
+  { verbosity: "verbose" },
+  { format: { type: "text" } },
+  { format: { type: "json_schema", strict: true, schema: { type: "object" }, name: "secret name" } },
+  { format: { type: "json_schema", strict: "yes", schema: { type: "object" }, name: "codex_output_schema" } },
+  { format: { type: "json_schema", strict: true, schema: [1], name: "codex_output_schema" } },
+  { format: { type: "json_schema", strict: true, schema: { type: "object" }, name: "codex_output_schema", description: "secret" } },
+  { unknown: "secret" },
+])("rejects unsupported text controls without echoing content", text => {
+  expect(() => responsesToChat({ ...request("hello"), text })).toThrow();
+  try { responsesToChat({ ...request("hello"), text }); } catch (error) { expect(String(error)).not.toContain("secret"); }
+});

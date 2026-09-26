@@ -54,11 +54,14 @@ export const commandCodeProviderDefinition: ModelProviderDefinition;
 export function ccgAccountDefinition(accountId: string): ModelProviderDefinition;
 export function isManagedProviderApiKeyValid(definition: ModelProviderDefinition, apiKey: unknown): boolean;
 export function isManagedProviderModelValid(
-  definition: Pick<ModelProviderDefinition, "id" | "storageId">,
+  definition: Pick<ModelProviderDefinition, "id" | "storageId" | "defaultModel">,
   model: unknown,
 ): boolean;
 export const opencodeGoProviderDefinition: ModelProviderDefinition;
 export const managedModelProviderDefinitions: readonly ModelProviderDefinition[];
+export function sharedManagedProviderDefinition(
+  proxyKey: string,
+): ModelProviderDefinition | undefined;
 
 export function opencodeGoAccountDefinition(
   accountId: string,

@@ -65,6 +65,25 @@ it.each(["oversize", "invalid-json", "network"])("sanitizes %s failures", async 
   await expect(adapter.accountUsage()).rejects.toMatchObject({ message: "CLP 账户查询失败" });
 });
 
+it("ignores unknown upstream windows but still requires the three known ones", async () => {
+  const withExtra = { success: true, data: { limits: [...valid.data.limits, { type: "daily", percentUsed: 5, resetsAt: reset }] } };
+  const adapter = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl: async () => Response.json(withExtra) });
+  expect(await adapter.accountUsage()).toEqual({ kind: "quota-windows", provider: "clp-test", available: true,
+    windows: ["five-hour", "weekly", "monthly"].map((windowId, index) => ({ windowId, label: ["5小时", "7天", "月度"][index], usedPercent: index * 12.5, resetsAt: Math.floor(Date.parse(reset) / 1000), status: null })) });
+  const missing = { success: true, data: { limits: valid.data.limits.slice(0, 2) } };
+  const incomplete = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl: async () => Response.json(missing) });
+  await expect(incomplete.accountUsage()).rejects.toMatchObject({ message: "CLP 账户查询失败" });
+});
+
+it("keeps the underlying failure reason on the user-facing error", async () => {
+  const adapter = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl: async () => { throw new Error("fixture network failure"); } });
+  const failure: unknown = await adapter.accountUsage().catch((value: unknown) => value);
+  expect(failure).toBeInstanceOf(Error);
+  expect(failure).toMatchObject({ code: "provider.account.unavailable", message: "CLP 账户查询失败" });
+  expect((failure as Error).cause).toBeInstanceOf(Error);
+  expect(((failure as Error).cause as Error).message).toBe("fixture network failure");
+});
+
 it("refreshes two account quotas concurrently with their own credentials and snapshots", async () => {
   const environment = await fixture();
   await applyClinePassConfiguration({ accountId: "work", apiKey: "sk_work" }, { environment });

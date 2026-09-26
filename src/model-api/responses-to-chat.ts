@@ -31,6 +31,7 @@ export interface ChatRequest {
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
   reasoning?: { effort: "none" | "low" | "high" | "max" };
+  response_format?: JsonObject;
 }
 
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
@@ -41,7 +42,14 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
   if (source.stream !== true || source.store === true) throw new ModelConversionError("Only stateless streaming Responses requests are supported");
   if (source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
-  if (source.text != null && Object.keys(object(source.text)).length > 0) throw new ModelConversionError("Structured output and verbosity are unsupported");
+  let responseFormat: JsonObject | undefined;
+  if (source.text != null) {
+    const text = object(source.text);
+    if (Object.keys(text).some(key => !["format", "verbosity"].includes(key))) throw new ModelConversionError("Unsupported Responses text controls");
+    // Chat 上游没有 verbosity 等价字段；Codex 仅在目录声明支持时携带，取值校验后忽略。
+    if (text.verbosity != null && (typeof text.verbosity !== "string" || !["low", "medium", "high"].includes(text.verbosity))) throw new ModelConversionError("Unsupported Responses text verbosity");
+    if (text.format != null) responseFormat = chatResponseFormat(text.format);
+  }
   let reasoningControl: ChatRequest["reasoning"];
   if (source.reasoning != null) {
     const reasoning = object(source.reasoning);
@@ -245,7 +253,19 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     if (!Number.isSafeInteger(source.max_output_tokens) || Number(source.max_output_tokens) <= 0) throw new ModelConversionError();
     result.max_completion_tokens = Number(source.max_output_tokens);
   }
+  if (responseFormat) result.response_format = responseFormat;
   return { request: result, toolNames };
+}
+
+/** Codex 只请求 json_schema；Chat 用 `response_format` 表达同一份 schema 约束。 */
+function chatResponseFormat(value: unknown): JsonObject {
+  const format = object(value);
+  if (format.type !== "json_schema" || Object.keys(format).some(key => !["type", "strict", "schema", "name"].includes(key))) {
+    throw new ModelConversionError("Unsupported Responses output format");
+  }
+  const name = string(format.name);
+  if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(name) || typeof format.strict !== "boolean") throw new ModelConversionError("Unsupported Responses output format");
+  return { type: "json_schema", json_schema: { name, strict: format.strict, schema: object(format.schema) } };
 }
 
 function userContent(value: unknown): string | ChatUserContentPart[] {

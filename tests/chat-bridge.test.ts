@@ -6,12 +6,12 @@ import { listDumpFiles, describeDumpExchange } from "../scripts/traffic-dump-rea
 import { ChatDiagnostics, ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
 import { createServer } from "node:http";
 import { afterEach, expect, it } from "vitest";
-import { ChatCompletionsBridge, ProviderProxy } from "../src/provider-proxy/index.js";
+import { ChatCompletionsBridge, ProviderProxy, chatBridgeRequestTimeoutMs } from "../src/provider-proxy/index.js";
 import type { ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
-async function fixture(reply: string | ((request: unknown) => string), status = 200) {
+async function fixture(reply: string | ((request: unknown) => string), status = 200, overrides: { timeoutMs?: number } = {}) {
   let received: unknown;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -27,7 +27,7 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
-  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", ...overrides });
   await bridge.start(); cleanups.push(() => bridge.close());
   return { bridge, received: () => received };
 }
@@ -65,6 +65,48 @@ it("preserves HTTP failure status without forwarding the error body", async () =
   const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
   expect(result.status).toBe(429);
   expect(await result.text()).not.toContain("upstream-secret");
+});
+
+it.each([undefined, 5_000])("fronts the bridge with the bridge's own request budget (%s)", async timeoutMs => {
+  const { bridge } = await fixture(frame({ content: "ok" }, "stop") + "data: [DONE]\n\n", 200, { ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+  const options = bridge.proxyOptions();
+  expect(options).toMatchObject({ upstreamHost: "127.0.0.1", upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics });
+  expect(options.upstreamPort).toBe(Number(new URL(`http://${bridge.address()}`).port));
+  expect(options.timeoutMs).toBe(timeoutMs ?? chatBridgeRequestTimeoutMs);
+  // 统计代理默认空闲超时是 60 秒；默认预算必须覆盖桥自身预算，否则慢上游会被本地代理先截断。
+  if (timeoutMs === undefined) expect(options.timeoutMs).toBeGreaterThan(60_000);
+});
+
+it("classifies its own request budget expiry instead of dropping the stream", async () => {
+  const server = createServer(request => { request.resume(); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", timeoutMs: 150 });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(result.status).toBe(502);
+  expect(await result.json()).toEqual({ error: { code: "upstream_timeout", message: "上游响应超时，请稍后重试。" } });
+});
+
+it("classifies a non-streaming upstream success without reading its body", async () => {
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "upstream-secret" } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(result.status).toBe(502);
+  expect(text).toContain('"code":"server_error"');
+  expect(text).not.toContain("upstream-secret");
 });
 
 it.each(["client", "service"])("cancels upstream work when the %s disconnects", async owner => {

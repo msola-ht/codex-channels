@@ -35,8 +35,13 @@ export function createClinePassAccountAdapter(options: {
           missingBody: () => new Error("Missing CLP response body"),
         });
         return parseUsage(JSON.parse(body.toString("utf8")) as unknown, options.provider);
-      } catch {
-        throw new UserFacingError("provider.account.unavailable", "CLP 账户查询失败", { provider: "CLP" });
+      } catch (error) {
+        throw new UserFacingError(
+          "provider.account.unavailable",
+          "CLP 账户查询失败",
+          { provider: "CLP" },
+          { cause: error },
+        );
       }
     },
   };
@@ -45,9 +50,10 @@ export function createClinePassAccountAdapter(options: {
 function parseUsage(value: unknown, provider: string): ProviderAccountUsage {
   const response = record(value);
   const limits = record(response.data).limits;
-  if (response.success !== true || !Array.isArray(limits) || limits.length !== windowDefinitions.length) {
+  if (response.success !== true || !Array.isArray(limits)) {
     throw new Error("Invalid CLP usage response");
   }
+  // 上游新增的窗口类型不进入 CLP 的展示口径；三个已知窗口仍必须齐全且唯一。
   const windows = windowDefinitions.map(({ type, windowId, label }): ProviderQuotaWindow => {
     const matches = limits.map(record).filter(limit => limit.type === type);
     if (matches.length !== 1) throw new Error("Missing or duplicate CLP window");

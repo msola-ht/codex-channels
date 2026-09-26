@@ -42,11 +42,12 @@ export function createCcgAccountAdapter(
           apiKey,
         );
         return parseCreditUsage(credits, options.provider);
-      } catch {
+      } catch (error) {
         throw new UserFacingError(
           "provider.account.unavailable",
           "CCG 账户查询失败",
           { provider: "CCG" },
+          { cause: error },
         );
       }
     },

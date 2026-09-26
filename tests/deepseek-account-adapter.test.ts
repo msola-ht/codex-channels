@@ -63,6 +63,19 @@ describe("DeepSeek account adapter", () => {
     });
   });
 
+  it("keeps the underlying failure reason on the user-facing error", async () => {
+    const codexHome = await createCodexHome();
+    const adapter = createDeepseekAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => { throw new Error("fixture network failure"); },
+    });
+
+    const failure: unknown = await adapter.accountUsage().catch((value: unknown) => value);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toContain("fixture network failure");
+    expect(((failure as Error).cause as Error).message).toBe("fixture network failure");
+  });
+
   it("reads the selected fixed account credential from its main config", async () => {
     const codexHome = await configuredHome("exclusive");
     temporaryDirectories.push(codexHome);

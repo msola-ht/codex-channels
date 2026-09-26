@@ -45,11 +45,12 @@ export function createDeepseekAccountAdapter(
           missingBody: () => new Error("DeepSeek balance response is empty"),
         });
         return { ...parseBalanceResponse(JSON.parse(body.toString("utf8")) as unknown), provider };
-      } catch {
+      } catch (error) {
         throw new UserFacingError(
           "provider.account.unavailable",
           "DeepSeek 账户查询失败",
           { provider: "DeepSeek" },
+          { cause: error },
         );
       }
     },
