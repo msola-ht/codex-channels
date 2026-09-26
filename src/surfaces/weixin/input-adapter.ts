@@ -51,8 +51,8 @@ export type WeixinInputFatalCode =
   | "receiver-failed";
 
 export class WeixinInputFatalError extends Error {
-  constructor(readonly code: WeixinInputFatalCode) {
-    super("微信消息接收已停止");
+  constructor(readonly code: WeixinInputFatalCode, options?: ErrorOptions) {
+    super("微信消息接收已停止", options);
     this.name = "WeixinInputFatalError";
   }
 }
@@ -355,7 +355,7 @@ export class WeixinInputAdapter {
         ? error.code
         : "receiver-failed";
     try {
-      this.options.onFatal(new WeixinInputFatalError(code));
+      this.options.onFatal(new WeixinInputFatalError(code, { cause: error }));
     } catch {
       // Fatal reporting must not create an unhandled rejection.
     }

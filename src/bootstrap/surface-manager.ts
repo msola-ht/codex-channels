@@ -12,11 +12,34 @@ import type { EventBus } from "../event-bus/index.js";
 import {
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
+  surfaceErrorMetadata,
   type SurfaceAdapter,
   type SurfaceConfigurationChange,
 } from "../surfaces/index.js";
 
 const defaultRetryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000] as const;
+
+/**
+ * pino 的错误序列化只保留受控类型与大写错误码，渠道错误码多是小写 kebab，会整条丢失。
+ * 这里显式展开最多四层 cause 的白名单元数据：既能定位失败原因，也不会写入错误正文。
+ */
+function surfaceErrorChain(error: unknown, maximumDepth = 4): string[] {
+  const chain: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < maximumDepth; depth += 1) {
+    if (current === undefined || current === null) {
+      break;
+    }
+    const metadata = surfaceErrorMetadata(current);
+    chain.push(
+      metadata.errorCode === undefined
+        ? metadata.errorType
+        : `${metadata.errorType}:${String(metadata.errorCode)}`,
+    );
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return chain;
+}
 
 /**
  * Turn 完成卡片需要指标写入落库后才读取聚合。共享输出路由只有一个消费者，
@@ -30,6 +53,8 @@ interface SurfaceRuntime {
   retryAttempt: number;
   retryTimer?: NodeJS.Timeout;
   pendingCriticalOutput: PendingOutputEntry[];
+  /** 串行投递链：富化是异步的，恢复重放与实时事件必须按到达顺序入队。 */
+  deliveryChain: Promise<void>;
   shedBacklogCount: number;
   nextShedBacklogReport: number;
   nextPendingThresholdReport: number;
@@ -88,8 +113,10 @@ export class SurfaceManager {
     this.retryDelaysMs = options.retryDelaysMs?.length
       ? options.retryDelaysMs
       : defaultRetryDelaysMs;
-    this.maximumPendingCriticalOutput = options.maximumPendingCriticalOutput
-      ?? 100;
+    this.maximumPendingCriticalOutput = Math.max(
+      1,
+      options.maximumPendingCriticalOutput ?? 100,
+    );
     this.shedPendingOutputAt = this.maximumPendingCriticalOutput * 10;
     for (const surface of surfaces) {
       const key = surfaceAccountKey(surface.surface, surface.accountId);
@@ -101,6 +128,7 @@ export class SurfaceManager {
         state: "idle",
         retryAttempt: 0,
         pendingCriticalOutput: [],
+        deliveryChain: Promise.resolve(),
         shedBacklogCount: 0,
         nextShedBacklogReport: 1,
         nextPendingThresholdReport: this.maximumPendingCriticalOutput,
@@ -194,7 +222,12 @@ export class SurfaceManager {
       "渠道连接已中断，请恢复后重试",
     );
     this.logger.error(
-      { err: error, surface: surface.surface, accountId: surface.accountId },
+      {
+        err: error,
+        surface: surface.surface,
+        accountId: surface.accountId,
+        errorChain: surfaceErrorChain(error),
+      },
       "Surface 连接已中断，将独立重试",
     );
     this.scheduleRetry(surface);
@@ -371,6 +404,7 @@ export class SurfaceManager {
     const pending = runtime.pendingCriticalOutput.length;
     if (pending >= runtime.nextPendingThresholdReport) {
       // 与队列溢出告警一致：首次越过阈值和之后数量翻倍时各记录一次，避免断线期间刷屏。
+      const threshold = runtime.nextPendingThresholdReport;
       runtime.nextPendingThresholdReport = pending * 2;
       this.logger.error(
         {
@@ -378,7 +412,7 @@ export class SurfaceManager {
           accountId: surface.accountId,
           eventType: event.type,
           pending,
-          threshold: this.maximumPendingCriticalOutput,
+          threshold,
         },
         "Surface 恢复队列达到告警阈值，关键输出继续保留",
       );
@@ -525,6 +559,7 @@ export class SurfaceManager {
           surface: surface.surface,
           accountId: surface.accountId,
           retryAttempt: runtime.retryAttempt + 1,
+          errorChain: surfaceErrorChain(error),
         },
         "Surface 启动失败，将独立重试",
       );
@@ -573,11 +608,46 @@ export class SurfaceManager {
     runtime.retryTimer.unref();
   }
 
-  private async deliverOutput(
+  /**
+   * 按 Surface 串行投递。Turn 完成富化需要读取指标库，恢复重放与实时事件只有排在同一个链上
+   * 才能保持同一 Conversation 的到达顺序，不会被前面的富化等待插队。
+   */
+  private deliverOutput(
     surface: SurfaceAdapter,
     event: OutputEvent,
   ): Promise<void> {
-    const routedEvent = await this.enrichCompletionOutput(event);
+    const runtime = this.requireRuntime(surface);
+    const delivered = runtime.deliveryChain.then(
+      () => this.deliverOne(surface, event),
+    );
+    runtime.deliveryChain = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    return delivered;
+  }
+
+  private async deliverOne(
+    surface: SurfaceAdapter,
+    event: OutputEvent,
+  ): Promise<void> {
+    let routedEvent: OutputEvent;
+    try {
+      routedEvent = await this.enrichCompletionOutput(event);
+    } catch (error) {
+      // 完成卡不能因为统计读取失败而缺席，也不能在恢复重放里变成未处理的拒绝；
+      // 退化为未富化输出，并保留可观测性。
+      this.logger.warn(
+        {
+          err: error,
+          surface: surface.surface,
+          accountId: surface.accountId,
+          eventType: event.type,
+        },
+        "Turn 完成统计富化失败，改用未富化输出",
+      );
+      routedEvent = event;
+    }
     try {
       await surface.output.handle(routedEvent);
       if (routedEvent.type !== "text.delta") {

@@ -170,5 +170,6 @@ Provider 上游暂时不可用或响应超时，有限重试后仍未恢复”�
 | `agents.not-found` | 指定的子代理角色不存在；使用 /agents 查看可用角色 | 子代理角色不存在 |
 | `agents.config-unreadable` | Codex 子代理角色配置无法安全读取；请检查 ~/.codex/config.toml | 角色配置无法安全读取 |
 
-未知内部异常只显示 `Gateway 未能完成请求，请稍后重试`，日志里也只有 `errorType`；此时按
-`surface` 与时间范围过滤日志，再查看同一时段的 `err`/`cause` 字段。
+未知内部异常只显示 `Gateway 未能完成请求，请稍后重试`。渠道失效与启动失败日志会带受控的
+`errorChain`：从外层错误开始，每层只记录类型和白名单内的错误码，最多四层 `cause`，不含错误正文。
+此时按 `surface` 与时间范围过滤日志，再按 `errorChain` 逐层定位；`err` 字段本身仍只有类型。

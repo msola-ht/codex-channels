@@ -7,9 +7,17 @@ import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { SurfaceAdapter } from "../src/surfaces/index.js";
+import { WeixinInputFatalError } from "../src/surfaces/weixin/index.js";
 
 const interactions = {} as InteractionPort;
 const logger = pino({ level: "silent" });
+
+class MessageProcessingFixtureError extends Error {
+  constructor(options: ErrorOptions) {
+    super("微信消息处理失败", options);
+    this.name = "MessageProcessingFixtureError";
+  }
+}
 
 describe("SurfaceManager", () => {
   afterEach(() => {
@@ -101,6 +109,55 @@ describe("SurfaceManager", () => {
       "telegram:default:true",
     ]);
     await manager.stop();
+  });
+
+  it("logs a bounded error chain for fatal Surface errors", async () => {
+    const calls: string[] = [];
+    const telegram = surface("telegram", "default", calls);
+    const output = new EventBus<OutputEvent>(logger);
+    const records: Array<Record<string, unknown>> = [];
+    const managerLogger = {
+      debug() {},
+      info() {},
+      warn() {},
+      error: (fields: Record<string, unknown>, message: string) => {
+        if (message === "Surface 连接已中断，将独立重试") records.push(fields);
+      },
+    } as unknown as Logger;
+    const manager = new SurfaceManager(
+      [telegram],
+      output,
+      managerLogger,
+      undefined,
+      { retryDelaysMs: [60_000] },
+    );
+    await manager.start();
+
+    manager.reportFatal("telegram", "default", new WeixinInputFatalError(
+      "message-processing",
+      {
+        cause: new MessageProcessingFixtureError({
+          cause: new Error("private application detail"),
+        }),
+      },
+    ));
+    await settle();
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        surface: "telegram",
+        accountId: "default",
+        // 日志序列化会剥掉小写错误码，这里必须显式补回受控的类型与错误码链。
+        errorChain: [
+          "WeixinInputFatalError:message-processing",
+          "MessageProcessingFixtureError",
+          "Error",
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(records[0]?.errorChain)).not.toContain("private");
+    await manager.stop();
+    await output.close();
   });
 
   it("queues critical output during recovery and flushes it after reconnecting", async () => {
@@ -543,9 +600,9 @@ describe("SurfaceManager", () => {
     const managerLogger = {
       debug() {},
       warn() {},
-      error: (fields: { pending?: number }, message: string) => {
+      error: (fields: { pending?: number; threshold?: number }, message: string) => {
         if (message === "Surface 恢复队列达到告警阈值，关键输出继续保留") {
-          thresholds.push(fields.pending ?? -1);
+          thresholds.push(fields.pending ?? -1, fields.threshold ?? -1);
         }
       },
     } as unknown as Logger;
@@ -569,7 +626,7 @@ describe("SurfaceManager", () => {
     }
     await flushEventBus();
 
-    expect(thresholds).toEqual([2, 4, 8]);
+    expect(thresholds).toEqual([2, 2, 4, 4, 8, 8]);
     await manager.stop();
     await output.close();
   });
@@ -861,6 +918,60 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("keeps buffered replay order while Turn completion enrichment is pending", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: string[] = [];
+    feishu.output.handle = (event) => {
+      received.push(event.type);
+    };
+    let releaseAggregate!: () => void;
+    let markAggregateStarted!: () => void;
+    const aggregateGate = new Promise<void>((resolve) => {
+      releaseAggregate = resolve;
+    });
+    const aggregateStarted = new Promise<void>((resolve) => {
+      markAggregateStarted = resolve;
+    });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      taskAggregate: async () => {
+        markAggregateStarted();
+        await aggregateGate;
+        return undefined;
+      },
+    });
+    const target = {
+      surface: "feishu",
+      accountId: "tenant-a",
+      conversationId: "chat-1",
+    };
+    output.publish({
+      type: "turn.completed",
+      target,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    output.publish({
+      type: "thread.status",
+      target,
+      threadId: "thread-1",
+      status: "idle",
+    });
+    await flushEventBus();
+
+    await manager.start();
+    await aggregateStarted;
+    // 完成事件还在等指标库，后到达的状态事件必须排队，不能插到完成卡前面。
+    expect(received).toEqual([]);
+    releaseAggregate();
+    await flushEventBus();
+
+    expect(received).toEqual(["turn.completed", "thread.status"]);
+    await manager.stop();
+    await output.close();
+  });
+
   it("waits for an asynchronous task aggregate before delivery", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const order: string[] = [];
@@ -1056,6 +1167,53 @@ describe("SurfaceManager", () => {
     }
   });
 
+  it("delivers an unenriched completion card when enrichment itself fails", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: OutputEvent[] = [];
+    const warnings: string[] = [];
+    feishu.output.handle = (event) => {
+      received.push(event);
+    };
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = new SurfaceManager(
+      [feishu],
+      output,
+      {
+        debug() {},
+        info() {},
+        warn: (_fields: Record<string, unknown>, message: string) => {
+          warnings.push(message);
+        },
+        error() {},
+      } as unknown as Logger,
+      () => {
+        throw new Error("git branch lookup failed");
+      },
+    );
+    await manager.start();
+
+    output.publish({
+      type: "turn.completed",
+      target: {
+        surface: "feishu",
+        accountId: "tenant-a",
+        conversationId: "chat-1",
+      },
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    await flushEventBus();
+
+    expect(warnings).toContain("Turn 完成统计富化失败，改用未富化输出");
+    expect(received).toEqual([
+      expect.objectContaining({ type: "turn.completed", turnId: "turn-1" }),
+    ]);
+    expect(received[0]).not.toHaveProperty("gitBranch");
+    await manager.stop();
+    await output.close();
+  });
+
   it("isolates a Surface output rejection from later events", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: string[] = [];
@@ -1170,9 +1328,18 @@ function surface(
   };
 }
 
+/**
+ * 等待排队的输出路由与投递链结束。冻结定时器时只能推进微任务，真实定时器下排空一个宏
+ * 任务，覆盖投递链里异步富化引入的额外跳转。
+ */
 async function settle(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  if (!vi.isFakeTimers()) {
+    await flushEventBus();
+    return;
+  }
+  for (let index = 0; index < 4; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 async function flushEventBus(): Promise<void> {
