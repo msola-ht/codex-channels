@@ -1,4 +1,4 @@
-import { GrammyError, InputFile, Api, type Bot, type Context } from "grammy";
+import { GrammyError, HttpError, InputFile, Api, type Bot, type Context } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +49,7 @@ class FakeTelegramApi {
 
   async sendMessage(_chatId: string, text: string, options?: unknown): Promise<{ message_id: number }> {
     if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-      throw new Error("Bad Request: can't parse entities");
+      throw badRequest("Bad Request: can't parse entities");
     }
     this.sent.push(text);
     this.sendOptions.push(options);
@@ -63,7 +63,7 @@ class FakeTelegramApi {
   ): Promise<{ message_id: number }> {
     this.richMessages.push(richMessage);
     if (this.rejectRichMessages) {
-      throw new Error("Bad Request: can't parse rich message");
+      throw badRequest("Bad Request: can't parse rich message");
     }
     this.sent.push(richMessage.markdown ?? richMessage.html ?? "[rich blocks]");
     this.sendOptions.push(options);
@@ -78,13 +78,13 @@ class FakeTelegramApi {
   ): Promise<true> {
     if (typeof text === "string") {
       if (this.rejectHtmlMessages && hasHtmlParseMode(options)) {
-        throw new Error("Bad Request: can't parse entities");
+        throw badRequest("Bad Request: can't parse entities");
       }
       this.edits.push(text);
     } else {
       this.richEdits.push(text);
       if (this.rejectRichMessages) {
-        throw new Error("Bad Request: can't parse rich message");
+        throw badRequest("Bad Request: can't parse rich message");
       }
       this.edits.push(text.markdown ?? text.html ?? "[rich blocks]");
     }
@@ -103,7 +103,7 @@ class FakeTelegramApi {
     options?: unknown,
   ): Promise<{ message_id: number }> {
     if (this.rejectDocuments) {
-      throw new Error("Bad Request: document upload failed");
+      throw badRequest("Bad Request: document upload failed");
     }
     const raw = await document.toRaw();
     if (!(raw instanceof Uint8Array)) {
@@ -141,6 +141,163 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it("skips empty leading HTML chunks while retaining the first actual message identity", async () => {
+    const api = new FakeTelegramApi();
+    const logger = pino({ level: "silent" });
+    const info = vi.spyOn(logger, "info");
+    const outbox = new TelegramOutbox(api as unknown as Api, logger);
+    outbox.handle(textCompleted("final", "\n".repeat(3000) + "正文".repeat(3000)));
+    await drain();
+    await outbox.close();
+    expect(api.sent.every((text) => text.trim().length > 0)).toBe(true);
+    expect(api.sent.join("").trim()).toBe("正文".repeat(3000));
+    expect(info.mock.calls.find((call) => call[1] === "Telegram 完成正文投递完成")?.[0])
+      .toMatchObject({ itemId: "final", messageId: 1 });
+  });
+
+  it("does not implicitly resend an uncertain first stream message on later deltas or completion", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const send = vi.spyOn(api, "sendMessage").mockRejectedValueOnce(new HttpError("lost", new Error("response lost")));
+    outbox.handle(textDelta("final", "开头"));
+    await vi.advanceTimersByTimeAsync(1000);
+    outbox.handle(textDelta("final", "后续"));
+    await vi.advanceTimersByTimeAsync(1000);
+    outbox.handle(textCompleted("final", "## 最终正文"));
+    outbox.handle(turnCompleted());
+    await vi.waitFor(() => expect(api.sent.at(-1)).toBe(turnCompletedPanel));
+    await outbox.close();
+    expect(send).toHaveBeenCalledTimes(2); // 首次尝试和独立的 Turn 完成卡。
+    expect(api.sent).toEqual([turnCompletedPanel]);
+  });
+
+  it.each(["short", "long", "rich"] as const)("replaces an explicitly deleted streaming message for %s final output", async (kind) => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api, kind === "rich" ? "rich" : "html");
+    outbox.handle(textDelta("final", "预览"));
+    await vi.advanceTimersByTimeAsync(1000);
+    vi.spyOn(api, "editMessageText").mockRejectedValueOnce(badRequest("Bad Request: message to edit not found"));
+    outbox.handle(textCompleted("final", "## 标题\n" + (kind === "long" ? "内容\n".repeat(1800) : "最终正文")));
+    outbox.handle(turnCompleted());
+    await vi.waitFor(() => expect(api.sent.at(-1)).toBe(turnCompletedPanel));
+    await outbox.close();
+    expect(api.sent[1]).toContain(kind === "rich" ? "## 标题" : "<b>标题</b>");
+  });
+
+  it("does not report an operation flush as successful final body delivery", async () => {
+    const api = new FakeTelegramApi();
+    const logger = pino({ level: "silent" });
+    const info = vi.spyOn(logger, "info");
+    const outbox = new TelegramOutbox(api as unknown as Api, logger);
+    const send = api.sendMessage.bind(api);
+    vi.spyOn(api, "sendMessage").mockImplementation((chat, text, options) => {
+      if (!text.includes("操作过程")) throw new HttpError("failed", new Error("timeout"));
+      return send(chat, text, options);
+    });
+    outbox.handle(operationUpdated("op", "running", "command", "echo test"));
+    outbox.handle(textCompleted("final", "## 最终正文"));
+    await drain();
+    await outbox.close();
+    expect(api.sent).toHaveLength(1);
+    expect(info.mock.calls.some((call) => call[1] === "Telegram 完成正文投递完成")).toBe(false);
+    expect(info.mock.calls.some((call) => call[1] === "Surface 终态输出投递完成")).toBe(false);
+    expect(info.mock.calls.find((call) => call[1] === "Surface 输出任务处理完成")?.[0])
+      .toMatchObject({ purpose: "operation-log", itemId: "final" });
+  });
+
+  it("retains a completion arriving inside the running debounce window under pressure", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    let release!: () => void;
+    const blocked = outbox.runOrdered("100", () => new Promise<void>((resolve) => { release = resolve; }));
+    await settle();
+    outbox.handle(operationUpdated("fast", "running", "command", "echo fast"));
+    outbox.handle(operationUpdated("fast", "completed", "command", "echo fast"));
+    await vi.advanceTimersByTimeAsync(800);
+    for (let index = 0; index < 201; index++) {
+      outbox.handle({ type: "warning", target, threadId: "thread-1", message: "排队通知" });
+    }
+    release();
+    await blocked;
+    await outbox.close();
+    expect(api.sent.filter((text) => text.includes("操作过程"))).toHaveLength(1);
+    expect(api.sent[0]).toContain("已完成");
+  });
+
+  it("falls back only the rejected HTML chunk without duplicating accepted chunks", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const send = api.sendMessage.bind(api);
+    let attempts = 0;
+    vi.spyOn(api, "sendMessage").mockImplementation((chat, text, options) => {
+      if (++attempts === 3) throw badRequest("Bad Request: can't parse entities");
+      return send(chat, text, options);
+    });
+    const text = Array.from({ length: 180 }, (_, index) => `段落${index}：` + "内容".repeat(25)).join("\n");
+    outbox.handle(textCompleted("final", text));
+    await drain();
+    await outbox.close();
+    expect(api.sent.join("")).toBe(text);
+    expect(api.sendOptions[2]).not.toHaveProperty("parse_mode");
+    expect(api.sendOptions[0]).toHaveProperty("parse_mode", "HTML");
+    expect(api.edits).toHaveLength(0);
+  });
+
+  it.each([false, true])("does not replay partial long output after ambiguous failure (streamed=%s)", async (streamed) => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const logger = pino({ level: "silent" });
+    const info = vi.spyOn(logger, "info");
+    const outbox = new TelegramOutbox(api as unknown as Api, logger);
+    if (streamed) {
+      outbox.handle(textDelta("final", "预览"));
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    const send = api.sendMessage.bind(api);
+    let attempts = 0;
+    vi.spyOn(api, "sendMessage").mockImplementation((chat, text, options) => {
+      if (!text.includes("本次运行") && ++attempts === 2) {
+        throw new HttpError("failed", new Error("response lost"));
+      }
+      return send(chat, text, options);
+    });
+    outbox.handle(textCompleted("final", "## 长文\n" + "正文内容\n".repeat(1800)));
+    outbox.handle(turnCompleted());
+    await settle();
+    await outbox.close();
+    expect(attempts).toBe(2);
+    expect(api.sent.at(-1)).toBe(turnCompletedPanel);
+    expect(info.mock.calls.some((call) => call[1] === "Telegram 完成正文投递完成")).toBe(false);
+  });
+
+  it("does not downgrade or resend an ambiguously accepted document", async () => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const sendDocument = vi.spyOn(api, "sendDocument").mockRejectedValue(new HttpError("failed", new Error("response lost")));
+    outbox.handle(textCompleted("final", "文".repeat(17000)));
+    outbox.handle(turnCompleted());
+    await drain();
+    await outbox.close();
+    expect(sendDocument).toHaveBeenCalledOnce();
+    expect(api.sent).toHaveLength(2);
+    expect(api.edits).toHaveLength(0);
+  });
+
+  it.each(["html", "rich"] as const)("does not downgrade an ambiguously accepted short %s reply", async (format) => {
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api, format);
+    const send = vi.spyOn(api, format === "html" ? "sendMessage" : "sendRichMessage")
+      .mockRejectedValue(new HttpError("failed", new Error("response lost")));
+    outbox.handle(textCompleted("final", "## 最终正文"));
+    await drain();
+    await outbox.close();
+    expect(send).toHaveBeenCalledOnce();
+    expect(api.sent).toHaveLength(0);
+  });
+
   it("delivers and formats a reply completed before the first streaming interval", async () => {
     vi.useFakeTimers();
     const api = new FakeTelegramApi();
@@ -421,7 +578,7 @@ describe("TelegramOutbox", () => {
     await settle();
 
     await vi.waitFor(() => expect(api.edits).toEqual(["<b>思考完成</b>"]));
-    expect(api.sent).toEqual([
+    expect(api.sent.filter((text) => !text.includes("操作过程"))).toEqual([
       "<b>思考中…</b>",
       "<b>思考中…</b>\n\n<b>耗时：</b>3 s",
     ]);
@@ -946,7 +1103,7 @@ describe("TelegramOutbox", () => {
     await outbox.close();
 
     expect(api.sent).toHaveLength(2);
-    expect(api.sent[0]).toContain("完整内容已作为文件发送");
+    expect(api.sent[0]).toContain("以下为内容预览");
     expect(api.sent[1]).toBe(turnCompletedPanel);
     expect(api.documents).toHaveLength(1);
     expect(api.documents[0]?.filename).toBe("codex-response.md");
@@ -976,6 +1133,7 @@ describe("TelegramOutbox", () => {
     outbox.handle(textCompleted("final", text, "final_answer"));
     outbox.handle(turnCompleted());
     await settle();
+    await vi.waitFor(() => expect(api.sent.at(-1)).toBe(turnCompletedPanel));
     await outbox.close();
 
     expect(api.documents).toEqual([]);
@@ -994,6 +1152,7 @@ describe("TelegramOutbox", () => {
     outbox.handle({ ...textDelta("final", "## 公式"), ...(phase === null ? { phase } : {}) });
     await vi.advanceTimersByTimeAsync(1_000);
     outbox.handle({ ...textCompleted("final", markdown), ...(phase === null ? { phase } : {}) });
+    await vi.waitFor(() => expect(api.edits.at(-1)).toContain("<b>公式</b>"));
     await outbox.close();
     expect(api.edits.at(-1)).toContain("<b>公式</b>");
     expect(api.edits.at(-1)).toContain("<code>output_tokens</code>");
@@ -1044,6 +1203,7 @@ describe("TelegramOutbox", () => {
     outbox.handle(textCompleted("final", "# 无法解析的内容", "final_answer"));
     outbox.handle(turnCompleted());
     await settle();
+    await vi.waitFor(() => expect(api.sent.at(-1)).toBe(turnCompletedPanel));
     await outbox.close();
 
     expect(api.richMessages).toEqual([{ markdown: "# 无法解析的内容" }]);
@@ -1059,6 +1219,7 @@ describe("TelegramOutbox", () => {
     outbox.handle(textCompleted("final", "# 无法解析的内容", "final_answer"));
     outbox.handle(turnCompleted());
     await settle();
+    await vi.waitFor(() => expect(api.sent).toContain("# 无法解析的内容"));
     await outbox.close();
 
     expect(api.sent).toEqual(["# 无法解析的内容"]);
@@ -2049,4 +2210,8 @@ function isSilent(value: unknown): boolean {
     value !== null &&
     "disable_notification" in value &&
     value.disable_notification === true;
+}
+
+function badRequest(description: string): GrammyError {
+  return new GrammyError("rejected", { ok: false, error_code: 400, description }, "sendMessage", {});
 }

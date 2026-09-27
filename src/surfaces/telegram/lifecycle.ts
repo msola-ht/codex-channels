@@ -9,6 +9,7 @@ import { conversationCommandDescriptions } from "../conversation-command-help.js
 import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { telegramDefaultAccountId } from "./constants.js";
 import { telegramAbortSignal } from "./sdk-signal.js";
 
 export function telegramConversationCommandName(name: string): string {
@@ -351,7 +352,9 @@ export class TelegramLifecycle {
     update: Parameters<Bot["handleUpdate"]>[0],
   ): Promise<void> {
     try {
-      await withSurfaceDiagnosticContext({ component: "Telegram", inputId: String(update.update_id) },
+      const chatId = update.message?.chat.id ?? update.callback_query?.message?.chat.id;
+      await withSurfaceDiagnosticContext({ component: "Telegram", accountId: telegramDefaultAccountId,
+        ...(chatId === undefined ? {} : { conversationId: String(chatId) }), inputId: String(update.update_id) },
         () => observeSurfaceStage(this.logger, {
           stage: "input",
           queueWaitMs: Math.max(0, Math.round(performance.now() - (updateReceivedAt.get(update) ?? performance.now()))),

@@ -8,6 +8,7 @@ interface DeliveryOperation {
   critical: boolean;
   enqueuedAt: number;
   context: ReturnType<typeof surfaceDiagnosticContext>;
+  purpose: "output" | "ordered" | "answer" | "operation-log" | "turn-completion";
   requestSignal?: AbortSignal;
   run(signal: AbortSignal): Promise<void>;
 }
@@ -18,6 +19,7 @@ export interface ConversationDeliveryOptions {
    * 用于按秒刷新的中间状态：既不让它无限积压，也不在平台变慢时静默丢弃。
    */
   coalesceKey?: string;
+  purpose?: DeliveryOperation["purpose"];
 }
 
 interface ConversationWorker {
@@ -68,7 +70,7 @@ export class ConversationDeliveryQueue {
       return false;
     }
     const worker = this.worker(conversationId);
-    const operation = this.operation(conversationId, critical, run);
+    const operation = this.operation(conversationId, critical, run, options?.purpose);
     const accepted = worker.queue.push(operation, critical, options?.coalesceKey);
     this.logger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
       "Surface 输出入队结果");
@@ -135,6 +137,7 @@ export class ConversationDeliveryQueue {
           cleanup();
         }
       });
+      operation.purpose = "ordered";
       if (requestSignal) operation.requestSignal = requestSignal;
       this.orderedCancellations.add(cancel);
       requestSignal?.addEventListener("abort", cancelQueued, { once: true });
@@ -163,9 +166,10 @@ export class ConversationDeliveryQueue {
     conversationId: string,
     critical: boolean,
     run: DeliveryOperation["run"],
+    purpose: DeliveryOperation["purpose"] = "output",
   ): DeliveryOperation {
     return {
-      critical, run, enqueuedAt: performance.now(),
+      critical, run, purpose, enqueuedAt: performance.now(),
       context: {
         ...surfaceDiagnosticContext(),
         component: this.options.component,
@@ -260,6 +264,7 @@ export class ConversationDeliveryQueue {
           this.logger,
           {
             stage: "delivery",
+            purpose: operation.purpose,
             queueWaitMs: Math.max(0, Math.round(performance.now() - operation.enqueuedAt)),
             pending: queue.size,
             critical: operation.critical,

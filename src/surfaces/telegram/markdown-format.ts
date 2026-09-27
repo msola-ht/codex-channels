@@ -265,3 +265,11 @@ export function formatMarkdownAsTelegramHtmlChunks(markdown: string): string[] {
   flush();
   return chunks;
 }
+
+/** 仅用于本模块生成的 HTML 分片降级，先去标签再解码，避免误删正文里的尖括号。 */
+export function telegramHtmlToPlainText(html: string): string {
+  return html.replace(/<[^>]*>/gu, "").replace(/&(amp|lt|gt|quot|#39);/gu, (_match, entity: string) => {
+    const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
+    return entities[entity]!;
+  });
+}

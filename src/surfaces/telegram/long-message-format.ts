@@ -37,7 +37,7 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
     return {
       kind: "document",
       previewHtml: [
-        "<b>回复较长，完整内容已作为文件发送</b>",
+        "<b>回复较长，以下为内容预览</b>",
         "",
         `<pre>${previewHtml}</pre>`,
         "",

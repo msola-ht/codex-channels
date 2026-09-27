@@ -260,7 +260,10 @@ Telegram 操作状态只编辑显示内容已变化的消息；同一段操作�
 发送或编辑同一条消息；间隔不是送达保证，仍受平台耗时与排队影响。Telegram 增量暂用纯文本，
 正文完成后按配置转换为 HTML 或 Rich Markdown；非 commentary 的完成正文即使没有 phase
 标记，也执行格式化。普通长回复分段发送展开的 HTML，保留标题、代码和链接，不再包裹折叠引用；超过 16,000 字符或含大型代码块的回复继续使用预览加 Markdown 附件。
-附件发送失败回退展开的 HTML 分段；格式化发送失败会记录原因并回退纯文本。
+附件被 Telegram 明确拒绝（400）时回退展开的 HTML 分段；格式解析被明确拒绝时只降级当前分段，保留已成功发送的分段。
+网络中断、超时等结果不确定的失败会记录并停止本次发送，不从头重发，也不在 Turn 完成时自动重播。
+流式首条消息未取得消息 ID 且结果不确定时，后续增量和完成事件同样停止自动重发，完成卡仍独立投递。
+新建消息仅对明确的限流拒绝进行有界重试；编辑与删除可对网络异常或服务端错误进行有界重试。
 TG 中的 Markdown 本地绝对路径引用显示为等宽的文件名及行号，不展示不可点击的完整路径；HTTP(S) 网页链接仍可点击。
 「修改文件」卡片对应 App Server 的 `fileChange` item。直接调用 `apply_patch`，或通过 shell 调用并被 Codex 拦截的补丁操作，都可能产生该 item；普通 shell 文件写入通常呈现为「运行命令」。模型目录的 `apply_patch_tool_type` 控制独立补丁工具的提供，不能仅凭该声明判断渠道是否应显示文件修改卡片。
 
@@ -455,14 +458,17 @@ codexc service restart gateway
 
 | 等级 | 记录内容 |
 | --- | --- |
-| `info` | 收到完成正文/轮次结束事件、对应输出任务处理成功；TG 完成正文的格式化结果，以及长轮询失败后恢复 |
+| `info` | 收到完成正文/轮次结束事件、对应输出任务处理成功、共享路由处理结束；TG 完成正文的格式化与实际投递结果，以及长轮询失败后恢复 |
 | `warn` | 输入处理或发送失败、排队加执行总耗时达到 5 秒、执行 10 秒仍未完成的一次告警、格式化降级、输出未入队、容量替换及关闭超时未投递 |
 | `debug` | 输入处理、输出执行、平台调用的开始与结束，输出入队结果、同键合并和有序操作取消 |
 
 日志用 `component`、`accountId`、`conversationId`、`threadId`、`turnId` 和 `eventType` 定位；
-字段只在对应入口已知时提供。`inputId` 是平台输入标识，`deliveryId` 关联一次输出任务及其
+字段只在对应入口已知时提供；正文事件另带 `itemId`。`inputId` 是平台输入标识，`deliveryId` 关联一次输出任务及其
 分片/API 尝试，`diagnosticId` 关联一次阶段的开始与结束。`stage` 为 `input`、`delivery` 或
-`api`；`queueWaitMs` 表示进入该阶段前的本地排队时间，`executionMs` 是阶段执行耗时，
+`api`；共享路由另记录 `stage: routing`、事件总线等待 `eventBusWaitMs` 和路由处理（含统计富化）`routingMs`。
+`purpose` 区分输出任务用途，例如 TG 正文、操作记录刷新和轮次完成卡；“输出任务处理完成”
+仅表示该任务回调成功，不表示整个完成事件的正文已发送。“Telegram 完成正文投递完成”只在正文所有分段成功后记录。
+`queueWaitMs` 表示进入该阶段前的本地排队时间，`executionMs` 是阶段执行耗时，
 `totalMs` 是两者之和，`pending` 是阶段开始时的队列/待处理数量。API 尝试另外记录操作名，
 有重试策略时记录 `attempt`、`maximumAttempts`；重试等待仍计入外层输出执行耗时。
 飞书 API 阶段完成仅代表 HTTP SDK 调用返回，业务响应仍需经过现有校验；输出任务成功也不代表用户已读。
@@ -473,8 +479,8 @@ codexc service restart gateway
 codexc service logs gateway -n 500
 ```
 
-按 Thread/Turn 找到“Surface 终态输出已收到”，再按 `deliveryId` 查看输出阶段及平台调用：
-`queueWaitMs` 高说明等待前序输出；`executionMs` 高则检查同 ID 下的 API 超时、错误码、重试或
+按 Thread/Turn/Item 找到共享路由记录及“Surface 终态输出已收到”，先检查 `eventBusWaitMs`、`routingMs`，再按 `deliveryId` 和 `purpose` 查看输出阶段及平台调用：
+`queueWaitMs` 只覆盖渠道内等待前序输出，不包含事件总线及共享路由；`executionMs` 高则检查同 ID 下的 API 超时、错误码、重试或
 格式化降级。没有阶段明细时临时开启 `debug` 后复现；缺少日志不能直接认定平台丢消息。
 各渠道输出队列独立，同一会话串行；积压可能合并或替换中间状态，关键输出不会仅因容量耗尽被丢弃。
 发送失败与进程关闭仍可能造成未送达，这些日志不提供离线消息持久化或自动补发功能。

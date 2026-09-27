@@ -4,9 +4,14 @@ import { BoundedAsyncQueue } from "./bounded-queue.js";
 
 const closeTimeoutMs = 5_000;
 
+interface QueuedEvent<T> {
+  event: T;
+  enqueuedAt: number;
+}
+
 interface Subscription<T> {
   name: string;
-  queue: BoundedAsyncQueue<T>;
+  queue: BoundedAsyncQueue<QueuedEvent<T>>;
   controller: AbortController;
   worker: Promise<void>;
 }
@@ -24,13 +29,13 @@ export class EventBus<T> {
 
   subscribe(
     name: string,
-    handler: (event: T, signal: AbortSignal) => Promise<void> | void,
+    handler: (event: T, signal: AbortSignal, queueWaitMs: number) => Promise<void> | void,
     capacity = this.defaultCapacity,
   ): () => void {
     if (this.closed) {
       throw new Error("事件总线已关闭");
     }
-    const queue = new BoundedAsyncQueue<T>(capacity, (state) => {
+    const queue = new BoundedAsyncQueue<QueuedEvent<T>>(capacity, (state) => {
       this.logger.warn({ consumer: name, ...state }, "关键事件积压超过队列容量，继续保留待投递事件");
     });
     const controller = new AbortController();
@@ -56,7 +61,7 @@ export class EventBus<T> {
 
   publish(event: T, critical = false): void {
     for (const subscription of this.subscriptions) {
-      if (!subscription.queue.push(event, critical)) {
+      if (!subscription.queue.push({ event, enqueuedAt: performance.now() }, critical)) {
         this.logger.warn({ consumer: subscription.name, critical }, "事件队列已满，事件未入队");
       }
     }
@@ -93,17 +98,17 @@ export class EventBus<T> {
 
   private async runWorker(
     name: string,
-    queue: BoundedAsyncQueue<T>,
-    handler: (event: T, signal: AbortSignal) => Promise<void> | void,
+    queue: BoundedAsyncQueue<QueuedEvent<T>>,
+    handler: (event: T, signal: AbortSignal, queueWaitMs: number) => Promise<void> | void,
     signal: AbortSignal,
   ): Promise<void> {
     while (true) {
-      const event = await queue.shift();
-      if (event === undefined) {
+      const queued = await queue.shift();
+      if (queued === undefined) {
         return;
       }
       try {
-        await handler(event, signal);
+        await handler(queued.event, signal, Math.max(0, Math.round(performance.now() - queued.enqueuedAt)));
       } catch (error) {
         this.logger.error({ err: error, consumer: name }, "事件消费者执行失败");
       }

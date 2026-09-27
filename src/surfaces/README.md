@@ -91,8 +91,8 @@ Telegram 和飞书在交互消息创建成功或失败时
 清除余下积压且不再执行发送回调。并发关闭调用等待同一个关闭结果，不能提前报告完成。
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
 `diagnostics.ts` 提供 Surface 内部共用的脱敏阶段计时与异步关联上下文，只携带账号、会话、
-Thread/Turn、事件类型及输入/投递标识；输出队列、输入处理和平台调用复用该上下文，
-不保留事件正文。终态输出在 `info` 留痕，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
+Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处理和平台调用复用该上下文，
+不保留事件正文。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
 使用 `debug`。诊断不修改平台调用、重试或排队顺序，日志口径与排障步骤见
 [`渠道展示与调试模式`](../../docs/display.md#调试模式)。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface

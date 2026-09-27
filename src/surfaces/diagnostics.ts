@@ -11,6 +11,7 @@ interface SurfaceDiagnosticContext {
   conversationId?: string;
   threadId?: string | null;
   turnId?: string;
+  itemId?: string;
   eventType?: OutputEvent["type"];
   phase?: string | null;
   inputId?: string;
@@ -43,6 +44,7 @@ export function withSurfaceOutputDiagnostics(
     eventType: event.type,
     ...("threadId" in event ? { threadId: event.threadId } : {}),
     ...("turnId" in event ? { turnId: event.turnId } : {}),
+    ...("itemId" in event ? { itemId: event.itemId } : {}),
     ...("phase" in event ? { phase: event.phase } : {}),
   };
   if (event.type === "text.completed" || event.type === "turn.completed") {
@@ -54,6 +56,7 @@ export function withSurfaceOutputDiagnostics(
 interface SurfaceStageOptions {
   stage: "input" | "delivery" | "api";
   operation?: string;
+  purpose?: string;
   attempt?: number;
   maximumAttempts?: number;
   queueWaitMs?: number;
@@ -89,7 +92,7 @@ export async function observeSurfaceStage<T>(
     if (totalMs >= 5_000) logger.warn(complete, "Surface 阶段完成但耗时较长");
     else if (options.stage === "delivery"
       && (fields.eventType === "text.completed" || fields.eventType === "turn.completed")) {
-      logger.info(complete, "Surface 终态输出投递完成");
+      logger.info(complete, "Surface 输出任务处理完成");
     } else logger.debug(complete, "Surface 阶段完成");
     return result;
   } catch (error) {

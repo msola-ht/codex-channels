@@ -57,7 +57,7 @@ describe("Telegram long final message planner", () => {
     }
     expect(plan.filename).toBe("codex-response.md");
     expect(new TextDecoder().decode(plan.content)).toBe(code);
-    expect(plan.previewHtml).toContain("完整内容已作为文件发送");
+    expect(plan.previewHtml).toContain("以下为内容预览");
     expect(plan.lineCount).toBe(102);
   });
 

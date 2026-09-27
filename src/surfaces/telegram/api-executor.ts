@@ -29,7 +29,7 @@ export class TelegramApiExecutor {
         }, () => operation(signal)));
       } catch (error) {
         if (signal.aborted) throw error;
-        const delayMs = retryDelay(error, attempt);
+        const delayMs = retryDelay(error, attempt, context.operation);
         if (attempt === maximumAttempts || delayMs === undefined || delayMs > 30_000) {
           throw error;
         }
@@ -53,17 +53,18 @@ export class TelegramApiExecutor {
   }
 }
 
-function retryDelay(error: unknown, attempt: number): number | undefined {
+function retryDelay(error: unknown, attempt: number, operation: string): number | undefined {
+  const idempotent = operation === "editMessageText" || operation === "deleteMessage";
   if (error instanceof GrammyError) {
     if (error.error_code === 429 && typeof error.parameters.retry_after === "number") {
       return Math.max(0, error.parameters.retry_after * 1_000);
     }
-    if (error.error_code >= 500) {
+    if (idempotent && error.error_code >= 500) {
       return exponentialDelay(attempt);
     }
     return undefined;
   }
-  if (error instanceof HttpError) {
+  if (idempotent && error instanceof HttpError) {
     return exponentialDelay(attempt);
   }
   return undefined;

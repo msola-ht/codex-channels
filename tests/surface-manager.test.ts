@@ -20,6 +20,35 @@ class MessageProcessingFixtureError extends Error {
 }
 
 describe("SurfaceManager", () => {
+  it("correlates shared routing waits without confusing them with platform delivery", async () => {
+    vi.useFakeTimers();
+    const records: Array<Record<string, unknown>> = [];
+    const diagnosticLogger = pino({ level: "info" }, { write(line) { records.push(JSON.parse(line)); } });
+    const output = new EventBus<OutputEvent>(diagnosticLogger);
+    const telegram = surface("telegram", "default", []);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    telegram.output.handle = async (event) => {
+      if (event.type === "warning") { started(); await gate; }
+    };
+    const manager = new SurfaceManager([telegram], output, diagnosticLogger);
+    await manager.start();
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
+    output.publish({ type: "warning", target, threadId: "thread", message: "PRIVATE BODY" });
+    await ready;
+    output.publish({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", text: "PRIVATE BODY" }, true);
+    await vi.advanceTimersByTimeAsync(6000);
+    release();
+    await output.close();
+    await manager.stop();
+    expect(records.find((record) => record.eventType === "text.completed")).toMatchObject({
+      stage: "routing", eventBusWaitMs: 6000, routingMs: 0, itemId: "answer", conversationId: "chat",
+    });
+    expect(JSON.stringify(records)).not.toContain("PRIVATE BODY");
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

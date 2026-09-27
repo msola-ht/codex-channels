@@ -50,7 +50,13 @@ import { TurnPlanProgressState } from "../plan-presentation.js";
 import type { OperationUpdateDisplay } from "../types.js";
 import { TelegramApiExecutor } from "./api-executor.js";
 import { TelegramApprovalOperationCoordinator } from "./approval-operation-coordinator.js";
-import { telegramErrorMetadata } from "./error-metadata.js";
+import {
+  isTelegramBadRequest,
+  isTelegramDeliveryUncertain,
+  isTelegramFormatRejection,
+  isTelegramMissingMessage,
+  telegramErrorMetadata,
+} from "./error-metadata.js";
 import { telegramAbortSignal } from "./sdk-signal.js";
 import { telegramDefaultAccountId } from "./constants.js";
 import {
@@ -63,6 +69,7 @@ import {
   decodeMarkdownBackslashEscapes,
   formatMarkdownAsTelegramHtml,
   formatMarkdownAsTelegramHtmlChunks,
+  telegramHtmlToPlainText,
 } from "./markdown-format.js";
 import { formatTelegramPanelChunks, hasTelegramReplyHeading } from "./html-format.js";
 import {
@@ -80,6 +87,7 @@ interface StreamState {
   turnKey: string;
   text: string;
   messageId: number | undefined;
+  creationUncertain: boolean;
   phase: MessagePhase | null | undefined;
   completed: boolean;
   truncated: boolean;
@@ -325,6 +333,7 @@ export class TelegramOutbox {
           chatId,
           (signal) => this.flush(chatId, key, true, existing ? undefined : state, signal),
           true,
+          { purpose: "answer" },
         );
         return;
       }
@@ -398,14 +407,18 @@ export class TelegramOutbox {
           }
         }
         state.records.set(event.operation.itemId, event.operation);
-        if (!state.timer) {
+        if (event.operation.status !== "running") {
+          if (state.timer) clearTimeout(state.timer);
+          state.timer = undefined;
+          this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true, { purpose: "operation-log" });
+        } else if (!state.timer) {
           state.timer = setTimeout(() => {
             state.timer = undefined;
             this.enqueue(
               chatId,
               (signal) => this.flushOperationLog(state, false, signal),
-              event.operation.status !== "running",
-              event.operation.status === "running" ? { coalesceKey: state.refreshKey } : undefined,
+              false,
+              { coalesceKey: state.refreshKey, purpose: "operation-log" },
             );
           }, 750);
           state.timer.unref();
@@ -500,9 +513,9 @@ export class TelegramOutbox {
           }
         }
         this.typing.stop(chatId, this.turnActivityKey(event.threadId, event.turnId));
-        this.enqueue(chatId, async () => {
+        this.enqueue(chatId, async (signal) => {
           for (const key of keys) {
-            await this.flush(chatId, key, true);
+            await this.flush(chatId, key, true, undefined, signal);
           }
           const replyTo = this.replyTargets.get(turnKey);
           try {
@@ -517,13 +530,14 @@ export class TelegramOutbox {
               ),
               replyTo,
               true,
+              signal,
             );
           } finally {
             this.replyTargets.delete(turnKey);
             this.notifiedTurns.delete(turnKey);
             this.clearApprovalOperationsForTurn(turnKey);
           }
-        }, true);
+        }, true, { purpose: "turn-completion" });
         return;
       }
       case "warning":
@@ -767,7 +781,7 @@ export class TelegramOutbox {
         clearTimeout(state.timer);
         state.timer = undefined;
       }
-      this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true);
+      this.enqueue(chatId, (signal) => this.flushOperationLog(state, false, signal), true, { purpose: "operation-log" });
     }
   }
 
@@ -834,11 +848,21 @@ export class TelegramOutbox {
     if (!state) {
       return;
     }
+    // 终态尝试从活动流脱离，Turn 完成不能从头重播一次已部分发送或结果不确定的回复。
+    if (final && !standaloneState) this.streams.delete(key);
+    await this.flushState(chatId, state, final, signal);
+    if (final && state.phase !== "commentary") {
+      this.logger.info({ ...surfaceDiagnosticContext(), chatId, messageId: state.messageId },
+        "Telegram 完成正文投递完成");
+    }
+  }
+
+  private async flushState(chatId: string, state: StreamState, final: boolean, signal?: AbortSignal): Promise<void> {
+    if (state.creationUncertain) {
+      throw new Error("Telegram 流式正文首次发送结果不确定，停止自动重发");
+    }
     if (!state.text.trim()) {
       if (!final || state.phase === "commentary") {
-        if (final && !standaloneState) {
-          this.streams.delete(key);
-        }
         return;
       }
       state.text = emptyCodexResponseText;
@@ -847,18 +871,8 @@ export class TelegramOutbox {
     if (final && state.phase !== "commentary") {
       const longMessage = planLongFinalMessage(text);
       if (longMessage) {
-        try {
-          state.messageId = await this.sendLongFinal(chatId, state, text, longMessage, signal);
-          if (!standaloneState) {
-            this.streams.delete(key);
-          }
-          return;
-        } catch (error) {
-          this.logger.warn(
-            { ...surfaceDiagnosticContext(), chatId, ...telegramErrorMetadata(error) },
-            "Telegram 长回复优化发送失败，回退普通文本",
-          );
-        }
+        state.messageId = await this.sendLongFinal(chatId, state, text, longMessage, signal);
+        return;
       }
       {
         // Native Rich Markdown must not recreate the reserved interaction heading.
@@ -874,11 +888,10 @@ export class TelegramOutbox {
               : await this.sendHtmlFinal(chatId, state, formatted, signal);
             this.logger.info({ ...surfaceDiagnosticContext(), chatId, format, messageId: state.messageId },
               "Telegram 完成正文已格式化");
-            if (!standaloneState) {
-              this.streams.delete(key);
-            }
             return;
           } catch (error) {
+            if (isMessageNotModified(error)) return;
+            if (signal?.aborted || !isTelegramFormatRejection(error)) throw error;
             this.logger.warn(
               {
                 ...surfaceDiagnosticContext(),
@@ -906,7 +919,7 @@ export class TelegramOutbox {
       } catch (error) {
         if (isMessageNotModified(error)) {
           // The authoritative final text is already visible.
-        } else if (final) {
+        } else if (final && !signal?.aborted && isTelegramBadRequest(error)) {
           state.messageId = await this.sendFirstChunk(chatId, state, first, signal);
         } else {
           throw error;
@@ -919,9 +932,6 @@ export class TelegramOutbox {
       for (const chunk of rest) {
         await this.sendMessage(chatId, chunk, undefined, true, signal);
       }
-      if (!standaloneState) {
-        this.streams.delete(key);
-      }
     }
   }
 
@@ -931,6 +941,7 @@ export class TelegramOutbox {
       turnKey,
       text: "",
       messageId: undefined,
+      creationUncertain: false,
       phase: undefined,
       completed: false,
       truncated: false,
@@ -1007,7 +1018,7 @@ export class TelegramOutbox {
       state.timer = undefined;
     }
     this.operationLogs.delete(turnKey);
-    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true);
+    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true, { purpose: "operation-log" });
   }
 
   private removeOperationFromLog(
@@ -1056,7 +1067,7 @@ export class TelegramOutbox {
       state.timer = undefined;
     }
     this.operationLogs.delete(turnKey);
-    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true);
+    this.enqueue(chatId, (signal) => this.flushOperationLog(state, true, signal), true, { purpose: "operation-log" });
   }
 
   private flushOperationUpdates(
@@ -1140,7 +1151,7 @@ export class TelegramOutbox {
       }
       try {
         await this.executor.call(
-          { chatId, operation: "editMessageText", critical: final },
+          { chatId, operation: "editMessageText", critical: final || record.status !== "running" },
           (requestSignal) => this.api.editMessageText(
             chatId,
             messageId,
@@ -1152,7 +1163,7 @@ export class TelegramOutbox {
         );
       } catch (error) {
         if (!isMessageNotModified(error)) {
-          if (!final) {
+          if (!final || signal?.aborted || !isTelegramBadRequest(error)) {
             throw error;
           }
           state.messageIds.set(
@@ -1300,7 +1311,7 @@ export class TelegramOutbox {
         } catch (error) {
           if (isMessageNotModified(error)) {
             // 最终文本已经可见，无需重复编辑。
-          } else if (event.final === true) {
+          } else if (event.final === true && !signal?.aborted && isTelegramBadRequest(error)) {
             existing.messageId = await this.sendPanel(chatId, text, undefined, false, signal);
           } else {
             throw error;
@@ -1400,7 +1411,11 @@ export class TelegramOutbox {
       { chatId, operation: "sendMessage", critical: true },
       (requestSignal) => this.api.sendMessage(chatId, text, replyOptions(replyTo, silent), telegramAbortSignal(requestSignal)),
       signal,
-    );
+    ).catch((error: unknown) => {
+      // 没拿到消息 ID 时，后续定时刷新同样不能把未知结果当作“未发送”。
+      if (isTelegramDeliveryUncertain(error)) state.creationUncertain = true;
+      throw error;
+    });
     if (!silent) {
       this.notifiedTurns.add(state.turnKey);
     }
@@ -1415,12 +1430,18 @@ export class TelegramOutbox {
   ): Promise<number> {
     const richMessage: InputRichMessage = { markdown };
     if (state.messageId !== undefined) {
-      await this.executor.call(
-        { chatId, operation: "editMessageText", critical: true },
-        (requestSignal) => this.api.editMessageText(chatId, state.messageId!, richMessage, {}, telegramAbortSignal(requestSignal)),
-        signal,
-      );
-      return state.messageId;
+      try {
+        await this.executor.call(
+          { chatId, operation: "editMessageText", critical: true },
+          (requestSignal) => this.api.editMessageText(chatId, state.messageId!, richMessage, {}, telegramAbortSignal(requestSignal)),
+          signal,
+        );
+        return state.messageId;
+      } catch (error) {
+        if (isMessageNotModified(error)) return state.messageId;
+        if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
+        state.messageId = undefined;
+      }
     }
 
     const replyTo = this.replyTargets.get(state.turnKey);
@@ -1448,12 +1469,18 @@ export class TelegramOutbox {
     signal?: AbortSignal,
   ): Promise<number> {
     if (state.messageId !== undefined) {
-      await this.executor.call(
-        { chatId, operation: "editMessageText", critical: true },
-        (requestSignal) => this.api.editMessageText(chatId, state.messageId!, html, operationEditOptions(), telegramAbortSignal(requestSignal)),
-        signal,
-      );
-      return state.messageId;
+      try {
+        await this.executor.call(
+          { chatId, operation: "editMessageText", critical: true },
+          (requestSignal) => this.api.editMessageText(chatId, state.messageId!, html, operationEditOptions(), telegramAbortSignal(requestSignal)),
+          signal,
+        );
+        return state.messageId;
+      } catch (error) {
+        if (isMessageNotModified(error)) return state.messageId;
+        if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
+        state.messageId = undefined;
+      }
     }
 
     const replyTo = this.replyTargets.get(state.turnKey);
@@ -1501,6 +1528,7 @@ export class TelegramOutbox {
       );
       return state.messageId;
     } catch (error) {
+      if (signal?.aborted || !isTelegramBadRequest(error)) throw error;
       this.logger.warn(
         { ...surfaceDiagnosticContext(), chatId, ...telegramErrorMetadata(error) },
         "Telegram 完整回复文件发送失败，回退分段 HTML",
@@ -1515,56 +1543,48 @@ export class TelegramOutbox {
     chunks: readonly string[],
     signal?: AbortSignal,
   ): Promise<number> {
-    const first = chunks[0];
-    if (!first) {
-      throw new Error("Telegram 分段回复没有可发送内容");
-    }
-
-    if (state.messageId !== undefined) {
-      await this.executor.call(
-        { chatId, operation: "editMessageText", critical: true },
-        (requestSignal) => this.api.editMessageText(
-          chatId,
-          state.messageId!,
-          first,
-          operationEditOptions(),
-          telegramAbortSignal(requestSignal),
-        ),
-        signal,
-      ).catch((error: unknown) => {
-        if (!isMessageNotModified(error)) throw error;
-      });
-    } else {
-      const replyTo = this.replyTargets.get(state.turnKey);
-      const silent = this.notifiedTurns.has(state.turnKey);
-      const message = await this.executor.call(
-        { chatId, operation: "sendMessage", critical: true },
-        (requestSignal) => this.api.sendMessage(
-          chatId,
-          first,
-          htmlSendOptions(replyTo, silent),
-          telegramAbortSignal(requestSignal),
-        ),
-        signal,
-      );
-      state.messageId = message.message_id;
-      if (!silent) {
-        this.notifiedTurns.add(state.turnKey);
+    if (chunks.length === 0) throw new Error("Telegram 分段回复没有可发送内容");
+    let deliveredChunk = false;
+    for (const [index, html] of chunks.entries()) {
+      const plain = telegramHtmlToPlainText(html);
+      if (!plain.trim()) continue;
+      const first = !deliveredChunk;
+      const deliver = async (text: string, formatted: boolean): Promise<void> => {
+        if (first && state.messageId !== undefined) {
+          await this.executor.call(
+            { chatId, operation: "editMessageText", critical: true },
+            (requestSignal) => this.api.editMessageText(chatId, state.messageId!, text,
+              formatted ? operationEditOptions() : {}, telegramAbortSignal(requestSignal)), signal,
+          ).catch(async (error: unknown) => {
+            if (isMessageNotModified(error)) return;
+            if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
+            state.messageId = undefined;
+            await deliver(text, formatted);
+          });
+        } else {
+          const replyTo = first ? this.replyTargets.get(state.turnKey) : undefined;
+          const silent = !first || this.notifiedTurns.has(state.turnKey);
+          const message = await this.executor.call(
+            { chatId, operation: "sendMessage", critical: true },
+            (requestSignal) => this.api.sendMessage(chatId, text,
+              formatted ? htmlSendOptions(replyTo, silent) : replyOptions(replyTo, silent),
+              telegramAbortSignal(requestSignal)), signal,
+          );
+          if (first) state.messageId = message.message_id;
+          if (!silent) this.notifiedTurns.add(state.turnKey);
+        }
+      };
+      try {
+        await deliver(html, true);
+      } catch (error) {
+        if (signal?.aborted || !isTelegramFormatRejection(error)) throw error;
+        this.logger.warn({ ...surfaceDiagnosticContext(), chatId, chunkIndex: index,
+          ...telegramErrorMetadata(error) }, "Telegram 当前分段格式被拒绝，回退该段纯文本");
+        await deliver(plain, false);
       }
+      deliveredChunk = true;
     }
-
-    for (const chunk of chunks.slice(1)) {
-      await this.executor.call(
-        { chatId, operation: "sendMessage", critical: true },
-        (requestSignal) => this.api.sendMessage(
-          chatId,
-          chunk,
-          htmlSendOptions(undefined, true),
-          telegramAbortSignal(requestSignal),
-        ),
-        signal,
-      );
-    }
+    if (state.messageId === undefined) throw new Error("Telegram 分段回复没有可发送内容");
     return state.messageId;
   }
 

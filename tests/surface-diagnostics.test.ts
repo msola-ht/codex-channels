@@ -50,9 +50,9 @@ describe("Surface diagnostics", () => {
     const queue = new ConversationDeliveryQueue(logger, { component: surface });
     withSurfaceOutputDiagnostics(logger, answer(surface), () => queue.enqueue("chat", async () => undefined, true));
     await queue.close();
-    const record = records.find((r) => r.msg === "Surface 终态输出投递完成");
+    const record = records.find((r) => r.msg === "Surface 输出任务处理完成");
     expect(record).toMatchObject({ component: surface, accountId: "account", conversationId: "chat",
-      eventType: "text.completed", threadId: `thread-${surface}`, turnId: "turn", outcome: "completed",
+      eventType: "text.completed", threadId: `thread-${surface}`, turnId: "turn", itemId: "item", purpose: "output", outcome: "completed",
       deliveryId: expect.any(String), queueWaitMs: expect.any(Number), executionMs: expect.any(Number) });
     expect(JSON.stringify(records)).not.toContain("PRIVATE MESSAGE BODY");
   });
@@ -70,7 +70,7 @@ describe("Surface diagnostics", () => {
       observeSurfaceStage(logger, { stage: "api", operation: "editMessageText" }, async () => undefined), true));
     withSurfaceOutputDiagnostics(logger, answer("feishu"), () => feishu.enqueue("chat", async () => undefined, true));
     await settle();
-    expect(records.some((r) => r.msg === "Surface 终态输出投递完成" && r.component === "Feishu")).toBe(true);
+    expect(records.some((r) => r.msg === "Surface 输出任务处理完成" && r.component === "Feishu")).toBe(true);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(records.filter((r) => r.msg === "Surface 阶段仍未完成")).toHaveLength(1);
     release();

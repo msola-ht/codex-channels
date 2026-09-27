@@ -382,6 +382,7 @@ describe("Feishu outbox streaming lifecycle", () => {
         conversationId: "oc_chat",
         deliveryId: expect.any(String),
         eventType: "text.completed",
+        itemId: "飞书回复",
         threadId: "thread-1",
         turnId: "turn-1",
       },

@@ -136,7 +136,27 @@ export class SurfaceManager {
     }
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
-      (event) => this.routeOutput(event),
+      async (event, _signal, eventBusWaitMs) => {
+        const started = performance.now();
+        const fields = {
+          surface: event.target.surface, accountId: event.target.accountId,
+          conversationId: event.target.conversationId, eventType: event.type,
+          ...("threadId" in event ? { threadId: event.threadId } : {}),
+          ...("turnId" in event ? { turnId: event.turnId } : {}),
+          ...("itemId" in event ? { itemId: event.itemId } : {}),
+          stage: "routing", eventBusWaitMs,
+        };
+        try {
+          await this.routeOutput(event);
+        } finally {
+          const routingMs = Math.max(0, Math.round(performance.now() - started));
+          if (eventBusWaitMs + routingMs >= 5_000) {
+            this.logger.warn({ ...fields, routingMs }, "Surface 共享输出路由耗时较长");
+          } else if (event.type === "text.completed" || event.type === "turn.completed") {
+            this.logger.info({ ...fields, routingMs }, "Surface 终态输出路由处理结束");
+          }
+        }
+      },
     );
   }
 
