@@ -49,6 +49,17 @@ describe("WebUI 界面文案语言切换", () => {
     errorsPageLoadingEn: string;
     errorsPageEmptyEn: string;
     errorsPageErrorEn: string;
+    trafficTableEn: string;
+    trafficTableEmptyEn: string;
+    trafficDetailEn: string;
+    trafficDetailFailedEn: string;
+    trafficDetailPrewarmEn: string;
+    trafficDetailNoResponseEn: string;
+    trafficPageEn: string;
+    trafficBatchFailedEn: string;
+    trafficPageDisabledEn: string;
+    trafficPageLimitedEn: string;
+    trafficDetailPageEn: string;
   };
 
   beforeAll(() => {
@@ -67,6 +78,10 @@ describe("WebUI 界面文案语言切换", () => {
           if (id.endsWith("/src/hooks/use-requests.ts")) return "export function useRequests() { return globalThis.fixtureRequests; }";
           if (id.endsWith("/src/hooks/use-errors.ts")) return "export function useErrors() { return globalThis.fixtureErrors; }";
           if (id.endsWith("/src/hooks/use-metrics-export.ts")) return "export function useMetricsExport() { return globalThis.fixtureExport; }";
+          if (id.endsWith("/src/hooks/use-traffic.ts")) return "export function useTrafficExchanges() { return globalThis.fixtureTrafficList; } export function useTrafficExchange() { return globalThis.fixtureTrafficDetail; }";
+          if (id.endsWith("/src/hooks/use-traffic-query.ts")) return "export const trafficPageSizeOptions = [10, 20, 50]; export function useTrafficQuery() { return globalThis.fixtureTrafficQuery; }";
+          if (id.endsWith("/src/hooks/use-management-tasks.ts")) return "export function useManagementTasks() { return globalThis.fixtureManagementTasks; } export function useManagementTaskRefresh() {}";
+          if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
         } }],
       });
       try {
@@ -82,6 +97,9 @@ describe("WebUI 界面文案语言切换", () => {
         const { RequestsPage } = await server.ssrLoadModule("/src/pages/requests-page.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
+        const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
+        const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
+        const { TrafficPage } = await server.ssrLoadModule("/src/pages/traffic-page.tsx");
         const { ServerTimeContext } = await server.ssrLoadModule("/src/hooks/use-server-time.ts");
         const { AccountUpdateDescription, AccountRefreshFeedback, AccountSnapshotEmpty } =
           await server.ssrLoadModule("/src/components/overview/account-refresh-feedback.tsx");
@@ -219,6 +237,74 @@ describe("WebUI 界面文案语言切换", () => {
         globalThis.fixtureRequests = { ...globalThis.fixtureRequests, data: null,
           error: "fixture-requests-failure", errorCode: "unauthorized" };
         const requestsPageErrorEn = render(RequestsPage, {}, "en");
+        const trafficExchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model",
+          turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
+          state: "completed", durationMs: 1000, hasError: true, requestModel: "model-test",
+          responseModels: ["model-test"], upstreamProvider: "deepseek" };
+        const trafficDetail = { ...trafficExchange, transport: "http", account: "main", threadId: "thread-1",
+          turnId: "turn-1", requestKind: "response",
+          modelEvidence: { serverModels: [{ source: "response.completed", model: "server-model" }],
+            safetyModels: [{ source: "safety", model: "safety-model" }],
+            turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: true },
+          parameterComparison: [{ field: "temperature", request: "0.7", response: "0.7" }],
+          chatDiagnostics: { fields: { "routing.finalProvider": "deepseek", model: "upstream-model" }, truncated: true },
+          request: { headers: { "content-type": "application/json" }, body: "request-body", bodyTruncated: true,
+            method: "POST", path: "/v1/responses", bytes: 100, storedBytes: 90,
+            parameters: { reasoningEffort: "high", serviceTier: "priority", generate: false, previousResponseId: "resp-0" },
+            content: { instructions: "instructions-body",
+              input: [{ type: "message", role: "user", text: "hello", name: "turn-1" }, { type: "omitted", omittedItems: 3 }],
+              tools: [{ name: "tool-a", type: "function", definition: "{}" }] } },
+          response: { status: 200, eventType: "response.completed", outputTruncated: true, bodyTruncated: true,
+            serviceTier: "default", responseId: "resp-1", bytes: 200, storedBytes: 180,
+            headers: { "x-codex-turn-state": "abc" }, body: "response-body",
+            usage: { inputTokens: 100, cachedTokens: 50, outputTokens: 20, reasoningTokens: 5 },
+            firstTokenMs: 100, callTiming: { totalMs: 1000 }, state: "completed",
+            output: [{ type: "message", phase: "commentary", text: "answer-body" },
+              { type: "reasoning", text: "reasoning-body" }, { type: "function_call", name: "tool-a", callId: "call-1" }] },
+          tracePage: { offset: 0, total: 2, previousOffset: null, nextOffset: 1 },
+          trace: [{ atMs: 1000, kind: "fixture-event", text: "trace-body", truncated: true }] };
+        const trafficDetailProps = { provider: "openai", session: "batch-1", onTracePageChange: noop, onRetry: noop };
+        const trafficDetailFailed = { ...trafficDetail, state: "failed",
+          response: { ...trafficDetail.response, state: "failed", failureStage: "upstream",
+            failure: "boom", errorScope: "request", error: { code: "x" } } };
+        const trafficDetailPrewarm = { ...trafficDetail, category: "prewarm",
+          response: { ...trafficDetail.response, output: [] } };
+        const trafficDetailNoResponse = { ...trafficDetail, state: "pending", response: null };
+        globalThis.fixtureDisclosureOpen = true;
+        const trafficTableEn = render(TrafficTable, { exchanges: [trafficExchange], onOpen: noop,
+          turnStates: new Map([[JSON.stringify([trafficExchange.label, trafficExchange.session, trafficExchange.id]), trafficExchange.turnStateLengths]]) }, "en");
+        const trafficTableEmptyEn = render(TrafficTable, { exchanges: [], onOpen: noop }, "en");
+        const trafficDetailEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetail }, "en");
+        const trafficDetailFailedEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetailFailed }, "en");
+        const trafficDetailPrewarmEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetailPrewarm }, "en");
+        const trafficDetailNoResponseEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetailNoResponse }, "en");
+        const trafficListBase = { enabled: true, label: "openai", session: null, retentionDays: 30,
+          labels: [{ label: "openai", sessions: 1 }], sessions: [{ session: "batch-1", createdAtMs: 1000 }],
+          exchanges: [trafficExchange], total: 1, nextOffset: null, maximumOffset: 0 };
+        globalThis.fixtureTrafficQuery = { query: { id: null, limit: 50, offset: 0 }, update: noop };
+        globalThis.fixtureManagementTasks = { tasks: [], loading: false, error: null, saving: false,
+          pendingPreview: null, actionError: null, run: noop, refetch: noop, confirm: noop, cancelPending: noop };
+        globalThis.fixtureTrafficDetail = { displayData: null, loading: false, error: null, errorCode: null, refetch: noop };
+        globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, error: null, errorCode: null,
+          refetch: noop, turnStates: new Map(), turnStateErrors: new Map(), turnStatesLoading: false,
+          turnStatesError: null, refetchTurnStates: noop };
+        const trafficPageEn = render(TrafficPage, {}, "en");
+        globalThis.fixtureTrafficList.turnStatesError={batches:["openai / batch-1"]};
+        const trafficBatchFailedEn=render(TrafficPage, {}, "en");
+        globalThis.fixtureTrafficList.turnStatesError=null;
+        globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, enabled: false } };
+        const trafficPageDisabledEn = render(TrafficPage, {}, "en");
+        globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, total: 5 } };
+        const trafficPageLimitedEn = render(TrafficPage, {}, "en");
+        globalThis.fixtureTrafficQuery = { query: { id: 7, limit: 50, offset: 0, traceOffset: 0 }, update: noop };
+        globalThis.fixtureTrafficDetail = { ...globalThis.fixtureTrafficDetail, displayData: { label: "openai", session: "batch-1", exchange: trafficDetail },
+          loading: false, error: null, errorCode: null, refetch: noop };
+        const trafficDetailPageEn = render(TrafficPage, {}, "en");
+        delete globalThis.fixtureTrafficQuery;
+        delete globalThis.fixtureManagementTasks;
+        delete globalThis.fixtureTrafficList;
+        delete globalThis.fixtureTrafficDetail;
+        delete globalThis.fixtureDisclosureOpen;
         delete globalThis.fixtureDashboard;
         delete globalThis.fixtureAccounts;
         delete globalThis.fixtureAccountManagement;
@@ -275,6 +361,17 @@ describe("WebUI 界面文案语言切换", () => {
           errorsPageLoadingEn,
           errorsPageEmptyEn,
           errorsPageErrorEn,
+          trafficTableEn,
+          trafficTableEmptyEn,
+          trafficDetailEn,
+          trafficDetailFailedEn,
+          trafficDetailPrewarmEn,
+          trafficDetailNoResponseEn,
+          trafficPageEn,
+          trafficBatchFailedEn,
+          trafficPageDisabledEn,
+          trafficPageLimitedEn,
+          trafficDetailPageEn,
         }));
       } finally { await server.close(); }
     `;
@@ -453,6 +550,50 @@ describe("WebUI 界面文案语言切换", () => {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
     }
   });
+
+  it("调用列表与详情的表格、提示、空状态与失败覆盖英文", () => {
+    expect(result.trafficTableEn).toContain("Turn State characters");
+    expect(result.trafficTableEn).toContain("Request duration");
+    expect(result.trafficTableEn).toContain("Model request");
+    expect(result.trafficTableEn).toContain("Error");
+    expect(result.trafficTableEmptyEn).toContain("No traffic records");
+    expect(result.trafficDetailEn).toContain("Diagnostics");
+    expect(result.trafficDetailEn).toContain("Request headers and raw body");
+    expect(result.trafficDetailEn).toContain("Response service tier: default");
+    expect(result.trafficDetailEn).toContain("Copy reference");
+    expect(result.trafficDetailFailedEn).toContain("Request failed");
+    expect(result.trafficDetailFailedEn).toContain("Failure stage: upstream");
+    expect(result.trafficDetailPrewarmEn).toContain("This request produces no answer.");
+    expect(result.trafficDetailNoResponseEn).toContain("No terminal state recorded");
+    for (const html of [result.trafficTableEn, result.trafficTableEmptyEn, result.trafficDetailEn,
+      result.trafficDetailFailedEn, result.trafficDetailPrewarmEn, result.trafficDetailNoResponseEn]) {
+      expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+  });
+
+  it("调用页面的标题、筛选、保留策略、告警与分页覆盖英文", () => {
+    expect(result.trafficBatchFailedEn).toContain("Failed batches (1): openai / batch-1");
+    expect(result.trafficBatchFailedEn).not.toMatch(/[\u4e00-\u9fff]/u);
+    expect(result.trafficPageEn).toContain("Traffic");
+    expect(result.trafficPageEn).toContain("Recorded model request and response fields");
+    expect(result.trafficPageEn).toContain("Recorded session");
+    expect(result.trafficPageEn).toContain("openai · All 1 retained sessions");
+    expect(result.trafficPageEn).toContain("Request records (1)");
+    expect(result.trafficPageEn).toContain("Automatic retention: 30 days");
+    expect(result.trafficPageEn).toContain("Per page");
+    expect(result.trafficPageDisabledEn).toContain("Traffic recording is currently disabled");
+    expect(result.trafficPageDisabledEn).toContain("[debug].model_traffic_dump</code>");
+    expect(result.trafficPageDisabledEn).toContain("off, no new records are written");
+    expect(result.trafficPageLimitedEn).toContain("Traffic pagination limit reached");
+    expect(result.trafficPageLimitedEn).toContain("codexc traffic</code> to view them");
+    expect(result.trafficDetailPageEn).toContain("Call detail");
+    expect(result.trafficDetailPageEn).toContain("View the result, usage and diagnostics for this request");
+    expect(result.trafficDetailPageEn).toContain("Back to list");
+    for (const html of [result.trafficPageEn, result.trafficPageDisabledEn, result.trafficPageLimitedEn, result.trafficDetailPageEn]) {
+      expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+  });
+
   it("导出失败保留网络与超时分类，并按当前语言翻译", () => {
     const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
       import { createServer } from "vite";

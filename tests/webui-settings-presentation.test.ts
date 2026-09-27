@@ -63,6 +63,12 @@ describe("WebUI 状态与关联范围展示", () => {
           renderToStaticMarkup(h(AccountSettingsConfirmationDialog,{...base,pending:{input:{operation:"deepseek.remove"},preview:{operation:"remove"}},saving:false,loading:true})),
           renderToStaticMarkup(h(ManagementTaskConfirmationDialog,{tasks:{saving:false,loading:true,pendingPreview:{input:{operation:"metrics",action:"clear"},preview:{operation:"metrics",action:"clear",effects:[],preconditions:[]}},confirm(){},cancelPending(){}}}))
         ];
+        const {WebuiManagementTaskRunner}=await import("../scripts/webui-management-tasks.mjs");
+        const preview=new WebuiManagementTaskRunner({now:()=>1000}).preview({operation:"traffic",action:"cleanup"});
+        for(const running of [true,false]) {
+          const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
+          html.push(renderMarkup(h(LanguageContext.Provider,{value:{language:"en",setLanguage(){}}},h(ManagementTaskConfirmationDialog,{tasks}))));
+        }
         console.log(JSON.stringify(html));
       } finally {await server.close();}
     `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
@@ -74,6 +80,16 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(html[1]).toContain('<button disabled="">取消</button>');
     expect(html[1]).toContain("处理中…");
     expect(html[2]).toContain('<button>确认写入</button>');
+    for (const index of [6, 7]) {
+      expect(html[index]).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(html[index]).toContain("All App Servers must be stopped");
+      expect(html[index]).toContain("This cannot be undone");
+      expect(html[index]).toContain("codexc traffic cleanup --confirm");
+      expect(html[index]).toContain("2 V2 batches and 3 legacy files");
+      expect(html[index]).toContain("<button>Cancel</button>");
+    }
+    expect(html[6]).toContain('<button disabled="">Confirm execution</button>');
+    expect(html[7]).toContain('<button>Confirm execution</button>');
   }, 30_000);
 
   it("localizes the console account removal confirmation and preserves busy guards", () => {
