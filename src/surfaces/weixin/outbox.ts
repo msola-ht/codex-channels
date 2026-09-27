@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
+import { withSurfaceOutputDiagnostics } from "../diagnostics.js";
 
 import type {
   ConversationTarget,
@@ -102,6 +103,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     this.logger = logger;
     this.client = {
       sendText: (input, signal) => this.withSendRetry(
+        "sendText",
         () => (signal === undefined
           ? client.sendText(input)
           : client.sendText(input, signal)),
@@ -128,6 +130,10 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  private handleEvent(event: OutputEvent): void {
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
     // 通知，推理、计划、操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
@@ -227,12 +233,14 @@ export class WeixinOutbox implements SurfaceOutputPort {
    * 超时与网络中断一律不重试，避免重复气泡或重复上传。
    */
   private withSendRetry<T>(
+    operation: "sendText" | "sendImage" | "sendFile",
     call: () => Promise<T>,
     signal: AbortSignal | undefined,
   ): Promise<T> {
     return withDeliveryRetry(
       {
         component: "Weixin",
+        operation,
         maximumAttempts: maximumSendAttempts,
         maximumDelayMs: maximumSendRetryDelayMs,
         delayMs: weixinSendRetryDelay,
@@ -338,6 +346,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       };
       try {
         await this.withSendRetry(
+          "sendFile",
           () => (signal
             ? fileClient.sendFile(input, signal)
             : fileClient.sendFile(input)),
@@ -454,6 +463,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     };
     try {
       await this.withSendRetry(
+        "sendImage",
         () => (signal
           ? client.sendImage(input, signal)
           : client.sendImage(input)),

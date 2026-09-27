@@ -65,6 +65,7 @@ export function createTelegramSurfaceFixture(
   now?: () => number,
   debugEnabled = false,
   scheduledTasks?: ScheduledTaskUseCases,
+  proxyUrl?: string,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -115,7 +116,7 @@ export function createTelegramSurfaceFixture(
   });
   const surface = new TelegramSurface(
     "123:token",
-    undefined,
+    proxyUrl,
     conversations,
     new TelegramAccessPolicy(new Set([123]), "default"),
     new Set(),

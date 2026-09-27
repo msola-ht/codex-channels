@@ -378,6 +378,12 @@ describe("Feishu outbox streaming lifecycle", () => {
       {
         component: "Feishu",
         fallback: "post",
+        accountId: "cli_app",
+        conversationId: "oc_chat",
+        deliveryId: expect.any(String),
+        eventType: "text.completed",
+        threadId: "thread-1",
+        turnId: "turn-1",
       },
       "飞书静态 CardKit 创建失败，已降级为富文本",
     );

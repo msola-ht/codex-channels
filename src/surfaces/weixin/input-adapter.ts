@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostics.js";
 
 import type {
   ConversationCommandExecutor,
@@ -87,7 +88,7 @@ export interface WeixinInputAdapterOptions {
   closeTimeoutMs?: number;
   now?: () => number;
   debugEnabled?: boolean;
-  logger?: Pick<Logger, "debug">;
+  logger?: Pick<Logger, "debug" | "info" | "warn">;
 }
 
 export class WeixinInputAdapter {
@@ -182,7 +183,14 @@ export class WeixinInputAdapter {
     return this.stopPromise;
   }
 
-  private async handle(message: WeixinSupportedMessage): Promise<void> {
+  private handle(message: WeixinSupportedMessage): Promise<void> {
+    return withSurfaceDiagnosticContext({
+      component: "Weixin", accountId: this.accountId,
+      conversationId: message.conversationId, inputId: message.messageId,
+    }, () => observeSurfaceStage(this.options.logger, { stage: "input" }, () => this.handleMessage(message)));
+  }
+
+  private async handleMessage(message: WeixinSupportedMessage): Promise<void> {
     const receivedAtMs = this.now();
     this.options.logger?.debug(
       {

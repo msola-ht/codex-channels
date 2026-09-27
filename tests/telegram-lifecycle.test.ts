@@ -1,4 +1,4 @@
-import type { Bot } from "grammy";
+import { Bot } from "grammy";
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,30 @@ import {
 } from "../src/surfaces/telegram/lifecycle.js";
 
 describe("TelegramLifecycle", () => {
+  it("passes shutdown cancellation to command registration through the real SDK", async () => {
+    const bot = new Bot("123:token");
+    vi.spyOn(bot, "init").mockResolvedValue();
+    vi.spyOn(bot, "botInfo", "get").mockReturnValue({ username: "test_bot" } as Bot["botInfo"]);
+    let commandSignal: unknown;
+    bot.api.config.use(async (_previous, method, _payload, signal) => {
+      if (method === "setMyCommands") {
+        commandSignal = signal;
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      }
+      return { ok: true, result: true } as never;
+    });
+    const lifecycle = new TelegramLifecycle(bot, pino({ level: "silent" }));
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(commandSignal).toBeInstanceOf(AbortSignal));
+    } finally {
+      await lifecycle.stop();
+    }
+    expect((commandSignal as AbortSignal).aborted).toBe(true);
+  });
+
   it("initializes the bot, registers commands and stops long polling by aborting it", async () => {
     const calls: string[] = [];
     let registeredCommands: ReadonlyArray<{ command: string }> = [];

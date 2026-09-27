@@ -1,3 +1,5 @@
+import type { Logger as DiagnosticLogger } from "pino";
+import { observeSurfaceStage, surfaceDiagnosticContext, withSurfaceDiagnosticContext } from "../diagnostics.js";
 import {
   AppType,
   Client,
@@ -30,6 +32,7 @@ import {
 const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/u;
 
 export interface FeishuMessageClientOptions {
+  logger?: DiagnosticLogger;
   appId: string;
   appSecret: string;
   httpAgent?: unknown;
@@ -252,6 +255,7 @@ export class FeishuMessageClient implements
 {
   private readonly sdkClient: FeishuSdkMessageClient;
   private readonly sendTimeoutMs: number;
+  private readonly diagnosticLogger: DiagnosticLogger | undefined;
 
   constructor(
     options: FeishuMessageClientOptions,
@@ -265,6 +269,7 @@ export class FeishuMessageClient implements
       );
     }
     this.sendTimeoutMs = dependencies.sendTimeoutMs;
+    this.diagnosticLogger = options.logger;
     try {
       this.sdkClient = dependencies.createSdkClient(
         options,
@@ -279,6 +284,20 @@ export class FeishuMessageClient implements
         "飞书消息客户端创建失败",
       );
     }
+  }
+
+  private observeRequest<T>(
+    operation: string,
+    request: Promise<T>,
+    timeoutMs: number,
+    timeoutError: Error,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return withSurfaceDiagnosticContext({ ...surfaceDiagnosticContext(), component: "Feishu" },
+      () => observeSurfaceStage(this.diagnosticLogger, {
+        stage: "api", operation,
+        ...(signal === undefined ? {} : { signal }),
+      }, () => withTimeout(request, timeoutMs, timeoutError, signal)));
   }
 
   async sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
@@ -314,7 +333,7 @@ export class FeishuMessageClient implements
       );
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("uploadFile",
         this.sdkClient.createFile({
           data: {
             file_type: "stream",
@@ -375,7 +394,7 @@ export class FeishuMessageClient implements
       );
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("uploadImage",
         this.sdkClient.createImage({
           data: {
             image_type: "message",
@@ -616,7 +635,7 @@ export class FeishuMessageClient implements
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("patchMessage",
         this.sdkClient.patchMessage({
           path: {
             message_id: messageId,
@@ -663,7 +682,7 @@ export class FeishuMessageClient implements
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("streamingCard",
         operation(),
         this.sendTimeoutMs,
         new FeishuMessageError(
@@ -773,7 +792,7 @@ export class FeishuMessageClient implements
       );
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("downloadResource",
         this.sdkClient.downloadResource({
           params: {
             type,
@@ -823,7 +842,7 @@ export class FeishuMessageClient implements
       return undefined;
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("getMessage",
         this.sdkClient.getMessage({
           params: {
             user_id_type: "open_id",
@@ -892,7 +911,7 @@ export class FeishuMessageClient implements
       );
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("createStreamingCard",
         this.sdkClient.createStreamingCard({
           data: {
             type: "card_json",
@@ -968,7 +987,7 @@ export class FeishuMessageClient implements
     }
     const safeMarkdown = sanitizeFeishuMarkdown(markdown);
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("createMarkdownCard",
         this.sdkClient.createStreamingCard({
           data: {
             type: "card_json",
@@ -1037,7 +1056,7 @@ export class FeishuMessageClient implements
       );
     }
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("replyMessage",
         this.sdkClient.replyMessage({
           path: {
             message_id: messageId,
@@ -1091,7 +1110,7 @@ export class FeishuMessageClient implements
     signal?: AbortSignal,
   ): Promise<string> {
     try {
-      const response = await withTimeout(
+      const response = await this.observeRequest("createMessage",
         this.sdkClient.createMessage({
           params: {
             receive_id_type: "chat_id",

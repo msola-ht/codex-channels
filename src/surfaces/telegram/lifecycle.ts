@@ -1,5 +1,6 @@
 import type { Bot } from "grammy";
 import type { Logger } from "pino";
+import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostics.js";
 
 import {
   conversationCommandNames,
@@ -8,6 +9,7 @@ import { conversationCommandDescriptions } from "../conversation-command-help.js
 import { isEmergencyStopCommand } from "../slash-command.js";
 import { formatTelegramPanelChunks } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { telegramAbortSignal } from "./sdk-signal.js";
 
 export function telegramConversationCommandName(name: string): string {
   return name.replaceAll("-", "_");
@@ -23,6 +25,7 @@ const commands = [
 ];
 
 const updateGroupSizes = new WeakMap<object, number>();
+const updateReceivedAt = new WeakMap<object, number>();
 const maximumPendingUpdates = 1_000;
 const maximumUrgentUpdates = 100;
 const defaultCloseTimeoutMs = 5_000;
@@ -144,7 +147,7 @@ export class TelegramLifecycle {
             chatId,
             chunk,
             { parse_mode: "HTML", disable_notification: true },
-            signal as never,
+            telegramAbortSignal(signal),
           );
         }
       } catch (error) {
@@ -164,7 +167,7 @@ export class TelegramLifecycle {
 
   private async registerCommandMenu(signal: AbortSignal): Promise<void> {
     try {
-      await this.bot.api.setMyCommands(commands, signal as never);
+      await this.bot.api.setMyCommands(commands, {}, telegramAbortSignal(signal));
     } catch (error) {
       this.logger.warn(
         telegramErrorMetadata(error),
@@ -182,7 +185,7 @@ export class TelegramLifecycle {
       const timeout = setTimeout(cancelAttempt, 15_000);
       timeout.unref();
       try {
-        await this.bot.init(attemptController.signal as never);
+        await this.bot.init(telegramAbortSignal(attemptController.signal));
         return;
       } catch (error) {
         if (this.stopping || lifecycleSignal.aborted) {
@@ -235,9 +238,18 @@ export class TelegramLifecycle {
             ),
             allowed_updates: [],
           },
-          signal as never,
+          telegramAbortSignal(signal),
         );
+        if (consecutiveFailures > 0) {
+          this.logger.info({ component: "Telegram", failures: consecutiveFailures }, "Telegram Long Polling 已恢复");
+        }
         consecutiveFailures = 0;
+        for (const update of updates) updateReceivedAt.set(update, performance.now());
+        if (updates.length > 0) {
+          this.logger.debug({ component: "Telegram", count: updates.length,
+            firstInputId: String(updates[0]!.update_id), pending: this.pendingUpdateCount },
+          "Telegram Long Polling 收到更新批次");
+        }
         const emergencyStops = new Set(
           updates.filter((update) => isTelegramEmergencyStopUpdate(
             update,
@@ -339,7 +351,13 @@ export class TelegramLifecycle {
     update: Parameters<Bot["handleUpdate"]>[0],
   ): Promise<void> {
     try {
-      await this.bot.handleUpdate(update);
+      await withSurfaceDiagnosticContext({ component: "Telegram", inputId: String(update.update_id) },
+        () => observeSurfaceStage(this.logger, {
+          stage: "input",
+          queueWaitMs: Math.max(0, Math.round(performance.now() - (updateReceivedAt.get(update) ?? performance.now()))),
+          pending: this.pendingUpdateCount,
+          errorMetadata: telegramErrorMetadata,
+        }, () => this.bot.handleUpdate(update)));
     } catch (error) {
       this.logger.error(
         {

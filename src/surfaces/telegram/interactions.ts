@@ -21,6 +21,7 @@ import {
   telegramInteractionReplyHeading,
 } from "./html-format.js";
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { telegramAbortSignal } from "./sdk-signal.js";
 
 interface PendingInteraction {
   requestId: string;
@@ -174,7 +175,7 @@ export class TelegramInteractionPort implements InteractionPort {
             : { parse_mode: "HTML" as const, disable_notification: true };
           sent = await this.executor.call(
             { chatId: target.conversationId, operation: "sendMessage", critical: true },
-            (requestSignal) => this.bot.api.sendMessage(target.conversationId, chunk, options, requestSignal as never),
+            (requestSignal) => this.bot.api.sendMessage(target.conversationId, chunk, options, telegramAbortSignal(requestSignal)),
             signal,
           );
         }
@@ -268,7 +269,7 @@ export class TelegramInteractionPort implements InteractionPort {
         await this.queue.runOrdered(String(chatId), (signal) => this.executor.call(
           { chatId: String(chatId), operation: "sendMessage", critical: true },
           (requestSignal) => this.bot.api.sendMessage(
-            chatId, "该问题已处理或已失效，回答未发送。请核对当前会话后重新发送消息。", {}, requestSignal as never,
+            chatId, "该问题已处理或已失效，回答未发送。请核对当前会话后重新发送消息。", {}, telegramAbortSignal(requestSignal),
           ), signal,
         ));
         return true;
@@ -307,7 +308,7 @@ export class TelegramInteractionPort implements InteractionPort {
               pending.target.conversationId,
               "回答不完整或不符合可选值，请按原请求重新回复；发送 /stop 可停止当前请求。",
               { reply_parameters: { message_id: pending.messageId } },
-              requestSignal as never,
+              telegramAbortSignal(requestSignal),
             ),
             signal,
           ),
@@ -353,7 +354,7 @@ export class TelegramInteractionPort implements InteractionPort {
               pending.target.conversationId,
               "表单必须回复为有效 JSON 对象；发送 /stop 停止当前请求。",
               { reply_parameters: { message_id: pending.messageId } },
-              requestSignal as never,
+              telegramAbortSignal(requestSignal),
             ),
             signal,
           ),
@@ -696,7 +697,7 @@ export class TelegramInteractionPort implements InteractionPort {
               isLast
                 ? interactionOptions(request, keyboard)
                 : { parse_mode: "HTML", disable_notification: true },
-              requestSignal as never,
+              telegramAbortSignal(requestSignal),
             ),
             signal,
           );
@@ -776,7 +777,7 @@ export class TelegramInteractionPort implements InteractionPort {
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [] },
           },
-          requestSignal as never,
+          telegramAbortSignal(requestSignal),
         ),
         signal,
       )

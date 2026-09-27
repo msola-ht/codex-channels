@@ -1,10 +1,12 @@
 import type { Logger } from "pino";
+import { observeSurfaceStage, surfaceDiagnosticContext } from "./diagnostics.js";
 
 /** 根据错误判断是否重试，并给出下一次尝试前的等待毫秒数。 */
 export type DeliveryRetryDelay = (error: unknown, attempt: number) => number | undefined;
 
 export interface DeliveryRetryOptions {
   component: string;
+  operation?: string;
   /** 含首次尝试在内的最大尝试次数。 */
   maximumAttempts: number;
   /** 超过该等待时间就不再等待，直接抛出最后一次错误。 */
@@ -28,7 +30,12 @@ export async function withDeliveryRetry<T>(
 ): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await call();
+      return await observeSurfaceStage(options.logger, {
+        stage: "api", attempt, maximumAttempts: options.maximumAttempts,
+        ...(options.operation === undefined ? {} : { operation: options.operation }),
+        ...(signal === undefined ? {} : { signal }),
+        ...(options.metadata === undefined ? {} : { errorMetadata: (error: unknown) => options.metadata!(error) }),
+      }, call);
     } catch (error) {
       const delayMs = attempt >= options.maximumAttempts
         ? undefined
@@ -38,6 +45,7 @@ export async function withDeliveryRetry<T>(
       }
       options.logger.warn(
         {
+          ...surfaceDiagnosticContext(),
           component: options.component,
           attempt,
           maximumAttempts: options.maximumAttempts,

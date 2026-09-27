@@ -36,7 +36,8 @@
   每个 Turn 开始时发送共享确认；每轮状态卡复用共享生命周期字段，显示当前 Workspace Git
 分支、官方 Turn 总耗时、模型请求与 Token 统计、当前 Goal、上下文压缩总次数和用量；不显示
   模型请求聚合耗时或首段回复延迟，显示生成/端到端 Token/s（未采样时整行省略）。最终回复默认使用兼容 HTML，也可选择
-  Telegram 原生 Rich Markdown，超长或渲染失败时回退纯文本；完成的原生 `imageGeneration`
+  Telegram 原生 Rich Markdown；已完成且非 commentary 的短正文即使未提供 phase，也按该设置格式化，
+  长回复展开为 HTML 分段，特别长的内容使用预览加附件；渲染失败时回退纯文本；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
@@ -50,7 +51,7 @@
 - `markdown-format.ts`：把常见 Markdown 块与行内样式安全转换为传统 Telegram HTML；
   HTTP(S) 链接转换为可点击链接，Markdown 表格降级为紧凑的粗体表头与项目符号行；
   仅包含 Bot 命令的文本代码块和行内命令会转为可点击纯文本，普通代码块保持不变。
-- `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用可展开引用块，超长代码与内容使用预览加内存文件。
+- `long-message-format.ts`：统一规划终端或 Telegram 发起 Turn 的长回复；普通长文本使用展开的 HTML 分段，跨分片保留格式，超长代码与内容使用预览加内存文件。
 - `operation-format.ts`：把操作记录分组、截断、脱敏并按完整或单行摘要模式渲染为 Telegram
   HTML；完整模式同时显示状态、耗时和退出码。
 - `typing-indicator.ts`：维护活动请求和 Turn 的 Typing 状态、刷新与限速。
@@ -77,7 +78,8 @@
   有界重试耗尽后向 Bootstrap 报告渠道故障，由该
   Telegram 实例独立退避重连，不停止 Gateway 或其他 Surface。
 - `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试。
-- `error-metadata.ts`：只保留异常类型和受约束的机器错误码，不记录任意异常消息。
+- `sdk-signal.ts`：在 SDK 边界保留原生取消信号身份，并适配 grammY 的信号类型声明。
+- `error-metadata.ts`：只保留异常类型、受约束的机器错误码及消息未变化分类，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。
 - `plugin-task-prompts.ts`：把 Plugin 选择后的 ForceReply 提示绑定到聊天、Actor 与精确消息，
   使用十分钟一次性内存状态和 100 项容量上限；过期、跨 Actor 与重复回复不会进入普通 Turn。
@@ -99,7 +101,8 @@
 Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最终输出保持顺序；审批卡状态更新必须先于批准后的操作展示。图片下载必须限制大小、路径、类型和保留时间，文本文件下载
 必须保持纯内存、有界且严格验证 UTF-8。
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
-遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。
+遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。Bot API 的代理连接启用 Keep-Alive，
+由 Surface 关闭时释放连接池；主动取消的请求不进入自动重试。
 下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
 命令解析及位置、容量和内存生命周期提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
 条目按钮使用完整 Queue ID，进入后可启动或删除，删除必须二次确认。新增、更新和排序继续使用文本命令，

@@ -33,6 +33,7 @@ export class BoundedAsyncQueue<T> {
     readonly capacity: number,
     private readonly onOverflow?: (state: QueueOverflow) => void,
     private readonly onCoalesce?: (state: QueueCoalesce) => void,
+    private readonly onDiscard?: (value: T, reason: "coalesced" | "capacity") => void,
   ) {
     this.nextOverflowWarning = capacity + 1;
     if (!Number.isInteger(capacity) || capacity <= 0) {
@@ -59,6 +60,7 @@ export class BoundedAsyncQueue<T> {
           pending.critical = critical;
           this.nonCriticalCount += critical ? -1 : 1;
         }
+        this.onDiscard?.(pending.value, "coalesced");
         pending.value = value;
         this.onCoalesce?.({ coalesceKey, queued: this.entries.length });
         return true;
@@ -82,6 +84,7 @@ export class BoundedAsyncQueue<T> {
       ? -1 : this.entries.findIndex((entry) => !entry.critical);
     if (disposableIndex !== -1) {
       const [disposable] = this.entries.splice(disposableIndex, 1);
+      this.onDiscard?.(disposable!.value, "capacity");
       this.forgetCoalesceKey(disposable);
       this.nonCriticalCount -= 1;
     }
@@ -104,6 +107,7 @@ export class BoundedAsyncQueue<T> {
       const firstNonCritical = this.entries.findIndex((entry) => !entry.critical);
       if (firstNonCritical !== -1) {
         const [disposable] = this.entries.splice(firstNonCritical, 1);
+        this.onDiscard?.(disposable!.value, "capacity");
         this.forgetCoalesceKey(disposable);
         this.nonCriticalCount -= 1;
       }

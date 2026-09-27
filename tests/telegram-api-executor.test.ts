@@ -5,6 +5,25 @@ import { describe, expect, it, vi } from "vitest";
 import { TelegramApiExecutor } from "../src/surfaces/telegram/api-executor.js";
 
 describe("TelegramApiExecutor", () => {
+  it("does not retry a critical request after cancellation", async () => {
+    const controller = new AbortController();
+    const logger = pino({ level: "silent" });
+    const warn = vi.spyOn(logger, "warn");
+    const executor = new TelegramApiExecutor(logger);
+    const error = new HttpError("cancelled", new Error("aborted"));
+    const operation = vi.fn(async () => {
+      controller.abort();
+      throw error;
+    });
+    await expect(executor.call(
+      { chatId: "100", operation: "editMessageText", critical: true },
+      operation,
+      controller.signal,
+    )).rejects.toBe(error);
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalledWith(expect.anything(), "Telegram API 请求失败，稍后重试");
+  });
+
   it("retries transient failures for critical messages", async () => {
     vi.useFakeTimers();
     const executor = new TelegramApiExecutor(pino({ level: "silent" }));

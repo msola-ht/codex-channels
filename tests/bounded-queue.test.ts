@@ -173,7 +173,7 @@ describe("BoundedAsyncQueue", () => {
   });
 });
 
-function nonCriticalCount(queue: BoundedAsyncQueue<unknown>): number {
+function nonCriticalCount<T>(queue: BoundedAsyncQueue<T>): number {
   return (queue as unknown as { nonCriticalCount: number }).nonCriticalCount;
 }
 

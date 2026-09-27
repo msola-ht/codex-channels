@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { withSurfaceOutputDiagnostics, surfaceDiagnosticContext } from "../diagnostics.js";
 
 import {
   isCriticalOutputEvent,
@@ -200,6 +201,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  private handleEvent(event: OutputEvent): void {
     if (event.type === "text.delta") {
       this.acceptStreamDelta(event);
       return;
@@ -556,6 +561,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
             }
             this.logger.warn(
               {
+                ...surfaceDiagnosticContext(),
                 component: "Feishu",
                 threadId: event.threadId,
                 turnId: event.turnId,
@@ -630,6 +636,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           }
           this.logger.warn(
             {
+              ...surfaceDiagnosticContext(),
               component: "Feishu",
               threadId: event.threadId,
               turnId: event.turnId,
@@ -965,6 +972,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         }
         this.logger.warn(
           {
+            ...surfaceDiagnosticContext(),
             component: "Feishu",
             fallback: "post",
           },
@@ -1023,6 +1031,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         } catch (error) {
           this.logger.warn(
             {
+              ...surfaceDiagnosticContext(),
               component: "Feishu",
               threadId: event.threadId,
               turnId: event.turnId,
@@ -1252,6 +1261,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       } catch (error) {
         this.logger.warn(
           {
+            ...surfaceDiagnosticContext(),
             component: "Feishu",
             threadId: event.threadId,
             status: event.status,
@@ -1328,6 +1338,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         this.streamCapacityWarningIssued = true;
         this.logger.warn(
           {
+            ...surfaceDiagnosticContext(),
             component: "Feishu",
             maximumActiveStreams: maximumFeishuActiveStreams,
           },

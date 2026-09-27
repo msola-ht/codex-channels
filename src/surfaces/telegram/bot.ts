@@ -164,6 +164,7 @@ export class TelegramSurface {
   readonly bot: Bot;
   readonly interactions: TelegramInteractionPort;
   readonly output: TelegramOutbox;
+  private readonly proxyAgent: HttpsProxyAgent<string> | undefined;
   private readonly outbox: TelegramOutbox;
   private readonly lifecycle: TelegramLifecycle;
   private readonly imageStore: TelegramImagePort;
@@ -189,11 +190,12 @@ export class TelegramSurface {
     private readonly logger: Logger,
     options: TelegramSurfaceOptions,
   ) {
+    this.proxyAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl, { keepAlive: true }) : undefined;
     this.bot = new Bot(token, {
       client: {
         timeoutSeconds: 30,
-        ...(proxyUrl
-          ? { baseFetchConfig: { agent: new HttpsProxyAgent(proxyUrl) } }
+        ...(this.proxyAgent
+          ? { baseFetchConfig: { agent: this.proxyAgent } }
           : {}),
       },
     });
@@ -331,14 +333,18 @@ export class TelegramSurface {
   }
 
   async stop(): Promise<void> {
-    const lifecycleStop = this.lifecycle.stop();
-    await this.inputs.close();
-    this.imageStore.close();
-    this.audioStore.close();
-    this.pluginTaskPrompts.clear();
-    await this.interactions.close();
-    await this.outbox.close();
-    await lifecycleStop;
+    try {
+      const lifecycleStop = this.lifecycle.stop();
+      await this.inputs.close();
+      this.imageStore.close();
+      this.audioStore.close();
+      this.pluginTaskPrompts.clear();
+      await this.interactions.close();
+      await this.outbox.close();
+      await lifecycleStop;
+    } finally {
+      this.proxyAgent?.destroy();
+    }
   }
 
   replaceNotificationRecipients(recipients: ReadonlySet<number>): void {
