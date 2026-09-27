@@ -774,3 +774,50 @@ it("classifies remote compaction v2 metadata on the Responses path", async () =>
     })]);
   });
 });
+
+it.each([413, 429])("closes an unfinished upload after fully forwarding upstream HTTP %s", async status => {
+  let upstreamClosed = false;
+  const upstream = createServer((request, response) => {
+    request.socket.on("close", () => { upstreamClosed = true; });
+    response.writeHead(status, { "content-type": "application/json" });
+    response.write('{"error":');
+    const timer = setTimeout(() => response.end('{"code":"fixture_rejected"}}'), 20);
+    response.once("close", () => clearTimeout(timer));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  openServers.push({ close: async () => {
+    upstream.closeAllConnections();
+    await new Promise<void>(resolve => upstream.close(() => resolve()));
+  } });
+  const metrics: ProviderProxyMetrics[] = [];
+  const errors: Error[] = [];
+  const proxy = new ProviderProxy("127.0.0.1:0", {
+    upstreamHost: "127.0.0.1", upstreamPort: (upstream.address() as AddressInfo).port,
+    upstreamProtocol: "http", onMetrics: value => { metrics.push(value); }, onError: error => { errors.push(error); },
+  });
+  await proxy.start(); openServers.push(proxy);
+  const result = await new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+    let result: { status: number | undefined; body: string } | undefined;
+    const request = httpRequest(`http://${proxy.address()}/responses`, { method: "POST" }, response => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", chunk => { body += String(chunk); });
+      response.once("error", reject);
+      response.once("end", () => { result = { status: response.statusCode, body }; });
+    });
+    request.once("error", reject);
+    request.write("{");
+    const interval = setInterval(() => request.write(" "), 10);
+    const deadline = setTimeout(() => { reject(new Error("Unfinished upload was not closed")); request.destroy(); }, 1_000);
+    request.once("close", () => {
+      clearInterval(interval); clearTimeout(deadline);
+      if (!result) { reject(new Error("Error response was truncated")); return; }
+      resolve(result);
+    });
+  });
+  expect(result).toEqual({ status, body: '{"error":{"code":"fixture_rejected"}}' });
+  await vi.waitFor(() => expect(upstreamClosed).toBe(true));
+  expect(metrics).toHaveLength(1);
+  expect(metrics[0]).toMatchObject({ httpStatus: status, status: "failed", errorCode: "fixture_rejected" });
+  expect(errors).toEqual([]);
+});

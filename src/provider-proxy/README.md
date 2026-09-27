@@ -51,7 +51,7 @@
   外部额度窗口通过按账户缓存的后台刷新读取；请求完成只使用当时已有的快照，不等待额度接口；
   代理关闭时取消在途刷新并执行有上限的等待。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
-  上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。服务入口按统一
+  上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。上游在请求正文接收完整前返回 HTTP 错误时，停止转发上传正文，完整发送错误响应后关闭本跳连接；主动清理不重复上报失败指标。服务入口按统一
   `network.proxy` 选择传入上游 Agent。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
   `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按具体账户 Provider Socket 上报。
@@ -123,4 +123,4 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 `chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码，不自动重试。
 
 `chat-bridge.ts` 管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具与执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）；托管工具与执行位置为服务端的 `tool_search` 在 Chat 协议下没有等价形态，按失败关闭拒绝。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
-Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，因此面向桥的统计代理使用与桥相同的单次请求预算（默认 300 秒，见 `chatBridgeRequestTimeoutMs`），避免本地代理先按自己的空闲超时截断并丢失桥的错误分类。
+Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，桥的单次请求预算默认 300 秒（见 `chatBridgeRequestTimeoutMs`），覆盖正文接收、路由等待及上游处理。正文接收超时返回 408 `request_timeout` 并关闭未完成的请求连接；上游阶段超时返回 `upstream_timeout`。面向桥的统计代理在此预算上额外预留 5 秒用于终态发送，避免先按空闲超时截断并丢失桥的错误分类。

@@ -10,10 +10,10 @@ import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpErro
 import type { ProviderProxyOptions } from "./proxy.js";
 
 /**
- * 桥自身的单次请求预算。面向桥的统计代理必须使用同一预算，否则本地代理会在上游响应头到达前
- * 先按自己的空闲超时切断连接，把可归类的上游失败变成通用的本地超时。
+ * 桥负责单次请求预算；外层代理额外保留终态发送时间，避免先截断结构化错误。
  */
 export const chatBridgeRequestTimeoutMs = 300_000;
+const bridgeTerminalGraceMs = 5_000;
 
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
@@ -33,7 +33,7 @@ export class ChatCompletionsBridge {
     if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
     return `127.0.0.1:${address.port}`;
   }
-  /** 面向本桥的统计代理上游参数；空闲超时与桥自身预算一致。 */
+  /** 面向本桥的统计代理上游参数；空闲超时额外预留终态发送时间。 */
   proxyOptions(): ProviderProxyOptions {
     const address = this.server.address();
     if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
@@ -42,7 +42,7 @@ export class ChatCompletionsBridge {
       upstreamPort: address.port,
       upstreamProtocol: "http",
       chatDiagnostics: this.diagnostics,
-      timeoutMs: this.requestTimeoutMs,
+      timeoutMs: this.requestTimeoutMs + bridgeTerminalGraceMs,
     };
   }
   async close(): Promise<void> {
@@ -57,29 +57,26 @@ export class ChatCompletionsBridge {
     }
     const controller = new AbortController();
     this.active.add(controller);
+    let receivingBody = true;
+    let status = 400;
     const timer = setTimeout(() => {
-      // 只中止上游与等待中的写入，保留本地连接让下方按上游超时归类失败。
-      controller.abort(chatUpstreamError({ code: "upstream_timeout" }));
+      if (receivingBody) status = 408;
+      controller.abort(receivingBody
+        ? new ChatUpstreamError("request_timeout", "请求正文接收超时，请重试。", true)
+        : chatUpstreamError({ code: "upstream_timeout" }));
     }, this.requestTimeoutMs);
     const abort = (): void => { controller.abort(); };
     response.once("close", abort);
-    let status = 400;
     const diagnostics = new ChatDiagnostics();
     const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], diagnostics.snapshot());
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const value of request) {
-        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
-        size += chunk.length;
-        if (size > 16 * 1024 * 1024) throw new ModelConversionError("Model request exceeds size limit");
-        chunks.push(chunk);
-      }
-      const { request: body, toolNames } = responsesToChat(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+      const payloadBody = await readRequestBody(request, controller.signal);
+      receivingBody = false;
+      const { request: body, toolNames } = responsesToChat(JSON.parse(payloadBody) as unknown);
       status = 502;
       const upstream = this.options.resolveUpstream
-        ? await this.options.resolveUpstream(request.headers)
+        ? await abortable(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
       const payload = JSON.stringify(body);
@@ -156,10 +153,52 @@ export class ChatCompletionsBridge {
       if (!response.destroyed) {
         if (response.headersSent) {
           response.end(`event: response.failed\ndata: ${JSON.stringify({ type: "response.failed", response: { status: "failed", error: detail } })}\n\n`);
-        } else response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
+        } else {
+          // 未读完的正文不能复用连接；先送达错误，再释放入站请求。
+          if (!request.complete) {
+            response.setHeader("connection", "close");
+            response.once("finish", () => request.destroy());
+          }
+          response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
+        }
       }
     } finally {
       clearTimeout(timer); response.off("close", abort); controller.abort(); this.active.delete(controller);
     }
   }
+}
+
+/** Stop receiving immediately on cancellation without destroying the error response socket. */
+function readRequestBody(request: IncomingMessage, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const cleanup = (): void => {
+      request.off("data", data); request.off("end", end); request.off("error", error);
+      signal.removeEventListener("abort", abort);
+    };
+    const error = (reason: unknown): void => {
+      cleanup(); request.pause(); chunks.length = 0; reject(reason instanceof Error ? reason : new Error("Request cancelled"));
+    };
+    const abort = (): void => error(signal.reason);
+    const end = (): void => { cleanup(); resolve(Buffer.concat(chunks).toString("utf8")); };
+    const data = (chunk: Buffer): void => {
+      size += chunk.length;
+      if (size > 16 * 1024 * 1024) error(new ModelConversionError("Model request exceeds size limit"));
+      else chunks.push(chunk);
+    };
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    request.on("data", data); request.once("end", end); request.once("error", error);
+  });
+}
+
+/** Detach from a resolver that cannot be cancelled; late settlement cannot start an upstream request. */
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("Request cancelled"));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    void pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

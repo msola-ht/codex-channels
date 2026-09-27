@@ -363,6 +363,7 @@ export class ProviderProxy {
     const upstreamHeaders = forwardedRequestHeaders(request.headers, upstreamTarget.host, upstreamTarget.port, this.upstreamUserAgent);
     delete upstreamHeaders[chatDiagnosticsHeader];
     if (diagnosticObserver) upstreamHeaders[chatDiagnosticsHeader] = diagnosticObserver.id;
+    let closingRejectedUpload = false;
     const upstream = upstreamRequest({
       agent: upstreamTarget.agent ?? this.upstreamAgent,
       hostname: upstreamTarget.host,
@@ -378,6 +379,17 @@ export class ProviderProxy {
         upstreamResponse.statusCode ?? null,
         upstreamResponse.headers,
       );
+      if (!request.complete && (upstreamResponse.statusCode ?? 0) >= 400) {
+        // 上游提前拒绝上传：保留错误响应，响应发送完成后关闭本跳连接。
+        request.unpipe(upstream);
+        request.pause();
+        response.setHeader("connection", "close");
+        response.once("finish", () => {
+          closingRejectedUpload = true;
+          upstream.destroy();
+          request.destroy();
+        });
+      }
       writeUpstreamHead(response, upstreamResponse);
       const metricsObserver = new HttpResponseMetricsObserver(metrics);
       let forwarding = Promise.resolve();
@@ -418,6 +430,7 @@ export class ProviderProxy {
         });
       });
       upstreamResponse.on("error", (error) => {
+        if (closingRejectedUpload) return;
         const failedAtMonotonicMs = performance.now();
         if (metrics.status === "completed" && isExpectedStreamAbort(error)) {
           response.destroy();
@@ -434,6 +447,7 @@ export class ProviderProxy {
       upstream.destroy(new Error(`模型上游响应超时：${this.timeoutMs}ms`));
     });
     upstream.on("error", (error) => {
+      if (closingRejectedUpload) return;
       const failedAtMonotonicMs = performance.now();
       markMetricsFailed(metrics, "upstream_request_error", Date.now(), error, failedAtMonotonicMs);
       exchange?.failure("upstream_request", error, failedAtMonotonicMs);
@@ -447,6 +461,7 @@ export class ProviderProxy {
       this.onError?.(asError(error));
     });
     request.on("error", (error) => {
+      if (closingRejectedUpload) return;
       const failedAtMonotonicMs = performance.now();
       markMetricsFailed(metrics, "client_request_error", Date.now(), error, failedAtMonotonicMs);
       exchange?.failure("client_request", error, failedAtMonotonicMs);
