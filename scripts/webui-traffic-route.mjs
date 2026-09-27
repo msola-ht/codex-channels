@@ -16,6 +16,7 @@ import {
   describeDumpTrace,
   describeDumpTurnStates,
   dumpCatalog,
+  readDumpResponseProviders,
   selectFilesOfLabel,
   summarizeDumpFiles,
   writerSessionOf,
@@ -51,7 +52,8 @@ export async function readDumpUpstreamProviders(environment, references) {
   for (const reference of references) {
     if (dumpReferenceKey(reference) === null) continue;
     const key = `${reference.label}\u0000${reference.session}`;
-    if (!groups.has(key)) groups.set(key, { label: reference.label, session: reference.session });
+    if (!groups.has(key)) groups.set(key, { label: reference.label, session: reference.session, ids: new Set() });
+    groups.get(key).ids.add(reference.interaction);
   }
   if (groups.size === 0) return providers;
   const located = locateOptionalUserConfig(environment);
@@ -63,18 +65,17 @@ export async function readDumpUpstreamProviders(environment, references) {
     return providers;
   }
   for (const group of groups.values()) {
-    const files = selectFilesOfLabel(catalog.files, group.label, group.session);
-    if (files.length === 0) continue;
-    let page;
+    let matches;
     try {
-      page = await summarizeDumpFiles(files, {});
+      const files = selectFilesOfLabel(catalog.files, group.label, group.session);
+      if (files.length === 0) continue;
+      matches = await readDumpResponseProviders(files, group.ids);
     } catch {
       continue;
     }
-    for (const exchange of page.exchanges) {
-      if (exchange.upstreamProvider === undefined) continue;
-      const key = dumpReferenceKey({ label: group.label, session: group.session, interaction: exchange.id });
-      if (key !== null) providers.set(key, exchange.upstreamProvider);
+    for (const [interaction, provider] of matches) {
+      const key = dumpReferenceKey({ label: group.label, session: group.session, interaction });
+      if (key !== null) providers.set(key, provider);
     }
   }
   return providers;

@@ -1167,6 +1167,51 @@ describe("SurfaceManager", () => {
     }
   });
 
+  it.each(["pending", "synchronous"])("skips later metric reads after a %s timeout and handles late rejection", async (mode) => {
+    vi.useFakeTimers();
+    const received: OutputEvent[] = [];
+    let markDelivered!: () => void;
+    const delivered = new Promise<void>((resolve) => { markDelivered = resolve; });
+    const feishu = surface("feishu", "tenant-a", []);
+    feishu.output.handle = (event) => {
+      received.push(event);
+      if (event.type === "warning") markDelivered();
+    };
+    let rejectTiming!: (error: Error) => void;
+    const taskAggregate = vi.fn(async () => undefined);
+    const sessionAggregate = vi.fn(async () => undefined);
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      completionTiming: () => {
+        if (mode === "synchronous") vi.setSystemTime(Date.now() + 250);
+        return new Promise((_resolve, reject) => { rejectTiming = reject; });
+      },
+      taskAggregate,
+      sessionAggregate,
+    });
+    await manager.start();
+    const target = { surface: "feishu", accountId: "tenant-a", conversationId: "chat-1" };
+    output.publish({
+      type: "turn.completed", target, threadId: "thread-1", turnId: "turn-1",
+      status: "completed", timing: { modelRequestCount: 7 },
+    });
+    output.publish({ type: "warning", target, threadId: "thread-1", message: "next output" });
+    await settle();
+    if (mode === "pending") await vi.advanceTimersByTimeAsync(250);
+    await delivered;
+    expect(taskAggregate).not.toHaveBeenCalled();
+    expect(sessionAggregate).not.toHaveBeenCalled();
+    expect(received).toEqual([
+      expect.objectContaining({ type: "turn.completed", timing: { modelRequestCount: 7 } }),
+      expect.objectContaining({ type: "warning" }),
+    ]);
+    // Vitest reports any unhandled rejection, including queries that outlive delivery.
+    rejectTiming(new Error("metrics failed after delivery"));
+    await vi.advanceTimersByTimeAsync(1);
+    await manager.stop();
+    await output.close();
+  });
+
   it("delivers an unenriched completion card when enrichment itself fails", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];

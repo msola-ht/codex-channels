@@ -483,6 +483,9 @@ export class SurfaceManager {
     deadlineAtMs: number,
     fallback?: T,
   ): T | undefined | Promise<T | undefined> {
+    if (Date.now() >= deadlineAtMs) {
+      return this.expireCompletionMetrics(event, scope, fallback);
+    }
     const recover = (error: unknown): T | undefined => {
       this.logger.warn(
         {
@@ -504,12 +507,14 @@ export class SurfaceManager {
     if (!(result instanceof Promise)) {
       return result ?? fallback;
     }
+    // read 的同步部分也可能耗尽预算；所有已启动查询必须先接住迟到的拒绝。
+    const recovered = result.then((value) => value ?? fallback, recover);
     const remainingMs = deadlineAtMs - Date.now();
     if (remainingMs <= 0) {
       return this.expireCompletionMetrics(event, scope, fallback);
     }
     return withDeadline(
-      result.then((value) => value ?? fallback, recover),
+      recovered,
       remainingMs,
       () => this.expireCompletionMetrics(event, scope, fallback),
     );

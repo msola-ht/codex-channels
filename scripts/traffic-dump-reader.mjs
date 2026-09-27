@@ -89,6 +89,19 @@ export async function forEachDumpRecord(paths, visit) {
   }
 }
 
+/** 单批次按精确调用编号读取响应索引，不读取正文，也不保留页外记录。 */
+export async function readDumpResponseProviders(paths, ids) {
+  const selected = new Set(ids);
+  const providers = new Map();
+  if (selected.size === 0) return providers;
+  await forEachDumpRecord(paths, (record) => {
+    if (record.kind !== "response" || !selected.has(record.id)) return;
+    const provider = upstreamProviderOf(record);
+    if (provider !== undefined) providers.set(record.id, provider);
+  });
+  return providers;
+}
+
 export async function summarizeDumpFiles(paths, { limit, offset = 0, newestFirst = false } = {}) {
   const page = limit === undefined
     ? await readAllInteractionSummaries(paths, newestFirst)

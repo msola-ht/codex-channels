@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeUserData } from "../scripts/runtime-config.mjs";
+// @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
+import { dumpReferenceKey, readDumpUpstreamProviders } from "../scripts/webui-traffic-route.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { metricsLink, metricsQueryParams } from "../webui/src/lib/metrics-query.js";
 import {
@@ -137,6 +139,57 @@ describe("webui server data API", () => {
     expect(exported.status).toBe(200);
     const exportedRecord = ((await exported.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
     expect(exportedRecord).not.toHaveProperty("upstreamProvider");
+  });
+  it("joins only selected response indexes without reading missing WebSocket payloads", async () => {
+    const fixture = createFixture();
+    const session = "2026-09-19T00-00-00-000Z-20";
+    const otherSession = "2026-09-19T00-00-00-000Z-21";
+    const traffic = { label: "openai", session, interaction: 100 };
+    const other = { ...traffic, session: otherSession };
+    recordSample(fixture.databasePath, {
+      ...metricSample(), status: "failed", httpStatus: 502, errorType: "http_error", traffic,
+    });
+    const directory = join(fixture.home, "traffic", `openai-${session}`);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ version: 2, label: "openai", session, createdAtMs: 1 }));
+    const rows = Array.from({ length: 100 }, (_, index) => {
+      const id = index + 1;
+      return [
+        { version: 2, id, kind: "request", transport: "websocket", startedAtMs: id,
+          ...(id % 2 === 0 ? { requestKind: "prewarm" } : {}),
+          payload: { bytes: 1, parts: [{ bytes: 1, offset: 0, file: "payload-1.bin", encoding: "utf8" }] } },
+        { version: 2, id, kind: "response", upstreamProvider: `provider-${id}` },
+      ];
+    }).flat();
+    // No payload file exists: the join must use only the response index.
+    writeFileSync(join(directory, "interactions.jsonl"), rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+    writeCallIndex(fixture, otherSession, 100, "other-session-provider");
+    const providers = await readDumpUpstreamProviders(fixture.environment, [traffic, traffic, other]);
+    expect([...providers]).toEqual([
+      [dumpReferenceKey(traffic), "provider-100"],
+      [dumpReferenceKey(other), "other-session-provider"],
+    ]);
+    const { origin } = await startServer(fixture.environment);
+    for (const path of ["requests", "errors"]) {
+      const response = await fetch(`${origin}/api/v1/${path}?range=all&limit=1`);
+      expect(response.status).toBe(200);
+      const body = await response.json() as { records: Array<{ upstreamProvider?: string }> };
+      expect(body.records).toHaveLength(1);
+      expect(body.records[0]?.upstreamProvider).toBe("provider-100");
+    }
+  });
+  it("isolates an unsupported batch index from other provider references", async () => {
+    const fixture = createFixture();
+    const session = "2026-09-19T00-00-00-000Z-22";
+    const otherSession = "2026-09-19T00-00-00-000Z-23";
+    writeCallIndex(fixture, session, 1, "bad-batch-provider");
+    writeCallIndex(fixture, otherSession, 1, "good-batch-provider");
+    writeFileSync(join(fixture.home, "traffic", `openai-${session}`, "interactions.jsonl"), '{"version":1}\n');
+    const bad = { label: "openai", session, interaction: 1 };
+    const good = { ...bad, session: otherSession };
+    expect([...await readDumpUpstreamProviders(fixture.environment, [bad, good])]).toEqual([
+      [dumpReferenceKey(good), "good-batch-provider"],
+    ]);
   });
   it("keeps serving the request list when the referenced call record is missing", async () => {
     const fixture = createFixture();
