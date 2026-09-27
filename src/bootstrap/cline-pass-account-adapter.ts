@@ -2,8 +2,7 @@ import { isClinePassAccountProvider } from "../../runtime/cline-pass-accounts.mj
 import type { ManagedModelProviderId } from "../../runtime/model-provider-definitions.mjs";
 import { loadConfiguredProviderCredential } from "../../runtime/model-provider-runtime.mjs";
 import type { ProviderAccountAdapter, ProviderAccountUsage, ProviderQuotaWindow } from "../application/index.js";
-import { UserFacingError } from "../conversation-core/index.js";
-import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+import { AccountQuery } from "./account-query.js";
 
 const usageUrl = "https://api.cline.bot/api/v1/users/me/plan/usage-limits";
 const windowDefinitions = [
@@ -21,28 +20,12 @@ export function createClinePassAccountAdapter(options: {
   return {
     provider: options.provider,
     async accountUsage(signal) {
-      try {
+      const query = new AccountQuery("CLP", signal);
+      return query.run(async () => {
         const { apiKey } = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env);
-        const response = await (options.fetchImpl ?? fetch)(usageUrl, {
-          method: "GET", redirect: "error",
-          headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
-        });
-        if (!response.ok) throw new Error("CLP usage request failed");
-        const body = await readBoundedFetchBody(response, 65_536, {
-          invalidContentLength: () => new Error("Invalid CLP response length"),
-          tooLarge: () => new Error("CLP response too large"),
-          missingBody: () => new Error("Missing CLP response body"),
-        });
-        return parseUsage(JSON.parse(body.toString("utf8")) as unknown, options.provider);
-      } catch (error) {
-        throw new UserFacingError(
-          "provider.account.unavailable",
-          "CLP 账户查询失败",
-          { provider: "CLP" },
-          { cause: error },
-        );
-      }
+        const { body } = await query.json(options.fetchImpl ?? fetch, usageUrl, apiKey, "usage", { redirect: "error" });
+        return parseUsage(body, options.provider);
+      });
     },
   };
 }

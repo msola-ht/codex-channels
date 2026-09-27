@@ -197,7 +197,7 @@ export interface ProviderAccountAdapter {
 
 export interface ProviderAccountQueryPort {
   accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal): Promise<ProviderAccountUsage>;
-  accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
+  accountLimits(modelProvider: string, signal?: AbortSignal): Promise<ProviderAccountLimits>;
 }
 
 export interface OfficialAccountSnapshotWriter {

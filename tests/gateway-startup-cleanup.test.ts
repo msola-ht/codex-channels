@@ -1,9 +1,11 @@
-import pino from "pino";
+import pino, { type Logger } from "pino";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { ProviderAccountService } from "../src/application/index.js";
+import { AccountQueryError } from "../src/bootstrap/account-query.js";
 import type { AccountRateLimits } from "../src/application/index.js";
 import { GatewayApplication } from "../src/bootstrap/app.js";
 import { BindingRestoreCoordinator, type BindingRestoreCoordinatorOptions } from "../src/bootstrap/binding-restore-coordinator.js";
@@ -1530,3 +1532,66 @@ describe("GatewayApplication startup cleanup", () => {
     await expect(application.stop()).resolves.toBeUndefined();
   });
 });
+
+
+it("cancels warmup and bounds its wait before closing metrics storage", async () => {
+  vi.useFakeTimers();
+  const write = vi.fn();
+  let complete!: (value: { kind: "unsupported"; provider: string }) => void;
+  const service = new ProviderAccountService([{
+    provider: "clp-main", accountUsage: async () => ({ kind: "unsupported", provider: "clp-main" }),
+    accountLimits: () => new Promise(resolve => { complete = resolve; }),
+  }], { writeOfficialAccountSnapshot: write });
+  const closeStore = vi.fn(async () => undefined);
+  const logger = pino({ level: "silent" });
+  const warning = vi.spyOn(logger, "warn");
+  const application = accountWarmupFixture(service, logger, closeStore);
+  try {
+    await application.start();
+    await vi.advanceTimersByTimeAsync(0);
+    write.mockClear();
+    const stopping = application.stop();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(closeStore).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    expect(closeStore).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith("账户快照预热取消等待超时，迟到结果不会写入快照");
+    complete({ kind: "unsupported", provider: "clp-main" });
+    await (Reflect.get(application, "accountWarmupTask") as Promise<void>);
+    expect(write).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+it("logs safe per-account warmup failures through the real Gateway start path", async () => {
+  const diagnostic = { reason: "authentication" as const, stage: "request" as const, operation: "usage", elapsedMs: 7, httpStatus: 401 };
+  const service = new ProviderAccountService([{
+    provider: "clp-main", accountUsage: async () => { throw new AccountQueryError("CLP", diagnostic, new Error("secret-token")); },
+  }]);
+  const logger = pino({ level: "silent" });
+  const warning = vi.spyOn(logger, "warn");
+  const application = accountWarmupFixture(service, logger, async () => undefined);
+  await application.start();
+  await (Reflect.get(application, "accountWarmupTask") as Promise<void>);
+  expect(warning).toHaveBeenCalledWith({ provider: "clp-main", query: "usage", ...diagnostic }, "账户快照预热失败");
+  expect(JSON.stringify(warning.mock.calls)).not.toContain("secret-token");
+  await application.stop();
+});
+
+function accountWarmupFixture(service: ProviderAccountService, logger: Logger, closeStore: () => Promise<void>) {
+  const close = async () => undefined;
+  return createGatewayApplicationFixture({
+    logger, providerAccounts: service, primaryProvider: "clp-main", stopping: false,
+    config: { codexSocketPath: "/tmp/codex-warmup-fixture.sock" },
+    transport: { kind: "fixture" }, queueLifecycleTasks: new Set(),
+    providerMetrics: { start: close, close: closeStore },
+    codex: { onNotification: () => undefined, onDisconnect: () => undefined,
+      connect: async () => ({ userAgent: "fixture" }), close },
+    restoreBindings: close, scheduleBindingRestore: () => undefined,
+    stopReconnect: close, bindingRestoreCoordinator: () => ({ close }),
+    surfaceManager: { start: close, stop: close },
+    channelImageSpool: { start: close, stop: close },
+    inbound: { close }, output: { close }, bindings: { close },
+  });
+}

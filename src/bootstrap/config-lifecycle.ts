@@ -10,10 +10,14 @@ import {
   readConfigEvents,
   type WorkspaceAddedConfigEvent,
 } from "../../runtime/config-event-queue.mjs";
-import { GatewayAccountRefreshServer } from "../../runtime/gateway-account-refresh.mjs";
+import {
+  GatewayAccountRefreshError,
+  GatewayAccountRefreshServer,
+} from "../../runtime/gateway-account-refresh.mjs";
 import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
+import { accountQueryFailureMetadata } from "./account-query.js";
 import { createLogger } from "../observability/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication } from "./app.js";
@@ -69,7 +73,19 @@ export async function runGatewayProcess(): Promise<void> {
   }
   const accountRefresh = new GatewayAccountRefreshServer(
     runtime.configPath,
-    (provider) => application.refreshAccountSnapshot(provider),
+    async (provider, signal) => {
+      const startedAt = performance.now();
+      try {
+        return await application.refreshAccountSnapshot(provider, signal);
+      } catch (error) {
+        if (signal.aborted) throw signal.reason;
+        const diagnostic = accountQueryFailureMetadata(error, performance.now() - startedAt);
+        logger.warn({ provider, ...diagnostic }, "账户刷新失败");
+        throw new GatewayAccountRefreshError("refresh_failed", "账户刷新失败", {
+          cause: error, reason: diagnostic.reason,
+        });
+      }
+    },
   );
   let stopping = false;
   let started = false;

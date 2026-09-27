@@ -1,17 +1,14 @@
 import { loadDeepseekAccountCredential } from "../../runtime/model-provider-runtime.mjs";
 import { loadDeepseekAccounts, deepseekProviderId, isDeepseekAccountProvider } from "../../runtime/deepseek-accounts.mjs";
-import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+import { AccountQuery } from "./account-query.js";
 
 import type {
   ProviderAccountAdapter,
   ProviderAccountUsage,
   ProviderBalance,
 } from "../application/index.js";
-import { UserFacingError } from "../conversation-core/index.js";
 
 const deepseekBalanceUrl = "https://api.deepseek.com/user/balance";
-const maximumResponseBytes = 65_536;
-const requestTimeoutMs = 10_000;
 
 export function createDeepseekAccountAdapter(
   options: DeepseekAccountAdapterOptions = {},
@@ -26,33 +23,12 @@ export function createDeepseekAccountAdapter(
   return {
     provider,
     async accountUsage(signal) {
-      try {
+      const query = new AccountQuery("DeepSeek", signal);
+      return query.run(async () => {
         const apiKey = loadDeepseekAccountCredential(environment, provider);
-        const response = await fetchImpl(deepseekBalanceUrl, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            authorization: `Bearer ${apiKey}`,
-          },
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
-        });
-        if (!response.ok) {
-          throw new Error(`DeepSeek balance request failed with status ${response.status}`);
-        }
-        const body = await readBoundedFetchBody(response, maximumResponseBytes, {
-          invalidContentLength: () => new Error("DeepSeek balance response length is invalid"),
-          tooLarge: () => new Error("DeepSeek balance response is too large"),
-          missingBody: () => new Error("DeepSeek balance response is empty"),
-        });
-        return { ...parseBalanceResponse(JSON.parse(body.toString("utf8")) as unknown), provider };
-      } catch (error) {
-        throw new UserFacingError(
-          "provider.account.unavailable",
-          "DeepSeek 账户查询失败",
-          { provider: "DeepSeek" },
-          { cause: error },
-        );
-      }
+        const { body } = await query.json(fetchImpl, deepseekBalanceUrl, apiKey, "balance");
+        return { ...parseBalanceResponse(body), provider };
+      });
     },
   };
 }

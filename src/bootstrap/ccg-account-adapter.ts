@@ -1,18 +1,15 @@
 import { isCcgAccountProvider } from "../../runtime/ccg-accounts.mjs";
 import { loadConfiguredProviderCredential } from "../../runtime/model-provider-runtime.mjs";
 import type { ManagedModelProviderId } from "../../runtime/model-provider-definitions.mjs";
-import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+import { AccountQuery } from "./account-query.js";
 
 import type {
   ProviderAccountAdapter,
   ProviderAccountUsage,
   ProviderQuotaWindow,
 } from "../application/index.js";
-import { UserFacingError } from "../conversation-core/index.js";
 
 const commandCodeApiBaseUrl = "https://api.commandcode.ai";
-const maximumResponseBytes = 65_536;
-const requestTimeoutMs = 10_000;
 
 export interface CcgAccountAdapterOptions {
   environment?: NodeJS.ProcessEnv;
@@ -31,46 +28,17 @@ export function createCcgAccountAdapter(
   return {
     provider: options.provider,
     async accountUsage(signal) {
-      try {
+      const query = new AccountQuery("CCG", signal);
+      return query.run(async () => {
         const apiKey = loadConfiguredProviderCredential(options.provider, environment).apiKey;
-        const whoami = await getJson(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey, signal);
+        const { body: whoami } = await query.json(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey, "identity");
         const orgId = parseOrganizationId(whoami);
-        const query = orgId === null ? "" : `?orgId=${encodeURIComponent(orgId)}`;
-        const credits = await getJson(
-          fetchImpl,
-          `${commandCodeApiBaseUrl}/alpha/billing/credits${query}`,
-          apiKey,
-          signal,
-        );
+        const suffix = orgId === null ? "" : `?orgId=${encodeURIComponent(orgId)}`;
+        const { body: credits } = await query.json(fetchImpl, `${commandCodeApiBaseUrl}/alpha/billing/credits${suffix}`, apiKey, "credits");
         return parseCreditUsage(credits, options.provider);
-      } catch (error) {
-        throw new UserFacingError(
-          "provider.account.unavailable",
-          "CCG 账户查询失败",
-          { provider: "CCG" },
-          { cause: error },
-        );
-      }
+      });
     },
   };
-}
-
-async function getJson(fetchImpl: typeof fetch, url: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
-  const response = await fetchImpl(url, {
-    method: "GET",
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${apiKey}`,
-    },
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
-  });
-  if (!response.ok) throw new Error(`CCG account request failed with status ${response.status}`);
-  const body = await readBoundedFetchBody(response, maximumResponseBytes, {
-    invalidContentLength: () => new Error("CCG account response length is invalid"),
-    tooLarge: () => new Error("CCG account response is too large"),
-    missingBody: () => new Error("CCG account response is empty"),
-  });
-  return JSON.parse(body.toString("utf8")) as unknown;
 }
 
 function parseCreditUsage(

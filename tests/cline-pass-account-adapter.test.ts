@@ -116,7 +116,7 @@ it("cancels the outbound account fetch with the completion signal", async () => 
   };
   const adapter = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl });
   const result = adapter.accountUsage(controller.signal);
-  const rejected = expect(result).rejects.toMatchObject({ code: "provider.account.unavailable" });
+  const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
   expect(outbound?.aborted).toBe(false);
   controller.abort();
   expect(outbound?.aborted).toBe(true);

@@ -14,12 +14,32 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporaryDirectories.splice(0).map(
     (directory) => rm(directory, { recursive: true, force: true }),
   ));
 });
 
 describe("CCG account adapter", () => {
+  it("expires the second request on the original deadline and keeps cancellation distinct", async () => {
+    const codexHome = await createCodexHome();
+    const budget = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(budget.signal);
+    let calls = 0;
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      calls += 1;
+      if (calls === 1) return Response.json({ success: true, user: {}, org: { id: "org-1" } });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        budget.abort(new DOMException("fixture", "TimeoutError"));
+      });
+    };
+    const adapter = createCcgAccountAdapter({ provider: "ccg-main", environment: testEnvironment(codexHome), fetchImpl });
+    await expect(adapter.accountUsage()).rejects.toMatchObject({ diagnostic: { reason: "timeout", operation: "credits" } });
+    expect(calls).toBe(2);
+    expect(timeout).toHaveBeenCalledTimes(1);
+  });
+
   it("reads the selected account credential and maps credits plus quota windows", async () => {
     const codexHome = await createCodexHome();
     const fiveHourResetAt = Date.parse("2026-09-21T18:00:00.000Z");
@@ -202,6 +222,26 @@ describe("CCG account adapter", () => {
     await expect(adapter.accountUsage()).resolves.toMatchObject({ totalRemaining: "0.01" });
     await expect(adapter.accountUsage()).resolves.toMatchObject({ available: true, totalRemaining: "0.00", windows: [] });
   });
+
+  it("bounds both CCG requests with one shared account query deadline", async () => {
+    const codexHome = await createCodexHome();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      signals.push(init?.signal);
+      return String(input).includes("whoami")
+        ? Response.json({ success: true, user: {}, org: { id: "org-1" } })
+        : Response.json({ credits: { monthlyCredits: 1 } });
+    };
+    const adapter = createCcgAccountAdapter({
+      environment: testEnvironment(codexHome), fetchImpl, provider: "ccg-main",
+    });
+
+    await expect(adapter.accountUsage()).resolves.toMatchObject({ kind: "credit-usage" });
+    expect(signals).toHaveLength(2);
+    // 两次串行请求共用同一个总预算信号，最坏耗时不会翻倍到撞上账户刷新 IPC 的上限。
+    expect(signals[0]).toBe(signals[1]);
+    expect(signals[0]?.aborted).toBe(false);
+  });
 });
 
 async function createCodexHome(): Promise<string> {
@@ -223,7 +263,7 @@ it("cancels the outbound account fetch with the completion signal", async () => 
   };
   const adapter = createCcgAccountAdapter({ provider: "ccg-work", environment: testEnvironment(await createCodexHome()), fetchImpl });
   const result = adapter.accountUsage(controller.signal);
-  const rejected = expect(result).rejects.toMatchObject({ code: "provider.account.unavailable" });
+  const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
   expect(outbound?.aborted).toBe(false);
   controller.abort();
   expect(outbound?.aborted).toBe(true);

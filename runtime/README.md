@@ -137,7 +137,8 @@
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供独立的私有账户刷新 IPC；
   WebUI 只提交精确 Provider ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
-  关闭时停止接收新连接并等待已开始的刷新收尾。
+  公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
+  关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。

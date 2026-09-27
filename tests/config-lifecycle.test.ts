@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayConfig } from "../src/config/index.js";
+import { AccountQueryError } from "../src/bootstrap/account-query.js";
+import { UserFacingError } from "../src/conversation-core/index.js";
 
 const mocks = vi.hoisted(() => ({
   watchFile: vi.fn(),
@@ -70,7 +72,8 @@ vi.mock("../runtime/config-event-queue.mjs", () => ({
   matchingWorkspaceConfigEvents: mocks.matchingWorkspaceConfigEvents,
   readConfigEvents: mocks.readConfigEvents,
 }));
-vi.mock("../runtime/gateway-account-refresh.mjs", () => ({
+vi.mock("../runtime/gateway-account-refresh.mjs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../runtime/gateway-account-refresh.mjs")>()),
   GatewayAccountRefreshServer: class {
     constructor(...args: unknown[]) {
       return mocks.createAccountRefresh(...args);
@@ -236,6 +239,28 @@ describe("runGatewayProcess", () => {
       .toBeLessThan(mocks.accountRefresh.start.mock.invocationCallOrder[0]!);
     expect(mocks.accountRefresh.start.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.owner.markReady.mock.invocationCallOrder[0]!);
+  });
+
+  it("logs safe account diagnostics and never promotes internal messages", async () => {
+    isolateProcessLifecycle();
+    await runGatewayProcess();
+    const handler = mocks.createAccountRefresh.mock.calls[0]?.[1] as (provider: string, signal: AbortSignal) => Promise<boolean>;
+    const signal = new AbortController().signal;
+    const diagnostic = { reason: "authentication" as const, stage: "request" as const, operation: "usage", elapsedMs: 5, httpStatus: 401 };
+    mocks.application.refreshAccountSnapshot.mockRejectedValueOnce(new AccountQueryError("CLP", diagnostic, new Error("secret response")));
+    await expect(handler("clp-main", signal)).rejects.toMatchObject({ code: "refresh_failed", reason: "authentication", message: "账户刷新失败" });
+    expect(mocks.logger.warn).toHaveBeenLastCalledWith({ provider: "clp-main", ...diagnostic }, "账户刷新失败");
+    for (const internal of [new Error("private"), new UserFacingError("provider.account.unavailable", "private")]) {
+      mocks.application.refreshAccountSnapshot.mockRejectedValueOnce(internal);
+      await expect(handler("clp-main", signal)).rejects.toMatchObject({ reason: "internal", message: "账户刷新失败" });
+      expect(mocks.logger.warn).toHaveBeenLastCalledWith({ provider: "clp-main", elapsedMs: expect.any(Number), reason: "internal", stage: "refresh" }, "账户刷新失败");
+    }
+    const cancelled = new AbortController();
+    cancelled.abort();
+    mocks.application.refreshAccountSnapshot.mockRejectedValueOnce(cancelled.signal.reason);
+    mocks.logger.warn.mockClear();
+    await expect(handler("clp-main", cancelled.signal)).rejects.toBe(cancelled.signal.reason);
+    expect(mocks.logger.warn).not.toHaveBeenCalled();
   });
 
   it("maps Provider settings states to shared Surface notifications", async () => {
