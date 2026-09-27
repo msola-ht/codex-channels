@@ -21,10 +21,23 @@ import {
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
+import { useTranslation } from "@/hooks/use-translation"
 import { formatTokens } from "@/lib/format"
+import type { Translate } from "@/lib/i18n/messages"
 import { fillRecentDays, usageTrendRows, type UsageTrendRow } from "@/lib/trend"
 import type { DailyUsageRow, RangeName, UsageTrendResponse } from "@/lib/types"
-import { metricsRangeLabels } from "@/lib/metrics-query"
+
+const rangeKeys = ["today", "yesterday", "24h", "7d", "30d", "90d", "all"] as const satisfies readonly RangeName[]
+
+/** 自定义范围以 `from..to` 形式返回；其余范围名映射到字典键，未知名称保留原样。 */
+function overviewRangeLabel(t: Translate, name: string): string {
+  if (name.includes("..")) {
+    const [from = "", to = ""] = name.split("..")
+    return t("overview.customRange", { from, to })
+  }
+  const key = rangeKeys.find((candidate) => candidate === name)
+  return key === undefined ? name : t(`ranges.${key}`)
+}
 
 export function UsageCharts({
   trend,
@@ -39,13 +52,12 @@ export function UsageCharts({
   heatmapLoading: boolean
   error: string | null
 }) {
+  const { t } = useTranslation()
   const filledTrendRows = usageTrendRows(trend)
   const filledHeatmapRows = heatmapLoading && heatmapRows.length === 0
     ? []
     : fillRecentDays(heatmapRows, heatmapEndAtMs, 90)
-  const rangeLabel = trend.range.name.includes("..")
-    ? trend.range.name.replace("..", " 至 ")
-    : metricsRangeLabels[trend.range.name as RangeName]
+  const rangeLabel = overviewRangeLabel(t, trend.range.name)
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
@@ -66,23 +78,24 @@ function UsageTrendCard({
   rangeLabel: string
   granularity: UsageTrendResponse["granularity"]
 }) {
+  const { t } = useTranslation()
   const data = rows
   const hasData = rows.some((row) => row.requestCount > 0)
   const chartConfig: ChartConfig = {
-    inputTokens: { label: "输入", color: "var(--chart-1)" },
-    cachedInputTokens: { label: "缓存", color: "var(--chart-2)" },
-    outputTokens: { label: "输出", color: "var(--chart-3)" },
+    inputTokens: { label: t("overview.legendInput"), color: "var(--chart-1)" },
+    cachedInputTokens: { label: t("overview.legendCached"), color: "var(--chart-2)" },
+    outputTokens: { label: t("overview.legendOutput"), color: "var(--chart-3)" },
   }
 
   return (
     <Card size="sm" className="h-full">
       <CardHeader>
-        <CardTitle>用量趋势</CardTitle>
-        <CardDescription>{rangeLabel} · 按{granularity === "hour" ? "小时" : "天"}统计 Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
+        <CardTitle>{t("overview.trendTitle")}</CardTitle>
+        <CardDescription>{t(granularity === "hour" ? "overview.trendDescriptionHour" : "overview.trendDescriptionDay", { range: rangeLabel })}</CardDescription>
       </CardHeader>
       <CardContent>
         {!hasData ? (
-          <Empty className="h-[230px] p-4"><EmptyHeader><EmptyTitle>{rangeLabel}没有记录</EmptyTitle></EmptyHeader></Empty>
+          <Empty className="h-[230px] p-4"><EmptyHeader><EmptyTitle>{t("overview.trendEmpty", { range: rangeLabel })}</EmptyTitle></EmptyHeader></Empty>
         ) : (
           <ChartContainer config={chartConfig} className="h-[230px] w-full">
             <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
@@ -120,7 +133,15 @@ function ActivityHeatmapCard({
   rows: DailyUsageRow[]
   loading: boolean
 }) {
+  const { t, language } = useTranslation()
   const { resolvedTheme } = useTheme()
+  const locale = language === "en" ? "en-US" : "zh-CN"
+  const monthLabels = Array.from({ length: 12 }, (_, index) =>
+    new Intl.DateTimeFormat(locale, { month: language === "en" ? "short" : "long", timeZone: "UTC" })
+      .format(new Date(Date.UTC(2024, index, 1))))
+  const weekdayLabels = Array.from({ length: 7 }, (_, index) =>
+    new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" })
+      .format(new Date(Date.UTC(2024, 0, 7 + index))))
   const colorScheme = resolvedTheme === "light" ? "light" : "dark"
   const cells = rows.map((row) => ({ date: row.day, count: row.inputTokens + row.outputTokens, level: 0 }))
   const positive = cells.map((cell) => cell.count).filter((count) => count > 0).sort((left, right) => left - right)
@@ -148,8 +169,8 @@ function ActivityHeatmapCard({
   return (
     <Card size="sm" className="h-full">
       <CardHeader>
-        <CardTitle>活动热力图</CardTitle>
-        <CardDescription>最近 90 天每日 Token 量</CardDescription>
+        <CardTitle>{t("overview.heatmapTitle")}</CardTitle>
+        <CardDescription>{t("overview.heatmapDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col justify-center">
         {loading && rows.length === 0 ? (
@@ -172,17 +193,19 @@ function ActivityHeatmapCard({
                   dark: ["var(--heatmap-0)", "var(--heatmap-1)", "var(--heatmap-2)", "var(--heatmap-3)", "var(--heatmap-4)"],
                 }}
                 labels={{
-                  months: ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"],
-                  weekdays: ["日", "一", "二", "三", "四", "五", "六"],
-                  legend: { less: "少", more: "多" },
+                  months: monthLabels,
+                  weekdays: weekdayLabels,
+                  legend: { less: t("overview.heatmapLess"), more: t("overview.heatmapMore") },
                 }}
                 tooltips={{
-                  activity: { text: (activity) => `${activity.date} · ${formatTokens(activity.count)} Token` },
+                  activity: { text: (activity) => t("overview.heatmapActivity", {
+                    date: activity.date, tokens: formatTokens(activity.count),
+                  }) },
                 }}
               />
             </div>
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              最近 90 天共 {formatTokens(total)} Token · 活跃 {activeDays} 天
+              {t("overview.heatmapSummary", { total: formatTokens(total), days: activeDays })}
             </p>
           </>
         )}

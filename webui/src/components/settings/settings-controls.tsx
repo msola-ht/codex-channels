@@ -17,6 +17,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { useTranslation } from "@/hooks/use-translation"
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
 
@@ -28,7 +29,7 @@ export function ManagementConfirmationDialog({
   loading = false,
   onConfirm,
   onCancel,
-  confirmLabel = "确认写入",
+  confirmLabel,
   confirmVariant = "default",
   confirmDisabled = false,
   children,
@@ -45,6 +46,7 @@ export function ManagementConfirmationDialog({
   confirmDisabled?: boolean
   children: ReactNode
 }) {
+  const { t } = useTranslation()
   return (
     <AlertDialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
       <AlertDialogContent>
@@ -54,7 +56,7 @@ export function ManagementConfirmationDialog({
         </AlertDialogHeader>
         <div className="flex flex-col gap-1 text-sm">{children}</div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={saving}>取消</AlertDialogCancel>
+          <AlertDialogCancel disabled={saving}>{t("accountConfirmation.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             variant={confirmVariant}
             disabled={saving || loading || confirmDisabled}
@@ -63,8 +65,8 @@ export function ManagementConfirmationDialog({
               onConfirm()
             }}
           >
-            {saving || loading ? <Spinner data-icon="inline-start" /> : null}
-            {saving ? "处理中…" : loading ? "正在刷新…" : confirmLabel}
+            {saving || loading ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : null}
+            {saving ? t("accountConfirmation.processing") : loading ? t("accountConfirmation.refreshing") : confirmLabel ?? t("accountConfirmation.confirmWrite")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

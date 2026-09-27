@@ -20,6 +20,18 @@ export interface AccountRefreshControl {
   onRefresh: () => void
 }
 
+/** 账户区刷新/同步失败只保存结构化标识与错误码，界面文案在渲染时按当前语言翻译。 */
+export type AccountRefreshFailure =
+  | { kind: "listFailed"; code: string | null }
+  | { kind: "syncFailed"; code: string | null }
+  | { kind: "sourceMissing" }
+
+/** 删除成功提示只保存账户标识与是否需重启服务，文案在渲染时翻译。 */
+export interface AccountRemovalNotice {
+  accountId: string
+  restartRequired: boolean
+}
+
 export function accountSnapshotIsStale(observedAtMs: number, now: number): boolean {
   return observedAtMs > 0 && now - observedAtMs > ACCOUNT_SNAPSHOT_MAX_AGE_MS
 }

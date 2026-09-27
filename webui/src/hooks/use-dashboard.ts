@@ -16,7 +16,7 @@ export function useDashboard(query: MetricsRangeQuery) {
   const refetch = useCallback(() => setRevision((value) => value + 1), [])
   return {
     weeklyQuota: overview.data?.data.weeklyQuota ?? null,
-    data: current, loading: overview.loading, error: overview.error,
+    data: current, loading: overview.loading, error: overview.error, errorCode: overview.errorCode,
     refetch,
   }
 }

@@ -3,6 +3,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useTranslation } from "@/hooks/use-translation"
 import { formatTokens } from "@/lib/format"
 
 export function InputTokenTooltip({
@@ -12,6 +13,7 @@ export function InputTokenTooltip({
   inputTokens: number | null
   cachedInputTokens: number | null
 }) {
+  const { t } = useTranslation()
   if (cachedInputTokens === null) return <span className="tabular-nums">{formatTokens(inputTokens)}</span>
   const uncached =
     inputTokens === null || cachedInputTokens === null
@@ -33,14 +35,13 @@ export function InputTokenTooltip({
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
           <li className="whitespace-nowrap">
-            命中缓存：{formatTokens(cachedInputTokens)}
+            {t("metrics.cached", { count: formatTokens(cachedInputTokens) })}
           </li>
           <li className="whitespace-nowrap">
-            未命中缓存：{uncached === null ? "—" : formatTokens(uncached)}
+            {t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) })}
           </li>
           <li className="whitespace-nowrap">
-            命中率：
-            {rate === null ? "—" : `${(rate * 100).toFixed(1)}%`}
+            {t("metrics.hitRate", { rate: rate === null ? "—" : `${(rate * 100).toFixed(1)}%` })}
           </li>
         </ul>
       </TooltipContent>
@@ -55,6 +56,7 @@ export function OutputTokenTooltip({
   outputTokens: number | null
   reasoningOutputTokens: number | null
 }) {
+  const { t } = useTranslation()
   if (reasoningOutputTokens === null) return <span className="tabular-nums">{formatTokens(outputTokens)}</span>
   const nonReasoning =
     outputTokens === null || reasoningOutputTokens === null
@@ -70,10 +72,10 @@ export function OutputTokenTooltip({
       <TooltipContent side="right" align="start">
         <ul className="flex flex-col gap-1">
           <li className="whitespace-nowrap">
-            推理输出：{formatTokens(reasoningOutputTokens)}
+            {t("metrics.reasoning", { count: formatTokens(reasoningOutputTokens) })}
           </li>
           <li className="whitespace-nowrap">
-            非推理输出：{nonReasoning === null ? "—" : formatTokens(nonReasoning)}
+            {t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })}
           </li>
         </ul>
       </TooltipContent>

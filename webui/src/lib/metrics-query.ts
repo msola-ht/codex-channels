@@ -1,9 +1,4 @@
-import type { MetricsQuery, RangeName } from "./types"
-
-export const metricsRangeLabels: Record<RangeName | "custom", string> = {
-  today: "今天", yesterday: "昨天", "7d": "最近 7 天", "30d": "最近 30 天",
-  all: "全部历史", custom: "自定义日期", "24h": "最近 24 小时", "90d": "最近 90 天",
-}
+import type { MetricsQuery } from "./types"
 
 export function metricsQueryParams(query: MetricsQuery): string {
   const params = new URLSearchParams()

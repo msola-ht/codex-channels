@@ -76,4 +76,56 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(html[2]).toContain('<button>确认写入</button>');
   }, 30_000);
 
+  it("localizes the console account removal confirmation and preserves busy guards", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      import { createElement as h } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+        name:"removal-preview-fixture",enforce:"pre",
+        load(id) {
+          if (id.endsWith("/hooks/use-account-settings-management.ts"))
+            return 'export function useAccountSettingsManagement(){return globalThis.management}';
+          if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
+          return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
+        }
+      }]});
+      try {
+        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
+        const {AccountSubscriptionNotice}=await server.ssrLoadModule("/src/components/overview/account-subscription-notice.tsx");
+        const pending={input:{operation:"opencode.account.remove",accountId:"main"},preview:{operation:"opencode.account.remove",account:{id:"main",displayName:"Account main"},provider:{name:"OpenCode Go",id:"ocg-main"},mode:"switching",model:"test-model",status:"ready",effects:{stopAppServer:true,removeAccount:true},activation:"restart-all"}};
+        const before=JSON.stringify(pending);
+        globalThis.management={settings:{opencodeGo:{accounts:[{id:"main"}]}},loading:false,error:null,busy:false,pendingPreview:pending,actionError:null,refetch(){},cancel(){throw new Error("unexpected cancel")},confirm(){throw new Error("unexpected confirmation")},mutate(){throw new Error("unexpected mutation")}};
+        const render=(language)=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(AccountSubscriptionNotice,{accountId:"main",onRemoved(){}})));
+        const zh=render("zh"), en=render("en"), zhAgain=render("zh");
+        globalThis.management.loading=true;
+        const loading=render("en");
+        globalThis.management.loading=false;
+        globalThis.management.busy=true;
+        const saving=render("en");
+        console.log(JSON.stringify({zh,en,zhAgain,loading,saving,unchanged:before===JSON.stringify(pending)}));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const result = JSON.parse(output) as Record<string, string | boolean>;
+    expect(result.zh).toContain("确认删除账户");
+    expect(result.zhAgain).toBe(result.zh);
+    expect(result.unchanged).toBe(true);
+    expect(result.en).toContain("Confirm account removal");
+    expect(result.en).toContain("past Threads cannot be recovered");
+    expect(result.en).toContain("does not cancel or renew the official subscription");
+    expect(result.en).toContain("Operation: opencode.account.remove");
+    expect(result.en).toContain("Account main (main)");
+    expect(result.en).toContain("Activation target: restart-all");
+    expect(result.en).toContain("stopAppServer=true; removeAccount=true");
+    expect(result.en).toContain("<button>Confirm removal</button>");
+    for (const state of [result.en, result.loading, result.saving]) {
+      expect(state).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+    expect(result.loading).toContain("<button>Cancel</button>");
+    expect(result.loading).toMatch(/<button disabled="">[\s\S]*Refreshing…<\/button>/u);
+    expect(result.saving).toContain('<button disabled="">Cancel</button>');
+    expect(result.saving).toContain("Processing…");
+    expect(result.saving).toContain('aria-label="Loading…"');
+  }, 30_000);
+
 });

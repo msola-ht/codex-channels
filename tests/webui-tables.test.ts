@@ -303,7 +303,9 @@ describe("WebUI metrics table presentation", () => {
   it("distinguishes account loading and failures from confirmed empty configuration", () => {
     expect(markup.consoleAccountsLoading).toContain("正在加载账户列表");
     expect(markup.consoleAccountsLoading).not.toContain("尚未配置");
-    expect(markup.consoleAccountsFailed).toContain("fixture account read failure");
+    expect(markup.consoleAccountsFailed).toContain("账户数据暂未更新");
+    expect(markup.consoleAccountsFailed).toContain("无法完成请求，请重试。");
+    expect(markup.consoleAccountsFailed).not.toContain("fixture account read failure");
     expect(markup.consoleAccountsFailed).not.toContain("尚未配置");
     expect(markup.consoleAccountsEmpty).toContain("尚未配置 DeepSeek 账户");
   });
@@ -325,7 +327,9 @@ describe("WebUI metrics table presentation", () => {
       expect(markup[key]).toContain('aria-valuenow="37.5"');
       expect(markup[key]).not.toContain("尚未获取 OpenAI 额度快照");
     }
-    expect(markup.consoleQuotaFailed).toContain("fixture overview failure");
+    expect(markup.consoleQuotaFailed).toContain("加载失败");
+    expect(markup.consoleQuotaFailed).toContain("无法完成请求，请重试。");
+    expect(markup.consoleQuotaFailed).not.toContain("fixture overview failure");
     expect(markup.consoleQuotaCleared).toContain("尚未获取 OpenAI 额度快照");
   });
 

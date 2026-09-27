@@ -24,19 +24,25 @@ export function translate(
   )
 }
 
+const apiErrorKeys: Record<string, MessageKey> = {
+  unauthorized: "errors.unauthorized",
+  forbidden: "errors.forbidden",
+  not_found: "errors.notFound",
+  invalid_range: "errors.invalidQuery",
+  invalid_filter: "errors.invalidQuery",
+  unsupported_parameter: "errors.invalidQuery",
+  invalid_parameter: "errors.invalidQuery",
+  network_error: "errors.network",
+  request_timeout: "errors.timeout",
+}
+
+/** 结构化错误码到界面文案；未知或缺失代码使用通用提示，不展示内部消息。 */
+export function translateApiErrorCode(t: Translate, code?: string | null): string {
+  return t(code != null && Object.hasOwn(apiErrorKeys, code) ? apiErrorKeys[code]! : "errors.unknown")
+}
+
 /** 仅使用结构化错误码选择界面文案；未知内部消息不进入已本地化的查询界面。 */
 export function translateApiError(t: Translate, error: string | null, code?: string | null): string | null {
   if (error === null) return null
-  const keys: Record<string, MessageKey> = {
-    unauthorized: "errors.unauthorized",
-    forbidden: "errors.forbidden",
-    not_found: "errors.notFound",
-    invalid_range: "errors.invalidQuery",
-    invalid_filter: "errors.invalidQuery",
-    unsupported_parameter: "errors.invalidQuery",
-    invalid_parameter: "errors.invalidQuery",
-    network_error: "errors.network",
-    request_timeout: "errors.timeout",
-  }
-  return t(code != null && Object.hasOwn(keys, code) ? keys[code]! : "errors.unknown")
+  return translateApiErrorCode(t, code)
 }

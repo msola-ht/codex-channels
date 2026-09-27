@@ -370,7 +370,7 @@ export function DataTable<TData extends RowData>({
             pageNumber: server ? pagination.pageNumber : currentPage + 1,
             serverTotal: server ? pagination.serverTotal : undefined,
           })}</span>
-          {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner />{t("common.loadingRecords")}</span> : null}
+          {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner aria-label={t("common.loading")} />{t("common.loadingRecords")}</span> : null}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(10rem,1fr)_auto] gap-4" inert={loading}>

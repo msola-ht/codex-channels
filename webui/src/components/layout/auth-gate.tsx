@@ -86,7 +86,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               }
             }}
           >
-            {submitting ? <Spinner data-icon="inline-start" /> : null}
+            {submitting ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : null}
             {submitting ? t("auth.verifying") : t("auth.submit")}
           </Button>
         </CardContent>
