@@ -10,6 +10,7 @@ import type {
   BindingTransfer,
   ConversationBinding,
   ConversationIdleState,
+  ConversationModelPreference,
 } from "../storage/index.js";
 import type {
   ThreadLifecyclePort,
@@ -143,6 +144,14 @@ export class SessionRouter {
 
   allBindings(): ConversationBinding[] {
     return this.bindings.list();
+  }
+
+  modelPreference(target: ConversationTarget): ConversationModelPreference | undefined {
+    return this.bindings.get(target) ? undefined : this.bindings.modelPreference(target);
+  }
+
+  setModelPreference(target: ConversationTarget, preference: ConversationModelPreference | undefined): void {
+    this.bindings.setModelPreference(target, preference);
   }
 
   modelSettings(target: ConversationTarget): ThreadModelSettings | undefined {
@@ -705,14 +714,14 @@ export class SessionRouter {
     return transfer;
   }
 
-  async newSession(target: ConversationTarget, preserveCurrent = false): Promise<void> {
+  async newSession(target: ConversationTarget, preserveCurrent = false, preference?: ConversationModelPreference): Promise<void> {
     const current = this.bindings.get(target);
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
       this.assertLifecycleCurrent(target, current);
       if (preserveCurrent) {
-        this.bindings.demote(target);
+        this.bindings.demote(target, preference);
       } else {
-        await this.detachUnlocked(target);
+        await this.detachUnlocked(target, preference);
       }
       this.markForceNew(target, Date.now());
     });
@@ -731,7 +740,7 @@ export class SessionRouter {
     });
   }
 
-  async selectWorkspace(target: ConversationTarget, workspaceId: string): Promise<Workspace> {
+  async selectWorkspace(target: ConversationTarget, workspaceId: string, preference?: ConversationModelPreference): Promise<Workspace> {
     const current = this.bindings.get(target);
     return this.withThreadLifecycle(current ? [current.threadId] : [], async () => {
       this.assertLifecycleCurrent(target, current);
@@ -739,7 +748,7 @@ export class SessionRouter {
       if (this.workspace(target).id === workspace.id) {
         return workspace;
       }
-      await this.detachUnlocked(target);
+      await this.detachUnlocked(target, preference);
       this.bindings.selectWorkspace(target, workspace.id);
       // Workspace changes start a fresh conversation.  Keep the marker until
       // ensure() creates the first Thread so it cannot auto-resume history from
@@ -851,13 +860,15 @@ export class SessionRouter {
     });
   }
 
-  private async detachUnlocked(target: ConversationTarget): Promise<void> {
+  private async detachUnlocked(target: ConversationTarget, preference?: ConversationModelPreference): Promise<void> {
     const current = this.bindings.get(target);
     if (current) {
       await this.codex.unsubscribeThread(current.threadId);
       this.contextCompactionItemIdsByThread.delete(current.threadId);
-      this.bindings.unbind(target);
+      this.bindings.unbind(target, preference);
       this.onBindingsChanged?.();
+    } else {
+      this.bindings.setModelPreference(target, preference);
     }
   }
 

@@ -18,6 +18,7 @@ import type {
   BindingTransfer,
   ConversationBinding,
   ConversationIdleState,
+  ConversationModelPreference,
 } from "./binding-store.js";
 import { MemoryBindingStore } from "./memory-binding-store.js";
 
@@ -52,7 +53,7 @@ interface IdleStateRow {
   force_new: number;
 }
 
-const schemaVersion = 5;
+const schemaVersion = 6;
 export { schemaVersion as stateDatabaseSchemaVersion };
 const idleStatePersistenceIntervalMs = 60_000;
 
@@ -84,6 +85,33 @@ export class SqliteBindingStore implements BindingStore {
       }
       throw error;
     }
+  }
+
+  modelPreference(target: ConversationTarget): ConversationModelPreference | undefined {
+    return this.memory.modelPreference(target);
+  }
+
+  setModelPreference(target: ConversationTarget, preference: ConversationModelPreference | undefined): void {
+    this.requireOpen();
+    this.writeModelPreference(target, preference);
+    this.memory.setModelPreference(target, preference);
+  }
+
+  private writeModelPreference(target: ConversationTarget, preference: ConversationModelPreference | undefined): void {
+    if (!preference) {
+      this.database.prepare(`DELETE FROM conversation_model_preferences
+        WHERE surface = ? AND account_id = ? AND conversation_id = ?`)
+        .run(target.surface, target.accountId, target.conversationId);
+      return;
+    }
+    this.database.prepare(`INSERT INTO conversation_model_preferences
+      (surface, account_id, conversation_id, model, model_provider, effort, service_tier)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(surface, account_id, conversation_id) DO UPDATE SET
+        model = excluded.model, model_provider = excluded.model_provider,
+        effort = excluded.effort, service_tier = excluded.service_tier`)
+      .run(target.surface, target.accountId, target.conversationId, preference.model,
+        preference.modelProvider, preference.effort, preference.serviceTier);
   }
 
   conversations(): ConversationTarget[] {
@@ -142,6 +170,7 @@ export class SqliteBindingStore implements BindingStore {
         removeActor.run(target.surface, target.accountId, target.conversationId, actorId);
       }
       if (removeBindings) {
+        this.writeModelPreference(target, undefined);
         forceNewAtMs = Math.max(
           this.memory.idleState(target).lastActivityAt,
           Date.now(),
@@ -335,6 +364,7 @@ export class SqliteBindingStore implements BindingStore {
     const previous = this.memory.get(binding.target);
     try {
       this.database.exec("BEGIN IMMEDIATE");
+      this.writeModelPreference(binding.target, undefined);
       this.database
         .prepare("DELETE FROM conversation_background_bindings WHERE thread_id = ?")
         .run(binding.threadId);
@@ -392,12 +422,17 @@ export class SqliteBindingStore implements BindingStore {
     return result;
   }
 
-  demote(target: ConversationTarget): ConversationBinding | undefined {
+  demote(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined {
     this.requireOpen();
     const current = this.memory.get(target);
-    if (!current) return undefined;
+    if (!current) {
+      this.setModelPreference(target, preference);
+      return undefined;
+    }
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      this.writeModelPreference(target, preference);
+      this.upsertIdleState(target, Math.max(this.memory.idleState(target).lastActivityAt, Date.now()), true);
       insertBackground(this.database, current);
       this.database.prepare(`
         DELETE FROM conversation_bindings
@@ -408,7 +443,7 @@ export class SqliteBindingStore implements BindingStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
-    return this.memory.demote(target);
+    return this.memory.demote(target, preference);
   }
 
   removeThread(threadId: string): ConversationBinding | undefined {
@@ -422,6 +457,7 @@ export class SqliteBindingStore implements BindingStore {
     );
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      if (foreground) this.writeModelPreference(binding.target, undefined);
       this.database.prepare("DELETE FROM conversation_background_bindings WHERE thread_id = ?")
         .run(threadId);
       this.database.prepare("DELETE FROM conversation_bindings WHERE thread_id = ?")
@@ -471,6 +507,8 @@ export class SqliteBindingStore implements BindingStore {
     );
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      this.writeModelPreference(previousOwner.target, undefined);
+      this.writeModelPreference(target, undefined);
       const removeBinding = this.database.prepare(`
         DELETE FROM conversation_bindings
         WHERE surface = ? AND account_id = ? AND conversation_id = ?
@@ -533,10 +571,11 @@ export class SqliteBindingStore implements BindingStore {
     return transfer;
   }
 
-  unbind(target: ConversationTarget): ConversationBinding | undefined {
+  unbind(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined {
     this.requireOpen();
     const binding = this.memory.get(target);
     if (!binding) {
+      this.setModelPreference(target, preference);
       return undefined;
     }
     const atMs = Math.max(
@@ -545,6 +584,7 @@ export class SqliteBindingStore implements BindingStore {
     );
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      this.writeModelPreference(target, preference);
       this.database
         .prepare(`
           DELETE FROM conversation_bindings
@@ -557,7 +597,7 @@ export class SqliteBindingStore implements BindingStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
-    const removed = this.memory.unbind(target);
+    const removed = this.memory.unbind(target, preference);
     this.memory.setForceNew(target, atMs, true);
     this.lastPersistedActivity.set(conversationTargetKey(target), atMs);
     return removed;
@@ -579,7 +619,7 @@ export class SqliteBindingStore implements BindingStore {
     }
     if (row.user_version !== 0) {
       throw new Error(
-        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。请停止服务并备份后重建状态数据库`,
+        `状态数据库版本不兼容：当前 ${row.user_version}，Gateway 需要 ${schemaVersion}。请通过 codexc update 显式升级状态数据库；不要删除数据库`,
       );
     }
     this.database.exec("BEGIN IMMEDIATE");
@@ -594,6 +634,17 @@ export class SqliteBindingStore implements BindingStore {
 
   private createSchema(): void {
     this.database.exec(`
+      CREATE TABLE conversation_model_preferences (
+        surface TEXT NOT NULL CHECK (length(surface) > 0),
+        account_id TEXT NOT NULL CHECK (length(account_id) > 0),
+        conversation_id TEXT NOT NULL,
+        model TEXT NOT NULL CHECK (length(model) > 0),
+        model_provider TEXT NOT NULL CHECK (length(model_provider) > 0),
+        effort TEXT,
+        service_tier TEXT,
+        PRIMARY KEY (surface, account_id, conversation_id)
+      ) STRICT;
+
       CREATE TABLE conversation_workspaces (
         surface TEXT NOT NULL CHECK (length(surface) > 0),
         account_id TEXT NOT NULL CHECK (length(account_id) > 0),
@@ -726,6 +777,19 @@ export class SqliteBindingStore implements BindingStore {
         conversationTargetKey(target),
         row.last_activity_at,
       );
+    }
+    const preferences = this.database.prepare(`SELECT surface, account_id, conversation_id,
+      model, model_provider, effort, service_tier FROM conversation_model_preferences`).all();
+    for (const row of preferences) {
+      this.memory.setModelPreference({
+        surface: parseSurfaceId(String(row.surface)),
+        accountId: String(row.account_id),
+        conversationId: String(row.conversation_id),
+      }, {
+        model: String(row.model), modelProvider: String(row.model_provider),
+        effort: row.effort === null ? null : String(row.effort),
+        serviceTier: row.service_tier === null ? null : String(row.service_tier),
+      });
     }
     const actors = this.database
       .prepare(`

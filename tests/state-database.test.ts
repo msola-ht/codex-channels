@@ -33,7 +33,7 @@ describe("state database inspection", () => {
     const database = new DatabaseSync(databasePath);
     database.exec(`
       CREATE TABLE conversation_bindings (surface TEXT);
-      PRAGMA user_version = 5;
+      PRAGMA user_version = 6;
     `);
     database.close();
 
@@ -57,6 +57,10 @@ describe("state database inspection", () => {
     const statePath = join(dataDir, "gateway.sqlite3");
     const state = new DatabaseSync(statePath);
     state.exec(`
+      CREATE TABLE conversation_model_preferences (
+        surface TEXT, account_id TEXT, conversation_id TEXT,
+        model TEXT, model_provider TEXT, effort TEXT, service_tier TEXT
+      );
       CREATE TABLE conversation_workspaces (
         surface TEXT NOT NULL,
         account_id TEXT NOT NULL,
@@ -100,7 +104,7 @@ describe("state database inspection", () => {
         force_new INTEGER NOT NULL,
         PRIMARY KEY (surface, account_id, conversation_id)
       ) STRICT;
-      PRAGMA user_version = 5;
+      PRAGMA user_version = 6;
     `);
     state.close();
 

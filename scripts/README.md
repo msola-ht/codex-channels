@@ -36,8 +36,8 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前基线返回无需迁移，执行入口仅复核、不写库；未来具体迁移须在执行入口完成备份、事务及目标结构校验，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
-- `state-database.mjs`：只读检查当前状态库和计划任务库的版本与结构，不提供升级或写入入口。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，以及供安装流程调用的 v5 → v6 显式升级；运行时不迁移。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
   统一查询服务访问只读 Store，不加载服务控制或数据库维护流程。

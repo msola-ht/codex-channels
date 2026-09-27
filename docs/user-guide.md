@@ -121,6 +121,13 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 `idle_release_minutes = 0` 只关闭渠道会话自动解除；无任何绑定时的全局空闲停止仍会执行，其他
 非自动解除触发的全局空闲轮次只记录日志，不发送渠道通知。共享 App Server 的原生 TUI 必须通过
 `codexc remote` 启动；直接运行 `codex --remote unix://<socket>` 不持有生命周期租约，可能被停止。
+空闲解除时按渠道会话保存 Provider、模型、思考等级和服务层级；Gateway 重启后直接发送消息仍沿用
+这份偏好新建会话。断开后通过 `/model`、思考等级或 Fast 入口调整设置，会更新保存值。
+恢复时若 Provider、模型或设置已不可用，会要求重新选择，不自动换账户或模型。
+已有绑定仍以 App Server 的 Thread 设置为准；显式恢复同 Provider 历史会话继续沿用渠道偏好，
+跨 Provider 恢复尊重目标 Thread，原生 Queue 存在时清除待生效覆盖。撤权、归档和跨渠道接管
+等清理操作不会让旧偏好在重启后重新生效。首次采用此功能需通过
+[状态数据库升级流程](source-install.md)将 v5 显式升级至 v6。
 此后直接发送消息只会开启新会话，不会接续旧 Thread；需要继续旧会话时直接使用提示中的
 `/r <Thread ID>` 命令显式恢复；飞书显示为 CardKit 2.0 卡片，Telegram 为 HTML 面板，微信为
 结构化文本。修改后需要重启 Gateway。

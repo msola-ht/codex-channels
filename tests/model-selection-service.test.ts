@@ -7,6 +7,7 @@ import {
   type ModelOption,
   type ModelSelectionPort,
 } from "../src/application/index.js";
+import { MemoryBindingStore } from "../src/storage/index.js";
 import type { SessionRouter } from "../src/session-routing/router.js";
 
 const target = { surface: "telegram" as const, accountId: "default", conversationId: "100" };
@@ -71,6 +72,62 @@ function createService(settings?: {
 }
 
 describe("ModelSelectionService", () => {
+  it("restores an unbound selection, persists edits and clears it without reviving old values", async () => {
+    const store = new MemoryBindingStore();
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      modelPreference: () => store.modelPreference(target),
+      setModelPreference: (_target: typeof target, preference: Parameters<MemoryBindingStore["setModelPreference"]>[1]) => store.setModelPreference(target, preference),
+    } as unknown as SessionRouter;
+    const port = {
+      listModels: async () => models, writeDefaultFastMode: async () => undefined,
+      readDefaultReasoningEffort: async () => null, readDefaultServiceTier: async () => null,
+    };
+    store.setModelPreference(target, { model: "gpt-main", modelProvider: "openai", effort: "high", serviceTier: "priority" });
+    const first = new ModelSelectionService(port, router);
+    await first.validateUnboundPreference(target);
+    expect(first.threadStartOptions(target)).toEqual({ model: "gpt-main", modelProvider: "openai" });
+    await first.selectModel(target, { provider: "openai", model: "gpt-deep" });
+    await first.selectEffort(target, "xhigh");
+    const restarted = new ModelSelectionService(port, router);
+    expect(restarted.capturePreference(target)).toEqual({ model: "gpt-deep", modelProvider: "openai", effort: "xhigh", serviceTier: "default" });
+    restarted.clear(target);
+    expect(new ModelSelectionService(port, router).capturePreference(target)).toBeUndefined();
+  });
+
+  it("lets an explicit model selection replace an obsolete persisted third-party tier", async () => {
+    const store = new MemoryBindingStore();
+    const router = {
+      current: () => undefined, modelSettings: () => undefined,
+      modelPreference: () => store.modelPreference(target),
+      setModelPreference: (_target: typeof target, preference: Parameters<MemoryBindingStore["setModelPreference"]>[1]) => store.setModelPreference(target, preference),
+    } as unknown as SessionRouter;
+    const service = new ModelSelectionService({ listModels: async () => models } as ModelSelectionPort,
+      router, undefined, [{ ...models[0]!, provider: "third-party" }]);
+    store.setModelPreference(target, { model: "gpt-main", modelProvider: "third-party", effort: "high", serviceTier: "retired-tier" });
+    await expect(service.validateUnboundPreference(target)).rejects.toMatchObject({ code: "model.selection.expired" });
+    await service.selectModel(target, { provider: "third-party", model: "gpt-main" });
+    expect(store.modelPreference(target)?.serviceTier).toBe("default");
+    await expect(service.validateUnboundPreference(target)).resolves.toBeUndefined();
+  });
+
+  it("rejects persisted provider remapping and invalid effort or Fast settings before starting", async () => {
+    const store = new MemoryBindingStore();
+    const router = { current: () => undefined, modelSettings: () => undefined,
+      modelPreference: () => store.modelPreference(target),
+    } as unknown as SessionRouter;
+    const port = { listModels: async () => models } as ModelSelectionPort;
+    store.setModelPreference(target, { model: "gpt-main", modelProvider: "openai", effort: "high", serviceTier: null });
+    const changedPrimary = new ModelSelectionService(port, router, undefined, [], "custom");
+    expect(changedPrimary.threadStartOptions(target).modelProvider).toBe("openai");
+    await expect(changedPrimary.validateUnboundPreference(target)).rejects.toMatchObject({ code: "model.selection.expired" });
+    const service = new ModelSelectionService(port, router);
+    for (const overrides of [{ effort: "unsupported" }, { serviceTier: "unsupported" }, { model: "removed" }]) {
+      store.setModelPreference(target, { model: "gpt-main", modelProvider: "openai", effort: "high", serviceTier: null, ...overrides });
+      await expect(service.validateUnboundPreference(target)).rejects.toMatchObject({ code: "model.selection.expired" });
+    }
+  });
+
   it("refreshes the automatic Provider default without replacing explicit or bound models", async () => {
     const codex = {
       listModels: async () => models,

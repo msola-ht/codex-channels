@@ -43,6 +43,80 @@ afterEach(() => {
 });
 
 describe("SqliteBindingStore", () => {
+  it("atomically retains unbound model preferences across restart and consumes them on bind", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-model-preference-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "state.sqlite3");
+    const preference = { model: "gpt-main", modelProvider: "openai", effort: "high", serviceTier: "priority" };
+    const binding = { target, workspaceId: "main", threadId: "t", sessionId: "t" };
+    const first = new SqliteBindingStore(path);
+    first.bind(binding);
+    first.unbind(target, preference);
+    first.close();
+    const second = new SqliteBindingStore(path);
+    expect(second.get(target)).toBeUndefined();
+    expect(second.idleState(target).forceNew).toBe(true);
+    expect(second.modelPreference(target)).toEqual(preference);
+    second.bind(binding);
+    expect(second.modelPreference(target)).toBeUndefined();
+    second.close();
+    const third = new SqliteBindingStore(path);
+    expect(third.modelPreference(target)).toBeUndefined();
+    third.close();
+  });
+
+  it("keeps saved foreground preferences when background bindings change and clears them on takeover", () => {
+    const { path } = databasePath();
+    const store = new SqliteBindingStore(path);
+    const preference = { model: "m", modelProvider: "p", effort: null, serviceTier: null };
+    store.setModelPreference(target, preference);
+    store.bindBackground({ target, workspaceId: "main", threadId: "background", sessionId: "background" });
+    expect(store.modelPreference(target)).toEqual(preference);
+    store.removeThread("background");
+    expect(store.modelPreference(target)).toEqual(preference);
+    const source = { ...target, accountId: "other-account" };
+    store.bind({ target: source, workspaceId: "main", threadId: "source", sessionId: "source" });
+    store.transfer("source", target);
+    expect(store.modelPreference(target)).toBeUndefined();
+    expect(store.modelPreference(source)).toBeUndefined();
+    store.close();
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.modelPreference(target)).toBeUndefined();
+    expect(reopened.get(target)?.threadId).toBe("source");
+    reopened.close();
+  });
+
+  it("rolls back unbinding when preference persistence fails", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-model-atomic-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "state.sqlite3");
+    const store = new SqliteBindingStore(path);
+    const binding = { target, workspaceId: "main", threadId: "t", sessionId: "t" };
+    store.bind(binding);
+    expect(() => store.unbind(target, { model: "", modelProvider: "openai", effort: null, serviceTier: null })).toThrow();
+    expect(store.get(target)).toEqual(binding);
+    store.close();
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toEqual(binding);
+    expect(reopened.modelPreference(target)).toBeUndefined();
+    reopened.close();
+  });
+
+  it("clears unbound preferences on revocation without requiring a foreground Thread", () => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-model-revoke-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "state.sqlite3");
+    const store = new SqliteBindingStore(path);
+    store.rememberActor(target, "actor");
+    store.setModelPreference(target, { model: "m", modelProvider: "p", effort: null, serviceTier: null });
+    store.retainActors(target, new Set());
+    expect(store.modelPreference(target)).toBeUndefined();
+    store.close();
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.modelPreference(target)).toBeUndefined();
+    reopened.close();
+  });
+
   it("persists foreground and background bindings independently", () => {
     const { path } = databasePath();
     const first = new SqliteBindingStore(path);
@@ -319,7 +393,7 @@ describe("SqliteBindingStore", () => {
     database.close();
 
     expect(() => new SqliteBindingStore(path)).toThrow(
-      "状态数据库版本不兼容：当前 2，Gateway 需要 5",
+      "状态数据库版本不兼容：当前 2，Gateway 需要 6",
     );
   });
 
@@ -358,7 +432,7 @@ describe("SqliteBindingStore", () => {
         updated_at INTEGER NOT NULL
       ) STRICT;
 
-      PRAGMA user_version = 5;
+      PRAGMA user_version = 6;
     `);
     database.close();
 
