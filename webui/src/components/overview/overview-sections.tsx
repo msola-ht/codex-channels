@@ -511,7 +511,7 @@ export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
       </CardHeader>
       <CardContent>
         {errors.groups.length === 0 ? (
-          <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("overview.noErrors")}</EmptyTitle></EmptyHeader></Empty>
+          <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("common.noFailedRequests")}</EmptyTitle></EmptyHeader></Empty>
         ) : (
           <ul className="flex flex-col gap-2">
             {errors.groups.slice(0, 5).map((group) => (

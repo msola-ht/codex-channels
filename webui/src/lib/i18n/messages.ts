@@ -67,7 +67,8 @@ const zh = {
     "cacheRate": "缓存命中率 {rate}",
     "outputTotal": "输出 {count}",
     "failedTotal": "失败 {count}",
-    "inputOutput": "输入 {input} · 输出 {output}"
+    "inputOutput": "输入 {input} · 输出 {output}",
+    "fastMismatch": "请求使用 Fast，响应回报层级：{tier}。"
   },
   threads: {
     "main": "主会话",
@@ -109,6 +110,8 @@ const zh = {
     "refresh": "刷新",
     "refreshing": "刷新中",
     "unknown": "未知",
+    "errorCode": "错误码：{code}",
+    "noFailedRequests": "没有异常请求",
     "loadFailed": "加载失败",
     "loadingRecords": "正在加载…",
     "all": "全部",
@@ -206,7 +209,6 @@ const zh = {
     "windowProgress": "{label}已用比例",
     "errorsTitle": "错误摘要",
     "failureRate": "失败率 {rate}",
-    "noErrors": "没有异常请求",
     "countAndTime": "{count} 次 · {time}",
     "trendTitle": "用量趋势",
     "trendDescriptionHour": "{range} · 按小时统计 Token · 左轴输入/缓存，右轴输出（独立刻度）",
@@ -261,6 +263,48 @@ const zh = {
     "listSeparator": "；",
     "activation": "生效目标：{value}",
     "activationFallback": "按操作结果"
+  },
+  requests: {
+    "title": "请求明细",
+    "export": "导出全部匹配请求（JSON）",
+    "exporting": "正在导出…",
+    "tableTitle": "记录",
+    "tableDescription": "共 {total} 条匹配 · 当前页 {count} 条 · 第 {page} 页",
+    "reasoningColumn": "推理输出",
+    "errorColumn": "错误",
+    "firstColumn": "首 Token",
+    "firstHint": "提交发送至收到首段非空内容，含思考、正文或工具参数。",
+    "durationColumn": "请求耗时",
+    "durationHint": "提交发送至请求完成或失败；不含发送前准备和客户端显示。",
+    "detailColumn": "调用详情",
+    "noTraffic": "未关联",
+    "viewTraffic": "查看调用详情"
+  },
+  errorList: {
+    "description": "失败请求记录，按发生时间倒序",
+    "requestTotal": "请求总数 · 失败 {count} 次",
+    "successRate": "成功率 · 当前显示 {shown} / {total} 条失败记录",
+    "tableTitle": "错误记录",
+    "tableDescription": "每一行是一条失败请求；错误明细跟随当前界面语言显示",
+    "loadingRecords": "正在加载错误记录…",
+    "detailColumn": "错误明细",
+    "threadColumn": "会话 / 轮次"
+  },
+  status: {
+    "completed": "成功",
+    "failed": "失败",
+    "incomplete": "未完成"
+  },
+  modelComparison: {
+    "requestOnly": "请求：{name}",
+    "requestAndResponses": "请求：{request}；响应回显：{responses}。仅比较名称，不验证模型身份。",
+    "notProvided": "未提供",
+    "upstream": "上游：{provider}（来自 Chat 上游诊断 routing.finalProvider）。",
+    "responseBadge": "响应模型：{name}（{comparison}）",
+    "match": "名称一致",
+    "mismatch": "名称不一致",
+    "insufficient": "信息不足",
+    "listSeparator": "、"
   },
   shell: {
     navigation: "导航",
@@ -356,7 +400,8 @@ const en: Messages = {
     "cacheRate": "Cache hit rate: {rate}",
     "outputTotal": "Output: {count}",
     "failedTotal": "Failures: {count}",
-    "inputOutput": "Input: {input} · Output: {output}"
+    "inputOutput": "Input: {input} · Output: {output}",
+    "fastMismatch": "Request used Fast; the response reported tier: {tier}."
   },
   threads: {
     "main": "Main thread",
@@ -398,6 +443,8 @@ const en: Messages = {
     "refresh": "Refresh",
     "refreshing": "Refreshing",
     "unknown": "Unknown",
+    "errorCode": "Error code: {code}",
+    "noFailedRequests": "No failed requests",
     "loadFailed": "Loading failed",
     "loadingRecords": "Loading…",
     "all": "All",
@@ -495,7 +542,6 @@ const en: Messages = {
     "windowProgress": "{label} used",
     "errorsTitle": "Error summary",
     "failureRate": "Failure rate: {rate}",
-    "noErrors": "No failed requests",
     "countAndTime": "Count: {count} · {time}",
     "trendTitle": "Usage trend",
     "trendDescriptionHour": "{range} · Token usage by hour · Left axis: input/cached, right axis: output (independent scale)",
@@ -550,6 +596,48 @@ const en: Messages = {
     "listSeparator": "; ",
     "activation": "Activation target: {value}",
     "activationFallback": "As directed by the result"
+  },
+  requests: {
+    "title": "Request details",
+    "export": "Export all matching requests (JSON)",
+    "exporting": "Exporting…",
+    "tableTitle": "Records",
+    "tableDescription": "Matching records: {total} · This page: {count} · Page {page}",
+    "reasoningColumn": "Reasoning output",
+    "errorColumn": "Error",
+    "firstColumn": "First token",
+    "firstHint": "From submitting to the first non-empty content, including reasoning, message text or tool arguments.",
+    "durationColumn": "Request duration",
+    "durationHint": "From submitting to request completion or failure; excludes preparation before sending and client rendering.",
+    "detailColumn": "Traffic",
+    "noTraffic": "Not linked",
+    "viewTraffic": "View traffic detail"
+  },
+  errorList: {
+    "description": "Failed request records, newest first",
+    "requestTotal": "Total requests · Failed: {count}",
+    "successRate": "Success rate · Showing {shown} / {total} failed records",
+    "tableTitle": "Failed request records",
+    "tableDescription": "Each row is a failed request; error details follow the selected language",
+    "loadingRecords": "Loading failed request records…",
+    "detailColumn": "Error detail",
+    "threadColumn": "Thread / Turn"
+  },
+  status: {
+    "completed": "Succeeded",
+    "failed": "Failed",
+    "incomplete": "Incomplete"
+  },
+  modelComparison: {
+    "requestOnly": "Request: {name}",
+    "requestAndResponses": "Request: {request}; response echo: {responses}. Only names are compared; model identity is not verified.",
+    "notProvided": "Not provided",
+    "upstream": "Upstream: {provider} (from the Chat upstream diagnostic routing.finalProvider).",
+    "responseBadge": "Response model: {name} ({comparison})",
+    "match": "Name matches",
+    "mismatch": "Name mismatch",
+    "insufficient": "Insufficient information",
+    "listSeparator": ", "
   },
   shell: {
     navigation: "Navigation",

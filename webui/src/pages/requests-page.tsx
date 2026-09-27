@@ -7,24 +7,27 @@ import { Button } from "@/components/ui/button"
 import { useRequests } from "@/hooks/use-requests"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { useMetricsExport } from "@/hooks/use-metrics-export"
+import { useTranslation } from "@/hooks/use-translation"
+import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 
 export function RequestsPage() {
+  const { t } = useTranslation()
   const state = useMetricsQuery("30d")
   const { query, update, sorting, onSortingChange } = state
-  const { data, loading, error, refetch } = useRequests(query)
+  const { data, loading, error, errorCode, refetch } = useRequests(query)
   const exporter = useMetricsExport(query)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">请求明细</h1>
+        <h1 className="text-xl font-semibold">{t("requests.title")}</h1>
         <Button variant="outline" disabled={exporter.pending || loading || error !== null} onClick={() => void exporter.download()}>
-          {exporter.pending ? "正在导出…" : "导出全部匹配请求（JSON）"}
+          {exporter.pending ? t("requests.exporting") : t("requests.export")}
         </Button>
       </div>
       <QueryFilters query={query} onChange={update} showThreadFilters={false} />
-      <ErrorBanner error={error} onRetry={refetch} pending={loading} />
-      <ErrorBanner error={exporter.error} onRetry={() => void exporter.download()} pending={exporter.pending || loading || error !== null} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
+      <ErrorBanner error={exporter.failed ? translateApiErrorCode(t, exporter.errorCode) : null} onRetry={() => void exporter.download()} pending={exporter.pending || loading || error !== null} />
       {error !== null ? null : data === null ? <PageSkeleton rows={8} /> : (
         <>
           <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} />

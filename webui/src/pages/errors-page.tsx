@@ -28,8 +28,9 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useErrors } from "@/hooks/use-errors"
-import { useLanguage } from "@/hooks/language-context"
+import { useTranslation } from "@/hooks/use-translation"
 import { formatCount, formatErrorMessage, formatErrorType, formatSuccessRate, formatTime } from "@/lib/format"
+import { translateApiError } from "@/lib/i18n/translate"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 import { metricsLink } from "@/lib/metrics-query"
 import { cn } from "@/lib/utils"
@@ -47,17 +48,17 @@ function ErrorCell({ loading, children, ...props }: ComponentProps<typeof TableC
 
 export function ErrorsPage() {
   const { query, update } = useMetricsQuery("30d")
-  const { data, loading, error, refetch } = useErrors(query)
+  const { data, loading, error, errorCode, refetch } = useErrors(query)
   const { offset, limit } = query
   const pageNumber = Math.floor(offset / limit) + 1
-  const { language } = useLanguage()
+  const { t, language } = useTranslation()
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">错误</h1>
-          <p className="text-sm text-muted-foreground">失败请求记录，按发生时间倒序</p>
+          <h1 className="text-xl font-semibold">{t("pages.errors")}</h1>
+          <p className="text-sm text-muted-foreground">{t("errorList.description")}</p>
         </div>
       </div>
       {error === null && data !== null ? (
@@ -65,14 +66,14 @@ export function ErrorsPage() {
             <div className={cn("grid gap-4 sm:grid-cols-2 xl:grid-cols-4", loading && "invisible")} aria-hidden={loading || undefined}>
               <StatCard
                 value={formatCount(data.errors.requestCount)}
-                description={`请求总数 · 失败 ${formatCount(data.errors.unsuccessfulRequestCount)} 次`}
+                description={t("errorList.requestTotal", { count: formatCount(data.errors.unsuccessfulRequestCount) })}
               />
               <StatCard
                 value={formatSuccessRate(
                   data.errors.requestCount,
                   data.errors.unsuccessfulRequestCount,
                 )}
-                description={`成功率 · 当前显示 ${data.records.length} / ${data.total} 条失败记录`}
+                description={t("errorList.successRate", { shown: data.records.length, total: data.total })}
               />
             </div>
             {loading ? <Skeleton className="absolute inset-0" /> : null}
@@ -80,28 +81,28 @@ export function ErrorsPage() {
       ) : null}
       <QueryFilters query={query} onChange={update} showThreadFilters={false} />
 
-      <ErrorBanner error={error} onRetry={refetch} pending={loading} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
 
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <>
           <Card className="min-w-0" aria-busy={loading}>
             <CardHeader>
-              <CardTitle>错误记录</CardTitle>
-              <CardDescription>每一行是一条失败请求；错误明细跟随当前界面语言显示</CardDescription>
-              {loading ? <span className="sr-only" role="status">正在加载错误记录…</span> : null}
+              <CardTitle>{t("errorList.tableTitle")}</CardTitle>
+              <CardDescription>{t("errorList.tableDescription")}</CardDescription>
+              {loading ? <span className="sr-only" role="status">{t("errorList.loadingRecords")}</span> : null}
             </CardHeader>
             <CardContent inert={loading}>
               <div className="overflow-x-auto">
                 <Table className="min-w-[900px]">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>时间</TableHead>
+                      <TableHead>{t("metrics.time")}</TableHead>
                       <TableHead>Provider</TableHead>
-                      <TableHead>模型</TableHead>
-                      <TableHead>状态</TableHead>
+                      <TableHead>{t("metrics.model")}</TableHead>
+                      <TableHead>{t("filters.status")}</TableHead>
                       <TableHead className="text-right">HTTP</TableHead>
-                      <TableHead>错误明细</TableHead>
-                      <TableHead>会话 / 轮次</TableHead>
+                      <TableHead>{t("errorList.detailColumn")}</TableHead>
+                      <TableHead>{t("errorList.threadColumn")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -117,7 +118,7 @@ export function ErrorsPage() {
                           <ErrorCell loading={loading}><StatusBadge status={record.status} /></ErrorCell>
                           <ErrorCell loading={loading} className="text-right tabular-nums">{record.httpStatus ?? "—"}</ErrorCell>
                           <ErrorCell loading={loading} className="max-w-md">
-                            {record.errorCode ? <TableHint hint={`${message} · 错误码：${record.errorCode}`}>
+                            {record.errorCode ? <TableHint hint={`${message} · ${t("common.errorCode", { code: record.errorCode })}`}>
                               <span className="block max-w-md truncate text-xs text-muted-foreground">{message}</span>
                             </TableHint> : <TruncatedText text={message} className="max-w-md text-xs text-muted-foreground" />}
                           </ErrorCell>
@@ -128,7 +129,7 @@ export function ErrorsPage() {
                     {data.records.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="h-16 text-center text-muted-foreground">
-                          {loading ? <Skeleton className="h-5 w-full" /> : "没有异常请求"}
+                          {loading ? <Skeleton className="h-5 w-full" /> : t("common.noFailedRequests")}
                         </TableCell>
                       </TableRow>
                     ) : null}
@@ -136,7 +137,7 @@ export function ErrorsPage() {
                 </Table>
               </div>
               <div className="mt-4 flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">第 {pageNumber} 页</p>
+                <p className="text-xs text-muted-foreground">{t("common.page", { page: pageNumber })}</p>
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -147,7 +148,7 @@ export function ErrorsPage() {
                       if (offset === 0) return
                       update({ offset: Math.max(0, offset - limit) }, false)
                     }}
-                  >上一页</Button>
+                  >{t("common.previous")}</Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -157,7 +158,7 @@ export function ErrorsPage() {
                       if (data.nextOffset === null) return
                       update({ offset: data.nextOffset }, false)
                     }}
-                  >下一页</Button>
+                  >{t("common.next")}</Button>
                 </div>
               </div>
             </CardContent>

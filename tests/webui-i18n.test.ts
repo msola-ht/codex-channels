@@ -25,6 +25,7 @@ describe("WebUI 界面文案语言切换", () => {
     knownError: string;
     prototypeError: string;
     interpolated: string;
+    errorCodeLabel: string;
     consoleEn: string;
     consoleEnLoading: string;
     consoleEnEmptyAccounts: string;
@@ -39,6 +40,15 @@ describe("WebUI 界面文案语言切换", () => {
     accountUpdateFailedEn: string;
     snapshotEmptyEn: string;
     refreshFeedbackEn: string;
+    requestsTableEn: string;
+    requestsTableEmptyEn: string;
+    requestsTableLoadingEn: string;
+    requestsPageEn: string;
+    requestsPageErrorEn: string;
+    errorsPageEn: string;
+    errorsPageLoadingEn: string;
+    errorsPageEmptyEn: string;
+    errorsPageErrorEn: string;
   };
 
   beforeAll(() => {
@@ -53,6 +63,10 @@ describe("WebUI 界面文案语言切换", () => {
           if (id.endsWith("/src/hooks/use-dashboard.ts")) return "export function useDashboard() { return globalThis.fixtureDashboard; }";
           if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
           if (id.endsWith("/src/hooks/use-account-settings-management.ts")) return "export function useAccountSettingsManagement() { return globalThis.fixtureAccountManagement; }";
+          if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return globalThis.fixtureMetricsQuery; } export function useMetricsProviders() { return globalThis.fixtureMetricsProviders ?? { data: null, loading: true, error: null, errorCode: null }; }";
+          if (id.endsWith("/src/hooks/use-requests.ts")) return "export function useRequests() { return globalThis.fixtureRequests; }";
+          if (id.endsWith("/src/hooks/use-errors.ts")) return "export function useErrors() { return globalThis.fixtureErrors; }";
+          if (id.endsWith("/src/hooks/use-metrics-export.ts")) return "export function useMetricsExport() { return globalThis.fixtureExport; }";
         } }],
       });
       try {
@@ -65,6 +79,9 @@ describe("WebUI 界面文案语言切换", () => {
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
+        const { RequestsPage } = await server.ssrLoadModule("/src/pages/requests-page.tsx");
+        const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
+        const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { ServerTimeContext } = await server.ssrLoadModule("/src/hooks/use-server-time.ts");
         const { AccountUpdateDescription, AccountRefreshFeedback, AccountSnapshotEmpty } =
           await server.ssrLoadModule("/src/components/overview/account-refresh-feedback.tsx");
@@ -165,9 +182,51 @@ describe("WebUI 界面文案语言切换", () => {
         const refreshFeedbackEn = renderWithClock(AccountRefreshFeedback,
           { control: { refreshing: false, disabled: false, error: { kind: "refresh-failed", message: "账户刷新失败" }, onRefresh: noop },
             hasSnapshot: true }, "en");
+        const requestRecord = { provider: "openai", model: "model-test", recordedAtMs: 1000,
+          cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
+          inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
+          tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0,
+          status: "failed", requestModel: "model-test", responseModel: "model-other", traffic: null,
+          userAgent: "fixture-client", operation: "response", httpStatus: 502, errorType: "upstream_error",
+          errorCode: "fixture_error", errorMessage: "fixture failure", firstTokenMs: 100, totalDurationMs: 1000,
+          upstreamTtftMs: null, cacheHitRate: 0.5, requestServiceTier: "priority", serviceTier: "default" };
+        const requestTableProps = { loading: false, records: [requestRecord], pageNumber: 1, hasPrevious: false,
+          hasNext: false, onPrevious: noop, onNext: noop, pageSize: 50, onPageSizeChange: noop,
+          sorting: [], onSortingChange: noop, filter: "", total: 1 };
+        globalThis.fixtureMetricsQuery = { query: { range: "30d", offset: 0, limit: 50, filter: "" },
+          update: noop, sorting: [], onSortingChange: noop };
+        globalThis.fixtureMetricsProviders = { data: { providers: ["openai"] }, loading: false, error: null, errorCode: null };
+        globalThis.fixtureExport = { download: noop, pending: false, failed: false, errorCode: null };
+        globalThis.fixtureRequests = { data: { aggregate: requestRecord, range, records: [requestRecord], total: 1,
+          nextOffset: null }, loading: false, error: null, errorCode: null, refetch: noop };
+        globalThis.fixtureErrors = { data: { errors: { requestCount: 100, unsuccessfulRequestCount: 60 },
+          total: 60, nextOffset: 50,
+          records: [{ ...requestRecord, id: 1, threadId: "thread-1", turnId: "turn-1" }] },
+          loading: false, error: null, errorCode: null, refetch: noop };
+        const requestsTableEn = render(RequestsTable, requestTableProps, "en");
+        const requestsTableEmptyEn = render(RequestsTable, { ...requestTableProps, records: [], total: 0 }, "en");
+        const requestsTableLoadingEn = render(RequestsTable, { ...requestTableProps, loading: true }, "en");
+        const requestsPageEn = render(RequestsPage, {}, "en");
+        const errorsPageEn = render(ErrorsPage, {}, "en");
+        globalThis.fixtureErrors = { ...globalThis.fixtureErrors, loading: true };
+        const errorsPageLoadingEn = render(ErrorsPage, {}, "en");
+        globalThis.fixtureErrors = { ...globalThis.fixtureErrors, loading: false,
+          data: { ...globalThis.fixtureErrors.data, records: [], total: 0 } };
+        const errorsPageEmptyEn = render(ErrorsPage, {}, "en");
+        globalThis.fixtureErrors = { ...globalThis.fixtureErrors, data: null, error: "fixture-errors-failure",
+          errorCode: "not_found" };
+        const errorsPageErrorEn = render(ErrorsPage, {}, "en");
+        globalThis.fixtureRequests = { ...globalThis.fixtureRequests, data: null,
+          error: "fixture-requests-failure", errorCode: "unauthorized" };
+        const requestsPageErrorEn = render(RequestsPage, {}, "en");
         delete globalThis.fixtureDashboard;
         delete globalThis.fixtureAccounts;
         delete globalThis.fixtureAccountManagement;
+        delete globalThis.fixtureMetricsQuery;
+        delete globalThis.fixtureMetricsProviders;
+        delete globalThis.fixtureExport;
+        delete globalThis.fixtureRequests;
+        delete globalThis.fixtureErrors;
         const keys = (node, prefix) => Object.entries(node).flatMap(([key, value]) =>
           typeof value === "string" ? [prefix + key] : keys(value, prefix + key + "."));
         console.log(JSON.stringify({
@@ -192,6 +251,7 @@ describe("WebUI 界面文案语言切换", () => {
           prototypeError: translateApiError((key)=>translate("en", key), "secret-internal-details", "__proto__"),
           knownError: translateApiError((key)=>translate("en", key), "secret-internal-details", "invalid_range"),
           interpolated: translate("en", "threads.heading", { id: "thread-$&-<script>" }),
+          errorCodeLabel: translate("en", "common.errorCode", { code: "fixture_error" }),
           consoleEn,
           consoleEnLoading,
           consoleEnEmptyAccounts,
@@ -206,6 +266,15 @@ describe("WebUI 界面文案语言切换", () => {
           accountUpdateFailedEn,
           snapshotEmptyEn,
           refreshFeedbackEn,
+          requestsTableEn,
+          requestsTableEmptyEn,
+          requestsTableLoadingEn,
+          requestsPageEn,
+          requestsPageErrorEn,
+          errorsPageEn,
+          errorsPageLoadingEn,
+          errorsPageEmptyEn,
+          errorsPageErrorEn,
         }));
       } finally { await server.close(); }
     `;
@@ -343,4 +412,97 @@ describe("WebUI 界面文案语言切换", () => {
       expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
     }
   });
+
+  it("请求明细的表头、提示、空状态与页面文案覆盖英文", () => {
+    expect(result.requestsTableEn).toContain("Records");
+    expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
+    expect(result.requestsTableEn).toContain("Request duration");
+    expect(result.requestsTableEn).toContain("Traffic");
+    expect(result.requestsTableEn).toContain("Not linked");
+    expect(result.requestsTableEn).toContain("Response model: model-other (Name mismatch)");
+    expect(result.requestsTableEmptyEn).toContain("No records");
+    expect(result.requestsTableLoadingEn).toContain('aria-label="Loading…"');
+    expect(result.requestsPageEn).toContain("Request details");
+    expect(result.requestsPageEn).toContain("Export all matching requests (JSON)");
+    expect(result.requestsPageErrorEn).toContain("The access token is invalid or expired. Verify it again.");
+    for (const html of [
+      result.requestsTableEn,
+      result.requestsTableEmptyEn,
+      result.requestsTableLoadingEn,
+      result.requestsPageEn,
+      result.requestsPageErrorEn,
+    ]) {
+      expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+  });
+
+  it("错误页面的统计、表头、分页、空状态与错误提示覆盖英文", () => {
+    expect(result.errorsPageEn).toContain("Failed request records, newest first");
+    expect(result.errorsPageEn).toContain("Total requests · Failed: 60");
+    expect(result.errorsPageEn).toContain("Success rate · Showing 1 / 60 failed records");
+    expect(result.errorsPageEn).toContain("Error detail");
+    expect(result.errorsPageEn).toContain("Thread / Turn");
+    expect(result.errorCodeLabel).toBe("Error code: fixture_error");
+    expect(result.errorsPageEn).toContain("Page 1");
+    expect(result.errorsPageEn).toContain("Previous page");
+    expect(result.errorsPageEn).toContain("Next page");
+    expect(result.errorsPageLoadingEn).toContain("Loading failed request records…");
+    expect(result.errorsPageEmptyEn).toContain("No failed requests");
+    expect(result.errorsPageErrorEn).toContain("The requested data was not found or has been removed.");
+    for (const html of [result.errorsPageEn, result.errorsPageLoadingEn, result.errorsPageEmptyEn, result.errorsPageErrorEn]) {
+      expect(html).not.toMatch(/[\u4e00-\u9fff]/u);
+    }
+  });
+  it("导出失败保留网络与超时分类，并按当前语言翻译", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      // 执行生产 Hook 的下载路径，仅用内存槽模拟 React 状态，网络由 fetch fixture 隔离。
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+        name:"export-hook-state",enforce:"pre",
+        transform(code,id) {
+          if (!id.endsWith("/src/hooks/use-metrics-export.ts")) return;
+          return code.replace('import { useEffect, useRef, useState } from "react"',
+            'const { useEffect, useRef, useState } = globalThis.exportHooks');
+        }
+      }]});
+      const slots=[]; let cursor=0;
+      globalThis.exportHooks={
+        useRef(value){const i=cursor++;return slots[i]??=( {current:value} );},
+        useState(value){const i=cursor++;if(!(i in slots))slots[i]=value;return [slots[i],next=>{slots[i]=next}];},
+        useEffect(){}
+      };
+      try {
+        const {useMetricsExport}=await server.ssrLoadModule("/src/hooks/use-metrics-export.ts");
+        const {translate,translateApiErrorCode}=await server.ssrLoadModule("/src/lib/i18n/translate.ts");
+        const read=()=>{cursor=0;return useMetricsExport({range:"all"});};
+        const results=[];
+        for (const cause of [new TypeError("private network detail"),new DOMException("private timeout detail","TimeoutError"),new Error("private internal detail"),null]) {
+          globalThis.fetch=async()=>{
+            if(cause)throw cause;
+            return Response.json({error:{code:"forbidden",message:"private API detail"}},{status:403});
+          };
+          const task=read().download();
+          const pending=read();
+          await task;
+          const failed=read();
+          results.push({pending:pending.pending,cleared:!pending.failed,failed:failed.failed,settled:!failed.pending,code:failed.errorCode,
+            zh:translateApiErrorCode(key=>translate("zh",key),failed.errorCode),
+            en:translateApiErrorCode(key=>translate("en",key),failed.errorCode)});
+        }
+        console.log(JSON.stringify(results));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const results = JSON.parse(output) as Array<{ pending: boolean; cleared: boolean; failed: boolean; settled: boolean; code: string | null; zh: string; en: string }>;
+    expect(results.map(result => result.code)).toEqual(["network_error", "request_timeout", null, "forbidden"]);
+    for (const result of results) {
+      expect(result).toMatchObject({ pending: true, cleared: true, failed: true, settled: true });
+      expect(result.zh).toMatch(/[\u4e00-\u9fff]/u);
+      expect(result.en).not.toMatch(/[\u4e00-\u9fff]/u);
+      expect(result.zh + result.en).not.toContain("private");
+    }
+    expect(results[0]!.en).toBe("Cannot reach the service. Check your connection and retry.");
+    expect(results[1]!.en).toMatch(/timed out/i);
+    expect(results[2]!.en).toBe("Could not complete the request. Try again.");
+  }, 30_000);
+
 });
