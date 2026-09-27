@@ -1,6 +1,7 @@
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { bindOutboxMessagePort, type FeishuMessagePort } from "../src/surfaces/feishu/outbox-message-port.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
 import {
   feishuCardElements,
@@ -29,6 +30,73 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it("blocks every message-port capability after the shared lifecycle ends", async () => {
+    const closed = new AbortController();
+    const invoked = vi.fn(async () => {});
+    const port = bindOutboxMessagePort({
+      sendText: invoked, sendPost: invoked, sendMarkdownCard: invoked,
+      sendImage: invoked, sendFile: invoked, replyPost: invoked, replyMarkdownCard: invoked,
+      updateCard: invoked, updateStreamingCard: invoked, finishStreamingCard: invoked,
+      sendCard: async () => { await invoked(); return "message"; },
+      createStreamingCard: async () => { await invoked(); return { cardId: "card", messageId: "message" }; },
+      createStreamingReplyCard: async () => { await invoked(); return { cardId: "card", messageId: "message" }; },
+    }, closed.signal);
+    const card: FeishuCardDocument = {
+      schema: "2.0", config: { update_multi: true, wide_screen_mode: true },
+      header: { template: "blue", title: { tag: "plain_text", content: "test" } }, body: { elements: [] },
+    };
+    const calls: Record<keyof FeishuMessagePort, () => Promise<unknown>> = {
+      sendText: () => port.sendText("chat", "text"),
+      sendPost: () => port.sendPost("chat", "text"),
+      sendMarkdownCard: () => port.sendMarkdownCard("chat", "text"),
+      sendImage: () => port.sendImage!("chat", Buffer.from("image")),
+      sendFile: () => port.sendFile!("chat", "file.txt", Buffer.from("file")),
+      replyPost: () => port.replyPost!("message", "text"),
+      replyMarkdownCard: () => port.replyMarkdownCard!("message", "text"),
+      sendCard: () => port.sendCard("chat", card),
+      updateCard: () => port.updateCard("message", card),
+      createStreamingCard: () => port.createStreamingCard("chat", "text"),
+      createStreamingReplyCard: () => port.createStreamingReplyCard!("message", "text"),
+      updateStreamingCard: () => port.updateStreamingCard("card", "text", 1),
+      finishStreamingCard: () => port.finishStreamingCard("card", 2, "text"),
+    };
+    closed.abort();
+    for (const call of Object.values(calls)) {
+      await expect(call()).rejects.toMatchObject({ name: "AbortError" });
+    }
+    expect(invoked).not.toHaveBeenCalled();
+  });
+
+  it("keeps optional capabilities absent and respects request cancellation", async () => {
+    const closed = new AbortController();
+    const external = new AbortController();
+    const sendPost = vi.fn(async (_chat: string, _text: string, signal?: AbortSignal) => { signal?.throwIfAborted(); });
+    const port = bindOutboxMessagePort({ ...cardMethods, sendText: async () => {}, sendPost }, closed.signal);
+    expect(port.sendImage).toBeUndefined();
+    expect(port.sendFile).toBeUndefined();
+    expect(port.replyPost).toBeUndefined();
+    external.abort();
+    await expect(port.sendPost("chat", "text", external.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(sendPost).not.toHaveBeenCalled();
+    await port.sendPost("chat", "text");
+    expect(sendPost).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a successful late result after the message port is closed", async () => {
+    const closed = new AbortController();
+    let release!: (id: string) => void;
+    const response = new Promise<string>((resolve) => { release = resolve; });
+    const port = bindOutboxMessagePort({
+      ...cardMethods, sendText: async () => {}, sendPost: async () => {},
+      sendMarkdownCard: () => response,
+    }, closed.signal);
+    const sent = port.sendMarkdownCard("chat", "body");
+    const rejected = expect(sent).rejects.toMatchObject({ name: "AbortError" });
+    closed.abort();
+    release("late_message");
+    await rejected;
+  });
+
   it("keeps one plan card and updates it in place", async () => {
     const sent: FeishuCardDocument[] = [];
     const updated: FeishuCardDocument[] = [];

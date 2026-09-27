@@ -15,6 +15,45 @@ afterEach(() => {
 });
 
 describe("FeishuMessageClient", () => {
+  it.each(["before", "between"])("checks cancellation %s the resource and message requests", async (stage) => {
+    const controller = new AbortController();
+    const createMessage = vi.fn(async () => ({ data: { message_id: "om_card" } }));
+    const createResource = vi.fn(async () => ({
+      code: 0,
+      data: { get card_id() { controller.abort(); return "7355372766134157313"; } },
+    }));
+    const client = new FeishuMessageClient(
+      { appId: "cli_0123456789abcdef", appSecret: "secret" },
+      { sendTimeoutMs: 1000, createSdkClient: () => ({
+        createMessage, createStreamingCard: createResource,
+        patchMessage: successfulPatch, downloadResource: successfulDownload,
+      }) },
+    );
+    if (stage === "before") controller.abort();
+    await expect(client.createStreamingCard("oc_chat", "body", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(createResource).toHaveBeenCalledTimes(stage === "before" ? 0 : 1);
+    expect(createMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["resource", "message"])("distinguishes stream creation failures at the %s stage", async (stage) => {
+    const createMessage = vi.fn(async () => { throw new Error("fixture"); });
+    const client = new FeishuMessageClient(
+      { appId: "cli_0123456789abcdef", appSecret: "secret" },
+      { sendTimeoutMs: 1000, createSdkClient: () => ({
+        createMessage,
+        createStreamingCard: async () => {
+          if (stage === "resource") throw new Error("fixture");
+          return { code: 0, data: { card_id: "7355372766134157313" } };
+        },
+        patchMessage: successfulPatch, downloadResource: successfulDownload,
+      }) },
+    );
+    await expect(client.createStreamingCard("oc_chat", "body")).rejects.toMatchObject({
+      code: stage === "resource" ? "card-create-failed" : "send-failed",
+    });
+    expect(createMessage).toHaveBeenCalledTimes(stage === "resource" ? 0 : 1);
+  });
+
   it("rejects invalid credentials before creating the SDK client", () => {
     const createSdkClient = vi.fn();
 

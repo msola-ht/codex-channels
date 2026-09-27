@@ -31,13 +31,18 @@ interface ConversationWorker {
 export interface ConversationDeliveryQueueOptions {
   component: string;
   capacity?: number;
+  /** 路由层逐 Token 入队时可关闭普通调试阶段，保留终态与警告。 */
+  logIntermediateStages?: boolean;
   closeTimeoutMs?: number;
+  /** 普通输出可在关闭期限内排空；有序交互仍立即取消。 */
+  drainOnClose?: boolean;
   errorMetadata?(error: unknown): Record<string, unknown>;
 }
 
 export class ConversationDeliveryQueue {
   private readonly workers = new Map<string, ConversationWorker>();
   private readonly capacity: number;
+  private readonly stageLogger: Pick<Logger, "debug" | "info" | "warn">;
   private readonly closeTimeoutMs: number;
   private closed = false;
   private stopped = false;
@@ -48,6 +53,9 @@ export class ConversationDeliveryQueue {
     private readonly logger: Logger,
     private readonly options: ConversationDeliveryQueueOptions,
   ) {
+    this.stageLogger = options.logIntermediateStages === false
+      ? { debug: () => {}, info: logger.info.bind(logger), warn: logger.warn.bind(logger) }
+      : logger;
     this.capacity = options.capacity ?? 200;
     this.closeTimeoutMs = options.closeTimeoutMs ?? 5_000;
     if (!Number.isInteger(this.capacity) || this.capacity <= 0) {
@@ -72,7 +80,7 @@ export class ConversationDeliveryQueue {
     const worker = this.worker(conversationId);
     const operation = this.operation(conversationId, critical, run, options?.purpose);
     const accepted = worker.queue.push(operation, critical, options?.coalesceKey);
-    this.logger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
+    this.stageLogger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
       "Surface 输出入队结果");
     if (!accepted) {
       this.logger.warn(
@@ -103,6 +111,7 @@ export class ConversationDeliveryQueue {
     }
     return new Promise<T>((resolve, reject) => {
       const worker = this.worker(conversationId);
+      const cancellation = new AbortController();
       let started = false;
       let settled = false;
       const cleanup = (): void => {
@@ -112,6 +121,7 @@ export class ConversationDeliveryQueue {
       const cancel = (): void => {
         if (settled) return;
         settled = true;
+        cancellation.abort();
         worker.queue.remove(operation);
         this.logger.debug({ ...operation.context, started, outcome: "cancelled" },
           "Surface 有序输出已取消");
@@ -138,7 +148,8 @@ export class ConversationDeliveryQueue {
         }
       });
       operation.purpose = "ordered";
-      if (requestSignal) operation.requestSignal = requestSignal;
+      operation.requestSignal = requestSignal
+        ? AbortSignal.any([requestSignal, cancellation.signal]) : cancellation.signal;
       this.orderedCancellations.add(cancel);
       requestSignal?.addEventListener("abort", cancelQueued, { once: true });
       const accepted = worker.queue.pushPriority(operation);
@@ -207,6 +218,14 @@ export class ConversationDeliveryQueue {
     return worker;
   }
 
+  /** 等待当前任务结束，不关闭队列；调用方须先暂停该队列的新入队。 */
+  waitForIdle(): Promise<boolean> {
+    return waitAtMost(
+      Promise.allSettled([...this.workers.values()].map((worker) => worker.done)),
+      this.closeTimeoutMs,
+    );
+  }
+
   close(): Promise<void> {
     if (this.closePromise) {
       return this.closePromise;
@@ -215,7 +234,7 @@ export class ConversationDeliveryQueue {
     for (const cancel of [...this.orderedCancellations]) cancel();
     for (const worker of this.workers.values()) {
       worker.queue.close();
-      worker.controller.abort();
+      if (!this.options.drainOnClose) worker.controller.abort();
     }
     const conversationCount = this.workers.size;
     this.closePromise = this.finishClose(conversationCount);
@@ -230,6 +249,7 @@ export class ConversationDeliveryQueue {
     if (!completed) {
       this.stopped = true;
       for (const [conversationId, worker] of this.workers) {
+        worker.controller.abort();
         const pending = worker.queue.size;
         if (pending > 0) this.logger.warn({ component: this.options.component, conversationId, pending },
           "Surface 关闭超时，排队输出未投递");
@@ -261,7 +281,7 @@ export class ConversationDeliveryQueue {
         const operationSignal = operation.requestSignal
           ? AbortSignal.any([signal, operation.requestSignal]) : signal;
         await withSurfaceDiagnosticContext(operation.context, () => observeSurfaceStage(
-          this.logger,
+          this.stageLogger,
           {
             stage: "delivery",
             purpose: operation.purpose,

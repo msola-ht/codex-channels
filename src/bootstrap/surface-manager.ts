@@ -11,6 +11,7 @@ import {
 } from "../conversation-core/index.js";
 import type { EventBus } from "../event-bus/index.js";
 import {
+  ConversationDeliveryQueue,
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
@@ -43,9 +44,8 @@ function surfaceErrorChain(error: unknown, maximumDepth = 4): string[] {
 }
 
 /**
- * Turn 完成卡片需要指标写入落库后才读取聚合。共享输出路由只有一个消费者，
- * 因此整组读取必须有一次总预算，超时回退到当前可用值，避免一个慢指标库
- * 阻塞所有 Surface 与 Conversation 的输出路由。
+ * Turn 完成卡片需要指标写入落库后才读取聚合。整组读取共享一次总预算，
+ * 超时回退到当前可用值；等待仅影响该 Conversation 的后续输出。
  */
 const completionEnrichmentTimeoutMs = 250;
 
@@ -54,8 +54,9 @@ interface SurfaceRuntime {
   retryAttempt: number;
   retryTimer?: NodeJS.Timeout;
   pendingCriticalOutput: PendingOutputEntry[];
-  /** 串行投递链：富化是异步的，恢复重放与实时事件必须按到达顺序入队。 */
-  deliveryChain: Promise<void>;
+  nextOutputOrder: number;
+  /** 富化与恢复重放按 Conversation 有界排队，彼此独立。 */
+  delivery: ConversationDeliveryQueue;
   shedBacklogCount: number;
   nextShedBacklogReport: number;
   nextPendingThresholdReport: number;
@@ -63,6 +64,7 @@ interface SurfaceRuntime {
 
 interface PendingOutputEntry {
   event: OutputEvent;
+  order: number;
   /** 可合并中间状态在故障期只保留同键的最新一份。 */
   coalesceKey?: string;
 }
@@ -131,7 +133,8 @@ export class SurfaceManager {
         state: "idle",
         retryAttempt: 0,
         pendingCriticalOutput: [],
-        deliveryChain: Promise.resolve(),
+        nextOutputOrder: 0,
+        delivery: new ConversationDeliveryQueue(logger, { component: "SurfaceRouting", logIntermediateStages: false }),
         shedBacklogCount: 0,
         nextShedBacklogReport: 1,
         nextPendingThresholdReport: this.maximumPendingCriticalOutput,
@@ -139,7 +142,7 @@ export class SurfaceManager {
     }
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
-      async (event, _signal, eventBusWaitMs) => {
+      (event, _signal, eventBusWaitMs) => {
         const started = performance.now();
         const fields = {
           surface: event.target.surface, accountId: event.target.accountId,
@@ -150,13 +153,13 @@ export class SurfaceManager {
           stage: "routing", eventBusWaitMs,
         };
         try {
-          await this.routeOutput(event);
+          this.routeOutput(event);
         } finally {
           const routingMs = Math.max(0, Math.round(performance.now() - started));
           if (eventBusWaitMs + routingMs >= 5_000) {
             this.logger.warn({ ...fields, routingMs }, "Surface 共享输出路由耗时较长");
           } else if (event.type === "text.completed" || event.type === "turn.completed") {
-            this.logger.info({ ...fields, routingMs }, "Surface 终态输出路由处理结束");
+            this.logger.info({ ...fields, routingMs }, "Surface 终态输出路由入队完成");
           }
         }
       },
@@ -260,7 +263,6 @@ export class SurfaceManager {
     this.stopping = true;
     this.accountQueriesAbort.abort();
     this.acceptingOutput = false;
-    this.active.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
     for (const runtime of this.runtimeBySurface.values()) {
@@ -276,6 +278,8 @@ export class SurfaceManager {
     for (const surface of this.surfaces) {
       this.setInteractionAvailable(surface, false, "Gateway 已停止");
     }
+    await Promise.all([...this.runtimeBySurface.values()].map((runtime) => runtime.delivery.close()));
+    this.active.clear();
     const failures: Array<{ surface: SurfaceAdapter; error: unknown }> = [];
     const attempted = [...this.attempted];
     this.attempted.clear();
@@ -363,7 +367,7 @@ export class SurfaceManager {
     }
   }
 
-  private async routeOutput(event: OutputEvent): Promise<void> {
+  private routeOutput(event: OutputEvent): void {
     if (!this.acceptingOutput) {
       return;
     }
@@ -381,11 +385,12 @@ export class SurfaceManager {
       );
       return;
     }
+    const runtime = this.requireRuntime(surface);
+    const order = runtime.nextOutputOrder++;
     if (!this.active.has(surface)) {
-      const runtime = this.requireRuntime(surface);
       const decision = resolveSurfaceDelivery(surface.surface, event);
       if (decision.disposition !== "ignore" && decision.critical) {
-        this.bufferPendingOutput(surface, runtime, event, decision.coalesceKey);
+        this.bufferPendingOutput(surface, runtime, event, order, decision.coalesceKey);
       } else {
         this.logger.debug(
           {
@@ -398,7 +403,7 @@ export class SurfaceManager {
       }
       return;
     }
-    await this.deliverOutput(surface, event);
+    this.deliverOutput(surface, event, order);
   }
 
   /**
@@ -411,6 +416,7 @@ export class SurfaceManager {
     surface: SurfaceAdapter,
     runtime: SurfaceRuntime,
     event: OutputEvent,
+    order: number,
     coalesceKey: string | undefined,
   ): void {
     if (coalesceKey !== undefined) {
@@ -418,8 +424,12 @@ export class SurfaceManager {
         (entry) => entry.coalesceKey === coalesceKey,
       );
       if (existing >= 0) {
-        runtime.pendingCriticalOutput[existing] = { event, coalesceKey };
-        return;
+        const previous = runtime.pendingCriticalOutput[existing]!;
+        if (previous.order < order) {
+          runtime.pendingCriticalOutput.splice(existing, 1);
+        } else {
+          return;
+        }
       }
     }
     if (this.shedBacklogOutput(surface, runtime, event)) {
@@ -442,8 +452,12 @@ export class SurfaceManager {
       );
     }
     runtime.pendingCriticalOutput.push(
-      coalesceKey === undefined ? { event } : { event, coalesceKey },
+      coalesceKey === undefined ? { event, order } : { event, order, coalesceKey },
     );
+    // 在途事件可能比故障期间的新事件更晚回到缓冲。
+    if (pending > 0 && runtime.pendingCriticalOutput[pending - 1]!.order > order) {
+      runtime.pendingCriticalOutput.sort((left, right) => left.order - right.order);
+    }
   }
 
   /**
@@ -576,6 +590,10 @@ export class SurfaceManager {
     runtime.state = "starting";
     this.attempted.add(surface);
     try {
+      if (!await runtime.delivery.waitForIdle()) {
+        throw new Error("Surface 旧投递队列尚未排空，延后恢复");
+      }
+      if (this.stopping) return;
       await surface.start();
     } catch (error) {
       if (this.stopping) {
@@ -607,7 +625,7 @@ export class SurfaceManager {
     runtime.nextPendingThresholdReport = this.maximumPendingCriticalOutput;
     const pending = runtime.pendingCriticalOutput.splice(0);
     for (const entry of pending) {
-      void this.deliverOutput(surface, entry.event);
+      this.deliverOutput(surface, entry.event, entry.order);
     }
     this.logger.info(
       {
@@ -637,28 +655,46 @@ export class SurfaceManager {
     runtime.retryTimer.unref();
   }
 
-  /**
-   * 按 Surface 串行投递。Turn 完成富化需要读取指标库，恢复重放与实时事件只有排在同一个链上
-   * 才能保持同一 Conversation 的到达顺序，不会被前面的富化等待插队。
-   */
+  /** 恢复重放与实时输出共用同一 Conversation 队列，富化不阻塞共享路由。 */
   private deliverOutput(
     surface: SurfaceAdapter,
     event: OutputEvent,
-  ): Promise<void> {
+    order: number,
+  ): void {
+    const decision = resolveSurfaceDelivery(surface.surface, event);
+    if (decision.disposition === "ignore") return;
     const runtime = this.requireRuntime(surface);
-    const delivered = runtime.deliveryChain.then(
-      () => this.deliverOne(surface, event),
-    );
-    runtime.deliveryChain = delivered.then(
-      () => undefined,
-      () => undefined,
-    );
-    return delivered;
+    const enqueuedAt = performance.now();
+    runtime.delivery.enqueue(event.target.conversationId, async () => {
+      const started = performance.now();
+      if (!this.active.has(surface)) {
+        if (!this.stopping && decision.critical) {
+          this.bufferPendingOutput(surface, runtime, event, order, decision.coalesceKey);
+        }
+        return;
+      }
+      await this.deliverOne(surface, event, order);
+      const fields = {
+        surface: surface.surface, accountId: surface.accountId,
+        conversationId: event.target.conversationId, eventType: event.type,
+        ...("threadId" in event ? { threadId: event.threadId } : {}),
+        ...("turnId" in event ? { turnId: event.turnId } : {}),
+        stage: "enrichment",
+        queueWaitMs: Math.max(0, Math.round(started - enqueuedAt)),
+        executionMs: Math.max(0, Math.round(performance.now() - started)),
+      };
+      if (fields.queueWaitMs + fields.executionMs >= 5_000) {
+        this.logger.warn(fields, "Surface 会话输出准备耗时较长");
+      } else if (event.type === "turn.completed") {
+        this.logger.info(fields, "Surface 完成统计准备结束");
+      }
+    }, decision.critical);
   }
 
   private async deliverOne(
     surface: SurfaceAdapter,
     event: OutputEvent,
+    order: number,
   ): Promise<void> {
     let routedEvent: OutputEvent;
     try {
@@ -676,6 +712,13 @@ export class SurfaceManager {
         "Turn 完成统计富化失败，改用未富化输出",
       );
       routedEvent = event;
+    }
+    if (!this.active.has(surface)) {
+      if (!this.stopping) {
+        const decision = resolveSurfaceDelivery(surface.surface, event);
+        if (decision.critical) this.bufferPendingOutput(surface, this.requireRuntime(surface), event, order, decision.coalesceKey);
+      }
+      return;
     }
     try {
       await surface.output.handle(routedEvent);

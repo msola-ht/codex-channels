@@ -288,7 +288,7 @@ export class FeishuMessageClient implements
 
   private observeRequest<T>(
     operation: string,
-    request: Promise<T>,
+    request: () => Promise<T>,
     timeoutMs: number,
     timeoutError: Error,
     signal?: AbortSignal,
@@ -297,7 +297,10 @@ export class FeishuMessageClient implements
       () => observeSurfaceStage(this.diagnosticLogger, {
         stage: "api", operation,
         ...(signal === undefined ? {} : { signal }),
-      }, () => withTimeout(request, timeoutMs, timeoutError, signal)));
+      }, () => {
+        if (signal?.aborted) throw createAbortError();
+        return withTimeout(request(), timeoutMs, timeoutError, signal);
+      }));
   }
 
   async sendText(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
@@ -334,7 +337,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("uploadFile",
-        this.sdkClient.createFile({
+        () => this.sdkClient.createFile!({
           data: {
             file_type: "stream",
             file_name: fileName,
@@ -395,7 +398,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("uploadImage",
-        this.sdkClient.createImage({
+        () => this.sdkClient.createImage!({
           data: {
             image_type: "message",
             image,
@@ -544,7 +547,7 @@ export class FeishuMessageClient implements
           uuid: `c_${cardId}_${sequence}`,
         },
       }),
-      "飞书流式卡片更新", signal,
+      "飞书流式卡片更新", "updateStreamingCard", signal,
     );
   }
 
@@ -605,7 +608,7 @@ export class FeishuMessageClient implements
           uuid: `f_${cardId}_${sequence}`,
         },
       }),
-      "飞书流式卡片结束", signal,
+      "飞书流式卡片结束", "finishStreamingCard", signal,
     );
   }
 
@@ -636,7 +639,7 @@ export class FeishuMessageClient implements
   ): Promise<void> {
     try {
       const response = await this.observeRequest("patchMessage",
-        this.sdkClient.patchMessage({
+        () => this.sdkClient.patchMessage({
           path: {
             message_id: messageId,
           },
@@ -679,11 +682,12 @@ export class FeishuMessageClient implements
   private async runStreamingOperation(
     operation: () => Promise<{ code?: number | undefined }>,
     label: string,
+    operationName: "updateStreamingCard" | "finishStreamingCard",
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const response = await this.observeRequest("streamingCard",
-        operation(),
+      const response = await this.observeRequest(operationName,
+        operation,
         this.sendTimeoutMs,
         new FeishuMessageError(
           "send-timeout",
@@ -793,7 +797,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("downloadResource",
-        this.sdkClient.downloadResource({
+        () => this.sdkClient.downloadResource({
           params: {
             type,
           },
@@ -843,7 +847,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("getMessage",
-        this.sdkClient.getMessage({
+        () => this.sdkClient.getMessage!({
           params: {
             user_id_type: "open_id",
             card_msg_content_type: "raw_card_content",
@@ -912,7 +916,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("createStreamingCard",
-        this.sdkClient.createStreamingCard({
+        () => this.sdkClient.createStreamingCard!({
           data: {
             type: "card_json",
             data: JSON.stringify({
@@ -962,19 +966,9 @@ export class FeishuMessageClient implements
       }
       return candidate;
     } catch (error) {
-      if (error instanceof FeishuMessageError) {
-        throw error;
-      }
-      if (isSdkTimeout(error)) {
-        throw new FeishuMessageError(
-          "send-timeout",
-          "飞书流式卡片创建超时",
-        );
-      }
-      throw new FeishuMessageError(
-        "send-failed",
-        "飞书流式卡片创建失败",
-      );
+      if (isAbortError(error)) throw error;
+      // CardKit 资源创建失败时尚未调用消息发送，可安全切换到富文本。
+      throw new FeishuMessageError("card-create-failed", "飞书流式卡片创建失败");
     }
   }
 
@@ -988,7 +982,7 @@ export class FeishuMessageClient implements
     const safeMarkdown = sanitizeFeishuMarkdown(markdown);
     try {
       const response = await this.observeRequest("createMarkdownCard",
-        this.sdkClient.createStreamingCard({
+        () => this.sdkClient.createStreamingCard!({
           data: {
             type: "card_json",
             data: JSON.stringify({
@@ -1057,7 +1051,7 @@ export class FeishuMessageClient implements
     }
     try {
       const response = await this.observeRequest("replyMessage",
-        this.sdkClient.replyMessage({
+        () => this.sdkClient.replyMessage!({
           path: {
             message_id: messageId,
           },
@@ -1111,7 +1105,7 @@ export class FeishuMessageClient implements
   ): Promise<string> {
     try {
       const response = await this.observeRequest("createMessage",
-        this.sdkClient.createMessage({
+        () => this.sdkClient.createMessage({
           params: {
             receive_id_type: "chat_id",
           },

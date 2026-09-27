@@ -44,7 +44,7 @@ describe("SurfaceManager", () => {
     await output.close();
     await manager.stop();
     expect(records.find((record) => record.eventType === "text.completed")).toMatchObject({
-      stage: "routing", eventBusWaitMs: 6000, routingMs: 0, itemId: "answer", conversationId: "chat",
+      stage: "routing", eventBusWaitMs: 0, routingMs: 0, itemId: "answer", conversationId: "chat",
     });
     expect(JSON.stringify(records)).not.toContain("PRIVATE BODY");
   });
@@ -267,7 +267,7 @@ describe("SurfaceManager", () => {
 
     resolveStart();
     await starting;
-    expect(received).toEqual(["warning"]);
+    await vi.waitFor(() => expect(received).toEqual(["warning"]));
     await manager.stop();
     await output.close();
   });
@@ -543,6 +543,7 @@ describe("SurfaceManager", () => {
       status: "idle",
     });
     await output.close();
+    await settle();
 
     expect(debug).toHaveBeenCalledTimes(1);
     expect(debug).toHaveBeenCalledWith(
@@ -627,6 +628,7 @@ describe("SurfaceManager", () => {
     const output = new EventBus<OutputEvent>(logger);
     const thresholds: number[] = [];
     const managerLogger = {
+      info() {},
       debug() {},
       warn() {},
       error: (fields: { pending?: number; threshold?: number }, message: string) => {
@@ -907,6 +909,35 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it("isolates slow completion enrichment by conversation and preserves local order", async () => {
+    const received: string[] = [];
+    const feishu = surface("feishu", "tenant-a", []);
+    const telegram = surface("telegram", "default", []);
+    for (const adapter of [feishu, telegram]) {
+      adapter.output.handle = (event) => { received.push(`${event.target.conversationId}:${event.type}`); };
+    }
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu, telegram], output, {
+      completionAccountStatus: async () => { await blocked; return undefined; },
+    });
+    await manager.start();
+    const target = { surface: "feishu" as const, accountId: "tenant-a", conversationId: "slow" };
+    output.publish({ type: "turn.completed", target, threadId: "thread", turnId: "turn", status: "completed", modelProvider: "clp-main" }, true);
+    output.publish({ type: "warning", target, threadId: "thread", message: "after completion" }, true);
+    for (const adapter of [feishu, telegram]) {
+      output.publish({ type: "warning", target: { surface: adapter.surface, accountId: adapter.accountId, conversationId: adapter.surface }, threadId: "other", message: "independent" }, true);
+    }
+    await settle();
+    expect(received).toEqual(["feishu:warning", "telegram:warning"]);
+    release();
+    await settle();
+    expect(received.slice(2)).toEqual(["slow:turn.completed", "slow:warning"]);
+    await output.close();
+    await manager.stop();
+  });
+
   it.each(["clp-main", "openai", undefined])("reads completion account data only for the exact third-party provider %s", async (provider) => {
     const feishu = surface("feishu", "tenant-a", []);
     const received: OutputEvent[] = [];
@@ -1001,6 +1032,90 @@ describe("SurfaceManager", () => {
       expect.objectContaining({ type: "turn.completed" }),
     ]);
     await manager.stop();
+    await output.close();
+  });
+
+  it.each([true, false])("preserves arrival order across failure and recovery (query finishes first: %s)", async (queryFirst) => {
+    vi.useFakeTimers();
+    const received: string[] = [];
+    const feishu = surface("feishu", "tenant-a", []);
+    feishu.output.handle = (event) => {
+      received.push(event.type === "warning" ? event.message : event.type);
+    };
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      retryDelaysMs: [1000],
+      completionAccountStatus: async () => { await blocked; return undefined; },
+    });
+    const target = { surface: "feishu", accountId: "tenant-a", conversationId: "chat" };
+    await manager.start();
+    output.publish({ type: "turn.completed", target, threadId: "thread", turnId: "turn", status: "completed", modelProvider: "clp-main" }, true);
+    output.publish({ type: "warning", target, threadId: "thread", message: "queued before failure" }, true);
+    await vi.advanceTimersByTimeAsync(0);
+    manager.reportFatal("feishu", "tenant-a", new Error("fixture"));
+    output.publish({ type: "warning", target, threadId: "thread", message: "arrived while offline" }, true);
+    await vi.advanceTimersByTimeAsync(0);
+    if (queryFirst) {
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    if (!queryFirst) {
+      expect(received).toEqual([]);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(received).toEqual(["turn.completed", "queued before failure", "arrived while offline"]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("does not replace an offline snapshot with an older in-flight snapshot", async () => {
+    vi.useFakeTimers();
+    const received: OutputEvent[] = [];
+    const feishu = surface("feishu", "tenant-a", []);
+    feishu.output.handle = (event) => { received.push(event); };
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      retryDelaysMs: [1000], completionAccountStatus: async () => { await blocked; return undefined; },
+    });
+    const target = { surface: "feishu", accountId: "tenant-a", conversationId: "chat" };
+    await manager.start();
+    output.publish({ type: "turn.completed", target, threadId: "thread", turnId: "turn", status: "completed", modelProvider: "clp-main" }, true);
+    output.publish({ type: "turn.reasoning", target, threadId: "thread", turnId: "next", summary: "older", elapsedMs: 1000 }, true);
+    await vi.advanceTimersByTimeAsync(0);
+    manager.reportFatal("feishu", "tenant-a", new Error("fixture"));
+    output.publish({ type: "turn.reasoning", target, threadId: "thread", turnId: "next", summary: "newer", elapsedMs: 2000 }, true);
+    await vi.advanceTimersByTimeAsync(0);
+    release();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(received.map((event) => event.type === "turn.reasoning" ? event.summary : event.type)).toEqual(["turn.completed", "newer"]);
+    await manager.stop();
+    await output.close();
+  });
+
+  it("does not restart a Surface after shutdown while recovery is waiting for delivery", async () => {
+    vi.useFakeTimers();
+    const calls: string[] = [];
+    const feishu = surface("feishu", "tenant-a", calls);
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, {
+      retryDelaysMs: [1000], completionAccountStatus: (_provider, signal) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve(undefined), { once: true });
+      }),
+    });
+    await manager.start();
+    output.publish({ type: "turn.completed", target: { surface: "feishu", accountId: "tenant-a", conversationId: "chat" }, threadId: "thread", turnId: "turn", status: "completed", modelProvider: "clp-main" }, true);
+    await vi.advanceTimersByTimeAsync(0);
+    manager.reportFatal("feishu", "tenant-a", new Error("fixture"));
+    await vi.advanceTimersByTimeAsync(1000);
+    await manager.stop();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toEqual(["start:feishu", "stop:feishu"]);
     await output.close();
   });
 

@@ -252,7 +252,13 @@ Codex 自身也会在工具发现时按退避规则尝试恢复 `codex_apps`，�
 Telegram 操作状态只编辑显示内容已变化的消息；同一段操作中等待发送的运行状态刷新，以及等待中的输入提示会合并。
 已完成操作不会因后续工具运行而反复编辑，失败的发送不标记为已送达；审批和完成事件仍保持原有顺序。
 两者都消费实际文本增量：飞书约每 300 ms 合并更新 CardKit 流式卡片，Telegram 约每秒合并后
-发送或编辑同一条消息；间隔不是送达保证，仍受平台耗时与排队影响。Telegram 增量暂用纯文本，
+发送或编辑同一条消息；间隔不是送达保证，仍受平台耗时与排队影响。飞书慢请求期间合并等待中的同段刷新，
+分卡保留在途到达的增量；正文收尾直接整卡更新，完成统计迟到时再补入。整卡更新结果不确定时，
+最多在原卡上覆盖重试一次；仍未确认则记录失败，不另发正文重播。首次流式消息发送超时或未返回有效
+消息 ID 时同样不另发正文，完成统计独立处理。明确拒绝且正文尚未送达时，
+在剩余消息预算内降级为富文本；仅完成统计补充失败时不重发正文。不同会话独立等待完成统计与账户额度，
+同一会话仍按顺序投递；断线恢复先等待旧投递队列排空，再按原始到达顺序补投，旧状态不会覆盖新快照。
+Telegram 增量暂用纯文本，
 正文完成后按配置转换为 HTML 或 Rich Markdown；非 commentary 的完成正文即使没有 phase
 标记，也执行格式化。普通长回复分段发送展开的 HTML，保留标题、代码和链接，不再包裹折叠引用；超过 16,000 字符或含大型代码块的回复继续使用预览加 Markdown 附件。
 附件被 Telegram 明确拒绝（400）时回退展开的 HTML 分段；格式解析被明确拒绝时只降级当前分段，保留已成功发送的分段。
@@ -460,7 +466,10 @@ codexc service restart gateway
 日志用 `component`、`accountId`、`conversationId`、`threadId`、`turnId` 和 `eventType` 定位；
 字段只在对应入口已知时提供；正文事件另带 `itemId`。`inputId` 是平台输入标识，`deliveryId` 关联一次输出任务及其
 分片/API 尝试，`diagnosticId` 关联一次阶段的开始与结束。`stage` 为 `input`、`delivery` 或
-`api`；共享路由另记录 `stage: routing`、事件总线等待 `eventBusWaitMs` 和路由处理（含统计富化）`routingMs`。
+`api`；共享路由另记录 `stage: routing`、事件总线等待 `eventBusWaitMs` 和路由入队 `routingMs`。
+完成统计准备另记录 `stage: enrichment`、本会话等待 `queueWaitMs` 和准备耗时 `executionMs`；
+它发生在路由之后、平台输出队列之前，不计入 `routingMs`。飞书正文更新与整卡收尾分别使用
+`operation: updateStreamingCard` 和 `finishStreamingCard`，避免把两类请求混在一起。
 `purpose` 区分输出任务用途，例如 TG 正文、操作记录刷新和轮次完成卡；“输出任务处理完成”
 仅表示该任务回调成功，不表示整个完成事件的正文已发送。“Telegram 完成正文投递完成”只在正文所有分段成功后记录。
 `queueWaitMs` 表示进入该阶段前的本地排队时间，`executionMs` 是阶段执行耗时，
@@ -474,10 +483,12 @@ codexc service restart gateway
 codexc service logs gateway -n 500
 ```
 
-按 Thread/Turn/Item 找到共享路由记录及“Surface 终态输出已收到”，先检查 `eventBusWaitMs`、`routingMs`，再按 `deliveryId` 和 `purpose` 查看输出阶段及平台调用：
-`queueWaitMs` 只覆盖渠道内等待前序输出，不包含事件总线及共享路由；`executionMs` 高则检查同 ID 下的 API 超时、错误码、重试或
+按 Thread/Turn/Item 找到共享路由记录及“Surface 终态输出已收到”，先检查 `eventBusWaitMs`、`routingMs` 和完成统计准备记录，再按 `deliveryId` 和 `purpose` 查看输出阶段及平台调用：
+平台投递阶段的 `queueWaitMs` 只覆盖渠道内等待前序输出，不包含事件总线、共享路由及完成统计准备；`executionMs` 高则检查同 ID 下的 API 超时、错误码、重试或
 格式化降级。没有阶段明细时临时开启 `debug` 后复现；缺少日志不能直接认定平台丢消息。
 各渠道输出队列独立，同一会话串行；积压可能合并或替换中间状态，关键输出不会仅因容量耗尽被丢弃。
+飞书关闭时普通输出可在 5 秒期限内排空，有序交互立即取消；期限结束后，分片、降级、媒体及客户端内部后续请求
+都不再启动。短回复未进入流式发送时，正文失败也会独立尝试完成统计。
 发送失败与进程关闭仍可能造成未送达，这些日志不提供离线消息持久化或自动补发功能。
 
 需要查看模型请求与响应的完整字段时，在 `codexc config` 中选择“系统设置 → 调用详情记录”，

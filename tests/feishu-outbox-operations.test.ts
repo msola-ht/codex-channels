@@ -128,7 +128,7 @@ describe("Feishu outbox operation summaries", () => {
     expect(sendCard).toHaveBeenCalledTimes(failedStart ? 2 : 1);
     expect(sendCard).toHaveBeenLastCalledWith("oc_chat", expect.objectContaining({
       header: expect.objectContaining({ title: { tag: "plain_text", content: "电脑与浏览器操作 · 已完成" } }),
-    }), undefined);
+    }), expect.any(AbortSignal));
     expect(updateCard).not.toHaveBeenCalled();
   });
 
