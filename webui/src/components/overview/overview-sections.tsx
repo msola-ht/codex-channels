@@ -209,7 +209,7 @@ function AccountName({ providerName, account, displayName }: { providerName: str
 }
 
 function DeepseekBalanceCard({
-  account, displayName, default: isDefault, available, observedAtMs, balances, refreshControl,
+  account, displayName, default: isDefault, observedAtMs, balances, refreshControl,
 }: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined }) {
   const primary = balances[0]
   return (
@@ -217,11 +217,11 @@ function DeepseekBalanceCard({
       <CardHeader className="min-w-0">
         <CardTitle className="flex flex-wrap items-center gap-2"><AccountName providerName="DeepSeek" account={account} displayName={displayName} /></CardTitle>
         <AccountUpdateDescription observedAtMs={observedAtMs} isDefault={isDefault} refreshFailed={Boolean(refreshControl?.error)} />
-        {refreshControl && !refreshControl.error && available && primary !== undefined
+        {refreshControl && !refreshControl.error && primary !== undefined
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && primary !== undefined} /></CardContent> : null}
-      {available && primary !== undefined ? (
+      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={primary !== undefined} /></CardContent> : null}
+      {primary !== undefined ? (
         <CardContent className="flex flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="text-2xl font-semibold tabular-nums">

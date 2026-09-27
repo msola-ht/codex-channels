@@ -1,12 +1,12 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { useApi } from "@/hooks/use-api"
 import { ApiClientError } from "@/lib/api"
 import type { PendingSetting, SettingMutationPreview } from "@/lib/settings-management"
 
 type VersionedSnapshot = object
-type PreviewRequest<Setting> = (revision: string, setting: Setting) => Promise<SettingMutationPreview>
-type UpdateRequest<Setting> = (revision: string, setting: Setting, confirmationToken?: string) => Promise<SettingMutationPreview>
+type PreviewRequest<Setting> = (revision: string, setting: Setting, signal?: AbortSignal) => Promise<SettingMutationPreview>
+type UpdateRequest<Setting> = (revision: string, setting: Setting, confirmationToken?: string, signal?: AbortSignal) => Promise<SettingMutationPreview>
 
 interface VersionedSettingsManagementOptions<Snapshot extends VersionedSnapshot, Setting> {
   load: (signal: AbortSignal) => Promise<Snapshot>
@@ -25,22 +25,27 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
 }: VersionedSettingsManagementOptions<Snapshot, Setting>) {
   const request = useApi(load, [])
   const { data, refetch } = request
+  const [lastAppliedSetting, setLastAppliedSetting] = useState<Setting | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [pending, setPending] = useState<{ setting: Setting; value: PendingSetting } | null>(null)
-  const operationSequence = useRef(0)
+  const [pending, setPending] = useState<{ setting: Setting; revision: string; value: PendingSetting } | null>(null)
+  const operation = useRef<AbortController | null>(null)
+  useEffect(() => () => operation.current?.abort(), [])
+  useEffect(() => { if (request.error !== null && operation.current === null) setPending(null) }, [request.error, saving])
 
   const previewSetting = useCallback(async (setting: Setting, label: string) => {
     const snapshot = data
-    if (snapshot === null) return
-    const operationId = ++operationSequence.current
+    if (snapshot === null || request.loading || request.error !== null || saving || operation.current !== null || pending !== null) return
+    const controller = new AbortController()
+    operation.current = controller
     setSaving(true)
     setActionError(null)
     try {
-      const result = await preview(revisionOf(snapshot), setting)
-      if (operationId !== operationSequence.current) return
+      const result = await preview(revisionOf(snapshot), setting, controller.signal)
+      if (controller.signal.aborted) return
       setPending({
         setting,
+        revision: revisionOf(snapshot),
         value: {
           kind: typeof setting === "object" && setting !== null && "kind" in setting ? String(setting.kind) : label,
           before: currentValue(snapshot, setting),
@@ -51,39 +56,44 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
         },
       })
     } catch (error) {
-      if (operationId === operationSequence.current) {
+      if (!controller.signal.aborted) {
         handleError(error, refetch, () => setPending(null), setActionError)
       }
     } finally {
-      if (operationId === operationSequence.current) setSaving(false)
+      if (operation.current === controller) operation.current = null
+      if (!controller.signal.aborted) setSaving(false)
     }
-  }, [currentValue, data, preview, refetch, revisionOf])
+  }, [currentValue, data, preview, refetch, revisionOf, request.loading, request.error, saving, pending])
 
   const confirmSetting = useCallback(async (): Promise<boolean> => {
     const snapshot = data
     const pendingSetting = pending
-    if (snapshot === null || pendingSetting === null) return false
-    const operationId = ++operationSequence.current
+    if (snapshot === null || pendingSetting === null || operation.current !== null || saving || request.loading || request.error !== null) return false
+    const controller = new AbortController()
+    operation.current = controller
     setSaving(true)
     setActionError(null)
     try {
-      await update(revisionOf(snapshot), pendingSetting.setting, pendingSetting.value.confirmationToken)
-      if (operationId !== operationSequence.current) return false
+      await update(pendingSetting.revision, pendingSetting.setting, pendingSetting.value.confirmationToken, controller.signal)
+      if (controller.signal.aborted) return false
       setPending(null)
+      setLastAppliedSetting(pendingSetting.setting)
       refetch()
       return true
     } catch (error) {
-      if (operationId === operationSequence.current) {
+      if (!controller.signal.aborted) {
+        setPending(null)
         handleError(error, refetch, () => setPending(null), setActionError)
       }
       return false
     } finally {
-      if (operationId === operationSequence.current) setSaving(false)
+      if (operation.current === controller) operation.current = null
+      if (!controller.signal.aborted) setSaving(false)
     }
-  }, [data, pending, refetch, revisionOf, update])
+  }, [data, pending, refetch, update, request.loading, request.error, saving])
 
   const cancelSetting = useCallback(() => {
-    operationSequence.current += 1
+    if (operation.current !== null) return
     setPending(null)
     setActionError(null)
     setSaving(false)
@@ -92,6 +102,7 @@ export function useVersionedSettingsManagement<Snapshot extends VersionedSnapsho
   return {
     ...request,
     pendingSetting: pending?.value ?? null,
+    lastAppliedSetting,
     actionError,
     saving,
     previewSetting,

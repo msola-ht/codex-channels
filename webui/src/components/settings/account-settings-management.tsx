@@ -17,7 +17,7 @@ export function AccountSettingsManagement({ management, onChanged }: { managemen
   const settings = management.settings
   if (management.loading && settings === null) return <LoadingSettingsCard title="账户设置" />
   if (settings === null) return <SettingsError message={management.error ?? "账户设置暂不可用"} retry={management.refetch} />
-  return <AccountSettingsCard management={management} settings={settings} onChanged={onChanged} />
+  return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<AccountSettingsCard management={management} settings={settings} onChanged={onChanged} /></>
 }
 
 function AccountSettingsCard({ management, settings, onChanged }: { management: AccountSettingsController; settings: NonNullable<AccountSettingsController["settings"]>; onChanged?: () => void }) {
@@ -84,7 +84,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
     setAccountReconfigure(true)
     setAccountKey("")
   }
-  const disabled = management.busy || management.loading || pending !== null
+  const disabled = management.busy || management.loading || management.error !== null || pending !== null
 
   return <Card>
     <CardHeader>
@@ -120,7 +120,7 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
         </FieldGroup>
         <div className="flex gap-2"><Button disabled={disabled || (!clineReconfigure && Boolean(newManagedAccountIdError(clineAccountId, settings.clinePass.accounts))) || clineKey.trim() === ""} onClick={() => void management.mutate({ operation: "clp.configure", accountId: clineAccountId.trim(), apiKey: clineKey, mode: clineMode, reconfigure: clineReconfigure })}>{clineReconfigure ? "重新配置账户" : "新增账户"}</Button>{clineReconfigure ? <Button variant="outline" disabled={disabled} onClick={() => { setClineAccountId(""); setClineReconfigure(false); setClineKey("") }}>取消编辑</Button> : null}</div>
       </section>
-      {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
+      {pending !== null ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     </CardContent>
   </Card>
@@ -129,11 +129,13 @@ function AccountSettingsCard({ management, settings, onChanged }: { management: 
 export function AccountSettingsConfirmationDialog({
   pending,
   saving,
+  loading,
   onConfirm,
   onCancel,
 }: {
   pending: NonNullable<AccountSettingsController["pendingPreview"]>
   saving: boolean
+  loading?: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -156,7 +158,7 @@ export function AccountSettingsConfirmationDialog({
     || pending.input.operation === "deepseek.legacy.remove"
   const stopping = pending.input.operation === "opencode.account.stop"
   const destructive = stopping || removing
-  return <ManagementConfirmationDialog open saving={saving} title={removing ? "确认删除账户" : "确认账户配置修改"} description={removing ? "确认后停止对应 App Server 并删除账户配置；完成后按操作结果重启服务。" : stopping ? "确认后停止对应账户的 App Server。" : "确认后写入对应配置，不会自动执行生效目标。"} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? "确认删除" : stopping ? "确认停止" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={removing ? "确认删除账户" : "确认账户配置修改"} description={removing ? "确认后停止对应 App Server 并删除账户配置；完成后按操作结果重启服务。" : stopping ? "确认后停止对应账户的 App Server。" : "确认后写入对应配置，不会自动执行生效目标。"} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? "确认删除" : stopping ? "确认停止" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
     {removing ? <p>删除本地账户配置后，该账户历史 Thread 将不可恢复。</p> : null}
     {pending.input.operation === "opencode.account.remove" ? <p>此操作不会取消或续订官方订阅。</p> : null}
     <p className="whitespace-pre-line">{lines.join("\n")}</p>

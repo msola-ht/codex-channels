@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 
+import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -18,7 +19,7 @@ export function ProviderSettingsManagement({ management, onChanged }: { manageme
   const settings = management.settings
   if (management.loading && settings === null) return <LoadingSettingsCard title="Provider 设置" />
   if (settings === null) return <SettingsError message={management.error ?? "Provider 设置暂不可用"} retry={management.refetch} />
-  return <ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} />
+  return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} /></>
 }
 
 function ProviderSettingsCard({
@@ -42,35 +43,28 @@ function ProviderSettingsCard({
   const [apiKey, setApiKey] = useState("")
   const [confirmRemoveBaseUrl, setConfirmRemoveBaseUrl] = useState(false)
   const [managedProvider, setManagedProvider] = useState(settings.managedProviders[0]?.id ?? "")
-  const [managedModel, setManagedModel] = useState(settings.managedProviders[0]?.model ?? "")
-  const [managedReasoning, setManagedReasoning] = useState(settings.managedProviders[0]?.reasoningEffort ?? "")
   const [windowModel, setWindowModel] = useState(settings.modelWindow[0]?.id ?? "")
-  const [windowPercent, setWindowPercent] = useState("100")
   const [windowError, setWindowError] = useState<string | null>(null)
 
   const managed = settings.managedProviders.find((provider) => provider.id === managedProvider) ?? settings.managedProviders[0]
-  const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel) ?? managed?.models[0]
   const windowEntry = settings.modelWindow.find((candidate) => candidate.id === windowModel) ?? settings.modelWindow[0]
+  const [managedDraft, patchManaged, resetManaged] = useSettingsDraft({ model: managed?.model ?? "", reasoning: managed?.reasoningEffort ?? "" })
+  const { model: managedModel, reasoning: managedReasoning } = managedDraft
+  const managedModelEntry = managed?.models.find((candidate) => candidate.id === managedModel)
+  const [windowDraft, patchWindow, resetWindow] = useSettingsDraft({ percent: String(windowEntry?.windowPercent ?? 100) })
+  const windowPercent = windowDraft.percent
   const candidates = useMemo(() => [
     ...settings.customProviders.fixedCandidates,
     ...settings.customProviders.switchingProviders,
     ...settings.customProviders.backupCandidates,
   ], [settings.customProviders])
-  const busy = management.busy || management.loading
+  const busy = management.busy || management.loading || management.error !== null
   const pending = management.pendingPreview
 
-  useEffect(() => {
-    if (managed === undefined) return
-    setManagedModel((current) => managed.models.some((candidate) => candidate.id === current) ? current : managed.model)
-    setManagedReasoning((current) => current || managed.reasoningEffort)
-  }, [managed])
-
-  useEffect(() => {
-    if (windowEntry === undefined) return
-    setWindowModel((current) => settings.modelWindow.some((candidate) => candidate.id === current) ? current : windowEntry.id)
-    setWindowPercent(String(windowEntry.windowPercent ?? 100))
-  }, [windowEntry, settings.modelWindow])
-
+  const managedId = managed?.id
+  const windowId = windowEntry?.id
+  useEffect(() => { resetManaged() }, [managedId, resetManaged])
+  useEffect(() => { resetWindow() }, [windowId, resetWindow])
 
   const resetForm = () => {
     setEditingId(null)
@@ -149,14 +143,11 @@ function ProviderSettingsCard({
       return
     }
     setWindowError(null)
-    const result = await management.mutate({
+    await management.mutate({
       operation: "managed.window",
       model: windowEntry.id,
       windowPercent: parsedPercent,
     })
-    if (result !== null) {
-      setWindowPercent(String(result.windowPercent ?? windowPercent))
-    }
   }
 
 
@@ -170,6 +161,8 @@ function ProviderSettingsCard({
     const operation = management.pendingPreview?.input.operation
     const result = await management.confirm()
     if (result !== null && operation === "primary.custom.save") resetForm()
+    if (result !== null && operation === "managed.default") resetManaged()
+    if (result !== null && operation === "managed.window") resetWindow()
     if (result !== null) onChanged?.()
   }
 
@@ -186,9 +179,9 @@ function ProviderSettingsCard({
         </div>
         {managed === undefined ? <SettingsEmpty>当前没有已配置的托管 Provider。</SettingsEmpty> : <>
           <FieldGroup>
-            <ManagedSelect label="Provider" value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={(value) => { setManagedProvider(value); const next = settings.managedProviders.find((candidate) => candidate.id === value); if (next !== undefined) { setManagedModel(next.model); setManagedReasoning(next.reasoningEffort) } }} />
-            <ManagedSelect label="默认模型" value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={setManagedModel} />
-            <ManagedSelect label="思考等级" value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={setManagedReasoning} />
+            <ManagedSelect label="Provider" value={managed.id} options={settings.managedProviders.map((provider) => [provider.id, provider.displayName])} disabled={busy || pending !== null} onChange={setManagedProvider} />
+            <ManagedSelect label="默认模型" value={managedModel} options={managed.models.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ model: value })} />
+            <ManagedSelect label="思考等级" value={managedReasoning} options={(managedModelEntry?.reasoningEfforts ?? []).map((candidate) => [candidate.effort, candidate.effort])} disabled={busy || pending !== null} onChange={(value) => patchManaged({ reasoning: value })} />
           </FieldGroup>
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>保存托管 Provider 默认值</Button>
         </>}
@@ -201,8 +194,8 @@ function ProviderSettingsCard({
         </div>
         {windowEntry === undefined ? <SettingsEmpty>当前没有可设置的受管模型。</SettingsEmpty> : <>
           <FieldGroup>
-            <ManagedSelect label="模型" value={windowEntry.id} options={settings.modelWindow.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={(value) => { setWindowModel(value); const next = settings.modelWindow.find((candidate) => candidate.id === value); if (next !== undefined) setWindowPercent(String(next.windowPercent ?? 100)) }} />
-            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">窗口占比（%）</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { setWindowPercent(event.target.value); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError}</FieldError></FieldContent></Field>
+            <ManagedSelect label="模型" value={windowEntry.id} options={settings.modelWindow.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={setWindowModel} />
+            <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">窗口占比（%）</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError}</FieldError></FieldContent></Field>
           </FieldGroup>
           <p className="text-xs text-muted-foreground">应用 Provider：{windowEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(windowEntry.contextWindow)} / 最大 {formatTokens(windowEntry.maxContextWindow)} tokens</p>
           {windowEntry.conflicts === true ? <Alert><AlertTitle>窗口占比不一致</AlertTitle><AlertDescription>当前不同 Provider 的窗口占比不一致：{Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</AlertDescription></Alert> : null}
@@ -243,7 +236,7 @@ function ProviderSettingsCard({
         {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">确认固定模式需要时移除顶层 openai_base_url</FieldLabel></Field> : null}
         <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Provider" : "保存 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
       </section>
-      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={busy} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
+      {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     </CardContent>
   </Card>
@@ -252,11 +245,13 @@ function ProviderSettingsCard({
 function ProviderSettingsConfirmationDialog({
   pending,
   saving,
+  loading,
   onConfirm,
   onCancel,
 }: {
   pending: NonNullable<ProviderSettingsController["pendingPreview"]>["preview"]
   saving: boolean
+  loading?: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -272,7 +267,7 @@ function ProviderSettingsConfirmationDialog({
   if (pending.reasoningEffort !== undefined) lines.push(`思考等级：${pending.reasoningEffort}`)
   if (pending.windowPercent !== undefined) lines.push(`上下文窗口：${pending.windowPercent}%`)
   if (pending.credential?.action !== undefined) lines.push(`凭据：${pending.credential.action === "replace" ? "写入新 API Key" : "沿用已有 API Key"}`)
-  return <ManagementConfirmationDialog open saving={saving} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title="确认 Provider 配置修改" description="确认后写入对应配置，不会自动执行生效目标。" confirmVariant={pending.operation === "remove" ? "destructive" : "default"} onConfirm={onConfirm} onCancel={onCancel}>
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
     <p className="text-muted-foreground">生效目标：{pending.activation}</p>
   </ManagementConfirmationDialog>

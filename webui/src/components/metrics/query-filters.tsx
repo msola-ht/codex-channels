@@ -1,6 +1,8 @@
 import { useId, useState } from "react"
-import { ChevronDownIcon, SlidersHorizontalIcon } from "lucide-react"
+import { ChevronDownIcon, SlidersHorizontalIcon, XIcon } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
+import { TruncatedText } from "@/components/metrics/data-table"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -37,7 +39,8 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
     ...(showThreadFilters ? [["turnId", "Turn ID"]] : []),
     ["model", "模型"],
   ] as Array<["threadId" | "turnId" | "model", string]>
-  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length
+  const scopedFields = !showThreadFilters ? (["threadId", "turnId"] as const).filter((key) => Boolean(query[key])) : []
+  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length + scopedFields.length
   const apply = () => {
       if (range === "custom" && (!draft.from || !draft.to || draft.from > draft.to)) {
         setDateError("请填写完整日期，结束日期不能早于开始日期。")
@@ -81,6 +84,12 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
           <Button type="submit">查询</Button>
           <Button type="button" variant="outline" onClick={reset}>重置</Button>
         </FieldGroup>
+        {scopedFields.length > 0 ? <div className="mt-2 flex flex-wrap items-center gap-2" aria-label="当前关联范围">
+          {scopedFields.map((key) => <div key={key} className="flex items-center gap-1"><Badge variant="outline">
+            {key === "threadId" ? "Thread" : "Turn"}：<TruncatedText text={query[key]} className="max-w-48" /></Badge>
+            <Button type="button" variant="ghost" size="icon-xs" aria-label={`清除 ${key === "threadId" ? "Thread" : "Turn"} 筛选`} onClick={() => onChange(key === "threadId" ? { threadId: undefined, turnId: undefined } : { turnId: undefined })}><XIcon /></Button>
+          </div>)}
+        </div> : null}
       </form>
       <SheetContent>
         <SheetHeader><SheetTitle>筛选条件</SheetTitle><SheetDescription>调整条件后点击查询生效，关闭面板保留未应用的条件。</SheetDescription></SheetHeader>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId } from "react"
 import type { ComponentProps, ReactNode } from "react"
 
 import {
@@ -17,6 +17,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import type { PendingSetting } from "@/lib/settings-management"
 
 export function ManagementConfirmationDialog({
@@ -24,6 +25,7 @@ export function ManagementConfirmationDialog({
   title,
   description,
   saving,
+  loading = false,
   onConfirm,
   onCancel,
   confirmLabel = "确认写入",
@@ -35,6 +37,7 @@ export function ManagementConfirmationDialog({
   title: string
   description: string
   saving: boolean
+  loading?: boolean
   onConfirm: () => void
   onCancel: () => void
   confirmLabel?: string
@@ -54,14 +57,14 @@ export function ManagementConfirmationDialog({
           <AlertDialogCancel disabled={saving}>取消</AlertDialogCancel>
           <AlertDialogAction
             variant={confirmVariant}
-            disabled={saving || confirmDisabled}
+            disabled={saving || loading || confirmDisabled}
             onClick={(event) => {
               event.preventDefault()
               onConfirm()
             }}
           >
-            {saving ? <Spinner data-icon="inline-start" /> : null}
-            {saving ? "处理中…" : confirmLabel}
+            {saving || loading ? <Spinner data-icon="inline-start" /> : null}
+            {saving ? "处理中…" : loading ? "正在刷新…" : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -73,17 +76,15 @@ export function SettingsRow({ label, value, badge = false, code = false }: { lab
   return <div className="flex min-w-0 flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4"><span className="text-muted-foreground">{label}</span>{badge ? <Badge className="self-start sm:self-auto" variant="secondary">{value}</Badge> : code ? <code className="max-w-full break-all rounded bg-muted px-2 py-1 text-xs sm:text-right">{value}</code> : <span className="break-words sm:text-right">{value}</span>}</div>
 }
 
-export function ManagedInputRow({ id, label, defaultValue, value, placeholder, disabled, type = "text", onChange, onBlur }: { id?: string; label: string; defaultValue: string; value?: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; onChange?: (value: string) => void; onBlur: (value: string) => void }) {
+export function ManagedInputRow({ id, label, defaultValue, value, placeholder, disabled, type = "text", saved, onChange, onBlur }: { id?: string; label: string; defaultValue: string; value?: string; placeholder: string; disabled: boolean; type?: "text" | "password" | "number"; saved?: object | null; onChange?: (value: string) => void; onBlur: (value: string) => void }) {
   const generatedId = useId()
   const inputId = id ?? generatedId
-  const [draft, setDraft] = useState(defaultValue)
-  useEffect(() => {
-    if (!disabled && value === undefined) setDraft(defaultValue)
-  }, [defaultValue, disabled, value])
-  return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={inputId}>{label}</FieldLabel><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) setDraft(event.target.value); onChange?.(event.target.value) }} onBlur={(event) => onBlur(event.target.value.trim())} /></Field>
+  const [draft, patch, reset] = useSettingsDraft({ value: defaultValue })
+  useEffect(() => { if (saved) reset() }, [saved, reset])
+  return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={inputId}>{label}</FieldLabel><Input id={inputId} className="w-full sm:w-[220px]" type={type} autoComplete={type === "password" ? "new-password" : undefined} value={value ?? draft.value} placeholder={placeholder} disabled={disabled} onChange={(event) => { if (value === undefined) patch({ value: event.target.value }); onChange?.(event.target.value) }} onBlur={(event) => { const next = event.target.value.trim(); if (value === undefined) patch({ value: next }); onBlur(next) }} /></Field>
 }
 
-export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; onConfirm: () => void; onCancel: () => void }) {
+export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCancel }: { pending: PendingSetting | null; saving: boolean; loading?: boolean; onConfirm: () => void; onCancel: () => void }) {
   const destructive = pending !== null
     && pending.value !== null
     && typeof pending.value === "object"
@@ -95,6 +96,7 @@ export function PendingSettingDialog({ pending, saving, onConfirm, onCancel }: {
       title="确认配置修改"
       description="确认后写入对应配置；下方显示实际生效方式。"
       saving={saving}
+      loading={loading}
       confirmVariant={destructive ? "destructive" : "default"}
       onConfirm={onConfirm}
       onCancel={onCancel}

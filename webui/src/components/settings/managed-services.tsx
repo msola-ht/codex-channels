@@ -10,7 +10,7 @@ export function ManagedServices({ services, tasks }: { services: ManagementServi
   if (services.entries.length === 0) {
     return <SettingsEmpty>当前平台没有可展示的受管服务。</SettingsEmpty>
   }
-  const taskBusy = tasks.loading || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
+  const taskBusy = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   return <>
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "install" })}>安装全部服务</Button>
@@ -41,7 +41,6 @@ export function ManagedServices({ services, tasks }: { services: ManagementServi
       </div>
     ))}
     {services.platform === null ? <p className="text-xs text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看详细信息。</p> : null}
-    {tasks.error !== null ? <Alert className="mt-2" variant="destructive"><AlertDescription>任务状态读取失败：{tasks.error}</AlertDescription></Alert> : null}
     {tasks.tasks.length > 0 ? <RecentManagementTasks tasks={tasks} /> : null}
   </>
 }

@@ -1,0 +1,75 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+// 与现有 WebUI 展示合同相同，直接渲染生产组件，不复制组件的条件分支。
+describe("WebUI 状态与关联范围展示", () => {
+  it("distinguishes zero balance, stale settings and scoped requests", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      import { createElement as h } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent"});
+      try {
+        const {setServerTimeZone}=await server.ssrLoadModule("/src/lib/format.ts"); setServerTimeZone("UTC");
+        const {DeepseekBalanceCards}=await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const {ServerTimeContext}=await server.ssrLoadModule("/src/hooks/use-server-time.ts");
+        const {TooltipProvider}=await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
+        const {QueryFilters}=await server.ssrLoadModule("/src/components/metrics/query-filters.tsx");
+        const {ProviderSettingsManagement}=await server.ssrLoadModule("/src/components/settings/provider-settings-management.tsx");
+        const zero=renderToStaticMarkup(h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(DeepseekBalanceCards,{accounts:[{provider:"ds-main",account:"main",displayName:"DeepSeek",default:true,available:false,observedAtMs:1000,balances:[{currency:"CNY",totalBalance:"0.00",grantedBalance:"0.00",toppedUpBalance:"0.00"}]}],refreshControls:{}})));
+        const filter=renderToStaticMarkup(h(TooltipProvider,null,h(QueryFilters,{query:{range:"all",threadId:"scoped-thread",turnId:"scoped-turn"},onChange(){},showThreadFilters:false})));
+        const settings={defaults:{},managedProviders:[],modelWindow:[],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}};
+        const stale=renderToStaticMarkup(h(ProviderSettingsManagement,{management:{settings,loading:false,error:"snapshot-load-failed",busy:false,pendingPreview:null,actionError:null,refetch(){},clearError(){}}}));
+        const button=[...stale.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].find(match=>match[0].includes("切回官方 OpenAI"))?.[0] ?? "";
+        console.log(JSON.stringify({zero,filter,stale,button}));
+      } finally { await server.close(); }
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const result = JSON.parse(output) as Record<string, string>;
+    expect(result.zero).toContain("¥0.00");
+    expect(result.zero).not.toContain("暂未获取到账户数据");
+    expect(result.filter).toContain("scoped-thread");
+    expect(result.filter).toContain("scoped-turn");
+    expect(result.filter).toContain('aria-label="清除 Thread 筛选"');
+    expect(result.filter).toContain('aria-label="清除 Turn 筛选"');
+    expect(result.stale).toContain("snapshot-load-failed");
+    expect(result.button).toMatch(/\sdisabled(?:=|\s|>)/u);
+  }, 30_000);
+  it("keeps cancellation available while confirmations wait for a snapshot", () => {
+    const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
+      import { createServer } from "vite";
+      import { createElement as h } from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
+        name:"dialog-without-browser-portal",enforce:"pre",
+        load(id) {
+          if (!id.endsWith("/components/ui/alert-dialog.tsx")) return;
+          return 'import {createElement as h} from "react"; const box=({children})=>h("div",null,children); const button=({children,disabled})=>h("button",{disabled},children); export const AlertDialog=box,AlertDialogContent=box,AlertDialogDescription=box,AlertDialogFooter=box,AlertDialogHeader=box,AlertDialogTitle=box,AlertDialogAction=button,AlertDialogCancel=button;';
+        }
+      }]});
+      try {
+        const {ManagementConfirmationDialog,PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
+        const {AccountSettingsConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
+        const {ManagementTaskConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/management-task-controls.tsx");
+        const base={open:true,title:"test",description:"test",onConfirm(){},onCancel(){}};
+        const pending={kind:"test",label:"test",value:1,before:0,activation:{status:"none",commands:[]}};
+        const html = [
+          ...[{saving:false,loading:true},{saving:true,loading:false},{saving:false,loading:false}].map(state=>renderToStaticMarkup(h(ManagementConfirmationDialog,{...base,...state}))),
+          renderToStaticMarkup(h(PendingSettingDialog,{...base,pending,saving:false,loading:true})),
+          renderToStaticMarkup(h(AccountSettingsConfirmationDialog,{...base,pending:{input:{operation:"deepseek.remove"},preview:{operation:"remove"}},saving:false,loading:true})),
+          renderToStaticMarkup(h(ManagementTaskConfirmationDialog,{tasks:{saving:false,loading:true,pendingPreview:{input:{operation:"metrics",action:"clear"},preview:{operation:"metrics",action:"clear",effects:[],preconditions:[]}},confirm(){},cancelPending(){}}}))
+        ];
+        console.log(JSON.stringify(html));
+      } finally {await server.close();}
+    `], { cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8", timeout: 30_000 });
+    const html = JSON.parse(output) as string[];
+    for (const index of [0, 3, 4, 5]) {
+      expect(html[index]).toContain('<button>取消</button>');
+      expect(html[index]).toMatch(/<button disabled="">[\s\S]*正在刷新…<\/button>/u);
+    }
+    expect(html[1]).toContain('<button disabled="">取消</button>');
+    expect(html[1]).toContain("处理中…");
+    expect(html[2]).toContain('<button>确认写入</button>');
+  }, 30_000);
+
+});

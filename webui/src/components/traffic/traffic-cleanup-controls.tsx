@@ -1,5 +1,5 @@
 import { Trash2Icon } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 
 import { ManagementTaskConfirmationDialog } from "@/components/settings/management-task-controls"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -13,15 +13,10 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
   onCompleted: () => void
 }) {
   const latest = tasks.tasks.findLast((task) => task.operation === "traffic")
-  const refreshedTaskId = useRef<string | null>(null)
   const active = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
-  const disabled = tasks.loading || tasks.saving || tasks.pendingPreview !== null || active
-  const error = tasks.actionError ?? latest?.error ?? null
-  useEffect(() => {
-    if (latest?.state !== "completed" || refreshedTaskId.current === latest.id) return
-    refreshedTaskId.current = latest.id
-    onCompleted()
-  }, [latest, onCompleted])
+  const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || active
+  const error = tasks.actionError ?? tasks.error ?? latest?.error ?? null
+  useManagementTaskRefresh(tasks, onCompleted)
 
   return <>
     <div className="flex items-center gap-2">
@@ -40,7 +35,7 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
       </Button>
     </div>
     {error === null ? null : <Alert variant="destructive">
-      <AlertDescription>{error}</AlertDescription>
+      <AlertDescription>{error}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>重试读取任务</Button> : null}</AlertDescription>
     </Alert>}
     <ManagementTaskConfirmationDialog tasks={tasks} />
   </>

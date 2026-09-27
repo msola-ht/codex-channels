@@ -17,7 +17,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
   const [pruneProvider, setPruneProvider] = useState(providerOptions[0] ?? "openai")
   const hasActiveTask = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
-  const disabled = tasks.loading || tasks.saving || tasks.pendingPreview !== null || hasActiveTask
+  const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || hasActiveTask
 
   return (
     <Card>
@@ -80,7 +80,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const traffic = pending.input.operation === "traffic"
     ? trafficCleanupResource(pending.preview.resource)
     : null
-  return <ManagementConfirmationDialog open saving={tasks.saving} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
     {traffic === null ? null : <p className="mt-2 text-muted-foreground">
       将删除 {traffic.v2Sessions} 个 V2 批次、{traffic.legacyFiles} 个旧版文件，合计 {formatBytes(traffic.bytes)}；
