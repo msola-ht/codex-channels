@@ -1,5 +1,14 @@
 import type { CacheUsage } from "./types"
 
+/** 调用转储使用 clp，请求指标使用精确账户 Provider clp-<id>。 */
+export function isClinePassProvider(provider: string | null | undefined): boolean {
+  return provider === "clp" || /^clp-[a-z0-9_-]{1,32}$/.test(provider ?? "")
+}
+
+export function formatModelName(model: string | null | undefined, provider: string | null | undefined): string | null {
+  return isClinePassProvider(provider) ? model?.replace(/^cline-pass\//, "") ?? null : model ?? null
+}
+
 export type DisplayLanguage = "zh" | "en"
 
 let serverTimeZone: string | undefined

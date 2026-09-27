@@ -15,6 +15,7 @@ import {
   type DataTableProps,
 } from "@/components/metrics/data-table"
 import {
+  formatModelName,
   formatTime,
   formatTokens,
 } from "@/lib/format"
@@ -72,7 +73,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <TruncatedText text={row.original.model} className="max-w-48" />
+        <TruncatedText text={formatModelName(row.original.model, row.original.provider)} className="max-w-48" />
       ),
     },
     {
