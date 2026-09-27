@@ -20,8 +20,9 @@ import { ModelSelectionService } from "../src/application/model-selection-servic
 import { ConversationService } from "../src/application/conversation-service.js";
 import type { ConversationCore } from "../src/conversation-core/index.js";
 import { SessionRouter } from "../src/session-routing/index.js";
-import { MemoryBindingStore } from "../src/storage/memory-binding-store.js";
+import { SqliteBindingStore } from "../src/storage/index.js";
 import { WorkspaceRegistry } from "../src/policy/workspace-registry.js";
+import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
 import { appendDiagnostic, appServerFailure, signalTestProcessTree, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
@@ -170,7 +171,7 @@ contractTest(
 );
 
 deepseekCatalogContractTest(
-  "cold-resumes a third-party thread with its provider model catalog",
+  "cold-resumes a third-party thread and persists the idle-release model across Gateway restart",
   async () => {
     const workdir = process.cwd();
     const runtimeRoot = resolve(".runtime");
@@ -184,10 +185,18 @@ deepseekCatalogContractTest(
     let upstreamRequests = 0;
     const apiServer = createServer((_request, response) => {
       upstreamRequests += 1;
-      response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({
-        error: { type: "invalid_request_error", message: "contract failure" },
-      }));
+      _request.resume();
+      const id = `saved-model-${upstreamRequests}`;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      for (const event of [
+        { type: "response.created", response: { id } },
+        { type: "response.output_item.done", item: {
+          type: "message", role: "assistant", id: `answer-${id}`,
+          content: [{ type: "output_text", text: "Done" }],
+        } },
+        completedResponseEvent(id),
+      ]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+      response.end();
     });
     await new Promise<void>((resolveListen, rejectListen) => {
       apiServer.once("error", rejectListen);
@@ -219,6 +228,9 @@ deepseekCatalogContractTest(
             supported_reasoning_levels: [{
               effort: "high",
               description: "DeepSeek contract fixture",
+            }, {
+              effort: "medium",
+              description: "Non-default effort for persistence verification",
             }],
             shell_type: "shell_command",
             visibility: "list",
@@ -257,6 +269,7 @@ deepseekCatalogContractTest(
     let processHandle: ChildProcess | undefined;
     let appServerStderr = "";
     let client: CodexAppServerClient | undefined;
+    let bindings: SqliteBindingStore | undefined;
     const startServer = async (): Promise<void> => {
       appServerStderr = "";
       processHandle = spawn(
@@ -298,7 +311,9 @@ deepseekCatalogContractTest(
       );
       await client.connect();
       expect(existsSync(join(codexHome, "auth.json"))).toBe(false);
-      const router = new SessionRouter(client, new MemoryBindingStore(), new WorkspaceRegistry([
+      const statePath = join(testRuntime, "gateway.sqlite3");
+      bindings = new SqliteBindingStore(statePath);
+      const router = new SessionRouter(client, bindings, new WorkspaceRegistry([
         { id: "contract", name: "Contract", cwd: workdir },
       ], "contract"));
       const selection = new ModelSelectionService(
@@ -330,6 +345,12 @@ deepseekCatalogContractTest(
       await waitFor(() => turnCompleted, 10_000);
       expect(upstreamRequests).toBeGreaterThan(0);
       removeNotification();
+      if (!deepseekCatalogPath) await selection.selectEffort(target, "medium");
+      const preference = selection.capturePreference(target);
+      expect(preference).toBeDefined();
+      expect(await conversations.releaseIdle(target)).toEqual({ status: "released", threadId });
+      expect(bindings.modelPreference(target)).toEqual(preference);
+      bindings.close();
       await client.close();
       client = undefined;
       await stopServer();
@@ -341,6 +362,33 @@ deepseekCatalogContractTest(
       );
       await client.connect();
 
+      bindings = new SqliteBindingStore(statePath);
+      const restartedRouter = new SessionRouter(client, bindings, new WorkspaceRegistry([
+        { id: "contract", name: "Contract", cwd: workdir },
+      ], "contract"));
+      const restartedSelection = new ModelSelectionService(client, restartedRouter, undefined,
+        (await client.listModels()).map(model => ({ ...model, provider: "deepseek" })),
+        "openai", [], () => false);
+      expect(restartedSelection.capturePreference(target)).toEqual(preference);
+      const restartedConversations = new ConversationService(client, restartedRouter, {
+        activeTurn: () => undefined, markTurnStarted: () => undefined,
+      } as unknown as ConversationCore, restartedSelection, client);
+      let newTurnCompleted = false;
+      const removeNewNotification = client.onNotification(notification => {
+        if (notification.method === "turn/completed") newTurnCompleted = true;
+      });
+      const next = await restartedConversations.submit(target, "Use the saved model in a new thread.");
+      expect(next.threadId).not.toBe(threadId);
+      await waitFor(() => newTurnCompleted, 10_000);
+      removeNewNotification();
+      expect(restartedRouter.modelSettings(target)).toMatchObject(preference!);
+      expect(bindings.modelPreference(target)).toBeUndefined();
+      const authoritative = await client.resumeThread(next.threadId, workdir);
+      expect(authoritative.model).toBe(preference!.model);
+      expect(authoritative.modelProvider).toBe(preference!.modelProvider);
+      expect(authoritative.reasoningEffort).toBe(preference!.effort);
+      await client.unsubscribeThread(next.threadId);
+      await client.deleteThread(next.threadId);
       const resumed = await client.resumeThread(threadId, workdir);
 
       expect(resumed.model).toBe("deepseek-v4-flash");
@@ -350,6 +398,7 @@ deepseekCatalogContractTest(
     } finally {
       await client?.close().catch(() => undefined);
       await stopServer();
+      bindings?.close();
       await proxy.close();
       await new Promise<void>((resolveClose) => apiServer.close(() => resolveClose()));
       rmSync(testRuntime, { recursive: true, force: true });

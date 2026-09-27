@@ -4,6 +4,7 @@ export type {
   BindingTransfer,
   ConversationBinding,
   ConversationIdleState,
+  ConversationModelPreference,
 } from "./binding-store.js";
 export { MemoryBindingStore } from "./memory-binding-store.js";
 export { SqliteBindingStore, stateDatabaseSchemaVersion } from "./sqlite-binding-store.js";

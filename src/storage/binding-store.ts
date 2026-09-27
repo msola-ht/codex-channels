@@ -7,6 +7,13 @@ export interface ConversationBinding {
   sessionId: string;
 }
 
+export interface ConversationModelPreference {
+  model: string;
+  modelProvider: string;
+  effort: string | null;
+  serviceTier: string | null;
+}
+
 export interface ConversationIdleState {
   /** Unix timestamp (milliseconds) of the last observed user input or output. */
   lastActivityAt: number;
@@ -27,6 +34,8 @@ export interface BindingSwitch {
 }
 
 export interface BindingStore {
+  modelPreference(target: ConversationTarget): ConversationModelPreference | undefined;
+  setModelPreference(target: ConversationTarget, preference: ConversationModelPreference | undefined): void;
   conversations(): ConversationTarget[];
   actors(target: ConversationTarget): string[];
   rememberActor(target: ConversationTarget, actorId: string): void;
@@ -47,9 +56,9 @@ export interface BindingStore {
   bind(binding: ConversationBinding): void;
   bindBackground(binding: ConversationBinding): void;
   switchForeground(binding: ConversationBinding, preserveCurrent: boolean): BindingSwitch;
-  demote(target: ConversationTarget): ConversationBinding | undefined;
+  demote(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined;
   removeThread(threadId: string): ConversationBinding | undefined;
   transfer(threadId: string, target: ConversationTarget): BindingTransfer;
-  unbind(target: ConversationTarget): ConversationBinding | undefined;
+  unbind(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined;
   close(): void;
 }

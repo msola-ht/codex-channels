@@ -26,6 +26,8 @@
   `startBackground` 是计划任务专用的窄入口：始终发送稳定 `threadSource=automation`、强制
   `thread/start`，不调用 `ensure` 的空闲候选选择，并在写入前限制每个 Conversation 三个后台绑定；
   后台 Thread 不携带前台 `dynamicTools`，防止计划任务递归创建任务。
+  Router 通过公开偏好接口保存未绑定会话的模型设置，解绑时与前台绑定和强制新建标记原子更新；
+  前台绑定建立后消费保存值，已有 Thread 仍从 App Server 恢复权威设置。
   Router 同时向 BindingStore 维护会话活动时间与持久化“强制新建”标记：空闲释放、跨 Provider
   切换、Workspace 切换、新建、归档和跨渠道接管会标记下一消息必须新建 Thread；普通消息在
   `ensure` 创建 Thread 后清除标记，显式 `/r` 恢复也立即清除，因此只有恢复命令能重新关联

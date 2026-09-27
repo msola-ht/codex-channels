@@ -517,7 +517,7 @@ export class ConversationService implements
       }
       const modelPreference = this.models.capturePreference?.(target);
       try {
-        await this.router.newSession(target);
+        await this.router.newSession(target, false, modelPreference);
       } catch {
         return { status: "busy", threadId: current.threadId };
       }
@@ -1116,7 +1116,7 @@ export class ConversationService implements
           `后台任务已满，最多同时运行 ${maximumBackgroundThreadsPerConversation} 个`,
         );
       }
-      await this.router.newSession(target, active !== undefined);
+      await this.router.newSession(target, active !== undefined, modelPreference);
       this.invalidateRevertSnapshot(target);
       this.restoreSelectionsAfterBindingChange(target, modelPreference);
       return {
@@ -1296,7 +1296,7 @@ export class ConversationService implements
       const modelPreference = selected.id === currentWorkspaceId
         ? undefined
         : this.models.capturePreference?.(target);
-      const workspace = await this.router.selectWorkspace(target, selected.id);
+      const workspace = await this.router.selectWorkspace(target, selected.id, modelPreference);
       if (workspace.id !== currentWorkspaceId) {
         this.invalidateRevertSnapshot(target);
         this.restoreSelectionsAfterBindingChange(target, modelPreference);
@@ -1664,11 +1664,15 @@ export class ConversationService implements
     };
   }
 
-  private ensureSession(target: ConversationTarget) {
+  private async ensureSession(target: ConversationTarget) {
+    await this.models.validateUnboundPreference?.(target);
+    const preference = !this.router.current?.(target) ? this.models.capturePreference?.(target) : undefined;
     const options = this.models.threadStartOptions?.(target) ?? {};
-    return Object.keys(options).length > 0
-      ? this.router.ensure(target, options)
-      : this.router.ensure(target);
+    const binding = Object.keys(options).length > 0
+      ? await this.router.ensure(target, options)
+      : await this.router.ensure(target);
+    if (preference) this.models.restorePreference?.(target, preference);
+    return binding;
   }
 
   private async startNewTurn(

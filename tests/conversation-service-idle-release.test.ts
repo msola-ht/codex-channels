@@ -114,7 +114,7 @@ describe("ConversationService idle release", () => {
       status: "released",
       threadId: binding.threadId,
     });
-    expect(newSession).toHaveBeenCalledWith(target);
+    expect(newSession).toHaveBeenCalledWith(target, false, undefined);
   });
 
   it("restores model preference and clears pending collaboration after idle release", async () => {

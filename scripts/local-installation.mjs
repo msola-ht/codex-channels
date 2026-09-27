@@ -9,7 +9,7 @@ import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
 import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
-import { validateStateDatabaseStructure } from "./state-database.mjs";
+import { inspectStateDatabaseUpgrade, upgradeStateDatabase } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 
 const defaultCoreServiceReadinessTimeoutMs = 150_000;
@@ -24,19 +24,19 @@ export function inspectGatewayConfiguration(environment = process.env) {
 }
 
 export function inspectDatabaseUpdates(environment = process.env) {
-  const state = validateStateDatabaseStructure(environment);
+  const state = inspectStateDatabaseUpgrade(environment);
   const metrics = validateMetricsDatabaseStructure(environment);
   const sessionDisplayCache = inspectSessionDisplayCache(environment);
   if (!sessionDisplayCache.compatible) {
     throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
   }
-  return { required: false, state, metrics, sessionDisplayCache };
+  return { required: state.exists && !state.compatible, state, metrics, sessionDisplayCache };
 }
 
-// Stable candidate-owned entry point. Future Schema changes add their explicit
-// backup, migration and target validation here; this baseline never writes data.
+// Stable candidate-owned entry point, invoked by the updater after stopping services.
 export function applyDatabaseUpdates(environment = process.env) {
   inspectDatabaseUpdates(environment);
+  return upgradeStateDatabase(environment);
 }
 
 export function inspectSessionDisplayCache(environment = process.env) {

@@ -1,5 +1,7 @@
 import {
   mkdirSync,
+  readdirSync,
+  statSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -16,6 +18,7 @@ import {
   readGatewayConfig,
   writeGatewayConfig,
 } from "../runtime/gateway-config.mjs";
+import { SqliteBindingStore } from "../src/storage/index.js";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
@@ -30,6 +33,69 @@ afterEach(() => {
 });
 
 describe("local installation inspection", () => {
+  it("upgrades v5 explicitly with a private backup, preserves bindings and permits safe retries", async () => {
+    const { environment, dataDir } = fixture();
+    const path = join(dataDir, "data", "gateway.sqlite3");
+    const store = new SqliteBindingStore(path);
+    const target = { surface: "telegram" as const, accountId: "a", conversationId: "c" };
+    const binding = { target, workspaceId: "w", threadId: "t", sessionId: "t" };
+    store.bind(binding);
+    store.close();
+    const v5 = new DatabaseSync(path);
+    v5.exec("DROP TABLE conversation_model_preferences; PRAGMA user_version = 5");
+    v5.close();
+    expect(inspectDatabaseUpdates(environment).required).toBe(true);
+    expect(() => new SqliteBindingStore(path)).toThrow("显式升级");
+    await applyDatabaseUpdates(environment);
+    expect(inspectDatabaseUpdates(environment).required).toBe(false);
+    const reopened = new SqliteBindingStore(path);
+    expect(reopened.get(target)).toEqual(binding);
+    expect(reopened.modelPreference(target)).toBeUndefined();
+    reopened.close();
+    const backups = readdirSync(join(dataDir, "data")).filter(name => name.includes(".v5-backup-"));
+    expect(backups).toHaveLength(1);
+    const backupPath = join(dataDir, "data", backups[0]!);
+    if (process.platform !== "win32") expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+    const backup = new DatabaseSync(backupPath, { readOnly: true });
+    expect(backup.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+    expect(backup.prepare("SELECT thread_id FROM conversation_bindings").get()?.thread_id).toBe("t");
+    backup.close();
+    await applyDatabaseUpdates(environment);
+    expect(readdirSync(join(dataDir, "data")).filter(name => name.includes(".v5-backup-"))).toHaveLength(1);
+  });
+
+  it("refuses migration while Gateway owns the configuration", async () => {
+    const { environment, dataDir, configPath } = fixture();
+    const path = join(dataDir, "data", "gateway.sqlite3");
+    new SqliteBindingStore(path).close();
+    const database = new DatabaseSync(path);
+    database.exec("DROP TABLE conversation_model_preferences; PRAGMA user_version = 5");
+    database.close();
+    const owner = new GatewayOwner(configPath);
+    await owner.start();
+    try {
+      await expect(applyDatabaseUpdates(environment)).rejects.toThrow("必须停止 Gateway");
+      expect(readdirSync(join(dataDir, "data")).filter(name => name.includes(".v5-backup-"))).toHaveLength(0);
+    } finally {
+      await owner.close();
+    }
+  });
+
+  it("keeps v5 intact and retains its backup when migration fails", async () => {
+    const { environment, dataDir } = fixture();
+    const path = join(dataDir, "data", "gateway.sqlite3");
+    new SqliteBindingStore(path).close();
+    const database = new DatabaseSync(path);
+    // A conflicting table simulates a failure after the backup was created.
+    database.exec("PRAGMA user_version = 5");
+    database.close();
+    await expect(applyDatabaseUpdates(environment)).rejects.toThrow("状态数据库升级失败");
+    const unchanged = new DatabaseSync(path, { readOnly: true });
+    expect(unchanged.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+    unchanged.close();
+    expect(readdirSync(join(dataDir, "data")).filter(name => name.includes(".v5-backup-"))).toHaveLength(1);
+  });
+
   it("inspects a fresh installation without creating databases or changing config", () => {
     const { environment, configPath, dataDir } = fixture();
     const before = readFileSync(configPath, "utf8");

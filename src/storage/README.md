@@ -15,7 +15,7 @@
 Conversation 使用 `surface + accountId + conversationId` 作为复合身份；每个 Conversation 最多
 有一个前台绑定，并可保存有界的运行中后台绑定；一个 Codex Thread 仍只能归属一个外部
 Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移除原绑定、释放目标 Conversation
-原绑定并写入新绑定。数据库必须使用当前 Schema v5；其他版本会失败关闭，不执行自动迁移。
+原绑定并写入新绑定。数据库必须使用当前 Schema v6；其他版本会失败关闭，不执行自动迁移。
 标记为当前版本但缺少必需表或字段的数据库同样会失败关闭，不执行自动补表或修补。
 
 授权操作者通过独立的 Conversation→Actor 关联保存，不从群聊或私聊的 Conversation ID
@@ -23,14 +23,15 @@ Conversation。空闲 Thread 的跨渠道接管在同一个 SQLite 事务中移�
 Actor 清理和解绑由存储实现原子完成。存储公开枚举已知 Conversation；`/new` 或跨 Provider
 `/model` 暂时解除 Thread 绑定时，授权身份与 Workspace 仍可用于安全的渠道生命周期通知。
 
-Schema v5 保留原 `conversation_bindings` 前台表，并新增
-`conversation_background_bindings` 与 `conversation_idle_state`。
+Schema v6 保留前台、后台绑定及 `conversation_idle_state`，新增 `conversation_model_preferences`。
+偏好按 Conversation 保存精确 Provider、模型、思考等级和服务层级，不包含凭据或历史。
+解绑与偏好、强制新建标记在同一事务写入；重新绑定、撤权及接管会清理对应偏好，后台变化不覆盖前台偏好。
 `conversation_idle_state` 按 `surface + accountId + conversationId` 保存最近一次可观测输入或
 输出的时间，以及下一次普通消息必须新建 Thread 的持久化标记；前台绑定删除与强制新建标记在同一
 事务中原子写入，常规活动以一分钟粒度写库，
 强制新建标记会立即写库，确保 Gateway 重启后普通消息仍不会自动接续已释放的旧 Thread。
 撤权导致所有绑定时也会原子写入强制新建标记，重新授权后的普通消息仍从新会话开始。
-当前只接受 Schema v5，初始化只创建新库；本模块不提供旧版本迁移，也不删除 App Server Thread。版本更新时的预检与显式升级由 `scripts/local-installation.mjs` 协调。
+当前只接受 Schema v6，初始化只创建新库；本模块不提供旧版本迁移，也不删除 App Server Thread。v5 → v6 的备份、事务升级和失败恢复由 `scripts/local-installation.mjs` 协调，其他旧版本拒绝。
 
 存储实现必须保持可替换。新增字段应只服务于绑定恢复或必要偏好；持久化格式变化必须明确当前数据的重建或升级方式，不能静默兼容未知 Schema，也不能读取或复制 `~/.codex/sessions`。
 

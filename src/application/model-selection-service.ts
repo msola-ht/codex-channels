@@ -191,23 +191,19 @@ export class ModelSelectionService {
       // 与显式 /fast off 使用同一用户默认值，避免 App Server 重启后重新加载旧 Fast 偏好。
       await this.codex.writeDefaultFastMode(false);
     }
-    if (providerChanged) {
-      await this.router.newSession(target);
-    }
-    this.requireSubscribedProvider(selectedProvider);
     const supported = selected.supportedReasoningEfforts.map((option) => option.effort);
     const effort = !providerChanged && current.effort && supported.includes(current.effort)
       ? current.effort
       : providerDefaultEffort && supported.includes(providerDefaultEffort)
         ? providerDefaultEffort
         : selected.defaultReasoningEffort;
-    const pending = { ...this.pendingByConversation.get(this.key(target)) };
+    const pending = { ...this.pending(target) };
     if (providerChanged) {
       delete pending.serviceTier;
     }
     const currentModel = findModel(current.models, current.model, current.modelProvider);
     const currentFast = isFastServiceTier(current.serviceTier, currentModel);
-    this.pendingByConversation.set(this.key(target), {
+    const nextPending: TurnOverrides = {
       ...pending,
       model: selected.model,
       modelProvider: selectedProvider,
@@ -224,8 +220,18 @@ export class ModelSelectionService {
           : {}
         : currentFast
           ? { serviceTier: selectedFastTier ?? standardServiceTierRequestValue }
-          : {}),
-    });
+          : current.serviceTier && current.serviceTier !== standardServiceTierRequestValue
+            ? { serviceTier: standardServiceTierRequestValue }
+            : {}),
+    };
+    if (providerChanged) {
+      await this.router.newSession(target, false, {
+        model: selected.model, modelProvider: selectedProvider,
+        effort, serviceTier: nextPending.serviceTier ?? null,
+      });
+    }
+    this.requireSubscribedProvider(selectedProvider);
+    this.setPending(target, nextPending);
     if (leavesThread) this.pendingProviderSwitches.add(this.key(target));
     this.providerFilterByConversation.set(this.key(target), selectedProvider);
     return this.selectionState(target, models, selectedProvider);
@@ -245,8 +251,8 @@ export class ModelSelectionService {
     this.requireAvailableModel(model);
     const options = model.supportedReasoningEfforts.map((option) => option.effort);
     const effort = resolveEffort(options, selector);
-    const pending = this.pendingByConversation.get(this.key(target));
-    this.pendingByConversation.set(this.key(target), { ...pending, effort });
+    const pending = this.pending(target);
+    this.setPending(target, { ...pending, effort });
     return this.resolveState(target, models);
   }
 
@@ -277,8 +283,8 @@ export class ModelSelectionService {
     if ((enable && currentFast) || (!enable && !currentFast)) {
       return current;
     }
-    const pending = this.pendingByConversation.get(this.key(target));
-    this.pendingByConversation.set(this.key(target), {
+    const pending = this.pending(target);
+    this.setPending(target, {
       ...pending,
       serviceTier: selectedTier,
     });
@@ -286,15 +292,15 @@ export class ModelSelectionService {
   }
 
   turnOverrides(target: ConversationTarget): TurnOverrides {
-    return { ...this.pendingByConversation.get(this.key(target)) };
+    return { ...this.pending(target) };
   }
 
   hasPending(target: ConversationTarget): boolean {
-    return this.pendingByConversation.has(this.key(target));
+    return this.pending(target) !== undefined;
   }
 
   threadStartOptions(target: ConversationTarget) {
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = this.pending(target);
     if (!this.router.current(target) && this.officialUnavailable()) {
       const selection = pending?.modelProvider
         ? { provider: pending.modelProvider, model: pending.model }
@@ -317,20 +323,20 @@ export class ModelSelectionService {
     return {
       ...(pending?.model ? { model: pending.model } : {}),
       ...(pending?.modelProvider
-        ? { modelProvider: this.normalizeProvider(pending.modelProvider) ?? this.primaryProvider }
+        ? { modelProvider: pending.modelProvider }
         : {}),
     };
   }
 
   capturePreference(target: ConversationTarget): ModelSelectionPreference | undefined {
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = this.pending(target);
     const current = this.router.modelSettings(target);
     const model = pending?.model ?? current?.model;
     if (!model) return undefined;
     const serviceTierPending = hasServiceTierOverride(pending);
     return {
       model,
-      modelProvider: this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
+      modelProvider: pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider)
         ?? this.primaryProvider,
       effort: pending?.effort ?? current?.effort ?? null,
       serviceTier: serviceTierPending
@@ -346,15 +352,19 @@ export class ModelSelectionService {
     const key = this.key(target);
     this.pendingByConversation.delete(key);
     this.pendingProviderSwitches.delete(key);
-    if (!preference) return;
+    if (!preference) {
+      this.router.setModelPreference?.(target, undefined);
+      return;
+    }
     const currentProvider = this.normalizeProvider(
       this.router.modelSettings(target)?.modelProvider,
     )
       ?? this.primaryProvider;
-    const preferredProvider = this.normalizeProvider(preference.modelProvider)
-      ?? this.primaryProvider;
+    const preferredProvider = this.router.modelSettings(target)?.modelProvider === preference.modelProvider
+      ? this.normalizeProvider(preference.modelProvider) ?? preference.modelProvider
+      : preference.modelProvider;
     if (this.router.current(target) && currentProvider !== preferredProvider) return;
-    this.pendingByConversation.set(key, {
+    this.setPending(target, {
       model: preference.model,
       modelProvider: preferredProvider,
       ...(preference.effort ? { effort: preference.effort } : {}),
@@ -364,7 +374,7 @@ export class ModelSelectionService {
 
   markApplied(target: ConversationTarget): void {
     const key = this.key(target);
-    const pending = this.pendingByConversation.get(key);
+    const pending = this.pending(target);
     const binding = this.router.current(target);
     const current = this.router.modelSettings(target);
     if (pending && binding && current) {
@@ -384,19 +394,20 @@ export class ModelSelectionService {
   }
 
   clear(target: ConversationTarget): void {
+    this.router.setModelPreference?.(target, undefined);
     this.pendingByConversation.delete(this.key(target));
     this.pendingProviderSwitches.delete(this.key(target));
     this.providerFilterByConversation.delete(this.key(target));
   }
 
   status(target: ConversationTarget): Omit<ModelSelectionState, "models"> {
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = this.pending(target);
     const current = this.router.modelSettings(target);
     const fallback = !pending?.modelProvider && !current && this.officialUnavailable()
       ? this.defaultThirdPartySelection()
       : undefined;
     const serviceTierPending = hasServiceTierOverride(pending);
-    const provider = this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider)
+    const provider = pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider)
       ?? fallback?.provider ?? (this.officialUnavailable() ? undefined : this.primaryProvider);
     return {
       model: pending?.model ?? current?.model ?? fallback?.model
@@ -420,9 +431,9 @@ export class ModelSelectionService {
     if (models.length === 0) {
       throw new Error("App Server 没有返回可用模型");
     }
-    const pending = this.pendingByConversation.get(this.key(target));
+    const pending = this.pending(target);
     const current = this.router.modelSettings(target);
-    const selectedProvider = this.normalizeProvider(pending?.modelProvider ?? current?.modelProvider);
+    const selectedProvider = pending?.modelProvider ?? this.normalizeProvider(current?.modelProvider);
     const useConfiguredDefault = !this.officialUnavailable()
       && (selectedProvider === undefined || selectedProvider === this.primaryProvider);
     const configuredDefault = useConfiguredDefault && this.configuredDefaultModel
@@ -454,10 +465,8 @@ export class ModelSelectionService {
       });
     }
     const model = pending?.model ?? current?.model ?? fallback?.model ?? "请选择模型";
-    const provider = this.normalizeProvider(
-      pending?.modelProvider
-        ?? current?.modelProvider
-        ?? (fallback ? fallback.provider ?? this.primaryProvider : undefined),
+    const provider = pending?.modelProvider ?? this.normalizeProvider(
+      current?.modelProvider ?? (fallback ? fallback.provider ?? this.primaryProvider : undefined),
     );
     const catalogModel = provider === undefined ? undefined : findModel(models, model, provider);
     const serviceTierPending = hasServiceTierOverride(pending);
@@ -482,7 +491,7 @@ export class ModelSelectionService {
 
   private isProviderSwitchPending(target: ConversationTarget): boolean {
     const key = this.key(target);
-    const selected = this.pendingByConversation.get(key)?.modelProvider;
+    const selected = this.pending(target)?.modelProvider;
     if (selected === undefined) return false;
     const current = this.router.modelSettings(target);
     return current
@@ -545,6 +554,49 @@ export class ModelSelectionService {
       ...this.resolveState(target, models, filter),
       models: filter === undefined ? selectable : filterModelsByProvider(selectable, filter),
     };
+  }
+
+  private pending(target: ConversationTarget): TurnOverrides | undefined {
+    const pending = this.pendingByConversation.get(this.key(target));
+    if (pending) return pending;
+    const preference = this.router.modelPreference?.(target);
+    return preference ? {
+      model: preference.model, modelProvider: preference.modelProvider,
+      ...(preference.effort === null ? {} : { effort: preference.effort }),
+      serviceTier: preference.serviceTier,
+    } : undefined;
+  }
+
+  private setPending(target: ConversationTarget, pending: TurnOverrides): void {
+    if (this.router.setModelPreference && !this.router.current(target) && pending.model && pending.modelProvider) {
+      this.router.setModelPreference(target, {
+        model: pending.model, modelProvider: pending.modelProvider,
+        effort: pending.effort ?? null, serviceTier: pending.serviceTier ?? null,
+      });
+      this.pendingByConversation.delete(this.key(target));
+    } else {
+      this.pendingByConversation.set(this.key(target), pending);
+    }
+  }
+
+  /** Check persisted identities against the current catalog before starting any Thread. */
+  async validateUnboundPreference(target: ConversationTarget): Promise<void> {
+    const preference = this.router.modelPreference?.(target);
+    if (!preference) return;
+    const models = await this.listModels(preference.modelProvider);
+    const model = findModel(models, preference.model, preference.modelProvider);
+    if (!model) {
+      throw new UserFacingError("model.selection.expired", "保存的模型已不可用，请重新发送 /model 选择");
+    }
+    this.requireAvailableModel(model);
+    this.requireSubscribedProvider(preference.modelProvider);
+    if (preference.effort && !model.supportedReasoningEfforts.some(option => option.effort === preference.effort)) {
+      throw new UserFacingError("model.selection.expired", "保存的思考等级已不可用，请重新发送 /model 选择");
+    }
+    if (preference.serviceTier && preference.serviceTier !== standardServiceTierRequestValue
+      && preference.serviceTier !== fastServiceTierId(model)) {
+      throw new UserFacingError("model.selection.expired", "保存的服务层级已不可用，请重新发送 /model 选择");
+    }
   }
 
   private key(target: ConversationTarget): string {

@@ -743,7 +743,7 @@ describe("ConversationService conversation service session", () => {
 
     await service.newSession(target);
 
-    expect(newSession).toHaveBeenCalledWith(target, false);
+    expect(newSession).toHaveBeenCalledWith(target, false, preference);
     expect(restorePreference).toHaveBeenCalledWith(target, preference);
   });
 
@@ -770,7 +770,7 @@ describe("ConversationService conversation service session", () => {
     await expect(idleService.newSession(target)).resolves.toEqual({
       previousThreadId: "thread-current",
     });
-    expect(idleNewSession).toHaveBeenCalledWith(target, false);
+    expect(idleNewSession).toHaveBeenCalledWith(target, false, undefined);
 
     const activeNewSession = vi.fn(async () => undefined);
     const activeService = new ConversationService(
@@ -795,7 +795,7 @@ describe("ConversationService conversation service session", () => {
       previousThreadId: "thread-current",
       backgroundedThreadId: "thread-current",
     });
-    expect(activeNewSession).toHaveBeenCalledWith(target, true);
+    expect(activeNewSession).toHaveBeenCalledWith(target, true, undefined);
   });
 
   it("restores the current channel model only after a workspace switch succeeds", async () => {

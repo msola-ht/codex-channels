@@ -5,6 +5,7 @@ import type {
   BindingTransfer,
   ConversationBinding,
   ConversationIdleState,
+  ConversationModelPreference,
 } from "./binding-store.js";
 
 export class MemoryBindingStore implements BindingStore {
@@ -15,6 +16,23 @@ export class MemoryBindingStore implements BindingStore {
   private readonly byThread = new Map<string, ConversationBinding>();
   private readonly actorsByConversation = new Map<string, Set<string>>();
   private readonly idleStateByConversation = new Map<string, ConversationIdleState>();
+
+  private readonly preferences = new Map<string, ConversationModelPreference>();
+
+  modelPreference(target: ConversationTarget): ConversationModelPreference | undefined {
+    const preference = this.preferences.get(this.key(target));
+    return preference && { ...preference };
+  }
+
+  setModelPreference(target: ConversationTarget, preference: ConversationModelPreference | undefined): void {
+    const key = this.key(target);
+    if (preference) {
+      this.targetsByConversation.set(key, target);
+      this.preferences.set(key, { ...preference });
+    } else {
+      this.preferences.delete(key);
+    }
+  }
 
   conversations(): ConversationTarget[] {
     return [...this.targetsByConversation.values()];
@@ -51,6 +69,7 @@ export class MemoryBindingStore implements BindingStore {
       }
     }
     if (this.actors(target).length === 0) {
+      this.setModelPreference(target, undefined);
       let removed = this.unbind(target) !== undefined;
       for (const binding of this.backgrounds(target)) {
         this.removeThread(binding.threadId);
@@ -181,6 +200,7 @@ export class MemoryBindingStore implements BindingStore {
       }
     }
     this.backgroundByConversation.get(conversationKey)?.delete(binding.threadId);
+    this.setModelPreference(binding.target, undefined);
     this.byConversation.set(conversationKey, binding);
     this.byThread.set(binding.threadId, binding);
     this.workspaceByConversation.set(conversationKey, binding.workspaceId);
@@ -195,11 +215,13 @@ export class MemoryBindingStore implements BindingStore {
     };
   }
 
-  demote(target: ConversationTarget): ConversationBinding | undefined {
+  demote(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined {
+    this.setModelPreference(target, preference);
     const key = this.key(target);
     const binding = this.byConversation.get(key);
     if (!binding) return undefined;
     this.byConversation.delete(key);
+    this.setForceNew(target, Date.now(), true);
     const backgrounds = this.backgroundByConversation.get(key)
       ?? new Map<string, ConversationBinding>();
     backgrounds.set(binding.threadId, binding);
@@ -213,6 +235,7 @@ export class MemoryBindingStore implements BindingStore {
     const key = this.key(binding.target);
     const foreground = this.byConversation.get(key)?.threadId === threadId;
     if (foreground) {
+      this.setModelPreference(binding.target, undefined);
       this.byConversation.delete(key);
     }
     const backgrounds = this.backgroundByConversation.get(key);
@@ -260,7 +283,8 @@ export class MemoryBindingStore implements BindingStore {
     };
   }
 
-  unbind(target: ConversationTarget): ConversationBinding | undefined {
+  unbind(target: ConversationTarget, preference?: ConversationModelPreference): ConversationBinding | undefined {
+    this.setModelPreference(target, preference);
     const key = this.key(target);
     const binding = this.byConversation.get(key);
     if (binding) {

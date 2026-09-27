@@ -52,7 +52,7 @@
   不复制到第三方 Provider，且不参与模型可用性、自动切换或审批判断；
   在 Workspace、新会话或同 Provider 历史 Thread 切换前后捕获并恢复当前模型、思考等级与服务层级；切换 Workspace
   后下一条消息强制新建 Thread，不自动接续目标 Workspace 的历史 Thread，
-  显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；偏好只保留在运行内存中；
+  显式恢复不同 Provider 的历史 Thread 时则尊重该 Thread 的 Provider；未绑定期间的偏好通过 Router 持久保存，重启后按精确 Provider 与目录校验恢复；已有 Thread 的待生效覆盖仍只在内存保存；
   选择不同 Provider 时保留并解绑当前 Thread，为下一 Turn 在对应 App Server 新建带精确
   `modelProvider` 的 Thread；思考等级优先采用目标 Provider App Server 的有效配置，目标模型不支持
   或未配置时才回落其目录默认值，避免把原 Provider 的设置或专属历史发送到不兼容的 API；旧 Thread 保持可恢复；
