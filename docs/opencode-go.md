@@ -102,7 +102,7 @@ Telegram 菜单因订阅状态变化而改变时，旧按钮会提示重新发�
 WebUI 区分此状态与普通刷新失败，并提供经过预览确认的本地账户删除入口，
 详见[WebUI 账户展示](webui.md)。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v19 另保存子代理
+`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v20 另保存子代理
 运行级父子 Turn 关联）。5 小时滚动窗口的 `resetsAt` 会随实时查询漂移，读取时只按当前
 `resetsAt` 反推的五小时范围和请求开始时间归集，不把重置秒数当作固定周期 ID。7 天和月度窗口
 优先按记录的固定周期快照归属 Token；快照缺失，或快照的重置时间不晚于请求开始时间（请求开始时
@@ -136,7 +136,7 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   直接清理共享模型目录，固定模式还会恢复安装前的 Codex 主配置。删除后重启 Gateway 会自动解绑已删除账户的
   外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：完成卡片展示请求结果、Token、缓存与压缩摘要，并在官方
-  `Turn.durationMs` 可用时显示本轮总耗时；不展示模型请求聚合耗时或首段回复延迟，显示生成/端到端 Token/s（未采样时整行省略）；
+  `Turn.durationMs` 可用时显示本轮总耗时；不展示模型请求聚合耗时或首段回复延迟，不显示 TPS；
   `/usage` 展示官方配额窗口与本机 Token 用量，见上文。
 
 官方来源：[`OpenCode Go`](https://opencode.ai/docs/go/)。

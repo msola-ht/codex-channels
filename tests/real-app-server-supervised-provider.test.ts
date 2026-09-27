@@ -325,10 +325,8 @@ contractSuite("real supervised App Server provider", () => {
             expect(summary).toBeDefined();
             const detail = await describeDumpExchange(files, summary.id);
             expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.preForwardMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
-            expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.receiveResponseMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.firstTokenMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(detail.response.firstTokenMs);
           }, { timeout: 5000 });
 
           const policyTurn = await client.startTurn(

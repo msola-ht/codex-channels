@@ -14,9 +14,7 @@ export interface CompactRequestMetricsSummary {
 }
 
 export interface TurnRequestMetricsSummary {
-  tokensPerSecond?: number | null;
-  generationTokensPerSecond?: number | null;
-  /** 上游轮次首 Token，不是单请求首内容延迟。 */
+  /** 上游轮次首 Token，不是本地单请求首 Token 延迟。 */
   upstreamTtftMs?: number | null;
   turnId: string;
   requestCount: number;
@@ -29,8 +27,6 @@ export interface TurnRequestMetricsSummary {
 }
 
 export interface ThreadRequestMetricsAggregate {
-  tokensPerSecond?: number | null;
-  generationTokensPerSecond?: number | null;
   turnCount: number;
   requestCount: number;
   unsuccessfulRequestCount: number;

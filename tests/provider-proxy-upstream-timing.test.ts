@@ -4,29 +4,44 @@ import {
   createMetricsState,
   inspectResponseEvent,
   observeResponseEvent,
+  observeRequestSubmitted,
   HttpResponseMetricsObserver,
 } from "../src/provider-proxy/response-metrics-observer.js";
 import { TurnTimingAccumulator } from "../src/conversation-core/turn-timing-accumulator.js";
 
 describe("OpenAI upstream TTFT", () => {
-  it("measures total duration from request entry and freezes it at the first terminal", () => {
-    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 120, 100);
+  it("measures total duration from submission and freezes it at the first terminal", () => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null);
+    observeRequestSubmitted(metrics, 120);
     metrics.responseFormat = "sse";
     const observer = new HttpResponseMetricsObserver(metrics);
     observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'), 500, 150);
     observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"status":"completed"}}\n\n'), 400, 200);
     observer.finish(300, 250);
-    expect(metrics.firstContentMs).toBe(30);
-    expect(metrics.totalDurationMs).toBe(100);
+    expect(metrics.firstTokenMs).toBe(30);
+    expect(metrics.totalDurationMs).toBe(80);
+  });
+  it.each(["http", "websocket"] as const)("starts %s timing only when submitted and ignores empty content", (transport) => {
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 0, transport, "response", null);
+    observeResponseEvent(metrics, "response.output_text.delta", { delta: "before-send" }, 10, 10);
+    expect(metrics.firstTokenMs).toBeUndefined();
+    observeRequestSubmitted(metrics, 1000);
+    observeRequestSubmitted(metrics, 1010);
+    observeResponseEvent(metrics, "response.output_text.delta", { delta: "" }, 1100, 1100);
+    observeResponseEvent(metrics, "response.anything.delta", { delta: "unknown" }, 1100, 1100);
+    expect(metrics.firstTokenMs).toBeUndefined();
+    observeResponseEvent(metrics, "response.reasoning_summary_text.delta", { delta: "thinking" }, 1200, 1200);
+    observeResponseEvent(metrics, "response.completed", { response: {} }, 1400, 1400);
+    expect(metrics).toMatchObject({ firstTokenMs: 200, totalDurationMs: 400 });
   });
   it.each([
     { type: "response.output_text.done", text: "answer" },
     { type: "response.function_call_arguments.done", arguments: "{}" },
-    { type: "response.output_text.delta", delta: "" },
+    { type: "response.output_text.delta", delta: "answer" },
     { type: "response.reasoning_text.delta", delta: "thinking" },
     { type: "response.refusal.delta", delta: "no" },
     { type: "response.custom_tool_call_input.delta", delta: "command" },
-  ])("measures HTTP and WS token events regardless of text length: $type", (event) => {
+  ])("measures HTTP and WS token events with nonempty content: $type", (event) => {
     for (const transport of ["http", "websocket"] as const) {
       const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null, 100);
       const payload = JSON.stringify(event);
@@ -37,9 +52,9 @@ describe("OpenAI upstream TTFT", () => {
         const parsed = inspectResponseEvent(payload, "", true);
         observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
       }
-      expect(metrics.firstContentMs).toBe(250);
+      expect(metrics.firstTokenMs).toBe(250);
       observeResponseEvent(metrics, "response.output_text.delta", { delta: "later" }, 1500, 600);
-      expect(metrics.firstContentMs).toBe(250);
+      expect(metrics.firstTokenMs).toBe(250);
     }
   });
 
@@ -57,7 +72,7 @@ describe("OpenAI upstream TTFT", () => {
       const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, transport, "response", null, 100);
       const parsed = inspectResponseEvent(JSON.stringify(event), "", true);
       observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
-      expect(metrics.firstContentMs).toBeUndefined();
+      expect(metrics.firstTokenMs).toBeUndefined();
     }
   });
 
@@ -65,15 +80,15 @@ describe("OpenAI upstream TTFT", () => {
     'data: {"type":"response.metadata","metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
     'event: response.metadata\ndata: {"metadata":{"type":"safety_buffering","retry_model":"model-b"}}\n\n',
   ])("waits for content after HTTP metadata: %s", (metadata) => {
-    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100, 100);
+    const metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
     metrics.responseFormat = "sse";
     const observer = new HttpResponseMetricsObserver(metrics);
     observer.observeChunk(Buffer.from(metadata), 1010, 110);
-    expect(metrics.firstContentMs).toBeUndefined();
+    expect(metrics.firstTokenMs).toBeUndefined();
     observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"hello"}\n\n'), 1500, 600);
-    expect(metrics.firstContentMs).toBe(500);
+    expect(metrics.firstTokenMs).toBe(500);
     observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"status":"completed"}}\n\n'), 1600, 700);
-    expect(metrics.firstContentMs).toBe(500);
+    expect(metrics.firstTokenMs).toBe(500);
     expect(metrics.totalDurationMs).toBe(600);
   });
 
@@ -81,19 +96,17 @@ describe("OpenAI upstream TTFT", () => {
     { type: "response.output_item.added", item: { type: "reasoning", summary: [] } },
     { type: "response.content_part.added", part: { type: "output_text", text: "" } },
     { type: "response.reasoning_summary_part.added", part: { type: "summary_text", text: "" } },
-    { type: "response.reasoning_text.done", text: "thinking" },
-    { type: "response.custom_tool_call_input.done", input: "command" },
     { type: "response.completed", response: { output: [], usage: { output_tokens: 100 } } },
     { type: "response.incomplete", response: { output: [{ type: "message", content: [{ type: "output_text", text: "partial" }] }] } },
-  ])("counts HTTP semantic progress but not WS non-token events: $type", (event) => {
+  ])("ignores non-content progress in both transports: $type", (event) => {
     const http = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
     http.responseFormat = "sse";
     new HttpResponseMetricsObserver(http).observeChunk(Buffer.from(`data: ${JSON.stringify(event)}\n\n`), 1250, 350);
-    expect(http.firstContentMs).toBe(250);
+    expect(http.firstTokenMs).toBeUndefined();
     const ws = state();
     const parsed = inspectResponseEvent(JSON.stringify(event), "", true);
     observeResponseEvent(ws, parsed.type, parsed.event, 1250, 350);
-    expect(ws.firstContentMs).toBeUndefined();
+    expect(ws.firstTokenMs).toBeUndefined();
   });
 
   it("uses valid top-level event types or explicit SSE event headers, not nested types", () => {
@@ -101,12 +114,12 @@ describe("OpenAI upstream TTFT", () => {
       const metrics = state();
       const parsed = inspectResponseEvent(payload, "", true);
       observeResponseEvent(metrics, parsed.type, parsed.event, 1250, 350);
-      expect(metrics.firstContentMs).toBeUndefined();
+      expect(metrics.firstTokenMs).toBeUndefined();
     }
     const http = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1000, "http", "response", null, 100);
     http.responseFormat = "sse";
     new HttpResponseMetricsObserver(http).observeChunk(Buffer.from('event: response.output_item.added\ndata: {"item":{"type":"reasoning"}}\n\n'), 1250, 350);
-    expect(http.firstContentMs).toBe(250);
+    expect(http.firstTokenMs).toBeUndefined();
   });
   it("uses captured request and receive times even when parsing runs later", () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(900);
@@ -119,8 +132,8 @@ describe("OpenAI upstream TTFT", () => {
       );
       const ws = createMetricsState(metadata, 1000, "websocket", "response", null, 100);
       observeResponseEvent(ws, "response.reasoning_text.delta", { delta: "thinking" }, 1200, 350);
-      expect(http.firstContentMs).toBe(250);
-      expect(ws.firstContentMs).toBe(250);
+      expect(http.firstTokenMs).toBe(250);
+      expect(ws.firstTokenMs).toBe(250);
       expect(clock).not.toHaveBeenCalled();
     } finally { clock.mockRestore(); }
   });
@@ -129,23 +142,23 @@ describe("OpenAI upstream TTFT", () => {
     try {
       const first = state();
       const push = (metrics: ReturnType<typeof state>, type: string, delta?: string) => {
-        const parsed = inspectResponseEvent(JSON.stringify({ type, delta }), "", metrics.firstContentMs === undefined);
+        const parsed = inspectResponseEvent(JSON.stringify({ type, delta }), "", metrics.firstTokenMs === undefined);
         observeResponseEvent(metrics, parsed.type, parsed.event, -999, performance.now());
       };
       clock.mockReturnValue(120);
       push(first, "response.created");
       push(first, "response.in_progress");
-      expect(first.firstContentMs).toBeUndefined();
+      expect(first.firstTokenMs).toBeUndefined();
       clock.mockReturnValue(145);
       push(first, "response.function_call_arguments.delta", "{");
-      expect(first.firstContentMs).toBe(45);
+      expect(first.firstTokenMs).toBe(45);
       clock.mockReturnValue(200);
       push(first, "response.output_text.delta", "later");
-      expect(first.firstContentMs).toBe(45);
+      expect(first.firstTokenMs).toBe(45);
       const second = state();
       clock.mockReturnValue(209);
       push(second, "response.reasoning_summary_text.delta", "thinking");
-      expect(second.firstContentMs).toBe(9);
+      expect(second.firstTokenMs).toBe(9);
       expect(inspectResponseEvent('{"type":"response.output_text.delta","delta":"later"}').event).toBeUndefined();
     } finally { clock.mockRestore(); }
   });
@@ -158,16 +171,16 @@ describe("OpenAI upstream TTFT", () => {
       metrics.requestModel = "requested";
       const observer = new HttpResponseMetricsObserver(metrics);
       observer.observeChunk(Buffer.from('data: {"type":"response.output_text.delta","delta":"'), 1010, performance.now());
-      expect(metrics.firstContentMs).toBeUndefined();
+      expect(metrics.firstTokenMs).toBeUndefined();
       clock.mockReturnValue(35);
       observer.observeChunk(Buffer.from('hi"}\n\n'), 500, performance.now());
-      expect(metrics.firstContentMs).toBe(25);
+      expect(metrics.firstTokenMs).toBe(25);
       observer.observeChunk(Buffer.from('data: {"type":"response.completed","response":{"model":"echoed"}}\n\n'), 1200, performance.now());
-      expect(metrics).toMatchObject({ firstContentMs: 25, requestModel: "requested", responseModel: "echoed" });
+      expect(metrics).toMatchObject({ firstTokenMs: 25, requestModel: "requested", responseModel: "echoed" });
       const missing = state();
       observeResponseEvent(missing, "response.completed", { response: {} }, 1, performance.now());
       expect(missing.responseModel).toBeNull();
-      expect(missing.firstContentMs).toBeUndefined();
+      expect(missing.firstTokenMs).toBeUndefined();
     } finally { clock.mockRestore(); }
   });
   it.each([0, 569, 720.25])("correlates %s ms before terminal delivery", (ttftMs) => {

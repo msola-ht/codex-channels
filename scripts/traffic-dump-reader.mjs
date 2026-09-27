@@ -147,7 +147,7 @@ async function readPageTurnStateLengths(entries) {
     collectors.set(entry, evidence);
     if (!batches.has(entry.directory)) batches.set(entry.directory, new Map());
     batches.get(entry.directory).set(entry.request.id,
-      createOutputCollector(4 * 1_048_576, undefined, undefined, evidence.event, false));
+      createOutputCollector(4 * 1_048_576, undefined, evidence.event, false));
   }
   for (const [directory, calls] of batches) {
     for await (const record of traceRecords(directory)) calls.get(record?.interaction)?.consume(record);
@@ -194,7 +194,7 @@ export async function describeDumpExchange(
   const models = createModelEvidenceCollector();
   models.headers(interaction.response?.headers, "http.headers");
   models.event(responseBody);
-  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, facts.responseId, models.event);
+  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, models.event);
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   const collected = output.result();
   return {
@@ -221,14 +221,9 @@ export async function describeDumpExchange(
       body: responsePayload.text,
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
-      durationMs: interaction.response.durationMs,
-      firstContentMs: interaction.response.firstContentMs,
+      durationMs: callTiming(interaction.response.callTiming)?.totalMs,
+      firstTokenMs: interaction.response.firstTokenMs,
       callTiming: callTiming(interaction.response.callTiming),
-      httpTiming: interaction.request.transport !== "http" ? null : {
-        receiveRequestMs: elapsedMs(interaction.request.startedAtMs, trace.milestones.request_end),
-        waitResponseHeadMs: elapsedMs(trace.milestones.request_end, trace.milestones.response_head),
-        receiveResponseMs: elapsedMs(trace.milestones.response_head, trace.milestones.response_end),
-      },
       eventType: interaction.response.eventType,
       errorScope: interaction.response.errorScope,
       failureStage: failureStage(interaction.response, responseBody),
@@ -426,7 +421,7 @@ function summaryOf(interaction, body) {
     responseModels: response?.responseModels ?? [],
     state: response?.state ?? "pending",
     status: response?.status,
-    durationMs: response?.durationMs,
+    durationMs: callTiming(response?.callTiming)?.totalMs,
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
 }
@@ -501,15 +496,11 @@ async function* traceRecords(directory) {
 
 async function readTrace(directory, id, offset, limit, maxBytes, output) {
   const items = [];
-  const milestones = {};
   let chatDiagnostics;
   let remaining = maxBytes;
   let total = 0;
   for await (const record of traceRecords(directory)) {
     if (record?.interaction !== id) continue;
-    if (["request_end", "response_head", "response_end"].includes(record.kind)) {
-      milestones[record.kind] = record.ts;
-    }
     if (record.kind === "chat_diagnostics" && record.fields && typeof record.fields === "object" && !Array.isArray(record.fields)) {
       chatDiagnostics = { fields: record.fields, truncated: record.truncated === true };
     }
@@ -526,7 +517,6 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
   }
   return {
     items,
-    milestones,
     chatDiagnostics,
     page: {
       offset,
@@ -535,10 +525,6 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
       nextOffset: offset + items.length < total ? offset + items.length : null,
     },
   };
-}
-
-function elapsedMs(start, end) {
-  return Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : undefined;
 }
 
 function numericSuffix(name) {

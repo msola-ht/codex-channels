@@ -186,6 +186,29 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout).toContain("结果=完成");
   });
 
+  it("keeps late disconnect diagnostics separate from a completed result", () => {
+    const directory = temporaryDirectory();
+    const item = interaction(1, "hello");
+    writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [{ ...item, response: { ...item.response, ...{ errorScope: "client_disconnected" } } }]);
+    const result = runTraffic(["--dir", directory, "--exchange", "1"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("响应：完成");
+    expect(result.stdout).toContain("完成后的诊断：client_disconnected");
+    expect(result.stdout).not.toContain("失败阶段");
+  });
+
+  it("does not infer a live request from a missing terminal record", () => {
+    const directory = temporaryDirectory();
+    const session = writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
+    const indexPath = join(session, "interactions.jsonl");
+    writeFileSync(indexPath, readFileSync(indexPath, "utf8").split("\n")[0] + "\n");
+    const result = runTraffic(["--dir", directory, "--exchange", "1"]);
+    expect(result.status).toBe(0);
+    expect(runTraffic(["--dir", directory]).stdout).toContain("结果=未记录终态");
+    expect(result.stdout).toContain("响应：未记录终态");
+    expect(result.stdout).not.toContain("进行中");
+  });
+
   it("renders exactly one request and one terminal response", () => {
     const directory = temporaryDirectory();
     writeSession(directory, "openai", "2026-09-18T00-00-00-000Z", [interaction(1, "hello")]);
@@ -200,9 +223,10 @@ describe("traffic command V2 rendering", () => {
     expect(result.stdout).toContain("服务端模型声明：未记录");
     expect(result.stdout).toContain("安全缓冲候选声明：未记录");
     expect(result.stdout).toContain("安全缓冲候选不表示已经切换");
-    expect(result.stdout).toContain("本次调用（单调时钟）");
-    expect(result.stdout).toContain("未记录阶段，不从历史记录补算");
-    expect(result.stdout).toContain("上游轮次统计（独立口径）");
+    expect(result.stdout).not.toContain("本次调用（单调时钟）");
+    expect(result.stdout).not.toContain("上游轮次统计");
+    expect(result.stdout).toContain("首 Token：");
+    expect(result.stdout).toContain("请求耗时：");
   });
 
   it("shows the recorded Chat upstream provider and keeps a placeholder when absent", () => {
@@ -337,7 +361,7 @@ describe("traffic command V2 rendering", () => {
     await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     runningChildren.delete(child);
     expect(stdout.match(/#1 /gu)).toHaveLength(1);
-    expect(stdout).not.toContain("结果=进行中");
+    expect(stdout).not.toContain("结果=未记录终态");
   });
 });
 

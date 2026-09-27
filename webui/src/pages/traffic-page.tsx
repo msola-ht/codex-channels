@@ -66,7 +66,7 @@ export function TrafficPage() {
           <div className="min-w-0">
             <h1 className="text-xl font-semibold">调用明细</h1>
             <p className="text-sm text-muted-foreground">
-              原始正文和传输轨迹可展开，每段最多展示 4 MiB
+              查看本次请求的结果、用量与诊断信息
             </p>
           </div>
           <div className="flex items-center gap-2">

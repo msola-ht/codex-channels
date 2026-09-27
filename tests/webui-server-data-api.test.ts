@@ -80,7 +80,7 @@ describe("webui server data API", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
       requestServiceTier: "priority", serviceTier: "default",
-      firstContentMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
+      firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -90,15 +90,11 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
-        firstContentMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
-        tokensPerSecond: 1_000_000 / 1234.5,
-        generationTokensPerSecond: 1_000_000 / 1222,
+        firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
-        firstContentMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
-        tokensPerSecond: null,
-        generationTokensPerSecond: null,
+        firstTokenMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
         requestServiceTier: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();
@@ -106,22 +102,10 @@ describe("webui server data API", () => {
     const sorted = await fetch(`${origin}/api/v1/requests?range=all&sort=totalDuration&direction=desc`);
     expect(sorted.status).toBe(200);
     expect(((await sorted.json()) as { records: Array<{ totalDurationMs: number | null }> }).records[0]?.totalDurationMs).toBe(1234.5);
-    const speeds = await fetch(`${origin}/api/v1/requests?range=all&sort=tokensPerSecond&direction=desc`);
-    expect(speeds.status).toBe(200);
-    expect(((await speeds.json()) as { records: Array<{ tokensPerSecond: number | null }> }).records[0]?.tokensPerSecond).toBe(1_000_000 / 1234.5);
-    const generation = await fetch(`${origin}/api/v1/requests?range=all&sort=generationTokensPerSecond&direction=desc`);
-    expect(generation.status).toBe(200);
-    expect(((await generation.json()) as { records: Array<{ generationTokensPerSecond: number | null }> })
-      .records[0]?.generationTokensPerSecond).toBe(1_000_000 / 1222);
-    for (const [path, key] of [["threads", "threads"], ["threads/thread-1/turns", "turns"]]) {
-      for (const [sort, field, expected] of [
-        ["tokensPerSecond", "tokensPerSecond", 1_000_000 / 1234.5],
-        ["generationTokensPerSecond", "generationTokensPerSecond", 1_000_000 / 1222],
-      ] as const) {
+    for (const path of ["requests", "threads", "threads/thread-1/turns"]) {
+      for (const sort of ["tokensPerSecond", "generationTokensPerSecond"]) {
         const response = await fetch(`${origin}/api/v1/${path}?range=all&sort=${sort}&direction=desc`);
-        expect(response.status).toBe(200);
-        const body = await response.json() as Record<string, Array<Record<string, number | null>>>;
-        expect(body[key!]![0]?.[field]).toBe(expected);
+        expect(response.status).toBe(400);
       }
     }
   });

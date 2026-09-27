@@ -16,8 +16,8 @@
   OpenCode Go、CCG 与自定义第三方代理不启用该组 OpenAI 路径。代理保留端到端状态码与响应头；
   Authorization 只用于上游请求，不落日志、不进指标，
   `x-codex-turn-metadata` 只在本地读取、原样转发，Hop-by-hop Header 不透传；
-  转发 SSE 或 WebSocket 响应时，在首字观测完成前解析合法事件类型，记录单请求单调时钟延迟；
-  HTTP 使用 semantic 事件口径，WebSocket 使用 delta 与指定 done 事件口径，不要求文本非空。
+  转发 SSE 或 WebSocket 响应时，从提交发送起计首 Token 与总耗时；两种传输共用非空内容白名单，
+  包含思考、正文、拒绝文本和工具参数，不计空事件与状态事件。
   此后普通增量只扫描事件类型并立即透传，不等待指标处理；创建、上游 timing、完成、失败、不完整、额度和包装错误事件解析受控字段。WebSocket 从
   出站 `response.create` 提前记录有界的模型、服务层级与 `reasoning.effort`，完成事件再刷新最终
   模型、服务层级、状态及输入/缓存/输出/推理 Token Usage，因此提前断线的失败
@@ -59,16 +59,14 @@
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
   平台输出。WebSocket 解析 `response.created` 与上游 timing 事件，在 `logical_turn` 且响应 ID
   同时匹配创建与终态时提供可选 `upstreamTtftMs`，不保留响应 ID 到指标记录。
-  `firstContentMs` 从 HTTP 路由解析成功、WS 请求帧转储与解析完成后进入转发流程开始，计到首个符合条件事件的接收回调入口；
-  不含 HTTP 路由等待，包含 WS 等待连接就绪。响应解析与转储后不重新取时，与上游轮次 TTFT 独立，不表示客户端显示时间。
-  `totalDurationMs` 使用独立的请求入口单调时钟，到首次模型终态或结束/失败时冻结，经 IPC 传递且不依赖调用记录开关；不包含终态后投递、客户端显示或其他重试，无逻辑请求的握手错误不伪造值。
-  HTTP 排除 created/in_progress/failed/metadata，其余合法 response.* 语义事件计入；WS 计入 response.*.delta、output_text.done 与 function_call_arguments.done。
-  纯错误、旁路额度/timing/metadata 与畸形报文不计入；完整展示口径见[WebUI 文档](../../docs/webui.md)。
+  `firstTokenMs` 与 `totalDurationMs` 从同一提交发送时刻计时，不含发送前路由、解析与 WS 连接等待；HTTP 提交后发生的连接等待计入耗时；
+  前者到首段非空内容的接收回调入口，后者到首次终态或结束/失败。未提交发送不伪造耗时。
+  指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
   两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
-  首内容观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
+  首 Token 观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
-- `traffic-call-timing.ts`：记录单次调用的单调时钟偏移，区分入口、转发、请求体收齐、响应头、WS 提交发送与结束；只写调用响应索引，不进入指标 IPC 或数据库。
+- `traffic-call-timing.ts`：记录单次调用从提交发送起的单调时钟耗时；只写调用响应索引，不进入指标 IPC 或数据库。
 - `request-routing.ts`：集中维护回环监听地址校验、账户前缀解析、受支持路径白名单、上游路径拼接
   以及 HTTP/WebSocket 请求头过滤；不持有连接或指标状态。
   其中 `forwardedRequestHeaders` / `forwardedWebSocketHeaders` 在配置了
@@ -86,7 +84,7 @@
   session 建立私有目录：`interactions.jsonl` 只记录每次逻辑模型调用的请求与终态响应索引，正文按
   offset/bytes 引用轮转的 `payload-*.bin`，逐块 HTTP/SSE 与 WebSocket 传输记录写入独立
   `trace-*.jsonl`。HTTP 请求对应一次调用；同一 WebSocket 连接中的每个 `response.create` 分别对应
-  一次调用。响应索引复用代理同一份 `firstContentMs` 观测，精简模式也保留，不从 trace 反推。
+  一次调用。响应索引复用代理同一份 `firstTokenMs` 观测，精简模式也保留，不从 trace 反推。
   指标中的 `traffic` 使用转储实际创建的标签、writer session（包含目录冲突时的编号后缀）与 interaction，
   HTTP 和每次 WebSocket 调用分别绑定；未开启转储或 WS 握手失败、尚未创建逻辑调用时不提供关联。
   每个逻辑调用绑定开始时的 writer session；长驻进程约每 24 小时让新调用进入新 session，

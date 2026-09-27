@@ -32,7 +32,6 @@ import {
   formatCacheHitRate,
   formatRequestCount,
   formatTokenCount,
-  formatTokensPerSecond,
 } from "./token-format.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
 
@@ -326,10 +325,6 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  fields.push(...completionRateFields(
-    event.generationTokensPerSecond,
-    event.tokensPerSecond,
-  ));
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -608,20 +603,8 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
-  if (event.durationMs !== undefined || event.timing?.modelRequestCount !== undefined) {
-    runFields.push({
-      title: "性能",
-      fields: [
-        ...completionRateFields(
-          event.timing?.generationTokensPerSecond,
-          event.timing?.tokensPerSecond,
-        ),
-        ...(event.durationMs === undefined ? [] : [{
-          label: "总耗时",
-          value: formatElapsedDuration(event.durationMs),
-        }]),
-      ],
-    });
+  if (event.durationMs !== undefined) {
+    runFields.push({ label: "本轮耗时", value: formatElapsedDuration(event.durationMs) });
   }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
@@ -667,10 +650,6 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    taskFields.push(...completionRateFields(
-      task.generationTokensPerSecond,
-      task.tokensPerSecond,
-    ));
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -693,10 +672,6 @@ export function createTurnCompletedPresentation(
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
           }]),
-        ...completionRateFields(
-          session.generationTokensPerSecond,
-          session.tokensPerSecond,
-        ),
       ],
     });
   }
@@ -713,30 +688,6 @@ export function createTurnCompletedPresentation(
     fields: runFields,
     ...(sections.length > 0 ? { sections } : {}),
   };
-}
-
-/**
- * 生成与端到端两个速度读数各自独立省略：没有采样的读数不出现在卡片上，
- * 不把缺失值渲染成占位文本（与 DeepSeek Harness 的读数省略规则一致）。
- */
-function completionRateFields(
-  generation: number | null | undefined,
-  endToEnd: number | null | undefined,
-): LifecyclePresentationField[] {
-  return [
-    ...(generation == null ? [] : [{
-      label: "生成 Token/s",
-      value: formatCompletionTokenRate(generation),
-    }]),
-    ...(endToEnd == null ? [] : [{
-      label: "端到端 Token/s",
-      value: formatCompletionTokenRate(endToEnd),
-    }]),
-  ];
-}
-
-function formatCompletionTokenRate(value: number): string {
-  return `${Number(formatTokensPerSecond(value))}/s`;
 }
 
 export function renderPlainLifecyclePresentation(

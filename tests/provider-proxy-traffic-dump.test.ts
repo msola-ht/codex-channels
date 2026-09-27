@@ -178,21 +178,17 @@ describe("ModelTrafficDump V2", () => {
     const files = listDumpFiles(directory);
     for (const id of [1, 2]) {
       const detail = await describeDumpExchange(files, id);
-      expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
-      expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
-      expect(detail.response.callTiming.submittedToFirstEventMs).toBeGreaterThanOrEqual(0);
+      expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(detail.response.firstTokenMs);
     }
-    expect((await describeDumpExchange(files, 2)).response.callTiming.connectionReady).toBe(true);
+    expect((await describeDumpExchange(files, 2)).response.callTiming).not.toHaveProperty("connectionReady");
   });
-  it("records monotonic HTTP stages independently of wall-clock changes", async () => {
+  it("records submitted HTTP duration independently of wall-clock changes", async () => {
     const { directory, dump } = fixture();
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(10000);
     const exchange = dump.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: 10000, startedAtMonotonicMs: 100 });
-    exchange.callTiming!.forwarding(110);
-    exchange.callTiming!.requestBodyEnd(120);
-    exchange.callTiming!.responseHead(130);
-    exchange.observeRequestMetrics({ firstContentMs: 25 });
+    exchange.callTiming!.submitted(110);
+    exchange.observeRequestMetrics({ firstTokenMs: 25 });
     exchange.requestEnd();
     exchange.responseHead(200, {});
     vi.setSystemTime(5000);
@@ -200,55 +196,47 @@ describe("ModelTrafficDump V2", () => {
     await dump.close();
     const detail = await describeDumpExchange(listDumpFiles(directory), 1);
     expect(detail.response.callTiming).toMatchObject({
-      totalMs: 60, preForwardMs: 10, firstEventWaitMs: 25, afterFirstEventMs: 25,
-      receiveRequestMs: 20, waitResponseHeadMs: 10, receiveResponseMs: 30,
+      totalMs: 50,
     });
   });
 
-  it("keeps WebSocket connection waiting and first-event stages within each call", async () => {
+  it("excludes WebSocket connection waiting from each submitted call", async () => {
     const { directory, dump } = fixture();
     const exchange = dump.beginWebSocketExchange({ headers: {}, startedAtMs: Date.now(), url: "/responses" });
     exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 100);
     const first = exchange.callTiming!;
-    first.forwarding(110, false);
     first.submitted(150);
-    exchange.observeRequestMetrics({ firstContentMs: 70 });
+    exchange.observeRequestMetrics({ firstTokenMs: 70 });
     exchange.webSocketFrame("upstream", Buffer.from('{"type":"response.completed","response":{}}'), false, 250);
     exchange.webSocketFrame("client", Buffer.from('{"type":"response.create"}'), false, 300);
-    exchange.callTiming!.forwarding(310, true);
     exchange.callTiming!.submitted(311);
-    exchange.observeRequestMetrics({ firstContentMs: 10 });
+    exchange.observeRequestMetrics({ firstTokenMs: 10 });
     exchange.failure("upstream_error", undefined, 340);
     await dump.close();
     const paths = listDumpFiles(directory);
     expect((await describeDumpExchange(paths, 1)).response.callTiming).toMatchObject({
-      totalMs: 150, preForwardMs: 10, firstEventWaitMs: 70, afterFirstEventMs: 70,
-      submitWaitMs: 40, submittedToFirstEventMs: 30, connectionReady: false,
+      totalMs: 100,
     });
     expect((await describeDumpExchange(paths, 2)).response.callTiming).toMatchObject({
-      totalMs: 40, preForwardMs: 10, firstEventWaitMs: 10, afterFirstEventMs: 20,
-      submitWaitMs: 1, submittedToFirstEventMs: 9, connectionReady: true,
+      totalMs: 29,
     });
   });
 
-  it("does not invent forwarding or first-event stages for a route failure", async () => {
+  it("does not invent submitted timing for a route failure", async () => {
     const { directory, dump } = fixture();
     const exchange = dump.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(), startedAtMonotonicMs: 100 });
     exchange.failure("upstream_route", undefined, 120);
     await dump.close();
     const timing = (await describeDumpExchange(listDumpFiles(directory), 1)).response.callTiming;
-    expect(timing.totalMs).toBe(20);
-    expect(timing.preForwardMs).toBeUndefined();
-    expect(timing.firstEventWaitMs).toBeUndefined();
-    expect(timing.afterFirstEventMs).toBeUndefined();
+    expect(timing).toBeNull();
   });
   it("binds HTTP metrics to actual collision-resolved sessions", async () => {
     const { directory, dump } = fixture();
     const second = new ModelTrafficDump({ directory, label: "openai", onError: () => undefined });
-    const observed: Array<Pick<ProviderProxyMetrics, "firstContentMs" | "traffic">> = [];
+    const observed: Array<Pick<ProviderProxyMetrics, "firstTokenMs" | "traffic">> = [];
     for (const writer of [dump, second]) {
       const exchange = writer.beginHttpExchange({ headers: {}, method: "POST", path: "/responses", startedAtMs: 1_789_776_000_000 });
-      const metrics: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = {};
+      const metrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "traffic"> = {};
       exchange.observeRequestMetrics(metrics);
       observed.push(metrics);
       exchange.requestEnd();
@@ -399,9 +387,9 @@ describe("ModelTrafficDump V2", () => {
     });
     exchange.requestChunk(Buffer.from(JSON.stringify({ input: ["hello"], model: "gpt-6-astra" })));
     exchange.requestEnd();
-    const observedMetrics: { firstContentMs?: number } = {};
+    const observedMetrics: { firstTokenMs?: number } = {};
     exchange.observeRequestMetrics(observedMetrics);
-    observedMetrics.firstContentMs = 12.5;
+    observedMetrics.firstTokenMs = 12.5;
     exchange.responseHead(200, { "content-type": "text/event-stream" });
     exchange.responseChunk(Buffer.from("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"));
     const terminal = {
@@ -438,8 +426,27 @@ describe("ModelTrafficDump V2", () => {
     const detail = await describeDumpExchange(sessions, 1);
     expect(JSON.parse(detail.request.body)).toMatchObject({ model: "gpt-6-astra" });
     expect(JSON.parse(detail.response.body)).toEqual(terminal);
-    expect(detail.response.firstContentMs).toBe(12.5);
+    expect(detail.response.firstTokenMs).toBe(12.5);
     expect(detail.trace.some((record: { kind: string }) => record.kind === "response_body")).toBe(true);
+  });
+
+  it("retains completed HTTP state and shared timing after a client disconnect", async () => {
+    const { directory, dump } = fixture();
+    const exchange = dump.beginHttpExchange({
+      headers: {}, method: "POST", path: "/responses", startedAtMs: Date.now(), startedAtMonotonicMs: 100,
+    });
+    exchange.requestChunk(Buffer.from('{"model":"fixture"}'));
+    exchange.requestEnd();
+    exchange.callTiming?.submitted(200);
+    exchange.observeRequestMetrics({ firstTokenMs: 30, totalDurationMs: 100 });
+    exchange.responseHead(200, { "content-type": "text/event-stream" });
+    exchange.responseChunk(Buffer.from('data: {"type":"response.completed","response":{"model":"fixture","output":[]}}\n\n'));
+    exchange.failure("client_disconnected", undefined, 500);
+    await dump.close();
+    const detail = await describeDumpExchange(listDumpFiles(directory), 1);
+    expect(detail.state).toBe("completed");
+    expect(detail.response).toMatchObject({ state: "completed", errorScope: "client_disconnected", firstTokenMs: 30, callTiming: { totalMs: 100 } });
+    expect(detail.response.failureStage).toBeUndefined();
   });
 
   it("creates a separate logical interaction for every WebSocket response.create", async () => {
@@ -454,7 +461,7 @@ describe("ModelTrafficDump V2", () => {
       model: "gpt-6-astra",
       client_metadata: { thread_id: "thread-ws" },
     }), false);
-    const first: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = { firstContentMs: 23.5 };
+    const first: Pick<ProviderProxyMetrics, "firstTokenMs" | "traffic"> = { firstTokenMs: 23.5 };
     exchange.observeRequestMetrics(first);
     exchange.webSocketFrame("upstream", textFrame({
       type: "response.completed",
@@ -465,7 +472,7 @@ describe("ModelTrafficDump V2", () => {
       model: "gpt-6-astra",
       input: ["second"],
     }), false);
-    const second: Pick<ProviderProxyMetrics, "firstContentMs" | "traffic"> = {};
+    const second: Pick<ProviderProxyMetrics, "firstTokenMs" | "traffic"> = {};
     exchange.observeRequestMetrics(second);
     expect(first.traffic?.interaction).toBe(1);
     expect(second.traffic?.interaction).toBe(2);
@@ -484,8 +491,8 @@ describe("ModelTrafficDump V2", () => {
     ]);
     expect((await describeDumpExchange(sessions, 1)).trace)
       .toHaveLength(2);
-    expect((await describeDumpExchange(sessions, 1)).response.firstContentMs).toBe(23.5);
-    expect((await describeDumpExchange(sessions, 2)).response.firstContentMs).toBeUndefined();
+    expect((await describeDumpExchange(sessions, 1)).response.firstTokenMs).toBe(23.5);
+    expect((await describeDumpExchange(sessions, 2)).response.firstTokenMs).toBeUndefined();
   });
 
   it("uses per-call WebSocket metadata instead of the prewarm handshake", async () => {

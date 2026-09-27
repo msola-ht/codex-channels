@@ -37,7 +37,7 @@ export function TrafficTable({
             <TableHead>Provider</TableHead>
             <TableHead>模型</TableHead>
             <TableHead>状态</TableHead>
-            <TableHead className="text-right">总耗时</TableHead>
+            <TableHead className="text-right">请求耗时</TableHead>
             <TableHead className="text-right whitespace-nowrap">Turn State 字符数</TableHead>
             <TableHead>类型</TableHead>
             <TableHead>请求</TableHead>
@@ -113,7 +113,7 @@ function stateLabel(state: TrafficExchangeSummary["state"]): string {
   if (state === "completed") return "完成"
   if (state === "failed") return "失败"
   if (state === "incomplete") return "不完整"
-  return "进行中"
+  return "未记录终态"
 }
 
 function requestLabel(exchange: TrafficExchangeSummary): string {

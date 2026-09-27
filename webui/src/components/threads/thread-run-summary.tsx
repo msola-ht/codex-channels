@@ -3,7 +3,6 @@ import { StatCard } from "@/components/metrics/stat-card"
 import {
   formatCount,
   formatTokens,
-  formatTokensPerSecond,
 } from "@/lib/format"
 import type { Aggregate, TurnSummary } from "@/lib/types"
 
@@ -23,12 +22,7 @@ export function ThreadRunSummary({
     )
   }
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatCard
-        title="生成 Token/s"
-        value={formatTokensPerSecond(threadAggregate.generationTokensPerSecond)}
-        description="首个内容之后的输出速率，含已关联子代理"
-      />
+    <div className="grid gap-4 sm:grid-cols-3">
       <StatCard
         title="Turn"
         value={threadAggregate.turnCount}

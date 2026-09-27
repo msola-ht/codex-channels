@@ -333,13 +333,15 @@ Codex App Server RPC。它负责主实例与受管实例的按需启动和显式
 归属的 `subagent_turns`，Schema v12 新增官方账户快照表，Schema v13 为每个请求新增记录实际发往
 模型上游 `User-Agent` 的 `user_agent` 列；Schema v14 删除价格、成本、旧计时列与派生 View，只保留
 当前采集和展示合同；Schema v15 新增可空 `upstream_ttft_ms`，保留 OpenAI 上游首 Token 统计，
-完成卡片取当前 Turn 首个有效样本，不由 App Server 通知或本地时间估算。Schema v16 新增可空
-`first_content_ms`、`request_model`、`response_model`，由 Provider Proxy 独立观测单请求首内容和请求/响应模型名称，
-贯通指标 IPC、明细、导出及转储，不新增 App Server RPC。单请求首字耗时参考 sub2api：HTTP/SSE 使用 semantic、
-WebSocket 使用 token-event 判定，具体口径及差异见[WebUI 请求明细](webui.md)；不替代上游轮次 TTFT。
+仅保留原始指标与机器导出，不用于完成卡片或替代本地请求计时。Schema v16 曾新增可空
+`first_content_ms`、`request_model`、`response_model`；Schema v20 将首事件列替换为 `first_token_ms`，
+由 Provider Proxy 从提交发送起观测非空思考、正文或工具参数，HTTP 与 WS 使用统一口径；总耗时采用同一起点。
+指标贯通 IPC、明细、导出与转储，不新增 App Server RPC，不接受旧指标库或换算历史计时，也不再计算 TPS。
 Schema v17 保存可空转储标签、实际 writer session 与 interaction，由 Provider Proxy 绑定并经 IPC、指标库、导出和 WebUI 精确定位调用；不根据历史时间猜配，也不新增 App Server RPC。
 转储读取器通过 `traffic-dump-presentation.mjs` 分开投影当前调用的服务端模型声明与安全缓冲候选；CLI 与 WebUI 复用 `runtime/model-name-comparison.mjs` 比较请求和响应名称，候选不作为实际换模证据，不改变转发或存储协议。
-单次调用阶段由 `src/provider-proxy/traffic-call-timing.ts` 记录单调时钟节点，`traffic-dump.ts` 写入 V2 响应索引的可选 `callTiming`；共享读取器向 CLI 与 WebUI 投影阶段，与上游 logical-turn 统计分组。Schema v18 新增可空 `total_duration_ms`，总耗时由 `response-metrics-observer.ts` 从请求入口到首次终态或结束/失败观测，经指标 IPC、Store、请求明细和导出贯通；不依赖调用记录开关，旧记录为 NULL，不新增 App Server RPC。
+单次调用计时由 `src/provider-proxy/traffic-call-timing.ts` 记录，`traffic-dump.ts` 写入 V2 响应索引的可选 `callTiming`，以 `basis: "submitted"` 区分旧起点。
+共享读取器向 CLI 与 WebUI 投影请求耗时；缺少标记不补算历史值。Schema v18 引入的 `total_duration_ms` 在 v20 统一为提交发送至结束，不聚合为 Turn 耗时。
+验证覆盖 `provider-proxy-upstream-timing.test.ts`、HTTP/WS metrics、traffic dump、request metrics store 与 WebUI 数据和表格测试。
 Schema v19 的 `request_service_tier` 由 `provider-proxy/proxy.ts` 从 HTTP/WS 出站请求独立采集，经指标 IPC、Store 与 JSON/CSV 导出传递；WebUI 请求和错误明细按请求层级显示 FAST，不被响应 `default` 覆盖。请求层级缺失时为 NULL；由 `provider-proxy-http-metrics.test.ts`、`provider-proxy-websocket-metrics.test.ts`、`provider-proxy-metrics.test.ts` 和 `webui-tables.test.ts` 验证，不新增 App Server RPC。
 指标库只接受当前 Schema，不提供历史升级；新安装直接建库。
 

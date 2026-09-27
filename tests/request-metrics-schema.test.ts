@@ -17,19 +17,22 @@ afterEach(() => {
 });
 
 describe("request metrics schema", () => {
-  it("fails closed when the standalone metrics schema version is unsupported", () => {
+  it.each([19, 99])("fails closed for metrics schema %s without rewriting history", (version) => {
     const directory = temporaryDirectory();
     const path = join(directory, "request-metrics.sqlite3");
     const database = new DatabaseSync(path);
     database.exec(`
       CREATE TABLE schema_metadata (name TEXT PRIMARY KEY, value INTEGER NOT NULL);
-      INSERT INTO schema_metadata (name, value) VALUES ('schema_version', 99);
+      INSERT INTO schema_metadata (name, value) VALUES ('schema_version', ${version});
     `);
     database.close();
 
     expect(() => new SqliteModelRequestMetricsStore(path)).toThrow(
       /codexc metrics reset/u,
     );
+    const preserved = new DatabaseSync(path, { readOnly: true });
+    expect(preserved.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(version);
+    preserved.close();
   });
 
   it("rolls back an interrupted first schema initialization", () => {

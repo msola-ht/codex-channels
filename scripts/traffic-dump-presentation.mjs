@@ -150,33 +150,11 @@ export function createModelEvidenceCollector() {
   };
 }
 
-/** 所有阶段只使用同一次调用的单调时钟偏移，不与旧墙钟或上游统计相减。 */
+/** 旧入口计时没有 submitted 标记，不能冒充发送起点。 */
 export function callTiming(record) {
-  if (record?.clock !== "monotonic") return null;
-  const end = tokenCount(record.endMs);
-  if (end === undefined) return null;
-  const offset = (key) => {
-    const value = tokenCount(record[key]);
-    return value !== undefined && value <= end ? value : undefined;
-  };
-  const between = (start, finish) => start !== undefined && finish !== undefined && finish >= start ? finish - start : undefined;
-  const forwarding = offset("forwardingMs");
-  const first = offset("firstEventMs");
-  const submitted = offset("submittedMs");
-  const head = offset("responseHeadMs");
-  const body = offset("requestBodyEndMs");
-  return {
-    totalMs: end,
-    preForwardMs: forwarding,
-    firstEventWaitMs: between(forwarding, first),
-    afterFirstEventMs: between(first, end),
-    receiveRequestMs: body,
-    waitResponseHeadMs: between(body, head),
-    receiveResponseMs: between(head, end),
-    submitWaitMs: between(forwarding, submitted),
-    submittedToFirstEventMs: between(submitted, first),
-    connectionReady: typeof record.connectionReady === "boolean" ? record.connectionReady : undefined,
-  };
+  if (record?.clock !== "monotonic" || record.basis !== "submitted") return null;
+  const totalMs = tokenCount(record.endMs);
+  return totalMs === undefined ? null : { totalMs };
 }
 
 function tokenCount(value) {
@@ -192,14 +170,13 @@ function parseObject(text) {
 }
 
 /** 完成条目独立于 trace 页收集；正文、重组缓冲与输出总量都受展示字节上限约束。 */
-export function createOutputCollector(maxBytes, terminalOutput, responseId, observeModelEvent, collectOutput = true) {
+export function createOutputCollector(maxBytes, terminalOutput, observeModelEvent, collectOutput = true) {
   const items = new Map();
   let bytes = 0;
   let truncated = false;
   let frame;
   let sse = "";
   let droppingSse = false;
-  let timing = null;
   const hasTerminalOutput = Array.isArray(terminalOutput) && terminalOutput.length > 0;
 
   function add(index, item) {
@@ -219,20 +196,6 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId, obse
     const value = parseObject(text);
     observeModelEvent?.(value);
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
-    const metrics = value?.timing_metrics;
-    if (value?.type === "responsesapi.websocket_timing" && metrics?.timing_scope === "logical_turn"
-      && typeof responseId === "string" && metrics.response_id === responseId) {
-      const seconds = tokenCount(metrics.total_turn_time_s);
-      timing = {
-        scope: metrics.timing_scope,
-        responseId,
-        totalMs: seconds === undefined ? undefined : tokenCount(seconds * 1000),
-        firstTokenMs: tokenCount(metrics.first_sampled_message_ttft_ms),
-        queueMaxMs: tokenCount(metrics.engine_queue_max_ms),
-        samplingMs: tokenCount(metrics.engine_service_sampling_total_ms),
-        toolPauseMs: tokenCount(metrics.client_tool_pause_total_ms),
-      };
-    }
     if (!hasTerminalOutput && value?.type === "response.output_item.done"
       && Number.isSafeInteger(value.output_index) && value.output_index >= 0) {
       add(value.output_index, value.item);
@@ -298,7 +261,6 @@ export function createOutputCollector(maxBytes, terminalOutput, responseId, obse
           .map(([, { item }]) => outputItem(item)),
         outputTruncated: truncated || (!hasTerminalOutput && frame !== undefined),
         outputSource: hasTerminalOutput ? "terminal" : "trace",
-        timing,
       };
     },
   };

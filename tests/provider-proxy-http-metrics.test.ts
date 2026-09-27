@@ -181,7 +181,7 @@ it("attaches quota snapshots and measures forwarding through event arrival exclu
       responseModel: "deepseek-v4-flash",
       quotaWindows,
     });
-    expect(metrics[0]?.firstContentMs).toBe(50);
+    expect(metrics[0]?.firstTokenMs).toBe(50);
     expect(metrics[0]?.totalDurationMs).toBeGreaterThanOrEqual(50);
   });
 

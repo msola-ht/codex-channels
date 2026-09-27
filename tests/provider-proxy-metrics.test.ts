@@ -41,17 +41,21 @@ describe("Provider proxy metrics channel", () => {
       received.length = 0;
       for (const value of [0, 12.5, -1, "123", null]) {
         await sendProviderProxyMetrics(socketPath, {
-          ...metrics(), firstContentMs: value, requestModel: "requested", responseModel: "echoed",
+          ...metrics(), timingBasis: "submitted", firstTokenMs: value, requestModel: "requested", responseModel: "echoed",
         } as ProviderProxyMetrics);
       }
-      expect(received.map((value) => value.firstContentMs)).toEqual([0, 12.5]);
+      expect(received.map((value) => value.firstTokenMs)).toEqual([0, 12.5]);
       expect(received[0]).toMatchObject({ requestModel: "requested", responseModel: "echoed" });
       received.length = 0;
       for (const value of [0, 1234.5, -1, "123", null]) {
-        await sendProviderProxyMetrics(socketPath, { ...metrics(), totalDurationMs: value } as ProviderProxyMetrics);
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), timingBasis: "submitted", totalDurationMs: value } as ProviderProxyMetrics);
       }
       expect(received.map((value) => value.totalDurationMs)).toEqual([0, 1234.5]);
       received.length = 0;
+      for (const legacy of [{ totalDurationMs: 1234 }, { firstContentMs: 12 }, { firstTokenMs: 12 }, { timingBasis: "entry", totalDurationMs: 12 }]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), ...legacy } as ProviderProxyMetrics);
+      }
+      expect(received).toHaveLength(0);
       for (const requestServiceTier of ["priority", "default", null, 123]) {
         await sendProviderProxyMetrics(socketPath, { ...metrics(), requestServiceTier } as ProviderProxyMetrics);
       }

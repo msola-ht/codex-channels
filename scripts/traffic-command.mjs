@@ -176,34 +176,12 @@ function renderDetail(detail) {
   lines.push(`思考等级：${parameters.reasoningEffort ?? "未提供"} · 请求服务层级：${parameters.serviceTier ?? "未提供"}`);
   if (parameters.previousResponseId !== undefined) lines.push(`接续响应：${parameters.previousResponseId}`);
   if (detail.response === null) {
-    lines.push("", "响应：等待终态");
+    lines.push("", "响应：未记录终态");
   } else {
     lines.push("", `响应：${stateLabel(detail.response.state)}`
-      + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`)
-      + (detail.response.durationMs === undefined ? "" : ` 原始记录耗时（墙钟）=${formatElapsedDuration(detail.response.durationMs)}`));
-    lines.push(`单请求首字耗时：${detail.response.firstContentMs === undefined ? "未采集" : formatElapsedDuration(detail.response.firstContentMs)}`);
-    const call = detail.response.callTiming;
-    lines.push("本次调用（单调时钟）：");
-    if (call === null) lines.push("  未记录阶段，不从历史记录补算；上方为原始记录的墙钟耗时。");
-    else {
-      const stages = [
-        ["总耗时", call.totalMs], ["转发前准备", call.preForwardMs],
-        ["转发至首字事件", call.firstEventWaitMs], ["首字事件至结束", call.afterFirstEventMs],
-        ...(detail.response.httpTiming === null ? [
-          ["转发开始至提交发送", call.submitWaitMs], ["提交发送至首字事件", call.submittedToFirstEventMs],
-        ] : [
-          ["入口至收齐请求体", call.receiveRequestMs], ["收齐请求体至响应头", call.waitResponseHeadMs], ["响应头至结束", call.receiveResponseMs],
-        ]),
-      ];
-      for (const [label, value] of stages) lines.push(`  ${label}：${value === undefined ? "未记录" : formatElapsedDuration(value)}`);
-      if (call.connectionReady !== undefined) lines.push(`  进入转发时连接${call.connectionReady ? "已就绪" : "尚未就绪"}；提交发送不表示上游已经收到。`);
-    }
-    lines.push("首字后包含生成、传输和背压暂停；HTTP 阶段可重叠，不能重复相加。失败记录的结束表示本地观察到中断。", "上游轮次统计（独立口径）：");
-    lines.push(`上游轮次首 Token：${detail.response.timing?.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.timing.firstTokenMs)}`);
-    for (const [label, key] of [["最大排队", "queueMaxMs"], ["轮次累计生成", "samplingMs"], ["logical turn", "totalMs"], ["客户端工具暂停", "toolPauseMs"]]) {
-      const value = detail.response.timing?.[key];
-      lines.push(`  ${label}：${value === undefined ? "未提供" : formatElapsedDuration(value)}`);
-    }
+      + (detail.response.status === null ? "" : ` HTTP ${detail.response.status}`));
+    lines.push(`首 Token：${detail.response.firstTokenMs === undefined ? "未提供" : formatElapsedDuration(detail.response.firstTokenMs)}`);
+    lines.push(`请求耗时：${detail.response.callTiming?.totalMs === undefined ? "未提供" : formatElapsedDuration(detail.response.callTiming.totalMs)}`);
     if (detail.response.failureStage !== undefined) lines.push(`失败阶段：${detail.response.failureStage}`);
     lines.push(...headerLines(detail.response.headers), "", "终态正文：", indent(pretty(detail.response.body)));
     if (detail.response.bodyTruncated) lines.push("（终态正文展示已截断）");
@@ -214,7 +192,7 @@ function renderDetail(detail) {
     }
     if (detail.response.outputTruncated) lines.push("（输出展示不完整：超出上限或传输记录残缺、无法解析）");
     if (detail.response.errorScope !== undefined) {
-      lines.push(`错误：${detail.response.errorScope}`
+      lines.push(`${detail.response.state === "completed" ? "完成后的诊断" : "错误"}：${detail.response.errorScope}`
         + (detail.response.error === undefined ? "" : ` ${detail.response.error}`));
     }
   }
@@ -225,7 +203,7 @@ function stateLabel(state) {
   if (state === "completed") return "完成";
   if (state === "failed") return "失败";
   if (state === "incomplete") return "不完整";
-  return "进行中";
+  return "未记录终态";
 }
 
 function pretty(text) {

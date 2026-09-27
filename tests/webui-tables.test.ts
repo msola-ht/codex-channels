@@ -53,7 +53,7 @@ describe("WebUI metrics table presentation", () => {
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
-          firstContentMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
+          firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
         const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
           h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null,
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
@@ -120,7 +120,7 @@ describe("WebUI metrics table presentation", () => {
           requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
-          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "tokensPerSecond", desc: false }] }),
+          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
@@ -206,6 +206,21 @@ describe("WebUI metrics table presentation", () => {
         result.traceFailure = render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop, traceError: true });
         const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
         result.truncatedContent = render(TrafficContent, { title: "片段", text: '{"partial":', json: true, truncated: true });
+        globalThis.fixtureDisclosureOpen = false;
+        const completedDetail = { ...detail, response: { ...response, callTiming: { totalMs: 9500 }, firstTokenMs: 1550,
+          usage: { inputTokens: 1000, cachedTokens: 500, outputTokens: 200, reasoningTokens: 50 },
+          output: [{ type: "message", text: "visible-answer" }] } };
+        result.structuredCall = render(TrafficDetail, { detail: completedDetail, provider: "openai", session: "hidden-batch", onRetry: noop, onTracePageChange: noop });
+        for (const category of ["prewarm", "models"]) {
+          result['call-' + category] = render(TrafficDetail, { detail: { ...completedDetail, category }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        }
+        result.pendingCall = render(TrafficDetail, { detail: { ...detail, state: "pending" }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        result.failedCall = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response,
+          state: "failed", failureStage: "upstream_error", failure: "hidden-error", errorScope: "socket", error: "hidden-transport-error" } }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        const completedWithDisconnect = { ...completedDetail, response: { ...completedDetail.response, errorScope: "client_disconnected" } };
+        result.completedDisconnect = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        globalThis.fixtureDisclosureOpen = true;
+        result.completedDisconnectOpen = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         globalThis.fixtureDisclosureOpen = false;
         result.incompleteOutput = render(TrafficDetail, { detail: { ...detail, response: {
           state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
@@ -424,7 +439,7 @@ describe("WebUI metrics table presentation", () => {
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
       "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
-      "首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情",
+      "首 Token", "请求耗时", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
@@ -446,8 +461,9 @@ describe("WebUI metrics table presentation", () => {
     const responseOnly = markup.fastResponseOnly!;
     expect(requestOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
     expect(responseOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
-    expect(requestOnly.indexOf(">Fast</span>")).toBeLessThan(requestOnly.indexOf("响应服务层级"));
+    expect(requestOnly.indexOf(">Fast</span>")).toBeGreaterThan(requestOnly.indexOf("请求服务层级"));
     expect(responseOnly.indexOf(">Fast</span>")).toBeGreaterThan(responseOnly.indexOf("响应服务层级"));
+    expect(responseOnly.indexOf(">Fast</span>")).toBeLessThan(responseOnly.indexOf("请求服务层级"));
     expect(markup.traceClosed).not.toContain(">Fast</span>");
   });
 
@@ -464,10 +480,10 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "生成 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "生成 Token/s",
+      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -492,7 +508,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("时间");
-    const speedIndex = headers(markup.ascending!).indexOf("端到端 Token/s");
+    const speedIndex = headers(markup.ascending!).indexOf("请求耗时");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -514,7 +530,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首字耗时", "总耗时", "生成 Token/s", "端到端 Token/s", "调用详情"]) {
+    for (const label of ["首 Token", "请求耗时", "调用详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");
@@ -567,7 +583,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
     expect(markup.trafficCountsLoading).toContain("的调用明细");
@@ -586,6 +602,38 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficLoading).not.toContain("的调用明细");
   });
 
+  it("structures call overview, response, request and folded diagnostics without guessing live state", () => {
+    const html = markup.structuredCall!;
+    const titles = [...html.matchAll(/data-slot="card-title"[^>]*>(.*?)<\/div>/g)].map(match => match[1]);
+    expect(titles.slice(1)).toEqual(["响应", "请求", "诊断信息"]);
+    expect(html).toContain('aria-label="调用概览"');
+    for (const text of ["首 Token", "请求耗时", "1.55 s", "9.5 s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
+    for (const text of ["hidden-batch", "request-body", "old-trace-body", "详细耗时", "逐条用量归因"]) expect(html).not.toContain(text);
+    expect(markup.pendingCall).toContain("未记录终态");
+    expect(markup.pendingCall).not.toContain("进行中");
+    expect(markup.pendingCall).toContain('data-slot="empty"');
+    expect(markup.failedCall!.match(/role="alert"/g)).toHaveLength(1);
+    expect(markup.failedCall).toContain("错误详情");
+    expect(markup.failedCall).not.toContain("hidden-error");
+    for (const category of ["prewarm", "models"]) {
+      expect(markup['call-' + category]).not.toContain("首 Token");
+      expect(markup['call-' + category]).not.toContain("输入 Token");
+      expect(markup['call-' + category]).toContain("请求耗时");
+    }
+  });
+
+  it("keeps completed calls successful and preserves late disconnects in folded diagnostics", () => {
+    expect(markup.completedDisconnect).toContain("完成后的诊断信息");
+    expect(markup.completedDisconnect).not.toContain("client_disconnected");
+    for (const html of [markup.completedDisconnect, markup.completedDisconnectOpen]) {
+      expect(html).not.toContain("请求失败");
+      expect(html).not.toContain('role="alert"');
+      expect(html).toContain("visible-answer");
+    }
+    expect(markup.completedDisconnectOpen).toContain("client_disconnected");
+    expect(markup.completedDisconnectOpen).toContain("不改变本次请求的完成状态");
+  });
+
   it("keeps call content but hides stale trace pages during loading or failure", () => {
     expect(markup.incompleteOutput).toContain("输出展示不完整");
     expect(markup.incompleteOutput).toContain("complete visible message");
@@ -598,8 +646,10 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.truncatedContent).not.toContain("格式化</button>");
     for (const html of [markup.traceLoading, markup.traceFailure]) {
       expect(html).toContain("request-body");
-      expect(html).toContain("提供商 openai · 批次 batch-1");
-      expect(html).toContain("调用编号 #7");
+      expect(html).toContain("batch-1");
+      expect(html).toContain("提供商");
+      expect(html).toContain("调用编号");
+      expect(html).toContain("#7");
       expect(html).toContain("复制定位信息");
       expect(html).not.toContain("old-trace-body");
       expect(html).toMatch(/<button\b[^>]*disabled=""/);

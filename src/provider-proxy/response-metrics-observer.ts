@@ -46,9 +46,11 @@ export interface ProviderProxyMetrics {
   totalTokens: number | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
-  /** 本次上游转发开始至首个符合传输协议口径的事件；不是客户端显示时间。 */
-  firstContentMs?: number;
-  /** 代理收到请求至首个终态或结束/失败；单调时钟，不含终态后的投递。 */
+  /** 提交发送至首段非空文本增量（含思考与工具参数）；不是客户端显示时间。 */
+  firstTokenMs?: number;
+  /** IPC 中明确区分旧的入口计时。 */
+  timingBasis?: "submitted";
+  /** 提交发送至首个终态或结束/失败；单调时钟，不含发送前准备。 */
   totalDurationMs?: number;
   requestModel?: string | null;
   responseModel?: string | null;
@@ -73,7 +75,6 @@ export interface MetricsState extends ProviderProxyMetrics {
 
 const timingByMetrics = new WeakMap<MetricsState, { responseId: string; ttftMs?: number }>();
 const requestClocks = new WeakMap<MetricsState, number>();
-const totalRequestClocks = new WeakMap<MetricsState, number>();
 
 export function createMetricsState(
   metadata: ResponseMetricsMetadata,
@@ -81,11 +82,11 @@ export function createMetricsState(
   transport: ProviderProxyMetrics["transport"],
   operation: ProviderProxyMetrics["operation"],
   userAgent: string | null,
-  startedAtMonotonicMs: number,
-  totalStartedAtMonotonicMs?: number,
+  submittedAtMonotonicMs?: number,
 ): MetricsState {
   const metrics: MetricsState = {
     ...metadata,
+    timingBasis: "submitted",
     transport,
     responseFormat: transport === "websocket" ? "websocket" : "unknown",
     operation,
@@ -109,13 +110,17 @@ export function createMetricsState(
     weeklyQuota: null,
     quotaWindows: null,
   };
-  requestClocks.set(metrics, startedAtMonotonicMs);
-  if (totalStartedAtMonotonicMs !== undefined) totalRequestClocks.set(metrics, totalStartedAtMonotonicMs);
+  if (submittedAtMonotonicMs !== undefined) observeRequestSubmitted(metrics, submittedAtMonotonicMs);
   return metrics;
 }
 
+/** 仅在实际提交给出站传输时调用；提交前的 WS 连接等待和路由准备不计时。 */
+export function observeRequestSubmitted(metrics: MetricsState, at: number): void {
+  if (!requestClocks.has(metrics)) requestClocks.set(metrics, at);
+}
+
 function observeTotalDuration(metrics: MetricsState, at: number): void {
-  const started = totalRequestClocks.get(metrics);
+  const started = requestClocks.get(metrics);
   if (started !== undefined) metrics.totalDurationMs ??= at - started;
 }
 
@@ -205,9 +210,9 @@ export function observeResponseEvent(
   receivedAtMs: number,
   receivedAtMonotonicMs: number,
 ): boolean {
-  if (metrics.firstContentMs === undefined && startsFirstToken(metrics.transport, type, event)) {
+  if (metrics.firstTokenMs === undefined && startsFirstToken(type, event)) {
     const started = requestClocks.get(metrics);
-    if (started !== undefined) metrics.firstContentMs = receivedAtMonotonicMs - started;
+    if (started !== undefined) metrics.firstTokenMs = receivedAtMonotonicMs - started;
   }
   if (metrics.transport === "websocket" && type === "response.created") {
     const responseId = boundedString(asRecord(event?.response)?.id);
@@ -379,7 +384,7 @@ export class HttpResponseMetricsObserver {
     if (!line.startsWith("data:")) return false;
     const payload = line.slice(5).trim();
     if (!payload || payload === "[DONE]") return false;
-    const observed = inspectResponseEvent(payload, this.currentEvent, this.metrics.firstContentMs === undefined);
+    const observed = inspectResponseEvent(payload, this.currentEvent, this.metrics.firstTokenMs === undefined);
     if (
       this.metrics.responseFormat === "unknown"
       && observed.type.startsWith("response.")
@@ -523,20 +528,27 @@ export function inspectResponseEvent(
   };
 }
 
-function startsFirstToken(
-  transport: ProviderProxyMetrics["transport"],
-  type: string,
-  event: Record<string, unknown> | undefined,
-): boolean {
-  // 参考 sub2api 的 HTTP semantic / WS token-event 口径；不把旁路元数据或纯错误计为首字。
-  if (!event || !type.startsWith("response.")) return false;
-  if (transport === "websocket") {
-    return type.endsWith(".delta") || type === "response.output_text.done"
-      || type === "response.function_call_arguments.done";
-  }
-  return type !== "response.created" && type !== "response.in_progress"
-    && type !== "response.failed" && type !== "response.metadata";
+function startsFirstToken(type: string, event: Record<string, unknown> | undefined): boolean {
+  if (!event) return false;
+  const field = firstTokenEventFields[type];
+  return field !== undefined && typeof event[field] === "string" && event[field].length > 0;
 }
+
+// HTTP 与 WebSocket 共享同一内容白名单；不把状态、空条目或 usage 当作输出。
+const firstTokenEventFields: Readonly<Record<string, string>> = {
+  "response.output_text.delta": "delta",
+  "response.reasoning_text.delta": "delta",
+  "response.reasoning_summary_text.delta": "delta",
+  "response.refusal.delta": "delta",
+  "response.function_call_arguments.delta": "delta",
+  "response.custom_tool_call_input.delta": "delta",
+  "response.output_text.done": "text",
+  "response.reasoning_text.done": "text",
+  "response.reasoning_summary_text.done": "text",
+  "response.refusal.done": "refusal",
+  "response.function_call_arguments.done": "arguments",
+  "response.custom_tool_call_input.done": "input",
+};
 
 const responseEventBodyTypeNames = [
   "response.created",
