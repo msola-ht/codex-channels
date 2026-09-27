@@ -17,7 +17,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { isComputerUseOperation, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, isComputerUseOperation, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import {
   createPlanPresentation,
   type PlanPresentation,
@@ -122,6 +122,7 @@ export interface FeishuOutboxOptions {
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
+  private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly messagePort: FeishuMessagePort;
   private readonly deliveryAbort = new AbortController();
@@ -222,6 +223,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
     }
     if (event.type === "operation.updated") {
+      if (event.operation.kind === "contextCompaction") {
+        const text = this.compactionNotices.accept(event);
+        if (text !== null) {
+          this.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+          this.delivery.enqueue(event.target.conversationId,
+            (signal) => this.sendMarkdown(event.target.conversationId, text, maximumFeishuMessageChunks, undefined, undefined, signal), true);
+        }
+        return;
+      }
       if (isExecutionOperation(event.operation)) {
         const turn = turnKey(event.threadId, event.turnId);
         const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);

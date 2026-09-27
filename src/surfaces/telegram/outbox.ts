@@ -19,7 +19,7 @@ import {
   OperationUpdateBuffer,
   type OperationUpdateSummary,
 } from "../operation-update-buffer.js";
-import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
+import { ContextCompactionNotices, isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
 import { TurnReplyTargets } from "../turn-reply-targets.js";
 import {
   createSubagentContactedPresentation,
@@ -149,6 +149,7 @@ export class TelegramOutbox {
   private readonly reasoningGenerations = new Map<string, number>();
   private readonly replyTargets = new TurnReplyTargets<number>();
   private readonly typing: TelegramTypingIndicator;
+  private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly approvalOperations = new TelegramApprovalOperationCoordinator();
   private readonly notifiedTurns = new Set<string>();
@@ -338,6 +339,16 @@ export class TelegramOutbox {
         return;
       }
       case "operation.updated": {
+        if (event.operation.kind === "contextCompaction") {
+          const text = this.compactionNotices.accept(event);
+          if (text !== null) {
+            this.flushStreamsBeforeVisibleOutput(chatId, this.turnKey(event.threadId, event.turnId));
+            this.enqueue(chatId, async (signal) => {
+              await this.sendOperationMessage(chatId, text, undefined, signal);
+            }, true);
+          }
+          return;
+        }
         const turnKey = this.turnKey(event.threadId, event.turnId);
         if (isExecutionOperation(event.operation)) {
           const operationKey = this.operationKey(turnKey, event.operation.itemId);

@@ -286,7 +286,8 @@ export function isCriticalOutputEvent(event: OutputEvent): boolean {
     event.type !== "plan.updated" &&
     event.type !== "subagent.spawned" &&
     event.type !== "subagent.contacted" &&
-    !(event.type === "operation.updated" && event.operation.status === "running");
+    !(event.type === "operation.updated" && event.operation.status === "running"
+      && event.operation.kind !== "contextCompaction");
 }
 
 export function usesOpenAiAccount(modelProvider: string | undefined): boolean {

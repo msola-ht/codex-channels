@@ -328,3 +328,13 @@ describe("isSheddableBacklogEvent", () => {
     }
   });
 });
+
+it.each(["feishu", "telegram", "weixin"] as const)("protects compaction start and completion from shedding for %s", (surface) => {
+  for (const status of ["running", "completed"] as const) {
+    const event: OutputEvent = { type: "operation.updated", target: { ...target, surface },
+      threadId: "thread", turnId: "turn", operation: { itemId: "compact", kind: "contextCompaction", status } };
+    expect(resolveSurfaceDelivery(surface, event)).toEqual({ disposition: "deliver", critical: true });
+    expect(isCriticalOutputEvent(event)).toBe(true);
+    expect(isSheddableBacklogEvent(event)).toBe(false);
+  }
+});

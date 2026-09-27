@@ -207,7 +207,8 @@ Core 只把 MCP 启动失败、取消及异常恢复投递给 Surface，首次�
 Telegram、飞书与微信分别通过 HTML 面板、CardKit Markdown 或按会话排序的纯文本气泡发送。
 `configuration-change-format.ts` 统一 Telegram、飞书与微信已有的配置热加载、重启、重装和失败通知；
 Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击。
-`operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要；
+`operation-presentation.ts` 统一操作标题、状态、耗时与退出码元数据、上游敏感占位符和单行摘要，
+并为三个渠道提供有界的压缩通知去重与文案；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作，并统一在非 Commentary
@@ -245,11 +246,12 @@ warning 和 MCP 错误只使用 Client 边界已经统一脱敏并限长的稳�
 
 Bootstrap 把共享的 `display.operation_updates` 三档模式显式注入各 Surface Outbox。`full`
 显示完整操作，`compact` 显示单行摘要，其中子代理只保留启动和失败、抑制成功的等待与交互操作，
-`hidden` 忽略 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
-Telegram 和微信把同一 Turn 的成功查询类操作延迟聚合；
+`hidden` 忽略普通 `operation.updated`；Core 始终正常归约操作，审批与其他关键输出不受影响。
+上下文压缩开始和完成由共享展示状态去重，三个渠道均独立、有序发送，不受操作显示设置影响。
+Telegram 把同一 Turn 的成功查询类操作延迟聚合；
 飞书只聚合 MCP 与动态工具，网页搜索完成后立即发送。MCP 目录与实际工具调用统一显示 App Server
 提供的只读、可能写入或未知提示，该提示不替代审批或执行结果。微信
-对其余操作仍仅发送终态，避免用普通气泡模拟持续更新；Surface 只实现平台格式，不各自定义
+除上下文压缩生命周期外，不主动发送操作事件；Surface 只实现平台格式，不各自定义
 第二套显示配置。
 
 Bootstrap 还把默认开启的 `display.plan_updates` 注入三个 Surface Outbox。开启后，各端消费

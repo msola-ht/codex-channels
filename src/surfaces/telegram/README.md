@@ -120,6 +120,7 @@ ForceReply 收集任务，再使用完整 Plugin ID 进入共享 Application 调
 账户额度和 MCP 状态通知也必须进入每聊天有界输出队列；不得从 App Server Reader 直接等待 Telegram 网络发送。
 结构化用户错误由 `bot.ts` 转换为 Telegram 专属文案；App Server Turn、warning 和 MCP 错误会
 显示 Client 边界已经统一脱敏并限长的详情，未知异常和原始响应正文不写入 Telegram 日志或外部消息。
+上下文压缩开始与完成复用共享去重和文案，分别立即入队为独立通知，不受操作显示设置影响。
 共享配置 `display.operation_updates` 为 `full` 时显示完整操作详情、状态、耗时和退出码，
 为 `compact` 时显示一行状态、元数据和最多 160 个字符的详情摘要，为 `hidden` 时不发送操作
 过程；命令、文件、图片和子代理等操作按 item 独立发送并在同一消息内更新状态；成功的 MCP、动态工具和网页搜索按 Turn 延迟到最终回复前聚合，单项保留详情，多项显示

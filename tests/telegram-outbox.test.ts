@@ -141,6 +141,17 @@ afterEach(() => {
 });
 
 describe("TelegramOutbox", () => {
+  it.each(["full", "compact", "hidden"] as const)("delivers compaction start before completion without timer merging in %s mode", async (display) => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox(api as unknown as Api, pino({ level: "silent" }), undefined, { operationUpdateDisplay: display });
+    for (const status of ["running", "running", "completed", "completed", "running"] as const) {
+      outbox.handle(operationUpdated("compact-1", status, "contextCompaction"));
+    }
+    await outbox.close();
+    expect(api.sent).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+    expect(api.edits).toEqual([]);
+  });
+
   it("skips empty leading HTML chunks while retaining the first actual message identity", async () => {
     const api = new FakeTelegramApi();
     const logger = pino({ level: "silent" });

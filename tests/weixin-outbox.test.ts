@@ -26,6 +26,16 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- 
 const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
+  it("delivers both compaction lifecycle notices through the reply window", async () => {
+    const { outbox, sendText } = outboxFixture();
+    for (const status of ["running", "running", "completed", "completed", "running"] as const) {
+      outbox.handle({ type: "operation.updated", target, threadId: "thread", turnId: "turn",
+        operation: { itemId: "compact-1", kind: "contextCompaction", status } });
+    }
+    await outbox.close();
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+  });
+
   it("keeps reply contexts private to one account and Conversation", () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");

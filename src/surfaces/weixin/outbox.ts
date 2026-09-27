@@ -8,6 +8,7 @@ import type {
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { ContextCompactionNotices } from "../operation-presentation.js";
 import { resolveSurfaceDelivery } from "../delivery-policy.js";
 import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
@@ -85,6 +86,7 @@ export interface WeixinOutboxOptions {
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
+  private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly accountId: string;
   private readonly client: Pick<WeixinProtocolClient, "sendText">;
@@ -135,7 +137,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private handleEvent(event: OutputEvent): void {
     // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
-    // 通知，推理、计划、操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
+    // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
     const decision = resolveSurfaceDelivery("weixin", event);
     if (decision.disposition === "ignore") {
       return;
@@ -254,6 +256,8 @@ export class WeixinOutbox implements SurfaceOutputPort {
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
+      case "operation.updated":
+        return this.compactionNotices.accept(event);
       case "text.completed":
         if (event.phase !== "final_answer") {
           return null;
