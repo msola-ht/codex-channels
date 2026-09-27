@@ -57,6 +57,16 @@ describe("commit verification workflows", () => {
     }
   });
 
+  it("keeps translation reporting read-only and dictionary validation in the shared gate", () => {
+    const workflow = readFileSync(join(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+    const verify = readFileSync(join(process.cwd(), "scripts/verify-commit.mjs"), "utf8");
+    expect(workflow).toContain("I18N_BASE_SHA: ${{ github.event.pull_request.base.sha }}");
+    expect(workflow).toContain('i18n:report -- --base "$I18N_BASE_SHA"');
+    expect(workflow).toContain("name: webui-i18n-report");
+    expect(workflow).not.toMatch(/contents:\s*write/u);
+    expect(verify).toContain('args: ["run", "i18n:check"]');
+  });
+
   it("reports each verification stage duration and the total duration", () => {
     const script = readFileSync(
       join(process.cwd(), "scripts", "verify-commit.mjs"),

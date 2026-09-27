@@ -1,0 +1,28 @@
+{
+  "sourceLanguage": "zh-CN",
+  "targetLanguage": "en-US",
+  "terms": [
+    { "source": "会话", "target": "thread" },
+    { "source": "轮次", "target": "turn" },
+    { "source": "子代理", "target": "subagent" },
+    { "source": "请求", "target": "request" },
+    { "source": "调用", "target": "call" },
+    { "source": "调用详情", "target": "Traffic" },
+    { "source": "压缩", "target": "compaction" },
+    { "source": "缓存命中率", "target": "cache hit rate" },
+    { "source": "访问令牌", "target": "access token" },
+    { "source": "未完整观测", "target": "partially observed" },
+    { "source": "预览", "target": "preview" },
+    { "source": "确认", "target": "confirm" }
+  ],
+  "preserve": ["Codex", "OpenAI", "DeepSeek", "Cline Pass", "Provider", "Thread", "Turn", "Token", "API", "MCP", "Fast", "Goal"],
+  "rules": [
+    "以中文为源语言，按完整文案键翻译，结合键的命名空间判断上下文。",
+    "原样保留 {name} 形式的占位符及出现次数，不能翻译占位符名称。",
+    "模型与 Provider ID、配置键、路径、命令、协议字段和代码片段原样保留。",
+    "保留未知、未观测、失败与零值的区别，不添加原文没有的状态或承诺。",
+    "译文使用简洁的美式英语，适合按钮、表格、提示及辅助技术朗读。",
+    "术语大小写按语境处理；显式技术名称与品牌使用 preserve 中的写法。",
+    "现有英文作为审查参考，不直接覆盖人工译文；源文案变更后需重新确认英文。"
+  ]
+}

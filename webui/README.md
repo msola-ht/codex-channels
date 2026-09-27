@@ -15,6 +15,7 @@ npm run lint       # oxlint
 ## 结构
 
 ```text
+i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生成翻译任务
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时与页面可见性，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG、Cline Pass 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数

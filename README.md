@@ -106,6 +106,7 @@ npm ci
 npm run check
 npm run lint
 npm run docs:check
+npm run i18n:check
 npm test
 ```
 
