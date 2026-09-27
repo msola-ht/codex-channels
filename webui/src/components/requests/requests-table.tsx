@@ -74,7 +74,7 @@ export function RequestsTable({
   const { t, language } = useTranslation()
   const columnLabels: Record<string, string> = {
     time: t("metrics.time"),
-    provider: "Provider",
+    provider: t("metrics.provider"),
     model: t("metrics.model"),
     ua: "User-Agent",
     operation: t("filters.operation"),
@@ -107,7 +107,7 @@ export function RequestsTable({
       id: "provider",
       accessorFn: (record) => record.provider ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>Provider</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.provider")}</SortableHeader>
       ),
       cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
     },

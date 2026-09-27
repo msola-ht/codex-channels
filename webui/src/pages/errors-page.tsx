@@ -97,7 +97,7 @@ export function ErrorsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>{t("metrics.time")}</TableHead>
-                      <TableHead>Provider</TableHead>
+                      <TableHead>{t("metrics.provider")}</TableHead>
                       <TableHead>{t("metrics.model")}</TableHead>
                       <TableHead>{t("filters.status")}</TableHead>
                       <TableHead className="text-right">HTTP</TableHead>

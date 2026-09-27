@@ -15,7 +15,7 @@ export function ThreadsPage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
-      <h1 className="shrink-0 text-xl font-semibold">Threads</h1>
+      <h1 className="shrink-0 text-xl font-semibold">{t("pages.threads")}</h1>
       <QueryFilters query={query} onChange={update} />
       <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (

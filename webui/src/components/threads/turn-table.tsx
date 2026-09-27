@@ -30,9 +30,9 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 export function TurnTable({ turns, threadId, query, pagination, loading = false }: { turns: TurnSummary[]; threadId: string; query: MetricsQuery; pagination: DataTableProps<TurnSummary>["pagination"]; loading?: boolean }) {
   const { t } = useTranslation()
   const columnLabels: Record<string, string> = {
-    turn: "Turn",
+    turn: t("metrics.turn"),
     time: t("metrics.time"),
-    provider: "Provider",
+    provider: t("metrics.provider"),
     model: t("metrics.model"),
     requests: t("metrics.requests"),
     failures: t("metrics.failures"),
@@ -56,14 +56,14 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
     {
       id: "turn",
       accessorFn: (turn) => turn.turnId,
-      header: ({ column }) => <SortableHeader column={column}>Turn</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>,
       cell: ({ row }) => <TruncatedText asChild text={row.original.turnId} className="max-w-48"><Link className="underline-offset-4 hover:underline" to={metricsLink("/requests", query, { threadId, turnId: row.original.turnId })}>{row.original.turnId}</Link></TruncatedText>,
     },
     {
       id: "provider",
       accessorFn: (turn) => turn.provider ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>Provider</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.provider")}</SortableHeader>
       ),
       cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
     },

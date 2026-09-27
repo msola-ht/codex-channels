@@ -30,12 +30,12 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
   const { t } = useTranslation()
   const columnLabels: Record<string, string> = {
     time: t("metrics.first"),
-    thread: "Thread",
-    provider: "Provider",
+    thread: t("metrics.thread"),
+    provider: t("metrics.provider"),
     model: t("metrics.model"),
     type: t("metrics.type"),
     parent: t("metrics.parent"),
-    turns: "Turn",
+    turns: t("metrics.turn"),
     requests: t("metrics.requests"),
     input: t("metrics.input"),
     cacheHitRate: t("metrics.cacheHitRate"),
@@ -63,7 +63,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "thread",
       accessorFn: (thread) => thread.threadId,
       header: ({ column }) => (
-        <SortableHeader column={column}>Thread</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.thread")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <Link
@@ -79,7 +79,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "provider",
       accessorFn: (thread) => thread.provider ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>Provider</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.provider")}</SortableHeader>
       ),
       cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
     },
@@ -115,7 +115,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "turns",
       accessorFn: (thread) => thread.turnCount,
       header: ({ column }) => (
-        <SortableHeader column={column}>Turn</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.turnCount}</span>

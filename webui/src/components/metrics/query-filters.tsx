@@ -38,8 +38,8 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
   const selectedProviders = draft.provider ?? []
   const providerOptions = [...new Set([...providers, ...selectedProviders])].sort()
   const textFields = [
-    ...(showThreadFilters && !threadId ? [["threadId", "Thread ID"]] : []),
-    ...(showThreadFilters ? [["turnId", "Turn ID"]] : []),
+    ...(showThreadFilters && !threadId ? [["threadId", t("metrics.threadId")]] : []),
+    ...(showThreadFilters ? [["turnId", t("metrics.turnId")]] : []),
     ["model", t("metrics.model")],
   ] as Array<["threadId" | "turnId" | "model", string]>
   const scopedFields = !showThreadFilters ? (["threadId", "turnId"] as const).filter((key) => Boolean(query[key])) : []
@@ -89,8 +89,8 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         </FieldGroup>
         {scopedFields.length > 0 ? <div className="mt-2 flex flex-wrap items-center gap-2" aria-label={t("filters.scope")}>
           {scopedFields.map((key) => <div key={key} className="flex items-center gap-1"><Badge variant="outline">
-            {key === "threadId" ? "Thread" : "Turn"}：<TruncatedText text={query[key]} className="max-w-48" /></Badge>
-            <Button type="button" variant="ghost" size="icon-xs" aria-label={t("filters.clear", { kind: key === "threadId" ? "Thread" : "Turn" })} onClick={() => onChange(key === "threadId" ? { threadId: undefined, turnId: undefined } : { turnId: undefined })}><XIcon /></Button>
+            {key === "threadId" ? t("metrics.thread") : t("metrics.turn")}：<TruncatedText text={query[key]} className="max-w-48" /></Badge>
+            <Button type="button" variant="ghost" size="icon-xs" aria-label={t("filters.clear", { kind: key === "threadId" ? t("metrics.thread") : t("metrics.turn") })} onClick={() => onChange(key === "threadId" ? { threadId: undefined, turnId: undefined } : { turnId: undefined })}><XIcon /></Button>
           </div>)}
         </div> : null}
       </form>
@@ -101,7 +101,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         <ErrorBanner error={dateError ? t("filters.invalidDate") : null} />
         <RangeSelector value={range} onChange={setRange} from={draft.from} to={draft.to} onDateChange={set} />
         <Field>
-          <FieldLabel htmlFor={`${id}-provider`}>Provider</FieldLabel>
+          <FieldLabel htmlFor={`${id}-provider`}>{t("metrics.provider")}</FieldLabel>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button id={`${id}-provider`} type="button" variant="outline" className="w-full justify-between" disabled={providersLoading || providersError !== null}>

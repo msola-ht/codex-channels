@@ -26,7 +26,7 @@ export function ThreadRunSummary({
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       <StatCard
-        title="Turn"
+        title={t("metrics.turn")}
         value={threadAggregate.turnCount}
         description={latestTurn === null ? t("threads.noLatest") : t("threads.latest", { count: formatCount(latestTurn.requestCount) })}
       />

@@ -32,8 +32,8 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(result.zero).not.toContain("暂未获取到账户数据");
     expect(result.filter).toContain("scoped-thread");
     expect(result.filter).toContain("scoped-turn");
-    expect(result.filter).toContain('aria-label="清除 Thread 筛选"');
-    expect(result.filter).toContain('aria-label="清除 Turn 筛选"');
+    expect(result.filter).toContain('aria-label="清除会话筛选"');
+    expect(result.filter).toContain('aria-label="清除轮次筛选"');
     expect(result.stale).toContain("snapshot-load-failed");
     expect(result.button).toMatch(/\sdisabled(?:=|\s|>)/u);
   }, 30_000);

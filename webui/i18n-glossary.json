@@ -2,6 +2,7 @@
   "sourceLanguage": "zh-CN",
   "targetLanguage": "en-US",
   "terms": [
+    { "source": "提供商", "target": "provider" },
     { "source": "会话", "target": "thread" },
     { "source": "轮次", "target": "turn" },
     { "source": "子代理", "target": "subagent" },
@@ -15,9 +16,10 @@
     { "source": "预览", "target": "preview" },
     { "source": "确认", "target": "confirm" }
   ],
-  "preserve": ["Codex", "OpenAI", "DeepSeek", "Cline Pass", "Provider", "Thread", "Turn", "Token", "API", "MCP", "Fast", "Goal"],
+  "preserve": ["Codex", "OpenAI", "DeepSeek", "Cline Pass", "Token", "API", "MCP", "Fast", "Goal"],
   "rules": [
     "以中文为源语言，按完整文案键翻译，结合键的命名空间判断上下文。",
+    "中文界面标签统一使用提供商、会话、轮次；英文对应 Provider、Thread、Turn。ID 的标签可翻译，实际值及 Turn State、X-Codex-Turn-State 等协议名称保持原样。",
     "原样保留 {name} 形式的占位符及出现次数，不能翻译占位符名称。",
     "模型与 Provider ID、配置键、路径、命令、协议字段和代码片段原样保留。",
     "保留未知、未观测、失败与零值的区别，不添加原文没有的状态或承诺。",

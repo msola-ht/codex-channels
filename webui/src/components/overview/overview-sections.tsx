@@ -134,7 +134,7 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Provider</TableHead>
+              <TableHead>{t("metrics.provider")}</TableHead>
               <TableHead>{t("overview.threads")}</TableHead>
               <TableHead>{t("overview.turnColumn")}</TableHead>
               <TableHead>{t("metrics.requests")}</TableHead>

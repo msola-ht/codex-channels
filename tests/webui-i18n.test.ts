@@ -407,6 +407,11 @@ describe("WebUI 界面文案语言切换", () => {
 
   it("Threads 链路的表头、空状态、筛选、统计与分页覆盖英文", () => {
     expect(result.zhThreads).toContain("暂无会话记录");
+    for (const label of ["提供商", "会话", "轮次"]) expect(result.zhThreads).toContain(label);
+    for (const label of [">Provider<", ">Thread<", ">Turn<"]) {
+      expect(result.zhThreads).not.toContain(label);
+      expect(result.enThreads).toContain(label);
+    }
     expect(result.enThreads).toContain("No thread records");
     expect(result.enThreads).toContain("First request in range");
     expect(result.enThreads).toContain('aria-label="Next page"');
