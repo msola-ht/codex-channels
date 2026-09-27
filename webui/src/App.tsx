@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
@@ -20,8 +20,9 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/s
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useLanguage } from "@/hooks/language-context"
-import { useServerTime } from "@/hooks/use-server-time"
-import { formatTimeZoneLabel } from "@/lib/format"
+import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
+import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
+import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
 
 const ConsolePage = lazy(() =>
@@ -85,6 +86,12 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   )
 }
 
+function ServerClock({ snapshot, syncFailed }: { snapshot: ServerClockSnapshot; syncFailed: boolean }) {
+  const [currentTime, setCurrentTime] = useState(snapshot.nowMs)
+  useEffect(() => observeServerClock(snapshot, setCurrentTime, document), [snapshot])
+  return <><time dateTime={new Date(currentTime).toISOString()} className="tabular-nums">{formatClockTime(currentTime)}</time>{" · "}{formatTimeZoneLabel(currentTime)}{syncFailed ? " · 时间待校准" : ""}</>
+}
+
 function Layout() {
   const { pathname } = useLocation()
   const { language, setLanguage } = useLanguage()
@@ -101,48 +108,50 @@ function Layout() {
   }
 
   return (
-    <SidebarProvider className="min-h-0 min-w-0">
-      <AppSidebar />
-      <SidebarInset className="min-w-0">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
-          <SidebarTrigger className="-ml-1" />
-          <Breadcrumb className="min-w-0 flex-1">
-            <BreadcrumbList className="flex-nowrap">
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink asChild>
-                  <Link to="/">Codex WebUI</Link>
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbTrail pathname={pathname} />
-            </BreadcrumbList>
-          </Breadcrumb>
-          <div className="flex shrink-0 items-center gap-1">
-            <span className="hidden text-xs text-muted-foreground lg:inline" title="页面时间与统计日期均使用服务端系统时区">
-              {formatTimeZoneLabel(time.data.nowMs)}
-            </span>
-            <LanguageToggle value={language} onChange={setLanguage} />
-            <ModeToggle />
+    <ServerTimeContext.Provider value={time.data}>
+      <SidebarProvider className="min-h-0 min-w-0">
+        <AppSidebar />
+        <SidebarInset className="min-w-0">
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
+            <SidebarTrigger className="-ml-1" />
+            <Breadcrumb className="min-w-0 flex-1">
+              <BreadcrumbList className="flex-nowrap">
+                <BreadcrumbItem className="hidden md:block">
+                  <BreadcrumbLink asChild>
+                    <Link to="/">Codex WebUI</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden md:block" />
+                <BreadcrumbTrail pathname={pathname} />
+              </BreadcrumbList>
+            </Breadcrumb>
+            <div className="flex shrink-0 items-center gap-1">
+              <span className="hidden text-xs text-muted-foreground lg:inline" title="页面时间与统计日期均使用服务端系统时区">
+                <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
+              </span>
+              <LanguageToggle value={language} onChange={setLanguage} />
+              <ModeToggle />
+            </div>
+          </header>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
+            <p className="mb-3 text-xs text-muted-foreground lg:hidden">
+              <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
+            </p>
+            <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
+              <Routes>
+                <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />
+                <Route path="/threads" element={<ThreadsPage />} />
+                <Route path="/threads/:id" element={<ThreadDetailPage />} />
+                <Route path="/requests" element={<RequestsPage />} />
+                <Route path="/traffic" element={<TrafficPage />} />
+                <Route path="/errors" element={<ErrorsPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+              </Routes>
+            </Suspense>
           </div>
-        </header>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto p-3">
-          <p className="mb-3 text-xs text-muted-foreground lg:hidden">
-            服务端时区：{formatTimeZoneLabel(time.data.nowMs)}
-          </p>
-          <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
-            <Routes>
-              <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />
-              <Route path="/threads" element={<ThreadsPage />} />
-              <Route path="/threads/:id" element={<ThreadDetailPage />} />
-              <Route path="/requests" element={<RequestsPage />} />
-              <Route path="/traffic" element={<TrafficPage />} />
-              <Route path="/errors" element={<ErrorsPage />} />
-              <Route path="/settings" element={<SettingsPage />} />
-            </Routes>
-          </Suspense>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </ServerTimeContext.Provider>
   )
 }
 

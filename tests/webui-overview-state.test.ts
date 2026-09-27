@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { observeServerClock, observeServerTimeResync } from "../webui/src/lib/server-time.js";
 import { resolveDashboardData } from "../webui/src/lib/overview-state.js";
-import { formatCalendarDay, formatFailureRate, formatSuccessRate, formatTime, formatTimeZoneLabel, setServerTimeZone } from "../webui/src/lib/format.js";
+import { formatClockTime, formatCalendarDay, formatFailureRate, formatSuccessRate, formatTime, formatTimeZoneLabel, setServerTimeZone } from "../webui/src/lib/format.js";
 import { fillDailyRange, fillRecentDays, usageTrendRows } from "../webui/src/lib/trend.js";
 import type { OverviewResponse } from "../scripts/webui-api.js";
 
@@ -31,7 +32,7 @@ describe("WebUI 控制台范围与数据一致性", () => {
     expect(resolveDashboardData(request, current)).toBe(current.data);
   });
 
-  it("does not expose stale charts or quota after a failed refresh", () => {
+  it("does not expose a previous range overview after a failed refresh", () => {
     const request = {};
     const current = responses("today", request);
     const previous = responses("today", {});
@@ -52,6 +53,15 @@ describe("WebUI 控制台范围与数据一致性", () => {
 });
 
 describe("服务端时区展示与日期标签", () => {
+  it("formats the header clock to seconds using the server timezone across midnight", () => {
+    setServerTimeZone("Asia/Shanghai");
+    expect(formatClockTime(Date.parse("2026-09-17T15:59:59Z"))).toBe("2026-09-17 23:59:59");
+    expect(formatClockTime(Date.parse("2026-09-17T16:00:00Z"))).toBe("2026-09-18 00:00:00");
+    setServerTimeZone("America/New_York");
+    expect(formatClockTime(Date.parse("2026-11-01T06:00:00Z"))).toBe("2026-11-01 01:00:00");
+    expect(formatTimeZoneLabel(Date.parse("2026-11-01T06:00:00Z"))).toBe("America/New_York（UTC-05:00）");
+  });
+
   it("preserves server hourly buckets without turning them into daily rows", () => {
     setServerTimeZone("America/New_York");
     const hourly = [
@@ -99,4 +109,75 @@ describe("WebUI 成功率与失败率", () => {
       expect(formatSuccessRate(requests, failures)).toBe(successRate);
     },
   );
+});
+
+
+describe("WebUI server clock lifecycle", () => {
+  afterEach(() => vi.useRealTimers());
+  class Page extends EventTarget {
+    visibilityState = "visible";
+    change(state: string) {
+      this.visibilityState = state;
+      this.dispatchEvent(new Event("visibilitychange"));
+    }
+  }
+  it("uses the server baseline, includes sleep elapsed time and cleans up ticking", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const page = new Page();
+    const update = vi.fn();
+    const stop = observeServerClock({ nowMs: 1_000_000, receivedAtMs: Date.now(), timeZone: "UTC" }, update, page);
+    expect(update).toHaveBeenLastCalledWith(1_000_000);
+    vi.advanceTimersByTime(1_000);
+    expect(update).toHaveBeenLastCalledWith(1_001_000);
+    page.change("hidden");
+    expect(vi.getTimerCount()).toBe(0);
+    vi.setSystemTime(3_701_000);
+    page.change("visible");
+    expect(update).toHaveBeenLastCalledWith(4_601_000);
+    stop();
+    const calls = update.mock.calls.length;
+    page.change("visible");
+    vi.advanceTimersByTime(5_000);
+    expect(update).toHaveBeenCalledTimes(calls);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("coalesces visibility and focus into one calibration without polling", () => {
+    vi.useFakeTimers();
+    const page = new Page();
+    const focus = new EventTarget();
+    const refresh = vi.fn();
+    const stop = observeServerTimeResync(refresh, page, focus);
+    vi.advanceTimersByTime(60_000);
+    expect(refresh).not.toHaveBeenCalled();
+    page.change("visible");
+    focus.dispatchEvent(new Event("focus"));
+    vi.advanceTimersByTime(100);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(60_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    focus.dispatchEvent(new Event("focus"));
+    page.change("hidden");
+    vi.advanceTimersByTime(100);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    page.change("visible");
+    stop();
+    focus.dispatchEvent(new Event("focus"));
+    vi.advanceTimersByTime(100);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("replaces the old baseline after calibration without leaving the old timer active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100_000);
+    const page = new Page();
+    const update = vi.fn();
+    const stop = observeServerClock({ nowMs: 1_000_000, receivedAtMs: Date.now(), timeZone: "UTC" }, update, page);
+    stop();
+    const stopNew = observeServerClock({ nowMs: 2_000_000, receivedAtMs: Date.now(), timeZone: "UTC" }, update, page);
+    vi.advanceTimersByTime(1_000);
+    expect(update).toHaveBeenLastCalledWith(2_001_000);
+    expect(vi.getTimerCount()).toBe(1);
+    stopNew();
+  });
 });

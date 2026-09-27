@@ -29,6 +29,7 @@ import type {
   DeepseekBalanceResponse,
   OpencodeGoUsageResponse,
   OverviewResponse,
+  OfficialAccountSnapshotsResponse,
   RangeName,
   MetricsRangeQuery,
 } from "@/lib/types"
@@ -71,14 +72,16 @@ export function ConsolePage({ range, onRangeChange }: {
       <AccountStatusCards
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
-        overview={dashboard.data}
+        weeklyQuota={dashboard.weeklyQuota}
+        accountDataLoaded={officialAccounts.data !== null}
+        accountLoading={officialAccounts.loading}
         deepseek={officialAccounts.data?.deepseek ?? null}
         opencodeGoUsage={officialAccounts.data?.opencodeGo ?? null}
         ccgUsage={officialAccounts.data?.ccg ?? null}
         clinePass={officialAccounts.data?.clinePass ?? []}
         refreshControls={officialAccounts.refreshControls}
         accountError={officialAccounts.refreshError ?? officialAccounts.error}
-        accountWarning={officialAccounts.data?.warning ?? null}
+        accountWarnings={officialAccounts.data?.warnings ?? []}
         refreshing={officialAccounts.refreshing}
         onRefresh={() => void refreshAccounts()}
       />
@@ -145,27 +148,31 @@ function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery;
 function AccountStatusCards({
   onAccountRemoved,
   removalNotice,
-  overview,
+  weeklyQuota,
+  accountDataLoaded,
+  accountLoading,
   deepseek,
   opencodeGoUsage,
   ccgUsage,
   clinePass,
   refreshControls,
   accountError,
-  accountWarning,
+  accountWarnings,
   refreshing,
   onRefresh,
 }: {
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: string | null
-  overview: OverviewResponse | null
+  weeklyQuota: OverviewResponse["weeklyQuota"]
+  accountDataLoaded: boolean
+  accountLoading: boolean
   deepseek: DeepseekBalanceResponse | null
   opencodeGoUsage: OpencodeGoUsageResponse | null
   ccgUsage: CcgCreditUsageResponse | null
   clinePass: QuotaAccountUsage[]
   refreshControls: Record<string, AccountRefreshControl>
   accountError: string | null
-  accountWarning: string | null
+  accountWarnings: OfficialAccountSnapshotsResponse["warnings"]
   refreshing: boolean
   onRefresh: () => void
 }) {
@@ -185,28 +192,30 @@ function AccountStatusCards({
           </Button>
         </AlertDescription>
       </Alert> : null}
-      {accountWarning ? <Alert><AlertTitle>账户信息暂不可用</AlertTitle><AlertDescription>{accountWarning}</AlertDescription></Alert> : null}
+      {accountWarnings.map((warning) => <Alert key={warning.source}><AlertTitle>账户信息暂不可用</AlertTitle><AlertDescription>{warning.message}</AlertDescription></Alert>)}
       {removalNotice ? <Alert><AlertTitle>本地账户已删除</AlertTitle><AlertDescription>{removalNotice}</AlertDescription></Alert> : null}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
-          usedPercent={overview?.weeklyQuota?.usedPercent ?? null}
-          resetsAt={overview?.weeklyQuota?.resetsAt ?? null}
-          planType={overview?.weeklyQuota?.planType ?? null}
+          usedPercent={weeklyQuota?.usedPercent ?? null}
+          resetsAt={weeklyQuota?.resetsAt ?? null}
+          planType={weeklyQuota?.planType ?? null}
         />
-        <DeepseekBalanceCards
-          accounts={deepseek?.accounts ?? []}
-          refreshControls={refreshControls}
-        />
-        <OpencodeGoUsageCard
-          accounts={opencodeGoUsage?.accounts ?? []}
-          refreshControls={refreshControls}
-          onAccountsChanged={onAccountRemoved}
-        />
-        {clinePass.map(account => <ClinePassUsageCard key={account.provider} account={account} refreshControl={refreshControls[account.provider]} />)}
-        <CcgCreditUsageCards
-          accounts={ccgUsage?.accounts ?? []}
-          refreshControls={refreshControls}
-        />
+        {accountDataLoaded ? <>
+          {(deepseek?.accounts.length ?? 0) > 0 || !accountWarnings.some((warning) => warning.source === "deepseek") ? <DeepseekBalanceCards
+            accounts={deepseek?.accounts ?? []}
+            refreshControls={refreshControls}
+          /> : null}
+          {(opencodeGoUsage?.accounts.length ?? 0) > 0 || !accountWarnings.some((warning) => warning.source === "opencode-go") ? <OpencodeGoUsageCard
+            accounts={opencodeGoUsage?.accounts ?? []}
+            refreshControls={refreshControls}
+            onAccountsChanged={onAccountRemoved}
+          /> : null}
+          {clinePass.map(account => <ClinePassUsageCard key={account.provider} account={account} refreshControl={refreshControls[account.provider]} />)}
+          {(ccgUsage?.accounts.length ?? 0) > 0 || !accountWarnings.some((warning) => warning.source === "ccg") ? <CcgCreditUsageCards
+            accounts={ccgUsage?.accounts ?? []}
+            refreshControls={refreshControls}
+          /> : null}
+        </> : accountLoading ? <div aria-busy="true" aria-label="正在加载账户列表"><PageSkeleton rows={3} /></div> : null}
       </div>
     </div>
   )

@@ -20,8 +20,34 @@ export interface AccountRefreshControl {
   onRefresh: () => void
 }
 
-export function accountSnapshotIsStale(observedAtMs: number, now = Date.now()): boolean {
+export function accountSnapshotIsStale(observedAtMs: number, now: number): boolean {
   return observedAtMs > 0 && now - observedAtMs > ACCOUNT_SNAPSHOT_MAX_AGE_MS
+}
+
+export function scheduleAccountSnapshotExpiry(
+  observedAtMs: number,
+  update: (nowMs: number) => void,
+  page: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">,
+  now: () => number,
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const check = () => {
+    clearTimeout(timer)
+    timer = undefined
+    if (page.visibilityState !== "visible") return
+    const nowMs = now()
+    update(nowMs)
+    if (observedAtMs > 0 && !accountSnapshotIsStale(observedAtMs, nowMs)) {
+      const remaining = observedAtMs + ACCOUNT_SNAPSHOT_MAX_AGE_MS + 1 - nowMs
+      timer = setTimeout(check, Math.min(2_147_483_647, Math.max(1, remaining)))
+    }
+  }
+  page.addEventListener("visibilitychange", check)
+  check()
+  return () => {
+    clearTimeout(timer)
+    page.removeEventListener("visibilitychange", check)
+  }
 }
 
 export function refreshableAccounts(result: ManagementProvidersResponse): RefreshableAccount[] {

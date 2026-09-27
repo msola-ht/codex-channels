@@ -129,8 +129,6 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
     opencodeGo,
     ccg,
     clinePass: clinePass.map(quotaAccountFromSnapshot),
-    warning: result.warnings.length === 0
-      ? null
-      : result.warnings.map((warning) => warning.message).join("；"),
+    warnings: result.warnings,
   }
 }

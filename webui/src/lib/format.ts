@@ -35,6 +35,14 @@ export function formatTimeZoneLabel(value: number): string {
   return `${timeZone}（${offset}）`
 }
 
+export function formatClockTime(value: number): string {
+  const timeZone = getServerTimeZone()
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).format(value)
+  return `${formatCalendarDay(value, timeZone)} ${time}`
+}
+
 const compactTwoDecimalFormatter = new Intl.NumberFormat("en-US", {
   notation: "compact",
   compactDisplay: "short",

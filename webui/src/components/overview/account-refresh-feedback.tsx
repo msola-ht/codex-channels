@@ -1,16 +1,29 @@
+import { useEffect, useState } from "react"
 import { AlertCircleIcon, RefreshCwIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
+import { CardDescription } from "@/components/ui/card"
+import { formatTime } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
-import { accountSnapshotIsStale, type AccountRefreshControl } from "@/lib/account-refresh-state"
+import { accountSnapshotIsStale, scheduleAccountSnapshotExpiry, type AccountRefreshControl } from "@/lib/account-refresh-state"
+import { useServerTimeSnapshot } from "@/hooks/use-server-time"
+import { estimateServerTime } from "@/lib/server-time"
 
-export function AccountFreshnessBadge({ observedAtMs }: { observedAtMs: number }) {
-  return accountSnapshotIsStale(observedAtMs)
-    ? <Badge variant="secondary" title="上次成功获取的数据已超过 15 分钟">数据已过期</Badge>
-    : null
+export function AccountUpdateDescription({ observedAtMs, isDefault, refreshFailed }: {
+  observedAtMs: number
+  isDefault: boolean
+  refreshFailed: boolean
+}) {
+  const clock = useServerTimeSnapshot()
+  const [now, setNow] = useState(() => estimateServerTime(clock))
+  useEffect(() => scheduleAccountSnapshotExpiry(observedAtMs, setNow, document, () => estimateServerTime(clock)), [observedAtMs, clock])
+  return <CardDescription>
+    {isDefault ? "默认账户 · " : ""}
+    {observedAtMs > 0 ? `更新于 ${formatTime(observedAtMs)}` : "尚未更新"}
+    {refreshFailed ? " · 更新失败" : accountSnapshotIsStale(observedAtMs, now) ? " · 待更新" : ""}
+  </CardDescription>
 }
 
 export function AccountRefreshButton({ control, retry = false }: {
