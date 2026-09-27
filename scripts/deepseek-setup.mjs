@@ -143,11 +143,31 @@ export function createManagedDeepseekCatalog(
     throw new Error("DeepSeek 上下文窗口百分比无效");
   }
   return createManagedProviderCatalog(
-    catalog,
+    normalizeDeepseekCatalogCapabilities(catalog),
     deepseekProviderDefinition,
     {
       previousModels,
       windowPercent,
     },
   );
+}
+
+// DS Responses accepts these controls but does not implement them. Keep the
+// downloaded model/tool metadata intact while narrowing these two declarations.
+export function normalizeDeepseekCatalogCapabilities(catalog) {
+  if (!catalog || !Array.isArray(catalog.models)) throw new Error("DeepSeek 官方模型目录缺少 models");
+  return {
+    ...catalog,
+    models: catalog.models.map((model) => {
+      const result = { ...model,
+        support_verbosity: false,
+        default_verbosity: null,
+        supports_reasoning_summary_parameter: false,
+        default_reasoning_summary: "none",
+      };
+      // The locked Codex uses supports_reasoning_summary_parameter instead.
+      delete result.supports_reasoning_summaries;
+      return result;
+    }),
+  };
 }

@@ -500,3 +500,7 @@ DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口的内置网页搜索在
 [`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义，
 验证见 [`real-app-server-supervised-provider.test.ts`](../tests/real-app-server-supervised-provider.test.ts) 的真实配置读取
 及上述 Responses 合同的请求工具与推理回传断言。来源和边界见 [DeepSeek](deepseek.md#网页搜索)。
+DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scripts/deepseek-setup.mjs) 收紧，
+已有目录经 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs) 的显式配置事务更新；
+验证包括账户配置回滚测试和原生 Responses 合同的实际出站参数。客户端工具检索与跨轮推理的线上验证范围见
+[DS 兼容性边界](deepseek.md#responses-兼容性边界) 与 [CLP 转换边界](cline-pass.md#chat-转换边界)。

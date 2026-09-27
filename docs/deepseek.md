@@ -103,6 +103,24 @@ Gateway 对 DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口统一关闭
 `reasoning.summary` 可传入但不生成摘要，推理历史使用下文的明文正文。
 目录声明用于配置客户端，不替代上游 API 合同；Gateway 不把受忽略参数解释为已实现能力。
 
+DS 目录生成时明确设置 `support_verbosity: false`、`default_verbosity: null`、
+`supports_reasoning_summary_parameter: false` 和 `default_reasoning_summary: "none"`，
+移除锁定 Codex 已不使用的 `supports_reasoning_summaries` 声明。保留完整思考正文、工具能力与提示词。
+已有账户可通过 Setup 的“重新配置账户”或 `codexc deepseek account reconfigure <账户>` 应用；
+复用本地目录，不重新下载，不重置模型、思考等级或上下文设置。共享目录会惠及同机所有 DS 账户，
+写入失败按现有配置事务恢复原文件；完成后重启 App Server 生效。启动、Doctor 和源码更新器不隐式改写目录。
+
+2026-09-26 隔离线上验证：`deepseek-flash`、`low` 思考等级连续 4 次 Responses 请求均成功，
+依次覆盖客户端 `tool_search`、检索结果回传与命名空间函数调用、固定工具结果回传、下一轮用户输入。
+工具未在本机执行；后续请求保留全部已返回的 `reasoning.content`，包括最终回答轮次的思考。
+另以仅在 `tool_search_output` 中提供工具定义的两轮请求补测：明确要求调用后，
+上游返回了对应命名空间的函数调用，确认不必在顶层重复声明已检索工具。
+因此保留官方目录的 `supports_search_tool`，不因兼容性表未逐项列出便关闭客户端工具检索。
+该验证不代表 OCG、CCG 接口也已验证，亦不覆盖所有模型或参数组合。
+
+原生 Responses 把 `developer` 视同 `user`；CLP 的 Chat 适配将 `developer` 转成 `system`。
+两条线路的指令角色语义不同；任意自由格式工具也不能从 CLP 的函数转换能力推导为 DS 原生支持。
+
 ## App Server 与 Thread
 
 切换模式由同一个后台服务监管 OpenAI 主 App Server 和各账户隔离的 App Server。服务启动时只

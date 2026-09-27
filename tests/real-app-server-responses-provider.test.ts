@@ -1,3 +1,4 @@
+import { normalizeDeepseekCatalogCapabilities } from "../scripts/deepseek-setup.mjs";
 import {validateModelCatalogWithCodex} from "../scripts/model-catalog-validation.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 import { createServer } from "node:http";
@@ -76,14 +77,17 @@ describe("real custom Responses provider", () => {
       const ds = deepseekAccountDefinition("test");
       const dsDirectory = join(environment.CODEX_CONNECT_HOME, "providers", "deepseek");
       const dsCatalogPath = join(dsDirectory, "models.json");
-      const dsCatalog = createResponsesModelCatalog([{id:"deepseek-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["high"],defaultReasoningEffort:"high",supportsImages:false,applyPatchToolType:"freeform",supportsSearchTool:true}], "deepseek-flash");
+      const dsSourceCatalog = createResponsesModelCatalog([{id:"deepseek-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["high"],defaultReasoningEffort:"high",supportsImages:false,applyPatchToolType:"freeform",supportsSearchTool:true}], "deepseek-flash");
+      Object.assign(dsSourceCatalog.models[0]!, { support_verbosity: true, default_verbosity: "low", supports_reasoning_summary_parameter: true, default_reasoning_summary: "detailed" });
+      const dsCatalog = normalizeDeepseekCatalogCapabilities(dsSourceCatalog);
       writePrivateFileAtomicSync(dsCatalogPath, JSON.stringify(dsCatalog));
       writePrivateFileAtomicSync(join(dsDirectory,"accounts.json"), JSON.stringify([{id:"test",default:true}]));
       writePrivateFileAtomicSync(join(dsDirectory,"accounts","test","managed.toml"), 'version = 1\nprovider = "ds-test"\nmode = "switching"\n');
       writePrivateFileAtomicSync(join(environment.CODEX_HOME,ds.profileFileName), stringify(createManagedProviderProfile(ds,{apiKey:"sk-fixture",catalogPath:dsCatalogPath})));
       const dsRuntime = loadManagedProviderAppServers(environment)[0]!;
-      // Only the fixture endpoint changes; production launch arguments own web_search.
-      dsRuntime.arguments.push("-c", `model_providers.ds-test.base_url="http://127.0.0.1:${address.port}"`);
+      // Override the endpoint and request unsupported controls to verify the narrowed catalog.
+      dsRuntime.arguments.push("-c", `model_providers.ds-test.base_url="http://127.0.0.1:${address.port}"`,
+        "-c", 'model_reasoning_summary="detailed"', "-c", 'model_verbosity="high"');
       for(const runtime of [...loadConfiguredCustomSwitchingModelProviders(environment), {...dsRuntime,id:dsRuntime.provider,name:"DS fixture",model:"deepseek-flash",reasoningEffort:"high"}]) {
         rpc=new JsonRpcClient(new StdioTransport({codexBinary:process.env.CODEX_BINARY??"codex",cwd:root,environment:{...environment,...runtime.childEnvironment},createCodexProcessInvocation:args=>({file:process.env.CODEX_BINARY??"codex",args:[...args,...runtime.arguments]})}),15000);
         const turns:Array<{id:string;status:string}>=[];
@@ -124,6 +128,8 @@ describe("real custom Responses provider", () => {
         for (const request of requests) expect(request.tools).not.toContainEqual(expect.objectContaining({type:"web_search"}));
         if (runtime.id === "ds-test") {
           expect(requests[0]?.tools).toContainEqual(expect.objectContaining({type:"custom",name:"apply_patch"}));
+          expect(requests[0]?.text?.verbosity).toBeUndefined();
+          expect(requests[0]?.reasoning.summary).toBeUndefined();
           expect(JSON.parse(readFileSync(dsCatalogPath,"utf8")).models[0].supports_search_tool).toBe(true);
           expect(readFileSync(join(environment.CODEX_HOME,"config.toml"),"utf8")).toContain('web_search = "live"');
         }
