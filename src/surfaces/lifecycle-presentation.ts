@@ -505,6 +505,17 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
+  if (!usesOpenAiAccount(event.modelProvider) && event.accountStatus && event.accountStatus.provider === event.modelProvider) {
+    for (const balance of event.accountStatus.balances) {
+      accountFields.push({ label: "余额", value: `${balance.currency === "CNY" ? "¥" : "$"}${balance.remaining}` });
+    }
+    if (event.accountStatus.credits !== undefined) {
+      accountFields.push({ label: "剩余额度", value: `$${event.accountStatus.credits}` });
+    }
+    for (const window of event.accountStatus.windows) {
+      accountFields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
+    }
+  }
   if (event.goal) {
     sessionFields.push({
       label: "Goal",

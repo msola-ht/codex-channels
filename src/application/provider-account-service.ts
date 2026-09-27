@@ -29,16 +29,19 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   async accountUsage(
     modelProvider: string,
     threadId?: string,
+    signal?: AbortSignal,
   ): Promise<ProviderAccountUsage> {
+    signal?.throwIfAborted();
     const adapter = this.adapters.get(modelProvider);
     if (!adapter) {
       const result = { kind: "unsupported" as const, provider: modelProvider };
       this.persist(result, result);
       return result;
     }
-    const accountUsage = adapter.accountUsage();
+    const accountUsage = adapter.accountUsage(signal);
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
+      signal?.throwIfAborted();
       this.persist(result, { kind: "unsupported", provider: modelProvider });
       return result;
     }
@@ -48,6 +51,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
         kind: "failed",
       })),
     ]);
+    signal?.throwIfAborted();
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
     this.persist(result, { kind: "unsupported", provider: modelProvider });
     return result;

@@ -10,6 +10,22 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
+  it("passes cancellation to the exact account and discards late snapshots", async () => {
+    const controller = new AbortController();
+    const written = vi.fn();
+    const read = vi.fn(async (signal?: AbortSignal): Promise<ProviderAccountUsage> => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      return { kind: "quota-windows", provider: "clp-main", available: true, windows: [] };
+    });
+    const other = vi.fn();
+    const service = new ProviderAccountService([
+      { provider: "clp-main", accountUsage: read }, { provider: "clp-other", accountUsage: other },
+    ], { writeOfficialAccountSnapshot: written });
+    await expect(service.accountUsage("clp-main", undefined, controller.signal)).rejects.toThrow();
+    expect(written).not.toHaveBeenCalled();
+    expect(other).not.toHaveBeenCalled();
+  });
   it("persists missing subscription across failures and restart, then replaces it on recovery", async () => {
     const normal: ProviderAccountUsage = { kind: "quota-windows", provider: "ocg-main", available: true, windows: [] };
     const missing: ProviderAccountUsage = { kind: "subscription-required", provider: "ocg-main" };

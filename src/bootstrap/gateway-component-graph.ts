@@ -126,6 +126,7 @@ import {
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
+import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
@@ -863,6 +864,10 @@ export abstract class GatewayComponentGraph {
         ) => {
           this.interactions.setAvailable(surface, accountId, available, outcome);
           if (!available) this.asyncQuestions?.cancelSurface(surface, accountId);
+        },
+        completionAccountStatus: async (provider, signal) => {
+          if (provider === "openai" || !this.providerAccounts || !accountAdapters.some((adapter) => adapter.provider === provider)) return undefined;
+          return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));
         },
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);

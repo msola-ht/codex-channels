@@ -30,16 +30,17 @@ export function createCcgAccountAdapter(
   }
   return {
     provider: options.provider,
-    async accountUsage() {
+    async accountUsage(signal) {
       try {
         const apiKey = loadConfiguredProviderCredential(options.provider, environment).apiKey;
-        const whoami = await getJson(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey);
+        const whoami = await getJson(fetchImpl, `${commandCodeApiBaseUrl}/alpha/whoami?limits=1`, apiKey, signal);
         const orgId = parseOrganizationId(whoami);
         const query = orgId === null ? "" : `?orgId=${encodeURIComponent(orgId)}`;
         const credits = await getJson(
           fetchImpl,
           `${commandCodeApiBaseUrl}/alpha/billing/credits${query}`,
           apiKey,
+          signal,
         );
         return parseCreditUsage(credits, options.provider);
       } catch (error) {
@@ -54,14 +55,14 @@ export function createCcgAccountAdapter(
   };
 }
 
-async function getJson(fetchImpl: typeof fetch, url: string, apiKey: string): Promise<unknown> {
+async function getJson(fetchImpl: typeof fetch, url: string, apiKey: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetchImpl(url, {
     method: "GET",
     headers: {
       accept: "application/json",
       authorization: `Bearer ${apiKey}`,
     },
-    signal: AbortSignal.timeout(requestTimeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
   });
   if (!response.ok) throw new Error(`CCG account request failed with status ${response.status}`);
   const body = await readBoundedFetchBody(response, maximumResponseBytes, {

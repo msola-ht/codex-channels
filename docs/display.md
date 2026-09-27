@@ -85,11 +85,11 @@ WebUI、CLI 人类可读输出、转储详情和渠道的耗时展示统一为�
   指标库与异常报告中。
 - Gateway 不在本地计算或估算模型价格与费用，完成卡片不展示总价、均价、单价或峰谷档位，也不
   保存价格快照或刷新价格目录。账户与额度仍展示官方来源的数据：OpenAI 周限、
-  DeepSeek 账户余额、OpenCode Go 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。
+  DeepSeek 账户余额、OpenCode Go / Cline Pass 官方配额窗口和 CCG Credits；这些数据不是本地价格估算。
 - 完成卡片正式模式在本次运行和会话信息之外，保留精简的“账户状态”：OpenAI 优先显示
-  OpenAI 官方周限；DeepSeek、OpenCode Go 与 CCG 的完整账户信息可通过 `/usage` 查看，也可在本机
-  WebUI 控制台首次打开时自动刷新，或通过汇总范围旁的刷新按钮手动更新。
-  官方用量接口或本地指标不可用时，对应字段不显示。
+  OpenAI 官方周限；OpenCode Go、Cline Pass 显示各窗口“剩余百分比 · 重置时间”，CCG 显示剩余额度和可用窗口，DeepSeek 显示官方余额。重置时间缺失时省略，不推算；余额与 Credits 不转换为百分比。
+  第三方在投递完成卡时按本次 Turn 的精确 Provider/账户查询，与本地统计并行、最多等待 2 秒；查询失败或超时省略账户区块，不使用其他账户或旧快照。额度为零仍显示，Gateway 关闭会取消查询。此读取不阻塞 App Server Reader。
+  完整账户信息仍可通过 `/usage` 或 WebUI 控制台查看和刷新。
 
 ## /usage 命令
 

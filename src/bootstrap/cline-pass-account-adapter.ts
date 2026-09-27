@@ -20,13 +20,13 @@ export function createClinePassAccountAdapter(options: {
   if (!isClinePassAccountProvider(options.provider)) throw new Error("CLP 账户 Provider 无效");
   return {
     provider: options.provider,
-    async accountUsage() {
+    async accountUsage(signal) {
       try {
         const { apiKey } = loadConfiguredProviderCredential(options.provider, options.environment ?? process.env);
         const response = await (options.fetchImpl ?? fetch)(usageUrl, {
           method: "GET", redirect: "error",
           headers: { accept: "application/json", authorization: `Bearer ${apiKey}` },
-          signal: AbortSignal.timeout(10_000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
         });
         if (!response.ok) throw new Error("CLP usage request failed");
         const body = await readBoundedFetchBody(response, 65_536, {

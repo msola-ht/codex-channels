@@ -25,7 +25,7 @@ export function createDeepseekAccountAdapter(
   }
   return {
     provider,
-    async accountUsage() {
+    async accountUsage(signal) {
       try {
         const apiKey = loadDeepseekAccountCredential(environment, provider);
         const response = await fetchImpl(deepseekBalanceUrl, {
@@ -34,7 +34,7 @@ export function createDeepseekAccountAdapter(
             accept: "application/json",
             authorization: `Bearer ${apiKey}`,
           },
-          signal: AbortSignal.timeout(requestTimeoutMs),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
         });
         if (!response.ok) {
           throw new Error(`DeepSeek balance request failed with status ${response.status}`);

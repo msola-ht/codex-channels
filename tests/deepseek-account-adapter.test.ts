@@ -102,3 +102,22 @@ async function createCodexHome(): Promise<string> {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+
+it("cancels the outbound account fetch with the completion signal", async () => {
+  const controller = new AbortController();
+  let outbound: AbortSignal | null | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    outbound = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      outbound?.addEventListener("abort", () => reject(new Error("fixture aborted")), { once: true });
+    });
+  };
+  const adapter = createDeepseekAccountAdapter({  environment: testEnvironment(await createCodexHome()), fetchImpl });
+  const result = adapter.accountUsage(controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ code: "provider.account.unavailable" });
+  expect(outbound?.aborted).toBe(false);
+  controller.abort();
+  expect(outbound?.aborted).toBe(true);
+  await rejected;
+});

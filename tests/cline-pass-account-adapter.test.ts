@@ -103,3 +103,22 @@ it("refreshes two account quotas concurrently with their own credentials and sna
     expect(snapshots.find(snapshot => snapshot.provider === provider)).toMatchObject({ usage: { windows: [{ usedPercent }, { usedPercent }, { usedPercent }] } });
   }
 });
+
+
+it("cancels the outbound account fetch with the completion signal", async () => {
+  const controller = new AbortController();
+  let outbound: AbortSignal | null | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    outbound = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      outbound?.addEventListener("abort", () => reject(new Error("fixture aborted")), { once: true });
+    });
+  };
+  const adapter = createClinePassAccountAdapter({ provider: "clp-test", environment: await fixture(), fetchImpl });
+  const result = adapter.accountUsage(controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ code: "provider.account.unavailable" });
+  expect(outbound?.aborted).toBe(false);
+  controller.abort();
+  expect(outbound?.aborted).toBe(true);
+  await rejected;
+});

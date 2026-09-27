@@ -117,6 +117,13 @@ describe("WebUI metrics table presentation", () => {
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
+          trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficClpNoUpstream: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"] }], onOpen: noop }),
+          requestsMatch: render(RequestsTable, { ...requestProps, records: [{ ...record, responseModel: "model-test" }] }),
+          requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
+          requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
+          trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
           requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
@@ -190,6 +197,12 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureDisclosureOpen = true;
         for (const tier of ["fast", "priority", "default", "flex", "auto", null, undefined]) {
           result['tier-' + tier] = render(FastBadge, { tier, source: "request" });
+        }
+        for (const rate of [0, null]) {
+          result['request-cache-' + rate] = render(RequestsTable, { ...requestProps, records: [{ ...record, cacheHitRate: rate }] });
+        }
+        for (const cache of [{ inputTokens: 100, cachedInputTokens: 0 }, { inputTokens: 100, cachedInputTokens: null }, { inputTokens: 0, cachedInputTokens: 0 }]) {
+          result['summary-cache-' + cache.inputTokens + '-' + cache.cachedInputTokens] = render(QuerySummary, { aggregate: { ...common, cacheUsage: { ...cache, missingRequestCount: 0 } }, range: { name: 'all' } });
         }
         result.fastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, requestServiceTier: "priority", serviceTier: "default",
           traffic: { label: "ocg", session: "batch-fast", interaction: 23 } }] });
@@ -365,24 +378,60 @@ describe("WebUI metrics table presentation", () => {
   it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
     for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
       const html = markup[key]!;
-      expect(html).toContain('title="routing.finalProvider">上游：deepseek');
-      expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+      expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
       expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
     }
     expect(markup.requests).not.toContain('title="routing.finalProvider"');
     expect(markup.traffic).not.toContain('title="routing.finalProvider"');
   });
 
+  it("uses compact normal and warning badges for response models and actual upstreams", () => {
+    const badge = (html: string, title: string) => [...html.matchAll(/<span\b[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/span>/g)].find(match => match[0].includes(`title="${title}"`))?.[0] ?? "";
+    for (const key of ["requestsMatch", "traffic"]) {
+      const tag = badge(markup[key]!, "响应模型：model-test（名称一致）");
+      expect(tag).toContain('data-variant="outline"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).toContain('>model-test</span>');
+    }
+    for (const key of ["requests", "trafficMismatch"]) {
+      const tag = badge(markup[key]!, "响应模型：model-other（名称不一致）");
+      expect(tag).toContain('data-variant="destructive"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).toContain('data-icon="inline-start"');
+    }
+    expect(badge(markup.requestsMissingModel!, "响应模型：model-test（信息不足）")).toContain('data-variant="outline"');
+    for (const key of ["requestsUpstream", "trafficUpstream", "requestsOtherUpstream", "trafficOtherUpstream"]) {
+      const tag = badge(markup[key]!, "routing.finalProvider");
+      expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).not.toContain("上游：");
+    }
+  });
+
+  it("shows only actual upstream badges for CLP account and dump identities", () => {
+    for (const key of ["requestsClp", "trafficClp"]) {
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(markup[key]).not.toContain("hidden-response-model");
+      expect(markup[key]).not.toContain("响应模型：");
+      expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
+      expect(markup[key]).not.toContain('>cline-pass/deepseek-v4.1-flash</span>');
+    }
+    expect(markup.trafficClpNoUpstream).toContain('>deepseek-v4.1-flash</span>');
+    expect(markup.trafficClpNoUpstream).not.toContain("hidden-response-model");
+    expect(markup.trafficClpNoUpstream).not.toContain('title="routing.finalProvider"');
+  });
+
   it("shows the recorded upstream provider on the error list without adding a column", () => {
     const html = markup.errorsUpstream!;
-    expect(html).toContain('title="routing.finalProvider">上游：deepseek');
-    expect(html.indexOf("上游：deepseek")).toBeGreaterThan(html.indexOf("model-test"));
+    expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+    expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
     expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
     expect(markup.errors).not.toContain('title="routing.finalProvider"');
   });
 
   it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
-    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider">上游：deepseek/);
+    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider"><span class="truncate">deepseek/);
     expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
     expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
     expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
@@ -438,12 +487,23 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
+      "时间", "Provider", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
     expect(markup.requests).toContain("名称不一致");
+  });
+
+  it("shows request and period cache hit rates without treating missing data as zero", () => {
+    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("缓存命中率")]?.[1];
+    expect(cacheCell(markup.requests!)).toContain("50.0%");
+    expect(cacheCell(markup['request-cache-0']!)).toContain("0.0%");
+    expect(cacheCell(markup['request-cache-null']!)).toContain("—");
+    expect(markup.partialSummary).toContain("缓存命中率 50.0%");
+    expect(markup['summary-cache-100-0']).toContain("缓存命中率 0.0%");
+    expect(markup['summary-cache-100-null']).toContain("缓存命中率 —");
+    expect(markup['summary-cache-0-0']).toContain("缓存命中率 —");
   });
 
   it("shows only Fast tiers and preserves the exact call link", () => {
@@ -582,8 +642,8 @@ describe("WebUI metrics table presentation", () => {
     expect(cells[columnIndex]).toContain("text-right");
   });
 
-  it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
+  it("prioritizes traffic model, status and duration with compact response-model badges", () => {
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求"]);
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
     expect(markup.trafficCountsLoading).toContain("的调用明细");
@@ -593,7 +653,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficCountsPartial?.match(/加载失败/g)).toHaveLength(1);
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
-    expect(markup.traffic).not.toContain("名称一致");
+    expect(markup.traffic).toContain("响应模型：model-test（名称一致）");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");
     expect(headers(markup.trafficLoading!)).toEqual(headers(markup.traffic!));

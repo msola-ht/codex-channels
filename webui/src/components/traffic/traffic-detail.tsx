@@ -55,7 +55,7 @@ export function TrafficDetail({
       <Card size="sm" aria-label="调用概览">
         <CardHeader>
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
-            <TrafficModel request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
+            <TrafficModel provider={provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
             <Badge variant="outline">{detail.category === "models" ? "模型列表" : detail.category === "prewarm" ? "连接预热" : "模型请求"}</Badge>
           </CardTitle>
           <CardDescription className="flex min-w-0 flex-wrap items-center gap-2">

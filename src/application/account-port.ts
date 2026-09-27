@@ -190,13 +190,13 @@ export type ProviderAccountLimits =
 
 export interface ProviderAccountAdapter {
   provider: string;
-  accountUsage(): Promise<ProviderAccountUsage>;
+  accountUsage(signal?: AbortSignal): Promise<ProviderAccountUsage>;
   accountThreadUsage?(threadId: string): Promise<AccountThreadUsage>;
   accountLimits?(): Promise<ProviderAccountLimits>;
 }
 
 export interface ProviderAccountQueryPort {
-  accountUsage(modelProvider: string, threadId?: string): Promise<ProviderAccountUsage>;
+  accountUsage(modelProvider: string, threadId?: string, signal?: AbortSignal): Promise<ProviderAccountUsage>;
   accountLimits(modelProvider: string): Promise<ProviderAccountLimits>;
 }
 

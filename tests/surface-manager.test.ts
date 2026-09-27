@@ -907,6 +907,63 @@ describe("SurfaceManager", () => {
     await output.close();
   });
 
+  it.each(["clp-main", "openai", undefined])("reads completion account data only for the exact third-party provider %s", async (provider) => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: OutputEvent[] = [];
+    feishu.output.handle = (event) => { received.push(event); };
+    const read = vi.fn(async (id: string) => ({ provider: id, balances: [], windows: [{ label: "7天", usedPercent: 9, resetsAt: null }] }));
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, { completionAccountStatus: read });
+    await manager.start();
+    output.publish({ type: "turn.completed", target: { surface: "feishu", accountId: "tenant-a", conversationId: "chat" }, threadId: "thread", turnId: "turn", status: "completed", ...(provider ? { modelProvider: provider } : {}) });
+    await settle();
+    if (provider === "clp-main") {
+      expect(read).toHaveBeenCalledWith(provider, expect.any(AbortSignal));
+      expect(received[0]).toMatchObject({ accountStatus: { provider, windows: [{ usedPercent: 9 }] } });
+    } else {
+      expect(read).not.toHaveBeenCalled();
+      expect(received[0]).not.toHaveProperty("accountStatus");
+    }
+    await manager.stop();
+    await output.close();
+  });
+
+  it.each(["failure", "mismatch", "timeout", "stop"])("isolates completion account %s and cancels pending queries", async (mode) => {
+    vi.useFakeTimers();
+    try {
+      const feishu = surface("feishu", "tenant-a", []);
+      const received: OutputEvent[] = [];
+      feishu.output.handle = (event) => { received.push(event); };
+      let signal: AbortSignal | undefined;
+      const output = new EventBus<OutputEvent>(logger);
+      const manager = createManager([feishu], output, {
+        completionAccountStatus: async (_provider, currentSignal) => {
+          signal = currentSignal;
+          if (mode === "failure") throw new Error("fixture");
+          if (mode === "mismatch") return { provider: "clp-other", balances: [], windows: [] };
+          return new Promise((_, reject) => currentSignal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+        },
+      });
+      await manager.start();
+      output.publish({ type: "turn.completed", target: { surface: "feishu", accountId: "tenant-a", conversationId: "chat" }, threadId: "thread", turnId: "turn", status: "completed", modelProvider: "clp-main" });
+      await settle();
+      if (mode === "timeout") {
+        expect(received).toEqual([]);
+        await vi.advanceTimersByTimeAsync(2_000);
+        await settle();
+      }
+      if (mode !== "stop") {
+        await vi.advanceTimersByTimeAsync(0);
+        await settle();
+        expect(received).toHaveLength(1);
+        expect(received[0]).not.toHaveProperty("accountStatus");
+      }
+      await manager.stop();
+      expect(signal?.aborted).toBe(true);
+      await output.close();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("defers Turn completion enrichment until the buffered event is delivered", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const reads: string[] = [];

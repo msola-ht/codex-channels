@@ -42,6 +42,7 @@ const COLUMN_LABELS: Record<string, string> = {
   http: "HTTP",
   error: "错误",
   input: "输入 Token",
+  cacheHitRate: "缓存命中率",
   output: "输出 Token",
   reasoningOutput: "推理输出",
   firstContent: "首 Token",
@@ -122,6 +123,7 @@ export function RequestsTable({
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
           <TrafficModel
+            provider={row.original.provider}
             request={row.original.requestModel}
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
             fallback={row.original.model ?? undefined}
@@ -188,6 +190,12 @@ export function RequestsTable({
           </Tooltip>
         )
       },
+    },
+    {
+      id: "cacheHitRate",
+      enableSorting: false,
+      header: "缓存命中率",
+      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.cacheHitRate == null ? "—" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
     },
     {
       id: "output",
@@ -336,7 +344,7 @@ export function RequestsTable({
 
   return (
     <DataTable
-      numericColumnIds={["input", "output", "firstContent", "totalDuration", "http", "reasoningOutput"]}
+      numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "totalDuration", "http", "reasoningOutput"]}
       loading={loading}
       title="记录"
       description={({ pageNumber: currentPage }) =>

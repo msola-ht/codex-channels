@@ -38,7 +38,7 @@ export function createOpencodeGoAccountAdapter(
   const provider = options.provider ?? defaultOpencodeGoProvider(environment);
   return {
     provider,
-    async accountUsage() {
+    async accountUsage(signal) {
       try {
         const apiKey = loadOpencodeGoAccountCredentialFor(provider, environment);
         const response = await fetchImpl(opencodeGoUsageUrl, {
@@ -47,7 +47,7 @@ export function createOpencodeGoAccountAdapter(
             accept: "application/json",
             authorization: `Bearer ${apiKey}`,
           },
-          signal: AbortSignal.timeout(requestTimeoutMs),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs),
         });
         if (!response.ok && response.status !== 403) {
           throw new Error(`OpenCode Go usage request failed with status ${response.status}`);

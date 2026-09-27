@@ -4,6 +4,7 @@ import type { ScheduledTaskConfirmation } from "../application/index.js";
 import {
   surfaceAccountKey,
   type ConversationTarget,
+  type CompletionAccountStatus,
   type OutputEvent,
   type TurnOutputTiming,
   type TurnTaskMetricsSummary,
@@ -75,6 +76,7 @@ export interface SurfaceManagerOptions {
     available: boolean,
     outcome?: string,
   ): void;
+  completionAccountStatus?(provider: string, signal: AbortSignal): Promise<CompletionAccountStatus | undefined>;
   completionTiming?(
     threadId: string,
     turnId: string,
@@ -100,6 +102,7 @@ export class SurfaceManager {
   private removeOutputSubscription: (() => void) | undefined;
   private acceptingOutput = true;
   private stopping = false;
+  private readonly accountQueriesAbort = new AbortController();
 
   constructor(
     private readonly surfaces: readonly SurfaceAdapter[],
@@ -255,6 +258,7 @@ export class SurfaceManager {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.accountQueriesAbort.abort();
     this.acceptingOutput = false;
     this.active.clear();
     this.removeOutputSubscription?.();
@@ -708,6 +712,7 @@ export class SurfaceManager {
     if (event.type !== "turn.completed") {
       return event;
     }
+    const accountStatusResult = this.readCompletionAccountStatus(event);
     const enrichmentDeadline = Date.now() + completionEnrichmentTimeoutMs;
     const timingResult = this.resolveCompletionMetrics(
       event,
@@ -741,13 +746,38 @@ export class SurfaceManager {
     const sessionAggregate = sessionAggregateResult instanceof Promise
       ? await sessionAggregateResult
       : sessionAggregateResult;
+    const accountStatus = await accountStatusResult;
     return {
       ...event,
+      ...(accountStatus === undefined ? {} : { accountStatus }),
       gitBranch: this.currentGitBranch?.(event.target),
       ...(timing === undefined ? {} : { timing }),
       ...(taskAggregate === undefined ? {} : { taskAggregate }),
       ...(sessionAggregate === undefined ? {} : { sessionAggregate }),
     };
+  }
+
+  private async readCompletionAccountStatus(
+    event: Extract<OutputEvent, { type: "turn.completed" }>,
+  ): Promise<CompletionAccountStatus | undefined> {
+    const provider = event.modelProvider;
+    if (!provider || provider === "openai" || !this.options.completionAccountStatus || this.stopping) return undefined;
+    const deadline = new AbortController();
+    const signal = AbortSignal.any([deadline.signal, this.accountQueriesAbort.signal]);
+    try {
+      const query = this.options.completionAccountStatus(provider, signal);
+      const result = await withDeadline(query, 2_000, () => {
+        deadline.abort();
+        this.logger.warn({ provider }, "完成卡账户查询超时，省略账户状态");
+        return undefined;
+      });
+      return !signal.aborted && result?.provider === provider ? result : undefined;
+    } catch {
+      this.logger.warn({ provider }, "完成卡账户查询失败，省略账户状态");
+      return undefined;
+    } finally {
+      deadline.abort();
+    }
   }
 
   private requireRuntime(surface: SurfaceAdapter): SurfaceRuntime {

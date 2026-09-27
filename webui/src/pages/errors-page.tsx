@@ -113,7 +113,7 @@ export function ErrorsPage() {
                         <TableRow key={record.id}>
                           <ErrorCell loading={loading} className="whitespace-nowrap tabular-nums text-muted-foreground">{formatTime(record.recordedAtMs)}</ErrorCell>
                           <ErrorCell loading={loading}><ProviderBadge provider={record.provider} /></ErrorCell>
-                          <ErrorCell loading={loading}><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel request={record.model} responses={[]} upstream={record.upstreamProvider} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></ErrorCell>
+                          <ErrorCell loading={loading}><span className="flex items-center gap-2 whitespace-nowrap"><TrafficModel provider={record.provider} request={record.model} responses={[]} upstream={record.upstreamProvider} /><FastBadge tier={record.requestServiceTier} source="request" responseTier={record.serviceTier} /></span></ErrorCell>
                           <ErrorCell loading={loading}><StatusBadge status={record.status} /></ErrorCell>
                           <ErrorCell loading={loading} className="text-right tabular-nums">{record.httpStatus ?? "—"}</ErrorCell>
                           <ErrorCell loading={loading} className="max-w-md">

@@ -120,6 +120,14 @@ export interface RateLimitWindow {
   resetsAt: number | null;
 }
 
+/** 完成卡账户摘要；仅包含具体 Provider 本次查询返回的展示数据。 */
+export interface CompletionAccountStatus {
+  provider: string;
+  balances: Array<{ currency: "CNY" | "USD"; remaining: string }>;
+  credits?: string;
+  windows: Array<{ label: string; usedPercent: number; resetsAt: number | null }>;
+}
+
 export interface RateLimitSnapshot {
   limitId: string | null;
   limitName: string | null;
@@ -247,7 +255,7 @@ export type OutputEvent =
   | { type: "subagent.spawned"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.contacted"; target: ConversationTarget; threadId: string; turnId: string; agentThreadId: string; agentPath: string; background?: boolean }
   | { type: "subagent.completed"; target: ConversationTarget; parentThreadId: string; agentThreadId: string; agentPath: string; status: SubagentTerminalStatus; metricsStatus: "available" | "empty" | "unavailable"; model: string | null; modelProvider: string | null; reasoningEffort: string | null; requestCount: number; unsuccessfulRequestCount: number; inputTokens: number; cachedInputTokens: number | null; outputTokens: number; reasoningOutputTokens: number; upstreamTtftMs?: number }
-  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
+  | { type: "turn.completed"; target: ConversationTarget; threadId: string; sessionName?: string | null; turnId: string; status: TurnStatus; error?: string; errorCode?: TurnErrorCode; missingFinalResponse?: true; durationMs?: number; timing?: TurnOutputTiming; tokenUsage?: ThreadTokenUsage; model?: string; modelProvider?: string; effort?: string | null; serviceTier?: string | null; weeklyLimit?: NonNullable<RateLimitSnapshot["secondary"]>; accountStatus?: CompletionAccountStatus; goal?: ThreadGoal; contextCompactionCount?: number; taskAggregate?: TurnTaskMetricsSummary; sessionAggregate?: TurnTaskMetricsSummary; workspaceId?: string; workspaceName?: string; gitBranch?: string | undefined; background?: boolean }
   | { type: "thread.status"; target: ConversationTarget; threadId: string; status: string; background?: boolean }
   | { type: "thread.name"; target: ConversationTarget; threadId: string; name: string | null; background?: boolean }
   | { type: "thread.availability"; target: ConversationTarget; threadId: string; availability: "occupied" | "available"; background?: boolean }
