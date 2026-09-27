@@ -43,7 +43,8 @@ export async function cleanupWebuiTestFixtures(
 }
 
 export function createWebuiTestFixture(temporaryDirectories: string[]) {
-  const home = mkdtempSync(join(tmpdir(), "codexc-webui-"));
+  // Account refresh tests create a Unix socket below this home; macOS TMPDIR can exceed sun_path.
+  const home = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "codexc-webui-"));
   temporaryDirectories.push(home);
   const environment = {
     ...process.env,
