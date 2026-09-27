@@ -16,11 +16,13 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useSidebar } from "@/components/ui/sidebar-context"
+import { useTranslation } from "@/hooks/use-translation"
 import { navItems } from "@/lib/navigation"
 
 export function SidebarSwitcher() {
   const { isMobile } = useSidebar()
   const navigate = useNavigate()
+  const { t } = useTranslation()
 
   return (
     <SidebarMenu>
@@ -36,7 +38,7 @@ export function SidebarSwitcher() {
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">Codex WebUI</span>
-                <span className="truncate text-xs">本地指标与设置</span>
+                <span className="truncate text-xs">{t("shell.subtitle")}</span>
               </div>
               <ChevronsUpDownIcon className="ml-auto" />
             </SidebarMenuButton>
@@ -48,7 +50,7 @@ export function SidebarSwitcher() {
             sideOffset={4}
           >
             <DropdownMenuLabel className="text-xs text-muted-foreground">
-              页面
+              {t("shell.pagesMenu")}
             </DropdownMenuLabel>
             <DropdownMenuGroup>
               {navItems.map((item) => (
@@ -60,13 +62,13 @@ export function SidebarSwitcher() {
                   <div className="flex size-6 items-center justify-center rounded-md border">
                     <item.icon />
                   </div>
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{t(item.labelKey)}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <div className="px-3 py-1.5 text-xs text-muted-foreground">
-              本地指标、设置与维护
+              {t("shell.menuDescription")}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>

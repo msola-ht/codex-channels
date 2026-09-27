@@ -12,6 +12,6 @@ export function useThreadRun(threadId: string) {
 export function useThreadTurns(threadId: string, query: MetricsQuery) {
   const queryKey = JSON.stringify([threadId, query])
   const state = useApi(async (signal) => ({ queryKey, data: await fetchThreadTurns(threadId, query, signal) }), [queryKey])
-  return { data: state.data?.data ?? null, error: state.error, refetch: state.refetch,
+  return { data: state.data?.data ?? null, error: state.error, errorCode: state.errorCode, refetch: state.refetch,
     loading: state.loading || (state.error === null && state.data?.queryKey !== queryKey) }
 }

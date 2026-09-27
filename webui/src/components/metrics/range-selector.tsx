@@ -1,7 +1,7 @@
+import { useTranslation } from "@/hooks/use-translation"
 import { useId } from "react"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { metricsRangeLabels } from "@/lib/metrics-query"
 import {
   Select,
   SelectContent,
@@ -20,7 +20,7 @@ export function RangeSelector({
   from,
   to,
   onDateChange,
-  label = "时间范围",
+  label,
 }: {
   value: RangeName | "custom"
   onChange: (value: RangeName | "custom") => void
@@ -29,21 +29,22 @@ export function RangeSelector({
   onDateChange: (key: "from" | "to", value: string) => void
   label?: string
 }) {
+  const { t } = useTranslation()
   const id = useId()
   return (
     <>
       <Field>
-        <FieldLabel htmlFor={`${id}-range`}>{label}</FieldLabel>
+        <FieldLabel htmlFor={`${id}-range`}>{label ?? t("filters.range")}</FieldLabel>
         <Select value={value} onValueChange={(next) => onChange(next as RangeName | "custom")}>
-          <SelectTrigger id={`${id}-range`}><SelectValue>{metricsRangeLabels[value]}</SelectValue></SelectTrigger>
+          <SelectTrigger id={`${id}-range`}><SelectValue>{t(`ranges.${value}`)}</SelectValue></SelectTrigger>
           <SelectContent><SelectGroup>
-            {ranges.map((range) => <SelectItem key={range} value={range}>{metricsRangeLabels[range]}</SelectItem>)}
+            {ranges.map((range) => <SelectItem key={range} value={range}>{t(`ranges.${range}`)}</SelectItem>)}
           </SelectGroup></SelectContent>
         </Select>
       </Field>
       {value === "custom" ? <>
-        <Field><FieldLabel htmlFor={`${id}-from`}>开始日期</FieldLabel><Input id={`${id}-from`} type="date" required value={from ?? ""} onChange={(event) => onDateChange("from", event.target.value)} /></Field>
-        <Field><FieldLabel htmlFor={`${id}-to`}>结束日期（含当天）</FieldLabel><Input id={`${id}-to`} type="date" required min={from} value={to ?? ""} onChange={(event) => onDateChange("to", event.target.value)} /></Field>
+        <Field><FieldLabel htmlFor={`${id}-from`}>{t("filters.from")}</FieldLabel><Input id={`${id}-from`} type="date" required value={from ?? ""} onChange={(event) => onDateChange("from", event.target.value)} /></Field>
+        <Field><FieldLabel htmlFor={`${id}-to`}>{t("filters.to")}</FieldLabel><Input id={`${id}-to`} type="date" required min={from} value={to ?? ""} onChange={(event) => onDateChange("to", event.target.value)} /></Field>
       </> : null}
     </>
   )

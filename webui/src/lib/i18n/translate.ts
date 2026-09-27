@@ -1,0 +1,42 @@
+import type { DisplayLanguage } from "@/lib/format"
+import { messages } from "@/lib/i18n/messages"
+import type { MessageKey, Translate, TranslateParams } from "@/lib/i18n/messages"
+
+function lookup(language: DisplayLanguage, key: MessageKey): string | null {
+  let node: unknown = messages[language]
+  for (const segment of key.split(".")) {
+    if (typeof node !== "object" || node === null) return null
+    node = (node as Record<string, unknown>)[segment]
+  }
+  return typeof node === "string" ? node : null
+}
+
+/** 翻译单个文案键；缺失键时回退为键名本身，占位符按 `{name}` 替换。 */
+export function translate(
+  language: DisplayLanguage,
+  key: MessageKey,
+  params?: TranslateParams,
+): string {
+  const value = lookup(language, key) ?? key
+  if (params === undefined) return value
+  return value.replace(/\{(\w+)\}/gu, (match, name: string) =>
+    name in params ? String(params[name]) : match,
+  )
+}
+
+/** 仅使用结构化错误码选择界面文案；未知内部消息不进入已本地化的查询界面。 */
+export function translateApiError(t: Translate, error: string | null, code?: string | null): string | null {
+  if (error === null) return null
+  const keys: Record<string, MessageKey> = {
+    unauthorized: "errors.unauthorized",
+    forbidden: "errors.forbidden",
+    not_found: "errors.notFound",
+    invalid_range: "errors.invalidQuery",
+    invalid_filter: "errors.invalidQuery",
+    unsupported_parameter: "errors.invalidQuery",
+    invalid_parameter: "errors.invalidQuery",
+    network_error: "errors.network",
+    request_timeout: "errors.timeout",
+  }
+  return t(code != null && Object.hasOwn(keys, code) ? keys[code]! : "errors.unknown")
+}

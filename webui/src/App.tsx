@@ -1,3 +1,4 @@
+import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
@@ -19,8 +20,9 @@ import {
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
-import { useLanguage } from "@/hooks/language-context"
+import { useTranslation } from "@/hooks/use-translation"
 import { ServerTimeContext, useServerTime } from "@/hooks/use-server-time"
+import type { Translate } from "@/lib/i18n/messages"
 import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
 import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
@@ -40,25 +42,26 @@ const SettingsPage = lazy(() =>
 const TrafficPage = lazy(() =>
   import("@/pages/traffic-page").then((module) => ({ default: module.TrafficPage })))
 
-function pageTitle(pathname: string): string {
-  if (pathname.startsWith("/threads/")) return "Thread 详情"
-  if (pathname === "/threads") return "Threads"
-  if (pathname === "/requests") return "请求"
-  if (pathname === "/traffic") return "调用详情"
-  if (pathname === "/errors") return "错误"
-  if (pathname === "/settings") return "设置"
-  return "控制台"
+function pageTitle(pathname: string, t: Translate): string {
+  if (pathname.startsWith("/threads/")) return t("pages.threadDetail")
+  if (pathname === "/threads") return t("pages.threads")
+  if (pathname === "/requests") return t("pages.requests")
+  if (pathname === "/traffic") return t("pages.traffic")
+  if (pathname === "/errors") return t("pages.errors")
+  if (pathname === "/settings") return t("pages.settings")
+  return t("pages.console")
 }
 
 function BreadcrumbTrail({ pathname }: { pathname: string }) {
   const { search } = useLocation()
+  const { t } = useTranslation()
   const params = new URLSearchParams(search)
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>
-      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/traffic", search: params.toString() }}>调用详情</Link></BreadcrumbLink></BreadcrumbItem>
+      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/traffic", search: params.toString() }}>{t("pages.traffic")}</Link></BreadcrumbLink></BreadcrumbItem>
       <BreadcrumbSeparator className="hidden md:block" />
-      <BreadcrumbItem><BreadcrumbPage>调用明细</BreadcrumbPage></BreadcrumbItem>
+      <BreadcrumbItem><BreadcrumbPage>{t("pages.trafficDetail")}</BreadcrumbPage></BreadcrumbItem>
     </>
   }
   if (pathname.startsWith("/threads/")) {
@@ -67,7 +70,7 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
       <>
         <BreadcrumbItem className="hidden md:block">
           <BreadcrumbLink asChild>
-            <Link to="/threads">Threads</Link>
+            <Link to="/threads">{t("pages.threads")}</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         <BreadcrumbSeparator className="hidden md:block" />
@@ -81,28 +84,30 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   }
   return (
     <BreadcrumbItem>
-      <BreadcrumbPage>{pageTitle(pathname)}</BreadcrumbPage>
+      <BreadcrumbPage>{pageTitle(pathname, t)}</BreadcrumbPage>
     </BreadcrumbItem>
   )
 }
 
 function ServerClock({ snapshot, syncFailed }: { snapshot: ServerClockSnapshot; syncFailed: boolean }) {
   const [currentTime, setCurrentTime] = useState(snapshot.nowMs)
+  const { t } = useTranslation()
   useEffect(() => observeServerClock(snapshot, setCurrentTime, document), [snapshot])
-  return <><time dateTime={new Date(currentTime).toISOString()} className="tabular-nums">{formatClockTime(currentTime)}</time>{" · "}{formatTimeZoneLabel(currentTime)}{syncFailed ? " · 时间待校准" : ""}</>
+  return <><time dateTime={new Date(currentTime).toISOString()} className="tabular-nums">{formatClockTime(currentTime)}</time>{" · "}{formatTimeZoneLabel(currentTime)}{syncFailed ? ` · ${t("shell.timeSyncPending")}` : ""}</>
 }
 
 function Layout() {
   const { pathname } = useLocation()
-  const { language, setLanguage } = useLanguage()
+  const { t, language, setLanguage } = useTranslation()
   const [consoleRange, setConsoleRange] = useState<MetricsRangeQuery>({ range: "30d" })
   const time = useServerTime()
 
   if (time.data === null) {
     return <div className="flex flex-col gap-3 p-4">
-      {time.error === null ? <p>正在读取服务端时区…</p> : <>
-        <ErrorBanner error={time.error} />
-        <Button variant="outline" onClick={time.refetch}>重新读取时区</Button>
+      <div className="flex justify-end"><LanguageToggle value={language} onChange={setLanguage} /></div>
+      {time.error === null ? <p>{t("shell.timeZoneLoading")}</p> : <>
+        <ErrorBanner error={translateApiError(t, time.error, time.errorCode)} />
+        <Button variant="outline" onClick={time.refetch}>{t("shell.timeZoneReload")}</Button>
       </>}
     </div>
   }
@@ -113,8 +118,8 @@ function Layout() {
         <AppSidebar />
         <SidebarInset className="min-w-0">
           <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
-            <SidebarTrigger className="-ml-1" />
-            <Breadcrumb className="min-w-0 flex-1">
+            <SidebarTrigger aria-label={t("common.toggleSidebar")} className="-ml-1" />
+            <Breadcrumb aria-label={t("common.breadcrumb")} className="min-w-0 flex-1">
               <BreadcrumbList className="flex-nowrap">
                 <BreadcrumbItem className="hidden md:block">
                   <BreadcrumbLink asChild>
@@ -126,7 +131,7 @@ function Layout() {
               </BreadcrumbList>
             </Breadcrumb>
             <div className="flex shrink-0 items-center gap-1">
-              <span className="hidden text-xs text-muted-foreground lg:inline" title="页面时间与统计日期均使用服务端系统时区">
+              <span className="hidden text-xs text-muted-foreground lg:inline" title={t("shell.timeZoneHint")}>
                 <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
               </span>
               <LanguageToggle value={language} onChange={setLanguage} />
@@ -137,7 +142,7 @@ function Layout() {
             <p className="mb-3 text-xs text-muted-foreground lg:hidden">
               <ServerClock snapshot={time.data} syncFailed={time.error !== null} />
             </p>
-            <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">加载中…</div>}>
+            <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">{t("common.loading")}</div>}>
               <Routes>
                 <Route path="/" element={<ConsolePage range={consoleRange} onRangeChange={setConsoleRange} />} />
                 <Route path="/threads" element={<ThreadsPage />} />

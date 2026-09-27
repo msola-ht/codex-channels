@@ -17,8 +17,8 @@ npm run lint       # oxlint
 ```text
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
-  lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时与页面可见性，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG、Cline Pass 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址
-  hooks/       数据 hook（useApi 统一 loading/error/refetch，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）与全局货币上下文
+  lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时与页面可见性，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG、Cline Pass 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
+  hooks/       数据 hook（useApi 统一 loading/error/refetch，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
   components/  layout（Sidebar）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，account-id-field 共用新增账户预设与自定义输入）
   pages/       概览、Threads、Thread 详情、请求、错误、调用详情、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
@@ -44,9 +44,12 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 - 数据获取统一走 `hooks/`（`useApi` 系列，集中 loading/error/refetch；设置变更共用版本化预览/确认 Hook），组件不直接
   `fetch`（唯一例外：`AuthGate` 在提交令牌前用原始请求验证一次）；API 路径统一从
   `src/lib/api.ts` 的 `API_PREFIX` 拼接；
-- 类型从 `src/lib/types.ts` 转出，格式化（Token/时间）放 `src/lib/format.ts`；时间预设标签放 `src/lib/metrics-query.ts`，
+- 类型从 `src/lib/types.ts` 转出，格式化（Token/时间）放 `src/lib/format.ts`；已本地化的时间预设标签放 `src/lib/i18n/messages.ts`，
   控制台与各查询页复用 `components/metrics/range-selector.tsx` 的时间及日期控件；
   `use-metrics-query` 读取 Provider 筛选选项并保留多选 URL 参数，`query-filters` 使用勾选下拉；
+- 界面翻译通过 `hooks/use-translation.ts` 接入，字典与取值函数位于 `lib/i18n/`，语言状态由
+  `hooks/language-context.ts` 与 `language-provider.tsx` 管理。翻译约定、UI 文案参数、覆盖阶段及验收统一见
+  [WebUI 国际化实施计划](../docs/webui-i18n-plan.md)。
 - 页面（`pages/`）只负责组合区块与路由参数，业务规则不写进页面；
 - 遵守 oxlint 规则：Hooks 必须在组件顶层调用，文件默认只导出组件
   （`react/only-export-components`）。

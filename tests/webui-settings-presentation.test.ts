@@ -8,9 +8,11 @@ describe("WebUI 状态与关联范围展示", () => {
     const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
       import { createServer } from "vite";
       import { createElement as h } from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
+      import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
       const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent"});
       try {
+        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
+        const renderToStaticMarkup=(element)=>renderMarkup(h(LanguageContext.Provider,{value:{language:"zh",setLanguage(){}}},element));
         const {setServerTimeZone}=await server.ssrLoadModule("/src/lib/format.ts"); setServerTimeZone("UTC");
         const {DeepseekBalanceCards}=await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const {ServerTimeContext}=await server.ssrLoadModule("/src/hooks/use-server-time.ts");
@@ -39,7 +41,7 @@ describe("WebUI 状态与关联范围展示", () => {
     const output = execFileSync(process.execPath, ["--input-type=module", "-e", String.raw`
       import { createServer } from "vite";
       import { createElement as h } from "react";
-      import { renderToStaticMarkup } from "react-dom/server";
+      import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
       const server = await createServer({server:{middlewareMode:true},appType:"custom",logLevel:"silent",plugins:[{
         name:"dialog-without-browser-portal",enforce:"pre",
         load(id) {
@@ -48,6 +50,8 @@ describe("WebUI 状态与关联范围展示", () => {
         }
       }]});
       try {
+        const {LanguageContext}=await server.ssrLoadModule("/src/hooks/language-context.ts");
+        const renderToStaticMarkup=(element)=>renderMarkup(h(LanguageContext.Provider,{value:{language:"zh",setLanguage(){}}},element));
         const {ManagementConfirmationDialog,PendingSettingDialog}=await server.ssrLoadModule("/src/components/settings/settings-controls.tsx");
         const {AccountSettingsConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/account-settings-management.tsx");
         const {ManagementTaskConfirmationDialog}=await server.ssrLoadModule("/src/components/settings/management-task-controls.tsx");

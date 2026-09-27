@@ -14,6 +14,7 @@
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、旧单账户移除、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
+- [`docs/webui-i18n-plan.md`](docs/webui-i18n-plan.md)：WebUI 中英文接入阶段、当前覆盖范围、实现边界与验收计划。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
