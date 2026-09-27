@@ -1,7 +1,8 @@
 # DeepSeek 多账户
 
 DeepSeek 账户使用独立 API Key、Profile 和按需启动的 App Server。同一批 DS 账户共用
-DS 官方模型目录，OCG、CCG 的目录及增量模型保持独立，DS 不增加 V4.1 条目。
+DS 官方模型目录，OCG、CCG 的目录及增量模型保持独立。官方 `deepseek-flash` 已指向 V4.1 Flash，
+DS 不另造 `deepseek-v4.1-flash` 模型 ID。
 
 ## 配置与移除
 
@@ -80,22 +81,27 @@ DS 账户共用一个统计代理，通过内部账户路径区分请求并上�
 
 ## 网页搜索
 
-DeepSeek（官方目录中的模型 + Codex 0.154.0）支持网页搜索，且不依赖 OpenAI：
+2026-09-26 核对的官方 [Responses 兼容性说明](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)
+将内置 `web_search` 列为忽略，[Codex 接入配置](https://api-docs.deepseek.com/quick_start/agent_integrations/codex/)
+也明确设置 `web_search = "disabled"`。早期版本的搜索实测不能代表当前模型支持。
 
-- DeepSeek API 会向模型提供名为 `search` 的搜索工具；Codex 侧统一以 `web_search` item
-  回传（`query`、`action` 和结构化 `results`）。实测能返回带标题、URL、摘要和发布日期的
-  真实网页结果。
-- 该搜索是 DeepSeek API 自身的能力，不调用 OpenAI 的 `/v1/alpha/search`；本机是否存在
-  OpenAI 登录不影响 DeepSeek 搜索。Codex 的独立搜索扩展 `web.run` 不适用于 DeepSeek
-  （DeepSeek 没有 `/alpha/search` 端点，也未声明 `supports_standalone_web_search`）。
-- 网关链路无需额外配置：搜索请求包含在 `/responses` 模型请求内，经本地 Provider 代理
-  原样透传；会话事件里出现 `web_search` item 即表示模型真的调用了搜索。
-- 计费与统计：搜索是模型请求的一部分，按 DeepSeek API 用量计费，计入请求次数与 Token
-  统计；不消耗 OpenAI 额度。
-- 验证方式：直接让 DeepSeek 会话执行搜索任务，观察事件日志；或运行
-  `codex exec -p sf-ds-<账户> -C <工作目录> --skip-git-repo-check "请搜索……"` 直连测试。
-- 失效边界：若 DeepSeek API 对该模型关闭搜索、上游工具名称或响应结构变化，或网关代理
-  不再透传搜索工具，则搜索不可用；当前不支持把 DeepSeek 搜索路由到 OpenAI 官方搜索。
+Gateway 对 DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口统一关闭内置网页搜索，
+覆盖固定主实例和切换账户实例的启动参数；
+渠道与 `codexc remote` 共用该实例。已有账户更新代码并重启 App Server 后生效，
+无需重写基础配置或账户 Profile，也不改变 OpenAI 或自定义 Responses Provider 的搜索设置。
+该限制不承诺覆盖绕过受管服务的独立 Codex 进程，亦不自动把搜索转交 OpenAI。
+
+目录中的 `supports_search_tool` 是客户端工具检索能力，和内置网页搜索不同，继续保留官方值。
+普通函数工具及 Codex 本地管理的 MCP 工具不因关闭网页搜索而被禁用。
+历史 `web_search_call` 仍可随 `input` 回传，但不代表能发起新的内置搜索。
+
+## Responses 兼容性边界
+
+官方 API 无状态，不支持 `previous_response_id`、`conversation` 和响应存储，由 Codex 带回历史。
+支持普通函数工具；自由格式 `custom` 只接受 `apply_patch`，不能把任意自定义工具都视为受支持。
+`parallel_tool_calls` 参数被忽略，并行调用始终开启；`text.format` 支持，`text.verbosity` 不生效。
+`reasoning.summary` 可传入但不生成摘要，推理历史使用下文的明文正文。
+目录声明用于配置客户端，不替代上游 API 合同；Gateway 不把受忽略参数解释为已实现能力。
 
 ## App Server 与 Thread
 

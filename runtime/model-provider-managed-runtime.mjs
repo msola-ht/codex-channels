@@ -588,7 +588,7 @@ export function readProviderProfile(
     wireApi: descriptor.wireApi,
     apiKeyEnvironmentKey: descriptor.definition.apiKeyEnvironmentKey,
     supportsWebsockets: descriptor.definition.supportsWebsockets,
-    ...(descriptor.definition.upstreamWireApi ? { upstreamWireApi: descriptor.definition.upstreamWireApi } : {}),
+    ...(descriptor.definition.webSearch ? { webSearch: descriptor.definition.webSearch } : {}),
     apiKey,
   };
 }

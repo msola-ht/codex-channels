@@ -38,6 +38,8 @@ export interface ModelProviderDefinition {
   readonly baseUrl: string;
   readonly wireApi: "responses";
   readonly upstreamWireApi?: "chat_completions";
+  /** 上游不支持内置网页搜索时，在受管 App Server 中覆盖基础配置。 */
+  readonly webSearch?: "disabled";
   readonly apiKeyEnvironmentKey: string;
   /** 自动生成目录的 Provider 默认值；CCG 必须由文件和用户选择提供。 */
   readonly defaultModel?: string;

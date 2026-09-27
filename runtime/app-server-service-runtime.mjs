@@ -618,7 +618,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      if (definition.upstreamWireApi === "chat_completions") primaryArguments.push("-c", 'web_search="disabled"');
+      if (definition.webSearch === "disabled") primaryArguments.push("-c", 'web_search="disabled"');
       const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,

@@ -30,6 +30,17 @@ import {
 } from "../src/bootstrap/managed-provider-capabilities.js";
 
 describe("managed Provider capability registry", () => {
+  it("disables hosted web search for all four managed DeepSeek entries", () => {
+    for (const definition of [
+      deepseekProviderDefinition, deepseekAccountDefinition("work"),
+      opencodeGoProviderDefinition, opencodeGoAccountDefinition("work"),
+      commandCodeProviderDefinition, ccgAccountDefinition("work"),
+      clinePassProviderDefinition, clinePassAccountDefinition("work"),
+    ]) {
+      expect(definition.webSearch).toBe("disabled");
+    }
+  });
+
   it("resolves the registered default for every homogeneous managed account family", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-provider-family-defaults-"));
     const environment = { CODEX_CONNECT_HOME: join(home, ".codex-connect") };

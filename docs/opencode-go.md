@@ -123,11 +123,8 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
 - `deepseek-flash` 声明文字和图片输入，图片按官方规则折算为输入 Token；`deepseek-v4-pro` 只声明
   文字输入。文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；官方目录中的模型目前都不声明音频输入。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
-- 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
-  以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
-  摘要和发布日期的真实网页结果。验证方式：直接让 OpenCode Go 会话执行搜索任务并观察事件日志
-  中的 `web_search` item；或运行 `codex exec -p sf-ocg-<账户> -C <工作目录>
-  --skip-git-repo-check "请搜索……"` 直连测试。
+- 当前 DeepSeek 模型不支持内置网页搜索。固定与切换模式均在受管 App Server 启动参数中关闭，
+  不改写基础配置；普通函数工具及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中

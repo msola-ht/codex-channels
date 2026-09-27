@@ -495,3 +495,8 @@ CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由
 接受文本、用户内联图片、函数与自由格式工具、客户端 `tool_search`；自由格式语法保留在 Chat 工具说明，CLP 模型目录声明 `apply_patch_tool_type: freeform` 与 `supports_search_tool`，检索结果按锁定 `tools/src/tool_search.rs` 的命名空间和 `defer_loading` 形态显式加载。`reasoning_content` 通过 `reasoning.content` 原文往返，Cline `reasoning` 通过摘要往返，真实合同覆盖工具续跑及下一用户轮次。图片沿用稳定 `UserInput.image` 与模型目录 `input_modalities`，不伪造加密推理或远程压缩语义；不完整终态保留已生成文本并拒绝执行部分工具调用。Chat 上游诊断通过请求级进程内回调写独立调用记录，不增加协议事件；HTTP 与流内错误经 [`chat-errors.ts`](../src/provider-proxy/chat-errors.ts) 映射为固定文案和白名单分类，`context_length_exceeded` 沿用锁定上游 SSE 的上下文错误语义。验证入口为
 [`real-app-server-chat-provider.test.ts`](../tests/real-app-server-chat-provider.test.ts)；用户边界见 [`CLP`](cline-pass.md)。
 原生 Responses 推理回传验证见 [`real-app-server-responses-provider.test.ts`](../tests/real-app-server-responses-provider.test.ts)。
+DS 官方、OCG、CCG、CLP 四个受管 DeepSeek 入口的内置网页搜索在启动参数中关闭；固定与切换模式由
+[`app-server-service-runtime.mjs`](../runtime/app-server-service-runtime.mjs)、
+[`model-provider-startup-runtime.mjs`](../runtime/model-provider-startup-runtime.mjs) 统一消费 Provider 定义，
+验证见 [`real-app-server-supervised-provider.test.ts`](../tests/real-app-server-supervised-provider.test.ts) 的真实配置读取
+及上述 Responses 合同的请求工具与推理回传断言。来源和边界见 [DeepSeek](deepseek.md#网页搜索)。
