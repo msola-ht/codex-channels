@@ -13,6 +13,7 @@ import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { Badge } from "@/components/ui/badge"
 import {
   formatCacheUsage,
+  formatModelName,
   formatTime,
   formatTokens,
   shortThreadId,
@@ -88,7 +89,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
         <SortableHeader column={column}>模型</SortableHeader>
       ),
       cell: ({ row }) => (
-        <TruncatedText text={row.original.model} className="max-w-40" />
+        <TruncatedText text={formatModelName(row.original.model, row.original.provider)} className="max-w-40" />
       ),
     },
     {

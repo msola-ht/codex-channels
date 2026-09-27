@@ -132,6 +132,14 @@ describe("WebUI metrics table presentation", () => {
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
         };
+        for (const provider of ["clp-main", "openai"]) {
+          const model = "cline-pass/deepseek-v4.1-flash";
+          result["threadsModel-" + provider] = render(ThreadTable, { threads: [{ ...common, provider, model,
+            threadId: "thread-1", agentPath: null, parentThreadId: null, turnCount: 1,
+            firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
+          result["turnsModel-" + provider] = render(TurnTable, { turns: [{ ...common, provider, model,
+            turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination });
+        }
         for (const [key, inputTokens, cachedInputTokens] of [
           ["threadCacheZero", 100, 0], ["threadCacheUnknown", 100, null], ["threadInputZero", 0, 0],
         ]) {
@@ -406,6 +414,14 @@ describe("WebUI metrics table presentation", () => {
       expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
       expect(tag).toContain('data-size="sm"');
       expect(tag).not.toContain("上游：");
+    }
+  });
+
+  it("omits the CLP model prefix in thread and turn tables only for CLP providers", () => {
+    for (const table of ["threads", "turns"]) {
+      expect(markup[table + "Model-clp-main"]).toContain(">deepseek-v4.1-flash</span>");
+      expect(markup[table + "Model-clp-main"]).not.toContain("cline-pass/");
+      expect(markup[table + "Model-openai"]).toContain(">cline-pass/deepseek-v4.1-flash</span>");
     }
   });
 
