@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -18,25 +19,26 @@ const proxyFields = [
 
 export function WebuiDataSettingsCard({ management }: { management: GatewaySettingsController }) {
   const settings = management.managedSettings
-  const [retentionDays, setRetentionDays] = useState("")
-  const [maxRows, setMaxRows] = useState("")
-  const [port, setPort] = useState("")
+  const [metrics, patchMetrics, resetMetrics] = useSettingsDraft({ retentionDays: settings ? String(settings.metrics.storage.retentionDays) : "", maxRows: settings ? String(settings.metrics.storage.maxRows) : "" })
+  const [webui, patchWebui, resetWebui] = useSettingsDraft({ port: settings ? String(settings.webui.port) : "" })
+  const { retentionDays, maxRows } = metrics
+  const { port } = webui
   const [webuiToken, setWebuiToken] = useState("")
   const [proxyValues, setProxyValues] = useState<Record<string, string>>({})
   const [localError, setLocalError] = useState<string | null>(null)
-
   useEffect(() => {
-    if (settings === null || management.pendingSetting !== null) return
-    setRetentionDays(String(settings.metrics.storage.retentionDays))
-    setMaxRows(String(settings.metrics.storage.maxRows))
-    setPort(String(settings.webui.port))
-    setWebuiToken("")
-    setProxyValues({})
-    setLocalError(null)
-  }, [management.pendingSetting, settings])
+    const saved = management.lastAppliedSetting
+    if (saved?.kind === "metrics.storage") resetMetrics()
+    if (saved?.kind === "webui.port") resetWebui()
+    if (saved?.kind === "webui.token") setWebuiToken("")
+    if (saved?.kind === "network.proxy" && typeof saved.value === "object" && saved.value !== null && "field" in saved.value && typeof saved.value.field === "string") {
+      const field = saved.value.field
+      setProxyValues((previous) => ({ ...previous, [field]: "" }))
+    }
+  }, [management.lastAppliedSetting, resetMetrics, resetWebui])
 
   if (settings === null) return null
-  const disabled = management.saving || management.pendingSetting !== null
+  const disabled = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
 
   const saveMetrics = () => {
     const days = Number(retentionDays)
@@ -79,8 +81,8 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
       <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">指标存储</h3><p className="text-xs text-muted-foreground">达到保留天数或最大行数任一上限后删除最旧记录。</p></div>
         <FieldGroup className="grid gap-3 md:grid-cols-2">
-          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-retention-days">保留天数</FieldLabel><Input id="metrics-retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={disabled} onChange={(event) => setRetentionDays(event.target.value)} /></Field>
-          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-max-rows">最大行数</FieldLabel><Input id="metrics-max-rows" type="number" min={1000} max={10000000} value={maxRows} disabled={disabled} onChange={(event) => setMaxRows(event.target.value)} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-retention-days">保留天数</FieldLabel><Input id="metrics-retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={disabled} onChange={(event) => patchMetrics({ retentionDays: event.target.value })} /></Field>
+          <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-max-rows">最大行数</FieldLabel><Input id="metrics-max-rows" type="number" min={1000} max={10000000} value={maxRows} disabled={disabled} onChange={(event) => patchMetrics({ maxRows: event.target.value })} /></Field>
         </FieldGroup>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveMetrics}>保存指标存储</Button>
       </section>
@@ -90,7 +92,7 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
         <div><h3 className="font-medium">WebUI 服务</h3><p className="text-xs text-muted-foreground">监听地址、端口或令牌变化后需要重启 WebUI。</p></div>
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <ManagedSelect label="监听地址" value={settings.webui.host} options={[["127.0.0.1", "127.0.0.1"], ["::1", "::1"], ["0.0.0.0", "0.0.0.0"]]} disabled={disabled} onChange={(value) => void management.previewSetting("webui.host", value, "WebUI 监听地址")} />
-          <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor="webui-port">监听端口</FieldLabel><FieldContent className="flex-row items-center gap-2"><Input id="webui-port" className="min-w-0 flex-1 sm:w-[130px] sm:flex-none" type="number" min={1} max={65535} value={port} disabled={disabled} onChange={(event) => setPort(event.target.value)} /><Button variant="outline" size="sm" disabled={disabled} onClick={savePort}>保存</Button></FieldContent></Field>
+          <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor="webui-port">监听端口</FieldLabel><FieldContent className="flex-row items-center gap-2"><Input id="webui-port" className="min-w-0 flex-1 sm:w-[130px] sm:flex-none" type="number" min={1} max={65535} value={port} disabled={disabled} onChange={(event) => patchWebui({ port: event.target.value })} /><Button variant="outline" size="sm" disabled={disabled} onClick={savePort}>保存</Button></FieldContent></Field>
         </FieldGroup>
         <Field data-disabled={disabled}>
           <FieldLabel htmlFor="webui-token">访问令牌</FieldLabel>

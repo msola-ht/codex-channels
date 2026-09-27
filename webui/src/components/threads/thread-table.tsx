@@ -15,7 +15,6 @@ import {
   formatCacheUsage,
   formatTime,
   formatTokens,
-  formatTokensPerSecond,
   shortThreadId,
 } from "@/lib/format"
 import type { MetricsQuery, ThreadListItem } from "@/lib/types"
@@ -35,7 +34,6 @@ const COLUMN_LABELS: Record<string, string> = {
   input: "输入 Token",
   cacheHitRate: "缓存命中率",
   output: "输出 Token",
-  tokensPerSecond: "平均 Token/s",
   compact: "压缩",
   last: "最后记录",
 }
@@ -166,12 +164,6 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       ),
     },
     {
-      id: "tokensPerSecond",
-      accessorFn: (thread) => thread.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="当前筛选范围内，该会话自身有效请求速率的算术平均。">平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
-    },
-    {
       id: "last",
       accessorFn: (thread) => thread.lastRecordedAtMs,
       header: ({ column }) => (
@@ -216,7 +208,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
 
   return (
     <DataTable
-      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "tokensPerSecond", "compact"]}
+      numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "compact"]}
       loading={loading}
       title="会话列表"
       description={({ total }) =>

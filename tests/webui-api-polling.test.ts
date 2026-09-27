@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { scheduleApiRefresh } from "../webui/src/lib/api-polling.js";
+import { scheduleApiRefresh, settledTaskIds } from "../webui/src/lib/api-polling.js";
 
 class Page extends EventTarget {
   visibilityState = "visible";
@@ -58,5 +58,21 @@ describe("WebUI 自动刷新", () => {
     vi.advanceTimersByTime(10_000);
     expect(refresh).not.toHaveBeenCalled();
     stop();
+  });
+});
+
+describe("WebUI 管理任务终态关联刷新", () => {
+  it("ignores historical terminal tasks on first load", () => {
+    expect(settledTaskIds(null, [{ id: "history", state: "completed" }])).toEqual([]);
+  });
+  it("refreshes even when a task completes before the first post-submit poll", () => {
+    expect(settledTaskIds(new Map(), [{ id: "quick", state: "completed" }])).toEqual(["quick"]);
+  });
+  it.each(["completed", "failed", "cancelled"])("refreshes affected resources after %s exactly once", (state) => {
+    expect(settledTaskIds(new Map([["task", "running"]]), [{ id: "task", state }])).toEqual(["task"]);
+    expect(settledTaskIds(new Map([["task", state]]), [{ id: "task", state }])).toEqual([]);
+  });
+  it("does not refresh for queued or running tasks", () => {
+    expect(settledTaskIds(new Map(), [{ id: "task", state: "running" }])).toEqual([]);
   });
 });

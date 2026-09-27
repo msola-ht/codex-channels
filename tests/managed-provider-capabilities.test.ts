@@ -8,14 +8,17 @@ import {
   assertManagedModelProviderCapabilities,
   ccgAccountDefinition,
   clinePassAccountDefinition,
+  clinePassProviderDefinition,
   commandCodeProviderDefinition,
   deepseekProviderDefinition,
   deepseekAccountDefinition,
   expandManagedModelProviderDefinitions,
+  isManagedProviderModelValid,
   loadManagedModelProviderWatcherDefinitions,
   managedModelProviderDefinitions,
   opencodeGoAccountDefinition,
   opencodeGoProviderDefinition,
+  sharedManagedProviderDefinition,
 } from "../runtime/model-provider-definitions.mjs";
 import { writeOpencodeGoAccounts } from "../runtime/opencode-go-accounts.mjs";
 import { ccgAccountsFilePath } from "../runtime/ccg-accounts.mjs";
@@ -27,6 +30,17 @@ import {
 } from "../src/bootstrap/managed-provider-capabilities.js";
 
 describe("managed Provider capability registry", () => {
+  it("disables hosted web search for all four managed DeepSeek entries", () => {
+    for (const definition of [
+      deepseekProviderDefinition, deepseekAccountDefinition("work"),
+      opencodeGoProviderDefinition, opencodeGoAccountDefinition("work"),
+      commandCodeProviderDefinition, ccgAccountDefinition("work"),
+      clinePassProviderDefinition, clinePassAccountDefinition("work"),
+    ]) {
+      expect(definition.webSearch).toBe("disabled");
+    }
+  });
+
   it("resolves the registered default for every homogeneous managed account family", () => {
     const home = mkdtempSync(join(tmpdir(), "codexc-provider-family-defaults-"));
     const environment = { CODEX_CONNECT_HOME: join(home, ".codex-connect") };
@@ -72,6 +86,23 @@ describe("managed Provider capability registry", () => {
       profileName: "sf-ccg-work",
       profileFileName: "sf-ccg-work.config.toml",
     });
+  });
+
+  it("resolves every shared proxy key to its registered base definition", () => {
+    expect(sharedManagedProviderDefinition("clp")).toBe(clinePassProviderDefinition);
+    expect(sharedManagedProviderDefinition("deepseek")).toBe(deepseekProviderDefinition);
+    expect(sharedManagedProviderDefinition("opencode-go")).toBe(opencodeGoProviderDefinition);
+    expect(sharedManagedProviderDefinition("ccg")).toBe(commandCodeProviderDefinition);
+    expect(sharedManagedProviderDefinition("unknown")).toBeUndefined();
+    // 账户展开后的定义使用 clp-<账户> 之类的 ID，共享代理键只能回退到基础定义。
+    expect(managedModelProviderDefinitions.some(definition => definition.id === "clp")).toBe(true);
+  });
+
+  it("accepts only the model of the CLP shared catalog", () => {
+    expect(isManagedProviderModelValid(clinePassProviderDefinition, clinePassProviderDefinition.defaultModel)).toBe(true);
+    expect(isManagedProviderModelValid(clinePassAccountDefinition("main"), "cline-pass/deepseek-v4.1-flash")).toBe(true);
+    expect(isManagedProviderModelValid(clinePassAccountDefinition("main"), "cline-pass/other-model")).toBe(false);
+    expect(isManagedProviderModelValid(deepseekProviderDefinition, "deepseek-flash")).toBe(true);
   });
 
   it("fails closed when a future Provider Profile file diverges from its canonical name", () => {

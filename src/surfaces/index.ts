@@ -21,7 +21,13 @@ export {
 export {
   ConversationDeliveryQueue,
   type ConversationDeliveryQueueOptions,
+  type ConversationDeliveryOptions,
 } from "./conversation-delivery-queue.js";
+export {
+  isSheddableBacklogEvent,
+  resolveSurfaceDelivery,
+  surfaceDeliveryCoalesceKey,
+} from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,
   type SurfaceInputBatchResult,

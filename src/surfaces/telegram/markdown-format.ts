@@ -8,6 +8,10 @@ export function formatMarkdownAsTelegramHtml(markdown: string): string | undefin
     return undefined;
   }
 
+  return renderMarkdownAsTelegramHtml(markdown);
+}
+
+function renderMarkdownAsTelegramHtml(markdown: string): string {
   const lines = markdown.split("\n");
   const output: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -114,7 +118,15 @@ function formatInlineMarkdown(text: string): string {
       : `<code>${escapeHtml(content)}</code>`;
     return protect(rendered);
   });
-  const withLinkPlaceholders = withCodePlaceholders.replace(
+  const withFilePlaceholders = withCodePlaceholders.replace(
+    /(?<![!\\])\[([^\]\n]+)\]\((?:<(\/(?!\/)[^>\n]+)>|(\/(?!\/)[^\s)]+))\)/g,
+    (match, _label: string, wrapped: string | undefined, plain: string | undefined) => {
+      const destination = wrapped ?? plain;
+      const reference = destination?.slice(destination.lastIndexOf("/") + 1);
+      return reference ? protect(`<code>${escapeHtml(reference)}</code>`) : match;
+    },
+  );
+  const withLinkPlaceholders = withFilePlaceholders.replace(
     /(?<![!\\])\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/gi,
     (match, label: string, destination: string) => {
       if (!isSafeHttpUrl(destination)) {
@@ -220,4 +232,44 @@ function escapeHtml(value: string): string {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;");
+}
+
+/** Split rendered HTML after parsing entities, reopening formatting across message boundaries. */
+export function formatMarkdownAsTelegramHtmlChunks(markdown: string): string[] {
+  const html = renderMarkdownAsTelegramHtml(markdown);
+  const chunks: string[] = [];
+  const open: Array<{ tag: string; html: string }> = [];
+  let current = "";
+  let visibleLength = 0;
+  const flush = (): void => {
+    if (visibleLength === 0) return;
+    chunks.push(protectTelegramReplyHeading(current + [...open].reverse().map((entry) => `</${entry.tag}>`).join("")));
+    current = open.map((entry) => entry.html).join("");
+    visibleLength = 0;
+  };
+  for (const match of html.matchAll(/<[^>]*>|&(?:amp|lt|gt|quot|#39);|[\s\S]/gu)) {
+    const token = match[0];
+    if (token.startsWith("<")) {
+      const tag = token.match(/^<(\/?)([a-z]+)/u);
+      if (tag?.[1]) open.pop();
+      else if (tag) open.push({ tag: tag[2]!, html: token });
+      current += token;
+      continue;
+    }
+    const size = token.startsWith("&") ? 1 : token.length;
+    if (visibleLength + size > 3_500) flush();
+    current += token;
+    visibleLength += size;
+    if (token === "\n" && visibleLength >= 2_800) flush();
+  }
+  flush();
+  return chunks;
+}
+
+/** 仅用于本模块生成的 HTML 分片降级，先去标签再解码，避免误删正文里的尖括号。 */
+export function telegramHtmlToPlainText(html: string): string {
+  return html.replace(/<[^>]*>/gu, "").replace(/&(amp|lt|gt|quot|#39);/gu, (_match, entity: string) => {
+    const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
+    return entities[entity]!;
+  });
 }

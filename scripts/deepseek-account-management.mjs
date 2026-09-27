@@ -21,7 +21,7 @@ import { applyProviderFileUpdates, snapshotProviderFiles } from "./managed-provi
 import { createManagedProviderConfiguration, hasProviderBaseConfig, resolveManagedCatalogModel, restoreProviderBaseConfig } from "./managed-model-provider-setup.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { inspectManagedAccountRuntime, stopManagedAccountForRemoval } from "./managed-provider-account-runtime.mjs";
-import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl } from "./deepseek-setup.mjs";
+import { createManagedDeepseekCatalog, downloadDeepseekCatalog, deepseekSetupScriptUrl, normalizeDeepseekCatalogCapabilities } from "./deepseek-setup.mjs";
 
 export function deepseekAccountPaths(environment, accountId) {
   const definition = deepseekAccountDefinition(accountId);
@@ -123,7 +123,11 @@ export async function applyDeepseekAccountConfiguration(input, options = {}) {
     }
     let catalog;
     if (existsSync(paths.catalog)) {
-      catalog = JSON.parse(readPrivateFileSync(paths.catalog, 2_097_152));
+      const previousCatalog = JSON.parse(readPrivateFileSync(paths.catalog, 2_097_152));
+      catalog = normalizeDeepseekCatalogCapabilities(previousCatalog);
+      if (JSON.stringify(catalog) !== JSON.stringify(previousCatalog)) {
+        updates.set(paths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
+      }
     } else {
       assertNoResponsesContextFollowers(environment,"重建 DS 目录");
       const downloaded = await (options.downloadCatalog ?? downloadDeepseekCatalog)(options.fetchImpl ?? fetch);

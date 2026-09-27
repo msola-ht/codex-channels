@@ -36,7 +36,7 @@ export async function promptResponsesModels(prompts, defaultModel, previous = []
       if (prompts.isCancel(defaultReasoning)) return undefined;
       const images = await prompts.confirm({ message: `${id} 是否支持图片输入？`, initialValue: old?.supportsImages ?? false });
       if (prompts.isCancel(images)) return undefined;
-      models.push({ id, name: String(name), contextWindow: Number(context), ...(old?.maxContextWindow === undefined ? {} : {maxContextWindow: old.maxContextWindow}), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) });
+      models.push({ ...structuredClone(old), id, name: String(name), contextWindow: Number(context), reasoningEfforts, defaultReasoningEffort: defaultReasoning, supportsImages: images, ...(template ? {template} : {}) });
     }
     if (index === ids.length - 1 && ids.length < 64) {
       const add = await prompts.confirm({ message: "继续添加模型？", initialValue: false });

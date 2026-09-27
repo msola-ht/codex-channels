@@ -16,7 +16,7 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`~/.codex-connect/providers/<id>/` 目录、`modelProvider`、环境变量名 |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api` |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom` 与客户端 `tool_search`；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；托管工具在 Chat 协议下无等价形态，须保持关闭 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
 | 认证 | `sk-` API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
@@ -87,7 +87,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v19，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
+  Schema v20，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
   读取时对 5 小时滚动窗口按当前时间范围和请求开始时间判定，对 7 天/月度固定窗口优先按快照
   归属；快照缺失或请求开始时已经过期才回退到请求时间。账户窗口只展示官方已用百分比、重置时间
   和本地 Token，不展示总额或费用。

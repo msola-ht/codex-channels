@@ -37,17 +37,15 @@ export function TrafficTable({
             <TableHead>Provider</TableHead>
             <TableHead>模型</TableHead>
             <TableHead>状态</TableHead>
-            <TableHead className="text-right">总耗时</TableHead>
+            <TableHead className="text-right">请求耗时</TableHead>
             <TableHead className="text-right whitespace-nowrap">Turn State 字符数</TableHead>
             <TableHead>类型</TableHead>
             <TableHead>请求</TableHead>
-            <TableHead>线程</TableHead>
-            <TableHead>轮次</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 10 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 8 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => {
@@ -74,7 +72,7 @@ export function TrafficTable({
               </TableCell>
               <TableCell><Badge variant="outline">{exchange.label}</Badge></TableCell>
               <TableCell>
-                <TrafficModel request={exchange.requestModel} responses={exchange.responseModels} />
+                <TrafficModel provider={exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
@@ -92,13 +90,11 @@ export function TrafficTable({
               <TableCell className="text-xs">{exchange.category === "models" ? "模型列表"
                 : exchange.category === "prewarm" ? "连接预热" : exchange.requestKind ?? "模型请求"}</TableCell>
               <TableCell><TruncatedText text={requestLabel(exchange)} className="max-w-72 font-mono text-xs" /></TableCell>
-              <TableCell><TruncatedText text={exchange.threadId} className="max-w-40 font-mono text-xs" /></TableCell>
-              <TableCell><TruncatedText text={exchange.turnId} className="max-w-32 font-mono text-xs" /></TableCell>
             </TableRow>
           )})}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={10} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
                 没有调用记录
               </TableCell>
             </TableRow>
@@ -113,7 +109,7 @@ function stateLabel(state: TrafficExchangeSummary["state"]): string {
   if (state === "completed") return "完成"
   if (state === "failed") return "失败"
   if (state === "incomplete") return "不完整"
-  return "进行中"
+  return "未记录终态"
 }
 
 function requestLabel(exchange: TrafficExchangeSummary): string {

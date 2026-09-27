@@ -14,6 +14,7 @@ describe("WebUI metrics table presentation", () => {
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
+          if (id.endsWith("/src/hooks/use-official-account-sources.ts")) return "export function useOfficialAccountSources() { return globalThis.fixtureAccounts; }";
           if (id.endsWith("/src/hooks/use-api.ts")) return "export function useApi() { return globalThis.fixtureApiState; }";
           if (id.endsWith("/src/hooks/use-metrics-query.ts")) return "export function useMetricsQuery() { return { query: globalThis.fixtureQuery, update() {} }; } export function useMetricsProviders() { return { data: { providers: ['openai'] }, loading: false, error: null }; }";
           if (id.endsWith("/src/components/metrics/query-filters.tsx")) return "import { createElement } from 'react'; export function QueryFilters(props) { return createElement('div', { 'data-query-filters': true, 'data-thread-filters': props.showThreadFilters }); }";
@@ -28,8 +29,12 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficTable } = await server.ssrLoadModule("/src/components/traffic/traffic-table.tsx");
         const { TrafficDetail } = await server.ssrLoadModule("/src/components/traffic/traffic-detail.tsx");
         const { ErrorBanner } = await server.ssrLoadModule("/src/components/metrics/error-banner.tsx");
-        const { GlobalCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
+        const { GlobalCards, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
+        const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
+        const { accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
+        const { ServerTimeContext } = await server.ssrLoadModule("/src/hooks/use-server-time.ts");
+        const { AccountUpdateDescription } = await server.ssrLoadModule("/src/components/overview/account-refresh-feedback.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
         const { LanguageContext } = await server.ssrLoadModule("/src/hooks/language-context.ts");
         const { TooltipProvider } = await server.ssrLoadModule("/src/components/ui/tooltip.tsx");
@@ -48,9 +53,10 @@ describe("WebUI metrics table presentation", () => {
         const record = { ...common, status: "failed", requestModel: "model-test", responseModel: "model-other",
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
-          firstContentMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
+          firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
         const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
-          h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null, h(component, props)))));
+          h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null,
+            h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
         const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
         const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
@@ -59,11 +65,32 @@ describe("WebUI metrics table presentation", () => {
             content: { instructions: null, input: [], tools: [] } }, response: null,
           tracePage: { offset: 0, total: 101, previousOffset: null, nextOffset: 100 },
           trace: [{ atMs: 1000, kind: "fixture-event", text: "old-trace-body", truncated: false }] };
+        const quotaWindow = (windowId, label, usedPercent) => ({ windowId, label, usedPercent, resetsAt: null, status: null });
+        const quotaAccount = { account: "main", provider: "fixture", displayName: "额度测试", default: true,
+          available: true, observedAtMs: Date.now(), subscriptionRequired: false };
+        const monthlyWindow = quotaWindow("monthly", "月度", 30);
+        const weeklyWindow = quotaWindow("weekly", "7天", 20);
+        const rollingWindow = quotaWindow("rolling", "5小时", 10);
+        const fiveHourWindow = quotaWindow("five-hour", "5小时", 10);
         const result = {
+          ocgQuotaOrder: render(OpencodeGoUsageCard, { accounts: [{ ...quotaAccount, displayName: "OpenCode Go main",
+            windows: [monthlyWindow, weeklyWindow, rollingWindow] }], refreshControls: {}, onAccountsChanged: noop }),
+          clineQuotaOrder: render(ClinePassUsageCard, { account: { ...quotaAccount, displayName: "Cline Pass main",
+            windows: [weeklyWindow, monthlyWindow, fiveHourWindow] } }),
+          deepseekAccountBadge: render(DeepseekBalanceCards, { accounts: [{ ...quotaAccount,
+            displayName: "DS main", balances: [] }], refreshControls: {} }),
+          ccgAccountBadge: render(CcgCreditUsageCards, { accounts: [{ ...quotaAccount,
+            displayName: "CommandCode Go main", planId: null, monthlyRemaining: "1", purchasedRemaining: "2",
+            freeRemaining: "0", totalRemaining: "3", windows: [] }], refreshControls: {} }),
+          missingQuotaWindow: render(ClinePassUsageCard, { account: { ...quotaAccount,
+            windows: [monthlyWindow, fiveHourWindow] } }),
           newAccount: render(AccountIdField, { id: "account", value: "main", accounts: [], disabled: false, editing: false, onChange: noop }),
           reservedAccount: render(AccountIdField, { id: "account", value: "openai", accounts: [], reservedIds: ["openai", "deepseek", "ocg"], disabled: false, editing: false, onChange: noop }),
           customAccount: render(AccountIdField, { id: "account", value: "team_a", accounts: [{ id: "team-a" }], disabled: false, editing: false, onChange: noop }),
           editingAccount: render(AccountIdField, { id: "account", value: "main", accounts: [{ id: "main" }], disabled: false, editing: true, onChange: noop }),
+          quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
+          quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
+          quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
           shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),
@@ -84,12 +111,23 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+          traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
+          trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficClpNoUpstream: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"] }], onOpen: noop }),
+          requestsMatch: render(RequestsTable, { ...requestProps, records: [{ ...record, responseModel: "model-test" }] }),
+          requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
+          requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
+          trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
-          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "tokensPerSecond", desc: false }] }),
+          ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
           threads: render(ThreadTable, { threads: [{ ...common, threadId: "thread-1", agentPath: null,
             parentThreadId: null, turnCount: 1, firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination }),
           turns: render(TurnTable, { turns: [{ ...common, turnId: "turn-1" }], threadId: "thread-1", query: {}, pagination }),
@@ -102,6 +140,54 @@ describe("WebUI metrics table presentation", () => {
             threadId: "thread-1", agentPath: null, parentThreadId: null, turnCount: 1,
             firstRequestStartedAtMs: 1000, lastRecordedAtMs: 1000 }], query: {}, pagination });
         }
+        for (const [kind, component, convert] of [
+          ["ds", DeepseekBalanceCards, deepseekAccountFromSnapshot],
+          ["ocg", OpencodeGoUsageCard, quotaAccountFromSnapshot],
+          ["ccg", CcgCreditUsageCards, ccgAccountFromSnapshot],
+          ["clp", ClinePassUsageCard, quotaAccountFromSnapshot],
+        ]) {
+          const placeholders = accountSnapshotsWithMissingProviders({ snapshots: [], warnings: [], observedAtMs: 0 },
+            ["team-a", "team-b"].map((name) => ({ id: kind + "-" + name, displayName: "配置 " + name })));
+          if (placeholders.snapshots.some((snapshot) => snapshot.accountId !== null)) throw new Error("Placeholder identity must remain unknown");
+          const accounts = placeholders.snapshots.map(convert);
+          result[kind + "MissingIdentity"] = kind === "clp"
+            ? accounts.map((account) => render(component, { account })).join("")
+            : render(component, { accounts, refreshControls: {}, onAccountsChanged: noop });
+        }
+        globalThis.fixtureApiState = { data: null, loading: true, error: null };
+        globalThis.fixtureAccounts = { data: null, loading: true, refreshing: false, refreshControls: {}, refresh: noop,
+          error: null, refreshError: null, removalNotice: null, accountRemoved: noop };
+        const consoleProps = { range: { range: "30d" }, onRangeChange: noop };
+        result.consoleAccountsLoading = render(ConsolePage, consoleProps);
+        globalThis.fixtureAccounts = { ...globalThis.fixtureAccounts, loading: false, error: "fixture account read failure" };
+        result.consoleAccountsFailed = render(ConsolePage, consoleProps);
+        globalThis.fixtureAccounts = { ...globalThis.fixtureAccounts, error: null,
+          data: { deepseek: null, opencodeGo: null, ccg: null, clinePass: [], warnings: [] } };
+        result.consoleAccountsEmpty = render(ConsolePage, consoleProps);
+        for (const [source, title] of [["deepseek", "DeepSeek"], ["opencode-go", "OpenCode Go"], ["ccg", "CommandCode Go"], ["clp", "Cline Pass"]]) {
+          globalThis.fixtureAccounts.data.warnings = [{ source, code: "registry_unavailable", message: title + " 元数据暂不可用" }];
+          result[source + "PartialFailure"] = render(ConsolePage, consoleProps);
+        }
+        globalThis.fixtureAccounts.data.deepseek = { accounts: [{ ...quotaAccount, displayName: "DeepSeek main",
+          balances: [{ currency: "CNY", totalBalance: "2", grantedBalance: "0", toppedUpBalance: "2" }] }] };
+        globalThis.fixtureAccounts.data.warnings = [{ source: "deepseek", code: "registry_unavailable", message: "DeepSeek 元数据暂不可用" }];
+        result.partialFailureRetainsSnapshot = render(ConsolePage, consoleProps);
+        globalThis.fixtureAccounts.data.deepseek = null;
+        globalThis.fixtureAccounts.data.warnings = [];
+        globalThis.fixtureServerClock = { nowMs: Date.now() - 20 * 60_000, receivedAtMs: Date.now(), timeZone: "UTC" };
+        result.skewedClientFreshAccount = render(AccountUpdateDescription, { observedAtMs: globalThis.fixtureServerClock.nowMs, isDefault: false, refreshFailed: false });
+        globalThis.fixtureServerClock = undefined;
+        globalThis.fixtureApiState = { data: { request: {}, data: { weeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" } } },
+          loading: true, error: null };
+        result.consoleQuotaLoading = render(ConsolePage, consoleProps);
+        globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture overview failure" };
+        result.consoleQuotaFailed = render(ConsolePage, consoleProps);
+        globalThis.fixtureApiState = { data: { request: {}, data: { weeklyQuota: null } }, loading: false, error: null };
+        result.consoleQuotaCleared = render(ConsolePage, consoleProps);
+        result.accountStale = render(AccountUpdateDescription, { observedAtMs: Date.now() - 16 * 60_000, isDefault: true, refreshFailed: false });
+        result.accountFresh = render(AccountUpdateDescription, { observedAtMs: Date.now(), isDefault: false, refreshFailed: false });
+        result.accountMissing = render(AccountUpdateDescription, { observedAtMs: 0, isDefault: false, refreshFailed: false });
+        result.accountFailed = render(AccountUpdateDescription, { observedAtMs: Date.now() - 16 * 60_000, isDefault: false, refreshFailed: true });
         const partial = { ...common, inputTokens: 1000, cachedInputTokens: null,
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 1 } };
         result.partialSummary = render(QuerySummary, { aggregate: partial, range: { name: "all" } });
@@ -111,6 +197,12 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureDisclosureOpen = true;
         for (const tier of ["fast", "priority", "default", "flex", "auto", null, undefined]) {
           result['tier-' + tier] = render(FastBadge, { tier, source: "request" });
+        }
+        for (const rate of [0, null]) {
+          result['request-cache-' + rate] = render(RequestsTable, { ...requestProps, records: [{ ...record, cacheHitRate: rate }] });
+        }
+        for (const cache of [{ inputTokens: 100, cachedInputTokens: 0 }, { inputTokens: 100, cachedInputTokens: null }, { inputTokens: 0, cachedInputTokens: 0 }]) {
+          result['summary-cache-' + cache.inputTokens + '-' + cache.cachedInputTokens] = render(QuerySummary, { aggregate: { ...common, cacheUsage: { ...cache, missingRequestCount: 0 } }, range: { name: 'all' } });
         }
         result.fastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, requestServiceTier: "priority", serviceTier: "default",
           traffic: { label: "ocg", session: "batch-fast", interaction: 23 } }] });
@@ -128,6 +220,21 @@ describe("WebUI metrics table presentation", () => {
         const { TrafficContent } = await server.ssrLoadModule("/src/components/traffic/traffic-content.tsx");
         result.truncatedContent = render(TrafficContent, { title: "片段", text: '{"partial":', json: true, truncated: true });
         globalThis.fixtureDisclosureOpen = false;
+        const completedDetail = { ...detail, response: { ...response, callTiming: { totalMs: 9500 }, firstTokenMs: 1550,
+          usage: { inputTokens: 1000, cachedTokens: 500, outputTokens: 200, reasoningTokens: 50 },
+          output: [{ type: "message", text: "visible-answer" }] } };
+        result.structuredCall = render(TrafficDetail, { detail: completedDetail, provider: "openai", session: "hidden-batch", onRetry: noop, onTracePageChange: noop });
+        for (const category of ["prewarm", "models"]) {
+          result['call-' + category] = render(TrafficDetail, { detail: { ...completedDetail, category }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        }
+        result.pendingCall = render(TrafficDetail, { detail: { ...detail, state: "pending" }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        result.failedCall = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response,
+          state: "failed", failureStage: "upstream_error", failure: "hidden-error", errorScope: "socket", error: "hidden-transport-error" } }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        const completedWithDisconnect = { ...completedDetail, response: { ...completedDetail.response, errorScope: "client_disconnected" } };
+        result.completedDisconnect = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        globalThis.fixtureDisclosureOpen = true;
+        result.completedDisconnectOpen = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        globalThis.fixtureDisclosureOpen = false;
         result.incompleteOutput = render(TrafficDetail, { detail: { ...detail, response: {
           state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
           output: [{ type: "message", text: "complete visible message" }],
@@ -142,6 +249,8 @@ describe("WebUI metrics table presentation", () => {
         errorsData.records[0].requestServiceTier = "priority";
         errorsData.records[0].serviceTier = "default";
         result.fastErrors = render(ErrorsPage, {});
+        errorsData.records[0].upstreamProvider = "deepseek";
+        result.errorsUpstream = render(ErrorsPage, {});
         globalThis.fixtureApiState.loading = true;
         result.errorsLoading = render(ErrorsPage, {});
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
@@ -182,6 +291,151 @@ describe("WebUI metrics table presentation", () => {
 
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
+
+  it("distinguishes account loading and failures from confirmed empty configuration", () => {
+    expect(markup.consoleAccountsLoading).toContain("正在加载账户列表");
+    expect(markup.consoleAccountsLoading).not.toContain("尚未配置");
+    expect(markup.consoleAccountsFailed).toContain("fixture account read failure");
+    expect(markup.consoleAccountsFailed).not.toContain("尚未配置");
+    expect(markup.consoleAccountsEmpty).toContain("尚未配置 DeepSeek 账户");
+  });
+
+  it("distinguishes partial source failures from empty configuration and preserves valid snapshots", () => {
+    for (const [source, title] of [["deepseek", "DeepSeek"], ["opencode-go", "OpenCode Go"], ["ccg", "CommandCode Go"], ["clp", "Cline Pass"]]) {
+      const html = markup[source + "PartialFailure"]!;
+      expect(html).toContain(title + " 元数据暂不可用");
+      expect(html).not.toContain("尚未配置 " + title + " 账户");
+      if (source !== "deepseek") expect(html).toContain("尚未配置 DeepSeek 账户");
+    }
+    expect(markup.partialFailureRetainsSnapshot).toContain("DeepSeek 元数据暂不可用");
+    expect(markup.partialFailureRetainsSnapshot).toContain("¥2.00");
+    expect(markup.skewedClientFreshAccount).not.toContain("待更新");
+  });
+
+  it("keeps the last OpenAI quota during range loading and failures but honors an explicit empty snapshot", () => {
+    for (const key of ["consoleQuotaLoading", "consoleQuotaFailed"]) {
+      expect(markup[key]).toContain('aria-valuenow="37.5"');
+      expect(markup[key]).not.toContain("尚未获取 OpenAI 额度快照");
+    }
+    expect(markup.consoleQuotaFailed).toContain("fixture overview failure");
+    expect(markup.consoleQuotaCleared).toContain("尚未获取 OpenAI 额度快照");
+  });
+
+  it("uses short consistent account update descriptions", () => {
+    expect(markup.accountStale).toContain("待更新");
+    expect(markup.accountStale).not.toContain('data-slot="badge"');
+    expect(markup.accountFresh).toContain("更新于");
+    expect(markup.accountFresh).not.toContain("待更新");
+    expect(markup.accountMissing).toContain("尚未更新");
+    expect(markup.accountFailed).toContain("更新失败");
+    expect(markup.accountFailed).not.toContain("待更新");
+  });
+
+  it("keeps missing-snapshot account labels distinct without inventing an actionable identity", () => {
+    for (const kind of ["ds", "ocg", "ccg", "clp"]) {
+      const html = markup[kind + "MissingIdentity"]!;
+      expect(html).toContain("配置 team-a");
+      expect(html).toContain("配置 team-b");
+      expect(html).not.toContain("删除本地账户");
+    }
+  });
+
+  it("renders managed account names as badges beside their provider", () => {
+    for (const [key, provider] of [["ocgQuotaOrder", "OpenCode Go"], ["clineQuotaOrder", "Cline Pass"],
+      ["deepseekAccountBadge", "DeepSeek"], ["ccgAccountBadge", "CommandCode Go"]]) {
+      const html = markup[key!]!;
+      expect(html).toContain(`>${provider}</span>`);
+      expect(html).not.toContain(`${provider} main`);
+      expect(html).toMatch(/data-slot="badge"[^>]*><span[^>]*>main<\/span><\/span>/);
+    }
+  });
+
+  it("orders quota windows by duration and keeps missing windows absent", () => {
+    for (const key of ["ocgQuotaOrder", "clineQuotaOrder"]) {
+      const html = markup[key]!;
+      const labels = [...html.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]);
+      const values = [...html.matchAll(/aria-valuenow="([^"]+)"/g)].map((match) => match[1]);
+      expect(labels).toEqual(["5小时", "7天", "月度"]);
+      expect(values).toEqual(["10", "20", "30"]);
+    }
+    const missing = markup.missingQuotaWindow!;
+    expect(missing).not.toContain("7天");
+    expect([...missing.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]))
+      .toEqual(["5小时", "月度"]);
+  });
+
+  it("exposes the quota value and names its current snapshot correctly", () => {
+    expect(markup.quota).toContain('aria-valuenow="37.5"');
+    expect(markup.quota).toContain('aria-label="OpenAI 周额度已用比例"');
+    expect(markup.quota).toContain('data-state="loading"');
+    expect(markup.quotaEmpty).toContain("尚未获取 OpenAI 额度快照");
+    expect(markup.quotaEmpty).not.toContain("当前时间范围");
+    expect(markup.quotaUnknownReset).toContain("重置时间未知");
+    expect(markup.quotaUnknownReset).not.toContain("暂无限额快照");
+    expect(markup.quotaUnknownReset).toContain('aria-valuenow="37.5"');
+  });
+
+  it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
+    for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
+      const html = markup[key]!;
+      expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
+      expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
+    }
+    expect(markup.requests).not.toContain('title="routing.finalProvider"');
+    expect(markup.traffic).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("uses compact normal and warning badges for response models and actual upstreams", () => {
+    const badge = (html: string, title: string) => [...html.matchAll(/<span\b[^>]*data-slot="badge"[^>]*>[\s\S]*?<\/span>/g)].find(match => match[0].includes(`title="${title}"`))?.[0] ?? "";
+    for (const key of ["requestsMatch", "traffic"]) {
+      const tag = badge(markup[key]!, "响应模型：model-test（名称一致）");
+      expect(tag).toContain('data-variant="outline"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).toContain('>model-test</span>');
+    }
+    for (const key of ["requests", "trafficMismatch"]) {
+      const tag = badge(markup[key]!, "响应模型：model-other（名称不一致）");
+      expect(tag).toContain('data-variant="destructive"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).toContain('data-icon="inline-start"');
+    }
+    expect(badge(markup.requestsMissingModel!, "响应模型：model-test（信息不足）")).toContain('data-variant="outline"');
+    for (const key of ["requestsUpstream", "trafficUpstream", "requestsOtherUpstream", "trafficOtherUpstream"]) {
+      const tag = badge(markup[key]!, "routing.finalProvider");
+      expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
+      expect(tag).toContain('data-size="sm"');
+      expect(tag).not.toContain("上游：");
+    }
+  });
+
+  it("shows only actual upstream badges for CLP account and dump identities", () => {
+    for (const key of ["requestsClp", "trafficClp"]) {
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(markup[key]).not.toContain("hidden-response-model");
+      expect(markup[key]).not.toContain("响应模型：");
+      expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
+      expect(markup[key]).not.toContain('>cline-pass/deepseek-v4.1-flash</span>');
+    }
+    expect(markup.trafficClpNoUpstream).toContain('>deepseek-v4.1-flash</span>');
+    expect(markup.trafficClpNoUpstream).not.toContain("hidden-response-model");
+    expect(markup.trafficClpNoUpstream).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the recorded upstream provider on the error list without adding a column", () => {
+    const html = markup.errorsUpstream!;
+    expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+    expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
+    expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
+    expect(markup.errors).not.toContain('title="routing.finalProvider"');
+  });
+
+  it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
+    expect(markup.traceFinalProvider).toMatch(/title="routing.finalProvider"><span class="truncate">deepseek/);
+    expect(markup.traceFinalProvider!.indexOf('title="routing.finalProvider"')).toBeLessThan(markup.traceFinalProvider!.indexOf(">请求</"));
+    expect(markup.traceClosed).not.toContain('title="routing.finalProvider"');
+    expect(markup.traceFallbackOnly).not.toContain('title="routing.finalProvider"');
+  });
 
   it("renders account presets, custom validation and an immutable existing ID", () => {
     expect(markup.newAccount).toContain('role="combobox"');
@@ -233,12 +487,23 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "时间", "Provider", "模型", "状态", "输入 Token", "输出 Token",
-      "首字耗时", "总耗时", "Token/s", "调用详情",
+      "时间", "Provider", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
+      "首 Token", "请求耗时", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
     expect(markup.requests).toContain("名称不一致");
+  });
+
+  it("shows request and period cache hit rates without treating missing data as zero", () => {
+    const cacheCell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][headers(html).indexOf("缓存命中率")]?.[1];
+    expect(cacheCell(markup.requests!)).toContain("50.0%");
+    expect(cacheCell(markup['request-cache-0']!)).toContain("0.0%");
+    expect(cacheCell(markup['request-cache-null']!)).toContain("—");
+    expect(markup.partialSummary).toContain("缓存命中率 50.0%");
+    expect(markup['summary-cache-100-0']).toContain("缓存命中率 0.0%");
+    expect(markup['summary-cache-100-null']).toContain("缓存命中率 —");
+    expect(markup['summary-cache-0-0']).toContain("缓存命中率 —");
   });
 
   it("shows only Fast tiers and preserves the exact call link", () => {
@@ -256,8 +521,9 @@ describe("WebUI metrics table presentation", () => {
     const responseOnly = markup.fastResponseOnly!;
     expect(requestOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
     expect(responseOnly.match(/>Fast<\/span>/g)).toHaveLength(1);
-    expect(requestOnly.indexOf(">Fast</span>")).toBeLessThan(requestOnly.indexOf("响应服务层级"));
+    expect(requestOnly.indexOf(">Fast</span>")).toBeGreaterThan(requestOnly.indexOf("请求服务层级"));
     expect(responseOnly.indexOf(">Fast</span>")).toBeGreaterThan(responseOnly.indexOf("响应服务层级"));
+    expect(responseOnly.indexOf(">Fast</span>")).toBeLessThan(responseOnly.indexOf("请求服务层级"));
     expect(markup.traceClosed).not.toContain(">Fast</span>");
   });
 
@@ -274,10 +540,10 @@ describe("WebUI metrics table presentation", () => {
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
       "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
-      "输入 Token", "缓存命中率", "输出 Token", "平均 Token/s", "最后记录",
+      "输入 Token", "缓存命中率", "输出 Token", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token", "平均 Token/s",
+      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -302,7 +568,7 @@ describe("WebUI metrics table presentation", () => {
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
     const timeIndex = headers(markup.requests!).indexOf("时间");
-    const speedIndex = headers(markup.ascending!).indexOf("Token/s");
+    const speedIndex = headers(markup.ascending!).indexOf("请求耗时");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
     expect(speedIndex).toBeGreaterThanOrEqual(0);
@@ -324,7 +590,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首字耗时", "总耗时", "Token/s", "调用详情"]) {
+    for (const label of ["首 Token", "请求耗时", "调用详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");
@@ -376,8 +642,8 @@ describe("WebUI metrics table presentation", () => {
     expect(cells[columnIndex]).toContain("text-right");
   });
 
-  it("prioritizes traffic model, status and duration without redundant matching-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "总耗时", "Turn State 字符数", "类型", "请求", "线程", "轮次"]);
+  it("prioritizes traffic model, status and duration with compact response-model badges", () => {
+    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求"]);
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
     expect(markup.trafficCountsLoading).toContain("的调用明细");
@@ -387,13 +653,45 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficCountsPartial?.match(/加载失败/g)).toHaveLength(1);
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
-    expect(markup.traffic).not.toContain("名称一致");
+    expect(markup.traffic).toContain("响应模型：model-test（名称一致）");
     expect(markup.traffic).not.toContain("→");
     expect(markup.trafficMismatch).toContain("名称不一致");
     expect(headers(markup.trafficLoading!)).toEqual(headers(markup.traffic!));
     expect(markup.trafficLoading).toContain('data-slot="skeleton"');
     expect(markup.trafficLoading).not.toContain("model-test");
     expect(markup.trafficLoading).not.toContain("的调用明细");
+  });
+
+  it("structures call overview, response, request and folded diagnostics without guessing live state", () => {
+    const html = markup.structuredCall!;
+    const titles = [...html.matchAll(/data-slot="card-title"[^>]*>(.*?)<\/div>/g)].map(match => match[1]);
+    expect(titles.slice(1)).toEqual(["响应", "请求", "诊断信息"]);
+    expect(html).toContain('aria-label="调用概览"');
+    for (const text of ["首 Token", "请求耗时", "1.55 s", "9.5 s", "输入 Token", "输出 Token", "缓存 500", "其中推理 50", "visible-answer"]) expect(html).toContain(text);
+    for (const text of ["hidden-batch", "request-body", "old-trace-body", "详细耗时", "逐条用量归因"]) expect(html).not.toContain(text);
+    expect(markup.pendingCall).toContain("未记录终态");
+    expect(markup.pendingCall).not.toContain("进行中");
+    expect(markup.pendingCall).toContain('data-slot="empty"');
+    expect(markup.failedCall!.match(/role="alert"/g)).toHaveLength(1);
+    expect(markup.failedCall).toContain("错误详情");
+    expect(markup.failedCall).not.toContain("hidden-error");
+    for (const category of ["prewarm", "models"]) {
+      expect(markup['call-' + category]).not.toContain("首 Token");
+      expect(markup['call-' + category]).not.toContain("输入 Token");
+      expect(markup['call-' + category]).toContain("请求耗时");
+    }
+  });
+
+  it("keeps completed calls successful and preserves late disconnects in folded diagnostics", () => {
+    expect(markup.completedDisconnect).toContain("完成后的诊断信息");
+    expect(markup.completedDisconnect).not.toContain("client_disconnected");
+    for (const html of [markup.completedDisconnect, markup.completedDisconnectOpen]) {
+      expect(html).not.toContain("请求失败");
+      expect(html).not.toContain('role="alert"');
+      expect(html).toContain("visible-answer");
+    }
+    expect(markup.completedDisconnectOpen).toContain("client_disconnected");
+    expect(markup.completedDisconnectOpen).toContain("不改变本次请求的完成状态");
   });
 
   it("keeps call content but hides stale trace pages during loading or failure", () => {
@@ -408,8 +706,10 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.truncatedContent).not.toContain("格式化</button>");
     for (const html of [markup.traceLoading, markup.traceFailure]) {
       expect(html).toContain("request-body");
-      expect(html).toContain("提供商 openai · 批次 batch-1");
-      expect(html).toContain("调用编号 #7");
+      expect(html).toContain("batch-1");
+      expect(html).toContain("提供商");
+      expect(html).toContain("调用编号");
+      expect(html).toContain("#7");
       expect(html).toContain("复制定位信息");
       expect(html).not.toContain("old-trace-body");
       expect(html).toMatch(/<button\b[^>]*disabled=""/);

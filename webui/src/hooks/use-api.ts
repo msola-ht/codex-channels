@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { scheduleApiRefresh } from "../lib/api-polling"
 
@@ -17,10 +17,13 @@ export function useApi<T>(
     loading: true,
     error: null,
   })
+  const activeRequest = useRef<AbortController | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
+    activeRequest.current?.abort()
     const controller = new AbortController()
+    activeRequest.current = controller
     setState((previous) => ({ ...previous, loading: true, error: null }))
     loader(controller.signal)
       .then((data) => {
@@ -42,8 +45,13 @@ export function useApi<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, reloadKey])
 
-  const refetch = useCallback(() => setReloadKey((key) => key + 1), [])
+  const refetch = useCallback(() => {
+    activeRequest.current?.abort()
+    setState((previous) => ({ ...previous, loading: true, error: null }))
+    setReloadKey((key) => key + 1)
+  }, [])
   const replaceData = useCallback((data: T) => {
+    activeRequest.current?.abort()
     setState({ data, loading: false, error: null })
   }, [])
   return { ...state, refetch, replaceData }

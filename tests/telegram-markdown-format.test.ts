@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatMarkdownAsTelegramHtml } from "../src/surfaces/telegram/markdown-format.js";
+import { formatMarkdownAsTelegramHtml, formatMarkdownAsTelegramHtmlChunks } from "../src/surfaces/telegram/markdown-format.js";
 
 describe("Telegram Markdown compatibility formatter", () => {
   it("preserves code blocks and links when excluding the reserved bold heading", () => {
@@ -41,6 +41,29 @@ describe("Telegram Markdown compatibility formatter", () => {
       "• 链接 · <a href=\"https://example.com/\">可点击</a>",
       "<pre><code class=\"language-ts\">const value = a &lt; b;</code></pre>",
     ].join("\n"));
+  });
+
+  it("renders local file references compactly while preserving line numbers and web links", () => {
+    const markdown = [
+      "[sqlite-store.ts:76](/root/project/src/sqlite-store.ts:76)",
+      "[report.md](</root/My Project/report.md:3>)",
+      "[unsafe.ts](/root/a<b>.ts:9)",
+      "[文档](https://example.com/docs)",
+      "`[example.ts](/root/example.ts:1)`",
+    ].join("\n");
+    expect(formatMarkdownAsTelegramHtml(markdown)).toBe([
+      "<code>sqlite-store.ts:76</code>",
+      "<code>report.md:3</code>",
+      "<code>a&lt;b&gt;.ts:9</code>",
+      '<a href="https://example.com/docs">文档</a>',
+      "<code>[example.ts](/root/example.ts:1)</code>",
+    ].join("\n"));
+    const long = formatMarkdownAsTelegramHtmlChunks(
+      "- [sqlite-store.ts:76](/root/project/src/sqlite-store.ts:76)\n".repeat(300),
+    );
+    expect(long.length).toBeGreaterThan(1);
+    expect(long.join("")).toContain("<code>sqlite-store.ts:76</code>");
+    expect(long.join("")).not.toContain("/root/");
   });
 
   it("does not turn unsupported or malformed Markdown destinations into Telegram links", () => {

@@ -18,7 +18,7 @@ export function StatCard({
   description?: string
 }) {
   return (
-    <Card>
+    <Card size="sm">
       {title === undefined ? null : (
         <CardHeader>
           <CardTitle>{title}</CardTitle>

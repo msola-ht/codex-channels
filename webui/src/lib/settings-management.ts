@@ -10,6 +10,7 @@ import type {
   ManagementAccountSettingsPreview,
   ManagementAccountSettingsResponse,
   ManagementSettingMutationResponse,
+  ManagementSettingInput,
   ManagementSettingsResponse,
   ManagementTask,
   ManagementTaskInput,
@@ -26,6 +27,7 @@ export type PendingSetting = {
 }
 
 export interface GatewaySettingsController {
+  lastAppliedSetting?: ManagementSettingInput | null
   managedSettings: ManagementSettingsResponse | null
   loading: boolean
   error: string | null
@@ -39,6 +41,7 @@ export interface GatewaySettingsController {
 }
 
 export interface CodexSettingsController {
+  lastAppliedSetting?: CodexUserSettingInput | null
   codexSettings: CodexUserSettingsResponse | null
   loading: boolean
   error: string | null

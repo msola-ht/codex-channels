@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useSettingsDraft } from "@/hooks/use-settings-draft"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -13,27 +14,20 @@ import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 
 export function AppServerSettingsCard({ management, onChanged }: { management: CodexSettingsController; onChanged?: () => void }) {
   const settings = management.codexSettings
-  const [contextWindow, setContextWindow] = useState("")
-  const [compactPercent, setCompactPercent] = useState("")
-  const [planEffort, setPlanEffort] = useState("")
-  const [reasoningSummary, setReasoningSummary] = useState("none")
-  const [verbosity, setVerbosity] = useState("medium")
-  const [startupUpdate, setStartupUpdate] = useState("true")
-  const [historyPersistence, setHistoryPersistence] = useState("save-all")
+  const selectedModel = settings?.models.find((model) => model.model === settings.defaults.model) ?? settings?.models[0]
+  const [compact, patchCompact, resetCompact] = useSettingsDraft({ contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), compactPercent: settings?.compact.autoCompactPercent == null ? "" : String(settings.compact.autoCompactPercent) })
+  const [preferences, patchPreferences, resetPreferences] = useSettingsDraft({
+    planEffort: settings?.defaults.planModeReasoningEffort ?? selectedModel?.defaultReasoningEffort ?? "",
+    reasoningSummary: settings?.defaults.reasoningSummary ?? "none", verbosity: settings?.defaults.verbosity ?? "medium",
+    startupUpdate: String(settings?.defaults.checkForUpdateOnStartup ?? true), historyPersistence: settings?.defaults.historyPersistence ?? "save-all",
+  })
+  const { contextWindow, compactPercent } = compact
+  const { planEffort, reasoningSummary, verbosity, startupUpdate, historyPersistence } = preferences
   const [localError, setLocalError] = useState<string | null>(null)
-
   useEffect(() => {
-    if (settings === null || management.pendingSetting !== null) return
-    const selected = settings.models.find((model) => model.model === settings.defaults.model) ?? settings.models[0]
-    setContextWindow(settings.compact.contextWindow === null ? "" : String(settings.compact.contextWindow))
-    setCompactPercent(settings.compact.autoCompactPercent === null ? "" : String(settings.compact.autoCompactPercent))
-    setPlanEffort(settings.defaults.planModeReasoningEffort ?? selected?.defaultReasoningEffort ?? "")
-    setReasoningSummary(settings.defaults.reasoningSummary ?? "none")
-    setVerbosity(settings.defaults.verbosity ?? "medium")
-    setStartupUpdate(String(settings.defaults.checkForUpdateOnStartup ?? true))
-    setHistoryPersistence(settings.defaults.historyPersistence ?? "save-all")
-    setLocalError(null)
-  }, [management.pendingSetting, settings])
+    if (management.lastAppliedSetting?.kind === "model-compact") resetCompact()
+    if (management.lastAppliedSetting?.kind === "preferences") resetPreferences()
+  }, [management.lastAppliedSetting, resetCompact, resetPreferences])
 
   if (management.loading && settings === null) return <LoadingSettingsCard title="App Server 设置" />
   if (settings === null) return <SettingsError message={management.error ?? "App Server 用户设置暂不可用"} retry={management.refetch} />
@@ -43,7 +37,7 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   }
   const selected = settings.models.find((model) => model.model === settings.defaults.model) ?? settings.models[0]
   const effortOptions = selected?.reasoningEfforts.map((item) => [item.effort, item.effort]) ?? []
-  const busy = management.loading || management.saving || management.pendingSetting !== null
+  const busy = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
   const officialDisabled = busy || !settings.defaultsEditable
 
   const saveCompact = () => {
@@ -82,10 +76,11 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
   }
 
   return <>
-    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
+    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     <Card>
       <CardHeader><CardTitle>Codex 新会话与用户偏好</CardTitle><CardDescription>通过 App Server 用户配置 RPC 写入，修订冲突会要求重新读取；各项设置的准确生效范围会在确认时显示。</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
+      {management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
           <SettingsRow label="当前 Provider" value={settings.provider} badge />
           <ManagedSelect label="默认模型" value={settings.defaults.model ?? ""} options={settings.models.map((model) => [model.model, model.displayName])} disabled={officialDisabled} onChange={(value) => { const model = settings.models.find((candidate) => candidate.model === value); void management.previewSetting({ kind: "defaults", model: value, reasoningEffort: model?.defaultReasoningEffort ?? "medium" }, "默认模型") }} />
@@ -104,8 +99,8 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">模型上下文与自动压缩</h3><p className="text-xs text-muted-foreground">留空恢复模型默认；自动压缩百分比要求同时设置上下文窗口。</p></div>
           <FieldGroup className="grid gap-3 md:grid-cols-2">
-            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-context-window">上下文窗口（tokens）</FieldLabel><Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} onChange={(event) => setContextWindow(event.target.value)} placeholder="模型默认" /></Field>
-            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-compact-percent">自动压缩百分比</FieldLabel><Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} onChange={(event) => setCompactPercent(event.target.value)} placeholder="默认 95%" /></Field>
+            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-context-window">上下文窗口（tokens）</FieldLabel><Input id="codex-context-window" type="number" min={1} value={contextWindow} disabled={officialDisabled} onChange={(event) => patchCompact({ contextWindow: event.target.value })} placeholder="模型默认" /></Field>
+            <Field data-disabled={officialDisabled}><FieldLabel htmlFor="codex-compact-percent">自动压缩百分比</FieldLabel><Input id="codex-compact-percent" type="number" min={10} max={90} value={compactPercent} disabled={officialDisabled} onChange={(event) => patchCompact({ compactPercent: event.target.value })} placeholder="默认 95%" /></Field>
           </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled} onClick={saveCompact}>保存压缩设置</Button>
         </section>
@@ -114,11 +109,11 @@ export function AppServerSettingsCard({ management, onChanged }: { management: C
         <section className="flex flex-col gap-3">
           <div><h3 className="font-medium">其他用户偏好</h3><p className="text-xs text-muted-foreground">这些字段作为一组写入 Codex 用户配置；推理摘要未配置时默认关闭。</p></div>
           <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-            <ManagedSelect label="Plan 思考等级" value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={setPlanEffort} />
-            <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭（未配置默认，none）"]]} disabled={officialDisabled} onChange={setReasoningSummary} />
-            <ManagedSelect label="输出详细程度" value={verbosity} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} disabled={officialDisabled} onChange={setVerbosity} />
-            <ManagedSelect label="启动时检查更新" value={startupUpdate} options={[["true", "开启"], ["false", "关闭"]]} disabled={officialDisabled} onChange={setStartupUpdate} />
-            <ManagedSelect label="历史记录保存" value={historyPersistence} options={[["save-all", "保存"], ["none", "不保存"]]} disabled={officialDisabled} onChange={setHistoryPersistence} />
+            <ManagedSelect label="Plan 思考等级" value={planEffort} options={effortOptions} disabled={officialDisabled} onChange={(value) => patchPreferences({ planEffort: value })} />
+            <ManagedSelect label="推理摘要" value={reasoningSummary} options={[["auto", "自动"], ["concise", "简洁"], ["detailed", "详细"], ["none", "关闭（未配置默认，none）"]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ reasoningSummary: value })} />
+            <ManagedSelect label="输出详细程度" value={verbosity} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ verbosity: value })} />
+            <ManagedSelect label="启动时检查更新" value={startupUpdate} options={[["true", "开启"], ["false", "关闭"]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ startupUpdate: value })} />
+            <ManagedSelect label="历史记录保存" value={historyPersistence} options={[["save-all", "保存"], ["none", "不保存"]]} disabled={officialDisabled} onChange={(value) => patchPreferences({ historyPersistence: value })} />
           </FieldGroup>
           <Button className="self-start" variant="outline" disabled={officialDisabled || planEffort === ""} onClick={savePreferences}>保存用户偏好</Button>
         </section>

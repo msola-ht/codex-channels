@@ -49,8 +49,12 @@ export async function routeProviderManagement({
     ) {
       throw new ApiError(400, "invalid_account_refresh", "账户刷新请求必须包含唯一的 provider 字段");
     }
+    const controller = new AbortController();
+    const disconnect = () => { if (!response.writableEnded) controller.abort(); };
+    response.once("close", disconnect);
+    if (response.destroyed) controller.abort();
     try {
-      await state.refreshGatewayAccount(configPath, body.provider);
+      await state.refreshGatewayAccount(configPath, body.provider, controller.signal);
     } catch (error) {
       if (error instanceof GatewayAccountRefreshError) {
         if (error.code === "provider_not_found") throw new ApiError(404, error.code, error.message);
@@ -62,6 +66,8 @@ export async function routeProviderManagement({
         );
       }
       throw new ApiError(503, "gateway_unavailable", "Gateway 账户刷新接口不可用");
+    } finally {
+      response.removeListener("close", disconnect);
     }
     sendAccountSnapshots(environment, response, openMetricsStore);
     return true;

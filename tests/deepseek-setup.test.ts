@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { downloadDeepseekCatalog, extractDeepseekCatalog } from "../scripts/deepseek-setup.mjs";
+import { downloadDeepseekCatalog, extractDeepseekCatalog, createManagedDeepseekCatalog } from "../scripts/deepseek-setup.mjs";
 const script = `#!/bin/sh
 cat > "$TMP_MODELS" <<'CODEX_MODELS_JSON'
 {"models":[{"slug":"deepseek-flash","display_name":"DeepSeek-Flash","input_modalities":["text","image"],"context_window":1048576,"max_context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]},{"slug":"deepseek-v4-pro","display_name":"DeepSeek-V4-Pro","input_modalities":["text"],"context_window":1048576,"max_context_window":1048576,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Low"},{"effort":"high","description":"High"},{"effort":"max","description":"Max"}]}]}
@@ -53,4 +53,14 @@ describe("DeepSeek official catalog download", () => {
       .rejects.toThrow("超过允许大小");
   });
 
+});
+
+it("narrows DS controls without mutating the downloaded catalog or tool capabilities", () => {
+  const catalog = extractDeepseekCatalog(script);
+  Object.assign(catalog.models[0]!, {support_verbosity: true, default_verbosity: "low", supports_reasoning_summaries: true, supports_search_tool: true, apply_patch_tool_type: "freeform"});
+  const snapshot = structuredClone(catalog);
+  const managed = createManagedDeepseekCatalog(catalog);
+  expect(catalog).toEqual(snapshot);
+  expect(managed.models[0]).toMatchObject({support_verbosity: false, default_verbosity: null, supports_reasoning_summary_parameter: false, default_reasoning_summary: "none", supports_search_tool: true, apply_patch_tool_type: "freeform"});
+  expect(managed.models[0]).not.toHaveProperty("supports_reasoning_summaries");
 });

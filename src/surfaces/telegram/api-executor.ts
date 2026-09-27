@@ -2,6 +2,7 @@ import { GrammyError, HttpError } from "grammy";
 import type { Logger } from "pino";
 
 import { telegramErrorMetadata } from "./error-metadata.js";
+import { observeSurfaceStage, surfaceDiagnosticContext, withSurfaceDiagnosticContext } from "../diagnostics.js";
 
 interface TelegramApiCall {
   chatId: string;
@@ -20,14 +21,22 @@ export class TelegramApiExecutor {
     const maximumAttempts = context.critical ? 3 : 1;
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       try {
-        return await operation(signal);
+        return await withSurfaceDiagnosticContext({
+          ...surfaceDiagnosticContext(), component: "Telegram", conversationId: context.chatId,
+        }, () => observeSurfaceStage(this.logger, {
+          stage: "api", operation: context.operation, critical: context.critical,
+          attempt, maximumAttempts, signal, errorMetadata: telegramErrorMetadata,
+        }, () => operation(signal)));
       } catch (error) {
-        const delayMs = retryDelay(error, attempt);
+        if (signal.aborted) throw error;
+        const delayMs = retryDelay(error, attempt, context.operation);
         if (attempt === maximumAttempts || delayMs === undefined || delayMs > 30_000) {
           throw error;
         }
         this.logger.warn(
           {
+            ...surfaceDiagnosticContext(),
+            component: "Telegram",
             chatId: context.chatId,
             operation: context.operation,
             attempt,
@@ -44,17 +53,18 @@ export class TelegramApiExecutor {
   }
 }
 
-function retryDelay(error: unknown, attempt: number): number | undefined {
+function retryDelay(error: unknown, attempt: number, operation: string): number | undefined {
+  const idempotent = operation === "editMessageText" || operation === "deleteMessage";
   if (error instanceof GrammyError) {
     if (error.error_code === 429 && typeof error.parameters.retry_after === "number") {
       return Math.max(0, error.parameters.retry_after * 1_000);
     }
-    if (error.error_code >= 500) {
+    if (idempotent && error.error_code >= 500) {
       return exponentialDelay(attempt);
     }
     return undefined;
   }
-  if (error instanceof HttpError) {
+  if (idempotent && error instanceof HttpError) {
     return exponentialDelay(attempt);
   }
   return undefined;

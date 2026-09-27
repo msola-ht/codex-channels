@@ -24,3 +24,13 @@ export function scheduleApiRefresh(
     page.removeEventListener("visibilitychange", schedule)
   }
 }
+
+/** 首次读取仅建立基线；之后新出现或从运行态进入终态的任务触发关联刷新。 */
+export function settledTaskIds(
+  previous: ReadonlyMap<string, string> | null,
+  tasks: readonly { id: string; state: string }[],
+): string[] {
+  if (previous === null) return []
+  const terminal = (state: string | undefined) => state === "completed" || state === "failed" || state === "cancelled"
+  return tasks.filter((task) => terminal(task.state) && !terminal(previous.get(task.id))).map((task) => task.id)
+}

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  GatewayAccountRefreshError,
   GatewayAccountRefreshServer,
   requestGatewayAccountRefresh,
 } from "../runtime/gateway-account-refresh.mjs";
@@ -30,7 +31,7 @@ describe("Gateway account refresh IPC", () => {
 
     await expect(requestGatewayAccountRefresh(configPath, "deepseek"))
       .resolves.toEqual({ provider: "deepseek" });
-    expect(refreshAccount).toHaveBeenCalledWith("deepseek");
+    expect(refreshAccount).toHaveBeenCalledWith("deepseek", expect.any(AbortSignal));
   });
 
   it("returns stable errors for unknown providers and refresh failures", async () => {
@@ -51,34 +52,40 @@ describe("Gateway account refresh IPC", () => {
       });
   });
 
-  it("waits for an active refresh before closing", async () => {
+  it("generates public text from safe reasons, never from exception messages", async () => {
     const configPath = createConfigPath();
-    let completeRefresh: ((supported: boolean) => void) | undefined;
-    let markRefreshStarted: (() => void) | undefined;
-    const refreshStarted = new Promise<void>((resolve) => {
-      markRefreshStarted = resolve;
-    });
-    const server = new GatewayAccountRefreshServer(configPath, async () => {
-      markRefreshStarted?.();
-      return await new Promise<boolean>((resolve) => {
-        completeRefresh = resolve;
-      });
+    const server = new GatewayAccountRefreshServer(configPath, async provider => {
+      throw new GatewayAccountRefreshError("refresh_failed", "secret response", { ...(provider === "clp-main" ? { reason: "authentication" as const } : {}) });
     });
     servers.push(server);
     await server.start();
-
-    const request = requestGatewayAccountRefresh(configPath, "deepseek");
-    await refreshStarted;
-    const close = server.close();
-    let closed = false;
-    void close.then(() => { closed = true; });
-    await Promise.resolve();
-    expect(closed).toBe(false);
-
-    completeRefresh?.(true);
-    await expect(request).resolves.toEqual({ provider: "deepseek" });
-    await close;
+    await expect(requestGatewayAccountRefresh(configPath, "clp-main")).rejects.toMatchObject({ code: "refresh_failed", message: "账户认证失败，请检查配置" });
+    await expect(requestGatewayAccountRefresh(configPath, "ccg-main")).rejects.toMatchObject({ code: "refresh_failed", message: "账户刷新失败" });
   });
+
+  it.each(["caller", "shutdown"])("cancels an active refresh on %s even when a callback never resolves", async mode => {
+    const configPath = createConfigPath();
+    let outbound: AbortSignal | undefined;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const server = new GatewayAccountRefreshServer(configPath, (_provider, signal) => {
+      outbound = signal;
+      started();
+      return new Promise<boolean>(() => {});
+    });
+    servers.push(server);
+    await server.start();
+    const caller = new AbortController();
+    const result = requestGatewayAccountRefresh(configPath, "ds-main", caller.signal);
+    const rejected = expect(result).rejects.toBeInstanceOf(Error);
+    await ready;
+    if (mode === "caller") caller.abort();
+    else await server.close();
+    await rejected;
+    await vi.waitFor(() => expect(outbound?.aborted).toBe(true));
+    await server.close();
+  });
+
 });
 
 function createConfigPath(): string {

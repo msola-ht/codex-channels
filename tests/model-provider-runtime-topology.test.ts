@@ -73,6 +73,12 @@ describe("model provider App Server topology", () => {
       { provider: "ds-test" },
       { provider: "ocg-main" },
     ]);
+    expect(loadManagedProviderAppServers(environment).map(({ provider, arguments: args }) => ({
+      provider, webSearch: args.filter(argument => argument.startsWith("web_search=")),
+    }))).toEqual([
+      { provider: "ds-test", webSearch: ['web_search="disabled"'] },
+      { provider: "ocg-main", webSearch: ['web_search="disabled"'] },
+    ]);
     expect(loadManagedProviderAppServers(environment).map((provider) => ({
       provider: provider.provider,
       environmentKeys: Object.keys(provider.childEnvironment),

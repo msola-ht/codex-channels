@@ -62,7 +62,7 @@ describe("Responses provider catalog and lifecycle", () => {
     expect(()=>validateResponsesModels([{...model,template:{source:"official",model:"source",followContext:true}}],model.id)).toThrow("模板关联");
   });
 
-  it.each(["deepseek"] as const)("preserves only basic %s capabilities through import, WebUI edit and rollback", async source => {
+  it.each(["deepseek"] as const)("carries the %s prompt while dropping official-only capabilities through import, WebUI edit and rollback", async source => {
     const {options,input}=fixture();
     const snapshot={...createResponsesModelCatalog([model],model.id).models[0]!,
       max_context_window:1048576, shell_type:"shell_command", priority:7,
@@ -76,7 +76,8 @@ describe("Responses provider catalog and lifecycle", () => {
     const mapped={...definition,id:"platform/custom"};
     const generated=createResponsesModelCatalog([mapped],mapped.id);
     expect(generated.models[0]).toMatchObject({slug:mapped.id,context_window:64000,max_context_window:1048576,input_modalities:["text","image"],default_reasoning_level:"high"});
-    for(const marker of ["Original base instructions","Complete source instructions","source-hash","Detailed source description"]) expect(JSON.stringify(generated)).not.toContain(marker);
+    for(const marker of ["Original base instructions","source-hash","Detailed source description"]) expect(JSON.stringify(generated)).not.toContain(marker);
+    expect(generated.models[0]).toMatchObject({model_messages:{instructions_template:"Complete source instructions"}});
     expect(generated.models[0]).toMatchObject({shell_type:"unified_exec",support_verbosity:false,apply_patch_tool_type:null});
     await applyCustomPrimaryProviderSave({...input,model:mapped.id,catalog:{kind:"custom",models:[mapped]}},options);
     const state=await loadModelProviderManagementState({...options,readUserConfig:async()=>({config:{model_provider:"openai"}})});
@@ -85,7 +86,7 @@ describe("Responses provider catalog and lifecycle", () => {
     const mutation=normalizeProviderSettingsMutation({operation:"primary.custom.save",provider:{...input,operation:"update",model:mapped.id,catalog:{kind:"custom",models:[edited]}}});
     await applyCustomPrimaryProviderSave(mutation.provider,options);
     const saved=readResponsesModelCatalog(options.environment,input.providerId);
-    expect(saved.models[0]).toMatchObject({slug:mapped.id,display_name:"Edited",context_window:32000,max_context_window:1048576,input_modalities:["text"]});
+    expect(saved.models[0]).toMatchObject({slug:mapped.id,display_name:"Edited",context_window:32000,max_context_window:1048576,input_modalities:["text"],model_messages:{instructions_template:"Complete source instructions"}});
     expect(saved.definitions[0]?.template).toEqual({source:"deepseek",model:model.id,followContext:false});
     const transaction=writeResponsesModelCatalog(options.environment,input.providerId,[{...edited,contextWindow:16000}],mapped.id,saved.revision);
     finishResponsesModelCatalogWrite(transaction,true);
@@ -137,6 +138,12 @@ describe("Responses provider catalog and lifecycle", () => {
     const catalog = createResponsesModelCatalog([model], model.id);
     expect(catalog.models[0]).toMatchObject({ slug: model.id, context_window: 64000, input_modalities: ["text"], default_reasoning_level: null, supports_reasoning_summary_parameter: false, model_messages: {instructions_template: expect.any(String)} });
     expect(catalog.models[0]).toHaveProperty("upgrade", null);
+    expect(catalog.models[0]).not.toHaveProperty("supports_search_tool");
+    expect(createResponsesModelCatalog([{...model, supportsSearchTool: true}], model.id).models[0]).toMatchObject({ supports_search_tool: true });
+    expect(() => validateResponsesModels([{...model, supportsSearchTool: "yes"}], model.id)).toThrow("检索工具");
+    expect(catalog.models[0]).toMatchObject({ apply_patch_tool_type: null });
+    expect(createResponsesModelCatalog([{...model, applyPatchToolType: "freeform"}], model.id).models[0]).toMatchObject({ apply_patch_tool_type: "freeform" });
+    expect(() => validateResponsesModels([{...model, applyPatchToolType: "function"}], model.id)).toThrow("apply_patch");
   });
   it.each([
     [{...model, contextWindow: 1}], [{...model, reasoningEfforts:["invented"]}],

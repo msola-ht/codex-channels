@@ -18,7 +18,7 @@ import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/componen
 import type { UseApiState } from "@/hooks/use-api"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
-import { useManagementTasks } from "@/hooks/use-management-tasks"
+import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
 import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
 import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
@@ -64,6 +64,8 @@ export function SettingsPage() {
     if (source !== "account") refetchAccountSettings()
   }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
 
+  useManagementTaskRefresh(tasks, refreshAllSettings)
+
   useApiPolling(services.refetch, services.loading,
     tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)))
 
@@ -102,7 +104,7 @@ export function SettingsPage() {
       <p className="text-sm text-muted-foreground">按 App Server、Gateway 和 WebUI 边界查看并修改配置。</p>
     </div>
     {loadState === "loading" ? <SettingsSkeleton /> : null}
-    {loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
+    {summary.error !== null || loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
     {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
     {loadState === "ready" && summary.data !== null ? <SettingsContent
       summary={summary.data}
@@ -144,19 +146,20 @@ function SettingsContent({ summary, services, providers, upstreamAgent, manageme
   }
   return <>
     {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
-    {management.managedSettings === null && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
+    {(management.error !== null || management.managedSettings === null) && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
     <AppServerSettingsCard management={codexManagement} onChanged={() => onSettingsChanged("codex")} />
     {providers.loading && providers.data === null ? <LoadingSettingsCard title="Provider 状态" /> : null}
     {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
     {providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
     <ProviderSettingsManagement management={providerSettings} onChanged={() => onSettingsChanged("provider")} />
     <AccountSettingsManagement management={accountSettings} onChanged={() => onSettingsChanged("account")} />
-    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
+    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
     {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     <GatewaySettingsCard management={management} upstreamAgent={upstreamAgent} />
     <WorkspaceSettingsCard management={management} />
     <WebuiDataSettingsCard management={management} />
     <ChannelStatusCard channels={summary.gateway.channels} />
+    {tasks.error !== null ? <SettingsError message={tasks.error} retry={tasks.refetch} /> : null}
     {tasks.actionError !== null ? <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert> : null}
     <Card>
       <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态和版本由当前平台服务管理器查询，未运行时显示最近错误；启停、重载和安装操作需要确认</CardDescription></CardHeader>

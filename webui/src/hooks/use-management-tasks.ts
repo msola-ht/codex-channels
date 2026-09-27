@@ -1,68 +1,60 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
-import { useApi, useApiPolling } from "@/hooks/use-api"
+import { settledTaskIds } from "@/lib/api-polling"
+import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
+import { useApiPolling } from "@/hooks/use-api"
 import { cancelManagementTask, fetchManagementTasks, previewManagementTask, startManagementTask } from "@/lib/api"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementTaskInput } from "@/lib/types"
 
 export function useManagementTasks(): ManagementTaskController {
-  const request = useApi(fetchManagementTasks, [])
-  const { data, refetch } = request
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [pendingPreview, setPendingPreview] = useState<NonNullable<ManagementTaskController["pendingPreview"]> | null>(null)
-  useApiPolling(refetch, request.loading,
+  const mutation = useManagementConfirmedMutation({
+    load: fetchManagementTasks,
+    preview: previewManagementTask,
+    apply: (input: ManagementTaskInput, confirmationToken: string, signal?: AbortSignal) =>
+      startManagementTask({ ...input, confirmationToken }, signal),
+  })
+  const { data, refetch } = mutation
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const cancellations = useRef(new Map<string, AbortController>())
+  useEffect(() => {
+    const pending = cancellations.current
+    return () => { for (const controller of pending.values()) controller.abort() }
+  }, [])
+  useApiPolling(refetch, mutation.loading,
     data?.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)) ?? false)
-  const run = useCallback(async (input: ManagementTaskInput) => {
-    if (pendingPreview !== null || saving) return null
-    setSaving(true)
-    setActionError(null)
-    try {
-      const preview = await previewManagementTask(input)
-      setPendingPreview({ input, preview: preview.preview, confirmationToken: preview.confirmationToken })
-      return null
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
-      return null
-    } finally {
-      setSaving(false)
-    }
-  }, [pendingPreview, saving])
-
-  const confirm = useCallback(async () => {
-    const pending = pendingPreview
-    if (pending === null || saving) return null
-    setSaving(true)
-    setActionError(null)
-    try {
-      const task = await startManagementTask({ ...pending.input, confirmationToken: pending.confirmationToken })
-      setPendingPreview(null)
-      refetch()
-      return task
-    } catch (error) {
-      setPendingPreview(null)
-      setActionError(error instanceof Error ? error.message : String(error))
-      return null
-    } finally {
-      setSaving(false)
-    }
-  }, [pendingPreview, refetch, saving])
-
-  const cancelPending = useCallback(() => {
-    if (saving) return
-    setPendingPreview(null)
-    setActionError(null)
-  }, [saving])
   const cancel = useCallback(async (id: string) => {
-    setActionError(null)
+    if (cancellations.current.has(id)) return null
+    const controller = new AbortController()
+    cancellations.current.set(id, controller)
+    setCancelError(null)
     try {
-      const task = await cancelManagementTask(id)
+      const task = await cancelManagementTask(id, controller.signal)
+      if (controller.signal.aborted) return null
       refetch()
       return task
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      if (!controller.signal.aborted) setCancelError(error instanceof Error ? error.message : String(error))
       return null
+    } finally {
+      cancellations.current.delete(id)
     }
   }, [refetch])
-  return { ...request, tasks: request.data?.tasks ?? [], run, confirm, cancelPending, cancel, actionError, saving, pendingPreview }
+  return {
+    ...mutation, tasks: data?.tasks ?? [], saving: mutation.busy,
+    run: (input) => { setCancelError(null); return mutation.mutate(input) },
+    confirm: mutation.confirm, cancelPending: mutation.cancel, cancel,
+    actionError: cancelError ?? mutation.actionError,
+  }
+}
+
+/** 由页面提供受影响资源的刷新动作，任务 Hook 不耦合具体页面或账户数据。 */
+export function useManagementTaskRefresh(tasks: ManagementTaskController, onSettled: () => void) {
+  const previous = useRef<Map<string, string> | null>(null)
+  useEffect(() => {
+    if (tasks.loading || tasks.error !== null) return
+    const settled = settledTaskIds(previous.current, tasks.tasks)
+    previous.current = new Map(tasks.tasks.map((task) => [task.id, task.state]))
+    if (settled.length > 0) onSettled()
+  }, [tasks.tasks, tasks.loading, tasks.error, onSettled])
 }

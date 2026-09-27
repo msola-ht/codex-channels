@@ -1,7 +1,7 @@
+import { formatMarkdownAsTelegramHtmlChunks } from "./markdown-format.js";
 import { escapeTelegramHtml } from "./html-format.js";
 
 const maximumInlineCharacters = 3_500;
-const maximumExpandableChunkCodeUnits = 3_800;
 const documentThresholdCharacters = 16_000;
 const largeCodeBlockLines = 80;
 const previewLines = 24;
@@ -9,7 +9,7 @@ const maximumEscapedPreviewCodeUnits = 2_600;
 const maximumDocumentBytes = 45 * 1024 * 1024;
 
 export type LongFinalMessagePlan =
-  | { kind: "expandable"; chunks: string[] }
+  | { kind: "html"; chunks: string[] }
   | {
       kind: "document";
       previewHtml: string;
@@ -37,7 +37,7 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
     return {
       kind: "document",
       previewHtml: [
-        "<b>回复较长，完整内容已作为文件发送</b>",
+        "<b>回复较长，以下为内容预览</b>",
         "",
         `<pre>${previewHtml}</pre>`,
         "",
@@ -50,13 +50,9 @@ export function planLongFinalMessage(text: string): LongFinalMessagePlan | undef
   }
 
   return {
-    kind: "expandable",
-    chunks: splitExpandableMessage(text),
+    kind: "html",
+    chunks: formatMarkdownAsTelegramHtmlChunks(text),
   };
-}
-
-export function splitExpandableMessage(text: string): string[] {
-  return splitByUtf16(text, maximumExpandableChunkCodeUnits);
 }
 
 function maximumFencedCodeLines(lines: readonly string[]): number {
@@ -79,29 +75,6 @@ function maximumFencedCodeLines(lines: readonly string[]): number {
   return Math.max(maximum, current);
 }
 
-function splitByUtf16(text: string, limit: number): string[] {
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > limit) {
-    let boundary = remaining.lastIndexOf("\n", limit);
-    if (boundary < limit / 2) {
-      boundary = limit;
-      if (isHighSurrogate(remaining.charCodeAt(boundary - 1))) {
-        boundary -= 1;
-      }
-    }
-    chunks.push(remaining.slice(0, boundary));
-    remaining = remaining.slice(boundary);
-    if (remaining.startsWith("\n")) {
-      remaining = remaining.slice(1);
-    }
-  }
-  if (remaining) {
-    chunks.push(remaining);
-  }
-  return chunks;
-}
-
 function escapeTruncatedHtml(text: string, limit: number): string {
   let result = "";
   for (const character of text) {
@@ -112,8 +85,4 @@ function escapeTruncatedHtml(text: string, limit: number): string {
     result += escaped;
   }
   return result;
-}
-
-function isHighSurrogate(value: number): boolean {
-  return value >= 0xD800 && value <= 0xDBFF;
 }

@@ -102,7 +102,7 @@ Telegram 菜单因订阅状态变化而改变时，旧按钮会提示重新发�
 WebUI 区分此状态与普通刷新失败，并提供经过预览确认的本地账户删除入口，
 详见[WebUI 账户展示](webui.md)。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v19 另保存子代理
+`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v20 另保存子代理
 运行级父子 Turn 关联）。5 小时滚动窗口的 `resetsAt` 会随实时查询漂移，读取时只按当前
 `resetsAt` 反推的五小时范围和请求开始时间归集，不把重置秒数当作固定周期 ID。7 天和月度窗口
 优先按记录的固定周期快照归属 Token；快照缺失，或快照的重置时间不晚于请求开始时间（请求开始时
@@ -123,11 +123,8 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
 - `deepseek-flash` 声明文字和图片输入，图片按官方规则折算为输入 Token；`deepseek-v4-pro` 只声明
   文字输入。文字模型收到图片或音频时，Gateway 会在 Turn 前拒绝；官方目录中的模型目前都不声明音频输入。
 - OpenCode Go 不支持 Fast，执行 `/fast on` 或 `/fast off` 会明确拒绝。
-- 网页搜索已实测：OpenCode Go 与 DeepSeek 一样通过 `/responses` 提供搜索工具，Codex 侧统一
-  以 `web_search` item 回传（`query`、`action` 和结构化 `results`），实测能返回带标题、URL、
-  摘要和发布日期的真实网页结果。验证方式：直接让 OpenCode Go 会话执行搜索任务并观察事件日志
-  中的 `web_search` item；或运行 `codex exec -p sf-ocg-<账户> -C <工作目录>
-  --skip-git-repo-check "请搜索……"` 直连测试。
+- 当前 DeepSeek 模型不支持内置网页搜索。固定与切换模式均在受管 App Server 启动参数中关闭，
+  不改写基础配置；普通函数工具及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
 - API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
@@ -139,7 +136,7 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   直接清理共享模型目录，固定模式还会恢复安装前的 Codex 主配置。删除后重启 Gateway 会自动解绑已删除账户的
   外部会话；该会话下一条消息会新建 Thread。
 - 运行统计与 DeepSeek 一致：完成卡片展示请求结果、Token、缓存与压缩摘要，并在官方
-  `Turn.durationMs` 可用时显示本轮总耗时；不展示模型请求聚合耗时、首段回复延迟或生成速度；
+  `Turn.durationMs` 可用时显示本轮总耗时；不展示模型请求聚合耗时或首段回复延迟，不显示 TPS；
   `/usage` 展示官方配额窗口与本机 Token 用量，见上文。
 
 官方来源：[`OpenCode Go`](https://opencode.ai/docs/go/)。

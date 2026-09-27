@@ -1,50 +1,29 @@
 import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
+import { withSurfaceOutputDiagnostics } from "../diagnostics.js";
 
 import type {
-} from "../../application/index.js";
-import {
-  isCriticalOutputEvent,
-  type ConversationTarget,
-  type OutputEvent,
+  ConversationTarget,
+  OutputEvent,
 } from "../../conversation-core/index.js";
 import type { SurfaceAccessPolicy } from "../../policy/index.js";
 import { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
+import { ContextCompactionNotices } from "../operation-presentation.js";
+import { resolveSurfaceDelivery } from "../delivery-policy.js";
+import { exponentialRetryDelay, withDeliveryRetry } from "../delivery-retry.js";
 import { surfaceErrorMetadata } from "../error-metadata.js";
+import type { SurfaceOutputPort } from "../types.js";
 import {
-  OperationUpdateBuffer,
-  type OperationUpdateSummary,
-} from "../operation-update-buffer.js";
-import { isExecutionOperation, shouldDisplayOperation } from "../operation-presentation.js";
-import type {
-  OperationUpdateDisplay,
-  SurfaceOutputPort,
-} from "../types.js";
-import {
-  createSubagentContactedPresentation,
-  createSubagentStartedPresentation,
-  createTurnReasoningPresentation,
   createTurnStartedPresentation,
   renderPlainLifecyclePresentation,
 } from "../lifecycle-presentation.js";
 import {
   contentTruncatedText,
   emptyCodexResponseText,
-  formatCliInput,
   formatCodexWarning,
   formatConversationIdleReleased,
-  formatConnectionLost,
-  formatConnectionRestored,
-  formatThreadAvailability,
   visibleUpstreamMessage,
 } from "../output-copy.js";
-import {
-  formatRuntimeAccountUpdate,
-  formatRuntimeMcpOAuthCompleted,
-  formatRuntimeMcpStatusUpdate,
-  formatRuntimeRateLimitUpdate,
-} from "../runtime-status-format.js";
-import { TurnPlanProgressState } from "../plan-presentation.js";
 
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
@@ -64,18 +43,14 @@ import {
 } from "./reply-context-store.js";
 import {
   formatWeixinCommandText,
-  renderWeixinSubagentCompleted,
   renderWeixinTurnCompleted,
 } from "./command-renderer.js";
 import { formatWeixinFinalText } from "./final-text-format.js";
-import {
-  formatWeixinOperation,
-  formatWeixinOperationSummary,
-} from "./operation-format.js";
-import type { WeixinTypingController } from "./typing-controller.js";
 
 const maximumChunkCharacters = 4_000;
 const maximumChunks = 5;
+const maximumSendAttempts = 3;
+const maximumSendRetryDelayMs = 5_000;
 const truncationNotice = `\n\n[${contentTruncatedText}]`;
 const previewNotice = "\n\n[内容预览]";
 const fileFailureNotice = "[文件发送失败，已改为分段文本]\n\n";
@@ -96,9 +71,6 @@ export class WeixinOutboxError extends Error {
 export interface WeixinOutboxOptions {
   capacity?: number;
   closeTimeoutMs?: number;
-  operationUpdateDisplay?: OperationUpdateDisplay;
-  planUpdatesEnabled?: boolean;
-  reasoningEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
     model: string | null | undefined,
@@ -111,30 +83,35 @@ export interface WeixinOutboxOptions {
   imageClient?: Pick<WeixinImageSendProtocolClient, "sendImage">;
   fileClient?: Pick<WeixinFileSendProtocolClient, "sendFile">;
   readImage?: typeof readWeixinOutboundImage;
-  typing?: Pick<WeixinTypingController, "close" | "start" | "stop">;
 }
 
 export class WeixinOutbox implements SurfaceOutputPort {
+  private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
-  private readonly operationUpdates =
-    new OperationUpdateBuffer<ConversationTarget>();
-  private readonly activeOperations = new Set<string>();
-  private readonly pendingApprovalOperations = new Set<string>();
-  private readonly reasoningGenerations = new Map<string, number>();
-  private readonly reasoningDisplayedGenerations = new Map<string, number>();
-  private readonly planProgress = new TurnPlanProgressState();
   private readonly accountId: string;
+  private readonly client: Pick<WeixinProtocolClient, "sendText">;
+  private readonly logger: Logger;
   private closed = false;
 
   constructor(
     accountId: string,
-    private readonly client: Pick<WeixinProtocolClient, "sendText">,
+    client: Pick<WeixinProtocolClient, "sendText">,
     private readonly contexts: WeixinReplyContextStore,
     private readonly access: SurfaceAccessPolicy,
     logger: Logger,
     private readonly options: WeixinOutboxOptions = {},
   ) {
     this.accountId = validateWeixinAccountId(accountId);
+    this.logger = logger;
+    this.client = {
+      sendText: (input, signal) => this.withSendRetry(
+        "sendText",
+        () => (signal === undefined
+          ? client.sendText(input)
+          : client.sendText(input, signal)),
+        signal,
+      ),
+    };
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Weixin",
       ...(options.capacity === undefined
@@ -155,16 +132,17 @@ export class WeixinOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
-    // Weixin allows only a small number of downstream messages per inbound
-    // reply window. Keep the window for the user-visible lifecycle contract:
-    // start, approval (delivered by InteractionPort), final answer and done.
-    // Reasoning, operation progress, plan updates and connection notices must
-    // not consume that budget.
-    if (!isAllowedWeixinOutputEvent(event)) {
+    withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  private handleEvent(event: OutputEvent): void {
+    // 渠道投递策略只在这里判定一次：微信的单次回复窗口只保留生命周期、终态与全局空闲
+    // 通知和上下文压缩，推理、计划、其他操作、连接等事件不占用该预算（详见 delivery-policy.ts）。
+    const decision = resolveSurfaceDelivery("weixin", event);
+    if (decision.disposition === "ignore") {
       return;
     }
     if (event.type === "turn.started") {
-      this.clearExecutionTurns(event.threadId);
       this.enqueueText(
         event.target,
         renderPlainLifecyclePresentation(
@@ -176,108 +154,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
         true,
       );
       return;
-    }
-    if (event.type === "turn.reasoning") {
-      if (this.options.reasoningEnabled === false) {
-        return;
-      }
-      if (this.hasActiveOperation(event.threadId, event.turnId)) {
-        return;
-      }
-      const turn = turnKey(event.threadId, event.turnId);
-      const generation = this.reasoningGenerations.get(turn) ?? 0;
-      if (this.reasoningDisplayedGenerations.get(turn) === generation) {
-        return;
-      }
-      this.reasoningDisplayedGenerations.set(turn, generation);
-      this.enqueueText(
-        event.target,
-        renderPlainLifecyclePresentation(
-          createTurnReasoningPresentation(
-            event.background ? event.threadId : undefined,
-            undefined,
-            false,
-          ),
-        ),
-        true,
-      );
-      return;
-    }
-    if (event.type === "operation.updated") {
-      if (isExecutionOperation(event.operation)) {
-        const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-        const turn = turnKey(event.threadId, event.turnId);
-        if (event.operation.status === "running") {
-          if (this.pendingApprovalOperations.has(key)) return;
-          this.activeOperations.add(key);
-          this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
-        } else {
-          this.activeOperations.delete(key);
-        }
-      }
-      const imagePath = event.operation.imagePath;
-      if (
-        event.operation.kind === "imageGeneration"
-        && event.operation.status === "completed"
-        && imagePath !== undefined
-      ) {
-        this.enqueueImage(
-          event.target,
-          imagePath,
-          true,
-        );
-      }
-      if (
-        !shouldDisplayOperation(
-          event.operation,
-          this.options.operationUpdateDisplay ?? "full",
-        )
-      ) {
-        return;
-      }
-      // 操作只发送终态卡片；运行中状态由审批/执行链路内部维护，避免
-      // 同一命令产生“运行中”和“已完成”两条刷屏消息。
-      if (event.operation.status === "running") {
-        return;
-      }
-      if (
-        this.operationUpdates.accept(event, event.target)
-      ) {
-        return;
-      }
-      const rendered = formatWeixinOperation(
-        event.operation,
-        this.options.operationUpdateDisplay === "compact"
-          ? "compact"
-          : "full",
-      );
-      this.enqueueText(event.target, rendered, true);
-      return;
-    }
-    if (event.type === "plan.updated") {
-      if (!this.options.planUpdatesEnabled) {
-        return;
-      }
-      for (const presentation of this.planProgress.accept(event)) {
-        this.enqueueText(
-          event.target,
-          formatWeixinCommandText(presentation.text, { structuredFields: true }),
-          true,
-        );
-      }
-      return;
-    }
-    if (
-      (
-        event.type === "text.completed"
-        && event.phase !== "commentary"
-      )
-      || event.type === "turn.completed"
-    ) {
-      if (event.type === "turn.completed") {
-        this.planProgress.complete(event);
-      }
-      this.flushOperationUpdates(event.target, event);
     }
     const rendered = this.render(event);
     if (rendered === null) {
@@ -291,7 +167,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
         signal,
         this.contexts.get(event.target),
       ),
-      isCriticalOutputEvent(event),
+      decision.critical,
     );
   }
 
@@ -350,47 +226,40 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     this.closed = true;
-    for (const { target, summary } of this.operationUpdates.drain()) {
-      this.enqueueOperationSummary(target, summary);
-    }
-    await this.options.typing?.close();
     await this.delivery.close();
-    this.operationUpdates.clear();
-    this.activeOperations.clear();
-    this.reasoningGenerations.clear();
-    this.reasoningDisplayedGenerations.clear();
-    this.planProgress.clear();
     this.contexts.clear();
   }
 
-  private flushOperationUpdates(
-    target: ConversationTarget,
-    event: Extract<OutputEvent, { type: "text.completed" | "turn.completed" }>,
-  ): void {
-    const buffered = this.operationUpdates.flush(event);
-    if (buffered === null) {
-      return;
-    }
-    this.enqueueOperationSummary(target, buffered.summary);
-  }
-
-  private enqueueOperationSummary(
-    target: ConversationTarget,
-    summary: OperationUpdateSummary,
-  ): void {
-    const text = formatWeixinOperationSummary(
-      summary,
-      this.options.operationUpdateDisplay === "compact" ? "compact" : "full",
+  /**
+   * 有界重试只覆盖能证明平台未接受请求的失败，文本、图片与文件共用同一判定；
+   * 超时与网络中断一律不重试，避免重复气泡或重复上传。
+   */
+  private withSendRetry<T>(
+    operation: "sendText" | "sendImage" | "sendFile",
+    call: () => Promise<T>,
+    signal: AbortSignal | undefined,
+  ): Promise<T> {
+    return withDeliveryRetry(
+      {
+        component: "Weixin",
+        operation,
+        maximumAttempts: maximumSendAttempts,
+        maximumDelayMs: maximumSendRetryDelayMs,
+        delayMs: weixinSendRetryDelay,
+        logger: this.logger,
+        metadata: weixinOutputErrorMetadata,
+      },
+      call,
+      signal,
     );
-    this.enqueueText(target, text, true);
   }
 
   private render(event: OutputEvent): string | null {
     switch (event.type) {
-      case "user.message":
-        return formatCliInput(event.text);
+      case "operation.updated":
+        return this.compactionNotices.accept(event);
       case "text.completed":
-        if (event.phase === "commentary") {
+        if (event.phase !== "final_answer") {
           return null;
         }
         return event.text.trim().length === 0
@@ -408,70 +277,11 @@ export class WeixinOutbox implements SurfaceOutputPort {
           { structuredFields: true },
         );
       }
-      case "connection.lost":
-        return formatConnectionLost(visibleUpstreamMessage(event.message));
-      case "connection.restored":
-        return formatConnectionRestored(visibleUpstreamMessage(event.message));
-      case "thread.availability":
-        return formatThreadAvailability(
-          event.availability,
-          event.threadId,
-          event.background,
-        );
-      case "thread.name":
-        return formatWeixinCommandText(
-          `Session 名称已更新：${event.name ?? "未命名"}`,
-          { structuredFields: true },
-        );
       case "warning":
         return formatCodexWarning(visibleUpstreamMessage(event.message));
       case "conversation.idle.released":
         return formatWeixinCommandText(
           formatConversationIdleReleased(event.minutes, event.threadId),
-          { structuredFields: true },
-        );
-      case "account.updated":
-        return formatWeixinCommandText(
-          formatRuntimeAccountUpdate(event.authMode, event.planType),
-          { structuredFields: true },
-        );
-      case "account.rateLimits.updated":
-        return formatWeixinCommandText(
-          formatRuntimeRateLimitUpdate(event.rateLimits),
-          { structuredFields: true },
-        );
-      case "mcp.status.updated":
-        return formatWeixinCommandText(
-          formatRuntimeMcpStatusUpdate(event),
-          { structuredFields: true },
-        );
-      case "mcp.oauth.completed":
-        return formatWeixinCommandText(
-          formatRuntimeMcpOAuthCompleted(event),
-          { structuredFields: true },
-        );
-      case "plan.updated":
-        return null;
-      case "subagent.spawned":
-        return formatWeixinCommandText(
-          renderPlainLifecyclePresentation(
-            createSubagentStartedPresentation(event),
-          ),
-          { structuredFields: true },
-        );
-      case "subagent.contacted":
-        return formatWeixinCommandText(
-          renderPlainLifecyclePresentation(
-            createSubagentContactedPresentation(event),
-          ),
-          { structuredFields: true },
-        );
-      case "subagent.completed":
-        return formatWeixinCommandText(
-          renderWeixinSubagentCompleted(
-            event,
-            this.options.debugEnabled ?? false,
-          ),
           { structuredFields: true },
         );
       default:
@@ -486,16 +296,6 @@ export class WeixinOutbox implements SurfaceOutputPort {
     context: WeixinReplyContext | undefined,
   ): Promise<void> {
     signal = this.closed ? undefined : signal;
-    if (
-      event.type === "turn.completed"
-      || event.type === "connection.lost"
-      || (
-        event.type === "text.completed"
-        && event.phase === "final_answer"
-      )
-    ) {
-      await this.options.typing?.stop(event.target);
-    }
     if (
       event.type === "text.completed"
       && event.phase === "final_answer"
@@ -549,11 +349,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
         file,
       };
       try {
-        if (signal) {
-          await fileClient.sendFile(input, signal);
-        } else {
-          await fileClient.sendFile(input);
-        }
+        await this.withSendRetry(
+          "sendFile",
+          () => (signal
+            ? fileClient.sendFile(input, signal)
+            : fileClient.sendFile(input)),
+          signal,
+        );
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);
@@ -664,11 +466,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
       image,
     };
     try {
-      if (signal) {
-        await client.sendImage(input, signal);
-      } else {
-        await client.sendImage(input);
-      }
+      await this.withSendRetry(
+        "sendImage",
+        () => (signal
+          ? client.sendImage(input, signal)
+          : client.sendImage(input)),
+        signal,
+      );
     } catch (error) {
       if (isRejectedReplyContext(error)) {
         await this.invalidateContext(target, context.contextToken);
@@ -723,75 +527,24 @@ export class WeixinOutbox implements SurfaceOutputPort {
     );
   }
 
-  private enqueueImage(
-    target: ConversationTarget,
-    imagePath: string,
-    critical: boolean,
-  ): boolean {
-    return this.delivery.enqueue(
-      target.conversationId,
-      (signal) => this.sendImage(
-        target,
-        imagePath,
-        signal,
-        this.contexts.get(target),
-      ),
-      critical,
-    );
-  }
-
   private matches(target: ConversationTarget): boolean {
     return target.surface === "weixin"
       && target.accountId === this.accountId;
   }
 
-  private clearExecutionTurns(threadId: string): void {
-    const prefix = `${threadId}\u0000`;
-    for (const key of this.activeOperations) {
-      if (key.startsWith(prefix)) this.activeOperations.delete(key);
-    }
-    for (const key of this.reasoningGenerations.keys()) {
-      if (key.startsWith(prefix)) this.reasoningGenerations.delete(key);
-    }
-    for (const key of this.reasoningDisplayedGenerations.keys()) {
-      if (key.startsWith(prefix)) this.reasoningDisplayedGenerations.delete(key);
-    }
-  }
-
-  private operationKey(threadId: string, turnId: string, itemId: string): string {
-    return `${turnKey(threadId, turnId)}\u0000${itemId}`;
-  }
-
+  /**
+   * 微信不需要为审批预热渠道状态：占用单次回复窗口的事件已由投递策略判定，
+   * 审批本身由 InteractionPort 直接发送。保留共享交互准备入口，使
+   * PendingInteractionRegistry 的准备与清理契约在本渠道同样可执行。
+   */
   prepareInteraction(request: InteractionRequest): void {
-    if (request.type === "approval") {
-      this.pendingApprovalOperations.add(this.operationKey(request.threadId, request.turnId, request.itemId));
-    }
+    void request;
   }
 
   finishInteraction(request: InteractionRequest, decision: InteractionDecision): void {
+    void request;
     void decision;
-    if (request.type === "approval") {
-      this.pendingApprovalOperations.delete(this.operationKey(request.threadId, request.turnId, request.itemId));
-    }
   }
-
-  private hasActiveOperation(threadId: string, turnId: string): boolean {
-    const prefix = `${turnKey(threadId, turnId)}\u0000`;
-    return [...this.activeOperations].some((key) => key.startsWith(prefix));
-  }
-
-}
-
-function isAllowedWeixinOutputEvent(event: OutputEvent): boolean {
-  return event.type === "turn.started"
-    || event.type === "turn.completed"
-    || event.type === "conversation.idle.released"
-    || (event.type === "warning" && event.globalIdle === true)
-    || (event.type === "text.completed" && event.phase === "final_answer");
-}
-
-function turnKey(threadId: string, turnId: string): string {
-  return `${threadId}\u0000${turnId}`;
 }
 
 function splitWeixinText(
@@ -861,4 +614,25 @@ function isRejectedReplyContext(error: unknown): boolean {
   return error instanceof WeixinProtocolError
     && error.code === "api-error"
     && error.returnCode === -2;
+}
+
+/**
+ * 只有能证明消息未送达的失败才重试：平台业务返回码拒绝，以及 429 或 5xx 服务端拒绝。
+ * 超时、网络中断和响应不可解析都可能已经送达，重试会产生重复气泡；回复上下文失效
+ * （返回码 -2）是永久错误，由调用方作废上下文后交给用户重新发送。
+ */
+function weixinSendRetryDelay(error: unknown, attempt: number): number | undefined {
+  if (!(error instanceof WeixinProtocolError)) {
+    return undefined;
+  }
+  if (error.code === "api-error" && error.returnCode !== -2) {
+    return exponentialRetryDelay(attempt);
+  }
+  if (
+    error.code === "http-error"
+    && (error.status === 429 || (error.status !== undefined && error.status >= 500))
+  ) {
+    return exponentialRetryDelay(attempt);
+  }
+  return undefined;
 }

@@ -26,6 +26,16 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- 
 const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
+  it("delivers both compaction lifecycle notices through the reply window", async () => {
+    const { outbox, sendText } = outboxFixture();
+    for (const status of ["running", "running", "completed", "completed", "running"] as const) {
+      outbox.handle({ type: "operation.updated", target, threadId: "thread", turnId: "turn",
+        operation: { itemId: "compact-1", kind: "contextCompaction", status } });
+    }
+    await outbox.close();
+    expect(sendText.mock.calls.map(([input]) => input.text)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+  });
+
   it("keeps reply contexts private to one account and Conversation", () => {
     const contexts = new WeixinReplyContextStore(accountId);
     contexts.remember(target, actorId, "context-secret");
@@ -102,15 +112,68 @@ describe("WeixinOutbox", () => {
     );
   });
 
-  it("reserves the reply window for lifecycle output", async () => {
-    const { outbox, sendImage, sendText } = outboxFixture(
+  it("retries a platform rejection that proves the message was not delivered", async () => {
+    let attempts = 0;
+    const { outbox, sendText } = outboxFixture(
       { value: true },
-      {
-        operationUpdateDisplay: "full",
-        planUpdatesEnabled: true,
-        reasoningEnabled: true,
+      {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
       },
     );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(2);
+    expect(sendText.mock.calls[1]?.[0].text).toBe("final reply");
+  });
+
+  it("does not retry an ambiguous WeChat failure", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError("timeout", "微信发送超时");
+      },
+    );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an invalid reply context", async () => {
+    const { outbox, sendText } = outboxFixture(
+      { value: true },
+      {},
+      async () => {
+        throw new WeixinProtocolError(
+          "api-error",
+          "微信发送失败（返回码 -2）",
+          undefined,
+          -2,
+        );
+      },
+    );
+
+    outbox.handle(completed("final_answer", "final reply"));
+    await outbox.close();
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
+
+  it("reserves the reply window for lifecycle output", async () => {
+    const { outbox, sendImage, sendText } = outboxFixture({ value: true });
 
     outbox.handle({
       type: "turn.reasoning",
@@ -333,11 +396,65 @@ describe("WeixinOutbox", () => {
     }, expect.any(AbortSignal));
   });
 
-  it("hides operation updates without suppressing Turn completion", async () => {
-    const { outbox, sendText } = outboxFixture(
+  it("retries a channel image the platform rejected", async () => {
+    let attempts = 0;
+    const fixture = outboxFixture(
       { value: true },
-      { operationUpdateDisplay: "hidden" },
+      {},
+      async () => {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信图片发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
+      },
     );
+
+    await fixture.outbox.sendChannelImage(
+      target,
+      "/private/generated/image.png",
+    );
+    await fixture.outbox.close();
+
+    expect(fixture.sendImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a rejected final-answer file before falling back to text", async () => {
+    const longText = "测".repeat(20_001);
+    let attempts = 0;
+    const fixture = outboxFixture(
+      { value: true },
+      {},
+      async () => {},
+      async () => {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new WeixinProtocolError(
+            "api-error",
+            "微信文件发送失败（返回码 5）",
+            undefined,
+            5,
+          );
+        }
+      },
+    );
+
+    fixture.outbox.handle(completed("final_answer", longText));
+    await fixture.outbox.close();
+
+    expect(fixture.sendFile).toHaveBeenCalledTimes(2);
+    expect(fixture.sendText).toHaveBeenCalledOnce();
+    expect(fixture.sendText.mock.calls[0]?.[0].text).toMatch(/\[内容预览\]$/u);
+  });
+
+  it("keeps operation updates out of the reply window without suppressing Turn completion", async () => {
+    const { outbox, sendText } = outboxFixture({ value: true });
 
     outbox.handle(operationUpdated("running"));
     outbox.handle(operationUpdated("completed"));

@@ -104,7 +104,7 @@ export class ModelTrafficDump {
   beginHttpExchange(input: ModelTrafficHttpExchangeInput): ModelTrafficExchange {
     const session = this.storage.beginLogicalInteraction(input.startedAtMs);
     const exchange = this.createExchange(input, "http", session);
-    if (input.startedAtMonotonicMs !== undefined) exchange.callTiming = new TrafficCallTiming(input.startedAtMonotonicMs);
+    if (input.startedAtMonotonicMs !== undefined) exchange.callTiming = new TrafficCallTiming();
     exchange.write({
       kind: "request_head",
       method: input.method,
@@ -166,10 +166,10 @@ export class ModelTrafficDump {
 /** 单次 HTTP 交换或 WebSocket 连接；V2 索引按逻辑模型调用记录请求与终态响应。 */
 export class ModelTrafficExchange {
   callTiming: TrafficCallTiming | undefined;
-  private requestMetrics: { firstContentMs?: number; totalDurationMs?: number } | undefined;
+  private requestMetrics: { firstTokenMs?: number; totalDurationMs?: number } | undefined;
 
-  /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首内容时间。 */
-  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstContentMs" | "totalDurationMs" | "traffic">): void {
+  /** 复用代理观测，不从可裁剪或缓冲后的 trace 反推首 Token 时间。 */
+  observeRequestMetrics(metrics: Pick<ProviderProxyMetrics, "firstTokenMs" | "totalDurationMs" | "traffic">): void {
     this.requestMetrics = metrics;
     const interaction = this.transport === "http"
       ? this.httpInteractionId : this.activeWebSocket?.id;
@@ -204,6 +204,8 @@ export class ModelTrafficExchange {
   } | undefined;
   private requestModel: string | undefined;
   private responseModels: string[] = [];
+  /** Chat 上游诊断里的实际上游提供商；只在诊断到达时记录，缺失不推断。 */
+  private upstreamProvider: string | undefined;
   private websocketHandshake: {
     headers: Record<string, string | string[]>;
     url: string;
@@ -274,6 +276,10 @@ export class ModelTrafficExchange {
         headers: record.headers as Record<string, string | string[]>,
         url: String(record.url),
       };
+    } else if (record.kind === "chat_diagnostics") {
+      const fields = record.fields as Record<string, unknown> | undefined;
+      const final = fields?.["routing.finalProvider"];
+      if (typeof final === "string" && final !== "") this.upstreamProvider = final;
     }
     this.writeTrace(record);
   }
@@ -337,7 +343,7 @@ export class ModelTrafficExchange {
       let interaction = this.activeWebSocket?.id;
       if (direction === "client" && eventTypeOf(parsed) === "response.create") {
         this.completeActiveWebSocket("incomplete", "superseded_by_next_request", undefined, undefined, receivedAtMonotonicMs);
-        this.callTiming = receivedAtMonotonicMs === undefined ? undefined : new TrafficCallTiming(receivedAtMonotonicMs);
+        this.callTiming = receivedAtMonotonicMs === undefined ? undefined : new TrafficCallTiming();
         this.requestMetrics = undefined;
         this.responseModels = [];
         const startedAtMs = Date.now();
@@ -551,12 +557,13 @@ export class ModelTrafficExchange {
       headers: this.responseHeadRecord?.headers ?? {},
       bytes: this.responseBytes,
       durationMs: Date.now() - this.prefix.startedAtMs,
-      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstContentMs, this.requestMetrics?.totalDurationMs) }),
+      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstTokenMs, this.requestMetrics?.totalDurationMs) }),
       ...(terminal === undefined ? {} : { eventType: terminal.type }),
-      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
+      ...(this.requestMetrics?.firstTokenMs === undefined ? {} : { firstTokenMs: this.requestMetrics.firstTokenMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload,
+      ...(this.upstreamProvider === undefined ? {} : { upstreamProvider: this.upstreamProvider }),
       responseModels: terminal === undefined
         ? this.responseModels
         : responseModelsOf(parseJsonValue(terminal.text)),
@@ -584,8 +591,8 @@ export class ModelTrafficExchange {
       transport: "websocket",
       state,
       durationMs: Date.now() - active.startedAtMs,
-      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstContentMs, this.requestMetrics?.totalDurationMs) }),
-      ...(this.requestMetrics?.firstContentMs === undefined ? {} : { firstContentMs: this.requestMetrics.firstContentMs }),
+      ...(this.callTiming === undefined ? {} : { callTiming: this.callTiming.finish(endedAtMonotonicMs, this.requestMetrics?.firstTokenMs, this.requestMetrics?.totalDurationMs) }),
+      ...(this.requestMetrics?.firstTokenMs === undefined ? {} : { firstTokenMs: this.requestMetrics.firstTokenMs }),
       ...(errorScope === undefined ? {} : { errorScope }),
       ...(error === undefined ? {} : { error: errorText(error) }),
       payload: payloadOf(compacted === undefined

@@ -1,4 +1,4 @@
-import type { OperationUpdate } from "../conversation-core/index.js";
+import type { OperationUpdate, OutputEvent } from "../conversation-core/index.js";
 import { formatElapsedDuration } from "./elapsed-duration.js";
 import { visibleUpstreamMessage } from "./output-copy.js";
 import type { OperationUpdateDisplay } from "./types.js";
@@ -111,5 +111,33 @@ export function operationTitle(record: OperationUpdate): string {
       return "压缩上下文";
     case "reviewMode":
       return record.action === "exited" ? "退出审查模式" : "进入审查模式";
+  }
+}
+
+/** Separate lifecycle notices: never merge a queued start into its completion. */
+export class ContextCompactionNotices {
+  private readonly states = new Map<string, OperationUpdate["status"]>();
+
+  accept(event: Extract<OutputEvent, { type: "operation.updated" }>): string | null {
+    if (event.operation.kind !== "contextCompaction") return null;
+    const { itemId, status } = event.operation;
+    const key = JSON.stringify([
+      event.target.surface, event.target.accountId, event.target.conversationId,
+      event.threadId, event.turnId, itemId,
+    ]);
+    const previous = this.states.get(key);
+    if (previous === status || (previous !== undefined && previous !== "running")) return null;
+    this.states.set(key, status);
+    // Keep only recent presentation state; this is not a second Item history.
+    if (this.states.size > 256) {
+      const oldest = this.states.keys().next().value;
+      if (oldest !== undefined) this.states.delete(oldest);
+    }
+    return ({
+      running: "开始压缩上下文…",
+      completed: "上下文压缩已完成。",
+      failed: "上下文压缩失败。",
+      declined: "上下文压缩已拒绝。",
+    } as const)[status];
   }
 }

@@ -63,6 +63,19 @@ describe("DeepSeek account adapter", () => {
     });
   });
 
+  it("keeps the underlying failure reason on the user-facing error", async () => {
+    const codexHome = await createCodexHome();
+    const adapter = createDeepseekAccountAdapter({
+      environment: testEnvironment(codexHome),
+      fetchImpl: async () => { throw new Error("fixture network failure"); },
+    });
+
+    const failure: unknown = await adapter.accountUsage().catch((value: unknown) => value);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toContain("fixture network failure");
+    expect(((failure as Error).cause as Error).message).toBe("fixture network failure");
+  });
+
   it("reads the selected fixed account credential from its main config", async () => {
     const codexHome = await configuredHome("exclusive");
     temporaryDirectories.push(codexHome);
@@ -89,3 +102,22 @@ async function createCodexHome(): Promise<string> {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+
+it("cancels the outbound account fetch with the completion signal", async () => {
+  const controller = new AbortController();
+  let outbound: AbortSignal | null | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    outbound = init?.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      outbound?.addEventListener("abort", () => reject(new Error("fixture aborted")), { once: true });
+    });
+  };
+  const adapter = createDeepseekAccountAdapter({  environment: testEnvironment(await createCodexHome()), fetchImpl });
+  const result = adapter.accountUsage(controller.signal);
+  const rejected = expect(result).rejects.toMatchObject({ name: "AbortError" });
+  expect(outbound?.aborted).toBe(false);
+  controller.abort();
+  expect(outbound?.aborted).toBe(true);
+  await rejected;
+});

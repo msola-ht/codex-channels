@@ -10,6 +10,122 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
+  it.each(["clp-main", "openai"])("cancels %s warmup and ignores late usage and limits without reporting shutdown as failure", async provider => {
+    const write = vi.fn();
+    const failure = vi.fn();
+    let finishUsage!: (usage: ProviderAccountUsage) => void;
+    let finishLimits!: (limits: { kind: "unsupported"; provider: string }) => void;
+    let outbound: AbortSignal | undefined;
+    const service = new ProviderAccountService([{
+      provider,
+      accountUsage: signal => { outbound = signal; return new Promise(resolve => { finishUsage = resolve; }); },
+      accountLimits: () => new Promise(resolve => { finishLimits = resolve; }),
+    }], { writeOfficialAccountSnapshot: write });
+    const controller = new AbortController();
+    const warmup = service.refreshSnapshots(controller.signal, failure);
+    await Promise.resolve();
+    controller.abort();
+    expect(outbound?.aborted).toBe(true);
+    finishUsage({ kind: "quota-windows", provider, available: true, windows: [] });
+    finishLimits({ kind: "unsupported", provider });
+    await warmup;
+    expect(write).not.toHaveBeenCalled();
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it("reports each failed warmup query while keeping successful accounts independent", async () => {
+    const failure = vi.fn();
+    const write = vi.fn();
+    const badUsage = new Error("usage fixture");
+    const badLimits = new Error("limits fixture");
+    const service = new ProviderAccountService([
+      { provider: "clp-bad", accountUsage: async () => { throw badUsage; }, accountLimits: async () => { throw badLimits; } },
+      { provider: "clp-good", accountUsage: async () => ({ kind: "quota-windows", provider: "clp-good", available: true, windows: [] }) },
+    ], { writeOfficialAccountSnapshot: write });
+    await service.refreshSnapshots(undefined, failure);
+    expect(failure).toHaveBeenCalledWith("clp-bad", "usage", badUsage);
+    expect(failure).toHaveBeenCalledWith("clp-bad", "limits", badLimits);
+    expect(failure).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenCalledOnce();
+    expect(write.mock.calls[0]?.[0].provider).toBe("clp-good");
+  });
+
+  it("does not publish a snapshot into memory when persistence fails", async () => {
+    const write = vi.fn().mockImplementationOnce(() => { throw new Error("disk failure"); });
+    const service = new ProviderAccountService([{
+      provider: "clp-main",
+      accountUsage: async () => ({ kind: "quota-windows", provider: "clp-main", available: true, windows: [] }),
+      accountLimits: async () => ({ kind: "unsupported", provider: "clp-main" }),
+    }], { writeOfficialAccountSnapshot: write });
+    await expect(service.refreshAccountSnapshot("clp-main")).rejects.toThrow("disk failure");
+    await service.accountLimits("clp-main");
+    expect(write.mock.calls[1]?.[0].usage.kind).toBe("unsupported");
+  });
+
+  it("shares one provider query but lets each consumer cancel independently", async () => {
+    let complete!: (usage: ProviderAccountUsage) => void;
+    let upstream: AbortSignal | undefined;
+    const read = vi.fn((signal?: AbortSignal) => {
+      upstream = signal;
+      return new Promise<ProviderAccountUsage>(resolve => { complete = resolve; });
+    });
+    const write = vi.fn();
+    const service = new ProviderAccountService([{ provider: "clp-main", accountUsage: read }], { writeOfficialAccountSnapshot: write });
+    const first = new AbortController();
+    const second = new AbortController();
+    const a = service.refreshAccountSnapshot("clp-main", first.signal);
+    const rejected = expect(a).rejects.toMatchObject({ name: "AbortError" });
+    const b = service.refreshAccountSnapshot("clp-main", second.signal);
+    await Promise.resolve();
+    first.abort();
+    await rejected;
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(upstream?.aborted).toBe(false);
+    complete({ kind: "quota-windows", provider: "clp-main", available: true, windows: [] });
+    await expect(b).resolves.toBe(true);
+    expect(write).toHaveBeenCalledOnce();
+  });
+
+  it("abandons a cancelled query and rejects its late result without deleting the replacement", async () => {
+    const completions: Array<(usage: ProviderAccountUsage) => void> = [];
+    const read = vi.fn(() => new Promise<ProviderAccountUsage>(resolve => completions.push(resolve)));
+    const write = vi.fn();
+    const service = new ProviderAccountService([{ provider: "clp-main", accountUsage: read }], { writeOfficialAccountSnapshot: write });
+    const controller = new AbortController();
+    const old = service.refreshAccountSnapshot("clp-main", controller.signal);
+    const rejected = expect(old).rejects.toThrow();
+    await Promise.resolve();
+    controller.abort();
+    await rejected;
+    const current = service.refreshAccountSnapshot("clp-main");
+    await Promise.resolve();
+    const usage = { kind: "quota-windows" as const, provider: "clp-main", available: true, windows: [] };
+    completions[0]!(usage);
+    await Promise.resolve();
+    const joined = service.refreshAccountSnapshot("clp-main");
+    expect(read).toHaveBeenCalledTimes(2);
+    completions[1]!(usage);
+    await Promise.all([current, joined]);
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes cancellation to the exact account and discards late snapshots", async () => {
+    const controller = new AbortController();
+    const written = vi.fn();
+    const read = vi.fn(async (signal?: AbortSignal): Promise<ProviderAccountUsage> => {
+      expect(signal?.aborted).toBe(false);
+      controller.abort();
+      expect(signal?.aborted).toBe(true);
+      return { kind: "quota-windows", provider: "clp-main", available: true, windows: [] };
+    });
+    const other = vi.fn();
+    const service = new ProviderAccountService([
+      { provider: "clp-main", accountUsage: read }, { provider: "clp-other", accountUsage: other },
+    ], { writeOfficialAccountSnapshot: written });
+    await expect(service.accountUsage("clp-main", undefined, controller.signal)).rejects.toThrow();
+    expect(written).not.toHaveBeenCalled();
+    expect(other).not.toHaveBeenCalled();
+  });
   it("persists missing subscription across failures and restart, then replaces it on recovery", async () => {
     const normal: ProviderAccountUsage = { kind: "quota-windows", provider: "ocg-main", available: true, windows: [] };
     const missing: ProviderAccountUsage = { kind: "subscription-required", provider: "ocg-main" };

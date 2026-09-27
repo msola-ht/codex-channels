@@ -4,14 +4,14 @@ import { join } from "node:path";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { listDumpFiles, describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
 import { ChatDiagnostics, ChatDiagnosticsChannel } from "../src/provider-proxy/chat-diagnostics.js";
-import { createServer } from "node:http";
-import { afterEach, expect, it } from "vitest";
-import { ChatCompletionsBridge, ProviderProxy } from "../src/provider-proxy/index.js";
+import { createServer, request as httpRequest } from "node:http";
+import { afterEach, expect, it, vi } from "vitest";
+import { ChatCompletionsBridge, ProviderProxy, chatBridgeRequestTimeoutMs } from "../src/provider-proxy/index.js";
 import type { ProviderProxyMetrics } from "../src/provider-proxy/index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
-async function fixture(reply: string | ((request: unknown) => string), status = 200) {
+async function fixture(reply: string | ((request: unknown) => string), status = 200, overrides: { timeoutMs?: number } = {}) {
   let received: unknown;
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -27,7 +27,7 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
-  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", ...overrides });
   await bridge.start(); cleanups.push(() => bridge.close());
   return { bridge, received: () => received };
 }
@@ -67,7 +67,53 @@ it("preserves HTTP failure status without forwarding the error body", async () =
   expect(await result.text()).not.toContain("upstream-secret");
 });
 
-it.each(["client", "service"])("cancels upstream work when the %s disconnects", async owner => {
+it.each([undefined, 5_000])("reserves terminal delivery time outside the bridge request budget (%s)", async timeoutMs => {
+  const { bridge } = await fixture(frame({ content: "ok" }, "stop") + "data: [DONE]\n\n", 200, { ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+  const options = bridge.proxyOptions();
+  expect(options).toMatchObject({ upstreamHost: "127.0.0.1", upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics });
+  expect(options.upstreamPort).toBe(Number(new URL(`http://${bridge.address()}`).port));
+  expect(options.timeoutMs).toBe((timeoutMs ?? chatBridgeRequestTimeoutMs) + 5_000);
+  // 统计代理默认空闲超时是 60 秒；默认预算必须覆盖桥自身预算，否则慢上游会被本地代理先截断。
+  if (timeoutMs === undefined) expect(options.timeoutMs).toBeGreaterThan(60_000);
+});
+
+it.each([false, true])("classifies request budget expiry through proxy=%s", async throughProxy => {
+  const server = createServer(request => { request.resume(); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", timeoutMs: 150 });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const proxy = new ProviderProxy("127.0.0.1:0", bridge.proxyOptions());
+  if (throughProxy) { await proxy.start(); cleanups.push(() => proxy.close()); }
+  const result = await fetch(`http://${throughProxy ? proxy.address() : bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(result.status).toBe(502);
+  expect(await result.json()).toEqual({ error: { code: "upstream_timeout", message: "上游响应超时，请稍后重试。" } });
+});
+
+it("classifies a non-streaming upstream success without reading its body", async () => {
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "upstream-secret" } }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(result.status).toBe(502);
+  expect(text).toContain('"code":"server_error"');
+  expect(text).not.toContain("upstream-secret");
+});
+
+it.each([
+  ["client", false], ["service", false], ["client", true], ["service", true],
+] as const)("cancels upstream work when %s disconnects through proxy=%s", async (owner, throughProxy) => {
   let upstreamClosed!: () => void;
   const closed = new Promise<void>(resolve => { upstreamClosed = resolve; });
   const server = createServer((request, response) => {
@@ -83,10 +129,13 @@ it.each(["client", "service"])("cancels upstream work when the %s disconnects", 
   const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
   const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http" });
   await bridge.start(); cleanups.push(() => bridge.close());
+  const proxy = new ProviderProxy("127.0.0.1:0", bridge.proxyOptions());
+  if (throughProxy) { await proxy.start(); cleanups.push(() => proxy.close()); }
   const controller = new AbortController();
-  const result = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
+  const result = await fetch(`http://${throughProxy ? proxy.address() : bridge.address()}/responses`, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
   const pending = result.text().catch(() => "aborted");
-  if (owner === "client") controller.abort(); else await bridge.close();
+  if (owner === "client") controller.abort();
+  else { if (throughProxy) await proxy.close(); await bridge.close(); }
   await closed;
   await pending;
 });
@@ -237,4 +286,89 @@ it("shares one Chat bridge without mixing concurrent account credentials or metr
   expect(unknown.status).toBe(404); await unknown.text();
   expect(seen.sort()).toEqual(["Bearer sk_main", "Bearer sk_work"]);
   expect(metricsAccounts.sort()).toEqual(["main", "work"]);
+});
+
+
+it.each([false, true])("ends a slow unfinished request body through proxy=%s", async throughProxy => {
+  const { bridge, received } = await fixture(frame({ content: "ok" }, "stop"), 200, { timeoutMs: 100 });
+  const metrics: ProviderProxyMetrics[] = [];
+  const proxy = new ProviderProxy("127.0.0.1:0", { ...bridge.proxyOptions(), onMetrics: value => { metrics.push(value); } });
+  if (throughProxy) { await proxy.start(); cleanups.push(() => proxy.close()); }
+  const result = await new Promise<{ status: number | undefined; text: string }>((resolve, reject) => {
+    let result: { status: number | undefined; text: string } | undefined;
+    const request = httpRequest(`http://${throughProxy ? proxy.address() : bridge.address()}/responses`, { method: "POST" }, response => {
+      let text = "";
+      response.setEncoding("utf8");
+      response.on("data", chunk => { text += String(chunk); });
+      response.once("error", reject);
+      response.once("end", () => { result = { status: response.statusCode, text }; });
+    });
+    request.once("error", reject);
+    request.write("{");
+    const interval = setInterval(() => request.write(" "), 10);
+    const deadline = setTimeout(() => { request.destroy(); reject(new Error("Body deadline was not enforced")); }, 1_000);
+    request.once("close", () => {
+      clearInterval(interval); clearTimeout(deadline);
+      if (!result) { reject(new Error("Connection closed before error response completed")); return; }
+      expect(request.socket?.destroyed).toBe(true);
+      resolve(result);
+    });
+  });
+  expect(result.status).toBe(408);
+  expect(JSON.parse(result.text)).toMatchObject({ error: { code: "request_timeout" } });
+  expect(received()).toBeUndefined();
+  if (throughProxy) {
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({ httpStatus: 408, status: "failed" });
+  }
+});
+
+it("ends route waiting on budget expiry and never sends after late resolution", async () => {
+  let resolveRoute!: (value: { host: string; port: number; protocol: "http" }) => void;
+  const route = new Promise<{ host: string; port: number; protocol: "http" }>(resolve => { resolveRoute = resolve; });
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamProtocol: "http", timeoutMs: 100, resolveUpstream: () => route });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const proxy = new ProviderProxy("127.0.0.1:0", bridge.proxyOptions());
+  await proxy.start(); cleanups.push(() => proxy.close());
+  const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  expect(result.status).toBe(502);
+  expect(await result.json()).toMatchObject({ error: { code: "upstream_timeout" } });
+  let calls = 0;
+  const server = createServer((_request, response) => { calls += 1; response.end(); });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  resolveRoute({ host: "127.0.0.1", port: address.port, protocol: "http" });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(calls).toBe(0);
+});
+
+
+it("delivers a streaming timeout terminal through the proxy and releases upstream", async () => {
+  let upstreamClosed = false;
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(frame({ content: "partial" }));
+      response.once("close", () => { upstreamClosed = true; });
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("No listener");
+  const bridge = new ChatCompletionsBridge({ upstreamHost: "127.0.0.1", upstreamPort: address.port, upstreamProtocol: "http", timeoutMs: 100 });
+  await bridge.start(); cleanups.push(() => bridge.close());
+  const metrics: ProviderProxyMetrics[] = [];
+  const proxy = new ProviderProxy("127.0.0.1:0", { ...bridge.proxyOptions(), onMetrics: value => { metrics.push(value); } });
+  await proxy.start(); cleanups.push(() => proxy.close());
+  const result = await fetch(`http://${proxy.address()}/responses`, { method: "POST", body: JSON.stringify(body) });
+  const text = await result.text();
+  expect(text).toContain("response.output_text.delta");
+  expect(text).toContain("response.failed");
+  expect(text).toContain("upstream_timeout");
+  expect(text).not.toContain("response.completed");
+  await vi.waitFor(() => expect(upstreamClosed).toBe(true));
+  expect(metrics).toHaveLength(1);
+  expect(metrics[0]).toMatchObject({ status: "failed" });
 });

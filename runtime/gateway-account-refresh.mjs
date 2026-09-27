@@ -15,7 +15,32 @@ export class GatewayAccountRefreshError extends Error {
     super(message, options);
     this.name = "GatewayAccountRefreshError";
     this.code = code;
+    // 公开文案只由受控原因生成，绝不使用内部异常 message。
+    this.reason = options?.reason;
   }
+}
+
+/** 未知内部异常一律折叠为固定文案，避免上游报文或凭据随 IPC 离开网关进程。 */
+function refreshFailure(error) {
+  if (error instanceof GatewayAccountRefreshError) {
+    if (error.code === "invalid_request") {
+      return { code: "invalid_request", message: error.message };
+    }
+    if (error.code === "refresh_failed") {
+      const messages = {
+        configuration: "账户配置不可用，请检查配置",
+        timeout: "账户查询超时，请重试",
+        authentication: "账户认证失败，请检查配置",
+        "rate-limited": "账户请求受限，请稍后重试",
+        upstream: "账户服务暂不可用，请稍后重试",
+        network: "账户连接失败，请稍后重试",
+        "invalid-response": "账户数据暂时无法读取",
+        internal: "账户刷新失败",
+      };
+      return { code: "refresh_failed", message: Object.hasOwn(messages, error.reason) ? messages[error.reason] : "账户刷新失败" };
+    }
+  }
+  return { code: "refresh_failed", message: "账户刷新失败" };
 }
 
 export class GatewayAccountRefreshServer {
@@ -24,6 +49,7 @@ export class GatewayAccountRefreshServer {
   #operations = new Set();
   #server;
   #sockets = new Set();
+  #controllers = new Set();
 
   constructor(configPath, refreshAccount) {
     if (typeof refreshAccount !== "function") {
@@ -49,14 +75,17 @@ export class GatewayAccountRefreshServer {
       socket.destroy();
       return;
     }
+    const controller = new AbortController();
+    this.#controllers.add(controller);
     this.#sockets.add(socket);
     socket.on("error", () => undefined);
-    socket.on("close", () => this.#sockets.delete(socket));
+    socket.on("close", () => { this.#sockets.delete(socket); controller.abort(); });
+    socket.once("end", () => { controller.abort(); socket.destroy(); });
     socket.setTimeout(requestTimeoutMs, () => socket.destroy(new Error("账户刷新请求超时")));
     const operation = readJsonLine(socket)
       .then(parseRefreshRequest)
       .then(async ({ provider }) => {
-        const supported = await refreshAccount(provider);
+        const supported = await cancellableRefresh(() => refreshAccount(provider, controller.signal), controller.signal);
         if (!supported) {
           writeJsonLine(socket, {
             version: protocolVersion,
@@ -68,26 +97,22 @@ export class GatewayAccountRefreshServer {
         writeJsonLine(socket, { version: protocolVersion, ok: true, provider });
       })
       .catch((error) => {
-        const invalidRequest = error instanceof GatewayAccountRefreshError
-          && error.code === "invalid_request";
         writeJsonLine(socket, {
           version: protocolVersion,
           ok: false,
-          error: {
-            code: invalidRequest ? "invalid_request" : "refresh_failed",
-            message: invalidRequest ? error.message : "账户刷新失败",
-          },
+          error: refreshFailure(error),
         });
       });
-    const tracked = operation.finally(() => this.#operations.delete(tracked));
+    const tracked = operation.finally(() => { this.#operations.delete(tracked); this.#controllers.delete(controller); });
     this.#operations.add(tracked);
   }
 
   async #closeInternal() {
     this.#closing = true;
     const serverClosing = this.#server.close();
-    await Promise.allSettled([...this.#operations]);
+    for (const controller of this.#controllers) controller.abort();
     for (const socket of this.#sockets) socket.destroy();
+    await Promise.allSettled([...this.#operations]);
     await serverClosing;
   }
 }
@@ -96,7 +121,8 @@ export function gatewayAccountRefreshSocketPath(configPath) {
   return join(dirname(configPath), "runtime", "gateway-account-refresh.sock");
 }
 
-export function requestGatewayAccountRefresh(configPath, provider) {
+export function requestGatewayAccountRefresh(configPath, provider, signal) {
+  if (signal?.aborted) return Promise.reject(signal.reason);
   if (typeof provider !== "string" || !providerPattern.test(provider)) {
     return Promise.reject(new GatewayAccountRefreshError(
       "invalid_request",
@@ -122,6 +148,7 @@ export function requestGatewayAccountRefresh(configPath, provider) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       socket.destroy();
       if (error) reject(error);
       else resolve(value);
@@ -130,6 +157,9 @@ export function requestGatewayAccountRefresh(configPath, provider) {
       "gateway_unavailable",
       "Gateway 账户刷新请求超时",
     )), requestTimeoutMs);
+    const abort = () => finish(signal.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     socket.once("connect", () => {
       socket.write(`${JSON.stringify({
         version: protocolVersion,
@@ -184,6 +214,7 @@ function readJsonLine(socket) {
       socket.removeListener("data", onData);
       socket.removeListener("error", onError);
       socket.removeListener("end", onEnd);
+      socket.removeListener("close", onEnd);
       if (error) reject(error);
       else resolve(value);
     };
@@ -220,6 +251,7 @@ function readJsonLine(socket) {
     socket.on("data", onData);
     socket.once("error", onError);
     socket.once("end", onEnd);
+    socket.once("close", onEnd);
   });
 }
 
@@ -278,4 +310,17 @@ function parseRefreshResponse(content) {
 function writeJsonLine(socket, value) {
   if (socket.destroyed) return;
   socket.end(`${JSON.stringify(value)}\n`);
+}
+
+// Release IPC ownership even if a faulty callback does not cooperate with cancellation.
+function cancellableRefresh(action, signal) {
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) { signal.removeEventListener("abort", abort); reject(signal.reason); return; }
+    Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return action();
+    }).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

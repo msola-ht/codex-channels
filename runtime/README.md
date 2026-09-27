@@ -32,11 +32,12 @@
   共同使用。
 - `model-provider-definitions.mjs` / `model-provider-definitions.d.mts`：集中保存编译期内置第三方
   Provider 的非敏感固定定义，供 Setup、CLI、Runtime 与 Bootstrap 复用；不包含 API Key。
+  `webSearch` 声明受管实例是否在启动参数中关闭内置网页搜索，不改写基础配置或模型目录的客户端工具检索能力。
   CCG 采用显式多账户实例与 DS 来源目录，通过 Command Code 账户接口
   查询 Credits 与 5 小时/7 天窗口；模型 ID
   支持上游命名空间，凭据按 Bearer 格式校验。
   `loadManagedModelProviderDefinitions` 按定义的实例适配器保留所有单实例 Provider，并从 DS、OpenCode
-  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义；
+  Go、CCG 与 CLP 账户注册表动态生成 `ds-<账户>`、`ocg-<账户>`、`ccg-<账户>` 与 `clp-<账户>` 实例；能力元数据声明实例展开与账户能力。CLP 显式声明 Chat 上游，各账户共享服务拥有的本地转换桥；账户实例继承共享定义，共享代理键不在展开结果中，`sharedManagedProviderDefinition` 是回退到基础定义的唯一入口；CLP 的合法模型即共享目录生成的默认模型；
   `loadManagedModelProviderWatcherDefinitions` 额外保留未配置的共享目录，watcher 再按 Provider ID
   合并并去重文件路径。
 - `deepseek-accounts.mjs` / `deepseek-accounts.d.mts`：DS 账户注册表、账户 ID、私有文件路径与凭据变量名；运行实例使用 `ds-<账户>`，共用 DS 目录。
@@ -136,7 +137,8 @@
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供独立的私有账户刷新 IPC；
   WebUI 只提交精确 Provider ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
-  关闭时停止接收新连接并等待已开始的刷新收尾。
+  公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
+  关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。
 - `service-targets.mjs` / `service-targets.d.mts`：集中声明公开服务目标、systemd unit、launchd
   label、Windows 计划任务名称、核心服务范围和启停顺序，供 CLI、平台控制脚本、安装器与 Doctor
   复用。

@@ -7,7 +7,11 @@ import type { GatewaySettingsController } from "@/lib/settings-management"
 export function WorkspaceSettingsCard({ management }: { management: GatewaySettingsController }) {
   const settings = management.managedSettings
   if (settings === null) return null
-  const disabled = management.saving || management.pendingSetting !== null
+  const saved = management.lastAppliedSetting
+  const savedValue = saved?.kind === "workspace.permissions" && typeof saved.value === "object" && saved.value !== null ? saved.value : null
+  const savedWorkspaceId = savedValue && "workspaceId" in savedValue ? savedValue.workspaceId : null
+  const savedProfile = savedValue && "update" in savedValue && typeof savedValue.update === "object" && savedValue.update !== null && "kind" in savedValue.update && savedValue.update.kind === "permissions"
+  const disabled = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
   return <Card>
     <CardHeader>
       <CardTitle>Workspace 权限</CardTitle>
@@ -38,7 +42,7 @@ export function WorkspaceSettingsCard({ management }: { management: GatewaySetti
             }, workspace.name + " 审批策略")}
           />
           <ManagedInputRow
-            key={workspace.id + "-" + settings.revision}
+            saved={savedProfile && savedWorkspaceId === workspace.id ? saved : null}
             label="Permission Profile"
             defaultValue={workspace.permissions ?? ""}
             placeholder={workspace.sandbox === null ? "留空清除" : "先清除 Workspace Sandbox"}

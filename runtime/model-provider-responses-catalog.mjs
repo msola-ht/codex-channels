@@ -10,6 +10,7 @@ const activeCatalogWrite = new AsyncLocalStorage();
 
 const maximumBytes = 2 * 1024 * 1024;
 const efforts = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const controlFree = (text) => !Array.from(text).some((character) => { const code = character.codePointAt(0); return (code < 32 && code !== 9 && code !== 10) || code === 127; });
 const instructions = "You are a coding assistant. Follow the user's instructions, inspect the workspace before making changes, use the available tools when needed, and report results accurately. Respect tool permissions and do not claim actions succeeded without evidence.";
 
 export function isResponsesProvider(id) {
@@ -30,10 +31,10 @@ export function validateResponsesModels(values, defaultModel) {
   const seen = new Set();
   const models = values.map((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "template"].includes(key))) {
+      || Object.keys(value).some((key) => !["id", "name", "contextWindow", "maxContextWindow", "reasoningEfforts", "defaultReasoningEffort", "supportsImages", "applyPatchToolType", "instructions", "supportsSearchTool", "template"].includes(key))) {
       throw new Error("自定义模型包含不受支持的字段");
     }
-    const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages } = value;
+    const { id, name, contextWindow, maxContextWindow, reasoningEfforts, defaultReasoningEffort, supportsImages, applyPatchToolType, instructions: prompt, supportsSearchTool } = value;
     if (typeof id !== "string" || id.trim() !== id || id.length < 1 || id.length > 200 || /\p{Cc}/u.test(id) || seen.has(id)) {
       throw new Error("自定义模型 ID 无效或重复");
     }
@@ -42,6 +43,9 @@ export function validateResponsesModels(values, defaultModel) {
     if (!Array.isArray(reasoningEfforts) || reasoningEfforts.some((effort) => !efforts.has(effort)) || new Set(reasoningEfforts).size !== reasoningEfforts.length) throw new Error("模型思考等级无效或重复");
     if (reasoningEfforts.length === 0 ? defaultReasoningEffort !== null : !reasoningEfforts.includes(defaultReasoningEffort)) throw new Error("默认思考等级必须属于模型声明的等级；不支持时必须为 null");
     if (typeof supportsImages !== "boolean") throw new Error("模型图片能力必须为布尔值");
+    if (applyPatchToolType !== undefined && applyPatchToolType !== "freeform") throw new Error("模型 apply_patch 工具类型无效");
+    if (prompt !== undefined && (typeof prompt !== "string" || prompt.trim() === "" || prompt.length > 200_000 || !controlFree(prompt))) throw new Error("模型提示词无效");
+    if (supportsSearchTool !== undefined && typeof supportsSearchTool !== "boolean") throw new Error("模型检索工具能力必须为布尔值");
     const template = value.template;
     if (template !== undefined && (!template || typeof template !== "object" || Array.isArray(template)
       || Object.keys(template).some(key => !["source", "model", "followContext"].includes(key)) || !["official", "deepseek"].includes(template.source)
@@ -51,7 +55,7 @@ export function validateResponsesModels(values, defaultModel) {
     }
     if (maxContextWindow !== undefined && (!Number.isSafeInteger(maxContextWindow) || maxContextWindow < contextWindow || maxContextWindow > 100_000_000)) throw new Error("模型最大上下文必须为不小于当前窗口且不超过 100000000 的整数");
     seen.add(id);
-    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}) };
+    return { id, name: name.trim(), contextWindow, ...(maxContextWindow === undefined ? {} : {maxContextWindow}), reasoningEfforts: [...reasoningEfforts], defaultReasoningEffort, supportsImages, ...(applyPatchToolType === undefined ? {} : {applyPatchToolType}), ...(prompt === undefined ? {} : {instructions: prompt}), ...(supportsSearchTool === true ? {supportsSearchTool: true} : {}), ...(template === undefined ? {} : {template: {source: template.source, model: template.model, followContext: template.followContext}}) };
   });
   if (!seen.has(defaultModel)) throw new Error("默认模型必须存在于自定义模型目录");
   return models;
@@ -70,10 +74,11 @@ export function createResponsesModelCatalog(definitions, defaultModel) {
       shell_type: "unified_exec", visibility: "list", supported_in_api: true,
       priority: model.id === defaultModel ? 0 : index + 1,
       availability_nux: null, upgrade: null,
-      model_messages: { instructions_template: instructions },
+      model_messages: { instructions_template: model.instructions ?? instructions },
       include_apps_usage_instructions: false,
       supports_reasoning_summary_parameter: false,
-      support_verbosity: false, default_verbosity: null, apply_patch_tool_type: null,
+      support_verbosity: false, default_verbosity: null, apply_patch_tool_type: model.applyPatchToolType ?? null,
+      ...(model.supportsSearchTool === true ? {supports_search_tool: true} : {}),
       truncation_policy: { mode: "tokens", limit: Math.min(10_000, Math.floor(model.contextWindow / 4)) },
       context_window: model.contextWindow, max_context_window: model.maxContextWindow ?? model.contextWindow,
       effective_context_window_percent: 95, experimental_supported_tools: [],

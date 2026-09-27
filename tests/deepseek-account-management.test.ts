@@ -1,3 +1,4 @@
+import { normalizeDeepseekCatalogCapabilities } from "../scripts/deepseek-setup.mjs";
 import { finishResponsesModelCatalogWrite, readResponsesModelCatalog, writeResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
 import { writeFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,7 +92,7 @@ describe("DeepSeek managed accounts", () => {
     expect(servers.map((server) => server.provider)).toEqual(["ds-personal", "ds-work"]);
     expect(Object.values(servers[0]!.childEnvironment)).not.toContain("sk-work");
     expect(readFileSync(options.paths.registry, "utf8")).not.toContain("sk-");
-    expect(JSON.parse(readFileSync(options.paths.catalog, "utf8"))).toEqual(options.catalog);
+    expect(JSON.parse(readFileSync(options.paths.catalog, "utf8"))).toEqual(normalizeDeepseekCatalogCapabilities(options.catalog));
   });
 
   it("changes the default and removes accounts without deleting shared catalog or history", async () => {
@@ -148,6 +149,35 @@ describe("DeepSeek managed accounts", () => {
     expect(existsSync(options.originalBackup)).toBe(true);
     expect(existsSync(join(options.environment.CODEX_CONNECT_HOME, "backups"))).toBe(false);
     expect(parse(readFileSync(options.paths.config, "utf8"))).toEqual({ model: "original", personal_setting: "keep" });
+  });
+
+  it("narrows existing DS capabilities transactionally without resetting model settings", async () => {
+    const options = fixture();
+    await applyDeepseekAccountConfiguration(input, options);
+    const catalog = JSON.parse(readFileSync(options.paths.catalog, "utf8"));
+    for (const model of catalog.models) Object.assign(model, {
+      support_verbosity: true, default_verbosity: "low", supports_reasoning_summaries: true,
+      supports_reasoning_summary_parameter: true, default_reasoning_summary: "detailed",
+      supports_search_tool: true, effective_context_window_percent: 73,
+    });
+    const original = JSON.stringify(catalog);
+    writePrivateFileAtomicSync(options.paths.catalog, original);
+    const profile = readFileSync(options.paths.profile, "utf8");
+    failure.path = options.paths.marker;
+    await expect(applyDeepseekAccountConfiguration({ ...input, reconfigure: true }, options)).rejects.toThrow("injected");
+    expect(readFileSync(options.paths.catalog, "utf8")).toBe(original);
+    expect(readFileSync(options.paths.profile, "utf8")).toBe(profile);
+    failure.path = "";
+    await applyDeepseekAccountConfiguration({ ...input, reconfigure: true }, options);
+    const updated = JSON.parse(readFileSync(options.paths.catalog, "utf8"));
+    expect(updated.models).toEqual(catalog.models.map((model: Record<string, unknown>) => {
+      const result = { ...model, support_verbosity: false, default_verbosity: null,
+        supports_reasoning_summary_parameter: false, default_reasoning_summary: "none" };
+      delete (result as Record<string, unknown>).supports_reasoning_summaries;
+      return result;
+    }));
+    expect(readFileSync(options.paths.profile, "utf8")).toBe(profile);
+    expect(options.downloadCatalog).toHaveBeenCalledTimes(1);
   });
 
   it("preserves existing accounts and an unrelated custom role", async () => {

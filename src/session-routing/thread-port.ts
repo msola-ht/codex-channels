@@ -86,6 +86,11 @@ export interface ThreadQueryOptions {
 }
 
 export interface ThreadLifecyclePort {
+  /**
+   * 当前已配置、能够独立承载 App Server 的模型 Provider 判定。
+   * 未实现的部署视为不做限制，只使用主 App Server 时无需实现。
+   */
+  isProviderConfigured?(provider: string): boolean;
   listThreads(cwd: string, options?: ThreadQueryOptions): Promise<ThreadSnapshot[]>;
   readThread(threadId: string): Promise<ThreadSnapshot>;
   startThread(cwd: string, options?: ThreadStartOptions): Promise<ThreadSession>;

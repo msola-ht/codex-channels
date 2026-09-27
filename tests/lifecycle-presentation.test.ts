@@ -15,21 +15,18 @@ import { setConfiguredCustomPrimaryProviderId } from "../src/surfaces/provider-f
 import gatewayMetadata from "../src/version.json" with { type: "json" };
 
 describe("shared Surface lifecycle presentation", () => {
-  it("shows distinct run and session request speeds without restoring TTFT", () => {
+  it("shows only whole-turn duration without request speeds or upstream TTFT", () => {
     const rendered = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "100" },
       threadId: "thread-1", turnId: "turn-1", status: "completed", durationMs: 999_000,
-      timing: { modelRequestCount: 2, tokensPerSecond: 200 },
+      timing: { modelRequestCount: 2 },
       sessionAggregate: { requestCount: 3, unsuccessfulRequestCount: 0, inputTokens: 100, cachedInputTokens: null,
-        outputTokens: 1_000, reasoningOutputTokens: 0, tokensPerSecond: 300 },
+        outputTokens: 1_000, reasoningOutputTokens: 0 },
     }));
-    expect(rendered).toContain("Token/s：200/s");
-    expect(rendered).toContain("Token/s：300/s");
+    expect(rendered).not.toContain("Token/s");
     expect(rendered).not.toContain("本次运行：");
-    expect(rendered).not.toContain("200.00 Token/s");
-    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K\n  Token/s：300/s");
+    expect(rendered).toContain("当前会话：\nSession：未命名\nSession ID：thread-1\n模型请求：3 次\nToken：1.1 K");
     expect(rendered).not.toContain("会话统计（含子代理）");
-    expect(rendered).not.toContain("\nToken/s：300/s");
     expect(rendered).not.toContain("上游轮次首 Token");
   });
   it.each([0, 569, 720.25])("omits OpenAI TTFT %s from completion cards", (ttftMs) => {
@@ -44,9 +41,9 @@ describe("shared Surface lifecycle presentation", () => {
     const withDuration = renderPlainLifecyclePresentation(createTurnCompletedPresentation({
       ...event, durationMs: 3156,
     }));
-    expect(withDuration).toContain("总耗时：3.16 s");
+    expect(withDuration).toContain("本轮耗时：3.16 s");
     expect(withDuration).not.toContain("上游轮次首 Token");
-    expect(rendered).not.toContain("总耗时");
+    expect(rendered).not.toContain("本轮耗时");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
       modelProvider: "deepseek" }))).not.toContain("上游轮次首 Token");
     expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event,
@@ -634,9 +631,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
-      "性能",
-      "  Token/s：未提供",
-      "  总耗时：1 min 5 s",
+      "本轮耗时：1 min 5 s",
       "",
       "当前会话：",
       "当前工作区：Main (main)",
@@ -815,7 +810,6 @@ describe("shared Surface lifecycle presentation", () => {
           cachedInputTokens: 60_000,
           outputTokens: 2_000,
           reasoningOutputTokens: 500,
-          tokensPerSecond: 20.125,
         },
       }),
     );
@@ -824,7 +818,7 @@ describe("shared Surface lifecycle presentation", () => {
     expect(rendered).toContain("模型请求：9 次");
     expect(rendered).toContain("Token：92 K");
     expect(rendered).toContain("缓存命中率：66.67%");
-    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%\n  Token/s：20.13/s");
+    expect(rendered).toContain("Token：92 K\n  缓存命中率：66.67%");
   });
 
   it("separates completed, interrupted and unobservable model attempts", () => {

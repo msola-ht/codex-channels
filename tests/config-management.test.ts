@@ -137,6 +137,13 @@ describe("Gateway Config management", () => {
 
   it("updates explicit settings and returns their activation requirement", () => {
     const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "123456:fixture-token",
+      allowed_user_ids: [],
+      message_format: "html",
+    };
+    writeGatewayConfig(fixture.configPath, document);
     let settings = loadGatewaySettings(fixture.environment);
 
     expect(updateGatewaySetting({
@@ -173,6 +180,71 @@ describe("Gateway Config management", () => {
     expect(settings.display.operationUpdates).toBe("full");
     expect(settings.network.https_proxy).toEqual({ configured: true });
     expect(JSON.stringify(settings)).not.toContain("127.0.0.1:7890");
+  });
+
+  it("does not require a Gateway restart for display changes without a consuming channel", () => {
+    const fixture = createFixture();
+    const document = readGatewayConfig(fixture.configPath);
+    document.weixin = {
+      enabled: true,
+      account_id: "bot-fixture@im.bot",
+      allowed_user_ids: ["actor-fixture@im.wechat"],
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    const settings = loadGatewaySettings(fixture.environment);
+
+    expect(updateGatewaySetting({
+      kind: "display.reasoning",
+      value: true,
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      kind: "display.reasoning",
+      configPath: fixture.configPath,
+      previousRevision: settings.revision,
+      value: true,
+      activation: "reload",
+      activationResult: configActivationResult("reload"),
+    });
+    expect(readGatewayConfig(fixture.configPath).display).toMatchObject({ reasoning: true });
+  });
+
+  it("requires a restart for the Telegram message format only when Telegram is configured", () => {
+    const fixture = createFixture();
+    let settings = loadGatewaySettings(fixture.environment);
+
+    expect(updateGatewaySetting({
+      kind: "telegram.message-format",
+      value: "rich",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      value: "rich",
+      activation: "reload",
+      activationResult: configActivationResult("reload"),
+    });
+
+    const document = readGatewayConfig(fixture.configPath);
+    document.telegram = {
+      bot_token: "telegram-token",
+      allowed_user_ids: [],
+      message_format: "rich",
+    };
+    writeGatewayConfig(fixture.configPath, document);
+    settings = loadGatewaySettings(fixture.environment);
+    expect(updateGatewaySetting({
+      kind: "telegram.message-format",
+      value: "html",
+    }, {
+      environment: fixture.environment,
+      expectedRevision: settings.revision,
+    })).toMatchObject({
+      value: "html",
+      activation: "restart-gateway",
+      activationResult: configActivationResult("restart-gateway"),
+    });
   });
 
   it("updates the global conversation idle release minutes", () => {

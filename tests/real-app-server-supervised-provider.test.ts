@@ -24,11 +24,65 @@ import { toConversationInputEvent } from "../src/codex-client/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+import { configuredHome, providerCatalogPath, testEnvironment } from "./model-provider-runtime-test-fixture.js";
+import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";
+import type { ConfigReadResponse } from "../src/codex-protocol/index.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
 
 contractSuite("real supervised App Server provider", () => {
+    it.each(["switching", "exclusive"] as const)("disables DS hosted search in %s mode without rewriting the base preference", async (mode) => {
+      const home = await configuredHome(mode);
+      const environment = { ...process.env, ...testEnvironment(home) };
+      const configPath = join(environment.CODEX_CONNECT_HOME!, "config.toml");
+      const socketPath = join(home, "server.sock");
+      const basePath = join(home, "config.toml");
+      const baseConfig = 'web_search = "live"\n' + (mode === "exclusive" ? readFileSync(basePath, "utf8") : 'model_provider = "openai"\n');
+      writeFileSync(basePath, baseConfig, { mode: 0o600 });
+      writeFileSync(providerCatalogPath(home), JSON.stringify(createResponsesModelCatalog([
+        {id:"deepseek-v4-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["high"],defaultReasoningEffort:"high",supportsImages:false},
+      ], "deepseek-v4-flash")), { mode: 0o600 });
+      writeGatewayConfig(configPath, {
+        version: 1, default_workspace: "integration",
+        telegram: { bot_token: "integration-token", allowed_user_ids: [123], message_format: "html" },
+        codex: { binary: process.env.CODEX_BINARY ?? "codex", socket_path: socketPath, sandbox: "read-only" },
+        approval: { timeout_seconds: 300 }, storage: { database_path: join(home, "gateway.sqlite3") },
+        logging: { level: "info" }, workspaces: [{ id: "integration", name: "Integration", cwd: home }],
+      });
+      const service = spawn(process.execPath, [resolve("bin/codexc.mjs"), "service-app-server"], {
+        cwd: process.cwd(), env: { ...environment, CODEX_CONNECT_CONFIG_FILE: configPath },
+        stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
+      });
+      let diagnostic = "";
+      for (const stream of [service.stdout, service.stderr]) {
+        stream?.setEncoding("utf8");
+        stream?.on("data", (chunk: string) => { diagnostic = appendDiagnostic(diagnostic, chunk); });
+      }
+      let rpc: JsonRpcClient | undefined;
+      try {
+        await waitFor(() => existsSync(socketPath) && existsSync(appServerSupervisorSocketPath(socketPath)), 15000,
+          () => service.exitCode === null && service.signalCode === null ? undefined : new Error(appServerFailure("DS fixture startup failed", diagnostic)));
+        rpc = new JsonRpcClient(new UnixWebSocketTransport(socketPath));
+        await rpc.connect();
+        const primary = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+        expect(primary.config.web_search).toBe(mode === "exclusive" ? "disabled" : "live");
+        if (mode === "switching") {
+          await rpc.close();
+          await ensureAppServerProvider(socketPath, "ds-test");
+          rpc = new JsonRpcClient(new UnixWebSocketTransport(providerAppServerSocketPath(socketPath, "ds-test")));
+          await rpc.connect();
+          const ds = await rpc.request<ConfigReadResponse>({ method: "config/read", params: { includeLayers: false } });
+          expect(ds.config.web_search).toBe("disabled");
+        }
+        expect(readFileSync(basePath,"utf8")).toBe(baseConfig);
+      } finally {
+        await rpc?.close();
+        await stopDetachedTestProcess(service, 5000);
+        rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
+    }, 30000);
+
     it("starts a custom Responses primary Provider and maps reasoning notifications", async () => {
       const testRuntime = mkdtempSync(join(tmpdir(), "codex-custom-provider-contract-"));
       const codexHome = join(testRuntime, "codex-home");
@@ -271,10 +325,8 @@ contractSuite("real supervised App Server provider", () => {
             expect(summary).toBeDefined();
             const detail = await describeDumpExchange(files, summary.id);
             expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.preForwardMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.firstEventWaitMs).toBeCloseTo(detail.response.firstContentMs);
-            expect(detail.response.callTiming.afterFirstEventMs).toBeGreaterThanOrEqual(0);
-            expect(detail.response.callTiming.receiveResponseMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.firstTokenMs).toBeGreaterThanOrEqual(0);
+            expect(detail.response.callTiming.totalMs).toBeGreaterThanOrEqual(detail.response.firstTokenMs);
           }, { timeout: 5000 });
 
           const policyTurn = await client.startTurn(

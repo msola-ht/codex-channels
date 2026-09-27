@@ -17,7 +17,6 @@ import {
 import {
   formatTime,
   formatTokens,
-  formatTokensPerSecond,
 } from "@/lib/format"
 import type { MetricsQuery, TurnSummary } from "@/lib/types"
 import { metricsLink } from "@/lib/metrics-query"
@@ -33,7 +32,6 @@ const COLUMN_LABELS: Record<string, string> = {
   failures: "失败",
   input: "输入 Token",
   output: "输出 Token",
-  tokensPerSecond: "平均 Token/s",
   compact: "压缩",
 }
 
@@ -175,12 +173,6 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
       },
     },
     {
-      id: "tokensPerSecond",
-      accessorFn: (turn) => turn.tokensPerSecond,
-      header: ({ column }) => <SortableHeader column={column} hint="该轮有效请求速率的算术平均；按各次请求总耗时计算。">平均 Token/s</SortableHeader>,
-      cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{formatTokensPerSecond(row.original.tokensPerSecond)}</span>,
-    },
-    {
       id: "compact",
       accessorFn: (turn) => turn.compact?.requestCount ?? 0,
       header: ({ column }) => (
@@ -198,7 +190,7 @@ export function TurnTable({ turns, threadId, query, pagination, loading = false 
 
   return (
     <DataTable
-      numericColumnIds={["requests", "failures", "input", "output", "tokensPerSecond", "compact"]}
+      numericColumnIds={["requests", "failures", "input", "output", "compact"]}
       loading={loading}
       title="每轮明细"
       description={({ total, matched, pageSize }) =>

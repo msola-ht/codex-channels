@@ -35,6 +35,7 @@ export function responsesModelTemplatesFromCatalog(catalog, source = "official")
     reasoningEfforts: model.supported_reasoning_levels?.map(entry => entry.effort).filter(effort => effort !== "ultra" && effort !== "persistent"),
     defaultReasoningEffort: model.default_reasoning_level ?? null,
     supportsImages: model.input_modalities?.includes("image") === true,
+    ...(source === "deepseek" && typeof model.model_messages?.instructions_template === "string" && model.model_messages.instructions_template.length > 0 ? {instructions: model.model_messages.instructions_template} : {}),
     ...(source === "official" ? {} : {template: {source, model: model.slug, followContext: false}}),
   }));
   return validateResponsesModels(models, models[0]?.id);

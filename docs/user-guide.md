@@ -70,7 +70,7 @@ enabled = true
 | 设置 | 作用 |
 | --- | --- |
 | `tools.update_plan.enabled` | 模型是否拥有创建/更新待办清单的工具，默认关闭 |
-| `display.plan_updates` | Gateway 是否把 `turn/plan/updated` 通知展示到渠道，默认开启 |
+| `display.plan_updates` | Telegram 与飞书是否把 `turn/plan/updated` 通知展示到渠道，默认开启 |
 | `/plan` | 是否使用官方 Plan 协作模式 |
 
 上游计划工具关闭时不会产生普通计划清单通知；`display.plan_updates` 不能替代它。修改后由新建或重新加载的 Codex Thread 读取；当前已加载的 Thread 保持不变，无需重启服务。
@@ -508,7 +508,7 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 后永�
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
 点开某条即进入该条的请求参数、实际输出与用量摘要。终态未携带输出时，从已存 trace 的完成条目
-提取；原始正文、逐条用量归因与传输 trace 默认收起，数据不会回写。页面地址保留标签、writer session、调用编号与分页位置，
+提取；原始正文、诊断信息与传输 trace 默认收起，数据不会回写。页面地址保留标签、writer session、调用编号与分页位置，
 返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号调用。
 该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。页面
 同时显示自动保留天数，并提供“清空转储”的预览确认入口；实际删除前必须先停止全部 App Server。

@@ -31,14 +31,17 @@ describe("webui traffic V2 API", () => {
       clock: "monotonic", endMs: 100, forwardingMs: 10, firstEventMs: 120,
       requestBodyEndMs: 80, responseHeadMs: 20,
     } });
-    writeSession(fixture.trafficDir, "openai", "clock-stages", [legacy, invalid]);
+    const current = httpInteraction(3);
+    Object.assign(current.response, { firstTokenMs: 25, callTiming: { clock: "monotonic", basis: "submitted", endMs: 80 } });
+    writeSession(fixture.trafficDir, "openai", "clock-stages", [legacy, invalid, current]);
     const paths = [join(fixture.trafficDir, "openai-clock-stages")];
     expect((await describeDumpExchange(paths, 1)).response.callTiming).toBeNull();
     const timing = (await describeDumpExchange(paths, 2)).response.callTiming;
-    expect(timing).toMatchObject({ totalMs: 100, preForwardMs: 10, receiveResponseMs: 80 });
-    expect(timing.firstEventWaitMs).toBeUndefined();
-    expect(timing.afterFirstEventMs).toBeUndefined();
-    expect(timing.waitResponseHeadMs).toBeUndefined();
+    expect(timing).toBeNull();
+    expect((await describeDumpExchange(paths, 3)).response).toMatchObject({
+      firstTokenMs: 25, durationMs: 80, callTiming: { totalMs: 80 },
+    });
+    expect((await describeDumpExchange(paths, 1)).response.durationMs).toBeUndefined();
   });
   it.each(["http", "websocket"])("separates %s model declarations across trace pages without changing terminal models", async (transport) => {
     const fixture = createFixture();
@@ -123,6 +126,18 @@ describe("webui traffic V2 API", () => {
     const list = await getJson<{ exchanges: Array<{ id: number; turnStateLengths: unknown }> }>(`${server.origin}/api/v1/traffic/turn-state?label=openai&session=turn-state&ids=1,2`);
     expect(list.body.exchanges.find((entry) => entry.id === 1)?.turnStateLengths).toEqual(detail.modelEvidence.turnStateLengths);
     expect(list.body.exchanges.find((entry) => entry.id === 2)?.turnStateLengths).toEqual([]);
+  });
+
+  it("exposes the recorded Chat upstream provider in the list without inferring it", async () => {
+    const fixture = createFixture();
+    const reported = httpInteraction(1);
+    reported.response.upstreamProvider = "deepseek";
+    writeSession(fixture.trafficDir, "clp", "upstream-provider", [reported, httpInteraction(2)]);
+    const server = await startServer(fixture.environment);
+    const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
+    expect(list.status).toBe(200);
+    expect(list.body.exchanges.find((entry) => entry.id === 1)?.upstreamProvider).toBe("deepseek");
+    expect(list.body.exchanges.find((entry) => entry.id === 2)).not.toHaveProperty("upstreamProvider");
   });
 
   it("loads the list without reading response payloads or traces for character counts", async () => {
@@ -244,9 +259,9 @@ describe("webui traffic V2 API", () => {
     writeSession(fixture.trafficDir, "deepseek", session, [call, websocketInteraction(2)]);
     const paths = [join(fixture.trafficDir, `deepseek-${session}`)];
     const detail = await describeDumpExchange(paths, 1, { maxTracePageSize: 1 });
-    expect(detail.response.httpTiming).toEqual({ receiveRequestMs: 10, waitResponseHeadMs: 40, receiveResponseMs: 0 });
+    expect(detail.response).not.toHaveProperty("httpTiming");
     expect(detail.trace).toHaveLength(1);
-    expect((await describeDumpExchange(paths, 2)).response.httpTiming).toBeNull();
+    expect((await describeDumpExchange(paths, 2)).response).not.toHaveProperty("httpTiming");
   });
 
   it("does not replace unavailable request content or invalid stage timestamps with defaults", async () => {
@@ -260,7 +275,7 @@ describe("webui traffic V2 API", () => {
     writeSession(fixture.trafficDir, "ocg", session, [call]);
     const detail = await describeDumpExchange([join(fixture.trafficDir, `ocg-${session}`)], 1);
     expect(detail.request.content).toEqual({ instructions: null, input: null, tools: null });
-    expect(detail.response.httpTiming).toEqual({ receiveRequestMs: undefined, waitResponseHeadMs: undefined, receiveResponseMs: undefined });
+    expect(detail.response).not.toHaveProperty("httpTiming");
   });
 
   it("lists logical calls without payloads and returns one request with one response", async () => {
@@ -372,7 +387,7 @@ describe("webui traffic V2 API", () => {
     expect(detail.response.outputTruncated).toBe(truncated);
   });
 
-  it("extracts scoped timing beyond the trace page even when terminal output exists", async () => {
+  it("keeps upstream timing only in raw trace without projecting a second timing scope", async () => {
     const fixture = createFixture();
     const call = websocketInteraction(1, Array.from({ length: 101 }, () => ({
       interaction: 1, kind: "websocket_frame", direction: "upstream", text: "{}",
@@ -392,34 +407,10 @@ describe("webui traffic V2 API", () => {
     const session = "2026-09-17T00-00-00-000Z";
     writeSession(fixture.trafficDir, "openai", session, [call]);
     const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
-    expect(detail.response.timing).toEqual({ scope: "logical_turn", responseId: "resp-current",
-      totalMs: 5421, firstTokenMs: 2843, queueMaxMs: 1738, samplingMs: 2327.393, toolPauseMs: 0 });
+    expect(detail.response).not.toHaveProperty("timing");
     expect(detail.response.output).toMatchObject([{ text: "answer" }]);
     expect(detail.response.outputTruncated).toBe(false);
     expect(detail.trace).toHaveLength(100);
-  });
-
-  it.each([
-    ["logical_turn", "resp-current", "resp-current", true],
-    ["engine_call", "resp-current", "resp-current", false],
-    ["logical_turn", "resp-other", "resp-current", false],
-    ["logical_turn", undefined, undefined, false],
-  ])("keeps missing timing explicit and rejects unmatched scope or response: %s %s %s", async (scope, id, terminalId, matched) => {
-    const fixture = createFixture();
-    const call = websocketInteraction(1, [{ interaction: 1, kind: "websocket_frame", direction: "upstream",
-      text: JSON.stringify({ type: "responsesapi.websocket_timing", timing_metrics: {
-        timing_scope: scope, response_id: id, total_turn_time_s: null,
-        first_sampled_message_ttft_ms: "123", engine_queue_max_ms: -1, client_tool_pause_total_ms: 0,
-      } }),
-    }]);
-    call.responseBody = JSON.stringify({ response: { id: terminalId, output: [] } });
-    const session = "2026-09-17T00-00-00-000Z";
-    writeSession(fixture.trafficDir, "openai", session, [call]);
-    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
-    if (matched) {
-      expect(detail.response.timing).toEqual({ scope, responseId: id, toolPauseMs: 0,
-        totalMs: undefined, firstTokenMs: undefined, queueMaxMs: undefined, samplingMs: undefined });
-    } else expect(detail.response.timing).toBeNull();
   });
 
   it("prefers terminal output without duplicating its trace items and distinguishes model discovery", async () => {

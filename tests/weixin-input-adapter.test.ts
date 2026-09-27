@@ -913,6 +913,10 @@ describe("WeixinInputAdapter", () => {
       message: "微信消息接收已停止",
     });
     expect(error.message).not.toContain("private");
+    // 原始错误必须留在 cause 链里，否则渠道失效日志只能看到最外层的 fatal 类型。
+    const processing = error.cause as Error & { cause?: unknown };
+    expect(processing.name).toBe("WeixinMessageProcessingError");
+    expect((processing.cause as Error).message).toBe("private application detail");
     expect(cursorStore.set).not.toHaveBeenCalled();
   });
 

@@ -71,7 +71,6 @@ const weeklyWindowMs = 7 * 24 * 60 * 60 * 1_000;
 const quotaResetJitterSeconds = 5 * 60;
 const cleanupInterval = 100;
 const maximumAggregationGroups = 20;
-const tokensPerSecondSql = "CASE WHEN total_duration_ms > 0 AND output_tokens > 0 THEN output_tokens * 1000.0 / total_duration_ms END";
 const pageSortSql = {
   recordedAtMs: "recorded_at_ms",
   provider: "provider",
@@ -84,7 +83,6 @@ const pageSortSql = {
   outputTokens: "output_tokens",
   reasoningOutputTokens: "reasoning_output_tokens",
   totalDurationMs: "total_duration_ms",
-  tokensPerSecond: tokensPerSecondSql,
 } as const;
 const observableCompletionSql = `
   status = 'completed'
@@ -141,7 +139,6 @@ const metricsAggregateSql = `
   COUNT(cached_input_tokens) AS cached_input_token_count,
   SUM(output_tokens) AS output_tokens,
   SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-  AVG(${tokensPerSecondSql}) AS tokens_per_second,
   ${compactAggregateSql}
 `;
 
@@ -306,7 +303,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         : JSON.stringify(sample.quotaWindows),
       sample.userAgent ?? null,
       sample.upstreamTtftMs ?? null,
-      sample.firstContentMs ?? null,
+      sample.firstTokenMs ?? null,
       sample.requestModel ?? null,
       sample.responseModel ?? null,
       sample.traffic?.label ?? null,
@@ -927,7 +924,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId) as unknown as TurnSummaryRow;
@@ -997,7 +993,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
         ${compactAggregateSql}
       FROM scoped
     `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
@@ -1077,7 +1072,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
         ${compactAggregateSql}
       FROM model_request_metrics
       WHERE thread_id = ? AND turn_id = ?
@@ -1135,7 +1129,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         requestCount: row.request_count,
         inputTokens: row.input_tokens ?? 0,
         outputTokens: row.output_tokens ?? 0,
-        tokensPerSecond: row.tokens_per_second,
         compact: toStoredCompactSummary(row),
         firstRequestStartedAtMs: row.first_request_started_at_ms,
         lastRecordedAtMs: row.recorded_at_ms,
@@ -1154,7 +1147,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       provider: "latest.provider", model: "latest.model", turns: "turn_count",
       requests: "request_count", failures: "unsuccessful_request_count",
       input: "input_tokens", output: "output_tokens", compact: "compact_request_count",
-      tokensPerSecond: "tokens_per_second",
     };
     const sortColumn = sortColumns[sortKey];
     const direction = query.sortDirection ?? "desc";
@@ -1330,7 +1322,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         COUNT(cached_input_tokens) AS cached_input_token_count,
         SUM(output_tokens) AS output_tokens,
         SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        AVG(${tokensPerSecondSql}) AS tokens_per_second,
         ${compactAggregateSql},
         COUNT(*) OVER () AS total_group_count
       FROM filtered
@@ -1385,11 +1376,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
         DELETE FROM subagent_turns WHERE recorded_at_ms < ?
       `).run(Math.max(0, nowMs - this.retentionMs));
       this.cleanupAccountSnapshots(nowMs);
+      // 行数裁剪按 id 上界一次定位，避免 ORDER BY ... OFFSET 在每次清理时
+      // 对主键做全表倒扫；id 出现空洞时只会更早清掉最旧记录，不会删掉更新的记录。
       this.database.prepare(`
         DELETE FROM model_request_metrics
-        WHERE id <= COALESCE((
-          SELECT id FROM model_request_metrics ORDER BY id DESC LIMIT 1 OFFSET ?
-        ), 0)
+        WHERE id <= (SELECT MAX(id) FROM model_request_metrics) - ?
       `).run(this.maximumRows);
       this.database.exec("COMMIT");
       this.recordsSinceCleanup = 0;

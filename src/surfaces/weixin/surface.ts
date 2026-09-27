@@ -13,7 +13,6 @@ import type {
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
 import type {
-  OperationUpdateDisplay,
   SurfaceAdapter,
   SurfaceConfigurationChange,
 } from "../types.js";
@@ -38,7 +37,6 @@ import type {
   WeixinImageSendProtocolClient,
   WeixinLifecycleProtocolClient,
   WeixinProtocolClient,
-  WeixinTypingProtocolClient,
 } from "./protocol-client.js";
 import { WeixinProtocolError } from "./protocol-client.js";
 import { WeixinReplyContextStore } from "./reply-context-store.js";
@@ -49,7 +47,6 @@ import {
 } from "./command-renderer.js";
 import type { WeixinUpdatesCursorStore } from "./updates-cursor-store.js";
 import type { WeixinUpdatesRetryEvent } from "./updates-monitor.js";
-import { WeixinTypingController } from "./typing-controller.js";
 
 export interface WeixinStartupNotification {
   targets(): readonly ConversationTarget[];
@@ -61,7 +58,6 @@ export interface WeixinSurfaceOptions {
   client: WeixinProtocolClient;
   fileSendClient?: WeixinFileSendProtocolClient;
   imageSendClient?: WeixinImageSendProtocolClient;
-  typingClient?: WeixinTypingProtocolClient;
   lifecycleClient?: WeixinLifecycleProtocolClient;
   cursorStore: WeixinUpdatesCursorStore;
   service: Pick<ConversationTurnUseCases, "touchActivity" | "submit">;
@@ -76,9 +72,6 @@ export interface WeixinSurfaceOptions {
   files?: WeixinFilePort;
   audios?: WeixinAudioPort;
   startupNotification?: WeixinStartupNotification;
-  operationUpdateDisplay?: OperationUpdateDisplay;
-  planUpdatesEnabled?: boolean;
-  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
@@ -126,14 +119,6 @@ export class WeixinSurface implements SurfaceAdapter {
     this.audios = options.audios;
     this.lifecycleClient = options.lifecycleClient;
     this.accountId = options.accountId;
-    const typing = options.typingClient === undefined
-      ? undefined
-      : new WeixinTypingController(
-          options.typingClient,
-          replyContexts,
-          options.access,
-          options.logger,
-        );
     this.output = new WeixinOutbox(
       options.accountId,
       options.client,
@@ -148,22 +133,6 @@ export class WeixinSurface implements SurfaceAdapter {
         ...(options.fileSendClient === undefined
           ? {}
           : { fileClient: options.fileSendClient }),
-        ...(typing === undefined ? {} : { typing }),
-        ...(options.operationUpdateDisplay === undefined
-          ? {}
-          : {
-              operationUpdateDisplay: options.operationUpdateDisplay,
-            }),
-        ...(options.planUpdatesEnabled === undefined
-          ? {}
-          : {
-              planUpdatesEnabled: options.planUpdatesEnabled,
-            }),
-        ...(options.reasoningEnabled === undefined
-          ? {}
-          : {
-              reasoningEnabled: options.reasoningEnabled,
-            }),
         ...(options.autoCompactPercent === undefined
           ? {}
           : { autoCompactPercent: options.autoCompactPercent }),

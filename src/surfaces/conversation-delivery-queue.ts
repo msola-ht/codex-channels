@@ -1,11 +1,25 @@
+import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 
 import { BoundedAsyncQueue } from "../event-bus/index.js";
-import { surfaceErrorMetadata } from "./error-metadata.js";
+import { observeSurfaceStage, surfaceDiagnosticContext, withSurfaceDiagnosticContext } from "./diagnostics.js";
 
 interface DeliveryOperation {
   critical: boolean;
+  enqueuedAt: number;
+  context: ReturnType<typeof surfaceDiagnosticContext>;
+  purpose: "output" | "ordered" | "answer" | "operation-log" | "turn-completion";
+  requestSignal?: AbortSignal;
   run(signal: AbortSignal): Promise<void>;
+}
+
+export interface ConversationDeliveryOptions {
+  /**
+   * 同一 Conversation 内仍在等待执行的同键输出只保留最新一份。
+   * 用于按秒刷新的中间状态：既不让它无限积压，也不在平台变慢时静默丢弃。
+   */
+  coalesceKey?: string;
+  purpose?: DeliveryOperation["purpose"];
 }
 
 interface ConversationWorker {
@@ -17,13 +31,18 @@ interface ConversationWorker {
 export interface ConversationDeliveryQueueOptions {
   component: string;
   capacity?: number;
+  /** 路由层逐 Token 入队时可关闭普通调试阶段，保留终态与警告。 */
+  logIntermediateStages?: boolean;
   closeTimeoutMs?: number;
+  /** 普通输出可在关闭期限内排空；有序交互仍立即取消。 */
+  drainOnClose?: boolean;
   errorMetadata?(error: unknown): Record<string, unknown>;
 }
 
 export class ConversationDeliveryQueue {
   private readonly workers = new Map<string, ConversationWorker>();
   private readonly capacity: number;
+  private readonly stageLogger: Pick<Logger, "debug" | "info" | "warn">;
   private readonly closeTimeoutMs: number;
   private closed = false;
   private stopped = false;
@@ -34,6 +53,9 @@ export class ConversationDeliveryQueue {
     private readonly logger: Logger,
     private readonly options: ConversationDeliveryQueueOptions,
   ) {
+    this.stageLogger = options.logIntermediateStages === false
+      ? { debug: () => {}, info: logger.info.bind(logger), warn: logger.warn.bind(logger) }
+      : logger;
     this.capacity = options.capacity ?? 200;
     this.closeTimeoutMs = options.closeTimeoutMs ?? 5_000;
     if (!Number.isInteger(this.capacity) || this.capacity <= 0) {
@@ -48,18 +70,25 @@ export class ConversationDeliveryQueue {
     conversationId: string,
     run: (signal: AbortSignal) => Promise<void>,
     critical: boolean,
+    options?: ConversationDeliveryOptions,
   ): boolean {
     if (this.closed) {
+      this.logger.warn({ ...surfaceDiagnosticContext(), component: this.options.component,
+        conversationId, critical, reason: "closed" }, "Surface 输出未入队");
       return false;
     }
     const worker = this.worker(conversationId);
-    const accepted = worker.queue.push({ critical, run }, critical);
+    const operation = this.operation(conversationId, critical, run, options?.purpose);
+    const accepted = worker.queue.push(operation, critical, options?.coalesceKey);
+    this.stageLogger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
+      "Surface 输出入队结果");
     if (!accepted) {
       this.logger.warn(
         {
-          component: this.options.component,
-          conversationId,
+          ...operation.context,
           critical,
+          pending: worker.queue.size,
+          capacity: this.capacity,
         },
         "Surface Conversation 输出队列已满，输出未入队",
       );
@@ -82,6 +111,7 @@ export class ConversationDeliveryQueue {
     }
     return new Promise<T>((resolve, reject) => {
       const worker = this.worker(conversationId);
+      const cancellation = new AbortController();
       let started = false;
       let settled = false;
       const cleanup = (): void => {
@@ -91,42 +121,48 @@ export class ConversationDeliveryQueue {
       const cancel = (): void => {
         if (settled) return;
         settled = true;
+        cancellation.abort();
         worker.queue.remove(operation);
+        this.logger.debug({ ...operation.context, started, outcome: "cancelled" },
+          "Surface 有序输出已取消");
         cleanup();
         reject(new Error(`${this.options.component} Conversation 输出操作已取消`));
       };
       const cancelQueued = (): void => { if (!started) cancel(); };
-      const operation: DeliveryOperation = {
-        critical: true,
-        run: async (signal) => {
-          if (settled) return;
-          started = true;
-          try {
-            const combined = requestSignal ? AbortSignal.any([signal, requestSignal]) : signal;
-            combined.throwIfAborted();
-            resolve(await run(combined));
-          } catch (error) {
-            reject(
-              error instanceof Error
-                ? error
-                : new Error(`${this.options.component} Conversation 输出操作失败`),
-            );
-          } finally {
-            settled = true;
-            cleanup();
-          }
-        },
-      };
+      const operation = this.operation(conversationId, true, async (signal) => {
+        if (settled) return;
+        started = true;
+        try {
+          signal.throwIfAborted();
+          resolve(await run(signal));
+        } catch (error) {
+          reject(
+            error instanceof Error
+              ? error
+              : new Error(`${this.options.component} Conversation 输出操作失败`),
+          );
+          throw error;
+        } finally {
+          settled = true;
+          cleanup();
+        }
+      });
+      operation.purpose = "ordered";
+      operation.requestSignal = requestSignal
+        ? AbortSignal.any([requestSignal, cancellation.signal]) : cancellation.signal;
       this.orderedCancellations.add(cancel);
       requestSignal?.addEventListener("abort", cancelQueued, { once: true });
       const accepted = worker.queue.pushPriority(operation);
+      this.logger.debug({ ...operation.context, critical: true, accepted, pending: worker.queue.size },
+        "Surface 输出入队结果");
       if (!accepted) {
         cleanup();
         this.logger.warn(
           {
-            component: this.options.component,
-            conversationId,
+            ...operation.context,
             critical: true,
+            pending: worker.queue.size,
+            capacity: this.capacity,
           },
           "Surface Conversation 输出队列已满，优先操作未入队",
         );
@@ -137,12 +173,39 @@ export class ConversationDeliveryQueue {
     });
   }
 
+  private operation(
+    conversationId: string,
+    critical: boolean,
+    run: DeliveryOperation["run"],
+    purpose: DeliveryOperation["purpose"] = "output",
+  ): DeliveryOperation {
+    return {
+      critical, run, purpose, enqueuedAt: performance.now(),
+      context: {
+        ...surfaceDiagnosticContext(),
+        component: this.options.component,
+        conversationId,
+        deliveryId: randomUUID(),
+      },
+    };
+  }
+
   private worker(conversationId: string): ConversationWorker {
     let worker = this.workers.get(conversationId);
     if (!worker) {
       const queue = new BoundedAsyncQueue<DeliveryOperation>(this.capacity, (state) => {
         this.logger.warn({ component: this.options.component, conversationId, ...state },
           "关键输出积压超过队列容量，继续保留待投递输出");
+      }, (state) => {
+        // 平台变慢时同键中间状态会被就地替换；记录深度便于判断是否需要调整容量。
+        this.logger.debug(
+          { component: this.options.component, conversationId, ...state },
+          "Surface Conversation 输出队列合并了同键输出",
+        );
+      }, (operation, reason) => {
+        const fields = { ...operation.context, critical: operation.critical, reason };
+        if (reason === "capacity") this.logger.warn(fields, "Surface 中间输出因积压被替换");
+        else this.logger.debug(fields, "Surface 中间输出已合并");
       });
       const controller = new AbortController();
       worker = {
@@ -155,6 +218,14 @@ export class ConversationDeliveryQueue {
     return worker;
   }
 
+  /** 等待当前任务结束，不关闭队列；调用方须先暂停该队列的新入队。 */
+  waitForIdle(): Promise<boolean> {
+    return waitAtMost(
+      Promise.allSettled([...this.workers.values()].map((worker) => worker.done)),
+      this.closeTimeoutMs,
+    );
+  }
+
   close(): Promise<void> {
     if (this.closePromise) {
       return this.closePromise;
@@ -163,7 +234,7 @@ export class ConversationDeliveryQueue {
     for (const cancel of [...this.orderedCancellations]) cancel();
     for (const worker of this.workers.values()) {
       worker.queue.close();
-      worker.controller.abort();
+      if (!this.options.drainOnClose) worker.controller.abort();
     }
     const conversationCount = this.workers.size;
     this.closePromise = this.finishClose(conversationCount);
@@ -177,7 +248,11 @@ export class ConversationDeliveryQueue {
     );
     if (!completed) {
       this.stopped = true;
-      for (const worker of this.workers.values()) {
+      for (const [conversationId, worker] of this.workers) {
+        worker.controller.abort();
+        const pending = worker.queue.size;
+        if (pending > 0) this.logger.warn({ component: this.options.component, conversationId, pending },
+          "Surface 关闭超时，排队输出未投递");
         while (worker.queue.size > 0) await worker.queue.shift();
       }
       this.logger.warn(
@@ -203,18 +278,25 @@ export class ConversationDeliveryQueue {
         return;
       }
       try {
-        await operation.run(signal);
-      } catch (error) {
-        this.logger.warn(
+        const operationSignal = operation.requestSignal
+          ? AbortSignal.any([signal, operation.requestSignal]) : signal;
+        await withSurfaceDiagnosticContext(operation.context, () => observeSurfaceStage(
+          this.stageLogger,
           {
-            ...(this.options.errorMetadata?.(error)
-              ?? surfaceErrorMetadata(error)),
-            component: this.options.component,
-            conversationId,
+            stage: "delivery",
+            purpose: operation.purpose,
+            queueWaitMs: Math.max(0, Math.round(performance.now() - operation.enqueuedAt)),
+            pending: queue.size,
             critical: operation.critical,
+            signal: operationSignal,
+            ...(this.options.errorMetadata === undefined ? {} : {
+              errorMetadata: (error: unknown) => this.options.errorMetadata!(error),
+            }),
           },
-          "Surface Conversation 输出失败",
-        );
+          () => operation.run(operationSignal),
+        ));
+      } catch {
+        // 诊断边界已经记录失败，继续处理后续输出。
       }
       if (queue.size === 0) {
         const current = this.workers.get(conversationId);

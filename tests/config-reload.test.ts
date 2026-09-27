@@ -154,6 +154,32 @@ describe("Gateway config reload", () => {
     });
   });
 
+  it("does not restart for display changes when only WeChat is enabled", () => {
+    const weixin = {
+      accountId: "bot-fixture@im.bot",
+      allowedUserIds: new Set(["actor-fixture@im.wechat"]),
+    };
+    const current = config({ telegramEnabled: false, weixin });
+    expect(classifyConfigReload(
+      current,
+      { ...current, operationUpdateDisplay: "compact" },
+    )).toEqual({ action: "reload", changes: [] });
+    expect(classifyConfigReload(
+      current,
+      { ...current, planUpdatesEnabled: true, reasoningEnabled: false },
+    )).toEqual({ action: "reload", changes: [] });
+    // 打开 Telegram 后同一个设置重新需要重启。
+    const enabled = classifyConfigReload(
+      current,
+      { ...current, telegramEnabled: true, operationUpdateDisplay: "compact" },
+    );
+    expect(enabled.action).toBe("restart");
+    expect(enabled.changes).toContainEqual({
+      code: "display.operation-updates",
+      scope: "global",
+    });
+  });
+
   it("restarts when Telegram is enabled or disabled", () => {
     const disabled = config({
       telegramEnabled: false,

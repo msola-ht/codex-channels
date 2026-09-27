@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import {
+  ContextCompactionNotices,
   compactOperationDetail,
   operationMetadata,
   operationStatus,
@@ -10,6 +11,19 @@ import {
 } from "../src/surfaces/operation-presentation.js";
 
 describe("shared operation presentation", () => {
+  it("does not fabricate a start for completion-only history and scopes deduplication by target and item", () => {
+    const notices = new ContextCompactionNotices();
+    const event = { type: "operation.updated" as const,
+      target: { surface: "feishu" as const, accountId: "account", conversationId: "chat" },
+      threadId: "thread", turnId: "turn",
+      operation: { itemId: "compact", kind: "contextCompaction" as const, status: "completed" as const } };
+    expect(notices.accept(event)).toBe("上下文压缩已完成。");
+    expect(notices.accept(event)).toBeNull();
+    expect(notices.accept({ ...event, operation: { ...event.operation, status: "running" } })).toBeNull();
+    expect(notices.accept({ ...event, target: { ...event.target, conversationId: "other" } })).toBe("上下文压缩已完成。");
+    expect(notices.accept({ ...event, operation: { ...event.operation, itemId: "next", status: "running" } })).toBe("开始压缩上下文…");
+  });
+
   it("maps every operation kind to one shared title", () => {
     const titles = new Map<OperationUpdate["kind"], string>([
       ["command", "运行命令"],

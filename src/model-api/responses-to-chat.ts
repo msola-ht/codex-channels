@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
-import { array, ModelConversionError, object, string } from "./validation.js";
+import { array, ModelConversionError, object, string, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
+
+/** Chat 只有 function 一种工具，因此 Responses 的 function / custom(freeform) / 客户端 tool_search 都映射为 function，回程再还原原始形态。 */
+export type ChatToolKind = "function" | "custom" | "tool_search";
+/** 客户端执行的检索工具名；与锁定 Codex 的 `TOOL_SEARCH_TOOL_NAME` 一致。 */
+const toolSearchName = "tool_search";
+const freeformInputDescription = "Freeform tool input, passed through verbatim.";
+/** 自由格式工具在本上游只能以 JSON function 表达，必须明确告知模型输入放在 input 字段。 */
+const freeformBridgeNote = "This upstream invokes the tool as a JSON function: put the complete freeform input into the \"input\" field as a single string.";
 
 export type ChatUserContentPart = { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string; detail?: "auto" | "low" | "high" } };
@@ -10,6 +18,7 @@ interface ChatTextMessage {
   tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
   tool_call_id?: string;
   reasoning?: string;
+  reasoning_content?: string;
 }
 export type ChatMessage = ChatTextMessage | { role: "user"; content: string | ChatUserContentPart[] };
 export interface ChatRequest {
@@ -22,17 +31,25 @@ export interface ChatRequest {
   parallel_tool_calls?: boolean;
   max_completion_tokens?: number;
   reasoning?: { effort: "none" | "low" | "high" | "max" };
+  response_format?: JsonObject;
 }
 
 /** Stateless conversion: the caller supplies complete Responses input on every request. */
-export interface ChatToolIdentity { name: string; namespace?: string }
+export interface ChatToolIdentity { name: string; namespace?: string; kind: ChatToolKind }
 export function responsesToChat(value: unknown): { request: ChatRequest; toolNames: ReadonlyMap<string, ChatToolIdentity> } {
   const source = object(value);
   const allowed = new Set(["model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "store", "include", "reasoning", "text", "service_tier", "prompt_cache_key", "client_metadata", "max_output_tokens"]);
   if (Object.keys(source).some(key => !allowed.has(key))) throw new ModelConversionError("Unsupported Responses request field");
   if (source.stream !== true || source.store === true) throw new ModelConversionError("Only stateless streaming Responses requests are supported");
   if (source.service_tier != null && source.service_tier !== "default" && source.service_tier !== "auto") throw new ModelConversionError("Unsupported service tier");
-  if (source.text != null && Object.keys(object(source.text)).length > 0) throw new ModelConversionError("Structured output and verbosity are unsupported");
+  let responseFormat: JsonObject | undefined;
+  if (source.text != null) {
+    const text = object(source.text);
+    if (Object.keys(text).some(key => !["format", "verbosity"].includes(key))) throw new ModelConversionError("Unsupported Responses text controls");
+    // Chat 上游没有 verbosity 等价字段；Codex 仅在目录声明支持时携带，取值校验后忽略。
+    if (text.verbosity != null && (typeof text.verbosity !== "string" || !["low", "medium", "high"].includes(text.verbosity))) throw new ModelConversionError("Unsupported Responses text verbosity");
+    if (text.format != null) responseFormat = chatResponseFormat(text.format);
+  }
   let reasoningControl: ChatRequest["reasoning"];
   if (source.reasoning != null) {
     const reasoning = object(source.reasoning);
@@ -60,23 +77,56 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     messages.push(message);
     return message;
   };
+  const chatCallName = (item: JsonObject): string =>
+    chatToolName(string(item.name), item.namespace == null ? undefined : string(item.namespace));
+  const pushCall = (message: ChatTextMessage, callId: string, name: string, argumentsText: string): void => {
+    if (!callId || seenCalls.has(callId)) throw new ModelConversionError("Invalid tool call identity");
+    seenCalls.add(callId); pendingCalls.add(callId);
+    (message.tool_calls ??= []).push({ id: callId, type: "function", function: { name, arguments: argumentsText } });
+  };
+  const pushResult = (callId: string, content: string): void => {
+    if (!pendingCalls.delete(callId)) throw new ModelConversionError("Unmatched tool result");
+    messages.push({ role: "tool", tool_call_id: callId, content });
+  };
+  /** tool_search 结果带回的工具必须在本轮声明；Chat 上游没有“上游自动补工具”的等价机制。 */
+  const discovered: unknown[] = [];
   const input = typeof source.input === "string" ? [{ role: "user", content: source.input }] : array(source.input);
   for (const raw of input) {
     const item = object(raw);
     if (item.type === "function_call") {
       if (item.encrypted_function_args != null) throw new ModelConversionError("Encrypted tool arguments are unsupported");
-      const id = string(item.call_id);
-      if (!id || seenCalls.has(id)) throw new ModelConversionError("Invalid tool call identity");
       const message = assistant();
-      seenCalls.add(id); pendingCalls.add(id);
-      const call = { id, type: "function" as const, function: { name: chatToolName(string(item.name), item.namespace == null ? undefined : string(item.namespace)), arguments: string(item.arguments) } };
-      (message.tool_calls ??= []).push(call);
+      pushCall(message, string(item.call_id), chatCallName(item), string(item.arguments));
+    } else if (item.type === "custom_tool_call") {
+      // 自由格式工具的输入在 Chat 侧包一层 input 字段，回程再取出原始文本。
+      const message = assistant();
+      pushCall(message, string(item.call_id), chatCallName(item), JSON.stringify({ input: string(item.input) }));
+    } else if (item.type === "tool_search_call") {
+      if (item.execution !== "client") throw new ModelConversionError("Server-executed tool search is unsupported");
+      const message = assistant();
+      pushCall(message, string(item.call_id), toolSearchName, JSON.stringify(toolSearchArguments(item.arguments)));
     } else if (item.type === "function_call_output") {
-      const id = string(item.call_id);
-      if (!pendingCalls.delete(id)) throw new ModelConversionError("Unmatched tool result");
-      messages.push({ role: "tool", tool_call_id: id, content: textContent(item.output) });
+      pushResult(string(item.call_id), textContent(item.output));
+    } else if (item.type === "custom_tool_call_output") {
+      pushResult(string(item.call_id), textContent(item.output));
+    } else if (item.type === "tool_search_output") {
+      if (item.execution !== "client") throw new ModelConversionError("Server-executed tool search is unsupported");
+      pushResult(string(item.call_id), JSON.stringify(array(item.tools)));
+      discovered.push(...array(item.tools));
     } else if (item.type === "reasoning") {
       if (item.encrypted_content != null) throw new ModelConversionError("Encrypted reasoning cannot be converted to Chat");
+      // Full reasoning content and display summaries are distinct wire fields.
+      // When full text exists, do not substitute or append its summary.
+      if (item.content != null) {
+        const thought = array(item.content).map(raw => {
+          const part = object(raw);
+          if (part.type !== "reasoning_text") throw new ModelConversionError("Unsupported reasoning content");
+          return string(part.text);
+        }).join("");
+        const message = assistant();
+        message.reasoning_content = (message.reasoning_content ?? "") + thought;
+        continue;
+      }
       const thought = array(item.summary).map(raw => {
         const part = object(raw);
         if (part.type !== "summary_text") throw new ModelConversionError("Unsupported reasoning summary");
@@ -103,14 +153,48 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
   const result: ChatRequest = { model: string(source.model), messages, stream: true, stream_options: { include_usage: true } };
   if (reasoningControl) result.reasoning = reasoningControl;
-  const convertTool = (raw: unknown, namespace?: string): JsonObject => {
+  const convertTool = (raw: unknown, namespace?: string, loaded = false): JsonObject => {
     const tool = object(raw);
-    if (tool.type !== "function") throw new ModelConversionError("Only function tools are supported");
-    if (tool.defer_loading === true) throw new ModelConversionError("Deferred tools are unsupported");
+    if (namespace !== undefined && tool.type !== "function" && tool.type !== "custom") {
+      throw new ModelConversionError("Unsupported namespace tool type");
+    }
+    if (tool.defer_loading === true && !loaded) throw new ModelConversionError("Deferred tools are unsupported");
+    if (tool.type === "custom") {
+      const name = string(tool.name);
+      const convertedName = chatToolName(name, namespace);
+      if (toolNames.has(convertedName)) throw new ModelConversionError("Conflicting Chat tool names");
+      toolNames.set(convertedName, { name, ...(namespace === undefined ? {} : { namespace }), kind: "custom" });
+      // Chat 没有语法约束解码；完整语法作为模型输入说明保留。
+      const format = object(tool.format);
+      let grammar = "";
+      if (format.type === "grammar") {
+        if (format.syntax !== "lark" || typeof format.definition !== "string") throw new ModelConversionError("Unsupported custom tool grammar");
+        grammar = `\n\nThe input must follow this lark grammar:\n${format.definition}`;
+      } else if (format.type !== "text") throw new ModelConversionError("Unsupported custom tool format");
+      return { type: "function", function: {
+        name: convertedName,
+        description: `${string(tool.description)}\n\n${freeformBridgeNote}${grammar}`,
+        parameters: {
+          type: "object",
+          properties: { input: { type: "string", description: freeformInputDescription } },
+          required: ["input"],
+          additionalProperties: false,
+        },
+      } };
+    }
+    if (tool.type === "tool_search") {
+      // 服务端执行的检索由上游自行补工具，Chat 上游没有等价机制，只能拒绝。
+      if (tool.execution !== "client") throw new ModelConversionError("Server-executed tool search is unsupported");
+      const convertedName = chatToolName(toolSearchName);
+      if (toolNames.has(convertedName)) throw new ModelConversionError("Conflicting Chat tool names");
+      toolNames.set(convertedName, { name: toolSearchName, kind: "tool_search" });
+      return { type: "function", function: { name: convertedName, description: string(tool.description), parameters: object(tool.parameters) } };
+    }
+    if (tool.type !== "function") throw new ModelConversionError("Unsupported Responses tool type");
     const name = string(tool.name);
     const convertedName = chatToolName(name, namespace);
     if (toolNames.has(convertedName)) throw new ModelConversionError("Conflicting Chat tool names");
-    toolNames.set(convertedName, { name, ...(namespace ? { namespace } : {}) });
+    toolNames.set(convertedName, { name, ...(namespace === undefined ? {} : { namespace }), kind: "function" });
     const fn: JsonObject = { name: convertedName, parameters: object(tool.parameters) };
     if (tool.description !== undefined) fn.description = string(tool.description);
     if (tool.strict !== undefined) {
@@ -119,12 +203,40 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     }
     return { type: "function", function: fn };
   };
-  if (source.tools !== undefined) result.tools = array(source.tools).flatMap(raw => {
+  const tools: JsonObject[] = [];
+  if (source.tools !== undefined) tools.push(...array(source.tools).flatMap(raw => {
     const tool = object(raw);
     return tool.type === "namespace"
       ? array(tool.tools).map(nested => convertTool(nested, string(tool.name)))
       : [convertTool(tool)];
-  });
+  }));
+  const addDiscovered = (raw: unknown, namespace?: string): void => {
+    const tool = object(raw);
+    if (tool.type !== "function" && tool.type !== "custom") throw new ModelConversionError("Unsupported discovered tool type");
+    const name = string(tool.name);
+    const identity = toolNames.get(chatToolName(name, namespace));
+    if (identity) {
+      if (identity.name !== name || identity.namespace !== namespace || identity.kind !== tool.type) {
+        throw new ModelConversionError("Conflicting Chat tool names");
+      }
+      return;
+    }
+    // Codex marks search results defer_loading=true even though the client has
+    // already discovered them. Chat must declare these tools eagerly.
+    tools.push(convertTool(tool, namespace, true));
+  };
+  for (const raw of discovered) {
+    const tool = object(raw);
+    if (tool.type === "namespace") {
+      const namespace = string(tool.name);
+      for (const nested of array(tool.tools)) {
+        addDiscovered(nested, namespace);
+      }
+      continue;
+    }
+    addDiscovered(tool);
+  }
+  if (tools.length > 0) result.tools = tools;
   if (source.tool_choice !== undefined) {
     if (typeof source.tool_choice === "string" && ["auto", "none", "required"].includes(source.tool_choice)) result.tool_choice = source.tool_choice;
     else {
@@ -141,7 +253,19 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     if (!Number.isSafeInteger(source.max_output_tokens) || Number(source.max_output_tokens) <= 0) throw new ModelConversionError();
     result.max_completion_tokens = Number(source.max_output_tokens);
   }
+  if (responseFormat) result.response_format = responseFormat;
   return { request: result, toolNames };
+}
+
+/** Codex 只请求 json_schema；Chat 用 `response_format` 表达同一份 schema 约束。 */
+function chatResponseFormat(value: unknown): JsonObject {
+  const format = object(value);
+  if (format.type !== "json_schema" || Object.keys(format).some(key => !["type", "strict", "schema", "name"].includes(key))) {
+    throw new ModelConversionError("Unsupported Responses output format");
+  }
+  const name = string(format.name);
+  if (!/^[a-zA-Z0-9_-]{1,64}$/u.test(name) || typeof format.strict !== "boolean") throw new ModelConversionError("Unsupported Responses output format");
+  return { type: "json_schema", json_schema: { name, strict: format.strict, schema: object(format.schema) } };
 }
 
 function userContent(value: unknown): string | ChatUserContentPart[] {

@@ -230,7 +230,11 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
   }
   const record = parsed as Record<string, unknown>;
   if (
-    !oneOf(record.transport, ["http", "websocket"])
+    Object.hasOwn(record, "firstContentMs")
+    || ((record.firstTokenMs !== undefined || record.totalDurationMs !== undefined)
+      && record.timingBasis !== "submitted")
+    || (record.timingBasis !== undefined && record.timingBasis !== "submitted")
+    || !oneOf(record.transport, ["http", "websocket"])
     || !oneOf(record.responseFormat, ["sse", "json", "websocket", "unknown"])
     || !oneOf(record.operation, ["response", "compact"])
     || !nullableString(record.threadId)
@@ -258,9 +262,9 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || (record.totalDurationMs !== undefined
       && (typeof record.totalDurationMs !== "number"
         || !Number.isFinite(record.totalDurationMs) || record.totalDurationMs < 0))
-    || (record.firstContentMs !== undefined
-      && (typeof record.firstContentMs !== "number"
-        || !Number.isFinite(record.firstContentMs) || record.firstContentMs < 0))
+    || (record.firstTokenMs !== undefined
+      && (typeof record.firstTokenMs !== "number"
+        || !Number.isFinite(record.firstTokenMs) || record.firstTokenMs < 0))
     || (record.upstreamTtftMs !== undefined
       && (typeof record.upstreamTtftMs !== "number"
         || !Number.isFinite(record.upstreamTtftMs) || record.upstreamTtftMs < 0))

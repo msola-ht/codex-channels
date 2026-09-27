@@ -12,6 +12,7 @@ const descriptions: Record<string, readonly [string, boolean]> = {
   content_filter: ["上游内容过滤阻止了本次生成。", false],
   rate_limit: ["上游限流，请稍后重试或降低并发。", true],
   server_error: ["上游服务暂时异常，请稍后重试。", true],
+  upstream_timeout: ["上游响应超时，请稍后重试。", true],
 };
 const httpErrors: Record<number, readonly [string, string, boolean]> = {
   400: ["invalid_request_error", "上游拒绝请求，请检查模型参数与输入格式。", false],

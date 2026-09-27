@@ -28,6 +28,23 @@ afterEach(() => {
 
 
 describe("Feishu outbox operation summaries", () => {
+  it.each(["full", "compact", "hidden"] as const)("delivers distinct compaction notices in %s mode", async (display) => {
+    const sent: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {}, sendPost: async () => {},
+      sendMarkdownCard: async (_chatId, text) => { sent.push(text); },
+    }, pino({ level: "silent" }), { operationUpdateDisplay: display });
+    for (const phase of ["started", "started", "completed", "completed", "started"] as const) {
+      const input = toConversationInputEvent({ method: `item/${phase}`, params: {
+        threadId: "thread-1", turnId: "turn-1", item: { type: "contextCompaction", id: "compact-1" },
+      } });
+      if (input?.type !== "item.operation.updated") throw new Error("Missing compaction");
+      outbox.handle({ ...operationUpdated("running"), operation: input.operation });
+    }
+    await outbox.close();
+    expect(sent).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+  });
+
   it.each([
     ["compact", "completed", "已完成"],
     ["compact", "failed", "失败"],
@@ -128,7 +145,7 @@ describe("Feishu outbox operation summaries", () => {
     expect(sendCard).toHaveBeenCalledTimes(failedStart ? 2 : 1);
     expect(sendCard).toHaveBeenLastCalledWith("oc_chat", expect.objectContaining({
       header: expect.objectContaining({ title: { tag: "plain_text", content: "电脑与浏览器操作 · 已完成" } }),
-    }), undefined);
+    }), expect.any(AbortSignal));
     expect(updateCard).not.toHaveBeenCalled();
   });
 

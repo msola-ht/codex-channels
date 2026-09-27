@@ -1,7 +1,9 @@
+import { normalizeDeepseekCatalogCapabilities } from "../scripts/deepseek-setup.mjs";
 import {validateModelCatalogWithCodex} from "../scripts/model-catalog-validation.mjs";
 import { loadResponsesModelTemplates, responsesModelTemplatesFromCatalog } from "../scripts/responses-model-templates.mjs";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { stringify } from "smol-toml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -14,7 +16,9 @@ import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ModelListResponse, ThreadStartResponse, TurnStartResponse, ConfigReadResponse } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { createResponsesModelCatalog, writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
-import { writeCustomPrimaryProviderSwitchingProfile, loadConfiguredCustomSwitchingModelProviders } from "../runtime/model-provider-runtime.mjs";
+import { writeCustomPrimaryProviderSwitchingProfile, loadConfiguredCustomSwitchingModelProviders, loadManagedProviderAppServers } from "../runtime/model-provider-runtime.mjs";
+import { deepseekAccountDefinition } from "../runtime/model-provider-definitions.mjs";
+import { createManagedProviderProfile } from "../runtime/model-provider-profile.mjs";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
 import { waitFor } from "./support/real-app-server-helpers.js";
 
@@ -50,7 +54,8 @@ describe("real custom Responses provider", () => {
         const id=`responses-${bodies.length}`;
         const item=count===1 ? {type:"function_call",id:`call-${id}`,call_id:`tool-${body.model}`,name:"exec_command",arguments:JSON.stringify({cmd:"printf custom-response-ok",login:false,max_output_tokens:100})} : {type:"message",role:"assistant",id:`answer-${id}`,content:[{type:"output_text",text:"Tool round trip complete"}]};
         response.writeHead(200,{"content-type":"text/event-stream"});
-        for(const event of [{type:"response.created",response:{id}},{type:"response.output_item.done",item},completedResponseEvent(id)]) response.write(`data: ${JSON.stringify(event)}\n\n`);
+        const reasoning = { type: "reasoning", id: `thought-${id}`, summary: [], content: [{ type: "reasoning_text", text: `Full thought ${count}.` }] };
+        for(const event of [{type:"response.created",response:{id}}, {type:"response.output_item.done",item:reasoning}, {type:"response.output_item.done",item},completedResponseEvent(id)]) response.write(`data: ${JSON.stringify(event)}\n\n`);
         response.end();
       });
     });
@@ -58,7 +63,7 @@ describe("real custom Responses provider", () => {
     try {
       await new Promise<void>(resolve=>backend.listen(0,"127.0.0.1",resolve));
       const address=backend.address();if(!address||typeof address==="string")throw new Error("Missing fixture listener");
-      writePrivateFileAtomicSync(join(environment.CODEX_HOME,"config.toml"),'model_provider = "openai"\nmodel_reasoning_effort = "high"\n');
+      writePrivateFileAtomicSync(join(environment.CODEX_HOME,"config.toml"),'model_provider = "openai"\nmodel_reasoning_effort = "high"\nweb_search = "live"\n');
       for(const [id,model,reasoning] of [["rs-first","vendor/model-a",null],["rs-second","vendor/model-b","max"],["rs-template","vendor/ds-flash","high"]] as const) {
         const definition={id:model,name:model,contextWindow:64000,reasoningEfforts:reasoning===null?[]:[reasoning],defaultReasoningEffort:reasoning,supportsImages:false};
         const snapshot={...createResponsesModelCatalog([definition],model).models[0]!,slug:"deepseek-flash",max_context_window:1048576,
@@ -69,7 +74,21 @@ describe("real custom Responses provider", () => {
         finishResponsesModelCatalogWrite(transaction);
         writeCustomPrimaryProviderSwitchingProfile({provider:id,model,name:"Custom Responses fixture",baseUrl:`http://127.0.0.1:${address.port}`,apiKey:"fixture-key",supportsWebsockets:false,catalogSource:{kind:"custom",reasoningEffort:reasoning}},environment);
       }
-      for(const runtime of loadConfiguredCustomSwitchingModelProviders(environment)) {
+      const ds = deepseekAccountDefinition("test");
+      const dsDirectory = join(environment.CODEX_CONNECT_HOME, "providers", "deepseek");
+      const dsCatalogPath = join(dsDirectory, "models.json");
+      const dsSourceCatalog = createResponsesModelCatalog([{id:"deepseek-flash",name:"DS fixture",contextWindow:64000,reasoningEfforts:["high"],defaultReasoningEffort:"high",supportsImages:false,applyPatchToolType:"freeform",supportsSearchTool:true}], "deepseek-flash");
+      Object.assign(dsSourceCatalog.models[0]!, { support_verbosity: true, default_verbosity: "low", supports_reasoning_summary_parameter: true, default_reasoning_summary: "detailed" });
+      const dsCatalog = normalizeDeepseekCatalogCapabilities(dsSourceCatalog);
+      writePrivateFileAtomicSync(dsCatalogPath, JSON.stringify(dsCatalog));
+      writePrivateFileAtomicSync(join(dsDirectory,"accounts.json"), JSON.stringify([{id:"test",default:true}]));
+      writePrivateFileAtomicSync(join(dsDirectory,"accounts","test","managed.toml"), 'version = 1\nprovider = "ds-test"\nmode = "switching"\n');
+      writePrivateFileAtomicSync(join(environment.CODEX_HOME,ds.profileFileName), stringify(createManagedProviderProfile(ds,{apiKey:"sk-fixture",catalogPath:dsCatalogPath})));
+      const dsRuntime = loadManagedProviderAppServers(environment)[0]!;
+      // Override the endpoint and request unsupported controls to verify the narrowed catalog.
+      dsRuntime.arguments.push("-c", `model_providers.ds-test.base_url="http://127.0.0.1:${address.port}"`,
+        "-c", 'model_reasoning_summary="detailed"', "-c", 'model_verbosity="high"');
+      for(const runtime of [...loadConfiguredCustomSwitchingModelProviders(environment), {...dsRuntime,id:dsRuntime.provider,name:"DS fixture",model:"deepseek-flash",reasoningEffort:"high"}]) {
         rpc=new JsonRpcClient(new StdioTransport({codexBinary:process.env.CODEX_BINARY??"codex",cwd:root,environment:{...environment,...runtime.childEnvironment},createCodexProcessInvocation:args=>({file:process.env.CODEX_BINARY??"codex",args:[...args,...runtime.arguments]})}),15000);
         const turns:Array<{id:string;status:string}>=[];
         rpc.onNotification(notification=>{if(notification.method==="turn/completed") turns.push((notification.params as {turn:{id:string;status:string}}).turn);});
@@ -77,6 +96,7 @@ describe("real custom Responses provider", () => {
         await rpc.connect();
         const config=await rpc.request<ConfigReadResponse>({method:"config/read",params:{includeLayers:false}});
         expect(config.config.model_provider).toBe(runtime.id);
+        expect(config.config.web_search).toBe("disabled");
         const listed=await rpc.request<ModelListResponse>({method:"model/list",params:{}});
         expect(listed.data.map(model=>model.model)).toEqual([runtime.model]);
         const client = new CodexAppServerClient(rpc, {sandbox:"read-only"});
@@ -105,14 +125,27 @@ describe("real custom Responses provider", () => {
         expect(turns).toContainEqual(expect.objectContaining({id:turn.id,status:"completed"}));
         const requests=bodies.filter(body=>body.model===runtime.model);
         expect(requests).toHaveLength(2);
+        for (const request of requests) expect(request.tools).not.toContainEqual(expect.objectContaining({type:"web_search"}));
+        if (runtime.id === "ds-test") {
+          expect(requests[0]?.tools).toContainEqual(expect.objectContaining({type:"custom",name:"apply_patch"}));
+          expect(requests[0]?.text?.verbosity).toBeUndefined();
+          expect(requests[0]?.reasoning.summary).toBeUndefined();
+          expect(JSON.parse(readFileSync(dsCatalogPath,"utf8")).models[0].supports_search_tool).toBe(true);
+          expect(readFileSync(join(environment.CODEX_HOME,"config.toml"),"utf8")).toContain('web_search = "live"');
+        }
         if (runtime.id === "rs-template") {
-          expect(requests[0]?.instructions).not.toContain("Complete DS fixture instructions");
-          expect(requests[0]?.instructions).toContain("You are a coding assistant");
+          expect(requests[0]?.instructions).toBe("Complete DS fixture instructions. Use exec_command for commands.");
           expect(requests[0]?.text?.verbosity).toBeUndefined();
           expect(requests[0]?.tools).not.toContainEqual(expect.objectContaining({name:"apply_patch",type:"custom"}));
         }
         expect(requests[0]?.reasoning).toEqual({effort:runtime.reasoningEffort});
         expect(requests[1]?.input).toContainEqual(expect.objectContaining({type:"function_call_output",call_id:`tool-${runtime.model}`,output:expect.stringContaining("custom-response-ok")}));
+        expect(requests[1]?.input).toContainEqual(expect.objectContaining({ type: "reasoning", content: [{ type: "reasoning_text", text: "Full thought 1." }] }));
+        const next = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Continue", text_elements: [] }] } });
+        await waitFor(() => turns.some(entry => entry.id === next.turn.id), 15000);
+        expect(turns).toContainEqual(expect.objectContaining({ id: next.turn.id, status: "completed" }));
+        const nextRequest = bodies.filter(body => body.model === runtime.model)[2];
+        for (const count of [1, 2]) expect(nextRequest?.input).toContainEqual(expect.objectContaining({ type: "reasoning", content: [{ type: "reasoning_text", text: `Full thought ${count}.` }] }));
         await rpc.close();rpc=undefined;
       }
     } finally {

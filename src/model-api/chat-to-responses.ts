@@ -1,10 +1,10 @@
 import type { ChatToolIdentity } from "./responses-to-chat.js";
-import { array, ModelConversionError, object, string } from "./validation.js";
+import { array, customToolInput, ModelConversionError, object, string, toolArguments, toolSearchArguments } from "./validation.js";
 import type { JsonObject } from "./validation.js";
 
 type OutputItem = JsonObject & { id: string; type: string };
 interface ToolState { name: string; arguments: string; callId: string }
-interface ActiveContent { item: OutputItem; index: number; text: string; kind: "message" | "reasoning" }
+interface ActiveContent { item: OutputItem; index: number; text: string; kind: "message" | "reasoning" | "reasoning_content" }
 
 /** One instance per upstream response; no cross-request history or provider configuration. */
 export class ChatToResponses {
@@ -36,7 +36,8 @@ export class ChatToResponses {
     if (this.finishReason && Object.keys(delta).length) throw new ModelConversionError("Chat delta after finish reason");
     if (delta.refusal != null) throw new ModelConversionError("Unsupported Chat content");
     const events: JsonObject[] = [];
-    events.push(...this.appendContent("reasoning", reasoningText(delta)));
+    const thought = reasoningText(delta);
+    events.push(...this.appendContent(thought.kind, thought.text));
     if (delta.content != null) events.push(...this.appendContent("message", string(delta.content)));
     if (delta.tool_calls != null) for (const raw of array(delta.tool_calls)) {
       const call = object(raw);
@@ -74,20 +75,26 @@ export class ChatToResponses {
     const calls: OutputItem[] = [];
     for (const [index, state] of this.tools) {
       if (!state.name) throw new ModelConversionError("Missing Chat tool name");
-      try { object(JSON.parse(state.arguments)); } catch { throw new ModelConversionError("Invalid Chat tool arguments"); }
       const identity = this.toolNames?.get(state.name);
       if (this.toolNames && !identity) throw new ModelConversionError("Unknown Chat tool name");
-      calls.push({ id: `${this.id}_call_${index}`, type: "function_call", call_id: state.callId,
-        ...(identity ?? { name: state.name }), arguments: state.arguments, status: "completed" });
+      calls.push(toolCallItem(`${this.id}_call_${index}`, state, identity));
     }
     const events = this.closeContent();
     // Keep partial or invalid tool calls away from the client. Publish validated
     // calls after content, each with a complete identity and paired lifecycle.
     for (const item of calls) {
       const output_index = this.items.length;
-      events.push(...this.addItem({ ...item, arguments: "", status: "in_progress" }));
+      events.push(...this.addItem(item.type === "function_call"
+        ? { ...item, arguments: "", status: "in_progress" }
+        : item.type === "custom_tool_call"
+          ? { ...item, input: "", status: "in_progress" }
+          : { ...item, status: "in_progress" }));
       this.items[output_index] = item;
-      events.push(this.event("response.function_call_arguments.done", { item_id: item.id, output_index, arguments: item.arguments }));
+      if (item.type === "function_call") {
+        events.push(this.event("response.function_call_arguments.done", { item_id: item.id, output_index, arguments: item.arguments }));
+      } else if (item.type === "custom_tool_call") {
+        events.push(this.event("response.custom_tool_call_input.done", { item_id: item.id, output_index, input: item.input }));
+      }
       events.push(this.event("response.output_item.done", { item, output_index }));
     }
     if (!this.items.length) throw new ModelConversionError("Empty Chat response");
@@ -103,19 +110,21 @@ export class ChatToResponses {
       const index = this.items.length;
       const item: OutputItem = kind === "message"
         ? { id: `${this.id}_message_${index}`, type: "message", role: "assistant", status: "in_progress", content: [] }
-        : { id: `${this.id}_reasoning_${index}`, type: "reasoning", summary: [] };
+        : { id: `${this.id}_reasoning_${index}`, type: "reasoning", summary: [], ...(kind === "reasoning_content" ? { content: [] } : {}) };
       this.activeContent = { kind, item, index, text: "" };
       events.push(...this.addItem(item));
-      events.push(kind === "message"
-        ? this.event("response.content_part.added", { item_id: item.id, output_index: index, content_index: 0, part: { type: "output_text", text: "", annotations: [] } })
-        : this.event("response.reasoning_summary_part.added", { item_id: item.id, output_index: index, summary_index: 0, part: { type: "summary_text", text: "" } }));
+      events.push(kind === "reasoning"
+        ? this.event("response.reasoning_summary_part.added", { item_id: item.id, output_index: index, summary_index: 0, part: { type: "summary_text", text: "" } })
+        : this.event("response.content_part.added", { item_id: item.id, output_index: index, content_index: 0, part: kind === "message" ? { type: "output_text", text: "", annotations: [] } : { type: "reasoning_text", text: "" } }));
     }
     const active = this.activeContent;
     if (!active) throw new ModelConversionError("Missing active response item");
     active.text += text;
     events.push(kind === "message"
       ? this.event("response.output_text.delta", { item_id: active.item.id, output_index: active.index, content_index: 0, delta: text })
-      : this.event("response.reasoning_summary_text.delta", { item_id: active.item.id, output_index: active.index, summary_index: 0, delta: text }));
+      : kind === "reasoning"
+        ? this.event("response.reasoning_summary_text.delta", { item_id: active.item.id, output_index: active.index, summary_index: 0, delta: text })
+        : this.event("response.reasoning_text.delta", { item_id: active.item.id, output_index: active.index, content_index: 0, delta: text }));
     return events;
   }
 
@@ -127,18 +136,20 @@ export class ChatToResponses {
     const fields = { item_id: item.id, output_index };
     const part = kind === "message"
       ? { type: "output_text", text, annotations: [] }
-      : { type: "summary_text", text };
+      : { type: kind === "reasoning" ? "summary_text" : "reasoning_text", text };
     const completed = kind === "message"
       ? { ...item, status, content: [part] }
-      : { ...item, summary: [part] };
+      : kind === "reasoning" ? { ...item, summary: [part] } : { ...item, content: [part] };
     this.items[output_index] = completed;
     return [
       kind === "message"
         ? this.event("response.output_text.done", { ...fields, content_index: 0, text })
-        : this.event("response.reasoning_summary_text.done", { ...fields, summary_index: 0, text }),
-      kind === "message"
-        ? this.event("response.content_part.done", { ...fields, content_index: 0, part })
-        : this.event("response.reasoning_summary_part.done", { ...fields, summary_index: 0, part }),
+        : kind === "reasoning"
+          ? this.event("response.reasoning_summary_text.done", { ...fields, summary_index: 0, text })
+          : this.event("response.reasoning_text.done", { ...fields, content_index: 0, text }),
+      kind === "reasoning"
+        ? this.event("response.reasoning_summary_part.done", { ...fields, summary_index: 0, part })
+        : this.event("response.content_part.done", { ...fields, content_index: 0, part }),
       this.event("response.output_item.done", { item: completed, output_index }),
     ];
   }
@@ -154,10 +165,33 @@ export class ChatToResponses {
   private event(type: string, fields: JsonObject): JsonObject { return { type, sequence_number: this.sequence++, ...fields }; }
 }
 
-function reasoningText(delta: JsonObject): string {
+/**
+ * Chat function 调用按声明时的原始形态还原：function 为函数调用，custom 取回自由格式文本，
+ * 客户端 tool_search 还原为带 execution=client 的检索调用；三者都经过同一套参数校验。
+ */
+function toolCallItem(id: string, state: ToolState, identity: ChatToolIdentity | undefined): OutputItem {
+  const kind = identity?.kind ?? "function";
+  const fields = {
+    id,
+    call_id: state.callId,
+    name: identity?.name ?? state.name,
+    ...(identity?.namespace === undefined ? {} : { namespace: identity.namespace }),
+  };
+  if (kind === "custom") {
+    return { ...fields, type: "custom_tool_call", input: customToolInput(toolArguments(state.arguments, "Invalid custom tool arguments")), status: "completed" };
+  }
+  if (kind === "tool_search") {
+    return { id, type: "tool_search_call", call_id: state.callId, status: "completed", execution: "client",
+      arguments: toolSearchArguments(toolArguments(state.arguments, "Invalid tool search arguments")) };
+  }
+  try { object(JSON.parse(state.arguments)); } catch { throw new ModelConversionError("Invalid Chat tool arguments"); }
+  return { ...fields, type: "function_call", arguments: state.arguments, status: "completed" };
+}
+
+function reasoningText(delta: JsonObject): { kind: "reasoning" | "reasoning_content"; text: string } {
   const text = delta.reasoning == null ? "" : string(delta.reasoning);
-  if (delta.reasoning_details == null) return text;
-  const details = array(delta.reasoning_details).map(raw => {
+  const fullText = delta.reasoning_content == null ? "" : string(delta.reasoning_content);
+  const details = delta.reasoning_details == null ? "" : array(delta.reasoning_details).map(raw => {
     const detail = object(raw);
     if (detail.type !== "reasoning.text" || detail.signature != null || detail.data != null) {
       throw new ModelConversionError("Unsupported Chat reasoning details");
@@ -166,8 +200,9 @@ function reasoningText(delta: JsonObject): string {
   }).join("");
   // Cline mirrors the same plaintext in both fields within each SSE delta.
   // Reject conflicting representations instead of silently losing either one.
-  if (text && details && text !== details) throw new ModelConversionError("Conflicting Chat reasoning text");
-  return text || details;
+  const representations = [text, fullText, details].filter(value => value !== "");
+  if (new Set(representations).size > 1) throw new ModelConversionError("Conflicting Chat reasoning text");
+  return { kind: fullText ? "reasoning_content" : "reasoning", text: representations[0] ?? "" };
 }
 
 function convertUsage(value: unknown): JsonObject {

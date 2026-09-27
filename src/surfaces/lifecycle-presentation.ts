@@ -32,7 +32,6 @@ import {
   formatCacheHitRate,
   formatRequestCount,
   formatTokenCount,
-  formatTokensPerSecond,
 } from "./token-format.js";
 import gatewayMetadata from "../version.json" with { type: "json" };
 
@@ -326,7 +325,6 @@ export function createSubagentCompletedPresentation(
     };
   }
   fields.push({ label: "模型请求", value: `${formatRequestCount(event.requestCount)} 次` });
-  fields.push({ label: "Token/s", value: formatCompletionTokenRate(event.tokensPerSecond) });
   const cachedInputTokens = event.cachedInputTokens;
   fields.push({
     title: "Token",
@@ -507,6 +505,17 @@ export function createTurnCompletedPresentation(
       value: formatWeeklyLimit(event.weeklyLimit),
     });
   }
+  if (!usesOpenAiAccount(event.modelProvider) && event.accountStatus && event.accountStatus.provider === event.modelProvider) {
+    for (const balance of event.accountStatus.balances) {
+      accountFields.push({ label: "余额", value: `${balance.currency === "CNY" ? "¥" : "$"}${balance.remaining}` });
+    }
+    if (event.accountStatus.credits !== undefined) {
+      accountFields.push({ label: "剩余额度", value: `$${event.accountStatus.credits}` });
+    }
+    for (const window of event.accountStatus.windows) {
+      accountFields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
+    }
+  }
   if (event.goal) {
     sessionFields.push({
       label: "Goal",
@@ -605,17 +614,8 @@ export function createTurnCompletedPresentation(
       ),
     });
   }
-  if (event.durationMs !== undefined || event.timing?.modelRequestCount !== undefined) {
-    runFields.push({
-      title: "性能",
-      fields: [
-        { label: "Token/s", value: formatCompletionTokenRate(event.timing?.tokensPerSecond) },
-        ...(event.durationMs === undefined ? [] : [{
-          label: "总耗时",
-          value: formatElapsedDuration(event.durationMs),
-        }]),
-      ],
-    });
+  if (event.durationMs !== undefined) {
+    runFields.push({ label: "本轮耗时", value: formatElapsedDuration(event.durationMs) });
   }
   if (event.taskAggregate) {
     const task = event.taskAggregate;
@@ -661,7 +661,6 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
-    taskFields.push({ label: "Token/s", value: formatCompletionTokenRate(task.tokensPerSecond) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -684,7 +683,6 @@ export function createTurnCompletedPresentation(
             label: "缓存命中率",
             value: formatCacheHitRate(session.inputTokens, session.cachedInputTokens),
           }]),
-        { label: "Token/s", value: formatCompletionTokenRate(session.tokensPerSecond) },
       ],
     });
   }
@@ -701,10 +699,6 @@ export function createTurnCompletedPresentation(
     fields: runFields,
     ...(sections.length > 0 ? { sections } : {}),
   };
-}
-
-function formatCompletionTokenRate(value: number | null | undefined): string {
-  return value == null ? formatTokensPerSecond(value) : `${Number(formatTokensPerSecond(value))}/s`;
 }
 
 export function renderPlainLifecyclePresentation(

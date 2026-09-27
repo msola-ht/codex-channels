@@ -1,3 +1,5 @@
+import type { Logger } from "pino";
+import { observeSurfaceStage, withSurfaceDiagnosticContext } from "../diagnostics.js";
 import type { ConversationTarget } from "../../conversation-core/index.js";
 import type {
   ConversationActorRegistry,
@@ -65,6 +67,7 @@ export type FeishuInboxReceiveResult =
   | { status: "retry"; reason: "overloaded" };
 
 export interface FeishuInboxOptions {
+  logger?: Logger;
   accountId: string;
   access: SurfaceAccessPolicy;
   actorRegistry?: ConversationActorRegistry;
@@ -265,7 +268,7 @@ export class FeishuInbox {
         message.target,
         message.actorId,
       );
-      await (this.options.handleUrgent ?? this.options.handle)(message);
+      await this.observeInput(message, () => (this.options.handleUrgent ?? this.options.handle)(message));
     }).catch((error) => {
       this.reportProcessingError(message, error);
     }).finally(() => {
@@ -312,7 +315,7 @@ export class FeishuInbox {
               message.actorId,
             );
           }
-          await handleImageBatch(imageBatch);
+          await this.observeInput(imageBatch[0]!, () => handleImageBatch(imageBatch));
         } catch (error) {
           for (const message of imageBatch) {
             this.reportProcessingError(message, error);
@@ -331,7 +334,7 @@ export class FeishuInbox {
           message.target,
           message.actorId,
         );
-        await this.options.handle(message);
+        await this.observeInput(message, () => this.options.handle(message));
       } catch (error) {
         this.reportProcessingError(message, error);
       } finally {
@@ -342,6 +345,17 @@ export class FeishuInbox {
     if (current === worker) {
       this.workers.delete(conversationId);
     }
+  }
+
+  private observeInput(message: FeishuInboxMessage, run: () => Promise<void>): Promise<void> {
+    if (!this.options.logger) return run();
+    return withSurfaceDiagnosticContext({
+      component: "Feishu", accountId: this.options.accountId,
+      conversationId: message.target.conversationId, inputId: message.messageId,
+    }, () => observeSurfaceStage(this.options.logger, {
+      stage: "input", pending: this.pendingCount,
+      queueWaitMs: Math.max(0, this.now() - (message.receivedAtMs ?? this.now())),
+    }, run));
   }
 
   private reportProcessingError(

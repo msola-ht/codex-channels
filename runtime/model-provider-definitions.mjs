@@ -38,6 +38,7 @@ export const deepseekProviderDefinition = Object.freeze({
   backupDirectoryName: "backup",
   baseUrl: "https://api.deepseek.com/",
   wireApi: "responses",
+  webSearch: "disabled",
   apiKeyEnvironmentKey: "CODEX_CONNECT_DEEPSEEK_API_KEY",
   defaultModel: "deepseek-flash",
   defaultReasoningEffort: "high",
@@ -56,6 +57,7 @@ export const opencodeGoProviderDefinition = Object.freeze({
   backupDirectoryName: "backup",
   baseUrl: "https://opencode.ai/zen/go/v1",
   wireApi: "responses",
+  webSearch: "disabled",
   apiKeyEnvironmentKey: "CODEX_CONNECT_OPENCODE_GO_API_KEY",
   defaultModel: "deepseek-flash",
   defaultReasoningEffort: "high",
@@ -74,6 +76,7 @@ export const commandCodeProviderDefinition = Object.freeze({
   backupDirectoryName: "backup",
   baseUrl: "https://api.commandcode.ai/provider/v1",
   wireApi: "responses",
+  webSearch: "disabled",
   apiKeyEnvironmentKey: "CODEX_CONNECT_CCG_API_KEY",
   supportsWebsockets: false,
   capabilities: Object.freeze({
@@ -89,6 +92,7 @@ export const clinePassProviderDefinition = Object.freeze({
   managedMarkerFileName: "managed.toml", backupDirectoryName: "backup",
   baseUrl: "https://api.cline.bot/api/v1", wireApi: "responses",
   upstreamWireApi: "chat_completions",
+  webSearch: "disabled",
   apiKeyEnvironmentKey: "CODEX_CONNECT_CLP_API_KEY",
   defaultModel: "cline-pass/deepseek-v4.1-flash", defaultReasoningEffort: "high",
   supportsWebsockets: false,
@@ -104,7 +108,8 @@ export function isManagedProviderApiKeyValid(definition, apiKey) {
 }
 
 export function isManagedProviderModelValid(definition, model) {
-  if ((definition.storageId ?? definition.id) === "clp") return model === clinePassProviderDefinition.defaultModel;
+  // CLP 的共享目录只生成一个模型，因此该 Provider 的合法模型就是定义自带的默认模型。
+  if ((definition.storageId ?? definition.id) === "clp") return model === definition.defaultModel;
   return typeof model === "string" && ((definition.storageId ?? definition.id) === "ccg"
     ? /^(?:[a-zA-Z0-9][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/u.test(model)
     : /^[a-z0-9][a-z0-9._-]{0,119}$/u.test(model));
@@ -116,6 +121,13 @@ export const managedModelProviderDefinitions = Object.freeze([
   commandCodeProviderDefinition,
   clinePassProviderDefinition,
 ]);
+
+/** 共享代理键（如 clp、ocg）对应的基础定义；账户展开后的列表不包含这些键。 */
+export function sharedManagedProviderDefinition(proxyKey) {
+  return managedModelProviderDefinitions.find(
+    (definition) => definition.id === proxyKey || definition.storageId === proxyKey,
+  );
+}
 
 export function loadOpencodeGoAccountDefinitions(environment = process.env) {
   return loadOpencodeGoAccounts(environment).map((account) =>
@@ -227,6 +239,7 @@ export function opencodeGoAccountDefinition(accountId, email, phone) {
     backupDirectoryName: opencodeGoProviderDefinition.backupDirectoryName,
     baseUrl: opencodeGoProviderDefinition.baseUrl,
     wireApi: opencodeGoProviderDefinition.wireApi,
+    webSearch: opencodeGoProviderDefinition.webSearch,
     apiKeyEnvironmentKey: opencodeGoApiKeyEnvironmentKey(accountId),
     defaultModel: opencodeGoProviderDefinition.defaultModel,
     defaultReasoningEffort: opencodeGoProviderDefinition.defaultReasoningEffort,

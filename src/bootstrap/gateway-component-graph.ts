@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 import startupNetworkPolicy from "../../startup-network-policy.json" with { type: "json" };
 import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js";
+import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
@@ -126,6 +127,7 @@ import {
 import { ProviderMetricsComposition } from "./provider-metrics-composition.js";
 import { ProviderIdleReleaser } from "./provider-idle-releaser.js";
 import { enqueueTurnErrorMetric } from "./turn-error-metrics.js";
+import { completionAccountStatus } from "./completion-account-status.js";
 import { mergeCompletionTiming } from "./completion-timing.js";
 import { TomlWorkspacePermissionWriter } from "./workspace-permission-writer.js";
 import { SubagentCompletionTracker } from "./subagent-completion-tracker.js";
@@ -173,6 +175,7 @@ export abstract class GatewayComponentGraph {
   protected removeRpcNotification: (() => void) | undefined;
   protected removeRpcDisconnect: (() => void) | undefined;
   private shutdownTask: Promise<void> | undefined;
+  private accountWarmupTask: Promise<void> | undefined;
   private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
   private readonly disconnectedProviders = new Set<string>();
   private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
@@ -864,6 +867,10 @@ export abstract class GatewayComponentGraph {
           this.interactions.setAvailable(surface, accountId, available, outcome);
           if (!available) this.asyncQuestions?.cancelSurface(surface, accountId);
         },
+        completionAccountStatus: async (provider, signal) => {
+          if (provider === "openai" || !this.providerAccounts || !accountAdapters.some((adapter) => adapter.provider === provider)) return undefined;
+          return completionAccountStatus(provider, await this.providerAccounts.accountUsage(provider, undefined, signal));
+        },
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
@@ -882,7 +889,6 @@ export abstract class GatewayComponentGraph {
           if (summary === null) return undefined;
           return {
             requestCount: summary.requestCount,
-            tokensPerSecond: summary.tokensPerSecond ?? null,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
             cachedInputTokens: summary.cachedInputTokens,
@@ -897,7 +903,6 @@ export abstract class GatewayComponentGraph {
           if (aggregate === null) return undefined;
           return {
             requestCount: aggregate.requestCount,
-            tokensPerSecond: aggregate.tokensPerSecond ?? null,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
             cachedInputTokens: aggregate.cachedInputTokens,
@@ -1141,10 +1146,10 @@ export abstract class GatewayComponentGraph {
     return this.core.hasActiveTurns();
   }
 
-  refreshAccountSnapshot(provider: string): Promise<boolean> {
+  refreshAccountSnapshot(provider: string, signal?: AbortSignal): Promise<boolean> {
     this.requireRunning();
     if (provider === "openai") return Promise.resolve(false);
-    return this.providerAccounts?.refreshAccountSnapshot(provider)
+    return this.providerAccounts?.refreshAccountSnapshot(provider, signal)
       ?? Promise.resolve(false);
   }
 
@@ -1224,8 +1229,15 @@ export abstract class GatewayComponentGraph {
       );
       await this.surfaceManager.start();
       this.requireRunning();
-      void this.providerAccounts?.refreshSnapshots().catch((error) => {
-        this.logger.warn({ err: error }, "账户快照异步预热失败");
+      const warmupStarted = performance.now();
+      const warmupSignal = this.startupAbort.signal;
+      this.accountWarmupTask = this.providerAccounts?.refreshSnapshots(warmupSignal, (provider, operation, error) => {
+        this.logger.warn({ provider, query: operation,
+          ...accountQueryFailureMetadata(error, performance.now() - warmupStarted) }, "账户快照预热失败");
+      }).catch((error) => {
+        if (!warmupSignal.aborted) {
+          this.logger.warn(accountQueryFailureMetadata(error, performance.now() - warmupStarted), "账户快照预热任务失败");
+        }
       });
       await this.channelImageSpool.start();
       this.requireRunning();
@@ -1279,6 +1291,11 @@ export abstract class GatewayComponentGraph {
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
       ["Surface", () => this.surfaceManager.stop()],
+      ["Account Snapshot Warmup", async () => {
+        if (this.accountWarmupTask && !(await waitAtMost(this.accountWarmupTask, 5_000))) {
+          this.logger.warn("账户快照预热取消等待超时，迟到结果不会写入快照");
+        }
+      }],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],

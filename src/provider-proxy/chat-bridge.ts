@@ -6,15 +6,24 @@ import { request as httpsRequest } from "node:https";
 import { StringDecoder } from "node:string_decoder";
 import { ChatToResponses, ModelConversionError, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
-import { ChatUpstreamError, chatStreamError, readChatHttpError } from "./chat-errors.js";
+import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
+
+/**
+ * 桥负责单次请求预算；外层代理额外保留终态发送时间，避免先截断结构化错误。
+ */
+export const chatBridgeRequestTimeoutMs = 300_000;
+const bridgeTerminalGraceMs = 5_000;
 
 /** HTTP lifecycle adapter. Pure model conversion lives in model-api. */
 export class ChatCompletionsBridge {
   readonly diagnostics = new ChatDiagnosticsChannel();
   private readonly active = new Set<AbortController>();
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
-  constructor(private readonly options: ProviderProxyOptions) {}
+  private readonly requestTimeoutMs: number;
+  constructor(private readonly options: ProviderProxyOptions) {
+    this.requestTimeoutMs = options.timeoutMs ?? chatBridgeRequestTimeoutMs;
+  }
   async start(): Promise<void> {
     this.server.listen(0, "127.0.0.1");
     await once(this.server, "listening");
@@ -23,6 +32,18 @@ export class ChatCompletionsBridge {
     const address = this.server.address();
     if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
     return `127.0.0.1:${address.port}`;
+  }
+  /** 面向本桥的统计代理上游参数；空闲超时额外预留终态发送时间。 */
+  proxyOptions(): ProviderProxyOptions {
+    const address = this.server.address();
+    if (!address || typeof address === "string") throw new Error("Chat bridge is not listening");
+    return {
+      upstreamHost: "127.0.0.1",
+      upstreamPort: address.port,
+      upstreamProtocol: "http",
+      chatDiagnostics: this.diagnostics,
+      timeoutMs: this.requestTimeoutMs + bridgeTerminalGraceMs,
+    };
   }
   async close(): Promise<void> {
     for (const controller of this.active) controller.abort();
@@ -36,28 +57,26 @@ export class ChatCompletionsBridge {
     }
     const controller = new AbortController();
     this.active.add(controller);
+    let receivingBody = true;
+    let status = 400;
     const timer = setTimeout(() => {
-      controller.abort(); request.destroy(); response.destroy();
-    }, this.options.timeoutMs ?? 300_000);
+      if (receivingBody) status = 408;
+      controller.abort(receivingBody
+        ? new ChatUpstreamError("request_timeout", "请求正文接收超时，请重试。", true)
+        : chatUpstreamError({ code: "upstream_timeout" }));
+    }, this.requestTimeoutMs);
     const abort = (): void => { controller.abort(); };
     response.once("close", abort);
-    let status = 400;
     const diagnostics = new ChatDiagnostics();
     const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], diagnostics.snapshot());
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const value of request) {
-        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as string);
-        size += chunk.length;
-        if (size > 16 * 1024 * 1024) throw new ModelConversionError("Model request exceeds size limit");
-        chunks.push(chunk);
-      }
-      const { request: body, toolNames } = responsesToChat(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+      const payloadBody = await readRequestBody(request, controller.signal);
+      receivingBody = false;
+      const { request: body, toolNames } = responsesToChat(JSON.parse(payloadBody) as unknown);
       status = 502;
       const upstream = this.options.resolveUpstream
-        ? await this.options.resolveUpstream(request.headers)
+        ? await abortable(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
       const payload = JSON.stringify(body);
@@ -79,7 +98,11 @@ export class ChatCompletionsBridge {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
         throw await readChatHttpError(incoming);
       }
-      if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) { incoming.destroy(); throw new Error("invalid upstream content type"); }
+      if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) {
+        // 200 但不是 SSE：上游没有按流式合同返回，按服务异常归类且不读取正文。
+        incoming.destroy();
+        throw chatUpstreamError({ code: "server_error" });
+      }
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const converter = new ChatToResponses(`resp_${randomUUID()}`, body.model, toolNames);
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
@@ -119,18 +142,63 @@ export class ChatCompletionsBridge {
       await emit(terminal);
       response.end();
     } catch (error) {
-      const message = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error.message : "Chat upstream request failed";
-      if (status === 502 && !controller.signal.aborted) this.options.onError?.(new Error(message));
-      const detail = { code: error instanceof ChatUpstreamError ? error.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
-      if (error instanceof ChatUpstreamError) diagnostics.error(error.code, response.headersSent ? "stream" : "http", error.retryable);
+      // 桥自身超时通过中止原因传递，与上游返回的错误使用同一套分类。
+      const aborted = controller.signal.reason instanceof ChatUpstreamError ? controller.signal.reason : undefined;
+      const failure = error instanceof ModelConversionError || error instanceof ChatUpstreamError ? error : aborted;
+      const message = failure?.message ?? "Chat upstream request failed";
+      if (status === 502 && (!controller.signal.aborted || aborted)) this.options.onError?.(new Error(message));
+      const detail = { code: failure instanceof ChatUpstreamError ? failure.code : status === 400 ? "invalid_request_error" : "chat_upstream_error", message };
+      if (failure instanceof ChatUpstreamError) diagnostics.error(failure.code, response.headersSent ? "stream" : "http", failure.retryable);
       publishDiagnostics();
       if (!response.destroyed) {
         if (response.headersSent) {
           response.end(`event: response.failed\ndata: ${JSON.stringify({ type: "response.failed", response: { status: "failed", error: detail } })}\n\n`);
-        } else response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
+        } else {
+          // 未读完的正文不能复用连接；先送达错误，再释放入站请求。
+          if (!request.complete) {
+            response.setHeader("connection", "close");
+            response.once("finish", () => request.destroy());
+          }
+          response.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify({ error: detail }));
+        }
       }
     } finally {
       clearTimeout(timer); response.off("close", abort); controller.abort(); this.active.delete(controller);
     }
   }
+}
+
+/** Stop receiving immediately on cancellation without destroying the error response socket. */
+function readRequestBody(request: IncomingMessage, signal: AbortSignal): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const cleanup = (): void => {
+      request.off("data", data); request.off("end", end); request.off("error", error);
+      signal.removeEventListener("abort", abort);
+    };
+    const error = (reason: unknown): void => {
+      cleanup(); request.pause(); chunks.length = 0; reject(reason instanceof Error ? reason : new Error("Request cancelled"));
+    };
+    const abort = (): void => error(signal.reason);
+    const end = (): void => { cleanup(); resolve(Buffer.concat(chunks).toString("utf8")); };
+    const data = (chunk: Buffer): void => {
+      size += chunk.length;
+      if (size > 16 * 1024 * 1024) error(new ModelConversionError("Model request exceeds size limit"));
+      else chunks.push(chunk);
+    };
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    request.on("data", data); request.once("end", end); request.once("error", error);
+  });
+}
+
+/** Detach from a resolver that cannot be cancelled; late settlement cannot start an upstream request. */
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("Request cancelled"));
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    void pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }

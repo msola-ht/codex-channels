@@ -35,6 +35,11 @@ export function classifyConfigReload(
   return { action: "reload", changes: reloadReasons };
 }
 
+/** 只有 Telegram 与飞书消费 `display.*` 设置；只启用微信时它们没有效果。 */
+function displaySettingsAffectEnabledSurface(config: GatewayConfig): boolean {
+  return config.telegramEnabled || config.feishu !== undefined;
+}
+
 function serviceReinstallReasons(
   current: GatewayConfig,
   next: GatewayConfig,
@@ -97,21 +102,27 @@ function restartRequiredReasons(
       current.idleReleaseMinutes,
       next.idleReleaseMinutes,
     ],
-    [
-      configChange("display.operation-updates"),
-      current.operationUpdateDisplay,
-      next.operationUpdateDisplay,
-    ],
-    [
-      configChange("display.plan-updates"),
-      current.planUpdatesEnabled,
-      next.planUpdatesEnabled,
-    ],
-    [
-      configChange("display.reasoning"),
-      current.reasoningEnabled,
-      next.reasoningEnabled,
-    ],
+    // 微信不消费这些显示设置，只启用微信时改它们不需要重启 Gateway。
+    ...(displaySettingsAffectEnabledSurface(current)
+      || displaySettingsAffectEnabledSurface(next)
+      ? [
+          [
+            configChange("display.operation-updates"),
+            current.operationUpdateDisplay,
+            next.operationUpdateDisplay,
+          ],
+          [
+            configChange("display.plan-updates"),
+            current.planUpdatesEnabled,
+            next.planUpdatesEnabled,
+          ],
+          [
+            configChange("display.reasoning"),
+            current.reasoningEnabled,
+            next.reasoningEnabled,
+          ],
+        ] as Array<[ConfigChange, unknown, unknown]>
+      : []),
     [
       configChange("experimental.plugin-api"),
       current.pluginApiEnabled,

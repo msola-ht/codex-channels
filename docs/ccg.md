@@ -59,6 +59,9 @@ CCG 的模型 ID 按 [`provider-model-catalog.json`](../provider-model-catalog.j
 当 OpenAI 官方未登录、已配置的第三方切换实例全部属于 CCG 时，新 Conversation 与未显式指定 Profile 的
 `codexc remote` 使用注册表标记的默认账户；混合配置其他 Provider 时仍需显式选择。
 
+当前 DeepSeek 模型不支持内置网页搜索；固定与切换模式均在受管 App Server 启动参数中关闭，
+不改写基础配置。普通函数工具及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
+
 ## 账户额度
 
 当前 Thread 使用 CCG 时，`/usage` 使用该 `ccg-<账户>` 的私有 Key 查询 Command Code 官方 CLI

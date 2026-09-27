@@ -9,18 +9,15 @@ import {
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
 import type { ModelRequestMetricsRequestQueryStore } from "../observability/index.js";
-import { readBoundedFetchBody } from "./bounded-fetch-body.js";
+import { AccountQuery } from "./account-query.js";
 
 import type {
   ProviderAccountAdapter,
   ProviderAccountUsage,
   ProviderQuotaWindow,
 } from "../application/index.js";
-import { UserFacingError } from "../conversation-core/index.js";
 
 const opencodeGoUsageUrl = "https://opencode.ai/zen/go/v1/usage";
-const maximumResponseBytes = 65_536;
-const requestTimeoutMs = 10_000;
 const fiveHourMs = 5 * 60 * 60 * 1_000;
 const sevenDayMs = 7 * 24 * 60 * 60 * 1_000;
 
@@ -38,33 +35,18 @@ export function createOpencodeGoAccountAdapter(
   const provider = options.provider ?? defaultOpencodeGoProvider(environment);
   return {
     provider,
-    async accountUsage() {
-      try {
+    async accountUsage(signal) {
+      const query = new AccountQuery("OpenCode Go", signal);
+      return query.run(async () => {
         const apiKey = loadOpencodeGoAccountCredentialFor(provider, environment);
-        const response = await fetchImpl(opencodeGoUsageUrl, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            authorization: `Bearer ${apiKey}`,
-          },
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-        if (!response.ok && response.status !== 403) {
-          throw new Error(`OpenCode Go usage request failed with status ${response.status}`);
-        }
-        const body = await readBoundedFetchBody(response, maximumResponseBytes, {
-          invalidContentLength: () => new Error("OpenCode Go usage response length is invalid"),
-          tooLarge: () => new Error("OpenCode Go usage response is too large"),
-          missingBody: () => new Error("OpenCode Go usage response is empty"),
-        });
-        const parsed: unknown = JSON.parse(body.toString("utf8"));
-        if (response.status === 403) {
+        const { body: parsed, status } = await query.json(fetchImpl, opencodeGoUsageUrl, apiKey, "usage", { allowForbidden: true });
+        if (status === 403) {
           const error = record(record(parsed).error);
           if (record(parsed).type === "error" && error.type === "EntitlementError"
             && error.message === "OpenCode Go subscription required.") {
             return { kind: "subscription-required", provider };
           }
-          throw new Error("OpenCode Go usage request forbidden");
+          query.rejectHttp(403);
         }
         const usage = parseUsageResponse(
           parsed,
@@ -90,6 +72,8 @@ export function createOpencodeGoAccountAdapter(
           windowStartAtMs = calendarMonthStart(nowMs);
           windowEndAtMs = null;
         }
+        query.stage = "local";
+        query.operation = "local-tokens";
         const localTokens = options.metricsDatabasePath === undefined
           ? null
           : readWindowLocalTokens(
@@ -107,13 +91,7 @@ export function createOpencodeGoAccountAdapter(
               localTokens: localTokens.get(window.windowId) ?? null,
             }));
         return { ...usage, windows, provider };
-      } catch {
-        throw new UserFacingError(
-          "provider.account.unavailable",
-          "OpenCode Go 账户查询失败",
-          { provider: "OpenCode Go" },
-        );
-      }
+      });
     },
   };
 }

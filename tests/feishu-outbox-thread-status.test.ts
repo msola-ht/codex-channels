@@ -162,6 +162,7 @@ describe("Feishu outbox thread status", () => {
           })],
         }),
       }),
+      expect.any(AbortSignal),
     );
   });
 
@@ -205,6 +206,7 @@ describe("Feishu outbox thread status", () => {
           })],
         }),
       }),
+      expect.any(AbortSignal),
     );
   });
 

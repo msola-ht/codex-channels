@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   accountRefreshErrors,
   accountSnapshotIsStale,
+  scheduleAccountSnapshotExpiry,
   accountSnapshotsWithMissingProviders,
   accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved,
@@ -11,6 +12,7 @@ import {
   remainingRemovedAccountProviders,
   quotaAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
+import { estimateServerTime } from "../webui/src/lib/server-time.js";
 import type { ManagementProvidersResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 
 describe("WebUI per-account refresh state", () => {
@@ -151,4 +153,87 @@ it("includes CLP in refresh and maps official quota reset seconds to millisecond
       { windowId: "five-hour", label: "5小时", usedPercent: 12.5, resetsAt: 1800000000, status: null },
     ] } });
   expect(account).toMatchObject({ available: true, subscriptionRequired: false, windows: [{ usedPercent: 12.5, resetsAt: 1800000000000 }] });
+});
+
+
+describe("WebUI account snapshot expiry scheduling", () => {
+  afterEach(() => vi.useRealTimers());
+  class Page extends EventTarget {
+    visibilityState: DocumentVisibilityState = "visible";
+    change(state: DocumentVisibilityState) {
+      this.visibilityState = state;
+      this.dispatchEvent(new Event("visibilitychange"));
+    }
+  }
+  it("updates at expiry and cancels the timer and listener on cleanup", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const observedAtMs = Date.now();
+    const page = new Page();
+    const changes: boolean[] = [];
+    const stop = scheduleAccountSnapshotExpiry(observedAtMs, () => changes.push(accountSnapshotIsStale(observedAtMs, Date.now())), page, Date.now);
+    expect(changes).toEqual([false]);
+    vi.advanceTimersByTime(15 * 60_000);
+    expect(changes).toEqual([false]);
+    vi.advanceTimersByTime(1);
+    expect(changes).toEqual([false, true]);
+    stop();
+    page.change("visible");
+    expect(changes).toEqual([false, true]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("checks immediately on becoming visible and replaces the old snapshot timer", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const page = new Page();
+    const update = vi.fn();
+    const old = Date.now();
+    const stop = scheduleAccountSnapshotExpiry(old, update, page, Date.now);
+    page.change("hidden");
+    vi.advanceTimersByTime(16 * 60_000);
+    expect(update).toHaveBeenCalledTimes(1);
+    page.change("visible");
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(accountSnapshotIsStale(old, Date.now())).toBe(true);
+    stop();
+    const stopNew = scheduleAccountSnapshotExpiry(Date.now(), update, page, Date.now);
+    expect(vi.getTimerCount()).toBe(1);
+    stopNew();
+    vi.advanceTimersByTime(16 * 60_000);
+    expect(update).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([20 * 60_000, -30 * 86_400_000])("expires on server time despite client clock skew of %i ms", (skew) => {
+    vi.useFakeTimers();
+    const serverNow = 1_800_000_000_000;
+    vi.setSystemTime(serverNow + skew);
+    const clock = { nowMs: serverNow, receivedAtMs: Date.now(), timeZone: "UTC" };
+    const changes: boolean[] = [];
+    const stop = scheduleAccountSnapshotExpiry(serverNow, (now) => changes.push(accountSnapshotIsStale(serverNow, now)), new Page(), () => estimateServerTime(clock));
+    expect(changes).toEqual([false]);
+    vi.advanceTimersByTime(15 * 60_000 + 1);
+    expect(changes).toEqual([false, true]);
+    stop();
+  });
+
+  it("caps a future timestamp delay and does not spin when it exceeds the timer limit", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_800_000_000_000);
+    const schedule = vi.spyOn(globalThis, "setTimeout");
+    const update = vi.fn();
+    const stop = scheduleAccountSnapshotExpiry(Date.now() + 30 * 86_400_000, update, new Page(), Date.now);
+    expect(schedule).toHaveBeenLastCalledWith(expect.any(Function), 2_147_483_647);
+    vi.advanceTimersByTime(60_000);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(1);
+    stop();
+    schedule.mockRestore();
+  });
+
+  it("does not schedule expiration for missing snapshots", () => {
+    vi.useFakeTimers();
+    const stop = scheduleAccountSnapshotExpiry(0, vi.fn(), new Page(), Date.now);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
 });

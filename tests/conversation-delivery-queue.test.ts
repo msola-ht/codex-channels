@@ -6,6 +6,55 @@ import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("bounds recovery drain waits without closing the queue", async () => {
+    vi.useFakeTimers();
+    try {
+      const delivery = new ConversationDeliveryQueue(logger, { component: "Test", closeTimeoutMs: 10 });
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => { release = resolve; });
+      const calls: string[] = [];
+      delivery.enqueue("chat", async () => { await blocked; calls.push("old"); }, true);
+      delivery.enqueue("chat", async () => { calls.push("queued"); }, true);
+      const waiting = delivery.waitForIdle();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await waiting).toBe(false);
+      release();
+      expect(await delivery.waitForIdle()).toBe(true);
+      expect(delivery.enqueue("chat", async () => { calls.push("new"); }, true)).toBe(true);
+      expect(await delivery.waitForIdle()).toBe(true);
+      expect(calls).toEqual(["old", "queued", "new"]);
+      await delivery.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drains ordinary output but immediately cancels ordered interactions on close", async () => {
+    vi.useFakeTimers();
+    try {
+      const delivery = new ConversationDeliveryQueue(logger, { component: "Test", drainOnClose: true, closeTimeoutMs: 10 });
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => { release = resolve; });
+      let normalSignal: AbortSignal | undefined;
+      let orderedSignal: AbortSignal | undefined;
+      delivery.enqueue("normal", async (signal) => { normalSignal = signal; await blocked; }, true);
+      const ordered = delivery.runOrdered("interaction", async (signal) => { orderedSignal = signal; await blocked; });
+      const rejected = expect(ordered).rejects.toThrow("已取消");
+      await vi.advanceTimersByTimeAsync(0);
+      const closing = delivery.close();
+      await rejected;
+      expect(orderedSignal?.aborted).toBe(true);
+      expect(normalSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(10);
+      await closing;
+      expect(normalSignal?.aborted).toBe(true);
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("removes a cancelled ordered operation without blocking later work", async () => {
     const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
     let release!: () => void;
@@ -295,6 +344,76 @@ describe("ConversationDeliveryQueue", () => {
     expect(activeWorkerCount(delivery)).toBe(0);
     await delivery.close();
     expect(calls).toEqual(["first", "second"]);
+  });
+
+  it("coalesces pending same-key output per Conversation while keeping other keys", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    const calls: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("in-flight");
+      await firstGate;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("reasoning-1");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("reasoning-2");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("approval");
+    }, true);
+
+    releaseFirst();
+    await delivery.close();
+    expect(calls).toEqual(["in-flight", "reasoning-2", "approval"]);
+  });
+
+  it("keeps coalesce keys scoped to a single Conversation", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test" });
+    const calls: string[] = [];
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const gateB = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
+
+    delivery.enqueue("a", async () => {
+      calls.push("a:in-flight");
+      await gateA;
+    }, true);
+    delivery.enqueue("b", async () => {
+      calls.push("b:in-flight");
+      await gateB;
+    }, true);
+    await settle();
+    delivery.enqueue("a", async () => {
+      calls.push("a:reasoning-1");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("a", async () => {
+      calls.push("a:reasoning-2");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+    delivery.enqueue("b", async () => {
+      calls.push("b:reasoning");
+    }, true, { coalesceKey: "reasoning:thread:turn" });
+
+    releaseA();
+    releaseB();
+    await delivery.close();
+    expect([...calls].sort()).toEqual([
+      "a:in-flight",
+      "a:reasoning-2",
+      "b:in-flight",
+      "b:reasoning",
+    ]);
   });
 });
 

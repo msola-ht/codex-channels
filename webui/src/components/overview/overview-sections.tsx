@@ -24,7 +24,7 @@ import {
 } from "@/components/metrics/token-tooltip"
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { StatCard } from "@/components/metrics/stat-card"
-import { AccountFreshnessBadge, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
+import { AccountUpdateDescription, AccountRefreshButton, AccountRefreshFeedback, AccountSnapshotEmpty } from "./account-refresh-feedback"
 import { AccountSubscriptionNotice } from "./account-subscription-notice"
 import type { AccountRefreshControl } from "@/lib/account-refresh-state"
 import { useLanguage } from "@/hooks/language-context"
@@ -61,20 +61,23 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
+        title="总 Token"
         value={formatTokens(global.inputTokens + global.outputTokens)}
-        description={`总计 Token · 请求 ${formatCount(global.requestCount)} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
+        description={`请求 ${formatCount(global.requestCount)} 次 · 成功率 ${formatSuccessRate(global.requestCount, global.unsuccessfulRequestCount)}`}
       />
       <StatCard
+        title="输入 Token"
         value={formatTokens(global.inputTokens)}
-        description={`输入 Token · 其中缓存 ${cache.cached} · 命中率 ${cache.rate}`}
+        description={`缓存 ${cache.cached} · 命中率 ${cache.rate}`}
       />
       <StatCard
+        title="输出 Token"
         value={formatTokens(global.outputTokens)}
-        description="输出 Token"
       />
       <StatCard
+        title="会话"
         value={formatCount(threadCount)}
-        description={`会话 · 轮次 ${formatCount(turnCount)} 轮`}
+        description={`轮次 ${formatCount(turnCount)} 轮`}
       />
     </div>
   )
@@ -82,10 +85,10 @@ export function GlobalCards({ global, threadCount, turnCount }: { global: Aggreg
 
 export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
         <CardTitle>按 Provider</CardTitle>
-        <CardDescription>每组包含会话、轮次、请求、Token 与压缩统计</CardDescription>
+        <CardDescription>当前汇总范围</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -150,26 +153,26 @@ export function WeeklyQuotaCard({
   planType: string | null
 }) {
   return (
-    <Card>
-      <CardHeader>
+    <Card size="sm">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <CardTitle className="flex items-center gap-2">
           OpenAI 周额度
           {planType === null ? null : (
             <Badge variant="outline">{formatPlanType(planType)}</Badge>
           )}
         </CardTitle>
-        <CardDescription>
-          {resetsAt === null ? "暂无限额快照" : `下次重置 ${formatTime(resetsAt)}`}
-        </CardDescription>
+        {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
+          已用 {usedPercent.toFixed(1)}%
+        </CardDescription>}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
         {usedPercent === null
-          ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>当前时间范围没有 OpenAI 额度记录</EmptyTitle></EmptyHeader></Empty>
+          ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>尚未获取 OpenAI 额度快照</EmptyTitle></EmptyHeader></Empty>
           : (
             <>
-              <Progress value={Math.min(100, usedPercent)} />
-              <p className="text-sm text-muted-foreground">
-                已用 {usedPercent.toFixed(1)}% · 剩余 {(100 - usedPercent).toFixed(1)}%
+              <Progress value={Math.min(100, usedPercent)} aria-label="OpenAI 周额度已用比例" />
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {resetsAt === null ? "重置时间未知" : `重置 ${formatTime(resetsAt)}`}
               </p>
             </>
           )}
@@ -186,46 +189,51 @@ export function DeepseekBalanceCards({
   refreshControls: Record<string, AccountRefreshControl>
 }) {
   if (accounts.length === 0) {
-    return <AccountProviderEmpty title="DS 账户余额" description="尚未配置 DeepSeek 账户" />
+    return <AccountProviderEmpty title="DeepSeek" description="尚未配置 DeepSeek 账户" />
   }
-  return <div className="flex flex-col gap-4">{accounts.map((account) => (
+  return <>{accounts.map((account) => (
     <DeepseekBalanceCard
       key={account.provider}
       {...account}
       refreshControl={refreshControls[account.provider]}
     />
-  ))}</div>
+  ))}</>
+}
+
+function AccountName({ providerName, account, displayName }: { providerName: string; account: string | null; displayName: string }) {
+  const label = account ?? (displayName === providerName ? null : displayName)
+  return <>
+    <span className="min-w-0 break-all">{providerName}</span>
+    {label === null ? null : <Badge variant="outline" className="max-w-full"><span className="truncate" title={label}>{label}</span></Badge>}
+  </>
 }
 
 function DeepseekBalanceCard({
-  displayName, default: isDefault, available, observedAtMs, balances, refreshControl,
+  account, displayName, default: isDefault, observedAtMs, balances, refreshControl,
 }: DeepseekAccountBalance & { refreshControl: AccountRefreshControl | undefined }) {
   const primary = balances[0]
   return (
-    <Card aria-busy={refreshControl?.refreshing}>
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{displayName}</span><AccountFreshnessBadge observedAtMs={observedAtMs} /></CardTitle>
-        <CardDescription>
-          {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
-            ? "DeepSeek 账户余额暂不可用"
-            : `更新于 ${formatTime(observedAtMs)}`}
-        </CardDescription>
-        {refreshControl && !refreshControl.error && available && primary !== undefined
+    <Card size="sm" aria-busy={refreshControl?.refreshing}>
+      <CardHeader className="min-w-0">
+        <CardTitle className="flex flex-wrap items-center gap-2"><AccountName providerName="DeepSeek" account={account} displayName={displayName} /></CardTitle>
+        <AccountUpdateDescription observedAtMs={observedAtMs} isDefault={isDefault} refreshFailed={Boolean(refreshControl?.error)} />
+        {refreshControl && !refreshControl.error && primary !== undefined
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
-      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && primary !== undefined} /></CardContent> : null}
-      {available && primary !== undefined ? (
+      {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={primary !== undefined} /></CardContent> : null}
+      {primary !== undefined ? (
         <CardContent className="flex flex-col gap-1">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="text-2xl font-semibold tabular-nums">
               {formatDeepseekAmount(primary.totalBalance, primary.currency)}
             </span>
-            <span className="text-xs text-muted-foreground">
-              赠金 {formatDeepseekAmount(primary.grantedBalance, primary.currency)}
-              {" · "}
-              充值 {formatDeepseekAmount(primary.toppedUpBalance, primary.currency)}
-            </span>
+            <span className="text-xs text-muted-foreground">可用余额</span>
           </div>
+          <p className="text-xs text-muted-foreground">
+            赠金 {formatDeepseekAmount(primary.grantedBalance, primary.currency)}
+            {" · "}
+            充值 {formatDeepseekAmount(primary.toppedUpBalance, primary.currency)}
+          </p>
           {balances.length > 1 ? (
             <p className="text-xs text-muted-foreground">
               {balances.slice(1)
@@ -248,18 +256,19 @@ export function CcgCreditUsageCards({
   refreshControls: Record<string, AccountRefreshControl>
 }) {
   if (accounts.length === 0) {
-    return <AccountProviderEmpty title="CommandCode Go 账户额度" description="尚未配置 CommandCode Go 账户" />
+    return <AccountProviderEmpty title="CommandCode Go" description="尚未配置 CommandCode Go 账户" />
   }
-  return <div className="flex flex-col gap-4">{accounts.map((account) => (
+  return <>{accounts.map((account) => (
     <CcgCreditAccountCard
       key={account.provider}
       {...account}
       refreshControl={refreshControls[account.provider]}
     />
-  ))}</div>
+  ))}</>
 }
 
 function CcgCreditAccountCard({
+  account,
   displayName,
   default: isDefault,
   available,
@@ -273,37 +282,40 @@ function CcgCreditAccountCard({
   refreshControl,
 }: CcgCreditAccountUsage & { refreshControl: AccountRefreshControl | undefined }) {
   return (
-    <Card aria-busy={refreshControl?.refreshing}>
-      <CardHeader>
+    <Card size="sm" aria-busy={refreshControl?.refreshing}>
+      <CardHeader className="min-w-0">
         <CardTitle className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 break-all">{displayName}</span>
+          <AccountName providerName="CommandCode Go" account={account} displayName={displayName} />
           {planId === null ? null : <Badge variant="outline">{planId}</Badge>}
-          <AccountFreshnessBadge observedAtMs={observedAtMs} />
         </CardTitle>
-        <CardDescription>
-          {isDefault ? "默认账户 · " : ""}{observedAtMs <= 0
-            ? "CommandCode Go 账户额度暂不可用"
-            : `更新于 ${formatTime(observedAtMs)}`}
-        </CardDescription>
+        <AccountUpdateDescription observedAtMs={observedAtMs} isDefault={isDefault} refreshFailed={Boolean(refreshControl?.error)} />
         {refreshControl && !refreshControl.error && available
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
       {refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available} /></CardContent> : null}
-      {available ? <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">${totalRemaining}</span>
-          <span className="text-xs text-muted-foreground">
-            月度 ${monthlyRemaining} · 充值 ${purchasedRemaining} · 赠送 ${freeRemaining}
-          </span>
+      {available ? <CardContent>
+        <div className="grid grid-cols-3 gap-2">
+          <Card size="sm" className="min-w-0 gap-2 data-[size=sm]:[--card-spacing:--spacing(2)]">
+            <CardHeader><CardTitle>剩余额度</CardTitle></CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <p className="break-all text-xl font-semibold tabular-nums">${totalRemaining}</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                月度 ${monthlyRemaining}<br />充值 ${purchasedRemaining}<br />赠送 ${freeRemaining}
+              </p>
+            </CardContent>
+          </Card>
+          <QuotaWindowCards windows={windows} />
         </div>
-        <QuotaWindows windows={windows} />
       </CardContent> : !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
 }
 
 function AccountProviderEmpty({ title, description }: { title: string; description: string }) {
-  return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader></Card>
+  return <Card size="sm">
+    <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+    <CardContent><Empty className="p-3"><EmptyHeader><EmptyTitle>{description}</EmptyTitle></EmptyHeader></Empty></CardContent>
+  </Card>
 }
 
 export function OpencodeGoUsageCard({
@@ -325,26 +337,20 @@ export function OpencodeGoUsageCard({
   onAccountsChanged: (accountId: string, activation?: string) => void
 }) {
   if (accounts.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>OpenCode Go 用量</CardTitle>
-          <CardDescription>尚未配置 OpenCode Go 账户</CardDescription>
-        </CardHeader>
-      </Card>
-    )
+    return <AccountProviderEmpty title="OpenCode Go" description="尚未配置 OpenCode Go 账户" />
   }
   return (
-    <div className="flex flex-col gap-4">
+    <>
       {accounts.map((account) => (
         <QuotaAccountCard
           key={account.provider}
           {...account}
           refreshControl={refreshControls[account.provider]}
+          providerName="OpenCode Go"
           onRemoved={onAccountsChanged}
         />
       ))}
-    </div>
+    </>
   )
 }
 
@@ -353,12 +359,13 @@ export function ClinePassUsageCard({ account, refreshControl }: {
   refreshControl: AccountRefreshControl | undefined
 }) {
   if (!account) return null
-  return <QuotaAccountCard {...account} refreshControl={refreshControl} />
+  return <QuotaAccountCard {...account} providerName="Cline Pass" refreshControl={refreshControl} />
 }
 
 function QuotaAccountCard({
   account,
   displayName,
+  providerName,
   default: isDefault,
   available,
   windows,
@@ -369,6 +376,7 @@ function QuotaAccountCard({
 }: {
   account: string | null
   provider: string
+  providerName: string
   displayName: string
   default: boolean
   available: boolean
@@ -379,45 +387,53 @@ function QuotaAccountCard({
   subscriptionRequired: boolean
 }) {
   return (
-    <Card aria-busy={refreshControl?.refreshing}>
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2"><span className="min-w-0 break-all">{displayName}</span>{subscriptionRequired ? <Badge variant="secondary">无有效订阅</Badge> : <AccountFreshnessBadge observedAtMs={observedAtMs} />}</CardTitle>
-        <CardDescription>
-          {isDefault ? "默认账户 · " : ""}
-          {observedAtMs <= 0
-            ? "账户用量暂不可用"
-            : `${subscriptionRequired ? "订阅状态 · 确认于" : "账户配额 · 更新于"} ${formatTime(observedAtMs)}`}
-        </CardDescription>
+    <Card size="sm" aria-busy={refreshControl?.refreshing}>
+      <CardHeader className="min-w-0">
+        <CardTitle className="flex flex-wrap items-center gap-2"><AccountName providerName={providerName} account={account} displayName={displayName} />{subscriptionRequired ? <Badge variant="secondary">无有效订阅</Badge> : null}</CardTitle>
+        <AccountUpdateDescription observedAtMs={observedAtMs} isDefault={isDefault} refreshFailed={Boolean(refreshControl?.error)} />
         {refreshControl && !refreshControl.error && available && windows.length > 0
           ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
       {subscriptionRequired && onRemoved
         ? <CardContent className="flex flex-col gap-3"><AccountSubscriptionNotice accountId={account} control={refreshControl} onRemoved={onRemoved} /></CardContent>
         : refreshControl?.error ? <CardContent><AccountRefreshFeedback control={refreshControl} hasSnapshot={available && windows.length > 0} /></CardContent> : null}
-      {!subscriptionRequired && available && windows.length > 0 ? <CardContent><QuotaWindows windows={windows} /></CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
+      {!subscriptionRequired && available && windows.length > 0 ? <CardContent>
+        <div className="grid grid-cols-3 gap-2"><QuotaWindowCards windows={windows} /></div>
+      </CardContent> : !subscriptionRequired && !refreshControl?.error ? <CardContent><AccountSnapshotEmpty control={refreshControl} /></CardContent> : null}
     </Card>
   )
 }
 
-function QuotaWindows({ windows }: { windows: OpencodeGoQuotaWindow[] }) {
-  if (windows.length === 0) return null
-  return <div className="flex flex-col gap-3">{windows.map((window) => (
-    <div key={window.windowId} className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-sm">
-        <span>{window.label}</span>
-        <span className="tabular-nums text-muted-foreground">已用 {window.usedPercent.toFixed(1)}%</span>
-      </div>
-      <Progress value={Math.min(100, window.usedPercent)} />
-      <p className="text-xs text-muted-foreground">
-        {window.resetsAt === null ? "重置时间未知" : `下次重置 ${formatTime(window.resetsAt)}`}
-      </p>
-      {window.localTokens !== null && window.localTokens !== undefined ? (
-        <p className="text-xs text-muted-foreground">本地 Token 约 {formatTokens(window.localTokens)}</p>
-      ) : null}
-    </div>
-  ))}</div>
+const quotaWindowOrder: Readonly<Record<string, number>> = {
+  rolling: 0,
+  "five-hour": 0,
+  weekly: 1,
+  monthly: 2,
 }
 
+function QuotaWindowCards({ windows }: { windows: OpencodeGoQuotaWindow[] }) {
+  const orderedWindows = [...windows].sort((left, right) =>
+    (quotaWindowOrder[left.windowId] ?? 3) - (quotaWindowOrder[right.windowId] ?? 3))
+  return orderedWindows.map((window) => (
+    <Card key={window.windowId} size="sm" className="min-w-0 gap-2 data-[size=sm]:[--card-spacing:--spacing(2)]">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <CardTitle className="shrink-0">{window.label}</CardTitle>
+        <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
+          <span className="sr-only">已用 </span>{window.usedPercent.toFixed(1)}%
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <Progress value={Math.min(100, window.usedPercent)} aria-label={`${window.label}已用比例`} />
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {window.resetsAt === null ? "重置时间未知" : `重置 ${formatTime(window.resetsAt)}`}
+        </p>
+        {window.localTokens !== null && window.localTokens !== undefined ? (
+          <p className="text-xs text-muted-foreground">本地 Token 约 {formatTokens(window.localTokens)}</p>
+        ) : null}
+      </CardContent>
+    </Card>
+  ))
+}
 
 function formatDeepseekAmount(value: string, currency: string): string {
   const amount = Number(value)
@@ -433,10 +449,10 @@ function formatDeepseekAmount(value: string, currency: string): string {
 export function ErrorsSummary({ errors }: { errors: ErrorsReport }) {
   const { language } = useLanguage()
   return (
-    <Card>
-      <CardHeader>
+    <Card size="sm">
+      <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <CardTitle>错误摘要</CardTitle>
-        <CardDescription>
+        <CardDescription className="ml-auto">
           失败率 {formatFailureRate(errors.requestCount, errors.unsuccessfulRequestCount)}
         </CardDescription>
       </CardHeader>

@@ -19,7 +19,7 @@
 对应提交
 [`43675b6`](https://github.com/Tencent/openclaw-weixin/commit/43675b66551d12d6853155a7869a50fb12a18a1e)。
 
-本项目只参考固定标签中的扫码、HTTP JSON、长轮询、媒体、输入状态和消息发送合同：
+本项目只参考固定标签中的扫码、HTTP JSON、长轮询、媒体和消息发送合同：
 
 - 不以官方浮动 `main` 替代固定标签；
 - 不采用 OpenClaw 的 Channel、会话、授权或路由实现；
@@ -38,13 +38,31 @@
 - 文本、平台引用、PNG/JPEG/WebP/非动画 GIF、可信语音转写、UTF-8 文本文件，以及受限 MP3/OGG 的接收校验；
 - 共享会话、Workspace、模型、Fast、Goal、用量和其他平台无关命令；
 - 精确文本审批、用户输入和 MCP elicitation；
-- 原生输入状态、块式最终回复、操作过程、Turn 统计和生成图片回传；
+- 块式最终回复、Turn 统计，以及显式 `codexc channel send-image` 的生成图片回传；
 - Setup、Doctor、私有游标、安全凭据、加密回复上下文和重启恢复。
 
 群聊、多账号、原生交互按钮、原生流式编辑、定时主动推送、SILK、视频、Office、压缩包及其他
 通用二进制输入均不支持。
 当前模型目录未声明 `audio` 时，原始 MP3/OGG 会在创建或追加 Turn 前明确拒绝，不视为端到端
 语音支持。
+
+## 回复窗口输出边界
+
+微信每个入站回复窗口只能承载少量下行消息，因此只有生命周期、终态和全局空闲通知占用主动发送
+预算：`turn.started`、`turn.completed`、`conversation.idle.released`、`globalIdle` 警告与
+`text.completed` 最终回答。推理状态、结构化计划、操作与子代理过程、连接、账户、额度、MCP 状态、
+CLI/TUI 输入镜像和 App Server 自动生成图片事件都不占用该预算，也不写入微信会话；这些事件仍由
+Telegram、飞书或显式查询入口展示。判定由目录级 `src/surfaces/delivery-policy.ts` 统一给出，
+Outbox 不再各自维护允许列表。
+
+由此产生的当前决策：
+
+- `display.operation_updates` 与 `display.plan_updates` 是跨渠道设置，只对 Telegram 和飞书生效；
+  微信不因开启这两项而产生操作或计划消息，配置键仍为其他渠道保留。
+- `display.reasoning` 只对 Telegram 和飞书生效；微信不发送“思考中…”状态。
+- 微信 Outbox 与组合根不再接收操作、计划、推理展示参数，也不主动启动输入状态。
+- 若要恢复任一过程展示，必须先确认官方回复窗口预算和渠道可安全承载多条主动消息，再同时更新
+  本页、`src/config/README.md`、模块 README、`delivery-policy.ts` 与测试。
 
 ## 不引入第二个 Gateway
 
@@ -93,7 +111,6 @@ Policy / Application / Core / Approval / Routing
 - 只接受固定官方 CDN 与受支持媒体合同；图片、音频和文本文件分别执行大小、签名、完整性、
   格式和保留期校验。
 - 普通回复采用官方已验证的块式消息，不模拟原生流式编辑。
-- 输入状态票据只在内存有界缓存，失败不阻断正常回复。
 - 审批和 MCP 交互只接受包含不可预测一次性 ID 的精确命令；裸数字、模糊同意、过期、重复或跨
   Actor/Conversation 动作必须拒绝。
 - 平台发送返回回复上下文失效时，只清除对应 Conversation 的上下文，等待后续入站消息自然恢复。

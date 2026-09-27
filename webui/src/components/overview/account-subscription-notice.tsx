@@ -16,7 +16,7 @@ export function AccountSubscriptionNotice({ accountId, control, onRemoved }: {
   const management = useAccountSettingsManagement()
   const pending = management.pendingPreview
   const account = management.settings?.opencodeGo.accounts.find((account) => account.id === accountId)
-  const disabled = control?.disabled || management.busy || pending !== null
+  const disabled = control?.disabled || management.error !== null || management.busy || pending !== null
   const confirm = async () => {
     const result = await management.confirm()
     if (result?.action === "removed" && result.account?.id) onRemoved(result.account.id, result.activation)
@@ -42,7 +42,7 @@ export function AccountSubscriptionNotice({ accountId, control, onRemoved }: {
       </AlertDescription>
     </Alert>
     {management.actionError ? <Alert variant="destructive"><AlertTitle>删除未完成</AlertTitle><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-    {pending ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy}
+    {pending ? <AccountSettingsConfirmationDialog pending={pending} saving={management.busy} loading={management.loading}
       onConfirm={() => void confirm()} onCancel={management.cancel} /> : null}
   </>
 }

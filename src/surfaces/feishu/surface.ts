@@ -175,6 +175,7 @@ export class FeishuSurface implements SurfaceAdapter {
         && dependencies.audioPort
       ? undefined
       : new FeishuMessageClient({
+          logger: options.logger,
           appId: options.appId,
           appSecret: options.appSecret,
           ...(options.openApiAgent
@@ -316,6 +317,7 @@ export class FeishuSurface implements SurfaceAdapter {
       options.logger,
     );
     this.inbox = new FeishuInbox({
+      logger: options.logger,
       accountId: options.appId,
       access: options.access,
       ...(options.actorRegistry
@@ -366,6 +368,8 @@ export class FeishuSurface implements SurfaceAdapter {
           {
             surface: "feishu",
             accountId: options.appId,
+            conversationId: event.chatId,
+            inputId: event.messageId,
             messageType: event.messageType,
             outcome: result.status,
             ...(result.status === "accepted" ? {} : { reason: result.reason }),

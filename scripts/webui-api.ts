@@ -61,7 +61,6 @@ export interface CacheUsage {
 
 export interface Aggregate {
   cacheUsage: CacheUsage
-  tokensPerSecond?: number | null
   requestCount: number
   unsuccessfulRequestCount: number
   inputTokens: number
@@ -157,7 +156,6 @@ export type UsageTrendResponse = { range: Range<string>; generatedAt: string } &
 
 export interface ThreadListItem {
   cacheUsage: CacheUsage
-  tokensPerSecond?: number | null
   threadId: string
   provider: string | null
   model: string | null
@@ -181,7 +179,6 @@ export interface ThreadsResponse extends MetricsPageSummary {
 }
 
 export interface TurnSummary {
-  tokensPerSecond?: number | null
   provider: string | null
   model: string | null
   reasoningEffort: string | null
@@ -214,10 +211,11 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
-  tokensPerSecond?: number | null
+  /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
+  upstreamProvider?: string
   totalDurationMs: number | null
   traffic: { label: string; session: string; interaction: number } | null
-  firstContentMs: number | null
+  firstTokenMs: number | null
   requestModel: string | null
   responseModel: string | null
   upstreamTtftMs: number | null
@@ -248,7 +246,6 @@ export interface RequestRecord {
 }
 
 export type RequestSortKey =
-  | "tokensPerSecond"
   | "totalDuration"
   | "time"
   | "provider"
@@ -872,6 +869,8 @@ export interface TrafficExchangeSummary {
   hasError: boolean
   requestModel?: string
   responseModels: string[]
+  /** Chat 上游诊断记录的实际上游提供商；缺失表示没有诊断或不适用。 */
+  upstreamProvider?: string
 }
 
 export interface TrafficListResponse {
@@ -916,6 +915,8 @@ export interface TrafficExchangeDetail {
   category: "models" | "prewarm" | "model"
   requestModel?: string
   responseModels: string[]
+  /** 与调用列表同源的 Chat 上游提供商；详情同时保留完整诊断字段。 */
+  upstreamProvider?: string
   state: "completed" | "failed" | "incomplete" | "pending"
   url?: string
   request: {
@@ -951,20 +952,6 @@ export interface TrafficExchangeDetail {
     durationMs?: number
     callTiming: {
       totalMs: number
-      preForwardMs?: number
-      firstEventWaitMs?: number
-      afterFirstEventMs?: number
-      receiveRequestMs?: number
-      waitResponseHeadMs?: number
-      receiveResponseMs?: number
-      submitWaitMs?: number
-      submittedToFirstEventMs?: number
-      connectionReady?: boolean
-    } | null
-    httpTiming: {
-      receiveRequestMs?: number
-      waitResponseHeadMs?: number
-      receiveResponseMs?: number
     } | null
     eventType?: string
     errorScope?: string
@@ -984,16 +971,7 @@ export interface TrafficExchangeDetail {
     output: Array<{ type: string; name?: string; callId?: string; phase?: string; text: string }>
     outputTruncated: boolean
     outputSource: "terminal" | "trace"
-    timing: {
-      scope: "logical_turn"
-      responseId: string
-      totalMs?: number
-      firstTokenMs?: number
-      queueMaxMs?: number
-      samplingMs?: number
-      toolPauseMs?: number
-    } | null
-    firstContentMs?: number
+    firstTokenMs?: number
   } | null
   tracePage: {
     offset: number

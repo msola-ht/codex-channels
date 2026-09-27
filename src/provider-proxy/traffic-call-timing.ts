@@ -1,34 +1,16 @@
-/** 单次调用的单调时钟节点；只写调用记录，不进入指标 IPC。 */
+/** 调用转储复用指标的发送起点；没有提交发送的调用不伪造耗时。 */
 export class TrafficCallTiming {
-  private forwardingMs?: number;
-  private requestBodyEndMs?: number;
-  private responseHeadMs?: number;
-  private submittedMs?: number;
-  private connectionReady: boolean | undefined;
+  private submittedAt?: number;
 
-  constructor(private readonly startedAt: number) {}
+  submitted(at: number): void { this.submittedAt ??= at; }
 
-  forwarding(at: number, connectionReady?: boolean): void {
-    this.forwardingMs = at - this.startedAt;
-    this.connectionReady = connectionReady;
-  }
-
-  requestBodyEnd(at: number): void { this.requestBodyEndMs = at - this.startedAt; }
-  responseHead(at: number): void { this.responseHeadMs = at - this.startedAt; }
-  submitted(at: number): void { this.submittedMs = at - this.startedAt; }
-
-  finish(at: number, firstContentMs: number | undefined, totalDurationMs?: number) {
+  finish(at: number, firstTokenMs: number | undefined, totalDurationMs?: number) {
+    if (this.submittedAt === undefined) return undefined;
     return {
       clock: "monotonic" as const,
-      endMs: totalDurationMs ?? at - this.startedAt,
-      ...(this.forwardingMs === undefined ? {} : { forwardingMs: this.forwardingMs }),
-      ...(this.requestBodyEndMs === undefined ? {} : { requestBodyEndMs: this.requestBodyEndMs }),
-      ...(this.responseHeadMs === undefined ? {} : { responseHeadMs: this.responseHeadMs }),
-      ...(this.submittedMs === undefined ? {} : { submittedMs: this.submittedMs }),
-      ...(this.connectionReady === undefined ? {} : { connectionReady: this.connectionReady }),
-      ...(this.forwardingMs === undefined || firstContentMs === undefined ? {} : {
-        firstEventMs: this.forwardingMs + firstContentMs,
-      }),
+      basis: "submitted" as const,
+      endMs: totalDurationMs ?? at - this.submittedAt,
+      ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
     };
   }
 }

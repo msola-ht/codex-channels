@@ -105,9 +105,100 @@ describe("BoundedAsyncQueue", () => {
     expect(await queue.shift()).toBe(1);
     expect(await queue.shift()).toBeUndefined();
   });
+
+  it("replaces a pending entry with the same coalesce key in place", async () => {
+    const queue = new BoundedAsyncQueue<string>(3);
+    queue.push("first", true, "k");
+    queue.push("other", true, "o");
+    expect(queue.push("first-latest", true, "k")).toBe(true);
+    expect(queue.size).toBe(2);
+    expect(await queue.shift()).toBe("first-latest");
+    expect(await queue.shift()).toBe("other");
+  });
+
+  it("keeps non-critical accounting consistent when coalescing changes criticality", () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("non-critical", false, "k");
+    expect(nonCriticalCount(queue)).toBe(1);
+    queue.push("critical", true, "k");
+    expect(nonCriticalCount(queue)).toBe(0);
+    queue.push("non-critical-again", false, "k");
+    expect(nonCriticalCount(queue)).toBe(1);
+  });
+
+  it("drops the coalesce key after the entry is shifted", async () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("a", true, "k");
+    expect(await queue.shift()).toBe("a");
+    expect(queue.push("b", true, "k")).toBe(true);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("b");
+  });
+
+  it("drops the coalesce key after the entry is removed", async () => {
+    const queue = new BoundedAsyncQueue<string>(2);
+    queue.push("a", true, "k");
+    expect(queue.remove("a")).toBe(true);
+    expect(queue.push("b", true, "k")).toBe(true);
+    expect(queue.size).toBe(1);
+    expect(await queue.shift()).toBe("b");
+  });
+
+  it("drops the coalesce key after the entry is evicted by overflow", async () => {
+    const queue = new BoundedAsyncQueue<string>(1);
+    queue.push("disposable", false, "k");
+    queue.push("critical", true);
+    expect(queue.size).toBe(1);
+    expect(queue.push("replacement", true, "k")).toBe(true);
+    // 已淘汰条目的键必须失效，否则新载荷会写入一个不在队列里的旧条目并丢失。
+    expect(queue.size).toBe(2);
+    expect(await queue.shift()).toBe("critical");
+    expect(await queue.shift()).toBe("replacement");
+  });
+
+  it("reports coalesced replacements with the current queue depth", async () => {
+    const coalesced: Array<{ coalesceKey: string; queued: number }> = [];
+    const queue = new BoundedAsyncQueue<string>(
+      3,
+      undefined,
+      (state) => coalesced.push(state),
+    );
+    queue.push("first", true, "k");
+    expect(coalesced).toEqual([]);
+    queue.push("other", true, "o");
+    queue.push("latest", true, "k");
+    expect(coalesced).toEqual([{ coalesceKey: "k", queued: 2 }]);
+    expect(await queue.shift()).toBe("latest");
+    expect(await queue.shift()).toBe("other");
+  });
 });
 
+function nonCriticalCount<T>(queue: BoundedAsyncQueue<T>): number {
+  return (queue as unknown as { nonCriticalCount: number }).nonCriticalCount;
+}
+
 describe("EventBus", () => {
+  it("measures consumer backlog separately from handler execution", async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = new EventBus<number>(pino({ level: "silent" }));
+      const waits: number[] = [];
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      bus.subscribe("timing", async (event, _signal, queueWaitMs) => {
+        waits.push(queueWaitMs);
+        if (event === 1) await gate;
+      });
+      bus.publish(1, true);
+      await Promise.resolve();
+      bus.publish(2, true);
+      await vi.advanceTimersByTimeAsync(6000);
+      release();
+      await bus.close();
+      expect(waits).toEqual([0, 6000]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("rejects new subscriptions after close", async () => {
     const bus = new EventBus<number>(pino({ level: "silent" }));
     await bus.close();

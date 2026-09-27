@@ -2,10 +2,6 @@ import type { CacheUsage } from "./types"
 
 export type DisplayLanguage = "zh" | "en"
 
-export function formatTokensPerSecond(value: number | null | undefined): string {
-  return value == null ? "—" : value.toFixed(2)
-}
-
 let serverTimeZone: string | undefined
 
 /** 页面加载前由服务端时间接口设置；禁止静默使用浏览器时区。 */
@@ -33,6 +29,14 @@ export function formatTimeZoneLabel(value: number): string {
   const offset = new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "longOffset" })
     .formatToParts(value).find((part) => part.type === "timeZoneName")!.value.replace("GMT", "UTC")
   return `${timeZone}（${offset}）`
+}
+
+export function formatClockTime(value: number): string {
+  const timeZone = getServerTimeZone()
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).format(value)
+  return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
 const compactTwoDecimalFormatter = new Intl.NumberFormat("en-US", {

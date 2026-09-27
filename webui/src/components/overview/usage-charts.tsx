@@ -49,7 +49,7 @@ export function UsageCharts({
   return (
     <div className="flex flex-col gap-3">
       <ErrorBanner error={error} />
-      <div className="grid items-start gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
+      <div className="grid items-stretch gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <ActivityHeatmapCard rows={filledHeatmapRows} loading={heatmapLoading} />
         <UsageTrendCard rows={filledTrendRows} rangeLabel={rangeLabel} granularity={trend.granularity} />
       </div>
@@ -75,7 +75,7 @@ function UsageTrendCard({
   }
 
   return (
-    <Card className="h-[340px]">
+    <Card size="sm" className="h-full">
       <CardHeader>
         <CardTitle>用量趋势</CardTitle>
         <CardDescription>{rangeLabel} · 按{granularity === "hour" ? "小时" : "天"}统计 Token · 左轴输入/缓存，右轴输出（独立刻度）</CardDescription>
@@ -146,7 +146,7 @@ function ActivityHeatmapCard({
   const activeDays = cells.filter((cell) => cell.count > 0).length
 
   return (
-    <Card className="h-[340px]">
+    <Card size="sm" className="h-full">
       <CardHeader>
         <CardTitle>活动热力图</CardTitle>
         <CardDescription>最近 90 天每日 Token 量</CardDescription>

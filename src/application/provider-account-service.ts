@@ -10,6 +10,9 @@ import type {
 import { createOfficialAccountSnapshot } from "./account-snapshot.js";
 
 export class ProviderAccountService implements ProviderAccountQueryPort {
+  private readonly pendingUsage = new Map<string, {
+    controller: AbortController; promise: Promise<ProviderAccountUsage>; consumers: number;
+  }>();
   private readonly adapters = new Map<string, ProviderAccountAdapter>();
   private readonly snapshotUsage = new Map<string, ProviderAccountUsage>();
   private readonly snapshotLimits = new Map<string, ProviderAccountLimits>();
@@ -29,16 +32,21 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   async accountUsage(
     modelProvider: string,
     threadId?: string,
+    signal?: AbortSignal,
   ): Promise<ProviderAccountUsage> {
+    signal?.throwIfAborted();
     const adapter = this.adapters.get(modelProvider);
     if (!adapter) {
       const result = { kind: "unsupported" as const, provider: modelProvider };
       this.persist(result, result);
       return result;
     }
-    const accountUsage = adapter.accountUsage();
+    const accountUsage = adapter.provider === "openai"
+      ? adapter.accountUsage(signal)
+      : this.managedUsage(adapter, signal);
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
+      signal?.throwIfAborted();
       this.persist(result, { kind: "unsupported", provider: modelProvider });
       return result;
     }
@@ -48,16 +56,19 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
         kind: "failed",
       })),
     ]);
+    signal?.throwIfAborted();
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
     this.persist(result, { kind: "unsupported", provider: modelProvider });
     return result;
   }
 
-  async accountLimits(modelProvider: string): Promise<ProviderAccountLimits> {
+  async accountLimits(modelProvider: string, signal?: AbortSignal): Promise<ProviderAccountLimits> {
+    signal?.throwIfAborted();
     const adapter = this.adapters.get(modelProvider);
     // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
     if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
     const result = await adapter.accountLimits();
+    signal?.throwIfAborted();
     this.persist(
       this.snapshotUsage.get(modelProvider)
         ?? { kind: "unsupported", provider: modelProvider },
@@ -67,32 +78,81 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   }
 
   /** 按需预热所有已注册账户；调用方应异步触发，不阻塞主服务启动。 */
-  async refreshSnapshots(): Promise<void> {
-    await Promise.allSettled([...this.adapters.values()].flatMap((adapter) => [
-      this.accountUsage(adapter.provider),
-      ...(adapter.accountLimits ? [this.accountLimits(adapter.provider)] : []),
+  async refreshSnapshots(
+    signal?: AbortSignal,
+    onFailure?: (provider: string, operation: "usage" | "limits", error: unknown) => void,
+  ): Promise<void> {
+    const observe = async (provider: string, operation: "usage" | "limits", query: Promise<unknown>): Promise<void> => {
+      try { await query; }
+      catch (error) {
+        if (!signal?.aborted) onFailure?.(provider, operation, error);
+      }
+    };
+    await Promise.all([...this.adapters.values()].flatMap((adapter) => [
+      observe(adapter.provider, "usage", this.accountUsage(adapter.provider, undefined, signal)),
+      ...(adapter.accountLimits ? [observe(adapter.provider, "limits", this.accountLimits(adapter.provider, signal))] : []),
     ]));
   }
 
   /** 刷新单个已注册账户；未知 Provider 不创建无效快照。 */
-  async refreshAccountSnapshot(modelProvider: string): Promise<boolean> {
+  async refreshAccountSnapshot(modelProvider: string, signal?: AbortSignal): Promise<boolean> {
     if (!this.adapters.has(modelProvider)) return false;
-    await this.accountUsage(modelProvider);
+    await this.accountUsage(modelProvider, undefined, signal);
     return true;
+  }
+
+  private managedUsage(adapter: ProviderAccountAdapter, signal?: AbortSignal): Promise<ProviderAccountUsage> {
+    signal?.throwIfAborted();
+    let pending = this.pendingUsage.get(adapter.provider);
+    if (!pending) {
+      const controller = new AbortController();
+      pending = { controller, promise: Promise.resolve().then(() => {
+        controller.signal.throwIfAborted();
+        return adapter.accountUsage(controller.signal);
+      }), consumers: 0 };
+      this.pendingUsage.set(adapter.provider, pending);
+      const owned = pending;
+      const clear = (): void => {
+        if (this.pendingUsage.get(adapter.provider) === owned) this.pendingUsage.delete(adapter.provider);
+      };
+      void pending.promise.then(clear, clear);
+    }
+    const shared = pending;
+    shared.consumers += 1;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error: unknown, value?: ProviderAccountUsage): void => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", cancel);
+        shared.consumers -= 1;
+        if (shared.consumers === 0) {
+          if (this.pendingUsage.get(adapter.provider) === shared) this.pendingUsage.delete(adapter.provider);
+          shared.controller.abort();
+        }
+        if (value === undefined) reject(error instanceof Error ? error : new Error("账户查询失败", { cause: error }));
+        else resolve(value);
+      };
+      const cancel = (): void => finish(signal?.reason);
+      signal?.addEventListener("abort", cancel, { once: true });
+      void shared.promise.then(value => finish(undefined, value), error => finish(error));
+      if (signal?.aborted) cancel();
+    });
   }
 
   private persist(usage: ProviderAccountUsage, limits: ProviderAccountLimits): void {
     if (!this.snapshotWriter) return;
-    this.snapshotUsage.set(usage.provider, usage);
-    this.snapshotLimits.set(limits.provider, limits);
-    const mergedUsage = this.snapshotUsage.get(usage.provider) ?? usage;
-    const mergedLimits = this.snapshotLimits.get(usage.provider) ?? limits;
+    const mergedUsage = usage;
+    const mergedLimits = limits.provider === usage.provider
+      ? limits : this.snapshotLimits.get(usage.provider) ?? limits;
     this.snapshotWriter.writeOfficialAccountSnapshot(createOfficialAccountSnapshot({
       provider: mergedUsage.provider,
       observedAtMs: Date.now(),
       usage: mergedUsage,
       limits: mergedLimits,
     }));
+    this.snapshotUsage.set(usage.provider, usage);
+    this.snapshotLimits.set(limits.provider, limits);
   }
 }
 

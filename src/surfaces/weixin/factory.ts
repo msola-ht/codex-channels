@@ -8,7 +8,6 @@ import type {
   ConversationActorRegistry,
   SurfaceAccessPolicy,
 } from "../../policy/index.js";
-import type { OperationUpdateDisplay } from "../types.js";
 import { WeixinAudioStore } from "./audio-store.js";
 import { createCredentialBackedWeixinClient } from "./credential-client.js";
 import { createWeixinCredentialStore } from "./credential-store.js";
@@ -33,9 +32,6 @@ export interface CreateWeixinSurfaceOptions {
   cursorDirectory: string;
   uploadsDirectory: string;
   startupNotification: WeixinStartupNotification;
-  operationUpdateDisplay?: OperationUpdateDisplay;
-  planUpdatesEnabled?: boolean;
-  reasoningEnabled?: boolean;
   debugEnabled?: boolean;
   autoCompactPercent?: (
     provider: string | null | undefined,
@@ -63,7 +59,6 @@ export function createWeixinSurface(
     lifecycleClient: client,
     fileSendClient: client,
     imageSendClient: client,
-    typingClient: client,
     cursorStore: new FileWeixinUpdatesCursorStore(options.cursorDirectory),
     service: options.service,
     commands: options.commands,
@@ -85,15 +80,6 @@ export function createWeixinSurface(
       options.fetchImpl,
     ),
     startupNotification: options.startupNotification,
-    ...(options.operationUpdateDisplay === undefined
-      ? {}
-      : { operationUpdateDisplay: options.operationUpdateDisplay }),
-    ...(options.planUpdatesEnabled === undefined
-      ? {}
-      : { planUpdatesEnabled: options.planUpdatesEnabled }),
-    ...(options.reasoningEnabled === undefined
-      ? {}
-      : { reasoningEnabled: options.reasoningEnabled }),
     ...(options.debugEnabled === undefined
       ? {}
       : { debugEnabled: options.debugEnabled }),

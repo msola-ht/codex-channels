@@ -16,7 +16,9 @@
 - `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
   把具体组件所有权交给组件图。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
-  校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；把同一 Client 的
+  校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
+  启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
+  迟到的用量与额度结果均禁止写入。把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
   仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，
   并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
@@ -48,9 +50,11 @@
   普通 Thread 仅在缺失时
   由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；代理、Core 和数据库
   View 都不读取请求正文、设置文件或价格目录。
+- `account-query.ts`：四类第三方账户查询共用总预算、受控 HTTP/网络/解析失败分类和安全诊断；调用方取消保持取消语义，业务响应解析仍归各适配器；预热和手动刷新复用同一安全诊断投影。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、有效请求平均 Token/s 与压缩统计；
+- `completion-account-status.ts`：将本次具体 Provider 的官方余额、Credits 与配额窗口投影为完成卡摘要，不携带凭据或完整账户响应。
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token 与压缩统计；
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
@@ -98,18 +102,18 @@
 - `deepseek-account-adapter.ts`：通过共享 Provider 运行时按请求读取切换 Profile 或固定基础配置中的
   DeepSeek Key，
   通过共享代理调用官方余额接口，并在共享有界响应读取和严格 Schema 校验后只返回稳定余额；Key、响应正文
-  和解析异常不进入日志或业务事件。官方账户只有余额接口，没有用量窗口，不展示本地用量估算。
+  和解析异常不进入日志或业务事件；失败返回稳定文案并保留底层原因。官方账户只有余额接口，没有用量窗口，不展示本地用量估算。
 - `opencode-go-account-adapter.ts`：通过同一共享 Provider 运行时按请求读取 OpenCode Go Key，调用官方
   `/zen/go/v1/usage` 接口，把 5 小时/7 天/月度三个窗口归约为通用 `quota-windows` 形态（已用百分比与
   重置时间）；参数化工厂按 `modelProvider` 区分 `ocg-<账户>`，指标库按账户过滤，并汇总本机
   指标库的模型本地 Token 用量；三个额度窗口共用一次精确 Provider 流式读取，不执行通用文本筛选、
   重复计数或偏移分页；Key、响应正文
   和解析异常同样不进入日志或业务事件；仅将官方明确的缺少订阅权益响应转换为可持久化的无有效订阅结果，
-  不把普通鉴权或网络失败解释为订阅到期。
-- `cline-pass-account-adapter.ts`：按独立账户 Provider 读取固定或切换配置中的私有 Key，查询官方套餐额度接口，归约 5 小时、7 天和月度的已用比例及重置时间；响应有界读取、严格校验并使用稳定脱敏错误。
+  不把普通鉴权或网络失败解释为订阅到期；失败返回稳定文案并保留底层原因。
+- `cline-pass-account-adapter.ts`：按独立账户 Provider 读取固定或切换配置中的私有 Key，查询官方套餐额度接口，归约 5 小时、7 天和月度的已用比例及重置时间；三个已知窗口必须齐全且唯一，上游新增的其它窗口类型不进入展示口径。响应有界读取、严格校验，失败返回稳定脱敏文案并保留底层原因。
 - `ccg-account-adapter.ts`：按精确 `ccg-<账户>` 读取私有 Key，调用 Command Code 官方 CLI 当前使用的
   账户身份与 Credits 接口，归约月度、充值、赠送余额及 5 小时/7 天窗口；响应按统一字节上限和稳定
-  Schema 校验，失败不传播上游正文。
+  Schema 校验；身份与 Credits 两次串行请求共用同一个总预算，失败不传播上游正文，并保留底层原因。
 - `provider-idle-releaser.ts`：统一跟踪所有 Provider Client 的活动操作；当 Gateway 没有前台或后台
   Conversation 绑定、没有正在进行的 Provider 操作或启动任务时，先等待 60 秒宽限期；宽限期内
   新绑定、新操作或启动任务会取消本轮释放。宽限期结束仍空闲时，只有渠道会话空闲自动解除触发的
@@ -134,6 +138,8 @@
   进程退出；配置重载同时检查已启用微信的安全凭据变化，重新扫码替换同账号凭据也触发连接重建。
   只有应用启动完成后才把所有权
   协议标记为就绪，供服务管理入口区分进程占位和可用 Gateway；账户刷新私有 IPC 与应用一同启停。
+  该 IPC 根据受控账户查询原因生成固定文案，不透传内部异常 message；按 Provider 记录阶段、分类、
+  耗时和受控状态码，主动取消不记录为上游失败；快照等未知本地异常按内部故障处理。
 - `provider-settings-watcher.ts`：监听受管第三方 Provider 的模型目录、Profile 与管理标记变化，
   校验通过后防抖等待该 Provider 无活动 Turn，再自动触发 App Server 重启；校验失败保留旧基线并
   等待修复；重启后刷新 Gateway 模型目录，两步均成功才报告生效，任一步失败按冷却时间重试；
@@ -148,9 +154,14 @@
 - `surface-manager.ts`：按 `surface + accountId` 向已启动 Surface 集中路由 Core 输出，并为
   `turn.completed` 等待对应 Turn 或 Thread 的指标写入水位，再依次注入可恢复的本轮统计、当前授权 Workspace
   的 Git 分支、递归包含子代理后代的 Session 累计统计及显式父 Turn 任务合计；单项指标写入或读取
-  失败时保留 Core 已归约的本轮统计并省略不可靠的累计值，不阻断原始完成事件；并行完成各 Surface 的首次启动，
+  失败时保留 Core 已归约的本轮统计并省略不可靠的累计值，不阻断原始完成事件；整组统计读取共享
+  250 ms 预算，耗尽后不再启动后续查询，已启动查询的迟到失败仍被捕获。第三方完成卡并行读取本次账户额度，独立上限 2 秒，失败或超时省略；超时和关闭取消出站查询，不回退到其他账户或缓存。并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
-  首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；流式增量不积压。
+  首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；补投与实时输出共用每 Conversation 的有界顺序队列；
+  完成统计与额度查询只等待本会话，不阻塞其他会话或渠道。恢复前限时排空旧队列，
+  故障期间的输出与在途返回事件按原始到达序号归并，旧快照不覆盖新快照；关闭后不再启动恢复。
+  不可用期间不积压流式增量。渠道失效与启动失败日志附带受控的
+  `errorChain`（每层只有类型与白名单错误码，不含错误正文），便于定位底层失败原因。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据

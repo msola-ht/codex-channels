@@ -27,7 +27,7 @@ import {
 import {
   loadManagedModelProviderDefinitions,
   opencodeGoProviderDefinition,
-  clinePassProviderDefinition,
+  sharedManagedProviderDefinition,
 } from "./model-provider-definitions.mjs";
 import {
   loadConfiguredCustomPrimaryModelProvider,
@@ -148,7 +148,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     provider,
     options,
   ) => {
-    const definition = provider === "clp" ? clinePassProviderDefinition : providerDefinitions.get(provider);
+    const definition = providerDefinitions.get(provider) ?? sharedManagedProviderDefinition(provider);
     let bridge;
     if (definition?.upstreamWireApi === "chat_completions") {
       bridge = new ChatCompletionsBridge({ ...options,
@@ -156,8 +156,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });
       await bridge.start();
-      const url = new URL(`http://${bridge.address()}`);
-      options = { upstreamHost: url.hostname, upstreamPort: Number(url.port), upstreamProtocol: "http", chatDiagnostics: bridge.diagnostics };
+      options = bridge.proxyOptions();
     }
     const optionsWithUserAgent = {
       ...options,
@@ -619,7 +618,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     } else {
       const definition = providerDefinitions.get(primaryProvider);
       if (!definition) throw new Error(`未知主模型 Provider：${primaryProvider}`);
-      if (definition.upstreamWireApi === "chat_completions") primaryArguments.push("-c", 'web_search="disabled"');
+      if (definition.webSearch === "disabled") primaryArguments.push("-c", 'web_search="disabled"');
       const providerKey = sharedProviderProxyKey(definition.id);
       const { baseUrl: localBaseUrl } = await startProviderProxy(
         providerKey,

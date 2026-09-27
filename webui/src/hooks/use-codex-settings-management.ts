@@ -7,7 +7,7 @@ export function useCodexSettingsManagement(): CodexSettingsController {
   const management = useVersionedSettingsManagement({
     load: fetchCodexUserSettings,
     preview: previewCodexUserSetting,
-    update: (revision, setting, confirmationToken) => updateCodexUserSetting(revision, setting, confirmationToken),
+    update: updateCodexUserSetting,
     revisionOf: (settings) => settings.version,
     currentValue,
   })

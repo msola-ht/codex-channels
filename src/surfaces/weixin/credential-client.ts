@@ -80,11 +80,5 @@ export function createCredentialBackedWeixinClient(
     async sendFile(input, signal) {
       return (await client()).sendFile(input, signal);
     },
-    async getTypingTicket(input, signal) {
-      return (await client()).getTypingTicket(input, signal);
-    },
-    async setTyping(input, signal) {
-      return (await client()).setTyping(input, signal);
-    },
   };
 }

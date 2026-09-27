@@ -363,66 +363,59 @@ describe("systemd installer", () => {
       JOURNALCTL_LOG: journalctlLog,
     };
     const script = resolve("scripts/systemd-control.sh");
+    // This scenario starts many Node-backed shell commands; bound each command separately.
+    const commandOptions = { env: environment, encoding: "utf8" as const, timeout: 5_000 };
 
-    const installed = execFileSync("/bin/sh", [script, "install"], { env: environment, encoding: "utf8" });
+    const installed = execFileSync("/bin/sh", [script, "install"], commandOptions);
     const installCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
-    const started = execFileSync("/bin/sh", [script, "start"], { env: environment, encoding: "utf8" });
+    const started = execFileSync("/bin/sh", [script, "start"], commandOptions);
     const startCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
     const gatewayStarted = execFileSync(
       "/bin/sh",
       [script, "start", "gateway"],
-      { env: environment, encoding: "utf8" },
+      commandOptions,
     );
     const gatewayStartCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
-    const stopped = execFileSync("/bin/sh", [script, "stop"], { env: environment, encoding: "utf8" });
+    const stopped = execFileSync("/bin/sh", [script, "stop"], commandOptions);
     const stopCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
     const appServerStopped = execFileSync(
       "/bin/sh",
       [script, "stop", "app-server"],
-      { env: environment, encoding: "utf8" },
+      commandOptions,
     );
     const appServerStopCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
-    const restarted = execFileSync("/bin/sh", [script, "restart"], { env: environment, encoding: "utf8" });
+    const restarted = execFileSync("/bin/sh", [script, "restart"], commandOptions);
     const restartCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
     const appServerRestarted = execFileSync(
       "/bin/sh",
       [script, "restart", "app-server"],
-      { env: environment, encoding: "utf8" },
+      commandOptions,
     );
     const appServerRestartCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
     const allRestarted = execFileSync(
       "/bin/sh",
       [script, "restart", "all"],
-      { env: environment, encoding: "utf8" },
+      commandOptions,
     );
     const allRestartCalls = readFileSync(systemctlLog, "utf8");
     writeFileSync(systemctlLog, "");
-    const reloaded = execFileSync("/bin/sh", [script, "reload"], { env: environment, encoding: "utf8" });
+    const reloaded = execFileSync("/bin/sh", [script, "reload"], commandOptions);
     const reloadCalls = readFileSync(systemctlLog, "utf8");
-    const logs = execFileSync("/bin/sh", [script, "logs", "--follow", "--lines", "25"], {
-      env: environment,
-      encoding: "utf8",
-    });
+    const logs = execFileSync("/bin/sh", [script, "logs", "--follow", "--lines", "25"], commandOptions);
     const journalctlCalls = readFileSync(journalctlLog, "utf8");
-    execFileSync("/bin/sh", [script, "logs", "all", "--lines", "10"], {
-      env: environment,
-      encoding: "utf8",
-    });
+    execFileSync("/bin/sh", [script, "logs", "all", "--lines", "10"], commandOptions);
     const allJournalctlCalls = readFileSync(journalctlLog, "utf8");
     writeFileSync(systemctlLog, "");
-    execFileSync("/bin/sh", [script, "status", "gateway"], {
-      env: environment,
-      encoding: "utf8",
-    });
+    execFileSync("/bin/sh", [script, "status", "gateway"], commandOptions);
     const gatewayStatusCalls = readFileSync(systemctlLog, "utf8");
-    const uninstalled = execFileSync("/bin/sh", [script, "uninstall"], { env: environment, encoding: "utf8" });
+    const uninstalled = execFileSync("/bin/sh", [script, "uninstall"], commandOptions);
 
     expect(installed).toContain("已安装，启动操作已完成，正在确认就绪状态");
     expect(installCalls).toContain("--user daemon-reload");
@@ -470,7 +463,7 @@ describe("systemd installer", () => {
     expect(existsSync(appUnit)).toBe(false);
     expect(existsSync(gatewayUnit)).toBe(false);
     expect(readFileSync(userConfig, "utf8")).toBe("preserved=true\n");
-  });
+  }, 30_000);
 });
 
 function gatewayDocument(cwd: string, codex: Record<string, string>, network: Record<string, string>) {

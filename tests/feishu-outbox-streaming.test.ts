@@ -28,6 +28,351 @@ afterEach(() => {
 
 
 describe("Feishu outbox streaming lifecycle", () => {
+  it("keeps deltas received while a content update is pending", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const updated: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      updateStreamingCard: async (_id, text) => {
+        updated.push(text);
+        if (updated.length === 1) await blocked;
+      },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("A"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta("B"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta("C"));
+    await vi.advanceTimersByTimeAsync(300);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(updated).toEqual(["AB", "ABC"]);
+    await outbox.close();
+  });
+
+  it("preserves deltas received while a full card rolls over", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const finished: string[] = [];
+    const updated = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      updateStreamingCard: updated,
+      finishStreamingCard: async (_id, _sequence, text) => {
+        finished.push(text);
+        if (finished.length === 1) await blocked;
+      },
+    }, pino({ level: "silent" }));
+    const prefix = "x".repeat(5001);
+    outbox.handle(delta(prefix));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta("TAIL"));
+    outbox.handle(completed({}, `${prefix}TAIL`, "item-1"));
+    release();
+    await outbox.close();
+    expect(finished.join("")).toBe(`${prefix}TAIL`);
+    expect(updated).not.toHaveBeenCalled();
+  });
+
+  it("splits content that crosses the element limit during card creation", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const sent: string[] = [];
+    const finished: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      createStreamingCard: async (_id, text) => {
+        sent.push(text);
+        if (sent.length === 1) await blocked;
+        return { cardId: "card", messageId: "message" };
+      },
+      updateStreamingCard: async (_id, text) => { sent.push(text); },
+      finishStreamingCard: async (_id, _sequence, text) => { sent.push(text); finished.push(text); },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("A"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta("B".repeat(5001)));
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    outbox.handle(completed({}, `A${"B".repeat(5001)}`, "item-1"));
+    await outbox.close();
+    expect(sent.every((text) => [...text].length <= 5000)).toBe(true);
+    expect(finished.join("")).toBe(`A${"B".repeat(5001)}`);
+  });
+
+  it("coalesces pending refreshes behind a slow platform request", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const records: Array<{ msg: string; pending?: number }> = [];
+    const diagnosticLogger = pino({ level: "debug" }, { write(line) { records.push(JSON.parse(line)); } });
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      createStreamingCard: async () => { await blocked; return { cardId: "card", messageId: "message" }; },
+    }, diagnosticLogger);
+    outbox.handle(delta("A"));
+    await vi.advanceTimersByTimeAsync(300);
+    for (let index = 0; index < 10; index += 1) {
+      outbox.handle(delta("B"));
+      await vi.advanceTimersByTimeAsync(300);
+    }
+    const queued = records.filter((record) => record.msg === "Surface 输出入队结果");
+    expect(queued.length).toBeGreaterThan(1);
+    expect(Math.max(...queued.map((record) => record.pending ?? 0))).toBe(1);
+    release();
+    await outbox.close();
+  });
+
+  it("falls back to corrected final text received during rollover", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async (_id, text) => { posts.push(text); },
+      finishStreamingCard: async () => { await blocked; },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("x".repeat(5001)));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "corrected final body", "item-1"));
+    release();
+    await outbox.close();
+    expect(posts).toEqual(["corrected final body"]);
+  });
+
+  it("finishes with the final body without a redundant element update", async () => {
+    vi.useFakeTimers();
+    const updated = vi.fn(async () => {});
+    const finished = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async () => {},
+      updateStreamingCard: updated,
+      finishStreamingCard: finished,
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("A"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "ABC", "item-1"));
+    await outbox.close();
+    expect(updated).not.toHaveBeenCalled();
+    expect(finished).toHaveBeenCalledWith("7355372766134157313", 1, "ABC", undefined, expect.any(AbortSignal));
+  });
+
+  it.each(["rate-limited", "send-timeout"] as const)("preserves final text when whole-card finish fails with %s", async (code) => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const finishes: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async (_id, body) => { posts.push(body); },
+      finishStreamingCard: async (_id, _sequence, body) => {
+        finishes.push(body);
+        if (finishes.length === 1) throw new FeishuMessageError(code, "fixture");
+      },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "partial FINAL", "item-1"));
+    await outbox.close();
+    if (code === "rate-limited") {
+      expect(posts).toEqual(["partial FINAL"]);
+      expect(finishes).toEqual(["partial FINAL"]);
+    } else {
+      expect(posts).toEqual([]);
+      expect(finishes).toEqual(["partial FINAL", "partial FINAL"]);
+    }
+  });
+
+  it.each([false, true])("does not replay uncertain whole-card writes as new messages (rollover: %s)", async (rollover) => {
+    vi.useFakeTimers();
+    const posts: string[] = [];
+    const finishes: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async (_id, body) => { posts.push(body); },
+      finishStreamingCard: async (_id, _sequence, body) => {
+        finishes.push(body);
+        throw new FeishuMessageError(finishes.length === 1 ? "send-timeout" : "rate-limited", "fixture");
+      },
+    }, pino({ level: "silent" }));
+    const initial = rollover ? "x".repeat(5001) : "partial";
+    outbox.handle(delta(initial));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, `${initial} FINAL`, "item-1"));
+    await outbox.close();
+    expect(finishes).toHaveLength(2);
+    expect(finishes[0]).toBe(finishes[1]);
+    expect(posts).toEqual([]);
+  });
+
+  it("keeps a confirmed final body when only the late footer update fails", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const posts: string[] = [];
+    const footers: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      sendPost: async (_id, body) => { posts.push(body); },
+      sendMarkdownCard: async (_id, body) => { footers.push(body); },
+      finishStreamingCard: async (_id, _sequence, _body, footer) => {
+        if (footer === undefined) await blocked;
+        else throw new FeishuMessageError("rate-limited", "fixture");
+      },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "partial FINAL", "item-1"));
+    await vi.advanceTimersByTimeAsync(0);
+    outbox.handle(turnCompleted());
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await outbox.close();
+    expect(posts).toEqual([]);
+    expect(footers).toEqual([turnCompletedMarkdown]);
+  });
+
+  it("does not start recovery requests after close has timed out", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const finish = vi.fn(async () => { await blocked; throw new FeishuMessageError("send-timeout", "fixture"); });
+    const post = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {}, sendPost: post, finishStreamingCard: finish,
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "partial FINAL", "item-1"));
+    const closed = outbox.close();
+    await vi.advanceTimersByTimeAsync(5000);
+    await closed;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(finish).toHaveBeenCalledTimes(1);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("still delivers completion statistics when body fallback fails", async () => {
+    vi.useFakeTimers();
+    const footers: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods,
+      sendText: async () => {},
+      updateStreamingCard: async () => { throw new FeishuMessageError("send-failed", "fixture"); },
+      sendPost: async () => { throw new FeishuMessageError("send-failed", "fixture"); },
+      sendMarkdownCard: async (_id, body) => { footers.push(body); },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta(" FINAL"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "partial FINAL", "item-1"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+    expect(footers).toEqual([turnCompletedMarkdown]);
+  });
+
+  it("does not update a card whose creation returns after the close deadline", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const update = vi.fn(async () => {});
+    const finish = vi.fn(async () => {});
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {}, sendPost: async () => {},
+      createStreamingCard: async () => { await blocked; return { cardId: "card", messageId: "message" }; },
+      updateStreamingCard: update, finishStreamingCard: finish,
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(delta(" FINAL"));
+    const closed = outbox.close();
+    await vi.advanceTimersByTimeAsync(5000);
+    await closed;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(update).not.toHaveBeenCalled();
+    expect(finish).not.toHaveBeenCalled();
+  });
+
+  it.each(["send-timeout", "invalid-response"] as const)("does not create duplicate messages after uncertain stream creation: %s", async (code) => {
+    vi.useFakeTimers();
+    const post = vi.fn(async () => {});
+    const create = vi.fn(async () => { throw new FeishuMessageError(code, "fixture"); });
+    const footers: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {}, sendPost: post, createStreamingCard: create,
+      sendMarkdownCard: async (_id, body) => { footers.push(body); },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "partial FINAL", "item-1"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(post).not.toHaveBeenCalled();
+    expect(footers).toEqual([turnCompletedMarkdown]);
+  });
+
+  it("delivers the footer even when a fast static body and its fallback fail", async () => {
+    vi.useFakeTimers();
+    const footers: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {},
+      sendMarkdownCard: async (_id, text) => {
+        if (text === turnCompletedMarkdown) { footers.push(text); return; }
+        throw new FeishuMessageError("card-create-failed", "fixture");
+      },
+      sendPost: async () => { throw new FeishuMessageError("send-failed", "fixture"); },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("short"));
+    outbox.handle(completed({}, "short", "item-1"));
+    outbox.handle(turnCompleted());
+    await outbox.close();
+    expect(footers).toEqual([turnCompletedMarkdown]);
+  });
+
+  it("stops remaining fallback chunks after the close deadline", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const posts: string[] = [];
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendText: async () => {},
+      createStreamingCard: async () => { throw new FeishuMessageError("card-create-failed", "fixture"); },
+      sendPost: async (_id, text) => { posts.push(text); if (posts.length === 1) await blocked; },
+    }, pino({ level: "silent" }));
+    outbox.handle(delta("partial"));
+    await vi.advanceTimersByTimeAsync(300);
+    outbox.handle(completed({}, "中".repeat(14000), "item-1"));
+    const closing = outbox.close();
+    await vi.advanceTimersByTimeAsync(5000);
+    await closing;
+    expect(posts).toHaveLength(1);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posts).toHaveLength(1);
+  });
+
   it("streams coalesced deltas through one native CardKit card", async () => {
     vi.useFakeTimers();
     const created: string[] = [];
@@ -378,6 +723,13 @@ describe("Feishu outbox streaming lifecycle", () => {
       {
         component: "Feishu",
         fallback: "post",
+        accountId: "cli_app",
+        conversationId: "oc_chat",
+        deliveryId: expect.any(String),
+        eventType: "text.completed",
+        itemId: "飞书回复",
+        threadId: "thread-1",
+        turnId: "turn-1",
       },
       "飞书静态 CardKit 创建失败，已降级为富文本",
     );
@@ -418,7 +770,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream failed");
         },
       },
       pino({ level: "silent" }),
@@ -446,7 +798,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream failed");
         },
       },
       pino({ level: "silent" }),
@@ -475,7 +827,7 @@ describe("Feishu outbox streaming lifecycle", () => {
           posts.push(markdown);
         },
         createStreamingCard: async () => {
-          throw new Error("stream failed");
+          throw new FeishuMessageError("card-create-failed", "stream failed");
         },
       },
       pino({ level: "silent" }),
@@ -514,6 +866,7 @@ describe("Feishu outbox streaming lifecycle", () => {
     await vi.advanceTimersByTimeAsync(300);
     await Promise.resolve();
     outbox.handle(delta("正文"));
+    await vi.advanceTimersByTimeAsync(300);
     outbox.handle(completed({}, "部分正文", "item-1"));
     await outbox.close();
 
@@ -521,6 +874,8 @@ describe("Feishu outbox streaming lifecycle", () => {
       "7355372766134157313",
       2,
       "部分",
+      undefined,
+      expect.any(AbortSignal),
     );
     expect(posts).toEqual(["部分正文"]);
   });
@@ -574,6 +929,8 @@ describe("Feishu outbox streaming lifecycle", () => {
       "7355372766134157313",
       3,
       "部分正文继续",
+      undefined,
+      expect.any(AbortSignal),
     );
     expect(posts).toEqual([]);
   });

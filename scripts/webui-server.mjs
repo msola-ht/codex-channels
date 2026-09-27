@@ -56,7 +56,7 @@ import {
   isHighRiskManagementPath,
   ManagementOperationError,
 } from "./webui-management-operations.mjs";
-import { routeTrafficApi } from "./webui-traffic-route.mjs";
+import { dumpReferenceKey, readDumpUpstreamProviders, routeTrafficApi } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -91,7 +91,6 @@ const requestSortKeys = {
   output: "outputTokens",
   reasoningOutput: "reasoningOutputTokens",
   totalDuration: "totalDurationMs",
-  tokensPerSecond: "tokensPerSecond",
 };
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGE_VERSION = readJsonMetadata(join(PACKAGE_DIR, "package.json"))?.version ?? null;
@@ -455,7 +454,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     return;
   }
   if (apiPath === "/requests") {
-    handleRequests(environment, url, response);
+    await handleRequests(environment, url, response);
     return;
   }
   if (apiPath === "/requests/export") {
@@ -463,7 +462,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     return;
   }
   if (apiPath === "/errors") {
-    handleErrors(environment, url, response);
+    await handleErrors(environment, url, response);
     return;
   }
   if (apiPath === "/settings/summary") {
@@ -599,7 +598,7 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   }
 }
 
-function handleRequests(environment, url, response) {
+async function handleRequests(environment, url, response) {
   if (url.searchParams.has("afterId")) {
     throw new ApiError(
       400,
@@ -630,7 +629,7 @@ function handleRequests(environment, url, response) {
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      records: page.records,
+      records: await attachUpstreamProviders(environment, page.records),
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
       aggregate: page.aggregate,
@@ -638,6 +637,23 @@ function handleRequests(environment, url, response) {
   } finally {
     store.close();
   }
+}
+
+/**
+ * 请求明细与错误列表共用的按需关联：按记录的 `traffic` 读取同批次调用记录里的 Chat 上游提供商。
+ * 调用记录缺失、批次已清理或读取失败时原记录照常返回，不阻断指标页，也不回填历史。
+ */
+async function attachUpstreamProviders(environment, records) {
+  if (records.length === 0) return records;
+  const providers = await readDumpUpstreamProviders(
+    environment,
+    records.map((record) => record.traffic),
+  );
+  return records.map((record) => {
+    const key = dumpReferenceKey(record.traffic);
+    const upstreamProvider = key === null ? undefined : providers.get(key);
+    return upstreamProvider === undefined ? record : { ...record, upstreamProvider };
+  });
 }
 
 function handleRequestsExport(environment, url, response) {
@@ -664,7 +680,7 @@ function handleRequestsExport(environment, url, response) {
   }
 }
 
-function handleErrors(environment, url, response) {
+async function handleErrors(environment, url, response) {
   const range = parseRange(url);
   const filters = parseMetricsFilters(url);
   const sort = parseRequestSort(url);
@@ -691,7 +707,7 @@ function handleErrors(environment, url, response) {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
       errors: queries.errors(range, filters),
-      records: page.records,
+      records: await attachUpstreamProviders(environment, page.records),
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
       aggregate: page.aggregate,
@@ -806,7 +822,7 @@ function parseThreadQuery(url, threadId) {
   const sortKeys = threadId === undefined
     ? ["time", "last", "thread", "provider", "model", "turns", "requests", "input", "output", "compact"]
     : ["time", "last", "turn", "provider", "model", "requests", "failures", "input", "output", "compact"];
-  if (![...sortKeys, "tokensPerSecond"].includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
+  if (!sortKeys.includes(sortKey)) throw new ApiError(400, "invalid_sort", "不支持该会话排序字段");
   if (!["asc", "desc"].includes(sortDirection)) throw new ApiError(400, "invalid_direction", "direction 只支持 asc 或 desc");
   return {
     ...parseMetricsFilters(url, threadId),

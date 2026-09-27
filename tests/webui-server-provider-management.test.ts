@@ -1,3 +1,4 @@
+import { GatewayAccountRefreshError, GatewayAccountRefreshServer } from "../runtime/gateway-account-refresh.mjs";
 import { clinePassAccountsFilePath } from "../runtime/cline-pass-accounts.mjs";
 import {createResponsesModelCatalog} from "../runtime/model-provider-responses-catalog.mjs";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -43,6 +44,52 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("keeps upstream authentication failure at HTTP 502 across real refresh IPC", async () => {
+    const fixture = createFixture();
+    const ipc = new GatewayAccountRefreshServer(join(fixture.home, "config.toml"), async () => {
+      throw new GatewayAccountRefreshError("refresh_failed", "secret upstream response", { reason: "authentication" });
+    });
+    await ipc.start();
+    try {
+      const managementOrigin = "http://127.0.0.1:0";
+      const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+      const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, {
+        method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ provider: "clp-main" }),
+      });
+      expect(response.status).toBe(502);
+      expect(await response.json()).toMatchObject({ error: { code: "refresh_failed", message: "账户认证失败，请检查配置" } });
+    } finally { await ipc.close(); }
+  });
+
+  it("propagates browser disconnect through HTTP and real IPC to the account query", async () => {
+    const fixture = createFixture();
+    let upstream: AbortSignal | undefined;
+    let ready!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const ipc = new GatewayAccountRefreshServer(join(fixture.home, "config.toml"), (_provider, signal) => {
+      upstream = signal;
+      ready();
+      return new Promise<boolean>(() => {});
+    });
+    await ipc.start();
+    try {
+      const managementOrigin = "http://127.0.0.1:0";
+      const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+      const controller = new AbortController();
+      const request = fetch(`${origin}/api/v1/management/accounts/refresh`, {
+        method: "POST", signal: controller.signal,
+        headers: { origin: managementOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ provider: "clp-main" }),
+      });
+      const rejected = expect(request).rejects.toMatchObject({ name: "AbortError" });
+      await started;
+      controller.abort();
+      await rejected;
+      await vi.waitFor(() => expect(upstream?.aborted).toBe(true));
+    } finally { await ipc.close(); }
+  });
+
   it("refreshes Cline quota and hides retained snapshots after configuration removal", async () => {
     const fixture = createFixture();
     new SqliteModelRequestMetricsStore(fixture.databasePath).close();
@@ -636,6 +683,7 @@ describe("webui server Provider and account management", () => {
     expect(refreshGatewayAccount).toHaveBeenCalledWith(
       join(fixture.home, "config.toml"),
       "deepseek",
+      expect.any(AbortSignal),
     );
     expect(await response.json()).toMatchObject({
       snapshots: [{ provider: "deepseek", observedAtMs: 1_800_000_000_001 }],
