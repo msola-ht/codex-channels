@@ -37,3 +37,8 @@ export function isTelegramMissingMessage(error: unknown): boolean {
 export function isTelegramDeliveryUncertain(error: unknown): boolean {
   return !(error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500);
 }
+
+export function isTelegramMessageNotModified(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("message is not modified");
+}
