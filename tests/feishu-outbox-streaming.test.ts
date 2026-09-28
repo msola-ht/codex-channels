@@ -1190,11 +1190,7 @@ describe("Feishu outbox streaming lifecycle", () => {
     await outbox.close();
 
     expect(markdownCards).toEqual([turnCompletedMarkdown]);
-    expect(streamCount(outbox)).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
 });
-
-function streamCount(outbox: FeishuOutbox): number {
-  return (outbox as unknown as { streams: ReadonlyMap<string, unknown> }).streams.size;
-}
