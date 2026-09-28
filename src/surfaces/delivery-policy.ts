@@ -81,6 +81,39 @@ export function surfaceDeliveryCoalesceKey(
     : undefined;
 }
 
+/** Stateful keys for the live output chain; recovery buffers retain their latest-state policy. */
+export class SurfaceOutputCoalescer {
+  private readonly segments = new Map<string, { turn: string; key: string }>();
+  private sequence = 0;
+
+  constructor(private readonly capacity = 1_000) {
+    if (!Number.isSafeInteger(capacity) || capacity <= 0) throw new Error("思考分段容量必须是正整数");
+  }
+
+  readonly key = (event: OutputEvent): string | undefined => {
+    const conversation = JSON.stringify([event.target.surface, event.target.accountId, event.target.conversationId]);
+    const previous = this.segments.get(conversation);
+    this.segments.delete(conversation);
+    // Any intervening event in this Conversation is an ordering barrier.
+    if (event.type !== "turn.reasoning") return undefined;
+    const turn = JSON.stringify([event.threadId, event.turnId]);
+    const segment = previous?.turn === turn ? previous : undefined;
+    if (!event.final) {
+      if (this.segments.size >= this.capacity) {
+        this.segments.delete(this.segments.keys().next().value!);
+      }
+      this.segments.set(conversation, segment ?? { turn, key: `reasoning-segment:${++this.sequence}` });
+    }
+    // The first snapshot is never replaced; final can replace a waiting update, never the next segment.
+    // Eviction only reduces coalescing: a returning Conversation always starts a fresh key.
+    return segment?.key;
+  };
+
+  clear(): void {
+    this.segments.clear();
+  }
+}
+
 const backlogSheddableEventTypes: ReadonlySet<OutputEvent["type"]> =
   new Set<OutputEvent["type"]>([
     "turn.reasoning",
@@ -96,7 +129,7 @@ const backlogSheddableEventTypes: ReadonlySet<OutputEvent["type"]> =
   ]);
 
 /**
- * 渠道长时间不可用时，恢复缓冲超过硬上限后可以丢弃的事件。
+ * 渠道长时间不可用时，恢复缓冲超过减载阈值后可以丢弃的事件。
  *
  * 只覆盖过程、状态与生命周期通知：它们描述的是"发生过什么"，重新连接后不影响用户
  * 对结果的判断。最终回答、Turn 完成、操作终态、子代理完成、MCP 授权结果、警告和全局

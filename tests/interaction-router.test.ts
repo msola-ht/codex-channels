@@ -45,6 +45,71 @@ class ControlledInteraction implements InteractionPort {
 }
 
 describe("InteractionRouter", () => {
+  it("rejects a decision past the monotonic deadline even before the timer callback runs", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    try {
+      const decision = router.request(target, approvalInteractionRequest({ expiresInMs: 100 }));
+      clock.mockReturnValue(101);
+      port.resolveNext({ type: "approval", approved: true, scope: "session" });
+      await expect(decision).resolves.toMatchObject({ approved: false });
+      expect(router.hasPendingForThread("thread-1")).toBe(false);
+    } finally {
+      router.cancelAll();
+      clock.mockRestore();
+    }
+  });
+
+  it("expires queued work without dispatching it and ignores a late active approval", async () => {
+    vi.useFakeTimers();
+    const port = new ControlledInteraction();
+    const resolved = vi.fn();
+    Object.assign(port, { resolved });
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    try {
+      const active = router.request(target, approvalInteractionRequest({ requestId: "active", expiresInMs: 100 }));
+      const queued = router.request(target, approvalInteractionRequest({ requestId: "queued", expiresInMs: 50 }));
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(queued).resolves.toMatchObject({ approved: false });
+      expect(port.requests.map((request) => request.requestId)).toEqual(["active"]);
+      expect(resolved).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(active).resolves.toMatchObject({ approved: false });
+      expect(resolved).toHaveBeenCalledExactlyOnceWith("active");
+      port.resolveNext({ type: "approval", approved: true, scope: "session" });
+      await Promise.resolve();
+      expect(router.hasPendingForThread("thread-1")).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      router.cancelAll();
+      vi.useRealTimers();
+    }
+  });
+
+  it("passes only the remaining lifetime to the Surface after queueing", async () => {
+    vi.useFakeTimers();
+    const port = new ControlledInteraction();
+    const router = new InteractionRouter();
+    router.register("telegram", "default", port);
+    try {
+      const first = router.request(target, approvalInteractionRequest({ requestId: "first", expiresInMs: 100 }));
+      const second = router.request(target, approvalInteractionRequest({ requestId: "second", expiresInMs: 100 }));
+      await vi.advanceTimersByTimeAsync(40);
+      port.resolveNext({ type: "approval", approved: false });
+      await first;
+      expect(port.requests[1]?.expiresInMs).toBe(60);
+      await vi.advanceTimersByTimeAsync(60);
+      await expect(second).resolves.toMatchObject({ approved: false });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      router.cancelAll();
+      vi.useRealTimers();
+    }
+  });
+
   it("removes a whole cancellation batch before dispatching unaffected queued work", async () => {
     const port = new ControlledInteraction();
     const router = new InteractionRouter();

@@ -12,6 +12,7 @@ import {
 import type { EventBus } from "../event-bus/index.js";
 import {
   ConversationDeliveryQueue,
+  SurfaceOutputCoalescer,
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
@@ -105,6 +106,7 @@ export class SurfaceManager {
   private acceptingOutput = true;
   private stopping = false;
   private readonly accountQueriesAbort = new AbortController();
+  private readonly outputCoalescer = new SurfaceOutputCoalescer();
 
   constructor(
     private readonly surfaces: readonly SurfaceAdapter[],
@@ -263,6 +265,7 @@ export class SurfaceManager {
     this.stopping = true;
     this.accountQueriesAbort.abort();
     this.acceptingOutput = false;
+    this.outputCoalescer.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
     for (const runtime of this.runtimeBySurface.values()) {
@@ -461,7 +464,7 @@ export class SurfaceManager {
   }
 
   /**
-   * 恢复缓冲的硬上限。只丢弃过程、状态与生命周期输出，结果与错误始终保留，
+   * 恢复缓冲的减载阈值。只丢弃过程、状态与生命周期输出，结果与错误始终保留，
    * 因此长时间断线只会让过程通知缺席，不会丢掉最终回答或完成统计。
    * 返回 true 表示当前事件本身被丢弃。
    */
@@ -665,6 +668,7 @@ export class SurfaceManager {
     if (decision.disposition === "ignore") return;
     const runtime = this.requireRuntime(surface);
     const enqueuedAt = performance.now();
+    const coalesceKey = this.outputCoalescer.key(event);
     runtime.delivery.enqueue(event.target.conversationId, async () => {
       const started = performance.now();
       if (!this.active.has(surface)) {
@@ -688,7 +692,7 @@ export class SurfaceManager {
       } else if (event.type === "turn.completed") {
         this.logger.info(fields, "Surface 完成统计准备结束");
       }
-    }, decision.critical);
+    }, decision.critical, coalesceKey === undefined ? undefined : { coalesceKey });
   }
 
   private async deliverOne(

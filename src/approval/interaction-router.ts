@@ -16,6 +16,8 @@ interface QueuedInteraction {
   port: InteractionPort;
   queueKey: string;
   active: boolean;
+  deadline: number;
+  timer?: NodeJS.Timeout;
   resolve(decision: InteractionDecision): void;
   reject(error: unknown): void;
 }
@@ -79,6 +81,10 @@ export class InteractionRouter implements InteractionPort {
     target: ConversationTarget,
     request: InteractionRequest,
   ): Promise<InteractionDecision> {
+    if (!Number.isFinite(request.expiresInMs) || request.expiresInMs <= 0 || request.expiresInMs > 2_147_483_647) {
+      this.warnRejected(target, request, "invalid-interaction-lifetime");
+      return Promise.resolve(safeInteractionDecision(request));
+    }
     const portKey = this.key(target.surface, target.accountId);
     const port = this.ports.get(portKey);
     if (port) {
@@ -103,17 +109,20 @@ export class InteractionRouter implements InteractionPort {
         this.queues.set(queueKey, queue);
       }
       const decision = new Promise<InteractionDecision>((resolve, reject) => {
-        const queued = {
+        const queued: QueuedInteraction = {
           target,
           request,
           port,
           queueKey,
           active: false,
+          deadline: performance.now() + request.expiresInMs,
           resolve,
           reject,
         };
         queue.entries.push(queued);
         this.pendingByRequestId.set(request.requestId, queued);
+        queued.timer = setTimeout(() => this.expire(queued), request.expiresInMs);
+        queued.timer.unref();
       });
       this.dispatchNext(queueKey, queue);
       return decision;
@@ -178,6 +187,7 @@ export class InteractionRouter implements InteractionPort {
     const queues = new Map<string, ConversationInteractionQueue>();
     // Remove the entire batch before advancing any Conversation or calling a Surface.
     for (const queued of cancelled) {
+      clearTimeout(queued.timer);
       this.pendingByRequestId.delete(queued.request.requestId);
       const queue = this.queues.get(queued.queueKey);
       if (queue) {
@@ -210,6 +220,12 @@ export class InteractionRouter implements InteractionPort {
     }
   }
 
+  private expire(queued: QueuedInteraction): void {
+    if (this.pendingByRequestId.get(queued.request.requestId) !== queued) return;
+    this.warnRejected(queued.target, queued.request, "interaction-deadline-exceeded");
+    this.cancelMatching((candidate) => candidate === queued);
+  }
+
   private key(surface: SurfaceId, accountId: string): string {
     return surfaceAccountKey(surface, accountId);
   }
@@ -234,7 +250,7 @@ export class InteractionRouter implements InteractionPort {
         conversationId: target.conversationId,
         reason,
       },
-      "Codex 交互请求未进入 Surface 队列，已安全拒绝",
+      "Codex 交互请求已安全拒绝或取消",
     );
   }
 
@@ -251,9 +267,20 @@ export class InteractionRouter implements InteractionPort {
       return;
     }
     queue.active = next;
+    const remainingMs = next.deadline - performance.now();
+    if (remainingMs <= 0) {
+      this.expire(next);
+      return;
+    }
     next.active = true;
     const complete = (settle: () => void): void => {
       if (this.pendingByRequestId.get(next.request.requestId) === next) {
+        // A late platform callback may run before an overdue timer after event-loop congestion.
+        if (performance.now() >= next.deadline) {
+          this.expire(next);
+          return;
+        }
+        clearTimeout(next.timer);
         this.pendingByRequestId.delete(next.request.requestId);
         settle();
       }
@@ -263,7 +290,10 @@ export class InteractionRouter implements InteractionPort {
       }
     };
     try {
-      void next.port.request(next.target, next.request).then(
+      void next.port.request(next.target, {
+        ...next.request,
+        expiresInMs: Math.ceil(remainingMs),
+      }).then(
         (decision) => complete(() => next.resolve(decision)),
         (error: unknown) => complete(() => next.reject(error)),
       );

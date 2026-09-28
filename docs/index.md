@@ -197,7 +197,10 @@ Default 执行模式的等待提问只作隔离能力探测，不属于 Gateway 
 [`features/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/features/src/lib.rs)
 将 `default_mode_request_user_input` 标记为开发中且默认关闭。
 Client 验证并保留 `isBlocking`，Approval 呈现阻塞或可跳过问题；渠道有效期使用现有配置，
-不再由已弃用的 `autoResolutionMs` 控制。原生 TUI 的非阻塞自动跳过及输入暂停机制见
+不再由已弃用的 `autoResolutionMs` 控制。`InteractionRouter` 从接收请求开始统一约束排队、渠道准备和答复期限，
+超时沿现有交互取消路径返回安全决定；三渠道 Outbox 链路由 `tests/interaction-cancellation.test.ts` 验证，
+真实 MCP 准备期超时由 `tests/real-app-server-isolated-state.test.ts` 的 `deadline` 合同验证。
+原生 TUI 的非阻塞自动跳过及输入暂停机制见
 [`request_user_input/mod.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/tui/src/bottom_pane/request_user_input/mod.rs)，
 与渠道的差异见[等待式问题](display.md#等待式问题)。
 探测入口为 `RUN_CODEX_CONTRACT=1 npx vitest run tests/real-app-server-supervised-tools.test.ts -t 'probes Default-mode user input'`，

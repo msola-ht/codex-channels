@@ -27,6 +27,7 @@ export {
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
+  SurfaceOutputCoalescer,
 } from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,

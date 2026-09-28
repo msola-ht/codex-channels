@@ -891,7 +891,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
-  it.each(["channel", "thread"] as const)("cancels a real MCP approval while the %s interaction is still preparing", async (scope) => {
+  it.each(["channel", "thread", "deadline"] as const)("cancels a real MCP approval while the %s interaction is still preparing", async (scope) => {
     const { thread } = await ownerClient.startThread(workdir);
     const target = { surface: "telegram" as const, accountId: "contract", conversationId: "approval-cancel" };
     const store = new MemoryBindingStore();
@@ -904,7 +904,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     const preparing = vi.fn(() => new Promise<InteractionDecision>((resolveDecision) => { release = resolveDecision; }));
     const resolved = vi.fn();
     interactions.register("telegram", "contract", { request: preparing, resolved });
-    const coordinator = new ApprovalCoordinator(router, interactions, 5_000);
+    const coordinator = new ApprovalCoordinator(router, interactions, scope === "deadline" ? 200 : 5_000);
     ownerClient.setServerRequestHandler((request) => handleApprovalServerRequest(request, coordinator));
     try {
       const response = ownerRpc.request<{ content: Array<{ text?: unknown }>; isError?: boolean }>({
@@ -913,7 +913,7 @@ contractSuite("isolated Codex App Server state contract", () => {
       } as never);
       await waitFor(() => preparing.mock.calls.length === 1, 5_000);
       if (scope === "channel") interactions.setAvailable("telegram", "contract", false);
-      else interactions.cancelThreads(new Set([thread.id]));
+      else if (scope === "thread") interactions.cancelThreads(new Set([thread.id]));
       const result = await response;
       expect(result.isError).toBe(false);
       expect(JSON.parse(String(result.content[0]?.text)).action).toBe("cancel");

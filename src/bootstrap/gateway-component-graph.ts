@@ -113,6 +113,7 @@ import {
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
+  SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
 import { AsyncQuestionCoordinator } from "./async-question-coordinator.js";
@@ -310,7 +311,7 @@ export abstract class GatewayComponentGraph {
       },
     );
     this.inbound = new EventBus<RpcNotification>(logger, 2_000);
-    this.output = new EventBus<OutputEvent>(logger, 1_000);
+    this.output = new EventBus<OutputEvent>(logger, 1_000, new SurfaceOutputCoalescer().key);
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),

@@ -25,6 +25,7 @@ export class EventBus<T> {
   constructor(
     private readonly logger: Logger,
     private readonly defaultCapacity = 1_000,
+    private readonly coalesceKey?: (event: T) => string | undefined,
   ) {}
 
   subscribe(
@@ -60,8 +61,10 @@ export class EventBus<T> {
   }
 
   publish(event: T, critical = false): void {
+    if (this.closed) return;
+    const key = this.coalesceKey?.(event);
     for (const subscription of this.subscriptions) {
-      if (!subscription.queue.push({ event, enqueuedAt: performance.now() }, critical)) {
+      if (!subscription.queue.push({ event, enqueuedAt: performance.now() }, critical, key)) {
         this.logger.warn({ consumer: subscription.name, critical }, "事件队列已满，事件未入队");
       }
     }
