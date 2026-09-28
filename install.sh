@@ -152,6 +152,9 @@ print_next_steps() {
   fi
 }
 
+node "$staging/repository/scripts/sandbox-dependencies.mjs" \
+  || fail "沙盒运行依赖检查或安装失败"
+
 note "正在安装依赖并构建 Gateway"
 (cd "$staging/repository" \
   && npm ci --no-audit --no-fund \

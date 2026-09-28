@@ -20,6 +20,14 @@ Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完�
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
+`install.sh` 与 `npm run install:global` 共用沙盒运行依赖检查，无需先初始化渠道：
+
+- macOS 检查系统自带的 `/usr/bin/sandbox-exec`，无需安装 bubblewrap；缺失时明确失败并提示修复系统组件。
+- Linux 优先复用系统 `bwrap`；缺失时通过 apt-get（Debian/Ubuntu）或 dnf（Fedora/RHEL）安装 `bubblewrap`。root 直接安装，普通用户使用 `sudo -n`；没有管理员授权、包管理器不支持、安装失败或安装后 PATH 仍不可见时，停止安装并给出手工命令。安装器不更新包索引、不自动提权询问密码。
+- 检查 `bwrap --help` 的 `--perms` 能力，与锁定 Codex 的系统 launcher 要求一致。此步骤确认运行依赖，不保证容器、内核、AppArmor 等系统策略允许实际沙盒启动，也不会关闭沙盒或修改这些策略。
+
+锁定 Codex 在 Linux 还支持随 CLI 分发的内置 bubblewrap 回退；本项目源码安装会主动准备系统版本，`codexc doctor` 继续只读报告。Windows 不执行 Linux 依赖安装，也不自动创建沙盒用户或改变 Windows 沙盒配置。
+
 Windows PowerShell 7 使用仓库根目录的安装器：
 
 ```powershell

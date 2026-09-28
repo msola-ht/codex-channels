@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 
 import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
+import { ensureSandboxDependencies } from "./sandbox-dependencies.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const webuiDir = join(packageDir, "webui");
@@ -23,6 +24,7 @@ const prepared = alreadyPrepared
 const webuiBuilt = prepared === 0 && !alreadyPrepared ? buildWebui() : prepared;
 if (prepared === 0 && webuiBuilt === 0) {
   ensureCodexCli();
+  ensureSandboxDependencies();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
     const tarballPath = packSource(temporaryDirectory);

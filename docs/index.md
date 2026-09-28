@@ -89,6 +89,8 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 按已安装包的精确 CLI 基线完成临时候选公开合同校验、确认安装与服务恢复，验证见
 [`source-update.test.ts`](../tests/source-update.test.ts)。默认 CLI 缺失也进入确认安装流程，显式 `CODEX_BINARY` 无效时拒绝。首次本地源码安装由 [`install-global-source.mjs`](../scripts/install-global-source.mjs) 在注册 Gateway 前补装协议锁定的缺失 CLI，不依赖渠道初始化；验证见 [`source-install.test.ts`](../tests/source-install.test.ts)。
 
+安装阶段的系统沙盒依赖由 [`sandbox-dependencies.mjs`](../scripts/sandbox-dependencies.mjs) 统一检查，验证同上：macOS 固定系统入口依据 [`seatbelt.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/sandboxing/src/seatbelt.rs)，Linux 系统 `bwrap` 能力与内置回退依据 [`launcher.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/linux-sandbox/src/launcher.rs)。只处理 OS 依赖，不增加 App Server RPC 或权限配置能力。
+
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。
 2. [Codex 开源组件](https://learn.chatgpt.com/docs/open-source)：官方开源范围和仓库入口。
