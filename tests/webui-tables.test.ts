@@ -59,7 +59,7 @@ describe("WebUI metrics table presentation", () => {
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
         const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
         const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
-          state: "completed", durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
+          state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
             content: { instructions: null, input: [], tools: [] } }, response: null,
@@ -104,6 +104,8 @@ describe("WebUI metrics table presentation", () => {
           outputToken: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: 5 }),
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
           traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]) }),
+          trafficFirstZero: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: 0 }], onOpen: noop }),
+          trafficFirstMissing: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: undefined }], onOpen: noop }),
           trafficCountsLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
           trafficCountsFailed: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), "fixture count failure"]]) }),
           trafficCountsPartial: render(TrafficTable, { exchanges: [exchange, { ...exchange, id: 8 }], onOpen: noop,
@@ -663,7 +665,8 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "模型", "状态", "首 Token", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(markup.traffic).toContain("100 ms");
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
     expect(markup.trafficCountsLoading).toContain("的调用明细");
@@ -680,6 +683,12 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficLoading).toContain('data-slot="skeleton"');
     expect(markup.trafficLoading).not.toContain("model-test");
     expect(markup.trafficLoading).not.toContain("的调用明细");
+  });
+
+  it("distinguishes zero first-token latency from an unrecorded value", () => {
+    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][4]?.[1];
+    expect(cell(markup.trafficFirstZero!)).toBe("0 ms");
+    expect(cell(markup.trafficFirstMissing!)).toBe("—");
   });
 
   it("structures call overview, response, request and folded diagnostics without guessing live state", () => {

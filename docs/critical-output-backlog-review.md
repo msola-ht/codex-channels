@@ -1,6 +1,6 @@
 # 关键输出积压链路审查
 
-状态：关键终态有限磁盘投递已实现，飞书和 Telegram 已完成各自限定范围的实机验收；2026-09-28 前轮三项问题及后续发现的 TG 正常终态被误判未知、飞书旧流卡片绕过当前目标两项 P1，均已完成工作区修复及关联回归。最新一轮覆盖真实临时 Journal、Worker、EventBus、SurfaceManager、渠道 Outbox 和隔离平台端口，24 个文件、564 项通过；证据与限制见文末最新修复记录。本轮改动尚未部署，生产验收仍限于此前已部署版本。最新提交基线、隔离验证及剩余缺口统一见[当前验收跟踪](#当前验收跟踪)，渠道结论见[验收矩阵](channel-acceptance-matrix.md)。模块结构结论见[模块审查记录](modularity-review.md)，当前运维合同以[投递箱运维](delivery.md)为准。
+状态：关键终态有限磁盘投递已实现，飞书和 Telegram 已完成各自限定范围的实机验收；2026-09-28 前轮三项问题及后续发现的 TG 正常终态被误判未知、飞书旧流卡片绕过当前目标两项 P1，均已修复并提交为 `f7dc13b2`，正常提交门禁 4,673 项通过、99 项跳过。最新一轮覆盖真实临时 Journal、Worker、EventBus、SurfaceManager、渠道 Outbox 和隔离平台端口，24 个文件、564 项通过；证据与限制见文末最新修复记录。用户已完成分支部署重启；本轮关键安装模块核对一致，飞书长文独立投递实例的预览、附件及后续消息顺序已再次获得客户端确认，生产对话短正文投递正常。验收范围与剩余缺口见文末部署验收记录。最新提交基线、隔离验证及剩余缺口统一见[当前验收跟踪](#当前验收跟踪)，渠道结论见[验收矩阵](channel-acceptance-matrix.md)。模块结构结论见[模块审查记录](modularity-review.md)，当前运维合同以[投递箱运维](delivery.md)为准。
 
 ## 当前结论与历史记录边界
 
@@ -484,3 +484,16 @@ PR #195 的首轮 Linux/macOS CI 在 Node 22.13.0 发现两项失败。本地同
 #### 提交前关联复查（2026-09-28）
 
 再次核对 EventBus 同步观察、SurfaceManager 持久与临时状态调度、队列取消和预算释放、平台回执、TG/飞书缓存归属与恢复路径，以及相关模块文档和测试覆盖，未发现新的阻断提交问题。保留前轮 24 个文件、564 项关联验证证据；本次正常提交由 `.githooks/pre-commit` 执行完整 `verify:commit` 门禁，不跳过或降级检查。提交范围仅包含本轮链路修复及其测试、文档，独立的 Provider 转发草案和 HTML 文件不纳入。
+
+
+### 分支部署后的飞书验收（2026-09-28）
+
+用户明确已部署分支并重启，随后授权在当前飞书会话验收。本轮未再次部署或重启，不修改生产配置、绑定、投递记录，也未注入断网或进程中断。
+
+- 服务核对：Gateway 为 active/running，启动时间为 2026-09-28 04:49:32 PDT。安装目录中 `surface-manager`、`persistent-surface-output`、Delivery Coordinator、`snapshot-delivery`、`delivery-receipt`、飞书 Outbox/正文流和 `turn-reply-targets` 共 8 个关键构建文件，与当前 `f7dc13b2` 对应本地构建逐文件 SHA-256 相同；这是关键模块核验，不声称比对了完整安装目录。
+- 真实长文标识：`FEISHU-DEPLOY-20260928-03`。从已安装包加载实现，使用独立临时投递箱，经 `PersistentSurfaceOutput → Worker/Coordinator → FeishuOutbox → FeishuMessageClient` 向当前 Thread 的飞书目标发送合成 `final_answer`；发送前及检查点复核绑定、Workspace 和 Actor allowlist。没有绕过当前授权目标，也未向生产投递库注入合成事件。
+- 原文：001–300 共 300 行编号，30,992 字符、88,650 UTF-8 字节，最后一行为 `FEISHU-DEPLOY-20260928-03-END`。SHA-256 为 `183e3ff90f15f5343c4b30ee1f8e00302b94f5d4ebdf0289648158dec4407b4c`。
+- 平台结果：预览 `sendMarkdownCard` → 完整 `sendFile` → NEXT-OK `sendMarkdownCard` 均有 started/confirmed 检查点；faults 为空，独立投递箱最终 records/pending/sending/uncertain/blocked 全部为 0。
+- 客户端确认：用户明确回答“三项收到，顺序正确”“编号和末尾均完整”。据此确认本次安装版本的静态长文预览、完整附件和同一独立测试 Turn 内后续消息顺序通过；没有对客户端下载副本另作 SHA-256 比对。
+- 生产路径：当前对话发送 `FEISHU-DEPLOY-20260928-03-PROD-OK` 短正文标记。该轮 commentary 消息在生产 Gateway 日志有 `text.completed` 投递完成记录；只读查询当前 Conversation 的生产投递库时未发现未确认记录。未使用会恢复状态或取得维护写锁的 `codexc delivery` 命令。
+- 限制：合成长文未经过 App Server Reader/Core；当前生产短正文验证不能替代生产超长 `final_answer`、流式超限附件或真实故障验收。断线、限流、在途重启、跨会话切换、压缩开始通知仍以既有隔离测试为依据，本轮未实机注入。附件引用仍按用户要求暂缓。

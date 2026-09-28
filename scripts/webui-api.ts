@@ -866,6 +866,8 @@ export interface TrafficExchangeSummary {
   status?: number
   state: "completed" | "failed" | "incomplete" | "pending"
   durationMs?: number
+  /** 与调用详情同源的响应索引首 Token 延迟；缺失表示未记录或不适用。 */
+  firstTokenMs?: number
   hasError: boolean
   requestModel?: string
   responseModels: string[]

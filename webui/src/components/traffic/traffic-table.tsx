@@ -34,13 +34,16 @@ export function TrafficTable({
   const { t } = useTranslation()
   return (
     <div className="min-w-0">
-      <Table className="min-w-[960px]">
+      <Table className="min-w-[1040px]">
         <TableHeader>
           <TableRow>
             <TableHead>{t("metrics.time")}</TableHead>
             <TableHead>{t("metrics.provider")}</TableHead>
             <TableHead>{t("metrics.model")}</TableHead>
             <TableHead>{t("filters.status")}</TableHead>
+            <TableHead className="text-right whitespace-nowrap">
+              <TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint>
+            </TableHead>
             <TableHead className="text-right">{t("requests.durationColumn")}</TableHead>
             <TableHead className="text-right whitespace-nowrap">{t("traffic.turnStateColumn")}</TableHead>
             <TableHead>{t("metrics.type")}</TableHead>
@@ -49,7 +52,7 @@ export function TrafficTable({
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 8 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => {
@@ -83,6 +86,9 @@ export function TrafficTable({
                 {stateLabel(t, exchange.state)}
                 {exchange.hasError ? <Badge className="ml-2" variant="destructive">{t("traffic.hasError")}</Badge> : null}
               </TableCell>
+              <TableCell className="text-right whitespace-nowrap tabular-nums">
+                {exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}
+              </TableCell>
               <TableCell className="text-right tabular-nums">
                 {exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}
               </TableCell>
@@ -98,7 +104,7 @@ export function TrafficTable({
           )})}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
                 {t("traffic.empty")}
               </TableCell>
             </TableRow>
