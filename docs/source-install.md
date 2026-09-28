@@ -105,10 +105,12 @@ codexc update
 已有受管源码目录时直接使用 `codexc update`，不要重复运行安装器。
 
 同一版本号下的新提交仍会更新。受管源码没有新提交时，检查并按需同步配套 CLI、执行已安装版本的待完成数据库升级；两者都无需更新时不停止服务。npm 安装模式执行相同流程，不更新 Gateway npm 包。
-从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库，随后可执行 `codexc update` 同步配套 CLI。
-该安装模式会显示检查开始和完成结果；无需更新时明确提示配套 CLI 与数据库均无需更新。
+从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失时通过 npm 补装 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。已有 CLI 不静默升级或降级；版本不匹配时提示完成渠道配置后运行 `codexc update` 确认同步。显式 `CODEX_BINARY` 无效、CLI 无法执行、安装失败或安装后仍不可见时明确失败，不改用其他二进制。安装不自动登录或启动服务。
 
-候选源码完成构建和只读预检后，如其要求的 Codex CLI 版本与本机不一致，交互终端会显示当前版本和
+新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。旧版源码安装漏装 CLI 时，可先执行 `npm install -g @openai/codex@0.156.1` 补齐当前基线，再继续 Setup。
+本地构建包的 `codexc update` 会显示检查开始和完成结果；无需更新时明确提示配套 CLI 与数据库均无需更新。
+
+候选源码完成构建和只读预检后，如默认 Codex CLI 缺失或其要求的版本与本机不一致，交互终端会显示当前版本和
 目标版本，并询问是否现在全局安装精确的 `@openai/codex` 版本；提示为 `[Y/n]`，直接回车表示确认。
 确认后先把目标 CLI 安装到随候选源码一同清理的临时目录，以该二进制完成真实公开合同和用户设置
 检查；只有检查通过才修改全局 CLI 并继续同一次源码更新。输入 `N/n`、临时候选或全局安装失败、

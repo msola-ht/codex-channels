@@ -19,20 +19,23 @@ function fixture() {
 }
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
 
-it("provides exact short and long help paths and rejects unsafe syntax before creating data", () => {
+it.each(["-h", "--help"].flatMap((flag) =>
+  [[], ["status"], ["list"], ["retry"], ["confirm"]].map((path) => ({ args: [...path, flag] })),
+))("provides delivery help for $args without creating data", ({ args }) => {
   const { home, run } = fixture();
-  for (const flag of ["-h", "--help"]) {
-    for (const path of [[], ["status"], ["list"], ["retry"], ["confirm"]]) {
-      const result = run("delivery", ...path, flag);
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain("codexc delivery");
-    }
-  }
-  for (const args of [["retry", "id"], ["confirm", "id"], ["unknown", "--help"], ["status", "--help", "extra"]]) {
-    expect(run("delivery", ...args).status).toBe(1);
-  }
+  const result = run("delivery", ...args);
+  expect(result.status, result.stderr).toBe(0);
+  expect(result.stdout).toContain("codexc delivery");
   expect(existsSync(home)).toBe(false);
 });
+
+it.each([["retry", "id"], ["confirm", "id"], ["unknown", "--help"], ["status", "--help", "extra"]].map((args) => ({ args })))(
+  "rejects unsafe delivery syntax $args before creating data", ({ args }) => {
+    const { home, run } = fixture();
+    expect(run("delivery", ...args).status).toBe(1);
+    expect(existsSync(home)).toBe(false);
+  },
+);
 
 it("lists safe metadata, rejects concurrent maintenance and requires explicit retry or confirmation", () => {
   const { home, run } = fixture();

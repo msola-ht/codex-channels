@@ -82,7 +82,14 @@ export class SqliteDeliveryJournal {
       const proof = proofs[0];
       if (version !== deliverySchemaVersion || proofs.length !== 1 || proof?.version !== deliverySchemaVersion
         || this.decrypt(proof.proof as Uint8Array, proof.nonce as Uint8Array, proof.tag as Uint8Array, "metadata") !== "delivery-v1") throw new DeliveryError("storage");
-      for (const row of database.prepare("SELECT * FROM deliveries").iterate()) this.decode(row as unknown as Row);
+      // Keyset reads keep one payload in memory and retain the statement across
+      // calls; early Node 22 iterators can outlive their collected statement.
+      const recovery = database.prepare("SELECT * FROM deliveries WHERE sequence>? ORDER BY sequence LIMIT 1");
+      let sequence = 0;
+      for (let row = recovery.get(sequence); row; row = recovery.get(sequence)) {
+        this.decode(row as unknown as Row);
+        sequence = Number(row.sequence);
+      }
       // A network request may have succeeded before the previous process lost its acknowledgement.
       database.exec("UPDATE deliveries SET state='uncertain' WHERE state='sending'");
       // Only the single writer can clean interrupted, private render snapshots.
@@ -109,10 +116,13 @@ export class SqliteDeliveryJournal {
       case "submit": return this.submit(command.value);
       case "next": {
         const excluded = new Set(command.excluded);
-        for (const raw of this.database.prepare(`SELECT d.* FROM deliveries d WHERE d.state='pending'
+        const next = this.database.prepare(`SELECT d.* FROM deliveries d WHERE d.state='pending' AND d.sequence>?
           AND NOT EXISTS(SELECT 1 FROM deliveries p WHERE p.conversation=d.conversation AND p.sequence<d.sequence)
-          ORDER BY d.sequence`).iterate()) {
+          ORDER BY d.sequence LIMIT 1`);
+        let sequence = 0;
+        for (let raw = next.get(sequence); raw; raw = next.get(sequence)) {
           const row = raw as unknown as Row;
+          sequence = row.sequence;
           if (!excluded.has(row.conversation) && (!command.accounts || command.accounts.includes(row.account))) return this.decode(row);
         }
         return null;

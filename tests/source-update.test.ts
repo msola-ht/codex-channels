@@ -108,6 +108,41 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     ]);
   });
 
+  it("installs a missing default CLI through the confirmed candidate flow", async () => {
+    const fixture = createInstalledFixture("codexc-package-missing-cli-");
+    const bin = join(fixture.installRoot, "empty-bin");
+    mkdirSync(bin);
+    const environment = { ...fixture.environment, CODEX_BINARY: "", PATH: bin };
+    const calls: string[] = [];
+    await updateInstalledPackage(environment, {
+      projectDir: fixture.checkout,
+      inspectStaged: async () => ({ services: { installed: false }, databaseUpdatesRequired: false }),
+      confirmCodexCliInstall: (request) => {
+        expect(request).toEqual({ currentVersion: undefined, requiredVersion: "0.147.0" });
+        calls.push("confirm"); return true;
+      },
+      installCodexCliForValidation: (version) => {
+        calls.push("prepare"); return writeFakeCodex(join(fixture.installRoot, "candidate"), version);
+      },
+      validateCodexContract: () => { calls.push("validate"); },
+      installCodexCli: (version) => { calls.push("install"); writeFakeCodex(join(bin, "codex"), version); },
+      stopServices: () => { throw new Error("no installed service"); },
+      startServices: () => { throw new Error("no installed service"); },
+    });
+    expect(calls).toEqual(["confirm", "prepare", "validate", "install"]);
+  });
+
+  it("does not replace a missing explicitly configured Codex binary", async () => {
+    const fixture = createInstalledFixture("codexc-package-explicit-missing-");
+    let confirmed = false;
+    await expect(updateInstalledPackage({ ...fixture.environment, CODEX_BINARY: join(fixture.installRoot, "absent") }, {
+      projectDir: fixture.checkout,
+      inspectStaged: async () => ({ services: { installed: false }, databaseUpdatesRequired: false }),
+      confirmCodexCliInstall: () => { confirmed = true; return true; },
+    })).rejects.toThrow("CODEX_BINARY");
+    expect(confirmed).toBe(false);
+  });
+
   it("synchronizes Codex for a locally built global package with one service stop/start cycle", async () => {
     const fixture = createInstalledFixture("codexc-package-update-");
     writePackageVersion(fixture.checkout, "0.148.0");

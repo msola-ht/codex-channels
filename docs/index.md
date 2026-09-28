@@ -87,7 +87,7 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 本次图片接入增加一个认证响应导出和一个请求方法，审批种类没有增加；具体取舍见[升级决策记录](codex-cli-upgrade-decisions.md#01561)。
 本地构建或 Registry 包的 `codexc update` 由 [`source-update.mjs`](../scripts/source-update.mjs)
 按已安装包的精确 CLI 基线完成临时候选公开合同校验、确认安装与服务恢复，验证见
-[`source-update.test.ts`](../tests/source-update.test.ts)。
+[`source-update.test.ts`](../tests/source-update.test.ts)。默认 CLI 缺失也进入确认安装流程，显式 `CODEX_BINARY` 无效时拒绝。首次本地源码安装由 [`install-global-source.mjs`](../scripts/install-global-source.mjs) 在注册 Gateway 前补装协议锁定的缺失 CLI，不依赖渠道初始化；验证见 [`source-install.test.ts`](../tests/source-install.test.ts)。
 
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。

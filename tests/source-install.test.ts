@@ -552,3 +552,52 @@ function fixtureLock(name: string): string {
 function runGit(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
+
+
+describe.skipIf(process.platform === "win32")("local source install Codex bootstrap", () => {
+  it.each(["missing", "matching", "mismatch", "install-failed", "path-missing", "explicit-missing", "broken", "wrong-installed"])(
+    "handles %s CLI before registering Gateway without requiring init or a channel",
+    (mode) => {
+      const root = temporaryDirectory("codexc-local-bootstrap-");
+      for (const name of ["scripts", "runtime", "dist", "webui/dist", "src/codex-protocol", "bin"]) mkdirSync(join(root, name), { recursive: true });
+      for (const name of ["scripts/install-global-source.mjs", "scripts/package-path.mjs", "runtime/executable.mjs"]) copyFileSync(resolve(name), join(root, name));
+      writeFileSync(join(root, "tsconfig.build.json"), "{}");
+      writeFileSync(join(root, "dist/main.js"), "");
+      writeFileSync(join(root, "webui/dist/index.html"), "");
+      writeFileSync(join(root, "src/codex-protocol/version.json"), JSON.stringify({ codexCli: "codex-cli 0.156.1" }));
+      const log = join(root, "calls.jsonl");
+      const codex = join(root, "bin/codex");
+      const makeCli = (version: string) => `#!${process.execPath}\nconsole.log('codex-cli ${version}');\n`;
+      if (["matching", "mismatch", "broken"].includes(mode)) {
+        writeFileSync(codex, mode === "broken" ? `#!${process.execPath}\nprocess.exit(1);` : makeCli(mode === "matching" ? "0.156.1" : "0.155.0"), { mode: 0o755 });
+      }
+      const npm = join(root, "bin/npm");
+      writeFileSync(npm, `#!${process.execPath}
+        const fs = require('node:fs');
+        const args = process.argv.slice(2);
+        fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+        if (args.includes('@openai/codex@0.156.1')) {
+          if (${JSON.stringify(mode)} === 'install-failed') process.exit(1);
+          if (${JSON.stringify(mode)} !== 'path-missing') fs.writeFileSync(${JSON.stringify(codex)}, ${JSON.stringify(makeCli(mode === "wrong-installed" ? "0.155.0" : "0.156.1"))}, {mode: 0o755});
+        }
+        if (args[0] === 'pack') console.log(JSON.stringify([{filename:'fixture.tgz'}]));
+      `, { mode: 0o755 });
+      const result = spawnSync(process.execPath, [join(root, "scripts/install-global-source.mjs"), "--prepared"], {
+        cwd: root, encoding: "utf8", timeout: 10_000,
+        env: { ...process.env, PATH: join(root, "bin"), CODEX_BINARY: mode === "explicit-missing" ? join(root, "absent") : "", HOME: root },
+      });
+      const calls: string[][] = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]) : [];
+      const success = ["missing", "matching", "mismatch"].includes(mode);
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(success ? 0 : 1);
+      expect(calls.some((args) => args[0] === "pack")).toBe(success);
+      expect(calls.filter((args) => args.includes("@openai/codex@0.156.1"))).toHaveLength(
+        ["missing", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
+      );
+      if (mode === "mismatch") expect(result.stdout).toContain("保留已有 Codex CLI 0.155.0");
+      if (mode === "path-missing") expect(result.stderr).toContain("PATH");
+      if (mode === "explicit-missing") expect(result.stderr).toContain("CODEX_BINARY");
+      expect(existsSync(join(root, ".codex-connect"))).toBe(false);
+    },
+  );
+});

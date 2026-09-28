@@ -296,8 +296,8 @@ codexc update
 codexc doctor
 ```
 
-本地源码通过 `npm run install:global` 安装后，运行 `codexc update` 同步已安装包要求的
-Codex CLI。版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
+本地源码通过 `npm run install:global` 安装时，缺少 Codex CLI 会自动补装项目锁定版本，无需先初始化或配置渠道；随后执行 `codexc init`、`codexc setup`、`codexc service install`。已有 CLI 不被静默替换；完成渠道配置后可运行 `codexc update` 同步已安装包要求的版本。
+更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
 更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。当前数据库基线只校验、不写库；后续 Schema 变化随版本提供具体迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
