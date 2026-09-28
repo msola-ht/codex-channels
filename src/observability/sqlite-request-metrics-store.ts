@@ -1,7 +1,8 @@
-import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
+import { SqliteQuotaQueries } from "./sqlite-quota-queries.js";
+import { SqliteRequestMetricsQueries, validateThreadId } from "./sqlite-request-metrics-queries.js";
 
 import {
   securePrivateDirectorySync,
@@ -13,22 +14,7 @@ import {
   requestMetricsDatabasePath,
   type RequestMetricsDatabaseLock,
 } from "./request-metrics-database.js";
-import {
-  parseQuotaWindows,
-  toStoredCompactSummary,
-  toStoredMetric,
-  toStoredMetricsAggregate,
-  toStoredCacheUsage,
-  type CacheUsageRow,
-  toStoredMetricsGroup,
-  toStoredThreadAggregate,
-  toStoredTurnSummary,
-  type AggregateRow,
-  type ErrorGroupRow,
-  type ErrorSummaryRow,
-  type MetricRow,
-  type TurnSummaryRow,
-} from "./sqlite-request-metrics-row-codec.js";
+import { parseQuotaWindows } from "./sqlite-request-metrics-row-codec.js";
 import {
   ensureCurrentModelRequestMetricsSchema,
   metricStorageColumns,
@@ -38,28 +24,26 @@ import {
 
 import type {
   ModelRequestMetricSample,
-  ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
   ModelRequestMetricsPageQuery,
-  ModelRequestMetricsScope,
-  ModelRequestMetricsThreadQuery,
   ModelRequestMetricsStore,
+  ModelRequestMetricsThreadQuery,
+  QuotaHistoryQuery,
   StoredModelRequestMetric,
   StoredModelRequestMetricsDailyRow,
-  StoredModelRequestMetricsHourlyRow,
   StoredModelRequestMetricsErrorReport,
+  StoredModelRequestMetricsHourlyRow,
   StoredModelRequestMetricsPage,
   StoredModelRequestMetricsReport,
-  StoredThreadRequestMetricsSummary,
-  StoredThreadListPage,
-  StoredThreadTurnsPage,
+  StoredQuotaPeriod,
   StoredSubagentThreadRecord,
+  StoredThreadListPage,
+  StoredThreadRequestMetricsSummary,
+  StoredThreadTurnsPage,
   StoredTurnRequestMetricsSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
-  QuotaHistoryQuery,
-  StoredQuotaPeriod,
   WeeklyQuotaEstimateQuery,
 } from "./request-metrics.js";
 
@@ -67,80 +51,14 @@ const dayMs = 24 * 60 * 60 * 1_000;
 const defaultRetentionDays = 365;
 const defaultMaximumRows = 1_000_000;
 const cleanupInterval = 100;
-const maximumAggregationGroups = 20;
-const pageSortSql = {
-  recordedAtMs: "recorded_at_ms",
-  provider: "provider",
-  model: "model",
-  operation: "operation",
-  status: "status",
-  httpStatus: "http_status",
-  error: "COALESCE(error_type, error_code, '')",
-  inputTokens: "input_tokens",
-  outputTokens: "output_tokens",
-  reasoningOutputTokens: "reasoning_output_tokens",
-  totalDurationMs: "total_duration_ms",
-} as const;
-const observableCompletionSql = `
-  status = 'completed'
-  AND NOT (
-    response_format = 'unknown'
-    AND model IS NULL
-    AND input_tokens IS NULL
-    AND output_tokens IS NULL
-    AND total_tokens IS NULL
-  )
-`;
-const compactAggregateSql = `
-  COUNT(CASE WHEN operation = 'compact' THEN 1 END) AS compact_request_count,
-  SUM(CASE WHEN operation = 'compact' AND NOT (${observableCompletionSql})
-    THEN 1 ELSE 0 END) AS compact_unsuccessful_request_count,
-  MIN(CASE WHEN operation = 'compact' THEN model END) AS compact_model,
-  COUNT(DISTINCT CASE WHEN operation = 'compact' THEN model END)
-    AS compact_model_count,
-  SUM(CASE WHEN operation = 'compact' THEN input_tokens END)
-    AS compact_input_tokens,
-  SUM(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
-    AS compact_cached_input_tokens,
-  COUNT(CASE WHEN operation = 'compact' THEN input_tokens END)
-    AS compact_input_token_count,
-  COUNT(CASE WHEN operation = 'compact' THEN cached_input_tokens END)
-    AS compact_cached_input_token_count,
-  SUM(CASE WHEN operation = 'compact' THEN output_tokens END)
-    AS compact_output_tokens
-`;
-const normalizedStatusSql = `
-  CASE
-    WHEN status = 'completed'
-      AND response_format = 'unknown'
-      AND model IS NULL
-      AND input_tokens IS NULL
-      AND output_tokens IS NULL
-      AND total_tokens IS NULL
-      THEN 'incomplete'
-    ELSE status
-  END
-`;
-const cacheUsageSql = `
-  SUM(CASE WHEN input_tokens IS NOT NULL THEN cached_input_tokens END) AS known_cached_input_tokens,
-  SUM(CASE WHEN cached_input_tokens IS NOT NULL THEN input_tokens END) AS cache_observed_input_tokens,
-  SUM(CASE WHEN input_tokens IS NULL OR cached_input_tokens IS NULL THEN 1 ELSE 0 END) AS cache_missing_request_count
-`;
-const metricsAggregateSql = `
-  ${cacheUsageSql},
-  COUNT(*) AS request_count,
-  SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END) AS unsuccessful_request_count,
-  SUM(input_tokens) AS input_tokens,
-  SUM(cached_input_tokens) AS cached_input_tokens,
-  COUNT(input_tokens) AS input_token_count,
-  COUNT(cached_input_tokens) AS cached_input_token_count,
-  SUM(output_tokens) AS output_tokens,
-  SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-  ${compactAggregateSql}
-`;
 
 export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore {
   private readonly database: DatabaseSync;
+  private readonly queries = new SqliteRequestMetricsQueries({
+    prepare: (sql) => this.database.prepare(sql),
+    iterateRows: (sql, ...parameters) => this.iterateRows(sql, ...parameters),
+    requireOpen: () => this.requireOpen(),
+  });
   private readonly quotaQueries = new SqliteQuotaQueries({
     prepare: (sql) => this.database.prepare(sql),
     iterateRows: (sql, ...parameters) => this.iterateRows(sql, ...parameters),
@@ -396,14 +314,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   }
 
   recent(limit: number): StoredModelRequestMetric[] {
-    this.requireOpen();
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
-      throw new Error("模型请求指标查询数量必须在 1 到 500 之间");
-    }
-    const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics ORDER BY id DESC LIMIT ?
-    `).all(limit) as unknown as MetricRow[];
-    return rows.map(toStoredMetric);
+    return this.queries.recent(limit);
   }
 
   weeklyQuotaEstimate(query: WeeklyQuotaEstimateQuery): StoredWeeklyQuotaEstimate | null {
@@ -502,107 +413,21 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       quotaWindows: ReturnType<typeof parseQuotaWindows>;
     }) => void,
   ): void {
-    this.requireOpen();
-    validateMetricsTimeRange(query);
-    if (!query.provider || query.provider.length > 128) {
-      throw new Error("模型请求指标 Provider 无效");
-    }
-    const rows = this.iterateRows(`
-      SELECT request_started_at_ms, recorded_at_ms, input_tokens,
-        output_tokens, total_tokens, quota_windows
-      FROM model_request_metrics
-      WHERE provider = ?
-        AND recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-      ORDER BY recorded_at_ms ASC, id ASC
-    `, query.provider, query.startAtMs, query.endAtMs);
-    for (const rawRow of rows) {
-      const row = rawRow as {
-        request_started_at_ms: number;
-        recorded_at_ms: number;
-        input_tokens: number | null;
-        output_tokens: number | null;
-        total_tokens: number | null;
-        quota_windows: string | null;
-      };
-      visit({
-        requestStartedAtMs: row.request_started_at_ms,
-        recordedAtMs: row.recorded_at_ms,
-        inputTokens: row.input_tokens,
-        outputTokens: row.output_tokens,
-        totalTokens: row.total_tokens,
-        quotaWindows: parseQuotaWindows(row.quota_windows),
-      });
-    }
+    return this.queries.forEachProviderTokenMetric(query, visit);
   }
 
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
-    this.requireOpen();
-    const scope = metricsScopeSql(query);
-    const offset = metricsPageOffset(query);
-    const sortKey = query.sortKey ?? "recordedAtMs";
-    const sortDirection = query.sortDirection ?? "desc";
-    const sortExpression = pageSortSql[sortKey];
-    if (sortExpression === undefined || !["asc", "desc"].includes(sortDirection)) {
-      throw new Error("模型请求指标排序无效");
-    }
-    const order = sortDirection.toUpperCase();
-    const aggregateRow = this.queryAggregationRows("global", { ...query, dimension: "global" })[0];
-    const aggregate = aggregateRow === undefined ? null : toStoredMetricsAggregate(aggregateRow);
-    const matchedTotal = aggregate?.requestCount ?? 0;
-    const rows = this.database.prepare(`
-      SELECT *
-      FROM model_request_metrics
-      WHERE ${scope.sql}
-      ORDER BY ${sortExpression} ${order}, id ${order}
-      LIMIT ? OFFSET ?
-    `).all(
-      ...scope.params,
-      query.limit + 1,
-      offset,
-    ) as unknown as MetricRow[];
-    const hasMore = rows.length > query.limit;
-    const pageRows = hasMore ? rows.slice(0, query.limit) : rows;
-    return {
-      startAtMs: query.startAtMs,
-      endAtMs: query.endAtMs,
-      records: pageRows.map(toStoredMetric),
-      nextOffset: hasMore ? offset + query.limit : null,
-      matchedTotal,
-      aggregate,
-    };
+    return this.queries.page(query);
   }
 
   providers(): string[] {
-    this.requireOpen();
-    const rows = this.database.prepare("SELECT DISTINCT provider FROM model_request_metrics ORDER BY provider").all() as Array<{ provider: string }>;
-    return rows.map((row) => row.provider);
+    return this.queries.providers();
   }
 
   aggregate(
     query: ModelRequestMetricsAggregationQuery,
   ): StoredModelRequestMetricsReport {
-    this.requireOpen();
-    validateAggregationQuery(query);
-    const globalRows = this.queryAggregationRows("global", query);
-    const aggregate = globalRows[0] === undefined
-      ? null
-      : toStoredMetricsAggregate(globalRows[0]);
-    if (query.dimension === "global") {
-      return {
-        ...query,
-        aggregate,
-        groups: [],
-        totalGroupCount: aggregate === null ? 0 : 1,
-      };
-    }
-    const rows = this.queryAggregationRows(query.dimension, query);
-    return {
-      ...query,
-      aggregate,
-      groups: rows.map(toStoredMetricsGroup),
-      totalGroupCount: rows[0]?.total_group_count ?? 0,
-    };
+    return this.queries.aggregate(query);
   }
 
   /** 多个同步查询共享同一 SQLite 读快照；不持有写锁。 */
@@ -622,345 +447,41 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
   daily(
     query: { startAtMs: number; endAtMs: number },
   ): StoredModelRequestMetricsDailyRow[] {
-    return this.usageBuckets(query, "%Y-%m-%d").map(({ period, ...usage }) => ({ day: period, ...usage }));
+    return this.queries.daily(query);
   }
 
   hourly(
     query: { startAtMs: number; endAtMs: number },
   ): StoredModelRequestMetricsHourlyRow[] {
-    return this.usageBuckets(query, "%Y-%m-%d %H:00").map(({ period, ...usage }) => ({ hour: period, ...usage }));
-  }
-
-  private usageBuckets(
-    query: { startAtMs: number; endAtMs: number },
-    format: "%Y-%m-%d" | "%Y-%m-%d %H:00",
-  ) {
-    this.requireOpen();
-    validateMetricsTimeRange(query);
-    const rows = this.database.prepare(`
-      SELECT
-        strftime(?, recorded_at_ms / 1000, 'unixepoch', 'localtime') AS period,
-        COUNT(*) AS request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens
-      FROM model_request_metrics
-      WHERE recorded_at_ms >= ?
-        AND recorded_at_ms < ?
-      GROUP BY period
-      ORDER BY period ASC
-    `).all(format, query.startAtMs, query.endAtMs) as Array<{
-      period: string;
-      request_count: number;
-      input_tokens: number | null;
-      cached_input_tokens: number | null;
-      input_token_count: number;
-      cached_input_token_count: number;
-      output_tokens: number | null;
-    }>;
-    return rows.map((row) => ({
-      period: row.period,
-      requestCount: row.request_count,
-      inputTokens: row.input_tokens ?? 0,
-      cachedInputTokens: row.input_token_count > 0
-        && row.cached_input_token_count === row.input_token_count
-        ? row.cached_input_tokens ?? 0
-        : null,
-      outputTokens: row.output_tokens ?? 0,
-    }));
+    return this.queries.hourly(query);
   }
 
   errors(
     query: ModelRequestMetricsErrorQuery,
   ): StoredModelRequestMetricsErrorReport {
-    this.requireOpen();
-    const scope = metricsScopeSql(query);
-    const summary = this.database.prepare(`
-      SELECT
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count
-      FROM model_request_metrics
-      WHERE ${scope.sql}
-    `).get(...scope.params) as unknown as ErrorSummaryRow;
-    const rows = this.database.prepare(`
-      WITH normalized AS (
-        SELECT
-          *,
-          ${normalizedStatusSql} AS normalized_status,
-          CASE
-            WHEN ${normalizedStatusSql} = 'incomplete'
-              AND error_type IS NULL
-              AND incomplete_reason IS NULL
-              THEN 'response_not_observed'
-            WHEN incomplete_reason = 'response_not_observed'
-              AND error_type IS NULL
-              THEN 'response_not_observed'
-            ELSE error_type
-          END AS normalized_error_type
-        FROM model_request_metrics
-        WHERE ${scope.sql}
-      ),
-      ranked AS (
-        SELECT
-          *,
-          ROW_NUMBER() OVER (
-            PARTITION BY provider, model, normalized_status, http_status,
-              normalized_error_type
-            ORDER BY recorded_at_ms DESC
-          ) AS last_row
-        FROM normalized
-        WHERE normalized_status <> 'completed'
-      )
-      SELECT
-        provider,
-        model,
-        normalized_status AS status,
-        http_status,
-        normalized_error_type AS error_type,
-        MAX(error_message) FILTER (WHERE last_row = 1) AS last_error_message,
-        COUNT(*) AS request_count,
-        MAX(recorded_at_ms) AS last_occurred_at_ms,
-        COUNT(*) OVER () AS total_group_count
-      FROM ranked
-      GROUP BY provider, model, normalized_status, http_status, normalized_error_type
-      ORDER BY last_occurred_at_ms DESC, request_count DESC,
-        provider ASC, model ASC
-      LIMIT ?
-    `).all(
-      ...scope.params,
-      maximumAggregationGroups,
-    ) as unknown as ErrorGroupRow[];
-    return {
-      ...query,
-      requestCount: summary.request_count,
-      unsuccessfulRequestCount: summary.unsuccessful_request_count ?? 0,
-      groups: rows.map((row) => ({
-        provider: row.provider,
-        model: row.model,
-        status: row.status,
-        httpStatus: row.http_status,
-        errorType: row.error_type,
-        lastErrorMessage: row.last_error_message,
-        requestCount: row.request_count,
-        lastOccurredAtMs: row.last_occurred_at_ms,
-      })),
-      totalGroupCount: rows[0]?.total_group_count ?? 0,
-    };
+    return this.queries.errors(query);
   }
 
   threadSummary(threadId: string): StoredThreadRequestMetricsSummary {
-    this.requireOpen();
-    if (!threadId.trim() || threadId.length > 128) {
-      throw new Error("Thread ID 无效");
-    }
-    const latestTurn = this.database.prepare(`
-      SELECT turn_id
-      FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL AND operation = 'response'
-      ORDER BY id DESC
-      LIMIT 1
-    `).get(threadId) as { turn_id: string } | undefined;
-    const turn = latestTurn === undefined
-      ? undefined
-      : this.queryThreadTurnSummary(threadId, latestTurn.turn_id);
-    const threadAggregate = this.database.prepare(`
-      WITH RECURSIVE thread_tree(thread_id) AS (
-        SELECT ?
-        UNION
-        SELECT child.thread_id
-        FROM subagent_threads AS child
-        JOIN thread_tree AS parent
-          ON child.parent_thread_id = parent.thread_id
-      ), scoped AS (
-        SELECT metric.*
-        FROM model_request_metrics AS metric
-        WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
-          AND metric.turn_id IS NOT NULL
-      )
-      SELECT
-        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
-        NULL AS turn_id,
-        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        ${compactAggregateSql}
-      FROM scoped
-    `).get(threadId) as unknown as TurnSummaryRow;
-    return {
-      threadId,
-      latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
-      threadAggregate: threadAggregate.request_count === 0
-        ? null
-        : toStoredThreadAggregate(threadAggregate),
-    };
+    return this.queries.threadSummary(threadId);
   }
 
   threadTurnTaskSummary(
     threadId: string,
     turnId: string,
   ): StoredTurnRequestMetricsSummary | null {
-    this.requireOpen();
-    validateThreadId(threadId, "Thread ID");
-    validateThreadId(turnId, "Turn ID");
-    const child = this.database.prepare(`
-      SELECT 1
-      FROM subagent_turns
-      WHERE parent_thread_id = ?
-        AND parent_turn_id = ?
-      LIMIT 1
-    `).get(threadId, turnId);
-    if (child === undefined) return null;
-    const row = this.database.prepare(`
-      WITH RECURSIVE task_threads(thread_id, turn_id) AS (
-        SELECT child.thread_id, child.turn_id
-        FROM subagent_turns AS child
-        WHERE child.parent_thread_id = ?
-          AND child.parent_turn_id = ?
-        UNION
-        SELECT child.thread_id, child.turn_id
-        FROM subagent_turns AS child
-        JOIN task_threads AS parent
-          ON child.parent_thread_id = parent.thread_id
-          AND child.parent_turn_id = parent.turn_id
-      ), scoped AS (
-        SELECT metric.*
-        FROM model_request_metrics AS metric
-        WHERE (
-          metric.thread_id = ? AND metric.turn_id = ?
-        ) OR (
-          EXISTS (
-            SELECT 1
-            FROM task_threads AS task
-            WHERE task.thread_id = metric.thread_id
-              AND task.turn_id = metric.turn_id
-          )
-        )
-      )
-      SELECT
-        (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
-        (SELECT model FROM scoped ORDER BY id DESC LIMIT 1) AS model,
-        (SELECT reasoning_effort FROM scoped ORDER BY id DESC LIMIT 1)
-          AS reasoning_effort,
-        ? AS turn_id,
-        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count,
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        ${compactAggregateSql}
-      FROM scoped
-    `).get(threadId, turnId, threadId, turnId, turnId) as TurnSummaryRow | undefined;
-    // The direct-child probe above is the display gate. Keep a zero summary
-    // when a child has not produced any model rows yet so the parent card can
-    // distinguish an observed child from an absent task aggregate.
-    return row === undefined ? null : toStoredTurnSummary(row);
+    return this.queries.threadTurnTaskSummary(threadId, turnId);
   }
 
   threadTurnSummary(
     threadId: string,
     turnId: string,
   ): StoredTurnRequestMetricsSummary | null {
-    this.requireOpen();
-    validateThreadId(threadId, "Thread ID");
-    validateThreadId(turnId, "Turn ID");
-    const row = this.queryThreadTurnSummary(threadId, turnId);
-    return row === undefined ? null : toStoredTurnSummary(row);
-  }
-
-  private queryThreadTurnSummary(
-    threadId: string,
-    turnId: string,
-  ): TurnSummaryRow | undefined {
-    return this.database.prepare(`
-      SELECT
-        (
-          SELECT upstream_ttft_ms FROM model_request_metrics AS first_timing
-          WHERE first_timing.thread_id = model_request_metrics.thread_id
-            AND first_timing.turn_id = model_request_metrics.turn_id
-            AND first_timing.provider = 'openai'
-            AND first_timing.operation = 'response'
-            AND first_timing.upstream_ttft_ms IS NOT NULL
-          ORDER BY first_timing.id LIMIT 1
-        ) AS upstream_ttft_ms,
-        (
-          SELECT provider
-          FROM model_request_metrics AS latest_provider
-          WHERE latest_provider.thread_id
-              = model_request_metrics.thread_id
-            AND latest_provider.turn_id
-              = model_request_metrics.turn_id
-            AND latest_provider.operation = 'response'
-          ORDER BY latest_provider.id DESC
-          LIMIT 1
-        ) AS provider,
-        (
-          SELECT model
-          FROM model_request_metrics AS latest_model
-          WHERE latest_model.thread_id
-              = model_request_metrics.thread_id
-            AND latest_model.turn_id
-              = model_request_metrics.turn_id
-            AND latest_model.operation = 'response'
-          ORDER BY latest_model.id DESC
-          LIMIT 1
-        ) AS model,
-        (
-          SELECT reasoning_effort
-          FROM model_request_metrics AS latest_effort
-          WHERE latest_effort.thread_id
-              = model_request_metrics.thread_id
-            AND latest_effort.turn_id
-              = model_request_metrics.turn_id
-            AND latest_effort.operation = 'response'
-          ORDER BY latest_effort.id DESC
-          LIMIT 1
-        ) AS reasoning_effort,
-        turn_id,
-        COUNT(DISTINCT turn_id) AS turn_count,
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        ${compactAggregateSql}
-      FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id = ?
-      GROUP BY turn_id
-    `).get(threadId, turnId) as TurnSummaryRow | undefined;
+    return this.queries.threadTurnSummary(threadId, turnId);
   }
 
   threadTurnSummaries(threadId: string, query: ModelRequestMetricsThreadQuery): StoredThreadTurnsPage {
-    validateThreadId(threadId, "Thread ID");
-    if (query.threadId !== undefined && query.threadId !== threadId) {
-      throw new Error("Thread ID 与查询范围不一致");
-    }
-    const { rows, ...page } = this.queryThreadPage("turn_id", { ...query, threadId });
-    return {
-      ...page,
-      turns: rows.map((row) => ({
-        ...toStoredTurnSummary(row),
-        recordedAtMs: row.recorded_at_ms,
-      })),
-    };
+    return this.queries.threadTurnSummaries(threadId, query);
   }
 
   /**
@@ -969,100 +490,11 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
    * pickers; full summaries retain their aggregate/subagent semantics.
    */
   threadTurnCount(threadId: string): number | null {
-    this.requireOpen();
-    if (!threadId.trim() || threadId.length > 128) {
-      throw new Error("Thread ID 无效");
-    }
-    const row = this.database.prepare(`
-      SELECT COUNT(DISTINCT turn_id) AS turn_count, COUNT(*) AS request_count
-      FROM model_request_metrics
-      WHERE thread_id = ? AND turn_id IS NOT NULL
-    `).get(threadId) as { turn_count: number; request_count: number };
-    return row.request_count === 0 ? null : row.turn_count;
+    return this.queries.threadTurnCount(threadId);
   }
 
   threadList(query: ModelRequestMetricsThreadQuery): StoredThreadListPage {
-    const { rows, ...page } = this.queryThreadPage("thread_id", query);
-    return {
-      ...page,
-      threads: rows.map((row) => ({
-        cacheUsage: toStoredCacheUsage(row),
-        threadId: row.thread_id,
-        provider: row.provider ?? null,
-        model: row.model ?? null,
-        reasoningEffort: row.reasoning_effort ?? null,
-        agentPath: row.agent_path,
-        parentThreadId: row.parent_thread_id,
-        parentTurnId: row.parent_turn_id,
-        turnCount: row.turn_count,
-        requestCount: row.request_count,
-        inputTokens: row.input_tokens ?? 0,
-        outputTokens: row.output_tokens ?? 0,
-        compact: toStoredCompactSummary(row),
-        firstRequestStartedAtMs: row.first_request_started_at_ms,
-        lastRecordedAtMs: row.recorded_at_ms,
-      })),
-    };
-  }
-
-  private queryThreadPage(group: "thread_id" | "turn_id", query: ModelRequestMetricsThreadQuery) {
-    this.requireOpen();
-    const scope = metricsScopeSql(query);
-    const offset = metricsPageOffset(query);
-    const sortKey = query.sortKey ?? "last";
-    const sortColumns = {
-      time: group === "thread_id" ? "first_request_started_at_ms" : "recorded_at_ms",
-      last: "recorded_at_ms", thread: "grouped.thread_id", turn: "grouped.turn_id",
-      provider: "latest.provider", model: "latest.model", turns: "turn_count",
-      requests: "request_count", failures: "unsuccessful_request_count",
-      input: "input_tokens", output: "output_tokens", compact: "compact_request_count",
-    };
-    const sortColumn = sortColumns[sortKey];
-    const direction = query.sortDirection ?? "desc";
-    if (sortColumn === undefined || !["asc", "desc"].includes(direction)) {
-      throw new Error("会话指标排序无效");
-    }
-    const scoped = `SELECT * FROM model_request_metrics
-      WHERE ${scope.sql} AND thread_id IS NOT NULL AND turn_id IS NOT NULL`;
-    const summary = this.database.prepare(`
-      SELECT ${metricsAggregateSql},
-        COUNT(DISTINCT thread_id) AS thread_count,
-        COUNT(DISTINCT thread_id || char(0) || turn_id) AS turn_count
-      FROM (${scoped})
-    `).get(...scope.params) as unknown as AggregateRow & { thread_count: number; turn_count: number };
-    const matchedTotal = group === "thread_id" ? summary.thread_count : summary.turn_count;
-    const rows = this.database.prepare(`
-      WITH scoped AS (${scoped}), grouped AS (
-        SELECT thread_id, turn_id, COUNT(DISTINCT turn_id) AS turn_count,
-          ${metricsAggregateSql},
-          MIN(request_started_at_ms) AS first_request_started_at_ms,
-          MAX(recorded_at_ms) AS recorded_at_ms,
-          MAX(id) AS latest_id
-        FROM scoped
-        GROUP BY ${group}
-      )
-      SELECT grouped.*, latest.provider, latest.model, latest.reasoning_effort,
-        subagent.agent_path, subagent.parent_thread_id, subagent.parent_turn_id
-      FROM grouped
-      JOIN model_request_metrics AS latest ON latest.id = grouped.latest_id
-      LEFT JOIN subagent_threads AS subagent ON subagent.thread_id = grouped.thread_id
-      ORDER BY ${sortColumn} ${direction}, grouped.${group} ${direction}
-      LIMIT ? OFFSET ?
-    `).all(...scope.params, query.limit, offset) as unknown as Array<TurnSummaryRow & CacheUsageRow & {
-      thread_id: string;
-      first_request_started_at_ms: number;
-      recorded_at_ms: number;
-      agent_path: string | null;
-      parent_thread_id: string | null;
-      parent_turn_id: string | null;
-    }>;
-    return {
-      rows,
-      matchedTotal,
-      nextOffset: offset + rows.length < matchedTotal ? offset + rows.length : null,
-      aggregate: summary.request_count === 0 ? null : toStoredMetricsAggregate(summary),
-      turnCount: summary.turn_count,
-    };
+    return this.queries.threadList(query);
   }
 
   subagentThread(threadId: string): {
@@ -1070,85 +502,25 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     parentThreadId: string | null;
     parentTurnId: string | null;
   } {
-    this.requireOpen();
-    if (!threadId.trim() || threadId.length > 128) {
-      throw new Error("Thread ID 无效");
-    }
-    const row = this.database.prepare(`
-      SELECT agent_path, parent_thread_id, parent_turn_id
-      FROM subagent_threads
-      WHERE thread_id = ?
-    `).get(threadId) as {
-      agent_path: string;
-      parent_thread_id: string;
-      parent_turn_id: string | null;
-    } | undefined;
-    return {
-      agentPath: row?.agent_path ?? null,
-      parentThreadId: row?.parent_thread_id ?? null,
-      parentTurnId: row?.parent_turn_id ?? null,
-    };
+    return this.queries.subagentThread(threadId);
   }
 
   requestRowsAfter(
     afterLocalId: number,
     limit: number,
   ): StoredModelRequestMetric[] {
-    this.requireOpen();
-    if (!Number.isInteger(afterLocalId) || afterLocalId < 0) {
-      throw new Error("同步水位必须是大于等于 0 的整数");
-    }
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
-      throw new Error("同步批量大小必须在 1 到 500 之间");
-    }
-    const rows = this.database.prepare(`
-      SELECT * FROM model_request_metrics
-      WHERE id > ?
-      ORDER BY id ASC
-      LIMIT ?
-    `).all(afterLocalId, limit) as unknown as MetricRow[];
-    return rows.map(toStoredMetric);
+    return this.queries.requestRowsAfter(afterLocalId, limit);
   }
 
   subagentThreadsAfter(
     recordedAtMs: number,
     afterThreadId?: string,
   ): StoredSubagentThreadRecord[] {
-    this.requireOpen();
-    if (!Number.isInteger(recordedAtMs) || recordedAtMs < 0) {
-      throw new Error("子代理同步水位必须是大于等于 0 的整数");
-    }
-    if (afterThreadId !== undefined && afterThreadId.length === 0) {
-      throw new Error("子代理同步游标 Thread ID 不能为空");
-    }
-    const rows = this.database.prepare(`
-      SELECT thread_id, parent_thread_id, parent_turn_id, agent_path, recorded_at_ms
-      FROM subagent_threads
-      WHERE recorded_at_ms > ? OR (recorded_at_ms = ? AND thread_id > ?)
-      ORDER BY recorded_at_ms ASC, thread_id ASC
-      LIMIT 1000
-    `).all(recordedAtMs, recordedAtMs, afterThreadId ?? "") as unknown as Array<{
-      thread_id: string;
-      parent_thread_id: string;
-      parent_turn_id: string | null;
-      agent_path: string;
-      recorded_at_ms: number;
-    }>;
-    return rows.map((row) => ({
-      threadId: row.thread_id,
-      parentThreadId: row.parent_thread_id,
-      parentTurnId: row.parent_turn_id,
-      agentPath: row.agent_path,
-      recordedAtMs: row.recorded_at_ms,
-    }));
+    return this.queries.subagentThreadsAfter(recordedAtMs, afterThreadId);
   }
 
   count(): number {
-    this.requireOpen();
-    const row = this.database.prepare(`
-      SELECT COUNT(*) AS count FROM model_request_metrics
-    `).get() as { count: number };
-    return row.count;
+    return this.queries.count();
   }
 
   private *iterateRows(sql: string, ...parameters: SQLInputValue[]) {
@@ -1160,44 +532,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     } finally {
       this.activeReadStatements.delete(statement);
     }
-  }
-
-  private queryAggregationRows(
-    dimension: ModelRequestMetricsAggregationDimension,
-    query: ModelRequestMetricsAggregationQuery,
-  ): AggregateRow[] {
-    const grouping = aggregationGrouping(dimension);
-    const scope = metricsScopeSql(query);
-    const limit = dimension === "global" ? 1 : maximumAggregationGroups;
-    return this.database.prepare(`
-      WITH filtered AS (
-        SELECT
-          metric.*,
-          ${grouping.provider} AS group_provider,
-          ${grouping.model} AS group_model
-        FROM model_request_metrics AS metric
-        WHERE ${scope.sql}
-      )
-      SELECT
-        group_provider AS provider,
-        group_model AS model,
-        ${cacheUsageSql},
-        COUNT(*) AS request_count,
-        SUM(CASE WHEN ${observableCompletionSql} THEN 0 ELSE 1 END)
-          AS unsuccessful_request_count,
-        SUM(input_tokens) AS input_tokens,
-        SUM(cached_input_tokens) AS cached_input_tokens,
-        COUNT(input_tokens) AS input_token_count,
-        COUNT(cached_input_tokens) AS cached_input_token_count,
-        SUM(output_tokens) AS output_tokens,
-        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-        ${compactAggregateSql},
-        COUNT(*) OVER () AS total_group_count
-      FROM filtered
-      GROUP BY group_provider, group_model
-      ORDER BY request_count DESC, provider ASC, model ASC
-      LIMIT ?
-    `).all(...scope.params, limit) as unknown as AggregateRow[];
   }
 
   close(): void {
@@ -1276,87 +610,3 @@ export function modelRequestMetricsDatabasePath(stateDatabasePath: string): stri
 }
 
 export { ModelRequestMetricsSchemaError } from "./sqlite-request-metrics-schema.js";
-
-function validateAggregationQuery(query: ModelRequestMetricsAggregationQuery): void {
-  validateMetricsTimeRange(query);
-  if (!(["global", "provider", "model"] as const).includes(query.dimension)) {
-    throw new Error("模型请求指标聚合维度无效");
-  }
-}
-
-function metricsPageOffset(query: { offset?: number; limit: number }): number {
-  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 500) {
-    throw new Error("模型请求指标分页数量必须在 1 到 500 之间");
-  }
-  const offset = query.offset ?? 0;
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("模型请求指标分页偏移无效");
-  return offset;
-}
-
-function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params: Array<string | number> } {
-  validateMetricsTimeRange(query);
-  const conditions = ["recorded_at_ms >= ?", "recorded_at_ms < ?"];
-  const params: Array<string | number> = [query.startAtMs, query.endAtMs];
-  for (const [key, column] of [
-    ["threadId", "thread_id"], ["turnId", "turn_id"],
-    ["model", "model"],
-    ["operation", "operation"], ["status", `(${normalizedStatusSql})`],
-  ] as const) {
-    const value = query[key];
-    if (value === undefined) continue;
-    if (!value.trim() || value.length > 128) throw new Error(`${key} 筛选值无效`);
-    conditions.push(`${column} = ?`);
-    params.push(value);
-  }
-  if (query.provider !== undefined) {
-    const providers = Array.isArray(query.provider) ? query.provider : [query.provider];
-    if (providers.length === 0 || providers.some((value) => !value.trim() || value.length > 128)) throw new Error("provider 筛选值无效");
-    conditions.push(`provider IN (${providers.map(() => "?").join(", ")})`);
-    params.push(...providers);
-  }
-  if (query.turnId !== undefined && query.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
-  if (query.operation !== undefined && !["response", "compact"].includes(query.operation)) throw new Error("operation 筛选值无效");
-  if (query.status !== undefined && !["completed", "failed", "incomplete", "unknown"].includes(query.status)) throw new Error("status 筛选值无效");
-  if (query.onlyFailures) conditions.push(`NOT (${observableCompletionSql})`);
-  const filter = query.filter?.trim() ?? "";
-  if (filter.length > 128) throw new Error("模型请求指标筛选关键字最多 128 个字符");
-  if (filter !== "") {
-    const columns = ["thread_id", "turn_id", "provider", "model", "operation", "status", "error_type", "error_code", "error_message"];
-    conditions.push(`(${columns.map((column) => `${column} LIKE ? ESCAPE '\\'`).join(" OR ")})`);
-    const pattern = `%${filter.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
-    params.push(...columns.map(() => pattern));
-  }
-  return { sql: conditions.join(" AND "), params };
-}
-
-function validateThreadId(value: string, label: string): void {
-  if (!value.trim() || value.length > 128) {
-    throw new Error(`${label}无效`);
-  }
-}
-
-function validateMetricsTimeRange(
-  query: { startAtMs: number; endAtMs: number },
-): void {
-  if (
-    !Number.isSafeInteger(query.startAtMs)
-    || !Number.isSafeInteger(query.endAtMs)
-    || query.startAtMs < 0
-    || query.endAtMs <= query.startAtMs
-  ) {
-    throw new Error("模型请求指标时间范围无效");
-  }
-}
-
-function aggregationGrouping(
-  dimension: ModelRequestMetricsAggregationDimension,
-): { provider: string; model: string } {
-  switch (dimension) {
-    case "global":
-      return { provider: "NULL", model: "NULL" };
-    case "provider":
-      return { provider: "provider", model: "NULL" };
-    case "model":
-      return { provider: "provider", model: "model" };
-  }
-}
