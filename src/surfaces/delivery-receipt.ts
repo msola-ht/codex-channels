@@ -13,6 +13,8 @@ export class DeliveryReceipt {
   private pending = 1;
   private retained = false;
   private failure: unknown;
+  private contentIncomplete = false;
+  private completeContentConfirmed = false;
   private resolve!: () => void;
   private reject!: (error: unknown) => void;
   readonly done = new Promise<void>((resolve, reject) => { this.resolve = resolve; this.reject = reject; });
@@ -37,6 +39,10 @@ export class DeliveryReceipt {
     let released = false;
     return () => { if (!released) { released = true; this.release(); } };
   }
+  markContentIncomplete(): void { this.contentIncomplete = true; }
+  /** Only a confirmed artifact containing the original full result can satisfy this. */
+  confirmCompleteContent(): void { this.completeContentConfirmed = true; }
+  needsCompleteContent(): boolean { return this.contentIncomplete && !this.completeContentConfirmed; }
   fail(error: unknown): void { this.failure ??= error; this.controller.abort(); }
   async record(value: DeliveryCheckpoint): Promise<void> {
     try { await this.checkpoint(value); }
@@ -45,6 +51,7 @@ export class DeliveryReceipt {
   release(): void {
     if (--this.pending !== 0) return;
     if (this.failure) this.reject(this.failure);
+    else if (this.needsCompleteContent()) this.reject(new Error("可靠结果内容未完整确认"));
     else if (!this.retained) this.reject(new Error("可靠输出未产生投递操作"));
     else this.resolve();
   }

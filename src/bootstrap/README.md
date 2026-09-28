@@ -9,7 +9,7 @@
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
-- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，强制创建 `automation` 后台 Thread 并启动单个 Turn；写请求结果未知时失败关闭。
+- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，在调度容量检查及创建 Thread 前复核投递准入，临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和

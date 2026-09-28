@@ -203,6 +203,8 @@ Client 验证并保留 `isBlocking`，Approval 呈现阻塞或可跳过问题；
 
 渠道投递存量通过组合根 [`output-execution-admission.ts`](../src/bootstrap/output-execution-admission.ts)
 在现有 Turn、Review、Goal 与 Queue 输入/启动端口前实施本地准入；不改变 RPC 字段或 App Server 原生 Queue 持久语义。
+计划任务在调度容量检查及创建 Thread 前复核同一准入，临时超载不永久阻塞周期任务；
+执行前竞态及后续恢复由 `tests/scheduled-task-executor.test.ts` 联合调度器和 SQLite 验证。
 停止、只读查询及 Queue 删除保留可用。隔离真实 App Server 的 `fences Turn execution under delivery pressure`
 合同验证暂停、恢复与停止请求；容量、确认及离线恢复见[投递箱](delivery.md)。
 原生 TUI 的非阻塞自动跳过及输入暂停机制见

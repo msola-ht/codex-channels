@@ -6,7 +6,7 @@
 
 `persistent-output.ts` 分类可恢复的终态输出，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
-等待实际操作结算，Bootstrap 才能确认持久记录；普通 `handle` 继续用于中间输出。
+等待实际操作结算，Bootstrap 才能确认持久记录；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。普通 `handle` 继续用于中间输出。
 
 Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
 [`docs/index.md`](../../docs/index.md) 的支持矩阵为准；平台 SDK 提供某项能力或生成协议中出现
@@ -44,12 +44,11 @@ Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不
 只有成功启动且仍处于运行状态的 Surface 才会收到输出；单个输出端口拒绝事件不得中断后续路由。
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
 独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 只用于 Gateway 关闭，必须可在部分启动后
-安全调用并保持幂等。首次启动和故障恢复期间的关键输出只保存在 Bootstrap 有界内存中，不写入
-StateStore；恢复缓冲按策略合并键折叠可合并中间状态（例如按秒刷新的思考状态），达到告警阈值时
-记录日志而不静默丢弃，超过十倍告警阈值的减载阈值后只丢弃过程、状态与生命周期输出；最终回答、
-Turn 完成、操作终态、子代理完成、MCP 授权结果、警告、会话空闲解除与全局空闲通知始终保留，
-`isSheddableBacklogEvent` 未列出的新事件类型默认按保留处理。临时连接故障只能取消当前交互，
-不能把可恢复端口永久关闭。
+安全调用并保持幂等。生产装配中的关键终态由 Bootstrap 提交独立持久投递箱，不写入 StateStore；
+渠道恢复后按 Conversation 顺序交给 `deliver`，实际发送确认成功后才清除记录。渠道离线或存在前序
+持久结果时，中间输出不另建恢复队列。未装配持久投递的独立使用路径仍采用内存恢复缓冲，按
+`isSheddableBacklogEvent` 合并或削减中间输出。容量与恢复合同见[关键结果投递](../../docs/delivery.md)。
+临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
 等待重启、重启中、已生效和失败；Surface 只渲染结果，不得接收原始配置值或异常详情。普通
 生命周期通知可通过可选的 `configurationChanged` 异步入队；`deliverConfigurationChange` 必须等待

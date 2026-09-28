@@ -1,13 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { cleanupScheduledTaskTestFixtures, scheduledTaskDatabasePath, scheduledTaskInput, scheduledTaskBase } from "./scheduled-task-test-fixture.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TurnExecutionPort } from "../src/application/index.js";
 import {
   ScheduledTaskExecutor,
   type ScheduledTaskExecutorOptions,
 } from "../src/bootstrap/scheduled-task-executor.js";
+import { UserFacingError } from "../src/conversation-core/index.js";
 import type { ConversationCore } from "../src/conversation-core/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
 import {
+  ScheduledTaskScheduler, SqliteScheduledTaskStore,
   type ScheduledRun,
   type ScheduledTask,
 } from "../src/scheduled-tasks/index.js";
@@ -18,6 +21,9 @@ import {
   type ThreadSnapshot,
 } from "../src/session-routing/index.js";
 import { WorkspaceRegistry } from "../src/policy/index.js";
+
+const deliveryDirectories: string[] = [];
+afterEach(() => cleanupScheduledTaskTestFixtures(deliveryDirectories));
 
 const target = {
   surface: "telegram",
@@ -149,6 +155,7 @@ function setup(options: {
   };
   const executorOptions: ScheduledTaskExecutorOptions = {
     isSurfaceEnabled: () => true,
+    acceptsExecution: () => true,
     onThreadStarted: () => undefined,
     onTurnStarted: () => undefined,
     onRunStateChanged: () => undefined,
@@ -353,4 +360,46 @@ describe("ScheduledTaskExecutor", () => {
     await expect(executor.execute(task(), run, new AbortController().signal))
       .resolves.toEqual({ kind: "failed", category: "capacity" });
   });
+});
+
+
+it.each(["before-validation", "during-validation"])("rejects temporary delivery pressure %s before creating a Thread", async (stage) => {
+  let allowed = stage !== "before-validation";
+  const startThread = vi.fn(async () => session("fresh"));
+  const { executor } = setup({ startThread,
+    models: { ensureProvider: async () => { allowed = false; } },
+    executorOptions: { acceptsExecution: () => allowed },
+  });
+  await expect(executor.execute(task(), run, new AbortController().signal)).resolves.toEqual({ kind: "failed", category: "capacity" });
+  expect(startThread).not.toHaveBeenCalled();
+  expect(executor.availableCapacity(task())).toBe(0);
+  allowed = true;
+  expect(executor.availableCapacity(task())).toBe(3);
+});
+
+it("preserves the recurring task through early pressure and a Turn admission race, then runs after recovery", async () => {
+  let allowed = false;
+  let race = false;
+  let count = 0;
+  const startThread = vi.fn(async () => session(`fresh-${++count}`));
+  const unsubscribeThread = vi.fn(async () => {});
+  const { executor } = setup({ startThread, unsubscribeThread,
+    startTurn: async () => { if (race) throw new UserFacingError("delivery.overloaded", "fixture pressure"); return { turnId: "accepted" }; },
+    executorOptions: { acceptsExecution: () => allowed },
+  });
+  const store = new SqliteScheduledTaskStore(scheduledTaskDatabasePath(deliveryDirectories).path);
+  const scheduled = store.createTask(scheduledTaskInput({ ...target, actorId: "actor-1", workspaceId: "main", model: "gpt-main", modelProvider: "openai" }));
+  const scheduler = new ScheduledTaskScheduler(store, executor);
+  try {
+    expect(await scheduler.runTaskNow(scheduled.taskId, scheduledTaskBase + 1)).toMatchObject({ state: "skipped_capacity" });
+    expect(startThread).not.toHaveBeenCalled();
+    allowed = true;
+    race = true;
+    expect(await scheduler.runTaskNow(scheduled.taskId, scheduledTaskBase + 2)).toMatchObject({ state: "failed", errorCategory: "capacity" });
+    expect(unsubscribeThread).toHaveBeenCalledWith("fresh-1");
+    expect(store.getTask(scheduled.taskId)).toMatchObject({ status: "active", nextRunAt: scheduled.nextRunAt });
+    race = false;
+    expect(await scheduler.runTaskNow(scheduled.taskId, scheduledTaskBase + 3)).toMatchObject({ state: "running", turnId: "accepted" });
+    expect(startThread).toHaveBeenCalledTimes(2);
+  } finally { await scheduler.stop(); store.close(); }
 });

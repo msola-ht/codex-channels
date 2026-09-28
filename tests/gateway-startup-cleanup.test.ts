@@ -249,6 +249,7 @@ describe("GatewayApplication startup cleanup", () => {
         sandbox: "read-only", approvalPolicy: "never" }], "main"),
       core: Reflect.get(application, "core"), output: { subscribe: () => undefined },
       logger: pino({ level: "silent" }), isSurfaceEnabled: () => true,
+      acceptsExecution: () => true,
       creationContext: () => { throw new Error("unexpected creation"); }, presentConfirmation: () => undefined,
     } as unknown as ScheduledTaskCompositionOptions);
     Reflect.set(application, "scheduledTasks", composition);

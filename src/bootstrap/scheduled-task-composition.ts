@@ -37,6 +37,7 @@ export interface ScheduledTaskCompositionOptions {
   router: SessionRouter;
   codex: ProviderRoutingClient;
   turns?: TurnExecutionPort;
+  acceptsExecution: (target: ConversationTarget) => boolean;
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -79,6 +80,7 @@ export class ScheduledTaskComposition {
       options.core,
       {
         isSurfaceEnabled: (target) => options.isSurfaceEnabled(target),
+        acceptsExecution: options.acceptsExecution,
         onThreadStarted: (run, target, threadId) =>
           requireCoordinator().onThreadStarted(run, target, threadId),
         onTurnStarted: (run, target, threadId, turnId) =>

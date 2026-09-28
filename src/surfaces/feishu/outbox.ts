@@ -139,7 +139,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       () => this.closeFinished,
       (chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal) =>
         this.sendMarkdown(chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal),
-      (chatId, markdown, maximumChunks, signal) => this.sendPost(chatId, markdown, maximumChunks, signal),
+      (chatId, markdown, maximumChunks, signal, replyTo) => this.sendPost(chatId, markdown, maximumChunks, signal, replyTo),
     );
   }
 
@@ -164,6 +164,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
     if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
     await captureDelivery(() => {
       this.handle(event);
+      if (event.type === "text.completed") {
+        // Runs after the rendered output. Preview success alone cannot ACK a
+        // truncated result; an already-confirmed full file avoids a duplicate.
+        this.delivery.enqueue(event.target.conversationId, async (active) => {
+          const receipt = DeliveryReceipt.current();
+          if (!receipt?.needsCompleteContent()) return;
+          await this.sendCompleteContentFile(event.target.conversationId, event.text, active);
+        }, true);
+      }
       if (event.type === "operation.updated" && event.operation.status !== "running") {
         const buffered = this.operationUpdates.flushTurn(event.threadId, event.turnId);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
@@ -897,10 +906,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
     maximumChunks = maximumFeishuMessageChunks,
     signal?: AbortSignal,
-  ): Promise<void> {
-    for (const chunk of splitFeishuPost(markdown, maximumChunks)) {
-      await this.messagePort.sendPost(chatId, chunk, signal);
+    replyTo?: string,
+  ): Promise<number> {
+    const chunks = splitFeishuPost(markdown, maximumChunks);
+    for (const [index, chunk] of chunks.entries()) {
+      if (index === 0 && replyTo !== undefined && this.messagePort.replyPost) {
+        await this.messagePort.replyPost(replyTo, chunk, signal);
+      } else {
+        await this.messagePort.sendPost(chatId, chunk, signal);
+      }
     }
+    return chunks.length;
   }
 
   private async sendMarkdown(
@@ -912,7 +928,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
   ): Promise<void> {
     let first = true;
-    for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
+    let remainingBudget = maximumChunks;
+    const chunks = splitFeishuMarkdownCards(markdown, maximumChunks);
+    for (const [index, chunk] of chunks.entries()) {
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
           const messageId = await this.messagePort.replyMarkdownCard(replyTo, chunk, signal);
@@ -940,12 +958,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
           },
           "飞书静态 CardKit 创建失败，已降级为富文本",
         );
-        if (first && replyTo !== undefined && this.messagePort.replyPost) {
-          await this.messagePort.replyPost(replyTo, chunk, signal);
-        } else {
-          await this.sendPost(chatId, chunk, 1, signal);
-        }
+        // Card limits count characters; Post limits count encoded bytes.
+        // Reserve one slot for each later card and share the same total budget.
+        remainingBudget -= await this.sendPost(
+          chatId, chunk, remainingBudget - (chunks.length - index - 1),
+          signal, first ? replyTo : undefined,
+        );
+        first = false;
+        continue;
       }
+      remainingBudget--;
       first = false;
     }
   }
@@ -1116,6 +1138,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
             file,
             signal,
           );
+          DeliveryReceipt.current()?.confirmCompleteContent();
         } catch (error) {
           await this.sendText(
             event.target.conversationId,
@@ -1142,6 +1165,15 @@ export class FeishuOutbox implements SurfaceOutputPort {
     return bytes > 0 && bytes <= maximumFeishuFinalAnswerFileBytes;
   }
 
+  private async sendCompleteContentFile(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
+    const file = Buffer.from(text, "utf8");
+    if (!this.messagePort.sendFile || file.length > maximumFeishuFinalAnswerFileBytes) {
+      throw new Error("可靠结果无法通过完整文件确认");
+    }
+    await this.messagePort.sendFile(chatId, feishuFinalAnswerFileName, file, signal);
+    DeliveryReceipt.current()?.confirmCompleteContent();
+  }
+
   private async sendLongFinalAnswer(
     chatId: string,
     text: string,
@@ -1164,12 +1196,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       signal,
     );
     try {
-      await this.messagePort.sendFile!(
-        chatId,
-        feishuFinalAnswerFileName,
-        Buffer.from(text, "utf8"),
-        signal,
-      );
+      await this.sendCompleteContentFile(chatId, text, signal);
     } catch (error) {
       await this.sendMarkdown(
         chatId,

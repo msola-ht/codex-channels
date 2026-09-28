@@ -1,3 +1,4 @@
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import { contentTruncatedText } from "../output-copy.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 
@@ -26,6 +27,7 @@ export function appendBoundedStreamText(
   let remaining =
     maximumFeishuBufferedStreamCharacters - [...current].length;
   if (remaining <= 0 || addition.length === 0) {
+    if (addition.length > 0) DeliveryReceipt.current()?.markContentIncomplete();
     return {
       text: current,
       truncated: addition.length > 0,
@@ -41,6 +43,7 @@ export function appendBoundedStreamText(
     suffix += character;
     remaining -= 1;
   }
+  if (truncated) DeliveryReceipt.current()?.markContentIncomplete();
   return {
     text: `${current}${suffix}`,
     truncated,
@@ -132,6 +135,7 @@ export function appendFeishuStreamingTruncation(
   text: string,
   maximumCharacters = maximumFeishuStreamingElementCharacters,
 ): string {
+  DeliveryReceipt.current()?.markContentIncomplete();
   const characters = [...text];
   const notice = [...feishuTruncationNotice];
   const closingFence = text.endsWith("\n```") ? [..."\n```"] : [];
@@ -179,6 +183,7 @@ function splitFeishuContent(
     offset = end;
   }
   if (offset < characters.length) {
+    DeliveryReceipt.current()?.markContentIncomplete();
     const lastIndex = payloads.length - 1;
     payloads[lastIndex] = appendWithinByteLimit(
       payloads[lastIndex]!,

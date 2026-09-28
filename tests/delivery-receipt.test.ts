@@ -142,3 +142,27 @@ it("filters hidden operations at intake and refuses to acknowledge an older reta
     expect(send).toHaveBeenCalledTimes(2);
   } finally { await outbox.close(); }
 });
+
+
+it.each([false, true])("splits Feishu Post fallback by encoded bytes without losing content (reply=%s)", async (reply) => {
+  const posts: string[] = [];
+  const post = async (_target: string, value: string) => { posts.push(value); };
+  const rejectedCard = async () => { throw new FeishuMessageError("card-create-failed", "fixture rejection"); };
+  const outbox = new FeishuOutbox("default", {
+    sendText: post, sendPost: post, replyPost: post, sendMarkdownCard: rejectedCard, replyMarkdownCard: rejectedCard,
+    sendCard: async () => "message", updateCard: async () => {},
+    createStreamingCard: async () => ({ cardId: "card", messageId: "message" }),
+    updateStreamingCard: async () => {}, finishStreamingCard: async () => {},
+  }, logger);
+  const text = "\u{20000}".repeat(4990) + "END-OF-RESULT";
+  try {
+    if (reply) { outbox.prepareTurnReplyTarget("chat", "source-message"); outbox.handle({ type: "turn.started", target: { surface: "feishu", accountId: "default", conversationId: "chat" }, threadId: "thread", turnId: "turn" }); }
+    await outbox.deliver({ type: "text.completed", target: { surface: "feishu", accountId: "default", conversationId: "chat" }, threadId: "thread", turnId: "turn", itemId: "item", text, phase: "final_answer" },
+      new AbortController().signal, async () => {});
+    const content = posts.join("");
+    expect(content.match(/\u{20000}/gu)).toHaveLength(4990);
+    expect(content).toContain("END-OF-RESULT");
+    expect(content).not.toContain("截断");
+    expect(posts.length).toBeLessThanOrEqual(5);
+  } finally { await outbox.close(); }
+});

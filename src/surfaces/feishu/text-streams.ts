@@ -1,3 +1,4 @@
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import type { Logger } from "pino";
 import type { OutputEvent } from "../../conversation-core/index.js";
 import type { ConversationDeliveryQueue } from "../conversation-delivery-queue.js";
@@ -59,8 +60,8 @@ export class FeishuTextStreams {
       onFirstMessageId?: (messageId: string) => void, signal?: AbortSignal,
     ) => Promise<void>,
     private readonly sendPost: (
-      chatId: string, markdown: string, maximumChunks: number, signal?: AbortSignal,
-    ) => Promise<void>,
+      chatId: string, markdown: string, maximumChunks: number, signal?: AbortSignal, replyTo?: string,
+    ) => Promise<number>,
   ) {}
 
   prepareClose(): void {
@@ -294,6 +295,7 @@ export class FeishuTextStreams {
       await this.withStreamFooter(state, signal, async () => {
         const remainingMessageBudget =
           maximumFeishuMessageChunks - state.cardCount;
+        if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
         if (fallbackPost && remainingMessageBudget > 0) {
           const markdown = state.truncated
             ? `${state.cardText}${feishuTruncationNotice}`
@@ -315,6 +317,7 @@ export class FeishuTextStreams {
     try {
       const ready = await this.rollStreamingCards(state, terminal, signal);
       if (!ready || this.isClosed() || signal?.aborted) {
+        if (terminal && !ready && DeliveryReceipt.current()) this.streams.delete(key);
         return;
       }
       if (!terminal && state.lastSentText !== state.cardText) {
@@ -360,11 +363,7 @@ export class FeishuTextStreams {
             const remaining = maximumFeishuMessageChunks - state.cardCount;
             if (remaining > 0) {
               const replyTo = this.replyTargets.get(turnKey(state.threadId, state.turnId));
-              if (replyTo !== undefined && this.messagePort.replyPost) {
-                await this.messagePort.replyPost(replyTo, state.cardText, signal);
-              } else {
-                await this.sendPost(state.chatId, state.cardText, remaining, signal);
-              }
+              await this.sendPost(state.chatId, state.cardText, remaining, signal, replyTo);
             }
           }
         });
@@ -470,6 +469,11 @@ export class FeishuTextStreams {
       }
       state.cardText = tail + state.cardText.slice(snapshot.length);
       if (reachesCardLimit) {
+        const receipt = DeliveryReceipt.current();
+        if (terminal && receipt) {
+          receipt.markContentIncomplete();
+          return false;
+        }
         throw new Error("飞书流式卡片数量超过单个结果上限");
       }
     }
@@ -547,22 +551,20 @@ export class FeishuTextStreams {
     await this.withStreamFooter(state, signal, async () => {
       const remainingMessageBudget =
         maximumFeishuMessageChunks - state.cardCount;
+      if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
       if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain && remainingMessageBudget > 0) {
         const markdown = state.truncated
           ? `${state.text}${feishuTruncationNotice}`
           : state.text;
         const replyKey = turnKey(state.threadId, state.turnId);
         const replyTo = this.replyTargets.get(replyKey);
-        if (replyTo !== undefined && this.messagePort.replyPost) {
-          await this.messagePort.replyPost(replyTo, markdown, signal);
-        } else {
-          await this.sendPost(
-            state.chatId,
-            markdown,
-            remainingMessageBudget,
-            signal,
-          );
-        }
+        await this.sendPost(
+          state.chatId,
+          markdown,
+          remainingMessageBudget,
+          signal,
+          replyTo,
+        );
       }
     });
     if (state.deliveryUncertain) {

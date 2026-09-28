@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Api } from "grammy";
+import type { Api, InputFile } from "grammy";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
@@ -12,6 +12,9 @@ import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { PersistentSurfaceOutput } from "../src/bootstrap/persistent-surface-output.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
+import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
+import { encodeFeishuPostContent } from "../src/surfaces/feishu/message-content.js";
+import { FeishuMessageError } from "../src/surfaces/feishu/message-error.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import { decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type SurfaceAdapter } from "../src/surfaces/index.js";
 
@@ -326,4 +329,170 @@ it("retains an unavailable channel's output, restarts, delivers through the actu
     await second.manager.stop();
     await second.output.close();
   }
+});
+
+
+it.each([false, true])("keeps the full durable Telegram result until its document is confirmed (failure=%s)", async (failure) => {
+  const directory = fixture();
+  const text = "a".repeat(1_100_000) + "END-OF-RESULT";
+  let document: string | undefined;
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve, reject) => {
+    finish = () => failure ? reject(new Error("ambiguous document send")) : resolve();
+  });
+  const outbox = new TelegramOutbox({
+    sendMessage: async () => ({ message_id: 1 }),
+    sendDocument: async (_chat: string, file: InputFile) => {
+      const raw = await file.toRaw();
+      if (!(raw instanceof Uint8Array)) throw new Error("expected buffered fixture");
+      document = Buffer.from(raw).toString("utf8");
+      await pending;
+      return { message_id: 2 };
+    },
+  } as unknown as Api, logger);
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, fault: () => {},
+    deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, signal,
+      async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
+  });
+  const event: OutputEvent = { type: "text.completed", target: { surface: "telegram", accountId: "default", conversationId: "chat" },
+    threadId: "thread", turnId: "turn", itemId: "item", phase: "final_answer", text };
+  try {
+    await coordinator.start();
+    await coordinator.submit({ ...submission("full-result"), payload: JSON.stringify(event) });
+    await vi.waitFor(() => expect(document).toBe(text));
+    expect(await journal.summary()).toMatchObject({ records: 1, sending: 1 });
+    finish();
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(failure ? { records: 1, uncertain: 1 } : { records: 0 }));
+  } finally { finish(); await coordinator.close(); await outbox.close(); }
+  const reopened = new SqliteDeliveryJournal(directory);
+  try {
+    expect(reopened.execute({ type: "summary" })).toMatchObject({ records: failure ? 1 : 0 });
+    if (failure) {
+      reopened.execute({ type: "resolve", id: "full-result", action: "retry" });
+      expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
+    }
+  } finally { reopened.close(); }
+});
+
+
+it.each(["confirmed", "failed", "unavailable", "stream"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
+  const directory = fixture();
+  const text = "\u{20000}".repeat(mode === "stream" ? 30_000 : 24_990) + "END-OF-RESULT";
+  let fileText: string | undefined;
+  let releaseFile!: () => void;
+  const fileConfirmation = new Promise<void>((resolve) => { releaseFile = resolve; });
+  const sendFile = vi.fn(async (_chat: string, _name: string, file: Buffer) => {
+    fileText = file.toString("utf8");
+    await fileConfirmation;
+    if (mode === "failed") throw new Error("ambiguous file send");
+  });
+  const outbox = new FeishuOutbox("default", {
+    sendText: async () => {}, sendPost: async () => {},
+    sendMarkdownCard: async () => { throw new FeishuMessageError("card-create-failed", "fixture rejection"); },
+    sendCard: async () => "message", updateCard: async () => {},
+    createStreamingCard: async () => ({ cardId: "card", messageId: "message" }),
+    updateStreamingCard: async () => {}, finishStreamingCard: async () => {},
+    ...(mode === "unavailable" ? {} : { sendFile }),
+  }, logger);
+  const target = { surface: "feishu" as const, accountId: "default", conversationId: "chat" };
+  if (mode === "stream") {
+    outbox.handle({ type: "text.delta", target, threadId: "thread", turnId: "turn", itemId: "item", text: "start", phase: "final_answer" });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, fault: () => {},
+    deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, signal,
+      async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
+  });
+  const event: OutputEvent = { type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", phase: "final_answer", text };
+  const retained = mode === "failed" || mode === "unavailable";
+  try {
+    await coordinator.start();
+    await coordinator.submit({ ...submission("full-feishu"), payload: JSON.stringify(event) });
+    if (mode !== "unavailable") {
+      await vi.waitFor(() => expect(fileText).toBe(text));
+      expect(await journal.summary()).toMatchObject({ records: 1, sending: 1 });
+      releaseFile();
+    }
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }));
+    if (mode !== "unavailable") { expect(fileText).toBe(text); expect(sendFile).toHaveBeenCalledOnce(); }
+  } finally { releaseFile(); await coordinator.close(); await outbox.close(); }
+  const reopened = new SqliteDeliveryJournal(directory);
+  try {
+    expect(reopened.execute({ type: "summary" })).toMatchObject({ records: retained ? 1 : 0 });
+    if (retained) {
+      reopened.execute({ type: "resolve", id: "full-feishu", action: "retry" });
+      expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
+    }
+  } finally { reopened.close(); }
+});
+
+it.each(["confirmed", "failed", "cancelled", "post-failed"] as const)("recovers a failed Feishu reply stream through bounded Posts and durable file confirmation (%s)", async (outcome) => {
+  const directory = fixture();
+  const target = { surface: "feishu" as const, accountId: "default", conversationId: "chat" };
+  const text = "start" + "\u{20000}".repeat(30_000) + "END-OF-RESULT";
+  const posts: Array<{ reply: boolean; bytes: number }> = [];
+  const abort = new AbortController();
+  let releaseFile!: () => void;
+  const fileConfirmation = new Promise<void>((resolve) => { releaseFile = resolve; });
+  const sendFile = vi.fn(async (_chat: string, _name: string, file: Buffer) => {
+    expect(file.toString("utf8")).toBe(text);
+    await fileConfirmation;
+    if (outcome === "failed") throw new Error("ambiguous file send");
+  });
+  const post = (reply: boolean) => async (_id: string, markdown: string) => {
+    const bytes = Buffer.byteLength(encodeFeishuPostContent(markdown));
+    posts.push({ reply, bytes });
+    if (outcome === "post-failed") throw new Error("ambiguous Post send");
+    if (bytes > 20_000) throw new FeishuMessageError("send-failed", "fixture oversized Post rejection");
+  };
+  const createStreamingCard = vi.fn(async () => { throw new FeishuMessageError("card-create-failed", "fixture safe rejection"); });
+  const later = vi.fn(async () => "later-message");
+  const outbox = new FeishuOutbox("default", {
+    sendText: async () => {}, sendPost: post(false), replyPost: post(true),
+    sendMarkdownCard: later, sendCard: async () => "message", updateCard: async () => {},
+    createStreamingCard, updateStreamingCard: async () => {}, finishStreamingCard: async () => {}, sendFile,
+  }, logger);
+  const event: OutputEvent = { type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", phase: "final_answer", text };
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, fault: () => {},
+    deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, AbortSignal.any([signal, abort.signal]),
+      async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
+  });
+  try {
+    outbox.prepareTurnReplyTarget("chat", "source-message");
+    outbox.handle({ type: "turn.started", target, threadId: "thread", turnId: "turn" });
+    outbox.handle({ ...event, type: "text.delta", text: "start" });
+    await vi.waitFor(() => expect(createStreamingCard).toHaveBeenCalledOnce());
+    later.mockClear();
+    await coordinator.start();
+    await coordinator.submit({ ...submission("reply-result"), payload: JSON.stringify(event) });
+    await coordinator.submit({ ...submission("later-result"), payload: JSON.stringify({ ...event, itemId: "later", text: "later result" }) });
+    if (outcome !== "post-failed") {
+      await vi.waitFor(() => expect(sendFile).toHaveBeenCalledOnce());
+      expect(await journal.summary()).toMatchObject({ records: 2, sending: 1, pending: 1 });
+      expect(later).not.toHaveBeenCalled();
+      if (outcome === "cancelled") abort.abort();
+    }
+    releaseFile();
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(outcome === "confirmed"
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1 }));
+    expect(later).toHaveBeenCalledTimes(outcome === "confirmed" ? 1 : 0);
+    expect(posts).toHaveLength(outcome === "post-failed" ? 1 : 5);
+    expect(posts.filter((value) => value.reply)).toHaveLength(1);
+    expect(posts.every((value) => value.bytes <= 20_000)).toBe(true);
+    expect(sendFile).toHaveBeenCalledTimes(outcome === "post-failed" ? 0 : 1);
+  } finally { releaseFile(); await coordinator.close(); await outbox.close(); }
+  const reopened = new SqliteDeliveryJournal(directory);
+  try {
+    expect(reopened.execute({ type: "summary" })).toMatchObject({ records: outcome === "confirmed" ? 0 : 2 });
+    if (outcome !== "confirmed") {
+      reopened.execute({ type: "resolve", id: "reply-result", action: "retry" });
+      expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
+    }
+  } finally { reopened.close(); }
 });

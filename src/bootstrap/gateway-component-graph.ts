@@ -803,6 +803,7 @@ export abstract class GatewayComponentGraph {
           router: this.router,
           codex: this.codex,
           turns: execution,
+          acceptsExecution: (target) => this.surfaceManager.acceptsExecution(target),
           bindings: this.bindings,
           workspaces: this.workspaces,
           core: this.core,
@@ -1343,6 +1344,9 @@ export abstract class GatewayComponentGraph {
   private outputAuthorized(event: OutputEvent, owner: string): boolean {
     const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
     if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
+    // Stored selections survive unbinding and configuration changes; they do
+    // not establish current Workspace authorization.
+    if ([original.workspace, original.binding?.[3]].some((id) => id != null && !this.workspaces.get(id))) return false;
     const current = this.outputIdentity(event);
     // Normal background completion releases its live binding before slow
     // platform output finishes. The durable recipient remains the original

@@ -1,3 +1,4 @@
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import { isTelegramMessageNotModified } from "./error-metadata.js";
 import { InputFile, type Api } from "grammy";
 import type { InputRichMessage } from "grammy/types";
@@ -101,9 +102,12 @@ export class TelegramTextStreams {
     const key = this.streamKey(turnKey, event.itemId);
     const existing = this.streams.get(key);
     const state = existing ?? this.createStream(chatId, turnKey);
-    const bounded = boundedTelegramStreamText(
-      `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`,
-    );
+    const completedText = `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`;
+    // Durable admission already bounds the full payload. A truncated preview
+    // must never become the source of the acknowledged final document.
+    const bounded = DeliveryReceipt.current()
+      ? { text: completedText, truncated: false }
+      : boundedTelegramStreamText(completedText);
     state.text = bounded.text;
     state.truncated = bounded.truncated;
     state.completed = true;
