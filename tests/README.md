@@ -21,6 +21,7 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 - `approval`、`policy`、`surfaces`：Actor 与 Workspace 授权、审批关联和失效、输出顺序、平台超时隔离、渠道展示与敏感信息清洗。
 - `bootstrap`、`config`、`storage`、`observability`、`provider-proxy`：组合根和生命周期、严格 TOML、当前 SQLite Schema、指标采集及 Provider 转发边界。
 - `scheduled-tasks`：Schedule 计算、状态机、存储和调度器合同。
+- `persistent-output-faults.test.ts`：持久投递的隔离进程崩溃切点与持续积压资源验证，依赖当前 `dist/`；SIGKILL 切点仅在非 Windows 环境执行。
 - CLI、WebUI、安装、服务和更新脚本：公开命令、管理接口、构建产物、跨平台服务模板与升级失败行为。
 - 模块边界测试：一级模块公开入口、允许依赖方向和生成协议类型隔离。
 
