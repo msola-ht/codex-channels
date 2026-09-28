@@ -86,26 +86,6 @@ export function formatTime(value: number | null | undefined, timeZone = getServe
   return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
-const planTypeNames: Record<string, string> = {
-  free: "Free",
-  go: "Go",
-  plus: "Plus",
-  pro: "Pro",
-  prolite: "Pro Lite",
-  team: "Team",
-  self_serve_business_usage_based: "Business（按量）",
-  business: "Business",
-  ent26: "Enterprise",
-  enterprise_cbp_usage_based: "Enterprise（按量）",
-  enterprise: "Enterprise",
-  edu: "Edu",
-  unknown: "未知",
-}
-
-export function formatPlanType(value: string | null): string {
-  return value === null ? "未知" : (planTypeNames[value] ?? value)
-}
-
 const errorTypeNames: Record<string, { zh: string; en: string }> = {
   usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
   rate_limit_reached: { zh: "速率限制", en: "Rate limit" },

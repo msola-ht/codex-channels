@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/card"
 import { formatBytes, formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeDetail, TrafficHeaderValue } from "@/lib/types"
+import type { Translate } from "@/lib/i18n/messages"
+import { useTranslation } from "@/hooks/use-translation"
 
 export function TrafficDetail({
   detail,
@@ -39,6 +41,7 @@ export function TrafficDetail({
   traceError?: boolean
   onRetry: () => void
 }) {
+  const { t } = useTranslation()
   const finalProvider = detail.chatDiagnostics?.fields["routing.finalProvider"]
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const copyReference = async () => {
@@ -52,11 +55,11 @@ export function TrafficDetail({
   }
   return (
     <div className="flex min-w-0 shrink-0 flex-col gap-4">
-      <Card size="sm" aria-label="调用概览">
+      <Card size="sm" aria-label={t("traffic.overviewAria")}>
         <CardHeader>
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
             <TrafficModel provider={provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
-            <Badge variant="outline">{detail.category === "models" ? "模型列表" : detail.category === "prewarm" ? "连接预热" : "模型请求"}</Badge>
+            <Badge variant="outline">{detail.category === "models" ? t("traffic.categoryModels") : detail.category === "prewarm" ? t("traffic.categoryPrewarm") : t("traffic.categoryRequest")}</Badge>
           </CardTitle>
           <CardDescription className="flex min-w-0 flex-wrap items-center gap-2">
             <span>{formatTime(detail.startedAtMs)} · {provider}</span>
@@ -66,40 +69,40 @@ export function TrafficDetail({
         </CardHeader>
         <CardContent><CallSummary detail={detail} /></CardContent>
       </Card>
-      {traceLoading ? <p role="status" className="text-sm text-muted-foreground">正在刷新调用记录，当前摘要为上次成功读取的内容。</p> : null}
+      {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
       {detail.response === null ? (
-        <Card size="sm" aria-label="响应">
-          <CardHeader><CardTitle>响应</CardTitle></CardHeader>
-          <CardContent><Empty><EmptyHeader><EmptyTitle>未记录终态</EmptyTitle><EmptyDescription>当前记录没有终态响应，无法据此判断请求是否仍在运行。可刷新查看。</EmptyDescription></EmptyHeader></Empty></CardContent>
+        <Card size="sm" aria-label={t("filters.response")}>
+          <CardHeader><CardTitle>{t("filters.response")}</CardTitle></CardHeader>
+          <CardContent><Empty><EmptyHeader><EmptyTitle>{t("traffic.statePending")}</EmptyTitle><EmptyDescription>{t("traffic.noTerminalDescription")}</EmptyDescription></EmptyHeader></Empty></CardContent>
         </Card>
       ) : (
         <Card size="sm" className="min-w-0 shrink-0">
           <CardHeader>
-            <CardTitle>响应</CardTitle>
-            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || "已保存的响应内容"}</CardDescription>
+            <CardTitle>{t("filters.response")}</CardTitle>
+            <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+            <CardContent className="flex flex-col gap-3">
             <ResponseFailure response={detail.response} />
             {detail.response.output.map((item, index) => (
-              <TrafficContent key={index} title={outputLabel(item)} text={item.text} />
+              <TrafficContent key={index} title={outputLabel(t, item)} text={item.text} />
             ))}
             {detail.response.output.length === 0 ? (
-              <Empty><EmptyHeader><EmptyTitle>{detail.category === "prewarm" ? "连接预热" : detail.category === "models" ? "模型列表" : "未提取到输出"}</EmptyTitle>
-                <EmptyDescription>{detail.category === "prewarm" ? "本次请求不生成回答。" : "可展开原始响应查看已保存的内容。"}</EmptyDescription>
+              <Empty><EmptyHeader><EmptyTitle>{detail.category === "prewarm" ? t("traffic.categoryPrewarm") : detail.category === "models" ? t("traffic.categoryModels") : t("traffic.outputMissing")}</EmptyTitle>
+                <EmptyDescription>{detail.category === "prewarm" ? t("traffic.prewarmNoOutput") : t("traffic.outputEmptyHint")}</EmptyDescription>
               </EmptyHeader></Empty>
             ) : null}
             {detail.response.outputTruncated ? (
-              <Alert><AlertTitle>输出展示不完整</AlertTitle><AlertDescription>输出超出展示上限，或传输记录残缺、无法解析。原始调用记录未被修改。</AlertDescription></Alert>
+              <Alert><AlertTitle>{t("traffic.outputTruncatedTitle")}</AlertTitle><AlertDescription>{t("traffic.outputTruncatedDescription")}</AlertDescription></Alert>
             ) : null}
-            <TrafficDisclosure title={`响应头与原始响应${detail.response.bodyTruncated ? " · 展示已截断" : ""}`}>
+            <TrafficDisclosure title={`${t("traffic.responseRawTitle")}${detail.response.bodyTruncated ? t("traffic.truncatedSuffix") : ""}`}>
               <div className="flex min-w-0 flex-col gap-3">
-                <p className="flex items-center gap-2 text-sm">响应服务层级：{detail.response.serviceTier ?? "未提供"}<FastBadge tier={detail.response.serviceTier} source="response" /></p>
+                <p className="flex items-center gap-2 text-sm">{t("traffic.responseServiceTier", { value: detail.response.serviceTier ?? t("modelComparison.notProvided") })}<FastBadge tier={detail.response.serviceTier} source="response" /></p>
                 {detail.response.responseId === undefined ? null : (
-                  <p className="break-all font-mono text-xs text-muted-foreground">响应 ID：{detail.response.responseId}</p>
+                  <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.responseId", { id: detail.response.responseId })}</p>
                 )}
-                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined ? null : `传输 ${formatBytes(detail.response.bytes)}`, detail.response.storedBytes === undefined ? null : `存储 ${formatBytes(detail.response.storedBytes)}`].filter(Boolean).join(" · ")}</p>}
-                <HeaderTable title="响应头" headers={detail.response.headers} />
-                <TrafficContent title="原始终态" text={detail.response.body} json truncated={detail.response.bodyTruncated} />
+                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
+                <HeaderTable title={t("traffic.responseHeadersTitle")} headers={detail.response.headers} />
+                <TrafficContent title={t("traffic.responseBodyRawTitle")} text={detail.response.body} json truncated={detail.response.bodyTruncated} />
               </div>
             </TrafficDisclosure>
           </CardContent>
@@ -108,67 +111,67 @@ export function TrafficDetail({
 
       <Card size="sm" className="min-w-0 shrink-0">
         <CardHeader>
-          <CardTitle>请求</CardTitle>
+          <CardTitle>{t("metrics.requests")}</CardTitle>
           <CardDescription className="break-all">
             {requestLabel(detail)}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-3 text-sm">
-            <span>思考等级：{detail.request.parameters.reasoningEffort ?? "未提供"}</span>
-            <span className="inline-flex items-center gap-2">请求服务层级：{detail.request.parameters.serviceTier ?? "未提供"}<FastBadge tier={detail.request.parameters.serviceTier} source="request" /></span>
-            {detail.request.parameters.generate === false ? <Badge variant="outline">不生成输出</Badge> : null}
+            <span>{t("traffic.reasoningEffort", { value: detail.request.parameters.reasoningEffort ?? t("modelComparison.notProvided") })}</span>
+            <span className="inline-flex items-center gap-2">{t("traffic.requestServiceTier", { value: detail.request.parameters.serviceTier ?? t("modelComparison.notProvided") })}<FastBadge tier={detail.request.parameters.serviceTier} source="request" /></span>
+            {detail.request.parameters.generate === false ? <Badge variant="outline">{t("traffic.noOutputBadge")}</Badge> : null}
           </div>
           <TrafficRequestContent content={detail.request.content} />
-          <TrafficDisclosure title={`请求头与原始正文${detail.request.bodyTruncated ? "（展示已截断）" : ""}`}>
+          <TrafficDisclosure title={`${t("traffic.requestRawTitle")}${detail.request.bodyTruncated ? t("traffic.truncatedSuffixParen") : ""}`}>
             <div className="flex min-w-0 flex-col gap-3">
               {detail.request.parameters.previousResponseId === undefined ? null : (
-                <p className="break-all font-mono text-xs text-muted-foreground">接续响应：{detail.request.parameters.previousResponseId}</p>
+                <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.previousResponseId", { id: detail.request.parameters.previousResponseId })}</p>
               )}
-              {detail.request.bytes === undefined && detail.request.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.request.bytes === undefined ? null : `原始 ${formatBytes(detail.request.bytes)}`, detail.request.storedBytes === undefined ? null : `存储 ${formatBytes(detail.request.storedBytes)}`].filter(Boolean).join(" · ")}</p>}
-              <HeaderTable title="请求头" headers={detail.request.headers} />
-              <TrafficContent title="请求正文" text={detail.request.body} json truncated={detail.request.bodyTruncated} />
+              {detail.request.bytes === undefined && detail.request.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.request.bytes === undefined ? null : t("traffic.requestBytesRaw", { size: formatBytes(detail.request.bytes) }), detail.request.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.request.storedBytes) })].filter(Boolean).join(" · ")}</p>}
+              <HeaderTable title={t("traffic.requestHeadersTitle")} headers={detail.request.headers} />
+              <TrafficContent title={t("traffic.requestBodyTitle")} text={detail.request.body} json truncated={detail.request.bodyTruncated} />
             </div>
           </TrafficDisclosure>
         </CardContent>
       </Card>
 
-      <Card size="sm" aria-label="诊断信息">
-        <CardHeader><CardTitle>诊断信息</CardTitle><CardDescription>记录定位、模型声明与原始事件，按需展开。</CardDescription></CardHeader>
+      <Card size="sm" aria-label={t("traffic.diagnosticsTitle")}>
+        <CardHeader><CardTitle>{t("traffic.diagnosticsTitle")}</CardTitle><CardDescription>{t("traffic.diagnosticsDescription")}</CardDescription></CardHeader>
         <CardContent className="flex min-w-0 flex-col gap-3">
-          <TrafficDisclosure title="记录信息">
+          <TrafficDisclosure title={t("traffic.recordInfoTitle")}>
             <dl className="grid min-w-0 gap-3 text-sm sm:grid-cols-2">
-              {[["提供商", provider], ["批次", session], ["调用编号", `#${detail.id}`], ["线程", detail.threadId], ["轮次", detail.turnId], ["请求类型", detail.requestKind], ["传输", requestLabel(detail)]].map(([label, value]) => (
+              {[[t("traffic.provider"), provider], [t("traffic.fieldSession"), session], [t("traffic.fieldCallId"), `#${detail.id}`], [t("traffic.fieldThread"), detail.threadId], [t("traffic.fieldTurn"), detail.turnId], [t("traffic.fieldRequestKind"), detail.requestKind], [t("traffic.fieldTransport"), requestLabel(detail)]].map(([label, value]) => (
                 <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value ?? "—"}</dd></div>
               ))}
             </dl>
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={copyState === "pending"} onClick={() => void copyReference()}><CopyIcon data-icon="inline-start" />复制定位信息</Button>
-              <span role="status" className="text-xs text-muted-foreground">{copyState === "copied" ? "已复制" : copyState === "failed" ? "复制失败，请手动选择记录信息。" : ""}</span>
+              <Button type="button" variant="outline" size="sm" disabled={copyState === "pending"} onClick={() => void copyReference()}><CopyIcon data-icon="inline-start" />{t("traffic.copyReference")}</Button>
+              <span role="status" className="text-xs text-muted-foreground">{copyState === "copied" ? t("traffic.referenceCopied") : copyState === "failed" ? t("traffic.referenceCopyFailed") : ""}</span>
             </div>
           </TrafficDisclosure>
-          {detail.response?.state === "completed" && hasResponseDiagnostics(detail.response) ? <TrafficDisclosure title="完成后的诊断信息">
-            <p className="text-sm text-muted-foreground">已记录完成终态；以下信息不改变本次请求的完成状态。</p>
+          {detail.response?.state === "completed" && hasResponseDiagnostics(detail.response) ? <TrafficDisclosure title={t("traffic.postCompleteDiagnosticsTitle")}>
+            <p className="text-sm text-muted-foreground">{t("traffic.postCompleteDiagnosticsNote")}</p>
             <ResponseErrorDetails response={detail.response} />
           </TrafficDisclosure> : null}
-          {detail.chatDiagnostics ? <TrafficDisclosure title="Chat 上游信息">
-            <p className="text-sm">实际上游：{String(detail.chatDiagnostics.fields["routing.finalProvider"] ?? "未提供")} · 上游模型：{String(detail.chatDiagnostics.fields.model ?? "未提供")}</p>
-            <p className="text-xs text-muted-foreground">上游回报的路由、标识和费用；不同费用字段保持各自口径，不代表套餐实际扣费。备用提供商不代表已调用。</p>
-            <TrafficContent title="上游诊断字段" text={JSON.stringify(detail.chatDiagnostics.fields, null, 2)} json />
-            {detail.chatDiagnostics.truncated ? <p className="text-xs text-muted-foreground">部分诊断字段超出限制或格式无效，未保留。</p> : null}
+          {detail.chatDiagnostics ? <TrafficDisclosure title={t("traffic.chatUpstreamTitle")}>
+            <p className="text-sm">{t("traffic.chatUpstreamSummary", { provider: String(detail.chatDiagnostics.fields["routing.finalProvider"] ?? t("modelComparison.notProvided")), model: String(detail.chatDiagnostics.fields.model ?? t("modelComparison.notProvided")) })}</p>
+            <p className="text-xs text-muted-foreground">{t("traffic.chatUpstreamNote")}</p>
+            <TrafficContent title={t("traffic.chatUpstreamFieldsTitle")} text={JSON.stringify(detail.chatDiagnostics.fields, null, 2)} json />
+            {detail.chatDiagnostics.truncated ? <p className="text-xs text-muted-foreground">{t("traffic.chatUpstreamTruncated")}</p> : null}
           </TrafficDisclosure> : null}
 
-          <TrafficDisclosure title="模型声明与来源"><ModelEvidence detail={detail} /></TrafficDisclosure>
+          <TrafficDisclosure title={t("traffic.modelEvidenceTitle")}><ModelEvidence detail={detail} /></TrafficDisclosure>
           <TrafficParameterComparison rows={detail.parameterComparison} />
           {detail.tracePage.total === 0 ? null : (
-            <TrafficDisclosure title={`原始事件（${detail.tracePage.total} 条）`}>
+            <TrafficDisclosure title={t("traffic.traceTitle", { count: detail.tracePage.total })}>
               <div className="flex min-w-0 flex-col gap-3" aria-busy={traceLoading}>
-                {traceLoading ? <><p role="status">正在加载原始事件…</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>原始事件加载失败，请重试。</p><Button type="button" variant="outline" onClick={onRetry}>重试原始事件</Button></> : <><p className="text-xs text-muted-foreground">当前 {detail.tracePage.offset + 1}–{detail.tracePage.offset + detail.trace.length} / {detail.tracePage.total} 条</p>{detail.trace.map((item, index) => (
+                {traceLoading ? <><p role="status">{t("traffic.traceLoading")}</p><Skeleton className="h-32 w-full" /></> : traceError ? <><p>{t("traffic.traceError")}</p><Button type="button" variant="outline" onClick={onRetry}>{t("traffic.traceRetry")}</Button></> : <><p className="text-xs text-muted-foreground">{t("traffic.traceRange", { from: detail.tracePage.offset + 1, to: detail.tracePage.offset + detail.trace.length, total: detail.tracePage.total })}</p>{detail.trace.map((item, index) => (
                   <section key={`${item.atMs}-${item.kind}-${index}`} className="flex min-w-0 flex-col gap-1">
                     <p className="font-mono text-xs text-muted-foreground">
-                      {formatTime(item.atMs)} [{item.kind}]{item.truncated ? "（已截断）" : ""}
+                      {formatTime(item.atMs)} [{item.kind}]{item.truncated ? t("traffic.truncatedInline") : ""}
                     </p>
-                    <TrafficContent title="事件正文" text={item.text} json truncated={item.truncated} />
+                    <TrafficContent title={t("traffic.traceItemTitle")} text={item.text} json truncated={item.truncated} />
                   </section>
                 ))}</>}
                 {detail.tracePage.previousOffset === null && detail.tracePage.nextOffset === null ? null : (
@@ -182,7 +185,7 @@ export function TrafficDetail({
                         ? undefined
                         : onTracePageChange(detail.tracePage.previousOffset)}
                     >
-                      <ChevronLeftIcon data-icon="inline-start" />上一页
+                      <ChevronLeftIcon data-icon="inline-start" />{t("common.previous")}
                     </Button>
                     <Button
                       type="button"
@@ -193,7 +196,7 @@ export function TrafficDetail({
                         ? undefined
                         : onTracePageChange(detail.tracePage.nextOffset)}
                     >
-                      下一页<ChevronRightIcon data-icon="inline-end" />
+                      {t("common.next")}<ChevronRightIcon data-icon="inline-end" />
                     </Button>
                   </div>
                 )}
@@ -207,23 +210,25 @@ export function TrafficDetail({
 }
 
 function StateBadge({ state }: { state: TrafficExchangeDetail["state"] }) {
-  const label = state === "completed" ? "完成" : state === "failed" ? "失败"
-    : state === "incomplete" ? "不完整" : "未记录终态"
+  const { t } = useTranslation()
+  const label = state === "completed" ? t("traffic.stateCompleted") : state === "failed" ? t("traffic.stateFailed")
+    : state === "incomplete" ? t("traffic.stateIncomplete") : t("traffic.statePending")
   return <Badge variant={state === "completed" ? "secondary" : state === "pending" ? "outline" : "destructive"}>{label}</Badge>
 }
 
 function CallSummary({ detail }: { detail: TrafficExchangeDetail }) {
+  const { t } = useTranslation()
   const usage = detail.response?.usage
   const isModel = detail.category !== "models" && detail.category !== "prewarm"
   const rate = usage?.inputTokens !== undefined && usage.inputTokens > 0 && usage.cachedTokens !== undefined
     ? `${(usage.cachedTokens / usage.inputTokens * 100).toFixed(1)}%` : "—"
   const elapsed = (value: number | undefined) => value === undefined ? "—" : formatElapsedDuration(value)
   return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    {isModel ? <SummaryMetric label={<TableHint hint="提交发送至收到首段非空内容，含思考、正文或工具参数；缺失不补算。">首 Token</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
-    <SummaryMetric label={<TableHint hint="提交发送至请求结束；不含发送前准备和客户端显示。">请求耗时</TableHint>} value={elapsed(detail.response?.callTiming?.totalMs)} />
+    {isModel ? <SummaryMetric label={<TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint>} value={elapsed(detail.response?.firstTokenMs)} /> : null}
+    <SummaryMetric label={<TableHint hint={t("traffic.durationHint")}>{t("requests.durationColumn")}</TableHint>} value={elapsed(detail.response?.callTiming?.totalMs)} />
     {isModel ? <>
-      <SummaryMetric label="输入 Token" value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : `缓存 ${usage.cachedTokens.toLocaleString()} · ${rate}`} />
-      <SummaryMetric label="输出 Token" value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : `其中推理 ${usage.reasoningTokens.toLocaleString()}`} />
+      <SummaryMetric label={t("metrics.input")} value={usage?.inputTokens?.toLocaleString() ?? "—"} description={usage?.cachedTokens === undefined ? undefined : t("traffic.cachedTokens", { count: usage.cachedTokens.toLocaleString(), rate })} />
+      <SummaryMetric label={t("metrics.output")} value={usage?.outputTokens?.toLocaleString() ?? "—"} description={usage?.reasoningTokens === undefined ? undefined : t("traffic.reasoningTokens", { count: usage.reasoningTokens.toLocaleString() })} />
     </> : null}
   </dl>
 }
@@ -237,14 +242,15 @@ function SummaryMetric({ label, value, description }: { label: ReactNode; value:
 }
 
 function ResponseFailure({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
+  const { t } = useTranslation()
   if (response.state === "completed") return null
   return <Alert variant="destructive">
-    <AlertTitle>{response.state === "incomplete" ? "响应不完整" : "请求失败"}</AlertTitle>
+    <AlertTitle>{response.state === "incomplete" ? t("traffic.responseIncomplete") : t("traffic.requestFailed")}</AlertTitle>
     <AlertDescription className="min-w-0">
-      {response.failureStage === undefined ? null : <p>失败阶段：{response.failureStage}</p>}
+      {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: response.failureStage })}</p>}
       {response.failure === undefined && response.error === undefined && response.errorScope === undefined
-        ? <p>记录未提供具体原因。</p>
-        : <TrafficDisclosure title="错误详情"><ResponseErrorDetails response={response} /></TrafficDisclosure>}
+        ? <p>{t("traffic.failureUnknown")}</p>
+        : <TrafficDisclosure title={t("traffic.errorDetailsTitle")}><ResponseErrorDetails response={response} /></TrafficDisclosure>}
     </AlertDescription>
   </Alert>
 }
@@ -254,14 +260,15 @@ function hasResponseDiagnostics(response: NonNullable<TrafficExchangeDetail["res
 }
 
 function ResponseErrorDetails({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
-  return <TrafficContent title="原始诊断" text={JSON.stringify({ stage: response.failureStage, reason: response.failure, scope: response.errorScope, error: response.error }, null, 2)} json />
+  const { t } = useTranslation()
+  return <TrafficContent title={t("traffic.rawDiagnosticsTitle")} text={JSON.stringify({ stage: response.failureStage, reason: response.failure, scope: response.errorScope, error: response.error }, null, 2)} json />
 }
 
-function outputLabel(item: NonNullable<TrafficExchangeDetail["response"]>["output"][number]): string {
-  if (item.type === "message") return item.phase === "commentary" ? "过程说明" : "回答"
-  if (item.type === "reasoning") return "推理摘要"
+function outputLabel(t: Translate, item: NonNullable<TrafficExchangeDetail["response"]>["output"][number]): string {
+  if (item.type === "message") return item.phase === "commentary" ? t("traffic.outputCommentary") : t("traffic.outputAnswer")
+  if (item.type === "reasoning") return t("traffic.outputReasoning")
   if (item.type === "function_call" || item.type === "custom_tool_call") {
-    return `工具调用：${item.name ?? "未提供名称"}${item.callId === undefined ? "" : ` · ${item.callId}`}`
+    return t("traffic.outputToolCall", { name: item.name ?? t("traffic.unknownName"), id: item.callId === undefined ? "" : ` · ${item.callId}` })
   }
   return item.type
 }
@@ -287,16 +294,17 @@ function HeaderTable({ title, headers }: { title: string; headers: Record<string
 }
 
 function ModelEvidence({ detail }: { detail: TrafficExchangeDetail }) {
+  const { t } = useTranslation()
   return <section className="flex min-w-0 flex-col gap-3 text-sm">
-      <p className="text-muted-foreground">仅比较请求与响应回显名称，不验证模型身份。缺失不代表上游未发送。</p>
-      <p className="break-all">请求模型：{detail.requestModel ?? "未提供"}</p>
-      <p className="break-all">响应回显：{detail.responseModels.join("、") || "未提供"}</p>
-      <p>服务端模型声明（不覆盖响应回显）：</p>
-      {detail.modelEvidence.serverModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
-      <p>安全缓冲候选声明（不表示已经切换，也不表示由该模型执行安全检查）：</p>
-      {detail.modelEvidence.safetyModels.length === 0 ? <p>未记录</p> : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{entry.model} · 来源：{entry.source}</p>)}
-      <p>X-Codex-Turn-State 字符数：</p>
-      {detail.modelEvidence.turnStateLengths.length === 0 ? <p>未记录</p> : detail.modelEvidence.turnStateLengths.map((entry) => <p className="break-all" key={`${entry.source}:${entry.characters}`}>{entry.characters.toLocaleString("zh-CN")} 字符 · 来源：{entry.source}</p>)}
-      {detail.modelEvidence.truncated ? <p>声明展示不完整：超过条数或字段长度限制，或含无效字符。</p> : null}
+      <p className="text-muted-foreground">{t("traffic.modelEvidenceNote")}</p>
+      <p className="break-all">{t("traffic.requestModel", { name: detail.requestModel ?? t("modelComparison.notProvided") })}</p>
+      <p className="break-all">{t("traffic.responseModels", { names: detail.responseModels.join(t("modelComparison.listSeparator")) || t("modelComparison.notProvided") })}</p>
+      <p>{t("traffic.serverModelsTitle")}</p>
+      {detail.modelEvidence.serverModels.length === 0 ? <p>{t("traffic.notRecorded")}</p> : detail.modelEvidence.serverModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{t("traffic.modelWithSource", { model: entry.model, source: entry.source })}</p>)}
+      <p>{t("traffic.safetyModelsTitle")}</p>
+      {detail.modelEvidence.safetyModels.length === 0 ? <p>{t("traffic.notRecorded")}</p> : detail.modelEvidence.safetyModels.map((entry) => <p className="break-all" key={`${entry.source}:${entry.model}`}>{t("traffic.modelWithSource", { model: entry.model, source: entry.source })}</p>)}
+      <p>{t("traffic.turnStateLengthsTitle")}</p>
+      {detail.modelEvidence.turnStateLengths.length === 0 ? <p>{t("traffic.notRecorded")}</p> : detail.modelEvidence.turnStateLengths.map((entry) => <p className="break-all" key={`${entry.source}:${entry.characters}`}>{t("traffic.turnStateWithSource", { count: entry.characters.toLocaleString("zh-CN"), source: entry.source })}</p>)}
+      {detail.modelEvidence.truncated ? <p>{t("traffic.modelEvidenceTruncated")}</p> : null}
   </section>
 }

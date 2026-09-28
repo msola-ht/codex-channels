@@ -7,12 +7,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useTranslation } from "@/hooks/use-translation"
 
 export function ModeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
+  const { t } = useTranslation()
   const isDark = resolvedTheme !== "light"
   const nextTheme = isDark ? "light" : "dark"
-  const label = isDark ? "切换浅色主题" : "切换深色主题"
+  const label = isDark ? t("shell.switchToLight") : t("shell.switchToDark")
 
   return (
     <Tooltip>

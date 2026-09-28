@@ -17,6 +17,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   })
 
   useEffect(() => {
+    document.documentElement.lang = language === "en" ? "en-US" : "zh-CN"
     try {
       localStorage.setItem(STORAGE_KEY, language)
     } catch {

@@ -6,12 +6,15 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useTranslation } from "@/hooks/use-translation"
 import type { ManagementTaskController } from "@/lib/settings-management"
+import type { Translate } from "@/lib/i18n/messages"
 
 export function TrafficCleanupControls({ tasks, onCompleted }: {
   tasks: ManagementTaskController
   onCompleted: () => void
 }) {
+  const { t } = useTranslation()
   const latest = tasks.tasks.findLast((task) => task.operation === "traffic")
   const active = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || active
@@ -21,7 +24,7 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
   return <>
     <div className="flex items-center gap-2">
       {latest === undefined ? null : <Badge variant={latest.state === "completed" ? "secondary" : latest.state === "failed" ? "destructive" : "outline"}>
-        {taskStateLabel(latest.state)}
+        {taskStateLabel(t, latest.state)}
       </Badge>}
       <Button
         type="button"
@@ -30,21 +33,21 @@ export function TrafficCleanupControls({ tasks, onCompleted }: {
         disabled={disabled}
         onClick={() => void tasks.run({ operation: "traffic", action: "cleanup" })}
       >
-        {tasks.saving ? <Spinner data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
-        清空调用记录
+        {tasks.saving ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <Trash2Icon data-icon="inline-start" />}
+        {t("traffic.cleanupAction")}
       </Button>
     </div>
     {error === null ? null : <Alert variant="destructive">
-      <AlertDescription>{error}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>重试读取任务</Button> : null}</AlertDescription>
+      <AlertDescription>{t("errors.unknown")}{tasks.error !== null ? <Button variant="outline" size="sm" disabled={tasks.loading} onClick={tasks.refetch}>{t("traffic.retryTasks")}</Button> : null}</AlertDescription>
     </Alert>}
     <ManagementTaskConfirmationDialog tasks={tasks} />
   </>
 }
 
-function taskStateLabel(state: string): string {
-  if (state === "completed") return "清理完成"
-  if (state === "failed") return "清理失败"
-  if (state === "cancelled") return "已取消"
-  if (state === "cancelling") return "取消中"
-  return state === "queued" ? "等待清理" : "清理中"
+function taskStateLabel(t: Translate, state: string): string {
+  if (state === "completed") return t("traffic.taskCompleted")
+  if (state === "failed") return t("traffic.taskFailed")
+  if (state === "cancelled") return t("traffic.taskCancelled")
+  if (state === "cancelling") return t("traffic.taskCancelling")
+  return state === "queued" ? t("traffic.taskQueued") : t("traffic.taskRunning")
 }

@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { StatCard } from "@/components/metrics/stat-card"
 import {
@@ -13,30 +14,31 @@ export function ThreadRunSummary({
   latestTurn: TurnSummary | null
   threadAggregate: (Omit<Aggregate, "cacheUsage"> & { turnCount: number }) | null
 }) {
+  const { t } = useTranslation()
   if (threadAggregate === null) {
     return (
       <Alert>
-        <AlertTitle>暂无数据</AlertTitle>
-        <AlertDescription>该 Thread 没有指标记录</AlertDescription>
+        <AlertTitle>{t("threads.noData")}</AlertTitle>
+        <AlertDescription>{t("threads.noMetrics")}</AlertDescription>
       </Alert>
     )
   }
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       <StatCard
-        title="Turn"
+        title={t("metrics.turn")}
         value={threadAggregate.turnCount}
-        description={latestTurn === null ? "无最近 Turn" : `最近 Turn ${formatCount(latestTurn.requestCount)} 次请求`}
+        description={latestTurn === null ? t("threads.noLatest") : t("threads.latest", { count: formatCount(latestTurn.requestCount) })}
       />
       <StatCard
-        title="请求数"
+        title={t("metrics.requestCount")}
         value={formatCount(threadAggregate.requestCount)}
-        description={`失败 ${formatCount(threadAggregate.unsuccessfulRequestCount)}`}
+        description={t("metrics.failedTotal", { count: formatCount(threadAggregate.unsuccessfulRequestCount) })}
       />
       <StatCard
         title="Token"
         value={formatTokens(threadAggregate.inputTokens + threadAggregate.outputTokens)}
-        description={`输入 ${formatTokens(threadAggregate.inputTokens)} · 输出 ${formatTokens(threadAggregate.outputTokens)}`}
+        description={t("metrics.inputOutput", { input: formatTokens(threadAggregate.inputTokens), output: formatTokens(threadAggregate.outputTokens) })}
       />
     </div>
   )

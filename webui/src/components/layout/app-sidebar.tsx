@@ -17,18 +17,20 @@ import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
 import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
 import { navItems } from "@/lib/navigation"
 import { useSidebar } from "@/components/ui/sidebar-context"
+import { useTranslation } from "@/hooks/use-translation"
 
 export function AppSidebar() {
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
+  const { t } = useTranslation()
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="icon" mobileTitle={t("common.sidebar")} mobileDescription={t("common.sidebarDescription")}>
       <SidebarHeader>
         <SidebarSwitcher />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>导航</SidebarGroupLabel>
+          <SidebarGroupLabel>{t("shell.navigation")}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => (
@@ -40,11 +42,11 @@ export function AppSidebar() {
                         ? pathname === "/"
                         : pathname.startsWith(item.to)
                     }
-                    tooltip={item.label}
+                    tooltip={t(item.labelKey)}
                   >
                     <NavLink to={item.to} onClick={() => setOpenMobile(false)}>
                       <item.icon />
-                      <span>{item.label}</span>
+                      <span>{t(item.labelKey)}</span>
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -56,7 +58,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarFooterNav />
       </SidebarFooter>
-      <SidebarRail />
+      <SidebarRail aria-label={t("common.toggleSidebar")} title={t("common.toggleSidebar")} />
     </Sidebar>
   )
 }

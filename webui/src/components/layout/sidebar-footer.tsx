@@ -23,9 +23,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useSidebar } from "@/components/ui/sidebar-context"
+import { useTranslation } from "@/hooks/use-translation"
 
 export function SidebarFooterNav() {
   const { isMobile } = useSidebar()
+  const { t } = useTranslation()
 
   return (
     <SidebarMenu>
@@ -40,7 +42,7 @@ export function SidebarFooterNav() {
                 <AvatarFallback className="rounded-lg">CX</AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">本地服务</span>
+                <span className="truncate font-medium">{t("shell.localService")}</span>
                 <span className="truncate text-xs">/api/v1</span>
               </div>
               <ChevronsUpDownIcon className="ml-auto" />
@@ -59,7 +61,7 @@ export function SidebarFooterNav() {
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">Codex WebUI</span>
-                  <span className="truncate text-xs">本地指标与设置</span>
+                  <span className="truncate text-xs">{t("shell.subtitle")}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
@@ -67,7 +69,7 @@ export function SidebarFooterNav() {
             <DropdownMenuGroup>
               <DropdownMenuItem>
                 <BadgeCheck />
-                只读模式
+                {t("shell.readOnly")}
               </DropdownMenuItem>
               <DropdownMenuItem>
                 <Activity />

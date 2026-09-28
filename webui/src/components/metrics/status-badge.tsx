@@ -1,6 +1,16 @@
 import { Badge } from "@/components/ui/badge"
+import { useTranslation } from "@/hooks/use-translation"
+import type { MessageKey } from "@/lib/i18n/messages"
+
+/** 已记录的请求状态映射到字典键；未知状态保留上游原值。 */
+const statusKeys: Readonly<Record<string, MessageKey>> = {
+  completed: "status.completed",
+  failed: "status.failed",
+  incomplete: "status.incomplete",
+}
 
 export function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation()
   const variant = status === "completed"
     ? "default"
     : status === "failed"
@@ -8,12 +18,6 @@ export function StatusBadge({ status }: { status: string }) {
       : status === "incomplete"
         ? "outline"
         : "secondary"
-  const label = status === "completed"
-    ? "成功"
-    : status === "failed"
-      ? "失败"
-      : status === "incomplete"
-        ? "未完成"
-        : status
-  return <Badge variant={variant}>{label}</Badge>
+  const key = statusKeys[status]
+  return <Badge variant={variant}>{key === undefined ? status : t(key)}</Badge>
 }

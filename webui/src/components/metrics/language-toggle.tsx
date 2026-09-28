@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import type { DisplayLanguage } from "@/lib/format"
+import { useTranslation } from "@/hooks/use-translation"
 
 const options: Array<{ value: DisplayLanguage; label: string }> = [
   { value: "zh", label: "中文" },
@@ -23,6 +24,7 @@ export function LanguageToggle({
   value: DisplayLanguage
   onChange: (language: DisplayLanguage) => void
 }) {
+  const { t } = useTranslation()
   const current = options.find((option) => option.value === value) ?? options[0]
 
   return (
@@ -33,7 +35,7 @@ export function LanguageToggle({
           variant="outline"
           size="sm"
           className="gap-2"
-          aria-label="切换显示语言"
+          aria-label={t("shell.switchLanguage")}
         >
           {current.label}
           <ChevronsUpDown data-icon="inline-end" className="opacity-50" />

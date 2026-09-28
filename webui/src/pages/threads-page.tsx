@@ -1,3 +1,5 @@
+import { useTranslation } from "@/hooks/use-translation"
+import { translateApiError } from "@/lib/i18n/translate"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { PageSkeleton } from "@/components/metrics/page-skeleton"
 import { QueryFilters } from "@/components/metrics/query-filters"
@@ -7,14 +9,15 @@ import { useThreads } from "@/hooks/use-threads"
 import { useMetricsQuery } from "@/hooks/use-metrics-query"
 
 export function ThreadsPage() {
+  const { t } = useTranslation()
   const { query, update, pagination } = useMetricsQuery("all", "last")
-  const { data, loading, error, refetch } = useThreads(query)
+  const { data, loading, error, errorCode, refetch } = useThreads(query)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
-      <h1 className="shrink-0 text-xl font-semibold">Threads</h1>
+      <h1 className="shrink-0 text-xl font-semibold">{t("pages.threads")}</h1>
       <QueryFilters query={query} onChange={update} />
-      <ErrorBanner error={error} onRetry={refetch} pending={loading} />
+      <ErrorBanner error={translateApiError(t, error, errorCode)} onRetry={refetch} pending={loading} />
       {error !== null ? null : data === null ? <PageSkeleton rows={5} /> : (
         <>
           <QuerySummary loading={loading} aggregate={data.aggregate} range={data.range} turns={data.turnCount} />

@@ -24,6 +24,7 @@ const checks = [
     args: ["run", "lint"],
     cwd: "webui",
   },
+  { name: "WebUI 翻译字典", command: "npm", args: ["run", "i18n:check"] },
   { name: "文档与索引", command: "npm", args: ["run", "docs:check"] },
   { name: "完整测试", command: "npm", args: ["test"] },
   { name: "Shell 语法", command: "bash", args: [

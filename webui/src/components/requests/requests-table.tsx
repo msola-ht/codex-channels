@@ -20,7 +20,7 @@ import {
   TruncatedText,
   type DataTableColumn,
 } from "@/components/metrics/data-table"
-import { useLanguage } from "@/hooks/language-context"
+import { useTranslation } from "@/hooks/use-translation"
 import {
   formatErrorMessage,
   formatElapsedDuration,
@@ -31,24 +31,6 @@ import {
 import type { RequestRecord } from "@/lib/types"
 
 const TABLE_STATE_KEY = "codex-webui:requests-table-state-v4"
-
-const COLUMN_LABELS: Record<string, string> = {
-  time: "时间",
-  provider: "Provider",
-  model: "模型",
-  ua: "User-Agent",
-  operation: "操作",
-  status: "状态",
-  http: "HTTP",
-  error: "错误",
-  input: "输入 Token",
-  cacheHitRate: "缓存命中率",
-  output: "输出 Token",
-  reasoningOutput: "推理输出",
-  firstContent: "首 Token",
-  totalDuration: "请求耗时",
-  traffic: "调用详情",
-}
 
 const DEFAULT_VISIBLE_COLUMNS: Record<string, boolean> = {
   ua: false,
@@ -72,7 +54,6 @@ export function RequestsTable({
   onPageSizeChange,
   sorting,
   onSortingChange,
-  onFilterChange,
   filter,
   total,
 }: {
@@ -87,18 +68,34 @@ export function RequestsTable({
   onPageSizeChange: (pageSize: number) => void
   sorting: SortingState
   onSortingChange: (sorting: SortingState) => void
-  onFilterChange?: (filter: string) => void
   filter: string
   total: number
 }) {
-  const { language } = useLanguage()
+  const { t, language } = useTranslation()
+  const columnLabels: Record<string, string> = {
+    time: t("metrics.time"),
+    provider: t("metrics.provider"),
+    model: t("metrics.model"),
+    ua: "User-Agent",
+    operation: t("filters.operation"),
+    status: t("filters.status"),
+    http: "HTTP",
+    error: t("requests.errorColumn"),
+    input: t("metrics.input"),
+    cacheHitRate: t("metrics.cacheHitRate"),
+    output: t("metrics.output"),
+    reasoningOutput: t("requests.reasoningColumn"),
+    firstContent: t("requests.firstColumn"),
+    totalDuration: t("requests.durationColumn"),
+    traffic: t("requests.detailColumn"),
+  }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
     {
       id: "time",
       accessorFn: (record) => record.recordedAtMs,
       header: ({ column }) => (
-        <SortableHeader column={column}>时间</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.time")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
         <span className="tabular-nums text-muted-foreground">
@@ -110,7 +107,7 @@ export function RequestsTable({
       id: "provider",
       accessorFn: (record) => record.provider ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>Provider</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.provider")}</SortableHeader>
       ),
       cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
     },
@@ -118,7 +115,7 @@ export function RequestsTable({
       id: "model",
       accessorFn: (record) => record.model ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>模型</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.model")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="flex items-center gap-2 whitespace-nowrap">
@@ -137,7 +134,7 @@ export function RequestsTable({
       id: "status",
       accessorFn: (record) => record.status,
       header: ({ column }) => (
-        <SortableHeader column={column}>状态</SortableHeader>
+        <SortableHeader column={column}>{t("filters.status")}</SortableHeader>
       ),
       cell: ({ row }) => {
         const record = row.original
@@ -146,7 +143,7 @@ export function RequestsTable({
         const details = [
           formatErrorType(record.errorType ?? record.errorCode ?? null, language),
           ...(record.errorMessage ? [formatErrorMessage(record.errorMessage, language)] : []),
-          ...(record.errorCode ? [`错误码：${record.errorCode}`] : []),
+          ...(record.errorCode ? [t("common.errorCode", { code: record.errorCode })] : []),
         ].join(" · ")
         return <TableHint hint={details}>{badge}</TableHint>
       },
@@ -155,7 +152,7 @@ export function RequestsTable({
       id: "input",
       accessorFn: (record) => record.inputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>输入 Token</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
       ),
       cell: ({ row }) => {
         const record = row.original
@@ -174,16 +171,17 @@ export function RequestsTable({
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">
-                  命中缓存：{formatTokens(record.cachedInputTokens)}
+                  {t("metrics.cached", { count: formatTokens(record.cachedInputTokens) })}
                 </li>
                 <li className="whitespace-nowrap">
-                  未命中缓存：{uncached === null ? "—" : formatTokens(uncached)}
+                  {t("metrics.uncached", { count: uncached === null ? "—" : formatTokens(uncached) })}
                 </li>
                 <li className="whitespace-nowrap">
-                  命中率：
-                  {record.cacheHitRate === null
-                    ? "—"
-                    : `${(record.cacheHitRate * 100).toFixed(1)}%`}
+                  {t("metrics.hitRate", {
+                    rate: record.cacheHitRate === null
+                      ? "—"
+                      : `${(record.cacheHitRate * 100).toFixed(1)}%`,
+                  })}
                 </li>
               </ul>
             </TooltipContent>
@@ -194,14 +192,14 @@ export function RequestsTable({
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: "缓存命中率",
+      header: t("metrics.cacheHitRate"),
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.cacheHitRate == null ? "—" : `${(row.original.cacheHitRate * 100).toFixed(1)}%`}</span>,
     },
     {
       id: "output",
       accessorFn: (record) => record.outputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>输出 Token</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>
       ),
       cell: ({ row }) => {
         const record = row.original
@@ -220,10 +218,10 @@ export function RequestsTable({
             <TooltipContent side="right" align="start">
               <ul className="flex flex-col gap-1">
                 <li className="whitespace-nowrap">
-                  推理输出：{formatTokens(record.reasoningOutputTokens)}
+                  {t("metrics.reasoning", { count: formatTokens(record.reasoningOutputTokens) })}
                 </li>
                 <li className="whitespace-nowrap">
-                  非推理输出：{nonReasoning === null ? "—" : formatTokens(nonReasoning)}
+                  {t("metrics.nonReasoning", { count: nonReasoning === null ? "—" : formatTokens(nonReasoning) })}
                 </li>
               </ul>
             </TooltipContent>
@@ -235,7 +233,7 @@ export function RequestsTable({
       id: "firstContent",
       accessorFn: (record) => record.firstTokenMs,
       enableSorting: false,
-      header: () => <TableHint hint="提交发送至收到首段非空内容，含思考、正文或工具参数。">首 Token</TableHint>,
+      header: () => <TableHint hint={t("requests.firstHint")}>{t("requests.firstColumn")}</TableHint>,
       cell: ({ row }) => (
         <span className="tabular-nums">
           {row.original.firstTokenMs == null ? "—"
@@ -246,18 +244,18 @@ export function RequestsTable({
     {
       id: "totalDuration",
       accessorFn: (record) => record.totalDurationMs,
-      header: ({ column }) => <SortableHeader column={column} hint="提交发送至请求完成或失败；不含发送前准备和客户端显示。">请求耗时</SortableHeader>,
+      header: ({ column }) => <SortableHeader column={column} hint={t("requests.durationHint")}>{t("requests.durationColumn")}</SortableHeader>,
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
       id: "traffic",
-      header: "调用详情",
+      header: t("requests.detailColumn"),
       enableSorting: false,
       cell: ({ row }) => row.original.traffic === null ? (
-        <span className="text-muted-foreground">未关联</span>
+        <span className="text-muted-foreground">{t("requests.noTraffic")}</span>
       ) : (
         <Button variant="link" size="sm" asChild>
-          <Link to={trafficDetailPath(row.original.traffic)}>查看调用详情</Link>
+          <Link to={trafficDetailPath(row.original.traffic)}>{t("requests.viewTraffic")}</Link>
         </Button>
       ),
     },
@@ -278,12 +276,12 @@ export function RequestsTable({
     },
     {
       id: "operation",
-      accessorFn: (record) => (record.operation === "compact" ? "压缩" : "响应"),
+      accessorFn: (record) => record.operation,
       header: ({ column }) => (
-        <SortableHeader column={column}>操作</SortableHeader>
+        <SortableHeader column={column}>{t("filters.operation")}</SortableHeader>
       ),
       cell: ({ row }) =>
-        row.original.operation === "compact" ? "压缩" : "响应",
+        row.original.operation === "compact" ? t("metrics.compact") : t("filters.response"),
     },
     {
       id: "http",
@@ -299,7 +297,7 @@ export function RequestsTable({
       id: "error",
       accessorFn: (record) => record.errorType ?? record.errorCode ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>错误</SortableHeader>
+        <SortableHeader column={column}>{t("requests.errorColumn")}</SortableHeader>
       ),
       cell: ({ row }) => {
         const label = formatErrorType(
@@ -319,7 +317,7 @@ export function RequestsTable({
               <p className="break-all whitespace-normal text-xs">{formatErrorMessage(message, language)}</p>
               {row.original.errorCode ? (
                 <p className="mt-1 break-all whitespace-normal text-xs text-muted-foreground">
-                  错误码：{row.original.errorCode}
+                  {t("common.errorCode", { code: row.original.errorCode })}
                 </p>
               ) : null}
             </TooltipContent>
@@ -332,7 +330,7 @@ export function RequestsTable({
       accessorFn: (record) =>
         record.reasoningOutputTokens ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>推理输出</SortableHeader>
+        <SortableHeader column={column}>{t("requests.reasoningColumn")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
@@ -340,25 +338,21 @@ export function RequestsTable({
         </span>
       ),
     },
-  ], [language])
+  ], [t, language])
 
   return (
     <DataTable
       numericColumnIds={["input", "cacheHitRate", "output", "firstContent", "totalDuration", "http", "reasoningOutput"]}
       loading={loading}
-      title="记录"
-      description={({ pageNumber: currentPage }) =>
-        `共 ${total} 条匹配 · 当前页 ${records.length} 条 · 第 ${currentPage} 页`
-      }
+      title={t("requests.tableTitle")}
+      description={() => t("requests.tableDescription", { total, count: records.length, page: pageNumber })}
       columns={columns}
       data={records}
       storageKey={TABLE_STATE_KEY}
-      columnLabels={COLUMN_LABELS}
+      columnLabels={columnLabels}
       defaultColumnVisibility={DEFAULT_VISIBLE_COLUMNS}
-      filterPlaceholder="筛选 Provider / 模型 / 状态 / 错误"
-      filterHint="全库筛选"
-      emptyText={filter.trim() === "" ? "暂无记录" : "无匹配记录"}
-      noMatchText="无匹配记录"
+      emptyText={filter.trim() === "" ? t("common.empty") : t("common.noMatch")}
+      noMatchText={t("common.noMatch")}
       pagination={{
         mode: "server",
         pageNumber,
@@ -371,7 +365,6 @@ export function RequestsTable({
         pageSizeOptions: PAGE_SIZE_OPTIONS,
         sorting,
         onSortingChange,
-        onFilterChange,
         serverTotal: total,
       }}
     />

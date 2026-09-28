@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { ApiClientError } from "@/lib/api"
 import { useApi } from "@/hooks/use-api"
 import {
   fetchManagementProviders,
@@ -11,17 +12,20 @@ import {
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
   quotaAccountFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
   type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
+  type AccountRefreshFailure, type AccountRemovalNotice,
 } from "@/lib/account-refresh-state"
+
+class MissingAccountSourceError extends Error {}
 
 export function useOfficialAccountSources() {
   const snapshots = useApi(fetchOfficialAccountSnapshots, [])
   const [refreshing, setRefreshing] = useState(false)
-  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [refreshError, setRefreshError] = useState<AccountRefreshFailure | null>(null)
   const [providers, setProviders] = useState<RefreshableAccount[]>([])
   const [providerErrors, setProviderErrors] = useState<Record<string, AccountRefreshError | null>>({})
   const [refreshingProviders, setRefreshingProviders] = useState<string[]>([])
   const [removedProviders, setRemovedProviders] = useState<string[]>([])
-  const [removalNotice, setRemovalNotice] = useState<string | null>(null)
+  const [removalNotice, setRemovalNotice] = useState<AccountRemovalNotice | null>(null)
   const initialRefreshStarted = useRef(false)
   const refreshOperation = useRef<Promise<void> | null>(null)
   const refreshController = useRef<AbortController | null>(null)
@@ -42,7 +46,7 @@ export function useOfficialAccountSources() {
           .filter((account) => provider === undefined || account.id === provider)
           .map((account) => account.id)
         if (provider !== undefined && refreshableProviders.length === 0) {
-          throw new Error("账户来源不存在或不支持刷新")
+          throw new MissingAccountSourceError("account source missing or not refreshable")
         }
         setRefreshingProviders(refreshableProviders)
         const results = await Promise.allSettled(
@@ -59,8 +63,12 @@ export function useOfficialAccountSources() {
         setRemovedProviders((removed) => remainingRemovedAccountProviders(result, accounts, removed))
       } catch (error) {
         if (!controller.signal.aborted) {
-          const message = error instanceof Error ? error.message : String(error)
-          setRefreshError(snapshotsOnly ? `账户已删除，列表同步失败：${message}` : message)
+          if (error instanceof MissingAccountSourceError) {
+            setRefreshError({ kind: "sourceMissing" })
+          } else {
+            const code = error instanceof ApiClientError ? error.code : null
+            setRefreshError({ kind: snapshotsOnly ? "syncFailed" : "listFailed", code })
+          }
         }
       } finally {
         if (refreshController.current === controller) {
@@ -82,7 +90,7 @@ export function useOfficialAccountSources() {
     setRemovedProviders((previous) => [...previous, removedProvider])
     setProviders((previous) => previous.filter((provider) => provider.id !== removedProvider))
     setProviderErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([provider]) => provider !== removedProvider)))
-    setRemovalNotice(`本地账户 ${accountId} 已删除。${activation === "restart-all" ? "请运行 codexc service restart all，使运行中的服务应用配置。" : ""}此操作不会取消官方订阅。`)
+    setRemovalNotice({ accountId, restartRequired: activation === "restart-all" })
     void refresh(undefined, true)
   }, [refresh])
 

@@ -29,9 +29,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { useTrafficExchange, useTrafficExchanges } from "@/hooks/use-traffic"
 import { useManagementTasks } from "@/hooks/use-management-tasks"
 import { trafficPageSizeOptions, useTrafficQuery } from "@/hooks/use-traffic-query"
+import { useTranslation } from "@/hooks/use-translation"
 import { formatTime } from "@/lib/format"
+import { translateApiError } from "@/lib/i18n/translate"
 
 export function TrafficPage() {
+  const { t } = useTranslation()
   const labelSelectId = useId()
   const sessionSelectId = useId()
   const pageSizeSelectId = useId()
@@ -58,30 +61,34 @@ export function TrafficPage() {
     && listData.nextOffset === null
     && query.offset + listData.exchanges.length < listData.total
     && query.offset + listData.exchanges.length >= listData.maximumOffset
+  // 完整说明带可翻译前缀，配置键本身原样保留并保持 code 展示。
+  const dumpNotice = t("traffic.dumpDisabledDescription").split("{configKey}")
+  // 分页上限说明同理：只翻译说明文字，命令本身原样保留并保持 code 展示。
+  const limitNotice = t("traffic.limitDescription", { offset: listData?.maximumOffset.toLocaleString("zh-CN") ?? "" }).split("{command}")
 
   if (query.id !== null) {
     return (
       <div className="flex min-w-0 shrink-0 flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold">调用明细</h1>
+            <h1 className="text-xl font-semibold">{t("pages.trafficDetail")}</h1>
             <p className="text-sm text-muted-foreground">
-              查看本次请求的结果、用量与诊断信息
+              {t("traffic.detailIntro")}
             </p>
           </div>
           <div className="flex items-center gap-2">
           <Button type="button" variant="outline" size="sm" disabled={detail.loading} onClick={detail.refetch}>
-            {detail.loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}刷新
+            {detail.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
           </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => update({ traceOffset: null, id: null, exchangeSession: null, exchangeLabel: null })}
-          >返回列表</Button>
+          >{t("traffic.backToList")}</Button>
           </div>
         </div>
-        <ErrorBanner error={detail.error} onRetry={detail.refetch} pending={detail.loading} />
+        <ErrorBanner error={translateApiError(t, detail.error, detail.errorCode)} onRetry={detail.refetch} pending={detail.loading} />
         {detailView === null ? detail.error !== null ? null : <PageSkeleton rows={6} /> : (
               <TrafficDetail
                 key={`${detailView.label}:${detailView.session}:${detailView.exchange.id}`}
@@ -102,17 +109,17 @@ export function TrafficPage() {
     <div className="flex min-w-0 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">调用详情</h1>
+          <h1 className="text-xl font-semibold">{t("pages.traffic")}</h1>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            记录的模型请求与响应字段；默认汇总全部提供商、全部保留批次，按请求时间倒序展示
+            {t("traffic.listIntro")}
           </p>
         </div>
         <div className="flex w-full flex-wrap items-end gap-3">
           <FieldGroup className="min-w-0 flex-1 flex-row flex-wrap items-end gap-3">
             {listData !== null ? (
               <Field className="w-48">
-                <FieldLabel htmlFor={labelSelectId}>提供商</FieldLabel>
+                <FieldLabel htmlFor={labelSelectId}>{t("traffic.provider")}</FieldLabel>
                 <Select
                   value={query.label === undefined ? "all" : `label:${query.label}`}
                   onValueChange={(value) => update({ label: value === "all" ? null : value.slice(6), session: null, exchangeSession: null, id: null }, true)}
@@ -122,10 +129,10 @@ export function TrafficPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="all">全部提供商</SelectItem>
+                      <SelectItem value="all">{t("traffic.allProviders")}</SelectItem>
                       {listData.labels.map((entry) => (
                         <SelectItem key={entry.label} value={`label:${entry.label}`}>
-                          {entry.label}（{entry.sessions} 个批次）
+                          {t("traffic.providerOption", { label: entry.label, sessions: entry.sessions })}
                         </SelectItem>
                       ))}
                     </SelectGroup>
@@ -135,7 +142,7 @@ export function TrafficPage() {
             ) : null}
             {listData !== null && listData.label !== null ? (
               <Field className="w-64">
-                <FieldLabel htmlFor={sessionSelectId}>记录批次</FieldLabel>
+                <FieldLabel htmlFor={sessionSelectId}>{t("traffic.sessionFilterLabel")}</FieldLabel>
                 <Select
                   value={query.session ?? "all"}
                   onValueChange={(value) => update({
@@ -147,7 +154,7 @@ export function TrafficPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      <SelectItem value="all">全部批次</SelectItem>
+                      <SelectItem value="all">{t("traffic.allSessions")}</SelectItem>
                       {listData.sessions.map((entry) => (
                         <SelectItem key={entry.session} value={entry.session}>
                           {formatTime(entry.createdAtMs)}
@@ -166,15 +173,15 @@ export function TrafficPage() {
             disabled={list.loading}
             onClick={() => list.refetch()}
           >
-            {list.loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {list.loading ? "刷新中" : "刷新"}
+            {list.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
+            {list.loading ? t("common.refreshing") : t("common.refresh")}
           </Button>
           <TrafficCleanupControls tasks={tasks} onCompleted={list.refetch} />
         </div>
       </div>
 
-      <ErrorBanner error={list.error} onRetry={list.refetch} pending={list.loading} />
-      <ErrorBanner error={list.turnStatesError === null ? null : `Turn State 字符数加载失败：${list.turnStatesError}`} onRetry={list.refetchTurnStates} pending={list.turnStatesLoading} />
+      <ErrorBanner error={translateApiError(t, list.error, list.errorCode)} onRetry={list.refetch} pending={list.loading} />
+      <ErrorBanner error={list.turnStatesError === null ? null : t("traffic.turnStatesError", { error: t("traffic.failedBatches", { count: list.turnStatesError.batches.length, batches: list.turnStatesError.batches.join(t("modelComparison.listSeparator")) }) })} onRetry={list.refetchTurnStates} pending={list.turnStatesLoading} />
       {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
@@ -182,40 +189,37 @@ export function TrafficPage() {
           size="sm"
           className="self-start"
           onClick={() => update({ id: null, label: null, session: null, exchangeSession: null }, true)}
-        >查看全部提供商和批次</Button>
+        >{t("traffic.clearScope")}</Button>
       ) : null}
       {listData !== null && !listData.enabled ? (
         <Alert>
-          <AlertTitle>当前未开启调用详情记录</AlertTitle>
+          <AlertTitle>{t("traffic.dumpDisabledTitle")}</AlertTitle>
           <AlertDescription>
-            配置里 <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
-            关闭时不会再写入新记录，这里显示的是已存在的历史调用记录文件。
+            {dumpNotice[0]}<code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{dumpNotice[1]}
           </AlertDescription>
         </Alert>
       ) : null}
       {paginationLimited ? (
         <Alert>
-          <AlertTitle>已达到调用记录分页上限</AlertTitle>
+          <AlertTitle>{t("traffic.limitTitle")}</AlertTitle>
           <AlertDescription>
-            当前最多翻到 offset {listData.maximumOffset.toLocaleString("zh-CN")}；仍有更早记录时，
-            请选择单个记录批次缩小范围，或使用 <code className="rounded bg-muted px-1 text-xs">codexc traffic</code> 查看。
+            {limitNotice[0]}<code className="rounded bg-muted px-1 text-xs">codexc traffic</code>{limitNotice[1]}
           </AlertDescription>
         </Alert>
       ) : null}
       {listData !== null ? (
         <p className="text-xs text-muted-foreground">
-          自动保留：{listData.retentionDays === 0 ? "已关闭" : `${listData.retentionDays} 天`}；
-          App Server 启动及新记录批次建立时清理过期历史批次。
+          {t("traffic.retentionNote", { value: listData.retentionDays === 0 ? t("traffic.retentionOff") : t("traffic.retentionDays", { count: listData.retentionDays }) })}
         </p>
       ) : null}
 
       {list.error !== null ? null : listData === null ? <PageSkeleton rows={8} /> : (
         <Card aria-busy={list.loading}>
           <CardHeader>
-            <CardTitle>{list.loading ? "正在刷新请求记录…" : `请求记录（${listData.total}）`}</CardTitle>
+            <CardTitle>{list.loading ? t("traffic.listRefreshing") : t("traffic.listTitle", { count: listData.total })}</CardTitle>
             <CardDescription className="break-all">
-              {listData.label ?? "全部提供商"} · {listData.session === null
-                ? `全部 ${listData.sessions.length} 个保留批次` : `批次 ${listData.session}`}
+              {listData.label ?? t("traffic.allProviders")} · {listData.session === null
+                ? t("traffic.allSessionsCount", { count: listData.sessions.length }) : t("traffic.sessionScope", { name: listData.session })}
             </CardDescription>
           </CardHeader>
           <CardContent inert={list.loading}>
@@ -233,7 +237,7 @@ export function TrafficPage() {
             />
             <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <Label htmlFor={pageSizeSelectId} className="text-sm">每页</Label>
+                <Label htmlFor={pageSizeSelectId} className="text-sm">{t("common.perPage")}</Label>
                 <Select
                   value={String(query.limit)}
                   onValueChange={(value) => update({
@@ -253,14 +257,14 @@ export function TrafficPage() {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-                <span className="text-sm text-muted-foreground">条 · 共 {listData.total} 条</span>
+                <span className="text-sm text-muted-foreground">{t("traffic.recordsTotal", { count: listData.total })}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  aria-label="上一页"
+                  aria-label={t("common.previous")}
                   disabled={query.offset === 0}
                   onClick={() => update({
                     id: null,
@@ -271,12 +275,12 @@ export function TrafficPage() {
                 >
                   <ChevronLeftIcon />
                 </Button>
-                <span className="min-w-14 text-center text-sm font-medium">第 {pageNumber} 页</span>
+                <span className="min-w-14 text-center text-sm font-medium">{t("common.page", { page: pageNumber })}</span>
                 <Button
                   type="button"
                   variant="outline"
                   size="icon"
-                  aria-label="下一页"
+                  aria-label={t("common.next")}
                   disabled={listData.nextOffset === null}
                   onClick={() => {
                     const next = listData.nextOffset

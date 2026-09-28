@@ -20,8 +20,11 @@ import {
 } from "@/components/overview/overview-sections"
 import { UsageCharts } from "@/components/overview/usage-charts"
 import { useOfficialAccountSources } from "@/hooks/use-official-account-sources"
-import type { AccountRefreshControl } from "@/lib/account-refresh-state"
+import { useTranslation } from "@/hooks/use-translation"
+import type { AccountRefreshControl, AccountRefreshFailure, AccountRemovalNotice } from "@/lib/account-refresh-state"
 import { useDashboard } from "@/hooks/use-dashboard"
+import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
+import type { Translate } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 import type {
   CcgCreditUsageResponse,
@@ -38,6 +41,7 @@ export function ConsolePage({ range, onRangeChange }: {
   range: MetricsRangeQuery
   onRangeChange: (range: MetricsRangeQuery) => void
 }) {
+  const { t } = useTranslation()
   const dashboard = useDashboard(range)
   const refetch = dashboard.refetch
   const officialAccounts = useOfficialAccountSources()
@@ -53,21 +57,21 @@ export function ConsolePage({ range, onRangeChange }: {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="shrink-0">
-          <h1 className="text-xl font-semibold">控制台</h1>
-          <p className="text-sm text-muted-foreground">本机指标库与账户状态</p>
+          <h1 className="text-xl font-semibold">{t("pages.console")}</h1>
+          <p className="text-sm text-muted-foreground">{t("console.description")}</p>
         </div>
         <div className="flex w-full flex-wrap items-end justify-end gap-3 sm:w-auto sm:flex-1">
           <DashboardRangeSelector key={JSON.stringify(range)} query={range} onChange={onRangeChange} />
           <Button variant="outline" size="sm" disabled={refreshing} onClick={refreshDashboard}>
-            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {refreshing ? "刷新中" : "刷新"}
+            {refreshing ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}
+            {refreshing ? t("common.refreshing") : t("common.refresh")}
           </Button>
         </div>
       </div>
       <LocalDashboard
         data={dashboard.data}
         loading={dashboard.loading}
-        error={dashboard.error}
+        error={translateApiError(t, dashboard.error, dashboard.errorCode)}
       />
       <AccountStatusCards
         onAccountRemoved={officialAccounts.accountRemoved}
@@ -80,13 +84,26 @@ export function ConsolePage({ range, onRangeChange }: {
         ccgUsage={officialAccounts.data?.ccg ?? null}
         clinePass={officialAccounts.data?.clinePass ?? []}
         refreshControls={officialAccounts.refreshControls}
-        accountError={officialAccounts.refreshError ?? officialAccounts.error}
+        accountError={accountRefreshFailureText(t, officialAccounts.refreshError)
+          ?? translateApiError(t, officialAccounts.error, officialAccounts.errorCode)}
         accountWarnings={officialAccounts.data?.warnings ?? []}
         refreshing={officialAccounts.refreshing}
         onRefresh={() => void refreshAccounts()}
       />
     </div>
   )
+}
+
+function accountRefreshFailureText(t: Translate, failure: AccountRefreshFailure | null): string | null {
+  if (failure === null) return null
+  switch (failure.kind) {
+    case "sourceMissing":
+      return t("console.accountSourceMissing")
+    case "syncFailed":
+      return t("console.accountSyncFailed", { message: translateApiErrorCode(t, failure.code) })
+    case "listFailed":
+      return translateApiErrorCode(t, failure.code)
+  }
 }
 
 function LocalDashboard({
@@ -120,6 +137,7 @@ function LocalDashboard({
 }
 
 function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery; onChange: (query: MetricsRangeQuery) => void }) {
+  const { t } = useTranslation()
   const [value, setValue] = useState<RangeName | "custom">(query.range ?? "custom")
   const [dates, setDates] = useState({ from: query.from ?? "", to: query.to ?? "" })
   return (
@@ -137,9 +155,9 @@ function DashboardRangeSelector({ query, onChange }: { query: MetricsRangeQuery;
           from={dates.from}
           to={dates.to}
           onDateChange={(key, date) => setDates((previous) => ({ ...previous, [key]: date }))}
-          label="汇总范围"
+          label={t("console.summaryRange")}
         />
-        {value === "custom" ? <Button type="submit">查询</Button> : null}
+        {value === "custom" ? <Button type="submit">{t("filters.query")}</Button> : null}
       </FieldGroup>
     </form>
   )
@@ -162,7 +180,7 @@ function AccountStatusCards({
   onRefresh,
 }: {
   onAccountRemoved: (accountId: string, activation?: string) => void
-  removalNotice: string | null
+  removalNotice: AccountRemovalNotice | null
   weeklyQuota: OverviewResponse["weeklyQuota"]
   accountDataLoaded: boolean
   accountLoading: boolean
@@ -176,24 +194,28 @@ function AccountStatusCards({
   refreshing: boolean
   onRefresh: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold">本地账户与额度</h2>
-        <p className="text-sm text-muted-foreground">数据来自本机 Gateway 的账户快照。</p>
+        <h2 className="text-lg font-semibold">{t("console.accountTitle")}</h2>
+        <p className="text-sm text-muted-foreground">{t("console.accountDescription")}</p>
       </div>
       {accountError ? <Alert variant="destructive">
-        <AlertTitle>账户数据暂未更新</AlertTitle>
+        <AlertTitle>{t("console.accountErrorTitle")}</AlertTitle>
         <AlertDescription>
           <p>{accountError}</p>
           <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-            {refreshing ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}
-            {refreshing ? "刷新中" : "重试"}
+            {refreshing ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : <RefreshCwIcon data-icon="inline-start" />}
+            {refreshing ? t("common.refreshing") : t("common.retry")}
           </Button>
         </AlertDescription>
       </Alert> : null}
-      {accountWarnings.map((warning) => <Alert key={warning.source}><AlertTitle>账户信息暂不可用</AlertTitle><AlertDescription>{warning.message}</AlertDescription></Alert>)}
-      {removalNotice ? <Alert><AlertTitle>本地账户已删除</AlertTitle><AlertDescription>{removalNotice}</AlertDescription></Alert> : null}
+      {accountWarnings.map((warning) => <Alert key={warning.source}><AlertTitle>{t("console.accountWarningTitle")}</AlertTitle><AlertDescription>{warning.message}</AlertDescription></Alert>)}
+      {removalNotice ? <Alert><AlertTitle>{t("console.accountRemovedTitle")}</AlertTitle><AlertDescription>
+        {t("console.accountRemovedNotice", { account: removalNotice.accountId })}
+        {removalNotice.restartRequired ? ` ${t("console.accountRemovedRestart")}` : ""}
+      </AlertDescription></Alert> : null}
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
           usedPercent={weeklyQuota?.usedPercent ?? null}
@@ -215,7 +237,7 @@ function AccountStatusCards({
             accounts={ccgUsage?.accounts ?? []}
             refreshControls={refreshControls}
           /> : null}
-        </> : accountLoading ? <div aria-busy="true" aria-label="正在加载账户列表"><PageSkeleton rows={3} /></div> : null}
+        </> : accountLoading ? <div aria-busy="true" aria-label={t("console.loadingAccounts")}><PageSkeleton rows={3} /></div> : null}
       </div>
     </div>
   )

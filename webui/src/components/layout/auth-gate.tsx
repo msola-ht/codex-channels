@@ -13,12 +13,16 @@ import {
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { LanguageToggle } from "@/components/metrics/language-toggle"
+import type { MessageKey } from "@/lib/i18n/messages"
+import { useTranslation } from "@/hooks/use-translation"
 import { API_PREFIX, onUnauthorized, setToken } from "@/lib/api"
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  const { t, language, setLanguage } = useTranslation()
   const [unauthorized, setUnauthorized] = useState(false)
   const [token, setTokenValue] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<MessageKey | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => onUnauthorized(() => setUnauthorized(true)), [])
@@ -29,20 +33,21 @@ export function AuthGate({ children }: { children: ReactNode }) {
     <main className="flex min-h-svh items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>需要访问令牌</CardTitle>
+          <div className="flex justify-end"><LanguageToggle value={language} onChange={setLanguage} /></div>
+          <CardTitle>{t("auth.tokenRequired")}</CardTitle>
           <CardDescription>
-            请输入访问令牌（codexc config 的 WebUI 设置或 --token 配置）
+            {t("auth.tokenDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <Alert>
-            <AlertTitle>访问受限</AlertTitle>
+            <AlertTitle>{t("auth.restricted")}</AlertTitle>
             <AlertDescription>
-              服务器开启了访问令牌保护，验证通过后才能查看指标。
+              {t("auth.restrictedDescription")}
             </AlertDescription>
           </Alert>
           <Field data-invalid={error !== null} data-disabled={submitting}>
-            <FieldLabel htmlFor="auth-token">访问令牌</FieldLabel>
+            <FieldLabel htmlFor="auth-token">{t("auth.tokenLabel")}</FieldLabel>
             <Input
               id="auth-token"
               type="password"
@@ -54,9 +59,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 setTokenValue(event.target.value)
                 setError(null)
               }}
-              placeholder="访问令牌"
+              placeholder={t("auth.tokenPlaceholder")}
             />
-            <FieldError id="auth-token-error">{error}</FieldError>
+            <FieldError id="auth-token-error">{error === null ? null : t(error)}</FieldError>
           </Field>
           <Button
             disabled={token.trim() === "" || submitting}
@@ -69,20 +74,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   headers: { authorization: `Bearer ${candidate}` },
                 })
                 if (!response.ok) {
-                  setError("令牌无效，请检查后重试")
+                  setError("auth.invalidToken")
                   return
                 }
                 setToken(candidate)
                 window.location.reload()
               } catch {
-                setError("无法连接服务，请稍后重试")
+                setError("auth.connectFailed")
               } finally {
                 setSubmitting(false)
               }
             }}
           >
-            {submitting ? <Spinner data-icon="inline-start" /> : null}
-            {submitting ? "验证中…" : "进入"}
+            {submitting ? <Spinner data-icon="inline-start" aria-label={t("common.loading")} /> : null}
+            {submitting ? t("auth.verifying") : t("auth.submit")}
           </Button>
         </CardContent>
       </Card>

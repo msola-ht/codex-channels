@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useTranslation } from "@/hooks/use-translation"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -65,14 +66,24 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
 }
 
 export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementTaskController }) {
+  const { t } = useTranslation()
   const pending = tasks.pendingPreview
   if (pending === null) return null
+  const isTraffic = pending.input.operation === "traffic"
+  // 仅翻译清理预览的受控文案；未知预览原样保留，避免丢失确认所需信息。
+  const previewText = (value: string) => {
+    if (!isTraffic) return value
+    if (value === "执行 codexc traffic cleanup --confirm") return t("traffic.cleanupEffect", { command: "codexc traffic cleanup --confirm" })
+    if (value === "全部 App Server 必须已停止") return t("traffic.cleanupStoppedRequired")
+    if (value === "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理") return t("traffic.cleanupIrreversible")
+    return value
+  }
   const description = [
-    `操作：${pending.preview.operation} · ${pending.preview.action}`,
-    pending.preview.target ? `目标：${pending.preview.target}` : null,
-    ...pending.preview.effects,
-    ...pending.preview.preconditions.map((condition) => `前置条件：${condition}`),
-    pending.preview.recovery ? `失败处理：${pending.preview.recovery}` : null,
+    isTraffic ? t("traffic.cleanupOperation", { operation: pending.preview.operation, action: pending.preview.action }) : `操作：${pending.preview.operation} · ${pending.preview.action}`,
+    pending.preview.target ? (isTraffic ? t("traffic.cleanupTarget", { target: pending.preview.target }) : `目标：${pending.preview.target}`) : null,
+    ...pending.preview.effects.map(previewText),
+    ...pending.preview.preconditions.map((condition) => isTraffic ? t("traffic.cleanupPrecondition", { condition: previewText(condition) }) : `前置条件：${condition}`),
+    pending.preview.recovery ? (isTraffic ? t("traffic.cleanupRecovery", { recovery: previewText(pending.preview.recovery) }) : `失败处理：${pending.preview.recovery}`) : null,
   ].filter((item): item is string => item !== null)
   const destructive = pending.input.operation === "metrics"
     || pending.input.operation === "traffic"
@@ -80,11 +91,12 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const traffic = pending.input.operation === "traffic"
     ? trafficCleanupResource(pending.preview.resource)
     : null
-  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title="确认执行管理任务" description="确认后提交后台任务，任务将在服务端串行执行。" confirmLabel="确认执行" confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title={isTraffic ? t("traffic.cleanupConfirmTitle") : "确认执行管理任务"} description={isTraffic ? t("traffic.cleanupConfirmDescription") : "确认后提交后台任务，任务将在服务端串行执行。"} confirmLabel={isTraffic ? t("traffic.cleanupConfirmAction") : "确认执行"} confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
     {traffic === null ? null : <p className="mt-2 text-muted-foreground">
-      将删除 {traffic.v2Sessions} 个 V2 批次、{traffic.legacyFiles} 个旧版文件，合计 {formatBytes(traffic.bytes)}；
-      受管 App Server 当前{traffic.appServerRunning ? "仍在运行" : "未运行"}。
+      {t(traffic.appServerRunning ? "traffic.cleanupResourceRunning" : "traffic.cleanupResourceStopped", {
+        sessions: traffic.v2Sessions, files: traffic.legacyFiles, size: formatBytes(traffic.bytes),
+      })}
     </p>}
   </ManagementConfirmationDialog>
 }

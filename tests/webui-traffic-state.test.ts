@@ -25,8 +25,8 @@ describe("traffic request ownership", () => {
         return { ...batch, exchanges: [{ id: 1, turnStateLengths: [{ source: "fixture", characters: 3 }] }] };
       };
       const key = value => JSON.stringify([value.label, value.session, value.id]);
-      const factory = new Function("useApi", "useRef", "resolveTrafficData", "fetchTrafficTurnStates", "trafficCallKey", compiled + ";return useTrafficExchanges;");
-      const hook = factory(useApi, useRef, (key, value) => value?.key === key ? value.value : null, fetchCounts, key);
+      const factory = new Function("ApiClientError", "useApi", "useRef", "resolveTrafficData", "fetchTrafficTurnStates", "trafficCallKey", compiled + ";return useTrafficExchanges;");
+      const hook = factory(class ApiClientError extends Error {}, useApi, useRef, (key, value) => value?.key === key ? value.value : null, fetchCounts, key);
       const render = () => { apiIndex = refIndex = 0; loaders.length = 0; return hook({}); };
       render();
       const result = await loaders[1](new AbortController().signal);
@@ -35,6 +35,9 @@ describe("traffic request ownership", () => {
       assert.deepEqual(calls, ["a", "b", "c"]);
       assert.equal(view.turnStates.size, 2);
       assert.equal(view.turnStateErrors.size, 1);
+      assert.equal(view.turnStateErrors.get(key({label:"b",session:"batch",id:1})), "unknown");
+      assert.deepEqual(view.turnStatesError, {batches:["b / batch"]});
+      assert.ok(!JSON.stringify(result).includes("fixture batch unavailable"));
       fail = false;
       const retry = await loaders[1](new AbortController().signal);
       counts = { ...empty, data: retry };

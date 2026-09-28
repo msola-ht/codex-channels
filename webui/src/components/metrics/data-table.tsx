@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import * as React from "react"
 import { Slot } from "radix-ui"
 import {
@@ -247,12 +248,13 @@ export function DataTable<TData extends RowData>({
   storageKey,
   columnLabels = {},
   defaultColumnVisibility = {},
-  filterPlaceholder = "筛选…",
+  filterPlaceholder,
   filterHint,
-  emptyText = "暂无记录",
-  noMatchText = "无匹配记录",
+  emptyText,
+  noMatchText,
   pagination,
 }: DataTableProps<TData>) {
+  const { t } = useTranslation()
   const server = pagination.mode === "server"
   const pageSizeOptions = pagination.pageSizeOptions ?? DEFAULT_PAGE_SIZE_OPTIONS
   const [columnVisibility, setColumnVisibility] =
@@ -368,7 +370,7 @@ export function DataTable<TData extends RowData>({
             pageNumber: server ? pagination.pageNumber : currentPage + 1,
             serverTotal: server ? pagination.serverTotal : undefined,
           })}</span>
-          {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner />正在加载…</span> : null}
+          {loading ? <span className="absolute inset-0 inline-flex items-center gap-2"><Spinner aria-label={t("common.loading")} />{t("common.loadingRecords")}</span> : null}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(10rem,1fr)_auto] gap-4" inert={loading}>
@@ -376,14 +378,14 @@ export function DataTable<TData extends RowData>({
           {server && pagination.onFilterChange === undefined ? null : (
             <div className="flex items-center gap-2">
               <Label htmlFor={`${storageKey}-search`} className="sr-only">
-                筛选
+                {t("common.filter")}
               </Label>
               <InputGroup className="w-72">
                 <InputGroupInput
                   id={`${storageKey}-search`}
                   value={queryValue}
                   onChange={(event) => handleFilterChange(event.target.value)}
-                  placeholder={filterPlaceholder}
+                  placeholder={filterPlaceholder ?? t("common.filterPlaceholder")}
                 />
                 <InputGroupAddon align="inline-end">
                   <SearchIcon />
@@ -400,7 +402,7 @@ export function DataTable<TData extends RowData>({
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
                 <Columns3Icon data-icon="inline-start" />
-                列
+                {t("common.columns")}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
@@ -474,7 +476,7 @@ export function DataTable<TData extends RowData>({
                     colSpan={table.getVisibleLeafColumns().length}
                     className="h-16 text-center text-muted-foreground"
                   >
-                    {data.length === 0 ? emptyText : noMatchText}
+                    {data.length === 0 ? emptyText ?? t("common.empty") : noMatchText ?? t("common.noMatch")}
                   </TableCell>
                 </TableRow>
               )}
@@ -484,12 +486,12 @@ export function DataTable<TData extends RowData>({
 
         <div className="flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-sm text-muted-foreground">
-            {loading ? "正在加载…" : `匹配 ${matched} 条`}
+            {loading ? t("common.loadingRecords") : t("common.matched", { count: matched })}
           </p>
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <Label htmlFor={`${storageKey}-page-size`} className="text-sm">
-                每页
+                {t("common.perPage")}
               </Label>
               <Select
                 value={String(pageSize)}
@@ -520,7 +522,7 @@ export function DataTable<TData extends RowData>({
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <span className="text-sm text-muted-foreground">条</span>
+              <span className="text-sm text-muted-foreground">{t("common.records")}</span>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -534,12 +536,12 @@ export function DataTable<TData extends RowData>({
                     setClientPage((value) => Math.max(0, value - 1))
                   }
                 }}
-                aria-label="上一页"
+                aria-label={t("common.previous")}
               >
                 <ChevronLeftIcon />
               </Button>
               <span className="min-w-14 text-center text-sm font-medium">
-                第 {server ? pagination.pageNumber : currentPage + 1} 页
+                {t("common.page", { page: server ? pagination.pageNumber : currentPage + 1 })}
               </span>
               <Button
                 variant="outline"
@@ -554,7 +556,7 @@ export function DataTable<TData extends RowData>({
                     )
                   }
                 }}
-                aria-label="下一页"
+                aria-label={t("common.next")}
               >
                 <ChevronRightIcon />
               </Button>

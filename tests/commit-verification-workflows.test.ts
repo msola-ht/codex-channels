@@ -57,6 +57,16 @@ describe("commit verification workflows", () => {
     }
   });
 
+  it("keeps dictionary validation without automatic translation reporting", () => {
+    const workflow = readFileSync(join(process.cwd(), ".github/workflows/ci.yml"), "utf8");
+    const verify = readFileSync(join(process.cwd(), "scripts/verify-commit.mjs"), "utf8");
+    expect(workflow).not.toContain("i18n-report:");
+    expect(workflow).not.toContain("i18n:report");
+    expect(workflow).toContain("npm run verify:commit");
+    expect(workflow).not.toMatch(/contents:\s*write/u);
+    expect(verify).toContain('args: ["run", "i18n:check"]');
+  });
+
   it("reports each verification stage duration and the total duration", () => {
     const script = readFileSync(
       join(process.cwd(), "scripts", "verify-commit.mjs"),

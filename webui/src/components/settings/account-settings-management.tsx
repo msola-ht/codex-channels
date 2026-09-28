@@ -1,6 +1,7 @@
 import { AccountIdField } from "@/components/settings/account-id-field"
 import { newManagedAccountIdError, opencodeGoReservedAccountIds } from "../../../../runtime/managed-provider-account-options.mjs"
 import { useState } from "react"
+import { useTranslation } from "@/hooks/use-translation"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -139,18 +140,19 @@ export function AccountSettingsConfirmationDialog({
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const { t } = useTranslation()
   const preview = pending.preview
   const account = preview.account
   const provider = preview.provider
-  const lines = [`操作：${preview.operation}`]
-  if (account?.id !== undefined) lines.push(`账户：${account.displayName ?? account.email ?? account.phone ?? account.id}（${account.id}）`)
-  if (provider?.name !== undefined) lines.push(`Provider：${provider.name}（${provider.id ?? "未知"}）`)
-  if (preview.mode !== undefined) lines.push(`模式：${preview.mode}`)
-  if (preview.model !== undefined) lines.push(`模型：${preview.model}`)
-  if (preview.status !== undefined) lines.push(`状态：${preview.status}`)
+  const lines = [t("accountConfirmation.operation", { value: preview.operation })]
+  if (account?.id !== undefined) lines.push(t("accountConfirmation.account", { name: account.displayName ?? account.email ?? account.phone ?? account.id, id: account.id }))
+  if (provider?.name !== undefined) lines.push(t("accountConfirmation.provider", { name: provider.name, id: provider.id ?? t("common.unknown") }))
+  if (preview.mode !== undefined) lines.push(t("accountConfirmation.mode", { value: preview.mode }))
+  if (preview.model !== undefined) lines.push(t("accountConfirmation.model", { value: preview.model }))
+  if (preview.status !== undefined) lines.push(t("accountConfirmation.status", { value: preview.status }))
   if (preview.effects !== undefined) {
     const effects = Object.entries(preview.effects).filter(([, value]) => value !== false && value !== null && value !== undefined).map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : String(value)}`)
-    if (effects.length > 0) lines.push(`影响：${effects.join("；")}`)
+    if (effects.length > 0) lines.push(t("accountConfirmation.effects", { value: effects.join(t("accountConfirmation.listSeparator")) }))
   }
   const removing = pending.input.operation === "opencode.account.remove"
     || pending.input.operation === "clp.remove"
@@ -158,10 +160,10 @@ export function AccountSettingsConfirmationDialog({
     || pending.input.operation === "deepseek.legacy.remove"
   const stopping = pending.input.operation === "opencode.account.stop"
   const destructive = stopping || removing
-  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={removing ? "确认删除账户" : "确认账户配置修改"} description={removing ? "确认后停止对应 App Server 并删除账户配置；完成后按操作结果重启服务。" : stopping ? "确认后停止对应账户的 App Server。" : "确认后写入对应配置，不会自动执行生效目标。"} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? "确认删除" : stopping ? "确认停止" : "确认写入"} onConfirm={onConfirm} onCancel={onCancel}>
-    {removing ? <p>删除本地账户配置后，该账户历史 Thread 将不可恢复。</p> : null}
-    {pending.input.operation === "opencode.account.remove" ? <p>此操作不会取消或续订官方订阅。</p> : null}
+  return <ManagementConfirmationDialog open saving={saving} loading={loading} title={removing ? t("accountConfirmation.removeTitle") : t("accountConfirmation.changeTitle")} description={removing ? t("accountConfirmation.removeDescription") : stopping ? t("accountConfirmation.stopDescription") : t("accountConfirmation.changeDescription")} confirmVariant={destructive ? "destructive" : "default"} confirmLabel={removing ? t("accountConfirmation.confirmRemove") : stopping ? t("accountConfirmation.confirmStop") : t("accountConfirmation.confirmWrite")} onConfirm={onConfirm} onCancel={onCancel}>
+    {removing ? <p>{t("accountConfirmation.historyWarning")}</p> : null}
+    {pending.input.operation === "opencode.account.remove" ? <p>{t("accountConfirmation.subscriptionWarning")}</p> : null}
     <p className="whitespace-pre-line">{lines.join("\n")}</p>
-    <p className="text-muted-foreground">生效目标：{preview.activation ?? "按操作结果"}</p>
+    <p className="text-muted-foreground">{t("accountConfirmation.activation", { value: preview.activation ?? t("accountConfirmation.activationFallback") })}</p>
   </ManagementConfirmationDialog>
 }

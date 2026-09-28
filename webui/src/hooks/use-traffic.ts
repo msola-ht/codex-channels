@@ -1,7 +1,7 @@
 import { useRef } from "react"
 
 import { useApi } from "@/hooks/use-api"
-import { fetchTrafficExchange, fetchTrafficExchanges, fetchTrafficTrace, fetchTrafficTurnStates } from "@/lib/api"
+import { ApiClientError, fetchTrafficExchange, fetchTrafficExchanges, fetchTrafficTrace, fetchTrafficTurnStates } from "@/lib/api"
 import { canReuseTrafficSummary, resolveTrafficData, resolveTrafficDetailSnapshot, trafficCallKey } from "@/lib/traffic-state"
 import type { TrafficDetailResponse, TrafficListResponse } from "@/lib/types"
 
@@ -46,12 +46,14 @@ export function useTrafficExchanges(
         successfulCounts.current = { source, entries: new Map(entries) }
       } catch (error) {
         if (signal.aborted) throw error
-        const message = error instanceof Error ? error.message : String(error)
+        const code = error instanceof ApiClientError ? error.code
+          : error instanceof Error && error.name === "TimeoutError" ? "request_timeout"
+          : error instanceof TypeError ? "network_error" : "unknown"
         failedBatches.push(`${batch.label} / ${batch.session}`)
-        for (const id of batch.ids) errors.set(trafficCallKey({ ...batch, id }), message)
+        for (const id of batch.ids) errors.set(trafficCallKey({ ...batch, id }), code)
       }
     }
-    return { source, entries, errors, error: failedBatches.length === 0 ? null : `${failedBatches.length} 个批次读取失败：${failedBatches.join("；")}` }
+    return { source, entries, errors, error: failedBatches.length === 0 ? null : { batches: failedBatches } }
   }, [source])
   const currentLengths = source !== null && lengths.data?.source === source ? lengths.data : null
   return { ...result, data,

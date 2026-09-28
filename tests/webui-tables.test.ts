@@ -303,7 +303,9 @@ describe("WebUI metrics table presentation", () => {
   it("distinguishes account loading and failures from confirmed empty configuration", () => {
     expect(markup.consoleAccountsLoading).toContain("正在加载账户列表");
     expect(markup.consoleAccountsLoading).not.toContain("尚未配置");
-    expect(markup.consoleAccountsFailed).toContain("fixture account read failure");
+    expect(markup.consoleAccountsFailed).toContain("账户数据暂未更新");
+    expect(markup.consoleAccountsFailed).toContain("无法完成请求，请重试。");
+    expect(markup.consoleAccountsFailed).not.toContain("fixture account read failure");
     expect(markup.consoleAccountsFailed).not.toContain("尚未配置");
     expect(markup.consoleAccountsEmpty).toContain("尚未配置 DeepSeek 账户");
   });
@@ -325,7 +327,9 @@ describe("WebUI metrics table presentation", () => {
       expect(markup[key]).toContain('aria-valuenow="37.5"');
       expect(markup[key]).not.toContain("尚未获取 OpenAI 额度快照");
     }
-    expect(markup.consoleQuotaFailed).toContain("fixture overview failure");
+    expect(markup.consoleQuotaFailed).toContain("加载失败");
+    expect(markup.consoleQuotaFailed).toContain("无法完成请求，请重试。");
+    expect(markup.consoleQuotaFailed).not.toContain("fixture overview failure");
     expect(markup.consoleQuotaCleared).toContain("尚未获取 OpenAI 额度快照");
   });
 
@@ -472,8 +476,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.filters).toContain('placeholder="搜索关键词"');
     expect(markup.filters).toContain("查询</button>");
     expect(markup.filters).toContain("重置</button>");
-    expect(markup.filters).not.toContain("Thread ID");
-    expect(markup.filters).not.toContain("Turn ID");
+    expect(markup.filters).not.toContain("会话 ID");
+    expect(markup.filters).not.toContain("轮次 ID");
     expect(markup.activeFilters).toContain("筛选 · 3");
     expect(markup.filters).not.toContain("筛选 ·");
   });
@@ -503,7 +507,7 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "时间", "Provider", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
+      "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');
@@ -555,11 +559,11 @@ describe("WebUI metrics table presentation", () => {
 
   it("keeps aggregate speeds after token counts and omits unused selection", () => {
     expect(headers(markup.threads!)).toEqual([
-      "期间首次请求", "Thread", "Provider", "模型", "类型", "Turn", "请求",
+      "期间首次请求", "会话", "提供商", "模型", "类型", "轮次", "请求",
       "输入 Token", "缓存命中率", "输出 Token", "最后记录",
     ]);
     expect(headers(markup.turns!)).toEqual([
-      "时间", "Turn", "Provider", "模型", "请求", "失败", "输入 Token", "输出 Token",
+      "时间", "轮次", "提供商", "模型", "请求", "失败", "输入 Token", "输出 Token",
     ]);
     expect(markup.turns).not.toContain('role="checkbox"');
   });
@@ -659,7 +663,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "Provider", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "模型", "状态", "请求耗时", "Turn State 字符数", "类型", "请求"]);
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
     expect(markup.trafficCountsLoading).toContain("的调用明细");

@@ -215,7 +215,7 @@ Surface -> Application/Core <- Codex Client
   Manual runs are allowed when changing CI or gates, explicitly requested, or needed to diagnose a failure independently.
   Never bypass gates with `--no-verify` or reduced checks.
 - `npm run verify:commit` is the shared full-check entry point for local commits and GitHub CI. In order, it covers staged diff formatting, types and versions,
-  production and test Lint, WebUI build and Lint, documentation links and indexes, the full test suite, shell syntax,
+  production and test Lint, WebUI build and Lint, translation dictionary keys and placeholders, documentation links and indexes, the full test suite, shell syntax,
   npm tarball installation smoke tests and service-template checks executable on the current platform.
   Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.

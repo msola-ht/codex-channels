@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import * as React from "react"
 
 import { Link } from "react-router"
@@ -23,25 +24,25 @@ import { metricsLink } from "@/lib/metrics-query"
 
 const TABLE_STATE_KEY = "codex-webui:threads-table-state-v1"
 
-const COLUMN_LABELS: Record<string, string> = {
-  time: "期间首次请求",
-  thread: "Thread",
-  provider: "Provider",
-  model: "模型",
-  type: "类型",
-  parent: "父会话",
-  turns: "Turn",
-  requests: "请求",
-  input: "输入 Token",
-  cacheHitRate: "缓存命中率",
-  output: "输出 Token",
-  compact: "压缩",
-  last: "最后记录",
-}
-
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100, 200]
 
 export function ThreadTable({ threads, query, pagination, loading = false }: { threads: ThreadListItem[]; query: MetricsQuery; pagination: DataTableProps<ThreadListItem>["pagination"]; loading?: boolean }) {
+  const { t } = useTranslation()
+  const columnLabels: Record<string, string> = {
+    time: t("metrics.first"),
+    thread: t("metrics.thread"),
+    provider: t("metrics.provider"),
+    model: t("metrics.model"),
+    type: t("metrics.type"),
+    parent: t("metrics.parent"),
+    turns: t("metrics.turn"),
+    requests: t("metrics.requests"),
+    input: t("metrics.input"),
+    cacheHitRate: t("metrics.cacheHitRate"),
+    output: t("metrics.output"),
+    compact: t("metrics.compact"),
+    last: t("metrics.last"),
+  }
   const mainCount = threads.filter((thread) => thread.agentPath === null).length
   const subagentCount = threads.length - mainCount
 
@@ -50,7 +51,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "time",
       accessorFn: (thread) => thread.firstRequestStartedAtMs,
       header: ({ column }) => (
-        <SortableHeader column={column}>期间首次请求</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.first")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
         <span className="tabular-nums text-muted-foreground">
@@ -62,7 +63,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "thread",
       accessorFn: (thread) => thread.threadId,
       header: ({ column }) => (
-        <SortableHeader column={column}>Thread</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.thread")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <Link
@@ -78,7 +79,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "provider",
       accessorFn: (thread) => thread.provider ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>Provider</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.provider")}</SortableHeader>
       ),
       cell: ({ row }) => <ProviderBadge provider={row.original.provider} />,
     },
@@ -86,7 +87,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "model",
       accessorFn: (thread) => thread.model ?? "",
       header: ({ column }) => (
-        <SortableHeader column={column}>模型</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.model")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <TruncatedText text={formatModelName(row.original.model, row.original.provider)} className="max-w-40" />
@@ -96,17 +97,17 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "type",
       enableSorting: false,
       accessorFn: (thread) =>
-        thread.agentPath === null ? "主会话" : `子代理 ${thread.agentPath}`,
-      header: "类型",
+        thread.agentPath === null ? t("threads.main") : t("threads.agentPath", { path: thread.agentPath }),
+      header: t("metrics.type"),
       cell: ({ row }) =>
         row.original.agentPath === null ? (
-          <span className="text-muted-foreground">主会话</span>
+          <span className="text-muted-foreground">{t("threads.main")}</span>
         ) : (
           <Badge
             variant="secondary"
             className="max-w-64 justify-start"
           >
-            <TruncatedText text={`子代理 · ${row.original.agentPath}`} />
+            <TruncatedText text={t("threads.agentPath", { path: row.original.agentPath! })} />
           </Badge>
         ),
     },
@@ -114,7 +115,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "turns",
       accessorFn: (thread) => thread.turnCount,
       header: ({ column }) => (
-        <SortableHeader column={column}>Turn</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.turn")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.turnCount}</span>
@@ -124,7 +125,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "requests",
       accessorFn: (thread) => thread.requestCount,
       header: ({ column }) => (
-        <SortableHeader column={column}>请求</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.requests")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">{row.original.requestCount}</span>
@@ -134,7 +135,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "input",
       accessorFn: (thread) => thread.inputTokens,
       header: ({ column }) => (
-        <SortableHeader column={column}>输入 Token</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.input")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
@@ -145,7 +146,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
     {
       id: "cacheHitRate",
       enableSorting: false,
-      header: "缓存命中率",
+      header: t("metrics.cacheHitRate"),
       cell: ({ row }) => (
         <span className="whitespace-nowrap tabular-nums">
           {formatCacheUsage(row.original.cacheUsage).rate}
@@ -156,7 +157,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "output",
       accessorFn: (thread) => thread.outputTokens,
       header: ({ column }) => (
-        <SortableHeader column={column}>输出 Token</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.output")}</SortableHeader>
       ),
       cell: ({ row }) => (
         <span className="tabular-nums">
@@ -168,7 +169,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "last",
       accessorFn: (thread) => thread.lastRecordedAtMs,
       header: ({ column }) => (
-        <SortableHeader column={column}>最后记录</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.last")}</SortableHeader>
       ),
       cell: ({ getValue }) => (
         <span className="tabular-nums text-muted-foreground">
@@ -180,7 +181,7 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "parent",
       enableSorting: false,
       accessorFn: (thread) => thread.parentThreadId ?? "",
-      header: "父会话",
+      header: t("metrics.parent"),
       cell: ({ row }) =>
         row.original.parentThreadId === null ? (
           <span className="text-muted-foreground">—</span>
@@ -198,30 +199,30 @@ export function ThreadTable({ threads, query, pagination, loading = false }: { t
       id: "compact",
       accessorFn: (thread) => thread.compact?.requestCount ?? Number.NEGATIVE_INFINITY,
       header: ({ column }) => (
-        <SortableHeader column={column}>压缩</SortableHeader>
+        <SortableHeader column={column}>{t("metrics.compact")}</SortableHeader>
       ),
       cell: ({ row }) =>
         row.original.compact === null
           ? "—"
-          : `${row.original.compact.requestCount} 次`,
+          : t("metrics.times", { count: row.original.compact.requestCount }),
     },
-  ], [query])
+  ], [query, t])
 
   return (
     <DataTable
       numericColumnIds={["turns", "requests", "input", "cacheHitRate", "output", "compact"]}
       loading={loading}
-      title="会话列表"
+      title={t("threads.list")}
       description={({ total }) =>
-        `共 ${total} 个匹配会话 · 本页主会话 ${mainCount} / 子代理 ${subagentCount} · 各会话只统计自身请求`
+        t("threads.description", { total, main: mainCount, agents: subagentCount })
       }
       columns={columns}
       data={threads}
       storageKey={TABLE_STATE_KEY}
-      columnLabels={COLUMN_LABELS}
+      columnLabels={columnLabels}
       defaultColumnVisibility={{ parent: false, compact: false }}
-      emptyText="暂无会话记录"
-      noMatchText="无匹配会话"
+      emptyText={t("threads.empty")}
+      noMatchText={t("threads.noMatch")}
       pagination={{ ...pagination, pageSizeOptions: PAGE_SIZE_OPTIONS }}
     />
   )

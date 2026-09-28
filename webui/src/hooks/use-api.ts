@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { ApiClientError } from "@/lib/api"
 import { scheduleApiRefresh } from "../lib/api-polling"
 
 export interface UseApiState<T> {
   data: T | null
   loading: boolean
   error: string | null
+  errorCode: string | null
 }
 
 export function useApi<T>(
@@ -16,6 +18,7 @@ export function useApi<T>(
     data: null,
     loading: true,
     error: null,
+    errorCode: null,
   })
   const activeRequest = useRef<AbortController | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -24,11 +27,11 @@ export function useApi<T>(
     activeRequest.current?.abort()
     const controller = new AbortController()
     activeRequest.current = controller
-    setState((previous) => ({ ...previous, loading: true, error: null }))
+    setState((previous) => ({ ...previous, loading: true, error: null, errorCode: null }))
     loader(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) {
-          setState({ data, loading: false, error: null })
+          setState({ data, loading: false, error: null, errorCode: null })
         }
       })
       .catch((error: unknown) => {
@@ -36,6 +39,9 @@ export function useApi<T>(
           setState((previous) => ({
             data: previous.data,
             loading: false,
+            errorCode: error instanceof ApiClientError ? error.code
+              : error instanceof Error && error.name === "TimeoutError" ? "request_timeout"
+              : error instanceof TypeError ? "network_error" : "unknown",
             error: error instanceof Error ? error.message : String(error),
           }))
         }
@@ -47,12 +53,12 @@ export function useApi<T>(
 
   const refetch = useCallback(() => {
     activeRequest.current?.abort()
-    setState((previous) => ({ ...previous, loading: true, error: null }))
+    setState((previous) => ({ ...previous, loading: true, error: null, errorCode: null }))
     setReloadKey((key) => key + 1)
   }, [])
   const replaceData = useCallback((data: T) => {
     activeRequest.current?.abort()
-    setState({ data, loading: false, error: null })
+    setState({ data, loading: false, error: null, errorCode: null })
   }, [])
   return { ...state, refetch, replaceData }
 }

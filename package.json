@@ -193,6 +193,8 @@
     "install:global": "node scripts/install-global-source.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "verify:commit": "node scripts/verify-commit.mjs",
+    "i18n:check": "node scripts/webui-i18n.mjs --check",
+    "i18n:report": "node scripts/webui-i18n.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "version:sync": "node scripts/sync-gateway-version.mjs",
     "check": "tsc -p tsconfig.json --noEmit && node scripts/check-gateway-version.mjs && node scripts/check-runtime-boundaries.mjs",

@@ -1,6 +1,18 @@
 {
   "version": 1,
   "skills": {
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "913b9d37d0d54047dd65222bb8c67b2bf04e3cb87dcad1729068d7a8b2c8c396"
+    },
+    "i18n-expert": {
+      "source": "daymade/claude-code-skills",
+      "sourceType": "github",
+      "skillPath": "i18n-expert/SKILL.md",
+      "computedHash": "53863be6a9330da7395c800aa23eaaa2d4e6cf4578b60b8ac13f4f920cd97fd4"
+    },
     "shadcn": {
       "source": "shadcn/ui",
       "sourceType": "github",
