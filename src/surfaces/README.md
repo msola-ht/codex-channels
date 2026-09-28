@@ -4,7 +4,7 @@
 
 `index.ts` 是所有 Surface 的公开导出入口。
 
-`persistent-output.ts` 分类可恢复的终态输出，并将必要图片纳入同一有界快照；
+`persistent-output.ts` 分类可恢复的终态输出和上下文压缩开始通知，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
 等待实际操作结算，Bootstrap 才能确认持久记录；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。普通 `handle` 继续用于中间输出。
 

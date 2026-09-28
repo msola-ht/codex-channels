@@ -7,17 +7,16 @@ import type { OperationUpdateDisplay } from "./types.js";
 import { resolveSurfaceDelivery } from "./delivery-policy.js";
 import { securePrivateDirectorySync, securePrivateFileSync } from "../../runtime/private-file.mjs";
 
-/** Result retention is separate from the live queue's broader critical classification. */
+/** Result and compaction lifecycle retention is separate from other live intermediate output. */
 export function isPersistentOutput(event: OutputEvent, display: OperationUpdateDisplay = "full"): boolean {
   if (resolveSurfaceDelivery(event.target.surface, event).disposition === "ignore") return false;
   switch (event.type) {
     case "text.completed": case "turn.completed": case "subagent.completed":
     case "mcp.oauth.completed": case "warning": case "conversation.idle.released": return true;
-    case "operation.updated": return event.operation.status !== "running" && (
-      event.operation.kind === "contextCompaction"
-      || (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
+    case "operation.updated": return event.operation.kind === "contextCompaction" || (event.operation.status !== "running" && (
+      (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
       || shouldDisplayOperation(event.operation, display)
-    );
+    ));
     case "turn.started": return event.target.surface === "weixin";
     case "text.delta": case "user.message": case "plan.updated": case "subagent.spawned":
     case "subagent.contacted": case "thread.status": case "thread.name": case "thread.availability":

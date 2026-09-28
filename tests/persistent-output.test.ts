@@ -308,23 +308,27 @@ it("retains an unavailable channel's output, restarts, delivers through the actu
   const first = create(false);
   await first.manager.start();
   first.output.publish({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", text: "durable answer", phase: "final_answer" }, true);
+  for (const status of ["running", "completed"] as const) {
+    first.output.publish({ type: "operation.updated", target, threadId: "thread", turnId: "turn", operation: { itemId: "compaction", kind: "contextCompaction", status } }, true);
+  }
   await first.manager.stop();
   await first.output.close();
   expect(sent).toEqual([]);
   const pending = new DeliveryJournal(directory, { workerUrl });
   await pending.ready;
-  expect(await pending.summary()).toMatchObject({ records: 1, pending: 1 });
+  expect(await pending.summary()).toMatchObject({ records: 3, pending: 3 });
   await pending.close();
   const second = create(true);
   try {
     await second.manager.start();
-    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    await vi.waitFor(() => expect(sent).toHaveLength(3));
     await vi.waitFor(() => {
       const database = new DatabaseSync(join(directory, "outbox.sqlite3"), { readOnly: true });
       try { expect(database.prepare("SELECT COUNT(*) AS count FROM deliveries").get()?.count).toBe(0); }
       finally { database.close(); }
     });
     expect(sent[0]).toContain("durable answer");
+    expect(sent.slice(1)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
     expect(faults).toEqual([]);
   } finally {
     await second.manager.stop();
@@ -332,6 +336,54 @@ it("retains an unavailable channel's output, restarts, delivers through the actu
   }
 });
 
+
+it("retains compaction start behind an online channel's unconfirmed answer", async () => {
+  const directory = fixture();
+  const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
+  const sent: string[] = [];
+  const faults: string[] = [];
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const api = { sendMessage: async (_chat: string, text: string) => {
+    sent.push(text);
+    if (sent.length === 1) await blocked;
+    return { message_id: sent.length };
+  } } as unknown as Api;
+  const output = new EventBus<OutputEvent>(logger);
+  const outbox = new TelegramOutbox(api, logger, undefined, { operationUpdateDisplay: "hidden" });
+  const surface: SurfaceAdapter = {
+    surface: "telegram", accountId: "default", output: outbox,
+    interactions: { request: async () => ({ type: "approval", approved: false }) },
+    start: async () => {}, stop: () => outbox.close(),
+    configurationChanged: () => {}, deliverConfigurationChange: async () => {},
+  };
+  const manager = new SurfaceManager([surface], output, logger, undefined, {
+    persistence: { directory, workerUrl, owner: () => "actor", authorized: () => true, fault: (code) => { faults.push(code); } },
+  });
+  const countRecords = (): number => {
+    const database = new DatabaseSync(join(directory, "outbox.sqlite3"), { readOnly: true });
+    try { return Number(database.prepare("SELECT COUNT(*) AS count FROM deliveries").get()?.count); }
+    finally { database.close(); }
+  };
+  try {
+    await manager.start();
+    output.publish({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", text: "prior answer", phase: "final_answer" }, true);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    for (const status of ["running", "completed"] as const) {
+      output.publish({ type: "operation.updated", target, threadId: "thread", turnId: "turn", operation: { itemId: "compaction", kind: "contextCompaction", status } }, true);
+    }
+    await vi.waitFor(() => expect(countRecords()).toBe(3));
+    expect(sent).toHaveLength(1);
+    release();
+    await vi.waitFor(() => expect(countRecords()).toBe(0));
+    expect(sent.slice(1)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+    expect(faults).toEqual([]);
+  } finally {
+    release();
+    await manager.stop();
+    await output.close();
+  }
+});
 
 it.each([false, true])("keeps the full durable Telegram result until its document is confirmed (failure=%s)", async (failure) => {
   const directory = fixture();
