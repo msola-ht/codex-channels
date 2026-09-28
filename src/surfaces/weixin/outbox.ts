@@ -345,6 +345,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       text,
       maximumChunkCharacters - previewNotice.length,
     );
+    DeliveryReceipt.current()?.markContentIncomplete();
     const preview = text.slice(0, previewLength) + previewNotice;
     await this.send(target, preview, maximumChunks, signal, context);
     if (!this.access.isAllowed({
@@ -371,6 +372,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
             : fileClient.sendFile(input)),
           signal,
         ), isDefinitelyRejectedWeixinSend);
+        DeliveryReceipt.current()?.confirmCompleteContent();
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);
@@ -569,6 +571,7 @@ function splitWeixinText(
   const maximumCharacters = maximumChunkCharacters * maximumChunkCount;
   let text = value;
   if (text.length > maximumCharacters) {
+    DeliveryReceipt.current()?.markContentIncomplete();
     text = safePrefix(
       text,
       maximumCharacters - truncationNotice.length,

@@ -16,6 +16,7 @@ import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
 import { encodeFeishuPostContent } from "../src/surfaces/feishu/message-content.js";
 import { FeishuMessageError } from "../src/surfaces/feishu/message-error.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
+import { WeixinOutbox, WeixinReplyContextStore, maximumWeixinOutboundFileBytes } from "../src/surfaces/weixin/index.js";
 import { decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type SurfaceAdapter } from "../src/surfaces/index.js";
 
 const directories: string[] = [];
@@ -376,6 +377,91 @@ it.each([false, true])("keeps the full durable Telegram result until its documen
   } finally { reopened.close(); }
 });
 
+
+it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const)("preserves complete Weixin results and Conversation ordering across restart (%s)", async (mode) => {
+  const directory = fixture();
+  const target = { surface: "weixin" as const, accountId: "account-fixture@im.bot", conversationId: "actor-fixture@im.wechat" };
+  const marker = "END-OF-RESULT";
+  const text = mode === "boundary" ? "x".repeat(maximumWeixinOutboundFileBytes - marker.length) + marker
+    : "测".repeat(mode === "oversized" ? Math.ceil(maximumWeixinOutboundFileBytes / 3) : 20_001) + marker;
+  const event: OutputEvent = { type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", phase: "final_answer", text };
+  const payload = JSON.stringify(event);
+  const success = mode === "confirmed" || mode === "boundary";
+  const hasFile = mode !== "unavailable" && mode !== "oversized";
+  const sent: string[] = [];
+  const faults: string[] = [];
+  let fileText: string | undefined;
+  let finishFile!: () => void;
+  const confirmation = new Promise<void>((resolve) => { finishFile = resolve; });
+  const createOutbox = () => new WeixinOutbox(target.accountId, {
+    sendText: async ({ text: value }) => { sent.push(value); },
+  }, new WeixinReplyContextStore(target.accountId), { isAllowed: () => true }, logger, {
+    ...(mode === "unavailable" ? {} : { fileClient: { sendFile: async ({ file }: { file: Buffer }) => {
+      fileText = file.toString("utf8");
+      await confirmation;
+      if (mode === "failed") throw new Error("ambiguous file confirmation");
+    } } }),
+  });
+  const createCoordinator = (journal: DeliveryJournal, outbox: WeixinOutbox) => new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, fault: (code) => { faults.push(code); },
+    deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, signal,
+      async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
+  });
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const outbox = createOutbox();
+  const coordinator = createCoordinator(journal, outbox);
+  const entry = (id: string, conversation = "chat") => ({ ...submission(id, conversation), payload: JSON.stringify({ ...event,
+    target: { ...target, conversationId: conversation === "chat" ? target.conversationId : "other-fixture@im.wechat" },
+    itemId: id, text: id,
+  }) });
+  try {
+    await journal.ready;
+    await journal.submit({ ...submission("full-result"), payload });
+    await journal.submit(entry("same-conversation-next"));
+    await journal.submit(entry("independent", "other"));
+    await coordinator.start();
+    if (hasFile) {
+      await vi.waitFor(() => expect(fileText).toBe(text));
+      expect(await journal.list()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "full-result", state: "sending" }),
+        expect.objectContaining({ id: "same-conversation-next", state: "pending" }),
+      ]));
+      expect(sent).not.toContain("same-conversation-next");
+      finishFile();
+    }
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(success
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+    expect(sent).toContain("independent");
+    expect(sent.includes("same-conversation-next")).toBe(success);
+    expect(faults).toEqual(success ? [] : ["delivery-uncertain"]);
+    if (!hasFile) {
+      expect(fileText).toBeUndefined();
+      expect(sent.join("")).not.toContain(marker);
+      expect(sent.join("")).toContain("内容过长，已截断");
+    }
+  } finally { finishFile(); await coordinator.close(); await outbox.close(); }
+
+  const beforeRestart = sent.length;
+  const recovered = new DeliveryJournal(directory, { workerUrl });
+  const recoveredOutbox = createOutbox();
+  const recovery = createCoordinator(recovered, recoveredOutbox);
+  try {
+    await recovered.ready;
+    await recovered.submit(entry("after-restart-independent", "other"));
+    await recovery.start();
+    await vi.waitFor(() => expect(sent.slice(beforeRestart)).toEqual(["after-restart-independent"]));
+    await vi.waitFor(async () => expect(await recovered.summary()).toMatchObject(success
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+  } finally { await recovery.close(); await recoveredOutbox.close(); }
+  if (!success) {
+    const stored = new SqliteDeliveryJournal(directory);
+    try {
+      expect(stored.execute({ type: "next", excluded: [] })).toBeNull();
+      stored.execute({ type: "resolve", id: "full-result", action: "retry" });
+      expect(stored.execute({ type: "next", excluded: [] })).toMatchObject({ id: "full-result", payload });
+    } finally { stored.close(); }
+  }
+});
 
 it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "stream-unavailable", "static-commentary"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
   const directory = fixture();

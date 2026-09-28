@@ -358,3 +358,11 @@ npx vitest run tests/persistent-output-faults.test.ts --silent=false --reporter=
 ### PR 分支复查与最低 Node 版本修复（2026-09-28）
 
 PR #195 的首轮 Linux/macOS CI 在 Node 22.13.0 发现两项失败。本地同版本复现大记录恢复扫描的 `statement has been finalized`；较新 Node 22 未复现。投递箱启动校验及候选记录查找改为按序号逐条查询，维持有界载荷内存、会话顺序与原有加密校验，不修改 Schema 或恢复合同。CLI 帮助测试将十余次命令调用拆成独立用例，保留原有帮助与拒绝输入断言，避免共用单个 5 秒期限。构建当前 Worker 后，Node 22.13.0 下 `persistent-output.test.ts` 与 `delivery-cli.test.ts` 共 42 项通过；macOS 和完整 CI 结果以修复提交的检查为准，不沿用此前本地门禁作为远程通过证据。
+
+### 合并前微信完整性链路复查（2026-09-28）
+
+`a6a6f8a1` 的五项远程检查均通过后，分支复查仍发现微信文件超限降级的确认缺口：1,000,110 字符正文仅发送 20,000 字符，没有发送附件、末尾缺失，但持久记录被清除且未报告故障。隔离复现使用真实 Journal、Coordinator 和微信 Outbox，平台 API 为模拟实现。
+
+修复让微信截断文本和文件预览进入共享内容不完整状态；仅在完整附件及检查点确认后满足完整性要求。文件超限、端口缺失或发送失败不再以预览成功清除原文，沿现有 `uncertain` 合同保留并阻塞同会话后续结果，无 Schema 或协议变更。固定微信上游 `v2.4.9` 的文件发送实现与测试已核对，不改变平台合同或文件上限。
+
+新增五个跨层回归覆盖完整附件、恰好 1,000,000 字节、发送失败、端口缺失及多字节正文超限；附件确认前后核对记录状态，并重新启动实际 Worker/Coordinator/Outbox，验证未确认记录及原文保留、同会话后续不越过和其他会话继续。`persistent-output.test.ts`、`weixin-outbox.test.ts`、`delivery-receipt.test.ts` 共 80 项通过，类型/版本和定向 Lint 通过。此证据为隔离验证，尚未部署或进行微信实机验收。
