@@ -13,7 +13,6 @@ import {
   currentGitBranch,
   effectiveCodexBinary,
   immediateAddedWorkspaceNotifications,
-  waitAtMost,
 } from "./gateway-component-graph.js";
 
 export class GatewayApplication extends GatewayComponentGraph {
@@ -34,45 +33,7 @@ export class GatewayApplication extends GatewayComponentGraph {
 
   stop(): Promise<void> {
     if (this.stopTask) return this.stopTask;
-    this.stopping = true;
-    this.startupAbort?.abort();
-    void this.startupNetworkRecovery?.stop();
-    this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
-    const reconnecting = this.stopReconnect();
-    const startup = this.startTask;
-    void this.bindingRestoreCoordinator().close();
-    this.stopTask = (async () => {
-      const failures: unknown[] = [];
-      if (startup && !this.startupSettled) {
-        this.removeRpcNotification?.();
-        this.removeRpcNotification = undefined;
-        this.removeRpcDisconnect?.();
-        this.removeRpcDisconnect = undefined;
-        try {
-          await this.codex.close();
-        } catch (error) {
-          failures.push(error);
-          this.logger.error(
-            { err: error, component: "Codex Client" },
-            "Gateway 启动中断失败",
-          );
-        }
-      }
-      await startup?.catch(() => undefined);
-      try {
-        await this.shutdownComponents();
-      } catch (error) {
-        failures.push(error);
-      }
-      if (!(await waitAtMost(reconnecting, 5_000))) {
-        const error = new Error("等待 Codex App Server 重连任务停止超时");
-        failures.push(error);
-        this.logger.error({ err: error }, "Gateway 后台任务关闭失败");
-      }
-      if (failures.length > 0) {
-        throw new AggregateError(failures, "Gateway 资源未完全关闭");
-      }
-    })();
+    this.stopTask = this.stopInternal(this.startTask, this.startupSettled);
     return this.stopTask;
   }
 

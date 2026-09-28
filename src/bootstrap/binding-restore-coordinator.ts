@@ -17,7 +17,7 @@ import type { SurfaceAdapter } from "../surfaces/index.js";
 const retryDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const escalationAttempts = 3;
 
-export interface PendingBindingRestore {
+interface PendingBindingRestore {
   binding: ConversationBinding;
   occupiedNotified: boolean;
   failureCount: number;
@@ -44,34 +44,17 @@ export interface BindingRestoreCoordinatorOptions {
 }
 
 export class BindingRestoreCoordinator {
-  private readonly disconnectedProviders: Set<string>;
-  private readonly disconnectedBindingsByProvider: Map<string, Set<string>>;
-  private readonly pendingBindingRestores: Map<string, PendingBindingRestore>;
-  private readonly restoringThreadIds: Set<string>;
+  private readonly disconnectedProviders = new Set<string>();
+  private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
+  private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
+  private readonly restoringThreadIds = new Set<string>();
   private restoreTimer: NodeJS.Timeout | undefined;
   private readonly restoreTasks = new Set<Promise<void>>();
-  private restoreAttempt: number;
+  private restoreAttempt = 0;
   private stopped = false;
   private readonly recoveryAbort = new AbortController();
 
-  constructor(
-    private readonly options: BindingRestoreCoordinatorOptions,
-    state?: {
-      disconnectedProviders: Set<string>;
-      disconnectedBindingsByProvider: Map<string, Set<string>>;
-      pendingBindingRestores: Map<string, PendingBindingRestore>;
-      restoringThreadIds: Set<string>;
-      restoreAttempt: number;
-    },
-  ) {
-    this.disconnectedProviders = state?.disconnectedProviders ?? new Set<string>();
-    this.disconnectedBindingsByProvider = state?.disconnectedBindingsByProvider
-      ?? new Map<string, Set<string>>();
-    this.pendingBindingRestores = state?.pendingBindingRestores
-      ?? new Map<string, PendingBindingRestore>();
-    this.restoringThreadIds = state?.restoringThreadIds ?? new Set<string>();
-    this.restoreAttempt = state?.restoreAttempt ?? 0;
-  }
+  constructor(private readonly options: BindingRestoreCoordinatorOptions) {}
 
   isRestoring(threadId: string): boolean {
     const provider = this.options.codex.knownProvider(threadId);

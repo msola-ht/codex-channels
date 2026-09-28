@@ -395,7 +395,7 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 先通过当前模型能力检查。Codex Client 映射这些稳定输入，OpenAI ChatGPT 图片经账户校验和上传转换为官方 fileId，其他 Provider 保持内联路径。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
 不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
-会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。
+会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。列表投影与缓存状态由 [`conversation-session-query-service.ts`](../src/application/conversation-session-query-service.ts) 持有，稳定通知的缓存失效、待生效设置清理及 Reserve 前后置协调由 [`conversation-event-coordinator.ts`](../src/application/conversation-event-coordinator.ts) 执行，组合根保留协议解码与生命周期接线。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。
 
 历史恢复限定当前工作区，复用 `thread/list`、元数据 `thread/read` 和 `thread/resume`：
 [`router.ts`](../src/session-routing/router.ts) 在恢复和重连前核对历史目录，恢复后校验实际目录、权限和活动状态；
