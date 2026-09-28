@@ -26,6 +26,37 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("keeps quota queries in the caller's read snapshot and rejects them after close", () => {
+    const now = Date.now();
+    const path = join(temporaryDirectory(), "metrics.sqlite3");
+    const resetsAt = Math.floor(now / 1_000) + 3_600;
+    const writer = new SqliteModelRequestMetricsStore(path, now);
+    const record = (used: number, offset: number) => writer.record({
+      ...sample(), provider: "openai", recordedAtMs: now + offset,
+      weeklyQuota: { limitId: "codex", resetsAt, usedPercentMillionths: used * 1_000_000, planType: "plus" },
+    });
+    record(10, 0);
+    const reader = new SqliteModelRequestMetricsStore(path, now, { readOnly: true });
+    const range = { startAtMs: now, endAtMs: now + 100 };
+    const estimate = { provider: "openai", limitId: "codex" as const, resetsAt, nowMs: now + 100 };
+    try {
+      reader.readSnapshot(() => {
+        expect(reader.quotaHistory(range)[0]?.requestCount).toBe(1);
+        record(20, 1);
+        expect(reader.latestWeeklyQuota("openai", now + 100)?.usedPercentMillionths).toBe(10_000_000);
+        expect(reader.weeklyQuotaEstimate(estimate)).toBeNull();
+      });
+      expect(reader.quotaHistory(range)[0]?.requestCount).toBe(2);
+      expect(reader.weeklyQuotaEstimate(estimate)?.observedDeltaPercentMillionths).toBe(10_000_000);
+    } finally {
+      reader.close();
+      writer.close();
+    }
+    expect(() => reader.quotaHistory(range)).toThrow("模型请求指标数据库已关闭");
+    expect(() => reader.weeklyQuotaEstimate(estimate)).toThrow("模型请求指标数据库已关闭");
+    expect(() => reader.latestWeeklyQuota("openai", now)).toThrow("模型请求指标数据库已关闭");
+  });
+
   it("retains streaming statements through GC and releases iterators after visitor failure", () => {
     const directory = temporaryDirectory();
     execFileSync(process.execPath, ["--expose-gc", "--import", "tsx", "--input-type=module", "-e", `
