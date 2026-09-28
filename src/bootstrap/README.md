@@ -14,9 +14,10 @@
   `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
   同类请求先由 `scheduled-task-server-request.ts` 拒绝。
 - `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
-  把具体组件所有权交给组件图；只持有启动/停止幂等任务，启动中取消、订阅移除和资源关闭由组件图统一处理。
+  把具体组件所有权交给组件图；只持有启动/停止幂等任务，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
+  私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知

@@ -66,9 +66,11 @@ import {
   type RpcNotification,
 } from "../codex-client/index.js";
 import {
+  classifyConfigReload,
   configChange,
   includesConfigChange,
   type ConfigChange,
+  type ConfigReloadResult,
   type GatewayConfig,
 } from "../config/index.js";
 import {
@@ -149,9 +151,9 @@ export abstract class GatewayComponentGraph {
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
-  protected readonly surfaceModules: SurfaceRuntimeModule[];
+  private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
-  protected readonly surfaceManager: SurfaceManager;
+  private readonly surfaceManager: SurfaceManager;
   private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
@@ -167,7 +169,7 @@ export abstract class GatewayComponentGraph {
   private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
-  protected readonly workspaces: WorkspaceRegistry;
+  private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
   private readonly scheduledTasks: ScheduledTaskComposition | undefined;
@@ -188,7 +190,7 @@ export abstract class GatewayComponentGraph {
   protected abstract requestStop(): Promise<void>;
 
   constructor(
-    protected config: GatewayConfig,
+    private config: GatewayConfig,
     private readonly logger: Logger,
     configPath?: string,
   ) {
@@ -1061,6 +1063,63 @@ export abstract class GatewayComponentGraph {
     return this.bindingRestore;
   }
 
+  reloadConfig(
+    next: GatewayConfig,
+    pendingAddedWorkspaces: readonly GatewayConfig["workspaces"][number][] = [],
+    weixinCredentialsChanged = false,
+  ): ConfigReloadResult {
+    const result = classifyConfigReload(this.config, next, weixinCredentialsChanged);
+    if (result.action === "reinstall") {
+      this.surfaceManager.configurationChanged({
+        action: "reinstall-required",
+        changes: result.changes,
+        addedWorkspaces: [],
+      });
+      return result;
+    }
+    if (result.action === "restart") {
+      const restoreRecipients: Array<() => void> = [];
+      try {
+        for (const module of this.surfaceModules) {
+          restoreRecipients.push(module.prepareRestartNotification(next));
+        }
+        this.surfaceManager.configurationChanged({
+          action: "restarting",
+          changes: result.changes,
+          addedWorkspaces: [],
+        });
+      } finally {
+        for (const restore of restoreRecipients.reverse()) restore();
+      }
+      return result;
+    }
+
+    const addedWorkspaces = immediateAddedWorkspaceNotifications(
+      this.config.workspaces,
+      next.workspaces,
+      result.changes,
+      pendingAddedWorkspaces,
+    );
+    if (includesConfigChange(result.changes, "workspace.registry")) {
+      this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
+    }
+    for (const module of this.surfaceModules) {
+      module.applyHotReload(next, result.changes);
+    }
+    this.config = next;
+    const nonWorkspaceChanges = result.changes.filter(
+      (change) => change.code !== "workspace.registry",
+    );
+    if (nonWorkspaceChanges.length > 0 || addedWorkspaces.length > 0) {
+      this.surfaceManager.configurationChanged({
+        action: "reloaded",
+        changes: result.changes,
+        addedWorkspaces,
+      });
+    }
+    return result;
+  }
+
   hasActiveTurns(): boolean {
     return this.core.hasActiveTurns();
   }
@@ -1573,7 +1632,7 @@ function findAddedWorkspaces(
   return next.filter((workspace) => !currentIds.has(workspace.id));
 }
 
-export function immediateAddedWorkspaceNotifications(
+function immediateAddedWorkspaceNotifications(
   current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   changes: readonly ConfigChange[],
