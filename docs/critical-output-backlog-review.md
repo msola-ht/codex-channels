@@ -338,19 +338,19 @@ npx vitest run tests/persistent-output-faults.test.ts --silent=false --reporter=
 - 本次反馈未单独明确预览与附件的到达顺序，不追加这一结论；前轮长代码测试的三项顺序确认继续按前轮范围保留。本轮没有另发 NEXT-OK，也不声称同 Turn 连续最终输出或故障恢复通过。未注入网络或重启故障。
 
 
-### Telegram 隔离故障验证准备（2026-09-28）
+### Telegram 隔离故障验证（2026-09-28）
 
-审查现有测试：`tests/persistent-output-faults.test.ts` 的 8 个 SIGKILL 切点使用飞书 Outbox；`tests/persistent-output.test.ts` 已覆盖 TG 完整附件确认前保留、发送异常及重开投递库后原文恢复。下一批应补 TG 附件平台确认与本地检查点之间的真实子进程中断，避免重复已有正常发送测试。
+审查现有测试：`tests/persistent-output-faults.test.ts` 的 8 个 SIGKILL 切点使用飞书 Outbox；`tests/persistent-output.test.ts` 已覆盖 TG 完整附件确认前保留、发送异常及重开投递库后原文恢复。本批补充 TG 附件平台确认与本地检查点之间的真实子进程中断，避免重复已有正常发送测试。
 
 复用现有故障测试文件、实际 DeliveryJournal Worker、Coordinator 和 TelegramOutbox；平台 API 使用模拟实现，全部数据和平台接收日志位于临时目录，不读取真实 Token，不访问 Telegram，不停止当前 Gateway 或共享 App Server。每个场景预先持久提交首条长正文、同会话后续正文和另一会话正文，切点用检查点/模拟 API 返回位置触发，不使用固定延时猜测。
 
-| 待补切点 | 中断前证据 | 重启后的必要断言 |
+| 已执行切点 | 中断前证据 | 重启后的断言 |
 | --- | --- | --- |
 | 预览 confirmed 后、附件调用前 | 预览检查点已持久化，附件接收计数为 0 | 首条 uncertain、原文完整；同会话后续不得越过，另一会话继续 |
-| 附件 started 后、平台返回前 | started 已持久化，平台尚未确认附件 | 不自动重发附件；保留原文与 started 检查点 |
+| 附件 started 后、平台调用前 | started 已持久化，模拟平台尚未接收附件 | 不自动重发附件；保留原文与 started 检查点 |
 | 模拟平台收到附件后、confirmed 落盘前 | 独立模拟平台接收日志含全文哈希，本地仍为 started | 重开后 uncertain；恢复调度不造成第二次附件接收 |
 | 全部 confirmed 后、acknowledge 删除前 | 预览及附件均已确认，记录尚在 | 保留 uncertain 与全部检查点，不把完整检查点等同于允许自动重发 |
 
-恢复阶段需启动实际 Coordinator 并等待独立会话成功，核对同会话屏障与平台调用计数；仅检查 `next()` 候选不足以替代恢复调度证据。导出/只读恢复原文时先核对 hash；如夹具需要显式 retry 才能读取 payload，必须在停止恢复调度后进行，不能把它混入“不自动重发”的断言。准备完成不代表上述新增 TG 切点已执行。
+本批四个切点已执行。恢复阶段启动实际 Coordinator，等待同账号另一会话成功，并核对平台调用计数及投递记录：仅另一会话产生发送，原会话首条保持 uncertain、后续保持 pending。模拟平台收到附件的场景在独立日志文件保留全文哈希；其余场景明确没有附件接收。停止恢复调度并关闭后，再通过独立 Journal 显式 retry 读取原文，逐字和 SHA-256 均一致；该离线读取步骤不参与“不自动重发”的断言。
 
-执行入口为 `npm test -- tests/persistent-output-faults.test.ts tests/persistent-output.test.ts`，由入口构建当前 Worker 后运行。通过后再准备独立测试账号的真实平台方案；真实账号、故障窗口及可影响的会话尚未选定，当前不对生产注入故障。
+执行入口为 `npm test -- tests/persistent-output-faults.test.ts tests/persistent-output.test.ts`，由入口构建当前 Worker 后运行；两文件 41 项通过，包含新增 4 个 TG SIGKILL 场景。定向 Lint 通过。此证据覆盖实际投递组件与模拟平台，不覆盖 Telegram 网络、完整 Gateway 服务重启、跨账号恢复、Windows 或物理断电。真实账号、故障窗口及可影响的会话尚未选定，当前不对生产注入故障。

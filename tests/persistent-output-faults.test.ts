@@ -1,9 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
-import { DeliveryJournal } from "../src/delivery/index.js";
+import type { Api } from "grammy";
+import pino from "pino";
+import { afterEach, expect, it, vi } from "vitest";
+import type { OutputEvent } from "../src/conversation-core/index.js";
+import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
+import { DeliveryCoordinator, DeliveryJournal } from "../src/delivery/index.js";
 
 const roots: string[] = [];
 const fixture = () => { const root = mkdtempSync(join(tmpdir(), "delivery-faults-")); roots.push(root); return root; };
@@ -82,6 +87,110 @@ it.skipIf(process.platform === "win32").each([
       expect(JSON.parse(recovered!.payload)).toMatchObject({ text });
     }
   } finally { await journal.close(); }
+});
+
+it.skipIf(process.platform === "win32").each([
+  "preview-confirmed", "document-started", "document-received", "before-ack",
+])("fences Telegram document recovery after SIGKILL at %s", async (cut) => {
+  const root = fixture();
+  const directory = join(root, "journal");
+  const script = join(root, "telegram-crash.mjs");
+  const platformLog = join(root, "platform.log");
+  const text = "完整结果".repeat(5_000) + "END";
+  const hash = createHash("sha256").update(text).digest("hex");
+  writeFileSync(platformLog, "");
+  writeFileSync(script, `
+    import { appendFileSync } from 'node:fs';
+    import { createHash } from 'node:crypto';
+    import { DeliveryJournal, DeliveryCoordinator } from ${moduleUrl("dist/delivery/index.js")};
+    import { TelegramOutbox } from ${moduleUrl("dist/surfaces/telegram/outbox.js")};
+    import pino from ${moduleUrl("node_modules/pino/pino.js")};
+    const [directory, cut, log] = process.argv.slice(2);
+    const stop = (point) => { if (cut === point) process.kill(process.pid, 'SIGKILL'); };
+    const journal = new DeliveryJournal(directory);
+    await journal.ready;
+    for (const [id, chat, text] of [
+      ['first', 'chat', ${JSON.stringify(text)}], ['second', 'chat', 'later'], ['independent', 'other', 'independent'],
+    ]) {
+      await journal.submit({ id, account: 'account', conversation: chat, payload: JSON.stringify({
+        type: 'text.completed', target: { surface: 'telegram', accountId: 'default', conversationId: chat },
+        threadId: chat, turnId: 'turn', itemId: id, phase: 'final_answer', text,
+      }) });
+    }
+    const outbox = new TelegramOutbox({
+      sendMessage: async () => { appendFileSync(log, 'preview\\n'); return { message_id: 1 }; },
+      sendDocument: async (_chat, file) => {
+        const raw = await file.toRaw();
+        if (!(raw instanceof Uint8Array)) throw new Error('expected in-memory document');
+        appendFileSync(log, 'document:' + createHash('sha256').update(raw).digest('hex') + '\\n');
+        stop('document-received');
+        return { message_id: 2 };
+      },
+    }, pino({ level: 'silent' }));
+    const acknowledge = journal.acknowledge.bind(journal);
+    journal.acknowledge = async (id) => { stop('before-ack'); return acknowledge(id); };
+    const coordinator = new DeliveryCoordinator(journal, {
+      accounts: () => ['account'], authorized: () => true, concurrency: 1,
+      fault: () => { throw new Error('unexpected crash fixture fault'); },
+      deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload), signal, async (checkpoint) => {
+        await journal.checkpoint(record.id, checkpoint);
+        if (checkpoint.operation === 'sendMessage' && checkpoint.state === 'confirmed') stop('preview-confirmed');
+        if (checkpoint.operation === 'sendDocument' && checkpoint.state === 'started') stop('document-started');
+      }),
+    });
+    await coordinator.start();
+  `);
+  const child = spawnSync(process.execPath, [script, directory, cut, platformLog], { timeout: 15_000, encoding: "utf8" });
+  expect(child.error, child.stderr).toBeUndefined();
+  expect(child.signal, child.stderr).toBe("SIGKILL");
+  const received = readFileSync(platformLog, "utf8");
+  expect(received).toBe(["document-received", "before-ack"].includes(cut) ? `preview\ndocument:${hash}\n` : "preview\n");
+
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const calls: string[] = [];
+  const faults: string[] = [];
+  const outbox = new TelegramOutbox({
+    sendMessage: async (chat: string) => { calls.push(`message:${chat}`); return { message_id: 3 }; },
+    sendDocument: async (chat: string) => { calls.push(`document:${chat}`); return { message_id: 4 }; },
+  } as unknown as Api, pino({ level: "silent" }));
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, concurrency: 1, fault: (code) => faults.push(code),
+    deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, signal,
+      async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
+  });
+  try {
+    await journal.ready;
+    expect(await journal.summary()).toMatchObject({ records: 3, uncertain: 1, pending: 2 });
+    const row = (await journal.list()).find((entry) => entry.id === "first")!;
+    expect(row.progress.map(({ operation, state }) => `${operation}:${state}`)).toEqual([
+      "sendMessage:started", "sendMessage:confirmed",
+      ...(cut === "preview-confirmed" ? [] : ["sendDocument:started"]),
+      ...(cut === "before-ack" ? ["sendDocument:confirmed"] : []),
+    ]);
+    await coordinator.start();
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject({ records: 2, uncertain: 1, pending: 1, sending: 0 }));
+    expect((await journal.list()).map(({ id, state }) => ({ id, state }))).toEqual([
+      { id: "first", state: "uncertain" }, { id: "second", state: "pending" },
+    ]);
+    expect(await journal.next()).toBeNull();
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(coordinator.hasOutstanding("other")).toBe(false);
+  } finally { await coordinator.close(); await outbox.close(); }
+  expect(calls).toEqual(["message:other"]);
+  expect(faults).toEqual([]);
+  expect(readFileSync(platformLog, "utf8")).toBe(received);
+
+  // Explicit retry is only for inspecting the retained payload, with no scheduler running.
+  const inspection = new DeliveryJournal(directory, { workerUrl });
+  try {
+    await inspection.ready;
+    expect(await inspection.resolve("first", "retry")).toBe(true);
+    const recovered = await inspection.next();
+    expect(recovered?.id).toBe("first");
+    const event = JSON.parse(recovered!.payload) as Extract<OutputEvent, { type: "text.completed" }>;
+    expect(event.text).toBe(text);
+    expect(createHash("sha256").update(event.text).digest("hex")).toBe(hash);
+  } finally { await inspection.close(); }
 });
 
 it("bounds persistent backlog under sustained new conversations and a stalled platform", () => {
