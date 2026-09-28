@@ -585,6 +585,27 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 15_000);
 
+  it("unsubscribes a fresh background Thread after local authorization cleanup removed its binding", async () => {
+    const bindings = new MemoryBindingStore();
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "revoked-schedule" };
+    bindings.selectWorkspace(target, "main"); bindings.rememberActor(target, "actor");
+    const router = new SessionRouter(ownerClient, bindings,
+      new WorkspaceRegistry([{ id: "main", name: "Main", cwd: workdir, sandbox: "read-only", approvalPolicy: "never" }], "main"));
+    const { binding } = await router.startBackground(target, { approvalPolicy: "never", sandbox: "read-only" }, "main");
+    const unsubscribe = vi.spyOn(ownerClient, "unsubscribeThread");
+    try {
+      bindings.retainActors(target, new Set());
+      await expect(router.releaseBackground(binding.threadId)).resolves.toBeUndefined();
+      expect(unsubscribe).toHaveBeenCalledWith(binding.threadId);
+      await expect(router.releaseBackground(binding.threadId)).resolves.toBeUndefined();
+      expect((await ownerClient.readThread(binding.threadId)).id).toBe(binding.threadId);
+    } finally {
+      unsubscribe.mockRestore();
+      await ownerClient.unsubscribeThread(binding.threadId).catch(() => undefined);
+      await ownerClient.deleteThread(binding.threadId);
+    }
+  }, 15_000);
+
   it("accepts the official Skill marker and structured input together", async () => {
     const skill = await ownerClient.resolveSkill(workdir, "contract-skill");
     expect(skill).toEqual({

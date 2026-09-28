@@ -1084,3 +1084,44 @@ describe("SubagentCompletionTracker", () => {
     vi.useRealTimers();
   });
 });
+
+
+describe("shutdown terminal drain", () => {
+  it("settles confirmed runs once, including detached runs, without completing running agents", async () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    let finishMetrics!: (ok: boolean) => void;
+    const checkpoint = new Promise<boolean>((resolve) => { finishMetrics = resolve; });
+    const tracker = new SubagentCompletionTracker({ readSummary: summary, publish, waitForMetrics: () => checkpoint });
+    try {
+      tracker.handle(spawned());
+      tracker.metricsAvailable("agent-1");
+      tracker.handleInput(completedActivity());
+      await vi.advanceTimersByTimeAsync(5_000); // complete already waiting on metrics
+      tracker.handle(contacted()); // detach old terminal while a new run is active
+      tracker.handle(spawned("agent-2"));
+      tracker.handleInput(completedActivity("turn-1", "agent-2"));
+      const draining = tracker.drain();
+      expect(tracker.drain()).toBe(draining);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await draining;
+      expect(publish.mock.calls.map(([event]) => [event.agentThreadId, event.metricsStatus]).sort()).toEqual([
+        ["agent-1", "unavailable"], ["agent-2", "available"],
+      ]);
+      finishMetrics(true);
+      await vi.runAllTimersAsync();
+      expect(publish).toHaveBeenCalledTimes(2);
+    } finally { tracker.close(); vi.useRealTimers(); }
+  });
+
+  it("retains terminal output if the metric checkpoint rejects", async () => {
+    const publish = vi.fn(); const onReadError = vi.fn();
+    const tracker = new SubagentCompletionTracker({ readSummary: summary, publish, onReadError,
+      waitForMetrics: async () => { throw new Error("checkpoint failed"); } });
+    tracker.handle(spawned()); tracker.metricsAvailable("agent-1");
+    tracker.handleInput(completedActivity());
+    await tracker.drain();
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", metricsStatus: "unavailable" }));
+    expect(onReadError).toHaveBeenCalledOnce();
+  });
+});

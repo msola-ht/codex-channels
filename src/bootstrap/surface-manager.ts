@@ -272,7 +272,7 @@ export class SurfaceManager {
 
   acceptsExecution(target: ConversationTarget): boolean {
     const account = surfaceAccountKey(target.surface, target.accountId);
-    return !this.stopping && !this.suspended.has(account) && (this.persistent?.acceptsExecution(account) ?? true);
+    return !this.stopping && !this.suspended.has(account) && (this.persistent?.acceptsExecution(target) ?? true);
   }
 
   waitForPersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
@@ -392,8 +392,17 @@ export class SurfaceManager {
     this.scheduleRetry(surface);
   }
 
-  async stop(): Promise<void> {
+  /** Fence new execution/interaction while accepted notifications still enter the journal. */
+  beginShutdown(): void {
+    if (this.stopping) return;
     this.stopping = true;
+    for (const surface of this.surfaces) {
+      this.setInteractionAvailable(surface, false, "Gateway 正在停止");
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.beginShutdown();
     this.accountQueriesAbort.abort();
     this.acceptingOutput = false;
     this.removePersistenceObserver?.();

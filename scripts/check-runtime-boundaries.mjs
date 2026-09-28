@@ -21,6 +21,7 @@ const allowedDistEntries = new Map([
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",
     "dist/storage/index.js",
+    "dist/surfaces/delivery-diagnostics/index.js", // Offline policy only; never load platform SDKs.
     "dist/surfaces/feishu/index.js",
     "dist/surfaces/token-format.js",
     "dist/surfaces/elapsed-duration.js",

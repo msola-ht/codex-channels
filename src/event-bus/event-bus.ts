@@ -34,6 +34,7 @@ export class EventBus<T> {
   private pendingBytes = 0;
   private overloaded = false;
   private shedEvents = 0;
+  private readonly drainWaiters = new Set<() => void>();
 
   constructor(
     private readonly logger: Logger,
@@ -110,7 +111,22 @@ export class EventBus<T> {
     return () => { this.observers.delete(observer); };
   }
 
-  close(): Promise<void> {
+  /** Wait for accepted events without closing publication by downstream producers. */
+  async drain(): Promise<void> {
+    if (this.pendingEntries === 0) return;
+    let onDrained: () => void = () => undefined;
+    const drained = new Promise<void>((resolve) => { onDrained = resolve; });
+    this.drainWaiters.add(onDrained);
+    try {
+      if (!(await waitAtMost(drained, closeTimeoutMs))) {
+        throw new Error("事件总线排空等待超时");
+      }
+    } finally {
+      this.drainWaiters.delete(onDrained);
+    }
+  }
+
+  close(options: { requireDrained?: boolean } = {}): Promise<void> {
     if (this.closePromise) {
       return this.closePromise;
     }
@@ -135,6 +151,7 @@ export class EventBus<T> {
           },
           "事件总线关闭等待超时",
         );
+        if (options.requireDrained) throw new Error("事件总线关闭未排空，已接收事件可能未完成处理");
       }
     });
     return this.closePromise;
@@ -164,6 +181,14 @@ export class EventBus<T> {
   private release(queued: QueuedEvent<T>): void {
     this.pendingEntries--;
     this.pendingBytes -= queued.bytes;
+    if (this.pendingEntries === 0) {
+      // Coalescing may release an old entry before its replacement is queued.
+      queueMicrotask(() => {
+        if (this.pendingEntries !== 0) return;
+        for (const resolve of this.drainWaiters) resolve();
+        this.drainWaiters.clear();
+      });
+    }
   }
 }
 

@@ -45,6 +45,29 @@ describe("encrypted delivery journal", () => {
     } finally { store.close(); }
   });
 
+  it("releases only uncertain scheduling barriers without changing storage, quota or offline retry semantics", () => {
+    const store = new SqliteDeliveryJournal(fixture(), { ...defaultDeliveryLimits, records: 2 });
+    try {
+      store.execute({ type: "submit", value: submission("notice") });
+      store.execute({ type: "submit", value: submission("answer") });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      store.execute({ type: "state", id: "notice", from: "pending", to: "sending" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      store.execute({ type: "state", id: "notice", from: "sending", to: "uncertain" });
+      const before = store.execute({ type: "summary" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(true);
+      expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "answer" });
+      expect(store.execute({ type: "summary" })).toEqual(before);
+      expect(() => store.execute({ type: "submit", value: submission("overflow") })).toThrow("capacity");
+      expect(store.execute({ type: "acknowledge", id: "notice" })).toBe(false);
+      store.execute({ type: "resolve", id: "notice", action: "retry" });
+      expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "notice" });
+      store.execute({ type: "state", id: "notice", from: "pending", to: "blocked" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      expect(store.execute({ type: "next", excluded: [] })).toBeNull();
+    } finally { store.close(); }
+  });
+
   it("rejects capacity overflow transactionally without expiring accepted results", () => {
     const store = new SqliteDeliveryJournal(fixture(), { ...defaultDeliveryLimits, records: 1 });
     try {
@@ -288,17 +311,17 @@ it("holds execution admission between the 80% and 60% account watermarks while o
   });
   try {
     await coordinator.start();
-    expect(coordinator.acceptsExecution("account")).toBe(false);
-    expect(coordinator.acceptsExecution("other")).toBe(true);
+    expect(coordinator.acceptsExecution("account", "chat")).toBe(false);
+    expect(coordinator.acceptsExecution("other", "other-chat")).toBe(true);
     enabled = true;
     coordinator.wake();
     for (let drained = 1; drained <= 5; drained++) {
       await vi.waitFor(() => expect(attempts).toBe(drained));
       release!();
       await vi.waitFor(async () => expect((await journal.summary()).records).toBe(14 - drained));
-      if (drained === 3) expect(coordinator.acceptsExecution("account")).toBe(false);
+      if (drained === 3) expect(coordinator.acceptsExecution("account", "chat")).toBe(false);
     }
-    expect(coordinator.acceptsExecution("account")).toBe(true);
+    expect(coordinator.acceptsExecution("account", "chat")).toBe(true);
   } finally { enabled = false; release?.(); await coordinator.close(); }
 }, 15_000);
 
@@ -659,4 +682,62 @@ it.each(["confirmed", "failed", "cancelled", "post-failed"] as const)("recovers 
       expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
     }
   } finally { reopened.close(); }
+});
+
+
+it("keeps recovery fenced until every journal page has been classified and counted", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  try {
+    for (let index = 0; index < 101; index++) {
+      const id = String(index);
+      store.execute({ type: "submit", value: submission(id) });
+      if (index < 100) store.execute({ type: "state", id, from: "pending", to: "sending" });
+    }
+  } finally { store.close(); }
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const observations: boolean[] = [];
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, deliver: async () => {}, fault: () => {},
+    mayReleaseUncertainBarrier: () => true,
+    changed: () => { observations.push(coordinator.hasOutstanding("chat")); },
+  });
+  try {
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(true);
+    await coordinator.start();
+    expect(observations).toEqual([true]);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(false);
+    expect(await journal.summary()).toMatchObject({ records: 101, uncertain: 100, pending: 1 });
+  } finally { await coordinator.close(); }
+});
+
+it("keeps Weixin auxiliary failure durable while allowing the complete answer through its real Outbox", async () => {
+  const directory = fixture();
+  const target = { surface: "weixin" as const, accountId: "fixture@im.bot", conversationId: "fixture@im.wechat" };
+  const sent: string[] = [];
+  const faults: string[] = [];
+  const outbox = new WeixinOutbox(target.accountId, { sendText: async ({ text }) => {
+    sent.push(text);
+    if (sent.length === 1) throw new Error("unknown first send");
+  } }, new WeixinReplyContextStore(target.accountId), { isAllowed: () => true }, logger);
+  const output = new PersistentSurfaceOutput({ directory, workerUrl,
+    owner: () => "actor", authorized: () => true, accounts: () => [JSON.stringify([target.surface, target.accountId])],
+    deliver: (event, signal, checkpoint) => outbox.deliver(event, signal, checkpoint),
+    fault: (code) => { faults.push(code); },
+  });
+  try {
+    await output.start();
+    output.accept({ type: "turn.started", target, threadId: "thread", turnId: "turn" });
+    output.accept({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", phase: "final_answer", text: "complete answer" });
+    await output.waitForIdle(target, AbortSignal.timeout(3000));
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toContain("complete answer");
+    expect(faults).toEqual(["delivery-uncertain"]);
+    expect(output.acceptsExecution(target)).toBe(true);
+  } finally { await output.close(); await outbox.close(); }
+  const retained = new SqliteDeliveryJournal(directory);
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 }); }
+  finally { retained.close(); }
 });

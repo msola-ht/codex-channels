@@ -21,6 +21,7 @@ interface ActiveSubagent {
   waitObservedAfterTerminal: boolean;
   timer: NodeJS.Timeout | undefined;
   revision: number;
+  emitted?: boolean;
 }
 
 interface SubagentMetricsSummary {
@@ -101,6 +102,8 @@ export class SubagentCompletionTracker {
   private readonly pendingParentRuns = new Map<string, PendingParentRun>();
   private readonly observedFollowupOperations = new Set<string>();
   private closed = false;
+  private readonly detached = new Set<ActiveSubagent>();
+  private drainTask: Promise<void> | undefined;
 
   constructor(private readonly options: SubagentCompletionTrackerOptions) {}
 
@@ -111,7 +114,7 @@ export class SubagentCompletionTracker {
   }
 
   handle(event: OutputEvent): void {
-    if (this.closed) return;
+    if (this.closed || this.drainTask) return;
     if (event.type === "subagent.spawned") {
       this.rememberParentRun(event);
       if (!this.active.has(event.agentThreadId)) this.register(event);
@@ -125,6 +128,7 @@ export class SubagentCompletionTracker {
         if (previous.timer) clearTimeout(previous.timer);
         previous.timer = undefined;
         this.active.delete(event.agentThreadId);
+        this.detached.add(previous);
         void this.complete(event.agentThreadId, previous, previous.revision, true);
         this.register(event);
       } else {
@@ -156,7 +160,7 @@ export class SubagentCompletionTracker {
   }
 
   handleInput(event: ConversationInputEvent): void {
-    if (this.closed) return;
+    if (this.closed || this.drainTask) return;
     if (event.type === "turn.started") {
       const entry = this.active.get(event.threadId);
       if (entry && entry.activeTurnId === undefined) {
@@ -205,7 +209,7 @@ export class SubagentCompletionTracker {
   }
 
   metricsAvailable(agentThreadId: string, agentTurnId?: string): void {
-    if (this.closed) return;
+    if (this.closed || this.drainTask) return;
     const entry = this.active.get(agentThreadId);
     if (!entry) return;
     if (
@@ -220,9 +224,43 @@ export class SubagentCompletionTracker {
       checkpoint,
     ]).then(([previousSucceeded, currentSucceeded]) =>
       previousSucceeded && currentSucceeded
-    );
+    ).catch((error: unknown) => {
+      this.options.onReadError?.(error, agentThreadId);
+      return false;
+    });
     if (!entry.terminalStatus) return;
     this.schedule(agentThreadId, entry);
+  }
+
+  /** Called after lifecycle producers and their event queues have drained. */
+  drain(): Promise<void> {
+    this.drainTask ??= this.drainTerminals();
+    return this.drainTask;
+  }
+
+  private async drainTerminals(): Promise<void> {
+    const entries = [...this.active.values(), ...this.detached];
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), defaultSettleDelayMs);
+    });
+    try {
+      await Promise.all(entries.map(async (entry) => {
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = undefined;
+        // Supersede both timer callbacks and already waiting complete calls.
+        entry.revision++;
+        if (!entry.terminalStatus || entry.emitted) return;
+        entry.metricsCheckpoint = Promise.race([
+          entry.metricsCheckpoint ?? Promise.resolve(true),
+          deadline,
+        ]);
+        await this.complete(entry.agentThreadId, entry, entry.revision, this.detached.has(entry));
+      }));
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.close();
+    }
   }
 
   close(): void {
@@ -231,6 +269,7 @@ export class SubagentCompletionTracker {
       if (entry.timer) clearTimeout(entry.timer);
     }
     this.active.clear();
+    this.detached.clear();
     this.pendingTerminals.clear();
     this.pendingStarts.clear();
     this.pendingActivities.clear();
@@ -496,6 +535,7 @@ export class SubagentCompletionTracker {
     if (previous.timer) clearTimeout(previous.timer);
     previous.timer = undefined;
     this.active.delete(agentThreadId);
+    this.detached.add(previous);
     void this.complete(agentThreadId, previous, previous.revision, true);
     this.register(pendingActivity.event);
   }
@@ -580,19 +620,13 @@ export class SubagentCompletionTracker {
     detached = false,
   ): Promise<void> {
     if (
-      this.closed
-      || (!detached && (
-        this.active.get(agentThreadId) !== entry
-        || entry.revision !== revision
-      ))
+      this.closed || entry.emitted || entry.revision !== revision
+      || (!detached && this.active.get(agentThreadId) !== entry)
     ) return;
     const metricsPersisted = await (entry.metricsCheckpoint ?? Promise.resolve(true));
     if (
-      this.closed
-      || (!detached && (
-        this.active.get(agentThreadId) !== entry
-        || entry.revision !== revision
-      ))
+      this.closed || entry.emitted || entry.revision !== revision
+      || (!detached && this.active.get(agentThreadId) !== entry)
     ) return;
     let summary: SubagentMetricsSummary | null = null;
     let metricsStatus: SubagentCompletedEvent["metricsStatus"] = "unavailable";
@@ -630,6 +664,8 @@ export class SubagentCompletionTracker {
       outputTokens: aggregate?.outputTokens ?? 0,
       reasoningOutputTokens: aggregate?.reasoningOutputTokens ?? 0,
     };
+    entry.emitted = true;
+    this.detached.delete(entry);
     if (!detached) this.active.delete(agentThreadId);
     this.options.publish(event);
     this.options.onCompleted?.(event);

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
-import { decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type DeliveryCheckpoint } from "../surfaces/index.js";
+import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
   directory: string;
@@ -30,6 +30,7 @@ export class PersistentSurfaceOutput {
     this.journal = new DeliveryJournal(options.directory, options.workerUrl ? { workerUrl: options.workerUrl } : {});
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
+      mayReleaseUncertainBarrier: (record) => mayReleaseUncertainOutputBarrier(decodePersistentOutput(record.payload).event),
       authorized: (record) => {
         const payload = decodePersistentOutput(record.payload);
         return options.authorized(payload.event, payload.owner);
@@ -54,7 +55,9 @@ export class PersistentSurfaceOutput {
 
   start(): Promise<void> { return this.coordinator.start(); }
   wake(): void { this.coordinator.wake(); }
-  acceptsExecution(account: string): boolean { return this.coordinator.acceptsExecution(account); }
+  acceptsExecution(target: ConversationTarget): boolean {
+    return this.coordinator.acceptsExecution(surfaceAccountKey(target.surface, target.accountId), conversationTargetKey(target));
+  }
   waitForIdle(target: ConversationTarget, signal: AbortSignal): Promise<void> {
     const key = conversationTargetKey(target);
     if (this.idleWaiters.size >= 100) return Promise.reject(new Error("投递顺序等待容量已满"));

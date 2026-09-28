@@ -5,11 +5,11 @@
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
-- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
+- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知辅助通知注入仅解除顺序屏障的策略，保留记录和额度；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
-- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
+- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核会话投递阻塞和容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
-- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，在调度容量检查及创建 Thread 前复核投递准入，临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
+- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限；异步预检返回后及 Thread 创建后再次复核当前授权、取消、Workspace 与投递准入，撤权时释放新建后台绑定而不启动 Turn。临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
@@ -77,7 +77,9 @@
   水位落库并发布，保持该等待操作先于完成卡片；终态到达时尚无指标或之后未出现父线程等待时
   保留有界收敛窗口，后续新指标使旧结算失效；指标到达或静默本身不推断子代理结束。无指标
   发布零统计终态，指标写入或读取失败发布“统计不可用”终态；完成事件复用汇总中的最后一次
-  思考等级、请求结果和 Token，不在 Tracker 内重复计算。
+  思考等级、请求结果和 Token，不在 Tracker 内重复计算。关闭时组合根先排空入站及输出登记队列，
+  再调用 `drain`，以共享 5 秒期限结算已确认终态（含分离的旧轮次），指标超时按不可用输出；
+  迟到结算不重复发布，不为仍运行的子代理伪造终态，持久接收入口在结算后才关闭。
 - `workspace-permission-writer.ts`：把渠道 `/workspaceperm` 的工作区权限更新写回
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
@@ -169,6 +171,7 @@
   不可用期间不积压流式增量。渠道失效与启动失败日志附带受控的
   `errorChain`（每层只有类型与白名单错误码，不含错误正文），便于定位底层失败原因。
   渠道未就绪时对应账号的新审批、用户输入与 MCP 交互立即失败关闭。
+  关闭时通过 `beginShutdown` 先拒绝新执行和交互，保留持久接收入口供组合根排空入站通知，随后 `stop` 等待入箱并关闭渠道。
 - `channel-image-spool.ts`：扫描 `data/channel-outbox/pending/` 的图片发送请求，按
   Thread 绑定解析目标会话，调用 `SurfaceManager.sendChannelImage` 由各渠道机器人凭据
   发送，成功归档到 `done/`、失败归档到 `failed/` 并保留原因；Unix 使用 `0700/0600`，Windows
