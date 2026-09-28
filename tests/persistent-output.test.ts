@@ -45,6 +45,29 @@ describe("encrypted delivery journal", () => {
     } finally { store.close(); }
   });
 
+  it("releases only uncertain scheduling barriers without changing storage, quota or offline retry semantics", () => {
+    const store = new SqliteDeliveryJournal(fixture(), { ...defaultDeliveryLimits, records: 2 });
+    try {
+      store.execute({ type: "submit", value: submission("notice") });
+      store.execute({ type: "submit", value: submission("answer") });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      store.execute({ type: "state", id: "notice", from: "pending", to: "sending" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      store.execute({ type: "state", id: "notice", from: "sending", to: "uncertain" });
+      const before = store.execute({ type: "summary" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(true);
+      expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "answer" });
+      expect(store.execute({ type: "summary" })).toEqual(before);
+      expect(() => store.execute({ type: "submit", value: submission("overflow") })).toThrow("capacity");
+      expect(store.execute({ type: "acknowledge", id: "notice" })).toBe(false);
+      store.execute({ type: "resolve", id: "notice", action: "retry" });
+      expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "notice" });
+      store.execute({ type: "state", id: "notice", from: "pending", to: "blocked" });
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
+      expect(store.execute({ type: "next", excluded: [] })).toBeNull();
+    } finally { store.close(); }
+  });
+
   it("rejects capacity overflow transactionally without expiring accepted results", () => {
     const store = new SqliteDeliveryJournal(fixture(), { ...defaultDeliveryLimits, records: 1 });
     try {
@@ -659,4 +682,33 @@ it.each(["confirmed", "failed", "cancelled", "post-failed"] as const)("recovers 
       expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
     }
   } finally { reopened.close(); }
+});
+
+
+it("keeps recovery fenced until every journal page has been classified and counted", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  try {
+    for (let index = 0; index < 101; index++) {
+      const id = String(index);
+      store.execute({ type: "submit", value: submission(id) });
+      if (index < 100) store.execute({ type: "state", id, from: "pending", to: "sending" });
+    }
+  } finally { store.close(); }
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const observations: boolean[] = [];
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, deliver: async () => {}, fault: () => {},
+    mayReleaseUncertainBarrier: () => true,
+    changed: () => { observations.push(coordinator.hasOutstanding("chat")); },
+  });
+  try {
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(true);
+    await coordinator.start();
+    expect(observations).toEqual([true]);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(false);
+    expect(await journal.summary()).toMatchObject({ records: 101, uncertain: 100, pending: 1 });
+  } finally { await coordinator.close(); }
 });

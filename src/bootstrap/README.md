@@ -5,7 +5,7 @@
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
-- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
+- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；对未知连接通知注入仅解除顺序屏障的策略，保留记录和额度；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
 - `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
 - `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。

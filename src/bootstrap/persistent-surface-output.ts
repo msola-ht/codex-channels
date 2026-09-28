@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
-import { decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type DeliveryCheckpoint } from "../surfaces/index.js";
+import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
   directory: string;
@@ -30,6 +30,7 @@ export class PersistentSurfaceOutput {
     this.journal = new DeliveryJournal(options.directory, options.workerUrl ? { workerUrl: options.workerUrl } : {});
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
+      mayReleaseUncertainBarrier: (record) => mayReleaseUncertainOutputBarrier(decodePersistentOutput(record.payload).event),
       authorized: (record) => {
         const payload = decodePersistentOutput(record.payload);
         return options.authorized(payload.event, payload.owner);

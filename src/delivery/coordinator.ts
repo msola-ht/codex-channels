@@ -9,6 +9,8 @@ export interface DeliveryCoordinatorOptions {
   concurrency?: number;
   timeoutMs?: number;
   changed?(): void;
+  /** Explicit opt-in: retain an uncertain record without fencing subsequent output. */
+  mayReleaseUncertainBarrier?(record: DeliveryRecord): boolean;
 }
 
 /** Owns scheduling only. Payloads and platform semantics belong to the caller. */
@@ -40,6 +42,11 @@ export class DeliveryCoordinator {
       for (const row of page) {
         this.updateUsage(row.account, row.bytes, 1);
         this.outstanding.set(row.conversation, (this.outstanding.get(row.conversation) ?? 0) + 1);
+        if (row.state === "uncertain" && this.options.mayReleaseUncertainBarrier) {
+          const record = await this.journal.read(row.id);
+          if (!record) throw new DeliveryError("conflict");
+          await this.releaseUncertainBarrier(record, false);
+        }
         after = row.sequence;
       }
       if (page.length < 100) break;
@@ -49,10 +56,12 @@ export class DeliveryCoordinator {
     this.total.paused = Math.max(this.total.bytes / defaultDeliveryLimits.bytes, this.total.records / defaultDeliveryLimits.records) >= 0.6;
     for (const usage of this.usage.values()) usage.paused = Math.max(usage.bytes / defaultDeliveryLimits.accountBytes, usage.records / defaultDeliveryLimits.accountRecords) >= 0.6;
     this.started = true;
+    this.options.changed?.();
     this.wake();
   }
 
-  hasOutstanding(conversation: string): boolean { return this.outstanding.has(conversation); }
+  /** Ordering barriers only; retained nonblocking records still count toward storage admission. */
+  hasOutstanding(conversation: string): boolean { return !this.started || this.outstanding.has(conversation); }
 
   acceptsExecution(account: string): boolean {
     return this.started && !this.stopped && !this.total.paused && !this.usage.get(account)?.paused;
@@ -132,18 +141,26 @@ export class DeliveryCoordinator {
         this.release(record.conversation);
         this.updateUsage(record.account, -record.bytes, -1);
       } catch {
-        await this.journal.transition(record.id, "sending", "uncertain");
+        if (!(await this.journal.transition(record.id, "sending", "uncertain"))) throw new DeliveryError("conflict");
+        await this.releaseUncertainBarrier({ ...record, state: "uncertain" });
         this.options.fault("delivery-uncertain", record.account);
       }
     } catch { if (!this.stopped) this.options.fault("storage", record.account); }
     finally { clearTimeout(timer); controller.signal.removeEventListener("abort", cancel); }
   }
 
-  private release(conversation: string): void {
+  private async releaseUncertainBarrier(record: DeliveryRecord, notify = true): Promise<void> {
+    if (!this.options.mayReleaseUncertainBarrier?.(record)) return;
+    if (!(await this.journal.releaseBarrier(record.id))) throw new DeliveryError("conflict");
+    // Keep storage accounting; only the ordering/interaction barrier is released.
+    this.release(record.conversation, notify);
+  }
+
+  private release(conversation: string, notify = true): void {
     const count = (this.outstanding.get(conversation) ?? 1) - 1;
     if (count <= 0) this.outstanding.delete(conversation);
     else this.outstanding.set(conversation, count);
-    this.options.changed?.();
+    if (notify) this.options.changed?.();
   }
 
   private updateUsage(account: string, bytes: number, records: number): void {

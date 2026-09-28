@@ -19,6 +19,8 @@ export class SqliteDeliveryJournal {
   private readonly key: Buffer;
   private readonly writerLock: DatabaseSync;
   private closed = false;
+  // Process-local scheduling policy only; retained rows and quota stay unchanged.
+  private readonly releasedBarriers = new Set<string>();
 
   constructor(private readonly directory: string, private readonly limits: DeliveryLimits = { ...defaultDeliveryLimits }) {
     for (const value of Object.values(limits)) {
@@ -116,22 +118,34 @@ export class SqliteDeliveryJournal {
       case "submit": return this.submit(command.value);
       case "next": {
         const excluded = new Set(command.excluded);
+        const released = JSON.stringify([...this.releasedBarriers]);
         const next = this.database.prepare(`SELECT d.* FROM deliveries d WHERE d.state='pending' AND d.sequence>?
-          AND NOT EXISTS(SELECT 1 FROM deliveries p WHERE p.conversation=d.conversation AND p.sequence<d.sequence)
+          AND NOT EXISTS(SELECT 1 FROM deliveries p WHERE p.conversation=d.conversation AND p.sequence<d.sequence
+            AND NOT (p.state='uncertain' AND p.id IN (SELECT value FROM json_each(?))))
           ORDER BY d.sequence LIMIT 1`);
         let sequence = 0;
-        for (let raw = next.get(sequence); raw; raw = next.get(sequence)) {
+        for (let raw = next.get(sequence, released); raw; raw = next.get(sequence, released)) {
           const row = raw as unknown as Row;
           sequence = row.sequence;
           if (!excluded.has(row.conversation) && (!command.accounts || command.accounts.includes(row.account))) return this.decode(row);
         }
         return null;
       }
+      case "read": {
+        const row = this.database.prepare("SELECT * FROM deliveries WHERE id=?").get(command.id);
+        return row ? this.decode(row as unknown as Row) : null;
+      }
+      case "releaseBarrier": {
+        if (this.database.prepare("SELECT state FROM deliveries WHERE id=?").get(command.id)?.state !== "uncertain") return false;
+        this.releasedBarriers.add(command.id);
+        return true;
+      }
       case "state": return this.database.prepare("UPDATE deliveries SET state=?, attempt=attempt+? WHERE id=? AND state=?")
         .run(command.to, command.to === "sending" ? 1 : 0, command.id, command.from).changes === 1;
       case "acknowledge": return this.database.prepare("DELETE FROM deliveries WHERE id=? AND state='sending'").run(command.id).changes === 1;
       case "summary": return this.summary();
       case "resolve": {
+        this.releasedBarriers.delete(command.id);
         // Offline operator acknowledgement only; never called by the scheduler.
         if (command.action === "confirm") return this.database.prepare("DELETE FROM deliveries WHERE id=? AND state IN ('uncertain','blocked')").run(command.id).changes === 1;
         return this.database.prepare("UPDATE deliveries SET state='pending',progress='[]' WHERE id=? AND state IN ('uncertain','blocked')").run(command.id).changes === 1;

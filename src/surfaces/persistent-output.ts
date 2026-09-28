@@ -26,6 +26,11 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
   }
 }
 
+/** Connection notices are retained for inspection, but an unknown send must not disable the conversation. */
+export function mayReleaseUncertainOutputBarrier(event: OutputEvent): boolean {
+  return event.type === "connection.lost" || event.type === "connection.restored";
+}
+
 export interface PersistentOutputPayload {
   version: 1;
   event: OutputEvent;

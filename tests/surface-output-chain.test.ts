@@ -549,3 +549,68 @@ it("does not let a failed initial plan suppress a later live plan update", async
     expect(f.sent[1]).toContain("latest plan");
   } finally { await f.close(); }
 });
+
+it.each([
+  ["telegram", "connection.lost"], ["feishu", "connection.lost"],
+  ["telegram", "connection.restored"], ["feishu", "connection.restored"],
+] as const)("retains an unknown %s %s notice without fencing answers, snapshots or interaction waits", async (platform, type) => {
+  const f = await fixture(true, platform, true);
+  try {
+    f.output.publish({ target: f.target, threadId: "thread", type, message: "connection notice" });
+    await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+    f.output.publish({ ...answer, target: f.target });
+    f.output.publish({ target: f.target, type: "account.updated", authMode: "chatgpt", planType: "pro" });
+    f.release();
+    await f.manager.waitForPersistentOutput(f.target, AbortSignal.timeout(3000));
+    await vi.waitFor(() => expect(f.sent.some((text) => text.includes("Pro"))).toBe(true));
+    expect(f.sent.filter((text) => text.includes("full answer"))).toHaveLength(1);
+    expect(f.faults).toEqual(["delivery-uncertain"]);
+  } finally { await f.close(); }
+  const stored = new SqliteDeliveryJournal(f.directory);
+  let retainedBytes: number;
+  try {
+    expect(stored.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 });
+    const rows = stored.execute({ type: "list", after: 0, limit: 100 }) as DeliveryRecord[];
+    expect(rows[0]?.progress.map((checkpoint) => checkpoint.state)).toEqual(["started"]);
+    retainedBytes = rows[0]!.bytes;
+  } finally { stored.close(); }
+  const restarted = await fixture(false, platform, false, false, f.directory);
+  try {
+    restarted.output.publish({ ...answer, target: restarted.target, itemId: "after-restart" });
+    await restarted.manager.waitForPersistentOutput(restarted.target, AbortSignal.timeout(3000));
+    expect(restarted.sent).toEqual(["full answer"]);
+  } finally { await restarted.close(); }
+  const retained = new SqliteDeliveryJournal(f.directory);
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1, bytes: retainedBytes }); }
+  finally { retained.close(); }
+});
+
+it.each(["connection", "answer", "warning", "blocked"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-recovered-barrier-"));
+  directories.push(directory);
+  const store = new SqliteDeliveryJournal(directory);
+  const event: OutputEvent = kind === "answer" ? answer : kind === "warning"
+    ? { target, type: "warning", message: "warning" }
+    : { target, threadId: "thread", type: "connection.lost", message: "lost" };
+  try {
+    for (const [id, value] of [["first", event], ["next", answer]] as const) {
+      store.execute({ type: "submit", value: { id, account: surfaceAccountKey(target.surface, target.accountId),
+        conversation: conversationTargetKey(target), payload: JSON.stringify({ version: 1, owner: "actor", event: value }) } });
+    }
+    store.execute({ type: "state", id: "first", from: "pending", to: kind === "blocked" ? "blocked" : "sending" });
+    if (kind !== "blocked") store.execute({ type: "checkpoint", id: "first", value: { operation: "send", state: "started" } });
+  } finally { store.close(); }
+  const f = await fixture(false, "telegram", false, false, directory);
+  try {
+    if (kind === "connection") {
+      await f.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
+      expect(f.sent).toEqual(["full answer"]);
+    } else {
+      await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
+      expect(f.sent).toEqual([]);
+    }
+  } finally { await f.close(); }
+  const retained = new SqliteDeliveryJournal(directory);
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: kind === "connection" ? 1 : 2 }); }
+  finally { retained.close(); }
+});

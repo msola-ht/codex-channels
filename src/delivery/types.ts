@@ -58,6 +58,8 @@ export type JournalCommand =
   | { type: "next"; excluded: string[]; accounts?: string[] }
   | { type: "state"; id: string; from: DeliveryState; to: DeliveryState }
   | { type: "acknowledge"; id: string }
+  | { type: "read"; id: string }
+  | { type: "releaseBarrier"; id: string }
   | { type: "summary" }
   | { type: "checkpoint"; id: string; value: DeliveryRecord["progress"][number] }
   | { type: "list"; after: number; limit: number }

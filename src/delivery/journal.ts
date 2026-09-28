@@ -38,6 +38,8 @@ export class DeliveryJournal {
   next(excluded: string[] = [], accounts?: string[]): Promise<DeliveryRecord | null> {
     return this.call({ type: "next", excluded, ...(accounts ? { accounts } : {}) }) as Promise<DeliveryRecord | null>;
   }
+  read(id: string): Promise<DeliveryRecord | null> { return this.call({ type: "read", id }) as Promise<DeliveryRecord | null>; }
+  releaseBarrier(id: string): Promise<boolean> { return this.call({ type: "releaseBarrier", id }) as Promise<boolean>; }
   transition(id: string, from: DeliveryState, to: DeliveryState): Promise<boolean> { return this.call({ type: "state", id, from, to }) as Promise<boolean>; }
   acknowledge(id: string): Promise<boolean> { return this.call({ type: "acknowledge", id }) as Promise<boolean>; }
   checkpoint(id: string, value: DeliveryRecord["progress"][number]): Promise<boolean> { return this.call({ type: "checkpoint", id, value }) as Promise<boolean>; }
