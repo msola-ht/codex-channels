@@ -6,7 +6,7 @@ import * as clackPrompts from "@clack/prompts";
 import { ForwardedChildSignalError } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { runFeishuSetup } from "./feishu-setup.mjs";
-import { runDeepseekSetup } from "./deepseek-setup.mjs";
+import { runDeepseekSetup } from "./deepseek-account-setup.mjs";
 import { runCcgSetup } from "./ccg-setup.mjs";
 import { runTelegramSetup } from "./telegram-setup.mjs";
 import { runWeixinSetup } from "./weixin-setup.mjs";
