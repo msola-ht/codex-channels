@@ -6,7 +6,7 @@ import type { InteractionPort } from "../src/approval/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
 import { EventBus } from "../src/event-bus/index.js";
-import type { SurfaceAdapter } from "../src/surfaces/index.js";
+import { SurfaceOutputCoalescer, type SurfaceAdapter } from "../src/surfaces/index.js";
 import { WeixinInputFatalError } from "../src/surfaces/weixin/index.js";
 
 const interactions = {} as InteractionPort;
@@ -20,6 +20,43 @@ class MessageProcessingFixtureError extends Error {
 }
 
 describe("SurfaceManager", () => {
+  it.each([false, true])("coalesces live snapshots across routing and the optional output bus (bus=%s)", async (coalesceBus) => {
+    const output = new EventBus<OutputEvent>(logger, 1_000, coalesceBus ? new SurfaceOutputCoalescer().key : undefined);
+    const telegram = surface("telegram", "default", []);
+    const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
+    const received: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    telegram.output.handle = async (event) => {
+      if (event.type === "warning") await gate;
+      received.push(event.type === "turn.reasoning" ? event.summary : event.type);
+    };
+    const manager = new SurfaceManager([telegram], output, logger);
+    await manager.start();
+    try {
+      output.publish({ type: "warning", target, threadId: "thread", message: "block" }, true);
+      await flushEventBus();
+      const reasoning = (summary: string, final = false): OutputEvent => ({
+        type: "turn.reasoning", target, threadId: "thread", turnId: "turn", summary, elapsedMs: 1_000, final,
+      });
+      output.publish(reasoning("first"), true);
+      for (let index = 0; index < 1_000; index++) output.publish(reasoning(`snapshot-${index}`), true);
+      output.publish(reasoning("final", true), true);
+      output.publish(reasoning("second-first"), true);
+      output.publish(reasoning("second-old"), true);
+      output.publish(reasoning("second-final", true), true);
+      output.publish({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", text: "answer" }, true);
+      await output.close();
+      release();
+      await vi.waitFor(() => expect(received).toHaveLength(6));
+      expect(received).toEqual(["warning", "first", "final", "second-first", "second-final", "text.completed"]);
+    } finally {
+      release();
+      await output.close();
+      await manager.stop();
+    }
+  });
+
   it("correlates shared routing waits without confusing them with platform delivery", async () => {
     vi.useFakeTimers();
     const records: Array<Record<string, unknown>> = [];

@@ -30,6 +30,53 @@ afterEach(() => {
 });
 
 describe("Feishu outbox", () => {
+  it.each([false, true])("settles retained final and completion together after disconnect (unknown=%s)", async (unknown) => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const sent: string[] = [];
+    const send = async (_chat: string, text: string) => {
+      sent.push(text);
+      if (sent.length === 1) await blocked;
+      if (unknown && text.includes("FULL_RESULT")) throw new Error("unknown send outcome");
+      return String(sent.length);
+    };
+    const outbox = new FeishuOutbox(target.accountId, {
+      ...cardMethods, sendText: async (chat, text) => { await send(chat, text); },
+      sendPost: async (chat, text) => { await send(chat, text); }, sendMarkdownCard: send,
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle({ target, type: "warning", message: "barrier" });
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      outbox.handle(delta("FULL_"));
+      const body = outbox.deliver(completed({}, "FULL_RESULT", "item-1"), new AbortController().signal, async () => {});
+      const completion = outbox.deliver(turnCompleted(), new AbortController().signal, async () => {});
+      const outcomes = Promise.allSettled([body, completion]);
+      outbox.observe({ target, type: "connection.lost", threadId: "thread-1", message: "lost" });
+      release();
+      expect((await outcomes).map((value) => value.status)).toEqual(unknown ? ["rejected", "rejected"] : ["fulfilled", "fulfilled"]);
+      expect(sent.filter((value) => value.includes("FULL_RESULT"))).toHaveLength(1);
+      expect(sent.filter((value) => value.includes("本次运行"))).toHaveLength(unknown ? 0 : 1);
+    } finally { release(); await outbox.close(); }
+  });
+
+  it("clears disconnected operation and stream state before replaying its notice", async () => {
+    vi.useFakeTimers();
+    const createStreamingCard = vi.fn(cardMethods.createStreamingCard);
+    const outbox = new FeishuOutbox(target.accountId, {
+      ...cardMethods, createStreamingCard, sendText: async () => {}, sendPost: async () => {},
+    }, pino({ level: "silent" }));
+    try {
+      outbox.handle(operationUpdated("running", "command"));
+      outbox.handle(delta("pending text"));
+      outbox.observe({ type: "connection.lost", target, threadId: "thread-1", message: "disconnected" });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(createStreamingCard).not.toHaveBeenCalled();
+      outbox.handle({ type: "turn.reasoning", target, threadId: "thread-1", turnId: "turn-1", summary: "", elapsedMs: 1000 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createStreamingCard).toHaveBeenCalledOnce();
+    } finally { await outbox.close(); }
+  });
+
   it("blocks every message-port capability after the shared lifecycle ends", async () => {
     const closed = new AbortController();
     const invoked = vi.fn(async () => {});

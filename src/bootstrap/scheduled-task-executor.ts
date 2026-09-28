@@ -34,6 +34,8 @@ export interface ScheduledTaskModelPort {
 export interface ScheduledTaskExecutorOptions {
   /** Return false when the configured Surface account is no longer running. */
   isSurfaceEnabled: (target: ConversationTarget) => boolean;
+  /** Temporary output pressure does not revoke task authorization. */
+  acceptsExecution: (target: ConversationTarget) => boolean;
   /** Associate a fresh Thread before the Turn-start write begins. */
   onThreadStarted: (run: ScheduledRun, target: ConversationTarget, threadId: string) => void;
   /** Complete the Thread association once the Turn-start response is known. */
@@ -57,6 +59,7 @@ export interface ScheduledTaskExecutorOptions {
  * as uncertain so the scheduler cannot duplicate an external side effect.
  */
 export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
+  private readonly acceptsExecution: (target: ConversationTarget) => boolean;
   private readonly isSurfaceEnabled: (target: ConversationTarget) => boolean;
   private readonly onThreadStarted: ScheduledTaskExecutorOptions["onThreadStarted"];
   private readonly onTurnStarted: ScheduledTaskExecutorOptions["onTurnStarted"];
@@ -77,6 +80,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       || typeof models.ensureProvider !== "function"
       || typeof models.isModelAvailable !== "function"
       || typeof options.isSurfaceEnabled !== "function"
+      || typeof options.acceptsExecution !== "function"
       || typeof options.onThreadStarted !== "function"
       || typeof options.onTurnStarted !== "function"
       || typeof options.onRunStateChanged !== "function"
@@ -84,6 +88,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       throw new Error("计划任务无人值守校验依赖不完整");
     }
     this.isSurfaceEnabled = options.isSurfaceEnabled;
+    this.acceptsExecution = options.acceptsExecution;
     this.onThreadStarted = options.onThreadStarted;
     this.onTurnStarted = options.onTurnStarted;
     this.onRunStateChangedHook = options.onRunStateChanged;
@@ -95,11 +100,12 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   }
 
   canStart(task: ScheduledTask): boolean {
-    return this.router.backgroundBindings(toTarget(task)).length < 3;
+    return this.availableCapacity(task) > 0;
   }
 
   availableCapacity(task: ScheduledTask): number {
-    return Math.max(0, 3 - this.router.backgroundBindings(toTarget(task)).length);
+    return this.acceptsExecution(toTarget(task))
+      ? Math.max(0, 3 - this.router.backgroundBindings(toTarget(task)).length) : 0;
   }
 
   async validateRun(task: ScheduledTask, signal?: AbortSignal): Promise<ScheduledTaskRunValidation | undefined> {
@@ -112,6 +118,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     signal: AbortSignal,
   ): Promise<ScheduledTaskExecutionResult> {
     const target = toTarget(task);
+    if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
     const validation = await this.validate(task, target);
     if (validation) {
       return {
@@ -124,6 +131,8 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       return { kind: "interrupted" };
     }
 
+    // Provider/model validation can await network I/O; recheck before creating a Thread.
+    if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
     const workspace = this.workspaces.require(task.workspaceId);
     const permission = task.permission;
     // Store v1 normalizes this field, but keep the executor closed if a test or
@@ -323,7 +332,7 @@ function withThreadId(
 
 function writeFailure(error: unknown): ScheduledTaskExecutionResult {
   if (error instanceof UserFacingError) {
-    const category = error.code === "conversation.background-limit"
+    const category = error.code === "conversation.background-limit" || error.code === "delivery.overloaded"
       ? "capacity"
       : error.code.startsWith("workspace.") || error.code === "thread.takeover.workspace"
         ? "workspace"

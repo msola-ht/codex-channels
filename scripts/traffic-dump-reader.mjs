@@ -398,6 +398,7 @@ function summaryOf(interaction, body) {
   const response = interaction.response;
   const metadata = requestMetadata(body);
   const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
+  const firstTokenMs = firstTokenMsOf(response);
   return {
     id: request.id,
     label: labelOf(interaction.directory),
@@ -422,6 +423,7 @@ function summaryOf(interaction, body) {
     state: response?.state ?? "pending",
     status: response?.status,
     durationMs: callTiming(response?.callTiming)?.totalMs,
+    ...(firstTokenMs === undefined ? {} : { firstTokenMs }),
     hasError: response?.state === "failed" || response?.state === "incomplete",
   };
 }
@@ -430,6 +432,12 @@ function summaryOf(interaction, body) {
 function upstreamProviderOf(response) {
   const value = response?.upstreamProvider;
   return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** 索引里的首 Token 延迟；缺失或非法数值不进入摘要，读取端缺失即显示未知。 */
+function firstTokenMsOf(response) {
+  const value = response?.firstTokenMs;
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function readPayload(directory, payload, maxBytes) {

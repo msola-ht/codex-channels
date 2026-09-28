@@ -27,6 +27,9 @@ export {
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
+  SurfaceOutputCoalescer,
+  surfaceOutputSnapshotKey,
+  supersedesSurfaceSnapshot,
 } from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,
@@ -62,3 +65,5 @@ export type {
   SurfaceConfigurationChange,
   SurfaceOutputPort,
 } from "./types.js";
+export { isPersistentOutput, snapshotPersistentOutput, decodePersistentOutput, withPersistentOutputImage } from "./persistent-output.js";
+export type { DeliveryCheckpoint } from "./delivery-receipt.js";

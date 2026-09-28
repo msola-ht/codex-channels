@@ -1,5 +1,4 @@
 export const deepseekSetupScriptUrl: string;
-export { runDeepseekSetup } from "./deepseek-account-setup.mjs";
 export function downloadDeepseekCatalog(
   fetchImplementation: typeof fetch,
   options?: {

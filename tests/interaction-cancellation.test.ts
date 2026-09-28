@@ -71,6 +71,38 @@ it("releases preparation capacity immediately without letting late cleanup cance
 });
 
 describe.each(["telegram", "feishu", "weixin"] as const)("%s interaction cancellation through the real Outbox", (surface) => {
+  it.each(["queued", "sending"] as const)("expires the complete interaction while %s and releases Outbox ownership", async (stage) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const fixture = createFixture(surface);
+    try {
+      const blocker = stage === "queued" ? fixture.block() : undefined;
+      await settle();
+      const decision = fixture.router.request(fixture.target, { ...request, expiresInMs: 100 });
+      await settle();
+      expect(fixture.send).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(decision).resolves.toEqual({ type: "approval", approved: false });
+      expect(fixture.router.hasPendingForThread(request.threadId)).toBe(false);
+      fixture.release();
+      await blocker;
+      await settle();
+      if (stage === "queued") {
+        if (surface === "weixin") expect(fixture.texts.some((text) => text.includes("npm test"))).toBe(false);
+        else expect(fixture.send).toHaveBeenCalledOnce();
+      }
+      const replacement = fixture.router.request(fixture.target, request);
+      await settle();
+      expect(fixture.router.hasPendingForThread(request.threadId)).toBe(true);
+      fixture.router.resolved(request.requestId);
+      await expect(replacement).resolves.toMatchObject({ approved: false });
+    } finally {
+      fixture.release();
+      fixture.router.cancelAll();
+      await fixture.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("releases reservations when the preparation hook throws", async () => {
     const fixture = createFixture(surface);
     vi.spyOn(fixture.outbox, "prepareInteraction").mockImplementationOnce(() => { throw new Error("fixture preparation failure"); });

@@ -1,3 +1,4 @@
+export { ConversationEventCoordinator } from "./conversation-event-coordinator.js";
 export {
   type AccountMetric,
   type AccountPlanType,

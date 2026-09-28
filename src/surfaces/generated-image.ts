@@ -30,8 +30,8 @@ export interface GeneratedImage {
   format: GeneratedImageFormat;
 }
 
-export async function readGeneratedImage(path: string): Promise<GeneratedImage> {
-  return await readImage(path, generatedImageFormat);
+export async function readGeneratedImage(path: string, maximumBytes = maximumGeneratedImageBytes): Promise<GeneratedImage> {
+  return await readImage(path, generatedImageFormat, maximumBytes);
 }
 
 export interface InputImage {
@@ -46,6 +46,7 @@ export async function readInputImage(path: string): Promise<InputImage> {
 async function readImage<Format extends string>(
   path: string,
   detectFormat: (value: Buffer) => Format | undefined,
+  maximumBytes = maximumGeneratedImageBytes,
 ): Promise<{ bytes: Buffer; format: Format }> {
   if (
     !isAbsolute(path)
@@ -61,13 +62,21 @@ async function readImage<Format extends string>(
     if (!stat.isFile() || stat.size <= 0) {
       throw new GeneratedImageError("invalid-file");
     }
-    if (stat.size > maximumGeneratedImageBytes) {
+    if (stat.size > maximumBytes) {
       throw new GeneratedImageError("too-large");
     }
-    const bytes = await file.readFile();
-    if (bytes.length > maximumGeneratedImageBytes) {
+    // A concurrent writer must not turn a checked file into an unbounded read.
+    const buffer = Buffer.alloc(Math.min(stat.size + 1, maximumBytes + 1));
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > stat.size || length > maximumBytes) {
       throw new GeneratedImageError("too-large");
     }
+    const bytes = buffer.subarray(0, length);
     const format = detectFormat(bytes);
     if (format === undefined) {
       throw new GeneratedImageError("unsupported-image");

@@ -232,7 +232,7 @@ describe("Feishu outbox thread status", () => {
     expect(updateCard).not.toHaveBeenCalled();
   });
 
-  it("rebuilds the Thread status card after an update failure", async () => {
+  it("does not rebuild an unknown status update but allows the next live state", async () => {
     const created: string[] = [];
     let updateAttempts = 0;
     const outbox = new FeishuOutbox(
@@ -260,7 +260,6 @@ describe("Feishu outbox thread status", () => {
 
     expect(created).toEqual([
       "运行中",
-      "处理结束 · 结果见下方消息",
       "运行中",
     ]);
     expect(updateAttempts).toBe(1);

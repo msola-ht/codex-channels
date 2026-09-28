@@ -8,6 +8,7 @@ import {
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
+  SurfaceOutputCoalescer,
 } from "../src/surfaces/index.js";
 import { isWeixinWindowEvent } from "../src/surfaces/delivery-policy.js";
 
@@ -16,6 +17,38 @@ const target = {
   accountId: "account",
   conversationId: "chat",
 } as const;
+
+describe("live output coalescing boundaries", () => {
+  const snapshot = (conversationId = "chat"): Extract<OutputEvent, { type: "turn.reasoning" }> => ({
+    type: "turn.reasoning", target: { ...target, conversationId }, threadId: "thread", turnId: "turn", summary: "thinking", elapsedMs: 1,
+  });
+
+  it("preserves first snapshots and separates finals, ordering barriers and Conversation identities", () => {
+    const policy = new SurfaceOutputCoalescer();
+    expect(policy.key(snapshot())).toBeUndefined();
+    const firstKey = policy.key(snapshot());
+    expect(firstKey).toBeDefined();
+    expect(policy.key(snapshot("other"))).toBeUndefined();
+    expect(policy.key(snapshot())).toBe(firstKey);
+    expect(policy.key({ ...snapshot(), target: { ...target, accountId: "other" } })).toBeUndefined();
+    expect(policy.key({ ...snapshot(), type: "turn.reasoning", final: true })).toBe(firstKey);
+    expect(policy.key(snapshot())).toBeUndefined();
+    expect(policy.key(snapshot())).not.toBe(firstKey);
+    policy.key({ type: "warning", target, threadId: "thread", message: "barrier" });
+    expect(policy.key(snapshot())).toBeUndefined();
+    policy.clear();
+    expect(policy.key(snapshot())).toBeUndefined();
+  });
+
+  it("bounds segment bookkeeping without reusing an evicted segment key", () => {
+    const policy = new SurfaceOutputCoalescer(1);
+    policy.key(snapshot());
+    const oldKey = policy.key(snapshot());
+    policy.key(snapshot("other"));
+    expect(policy.key(snapshot())).toBeUndefined();
+    expect(policy.key(snapshot())).not.toBe(oldKey);
+  });
+});
 
 /**
  * 每个 OutputEvent 变体都必须被明确归类：Record 键由联合类型约束，

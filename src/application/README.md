@@ -11,12 +11,16 @@
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
+- `scheduled-task-command.ts`：定义计划任务命令的解析结果与创建请求类型，解析固定句式和模型标记，不依赖具体用例服务。
+- `scheduled-task-service.ts`：执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 只保留兼容门面委托。
 - `conversation-extension-query-service.ts`：组合模型目录、Skill、MCP、Plugin 与 Permission Profile 查询和选择器解析；不拥有 Turn 或 Session 生命周期。
+- `conversation-session-query-service.ts`：拥有会话列表投影、排序、分页轮数查询和展示缓存刷新/失效状态；不修改绑定，不建立独立会话索引。
+- `conversation-event-coordinator.ts`：在稳定输入事件归约前失效选择快照与展示缓存、处理待生效偏好和 Reserve 标记，归约后执行 Reserve 收尾；子代理跟踪和后台释放调度通过注入端口保持原顺序，不等待 RPC 或渠道输出。
 - `conversation-service.ts`：按 Turn、Session/Workspace、Queue/Revert、扩展与账户指标五类稳定能力接口公开用例，
-  具体 `ConversationService` 负责新建、恢复、切换、归档、固定和分页筛选 Thread，提交、steer 或将纯文本
+  具体 `ConversationService` 负责新建、恢复、切换、归档和固定 Thread，列表查询委托给会话查询组件；提交、steer 或将纯文本
   写入 App Server Queue，公开 Conversation 状态与最近 Turn 产物；Queue 与 Revert 的稳定方法委托给各自内部用例服务，
   `submitAsyncAnswer` 在同一 Conversation 锁内、发送前校验原 Thread 绑定和问题有效性，再复用普通 start/steer 路径；
   会话列表优先读取本机指标/派生缓存中的 Turn 轮数，所有列表命令都不等待 Thread History 扫描；历史读取失败不阻塞列表且不伪造数量；

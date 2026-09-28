@@ -68,6 +68,7 @@
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
   App Server 枚举多 Provider/Workspace，按主会话真实轮数和整组可查询成员的空闲条件预览；所属 Provider 读取状态，后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档并核验结果。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
+- `delivery-command.mjs`：离线查看独立投递箱的计数与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
 - `cli-menu.mjs` / `cli-menu.d.mts`：顶层导航、运行与连接子菜单和服务操作菜单，以及交互操作失败呈现；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
@@ -279,7 +280,7 @@
 - `provider-model-catalog.mjs` / `provider-model-catalog.d.mts`：以 DS 完整目录生成 OCG/CCG 目录，保留原模型并复制 Flash 增加 V4.1；模型 ID 与显示名来自根目录 `provider-model-catalog.json`。
 - `managed-provider-files.mjs` / `managed-provider-files.d.mts`：OCG 与 CCG 共用的私有文件读取、写入、快照、逐文件并发复核和失败回滚。
 - `managed-provider-account-runtime.mjs` / `managed-provider-account-runtime.d.mts`：DS、OCG、CCG 共用账户实例检查与释放，删除前检查监管状态和 Remote TUI 租约。
-- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；导出账户菜单和目录构建、能力修正接口。
+- `deepseek-setup.mjs` / `deepseek-setup.d.mts`：下载并提取 DS 官方目录，收紧无效 verbosity/摘要声明，保留其他能力与窗口设置；仅提供目录构建、能力修正接口，不导入账户菜单或管理事务。
 - `deepseek-account-management.mjs` / `deepseek-account-management.d.mts`：DS 账户配置、默认账户与删除事务；旧单账户只提供确认后移除入口，保留备份、现有新账户及历史统计，不保留迁移入口。
 - `deepseek-account-setup.mjs` / `deepseek-account-setup.d.mts`：DS Setup 菜单与 `codexc deepseek account` 入口，复用管理事务和既有模型设置菜单。
 - `deepseek-catalog-baseline.json`：保存人工对照 DeepSeek 官方 Codex 安装脚本审查后的模型完整指纹、
@@ -447,10 +448,11 @@
   并检查登录状态；随后完成依赖、Gateway/WebUI 构建和 npm 全局命令注册。不覆盖现有源码目录、
   配置或数据，也不写入 Shell PATH。
 - `clean-dist.mjs`：构建前清理 `dist/`。
+- `sandbox-dependencies.mjs` / `sandbox-dependencies.d.mts`：`install.sh` 与本地源码全局安装共用的沙盒系统依赖检查；macOS 检查固定系统 Seatbelt 入口，Linux 缺少 `bwrap` 时通过 apt-get/dnf 补装，并检查锁定 Codex 所需的 `--perms`。不改变 Codex 权限或系统安全策略；普通用户仅使用非交互 sudo，无授权时给出人工处理步骤。
 - `install-global-source.mjs`：显式准备干净源码、自动执行 webui 子项目依赖安装与前端构建
   （`webui/dist`），再生成临时 npm tarball 并通过禁用隐式生命周期脚本的 npm 全局安装；安装结果
   不链接或依赖源码目录，并避免 npm 12 脚本策略跳过构建；源码更新可用内部 `--prepared` 复用已
-  验证的 Gateway/WebUI 构建结果，避免重复构建。
+  验证的 Gateway/WebUI 构建结果，避免重复构建。注册全局 Gateway 前按协议元数据补装缺失的默认 Codex CLI；已有版本不静默替换，显式二进制无效时失败关闭，不依赖渠道配置。
 - `webui-dev.mjs`：仓库根目录 `npm run webui:dev` 的一键开发入口，并行启动
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。

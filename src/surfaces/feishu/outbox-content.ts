@@ -1,9 +1,11 @@
+import { DeliveryReceipt } from "../delivery-receipt.js";
 import { contentTruncatedText } from "../output-copy.js";
 import { encodeFeishuPostContent } from "./message-content.js";
 
 const maximumFeishuMessageContentBytes = 20_000;
 export const maximumFeishuMessageChunks = 5;
 const feishuChunkHeaderReserveBytes = 64;
+export const feishuPreviewNotice = "\n\n[内容预览，完整回复见附件]";
 export const feishuTruncationNotice = `\n\n[${contentTruncatedText}]`;
 export const maximumFeishuStreamingElementCharacters = 5_000;
 export const maximumFeishuStreamingCards = 5;
@@ -26,6 +28,7 @@ export function appendBoundedStreamText(
   let remaining =
     maximumFeishuBufferedStreamCharacters - [...current].length;
   if (remaining <= 0 || addition.length === 0) {
+    if (addition.length > 0) DeliveryReceipt.current()?.markContentIncomplete();
     return {
       text: current,
       truncated: addition.length > 0,
@@ -41,6 +44,7 @@ export function appendBoundedStreamText(
     suffix += character;
     remaining -= 1;
   }
+  if (truncated) DeliveryReceipt.current()?.markContentIncomplete();
   return {
     text: `${current}${suffix}`,
     truncated,
@@ -79,6 +83,7 @@ export function splitFeishuStreamingContent(
 export function splitFeishuMarkdownCards(
   markdown: string,
   maximumChunks = maximumFeishuMessageChunks,
+  truncationNotice = feishuTruncationNotice,
 ): string[] {
   const chunks: string[] = [];
   let remaining = markdown;
@@ -92,7 +97,7 @@ export function splitFeishuMarkdownCards(
   }
   if ([...remaining].length > maximumFeishuStreamingElementCharacters) {
     const [head] = splitFeishuStreamingContent(remaining);
-    chunks.push(appendFeishuStreamingTruncation(head));
+    chunks.push(appendFeishuStreamingTruncation(head, maximumFeishuStreamingElementCharacters, truncationNotice));
   } else {
     chunks.push(remaining);
   }
@@ -109,11 +114,13 @@ export function splitFeishuText(text: string): string[] {
 export function splitFeishuPost(
   markdown: string,
   maximumChunks = maximumFeishuMessageChunks,
+  truncationNotice = feishuTruncationNotice,
 ): string[] {
   return splitFeishuContent(
     markdown,
     (value) => Buffer.byteLength(encodeFeishuPostContent(value), "utf8"),
     maximumChunks,
+    truncationNotice,
   );
 }
 
@@ -131,9 +138,11 @@ function openFenceLanguage(text: string): string | null {
 export function appendFeishuStreamingTruncation(
   text: string,
   maximumCharacters = maximumFeishuStreamingElementCharacters,
+  truncationNotice = feishuTruncationNotice,
 ): string {
+  DeliveryReceipt.current()?.markContentIncomplete();
   const characters = [...text];
-  const notice = [...feishuTruncationNotice];
+  const notice = [...truncationNotice];
   const closingFence = text.endsWith("\n```") ? [..."\n```"] : [];
   const contentLimit =
     maximumCharacters
@@ -153,6 +162,7 @@ function splitFeishuContent(
   text: string,
   measureBytes: (value: string) => number,
   maximumChunks = maximumFeishuMessageChunks,
+  truncationNotice = feishuTruncationNotice,
 ): string[] {
   if (measureBytes(text) <= maximumFeishuMessageContentBytes) {
     return [text];
@@ -179,10 +189,11 @@ function splitFeishuContent(
     offset = end;
   }
   if (offset < characters.length) {
+    DeliveryReceipt.current()?.markContentIncomplete();
     const lastIndex = payloads.length - 1;
     payloads[lastIndex] = appendWithinByteLimit(
       payloads[lastIndex]!,
-      feishuTruncationNotice,
+      truncationNotice,
       payloadLimit,
       measureBytes,
     );

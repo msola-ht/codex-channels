@@ -6,6 +6,8 @@ import startupNetworkPolicy from "../../startup-network-policy.json" with { type
 import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
+import { withOutputExecutionAdmission } from "./output-execution-admission.js";
+import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -66,14 +68,17 @@ import {
   type RpcNotification,
 } from "../codex-client/index.js";
 import {
+  classifyConfigReload,
   configChange,
   includesConfigChange,
   type ConfigChange,
+  type ConfigReloadResult,
   type GatewayConfig,
 } from "../config/index.js";
 import {
   CollaborationModeSelectionService,
   ConversationCommandService,
+  ConversationEventCoordinator,
   ConversationService,
   ModelSelectionService,
   ProviderAccountService,
@@ -97,7 +102,7 @@ import {
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
-import { WorkspaceRegistry } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -110,6 +115,7 @@ import {
   formatProviderIdleReleaseNotice,
   setConfiguredCustomPrimaryProviderId,
   type SurfaceAdapter,
+  SurfaceOutputCoalescer,
 } from "../surfaces/index.js";
 import { ChannelImageSpool } from "./channel-image-spool.js";
 import { AsyncQuestionCoordinator } from "./async-question-coordinator.js";
@@ -139,19 +145,18 @@ import {
 } from "./managed-provider-capabilities.js";
 import {
   BindingRestoreCoordinator,
-  type PendingBindingRestore,
 } from "./binding-restore-coordinator.js";
 
 export abstract class GatewayComponentGraph {
   private readonly transport: CodexTransport;
-  protected readonly codex: ProviderRoutingClient;
+  private readonly codex: ProviderRoutingClient;
   private readonly primaryProvider: string;
   private readonly customPrimaryProviderId: string | undefined;
   private readonly inbound: EventBus<RpcNotification>;
   private readonly output: EventBus<OutputEvent>;
-  protected readonly surfaceModules: SurfaceRuntimeModule[];
+  private readonly surfaceModules: SurfaceRuntimeModule[];
   private readonly surfaces: SurfaceAdapter[];
-  protected readonly surfaceManager: SurfaceManager;
+  private readonly surfaceManager: SurfaceManager;
   private readonly channelImageSpool: ChannelImageSpool;
   private readonly interactions: InteractionRouter;
   private readonly asyncQuestions: AsyncQuestionCoordinator;
@@ -167,34 +172,29 @@ export abstract class GatewayComponentGraph {
   private readonly providerAccounts?: ProviderAccountService;
   private readonly bindings: SqliteBindingStore;
   private readonly sessionDisplayCache?: SqliteSessionDisplayCache;
-  protected readonly workspaces: WorkspaceRegistry;
+  private readonly workspaces: WorkspaceRegistry;
   private readonly workspacePermissions: TomlWorkspacePermissionWriter | undefined;
   private readonly subagentCompletion: SubagentCompletionTracker;
   private readonly scheduledTasks: ScheduledTaskComposition | undefined;
   private bindingRestore: BindingRestoreCoordinator | undefined;
-  protected removeRpcNotification: (() => void) | undefined;
-  protected removeRpcDisconnect: (() => void) | undefined;
+  private removeRpcNotification: (() => void) | undefined;
+  private removeRpcDisconnect: (() => void) | undefined;
   private shutdownTask: Promise<void> | undefined;
   private accountWarmupTask: Promise<void> | undefined;
   private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
-  private readonly disconnectedProviders = new Set<string>();
-  private readonly disconnectedBindingsByProvider = new Map<string, Set<string>>();
-  private readonly pendingBindingRestores = new Map<string, PendingBindingRestore>();
-  private readonly restoringThreadIds = new Set<string>();
-  private bindingRestoreAttempt = 0;
   private readonly queueLifecycleTasks = new Set<Promise<void>>();
   private codexUpstreamUserAgent: string | undefined;
   private openAiConnectivity: OpenAiConnectivityStatus | "recovering" = "not-applicable";
-  protected startupNetworkRecovery: StartupNetworkRecovery | undefined;
-  protected openAiConnectivityAbort: AbortController | undefined;
-  protected startupAbort: AbortController | undefined;
-  protected stopping = false;
+  private startupNetworkRecovery: StartupNetworkRecovery | undefined;
+  private openAiConnectivityAbort: AbortController | undefined;
+  private startupAbort: AbortController | undefined;
+  private stopping = false;
 
   protected abstract requestStop(): Promise<void>;
 
   constructor(
-    protected config: GatewayConfig,
-    protected readonly logger: Logger,
+    private config: GatewayConfig,
+    private readonly logger: Logger,
     configPath?: string,
   ) {
     verifyCodexVersion(config);
@@ -312,8 +312,24 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
-    this.inbound = new EventBus<RpcNotification>(logger, 2_000);
-    this.output = new EventBus<OutputEvent>(logger, 1_000);
+    this.inbound = new EventBus<RpcNotification>(logger, 2_000, undefined, {
+      entries: 4_096,
+      bytes: 32 * 1024 * 1024,
+      size: (event) => Buffer.byteLength(JSON.stringify(event)),
+      overflow: () => {
+        logger.error("协议通知消费预算耗尽，停止 Gateway 消费；尚未持久接收的通知存在缺口");
+        void this.requestStop().catch(() => logger.error("协议通知超载后的 Gateway 清理失败"));
+      },
+    });
+    this.output = new EventBus<OutputEvent>(logger, 1_000, new SurfaceOutputCoalescer().key, {
+      entries: 2_048,
+      bytes: 32 * 1024 * 1024,
+      size: (event) => Buffer.byteLength(JSON.stringify(event)),
+      overflow: () => {
+        logger.error("共享输出预算耗尽，停止 Gateway 消费；已持久接收记录保留，未接收区间存在缺口");
+        void this.requestStop().catch(() => logger.error("共享输出超载后的 Gateway 清理失败"));
+      },
+    });
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
@@ -551,8 +567,14 @@ export abstract class GatewayComponentGraph {
         });
       },
     });
+    const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
+      const target = this.bindings.getByThread(threadId)?.target;
+      if (!target || !this.surfaceManager.acceptsExecution(target)) throw new UserFacingError(
+        "delivery.overloaded", "渠道投递箱接近容量上限或不可用，已暂停新执行；请先处理未确认投递",
+      );
+    });
     const service = new ConversationService(
-      this.codex,
+      execution,
       this.router,
       this.core,
       models,
@@ -606,7 +628,7 @@ export abstract class GatewayComponentGraph {
       {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
-      this.codex,
+      execution,
       this.codex,
       (parentThreadId) =>
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
@@ -780,6 +802,8 @@ export abstract class GatewayComponentGraph {
           stateDatabasePath: config.stateDatabasePath,
           router: this.router,
           codex: this.codex,
+          turns: execution,
+          acceptsExecution: (target) => this.surfaceManager.acceptsExecution(target),
           bindings: this.bindings,
           workspaces: this.workspaces,
           core: this.core,
@@ -858,6 +882,18 @@ export abstract class GatewayComponentGraph {
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
       {
+        persistence: {
+          directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),
+          workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
+          owner: (event) => this.outputOwner(event),
+          authorized: (event, owner) => this.outputAuthorized(event, owner),
+          fault: (code, account) => {
+            logger.error({ code, account }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
+            if (code === "delivery-uncertain" || code === "authorization-changed") return;
+            if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
+            else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
+          },
+        },
         setInteractionAvailable: (
           surface,
           accountId,
@@ -920,7 +956,8 @@ export abstract class GatewayComponentGraph {
       logger,
     });
     for (const surface of this.surfaces) {
-      this.interactions.register(surface.surface, surface.accountId, surface.interactions);
+      this.interactions.register(surface.surface, surface.accountId, new PersistentInteractionPort(surface.interactions,
+        (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
@@ -961,11 +998,23 @@ export abstract class GatewayComponentGraph {
         },
       });
     }
+    const conversationEvents = new ConversationEventCoordinator(service, {
+      trackSubagent: (event) => this.subagentCompletion.handleInput(event),
+      reduce: (event) => this.core.handle(event),
+      isBackgroundThread: (threadId) => this.router.isBackgroundThread(threadId),
+      retryBackgroundRelease: (threadId, trigger) => {
+        void this.trackQueueLifecycleTask(() => service.retryPendingBackgroundRelease(threadId))
+          .catch((error) => {
+            this.logger.warn({ err: error, threadId }, trigger === "thread-idle"
+              ? "后台 Thread 空闲状态后的订阅清理失败，已保留绑定供后续重试"
+              : "子代理终态后的后台 Thread 订阅清理失败，已保留绑定供后续重试");
+          });
+      },
+    });
     this.inbound.subscribe("conversation-core", (notification) => {
       const queueChanged = toThreadQueueChangedEvent(notification);
       if (queueChanged) {
-        service.invalidateQueueSnapshot(queueChanged.threadId);
-        service.invalidateRevertSnapshot(queueChanged.threadId);
+        conversationEvents.queueChanged(queueChanged.threadId);
       }
       const coreEvent = toConversationInputEvent(notification);
       if (coreEvent) {
@@ -978,89 +1027,7 @@ export abstract class GatewayComponentGraph {
         if (coreEvent.type === "thread.closed" || coreEvent.type === "thread.archived" || coreEvent.type === "thread.deleted") {
           this.startupNetworkRecovery?.forgetThread(coreEvent.threadId);
         }
-        if (
-          coreEvent.type === "turn.started"
-          || coreEvent.type === "turn.completed"
-          || coreEvent.type === "thread.reverted"
-          || coreEvent.type === "thread.closed"
-          || coreEvent.type === "thread.archived"
-          || coreEvent.type === "thread.deleted"
-        ) {
-          service.invalidateRevertSnapshot(coreEvent.threadId);
-        }
-        if (
-          coreEvent.type === "turn.started"
-          || coreEvent.type === "turn.completed"
-          || coreEvent.type === "thread.reverted"
-        ) {
-          // The display cache is derived data. Invalidate before any list command
-          // can observe a stale count, including Turns started by the native TUI.
-          service.invalidateSessionDisplayCache(coreEvent.threadId);
-        }
-        if (coreEvent.type === "turn.started") {
-          // A TUI or another App Server client may have consumed a native Queue
-          // entry. Pending model/effort/Fast/Plan choices are Conversation-local
-          // and must not leak into the next direct Turn after that dispatch.
-          service.clearPendingSelectionsForThread(coreEvent.threadId);
-        }
-        if (
-          coreEvent.type === "turn.error"
-          && !coreEvent.willRetry
-          && coreEvent.errorCode === "usageLimitExceeded"
-        ) {
-          service.markLunaReserveUsageLimit(coreEvent.threadId, coreEvent.turnId);
-        }
-        if (
-          coreEvent.type === "turn.completed"
-          && coreEvent.errorCode === "usageLimitExceeded"
-        ) {
-          service.markLunaReserveUsageLimit(coreEvent.threadId, coreEvent.turnId);
-        }
-        if (
-          coreEvent.type === "thread.closed"
-          || coreEvent.type === "thread.archived"
-          || coreEvent.type === "thread.deleted"
-        ) {
-          service.clearLunaReserveThread(coreEvent.threadId);
-        }
-        if (
-          coreEvent.type === "account.updated"
-          && (coreEvent.modelProvider ?? "openai") === "openai"
-        ) {
-          service.clearLunaReserveAccountState();
-        }
-        if (coreEvent.type === "thread.status.changed" && coreEvent.status !== "active") {
-          // A completion can race the native idle contributor. Retry only a
-          // marked background release, without making the App Server reader
-          // await any RPC or platform output.
-          void this.trackQueueLifecycleTask(() =>
-            service.retryPendingBackgroundRelease(coreEvent.threadId)
-          ).catch((error) => {
-            this.logger.warn(
-              { err: error, threadId: coreEvent.threadId },
-              "后台 Thread 空闲状态后的订阅清理失败，已保留绑定供后续重试",
-            );
-          });
-        }
-        this.subagentCompletion.handleInput(coreEvent);
-        if (
-          coreEvent.type === "item.subagentActivity"
-          && (coreEvent.kind === "completed" || coreEvent.kind === "interrupted")
-          && this.router.isBackgroundThread(coreEvent.threadId)
-        ) {
-          void this.trackQueueLifecycleTask(() =>
-            service.retryPendingBackgroundRelease(coreEvent.threadId)
-          ).catch((error) => {
-            this.logger.warn(
-              { err: error, threadId: coreEvent.threadId },
-              "子代理终态后的后台 Thread 订阅清理失败，已保留绑定供后续重试",
-            );
-          });
-        }
-        this.core.handle(coreEvent);
-        if (coreEvent.type === "turn.completed") {
-          service.recoverLunaReserveAfterTurn(coreEvent.threadId, coreEvent.turnId);
-        }
+        conversationEvents.handle(coreEvent);
         if (coreEvent.type === "turn.error" && !coreEvent.willRetry) {
           const modelSettings = this.router.modelSettingsForThread(coreEvent.threadId);
           recordTurnErrorMetric(
@@ -1121,7 +1088,7 @@ export abstract class GatewayComponentGraph {
     this.bindingRestoreCoordinator();
   }
 
-  protected bindingRestoreCoordinator(): BindingRestoreCoordinator {
+  private bindingRestoreCoordinator(): BindingRestoreCoordinator {
     this.bindingRestore ??= new BindingRestoreCoordinator({
       codex: this.codex,
       router: this.router,
@@ -1132,14 +1099,65 @@ export abstract class GatewayComponentGraph {
         this.core.markTurnStarted(target, threadId, turnId);
       },
       logger: this.logger,
-    }, {
-      disconnectedProviders: this.disconnectedProviders,
-      disconnectedBindingsByProvider: this.disconnectedBindingsByProvider,
-      pendingBindingRestores: this.pendingBindingRestores,
-      restoringThreadIds: this.restoringThreadIds,
-      restoreAttempt: this.bindingRestoreAttempt,
     });
     return this.bindingRestore;
+  }
+
+  reloadConfig(
+    next: GatewayConfig,
+    pendingAddedWorkspaces: readonly GatewayConfig["workspaces"][number][] = [],
+    weixinCredentialsChanged = false,
+  ): ConfigReloadResult {
+    const result = classifyConfigReload(this.config, next, weixinCredentialsChanged);
+    if (result.action === "reinstall") {
+      this.surfaceManager.configurationChanged({
+        action: "reinstall-required",
+        changes: result.changes,
+        addedWorkspaces: [],
+      });
+      return result;
+    }
+    if (result.action === "restart") {
+      const restoreRecipients: Array<() => void> = [];
+      try {
+        for (const module of this.surfaceModules) {
+          restoreRecipients.push(module.prepareRestartNotification(next));
+        }
+        this.surfaceManager.configurationChanged({
+          action: "restarting",
+          changes: result.changes,
+          addedWorkspaces: [],
+        });
+      } finally {
+        for (const restore of restoreRecipients.reverse()) restore();
+      }
+      return result;
+    }
+
+    const addedWorkspaces = immediateAddedWorkspaceNotifications(
+      this.config.workspaces,
+      next.workspaces,
+      result.changes,
+      pendingAddedWorkspaces,
+    );
+    if (includesConfigChange(result.changes, "workspace.registry")) {
+      this.workspaces.replace(next.workspaces, next.defaultWorkspaceId);
+    }
+    for (const module of this.surfaceModules) {
+      module.applyHotReload(next, result.changes);
+    }
+    this.config = next;
+    const nonWorkspaceChanges = result.changes.filter(
+      (change) => change.code !== "workspace.registry",
+    );
+    if (nonWorkspaceChanges.length > 0 || addedWorkspaces.length > 0) {
+      this.surfaceManager.configurationChanged({
+        action: "reloaded",
+        changes: result.changes,
+        addedWorkspaces,
+      });
+    }
+    return result;
   }
 
   hasActiveTurns(): boolean {
@@ -1173,6 +1191,8 @@ export abstract class GatewayComponentGraph {
     try {
       this.requireRunning();
       this.startupAbort = new AbortController();
+      await this.surfaceManager.preparePersistence();
+      this.requireRunning();
       await this.providerMetrics.start();
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
@@ -1265,7 +1285,95 @@ export abstract class GatewayComponentGraph {
     }
   }
 
-  protected shutdownComponents(): Promise<void> {
+  protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
+    this.stopping = true;
+    this.startupAbort?.abort();
+    void this.startupNetworkRecovery?.stop();
+    this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
+    const reconnecting = this.stopReconnect();
+    void this.bindingRestoreCoordinator().close();
+    const failures: unknown[] = [];
+    if (startup && !startupSettled) {
+      this.removeRpcNotification?.();
+      this.removeRpcNotification = undefined;
+      this.removeRpcDisconnect?.();
+      this.removeRpcDisconnect = undefined;
+      try {
+        await this.codex.close();
+      } catch (error) {
+        failures.push(error);
+        this.logger.error(
+          { err: error, component: "Codex Client" },
+          "Gateway 启动中断失败",
+        );
+      }
+    }
+    await startup?.catch(() => undefined);
+    try {
+      await this.shutdownComponents();
+    } catch (error) {
+      failures.push(error);
+    }
+    if (!(await waitAtMost(reconnecting, 5_000))) {
+      const error = new Error("等待 Codex App Server 重连任务停止超时");
+      failures.push(error);
+      this.logger.error({ err: error }, "Gateway 后台任务关闭失败");
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Gateway 资源未完全关闭");
+    }
+  }
+
+  private outputOwner(event: OutputEvent): string {
+    return JSON.stringify(this.outputIdentity(event));
+  }
+
+  private outputIdentity(event: OutputEvent) {
+    const target = event.target;
+    const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
+    const binding = threadId ? this.bindings.getByThread(threadId) : this.bindings.get(target);
+    return {
+      actors: this.bindings.actors(target).sort(),
+      workspace: this.bindings.getWorkspace(target) ?? null,
+      binding: binding ? [binding.target.surface, binding.target.accountId, binding.target.conversationId, binding.workspaceId, binding.threadId] : null,
+      provider: binding ? this.codex.knownProvider(binding.threadId) ?? null : null,
+      background: typeof threadId === "string" && this.router.isBackgroundThread(threadId),
+    };
+  }
+
+  private outputAuthorized(event: OutputEvent, owner: string): boolean {
+    const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
+    if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
+    // Stored selections survive unbinding and configuration changes; they do
+    // not establish current Workspace authorization.
+    if ([original.workspace, original.binding?.[3]].some((id) => id != null && !this.workspaces.get(id))) return false;
+    const current = this.outputIdentity(event);
+    // Normal background completion releases its live binding before slow
+    // platform output finishes. The durable recipient remains the original
+    // Actor/Workspace; a new binding or a removed Provider still fails closed.
+    if (original.background && current.binding === null && original.provider
+      && this.codex.isProviderConfigured(original.provider)) {
+      current.binding = original.binding;
+      current.provider = original.provider;
+      current.background = true;
+    }
+    if (JSON.stringify(current) !== owner) return false;
+    const target = event.target;
+    const actors = this.bindings.actors(target);
+    const policy = target.surface === "telegram" && this.config.telegramEnabled
+      ? new TelegramAccessPolicy(this.config.telegramAllowedUserIds, "default")
+      : target.surface === "feishu" && this.config.feishu
+      ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
+      : target.surface === "weixin" && this.config.weixin
+      ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : undefined;
+    if (!policy) return false;
+    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
+    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
+      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
+  }
+
+  private shutdownComponents(): Promise<void> {
     this.shutdownTask ??= this.shutdownComponentsOnce();
     return this.shutdownTask;
   }
@@ -1361,7 +1469,7 @@ export abstract class GatewayComponentGraph {
     });
   }
 
-  protected stopReconnect(): Promise<void> {
+  private stopReconnect(): Promise<void> {
     return this.reconnectCoordinator?.stop() ?? Promise.resolve();
   }
 
@@ -1615,7 +1723,7 @@ function findAddedWorkspaces(
   return next.filter((workspace) => !currentIds.has(workspace.id));
 }
 
-export function immediateAddedWorkspaceNotifications(
+function immediateAddedWorkspaceNotifications(
   current: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   next: ReadonlyArray<GatewayConfig["workspaces"][number]>,
   changes: readonly ConfigChange[],

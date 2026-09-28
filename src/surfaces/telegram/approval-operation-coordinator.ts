@@ -36,11 +36,13 @@ export class TelegramApprovalOperationCoordinator {
     return operationKey;
   }
 
-  routeOperation(operationKey: string, held: HeldApprovalOperation): "show" | "hold" | "suppress" {
+  isSuppressed(operationKey: string): boolean { return this.suppressedOperations.has(operationKey); }
+
+  routeOperation(operationKey: string, held: HeldApprovalOperation, allowHold = true): "show" | "hold" | "suppress" {
     if (this.suppressedOperations.has(operationKey)) {
       return "suppress";
     }
-    if (this.requestIdsByOperation.has(operationKey)) {
+    if (allowHold && this.requestIdsByOperation.has(operationKey)) {
       this.heldByOperation.set(operationKey, held);
       return "hold";
     }

@@ -20,6 +20,14 @@ Linux、macOS 与 Windows 可以把 Codex Connect 官方 `main` 分支作为完�
 curl -fsSL https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.sh | sh
 ```
 
+`install.sh` 与 `npm run install:global` 共用沙盒运行依赖检查，无需先初始化渠道：
+
+- macOS 检查系统自带的 `/usr/bin/sandbox-exec`，无需安装 bubblewrap；缺失时明确失败并提示修复系统组件。
+- Linux 优先复用系统 `bwrap`；缺失时通过 apt-get（Debian/Ubuntu）或 dnf（Fedora/RHEL）安装 `bubblewrap`。root 直接安装，普通用户使用 `sudo -n`；没有管理员授权、包管理器不支持、安装失败或安装后 PATH 仍不可见时，停止安装并给出手工命令。安装器不更新包索引、不自动提权询问密码。
+- 检查 `bwrap --help` 的 `--perms` 能力，与锁定 Codex 的系统 launcher 要求一致。此步骤确认运行依赖，不保证容器、内核、AppArmor 等系统策略允许实际沙盒启动，也不会关闭沙盒或修改这些策略。
+
+锁定 Codex 在 Linux 还支持随 CLI 分发的内置 bubblewrap 回退；本项目源码安装会主动准备系统版本，`codexc doctor` 继续只读报告。Windows 不执行 Linux 依赖安装，也不自动创建沙盒用户或改变 Windows 沙盒配置。
+
 Windows PowerShell 7 使用仓库根目录的安装器：
 
 ```powershell
@@ -105,10 +113,12 @@ codexc update
 已有受管源码目录时直接使用 `codexc update`，不要重复运行安装器。
 
 同一版本号下的新提交仍会更新。受管源码没有新提交时，检查并按需同步配套 CLI、执行已安装版本的待完成数据库升级；两者都无需更新时不停止服务。npm 安装模式执行相同流程，不更新 Gateway npm 包。
-从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库，随后可执行 `codexc update` 同步配套 CLI。
-该安装模式会显示检查开始和完成结果；无需更新时明确提示配套 CLI 与数据库均无需更新。
+从开发仓库执行 `npm run install:global` 不会将其登记为受管 `main` 仓库。该入口（包括内部 `--prepared`）在注册 Gateway 全局命令前检测 Codex CLI：默认 `codex` 缺失时通过 npm 补装 `src/codex-protocol/version.json` 锁定的正式版本，并检查安装后的版本和 PATH，无需初始化或渠道配置。已有 CLI 不静默升级或降级；版本不匹配时提示完成渠道配置后运行 `codexc update` 确认同步。显式 `CODEX_BINARY` 无效、CLI 无法执行、安装失败或安装后仍不可见时明确失败，不改用其他二进制。安装不自动登录或启动服务。
 
-候选源码完成构建和只读预检后，如其要求的 Codex CLI 版本与本机不一致，交互终端会显示当前版本和
+新设备按 `npm run install:global` → `codexc init` → `codexc setup` → `codexc service install` 顺序操作；`codexc update` 仍要求完成初始化和有效渠道配置，不承担空配置初始化。旧版源码安装漏装 CLI 时，可先执行 `npm install -g @openai/codex@0.156.1` 补齐当前基线，再继续 Setup。
+本地构建包的 `codexc update` 会显示检查开始和完成结果；无需更新时明确提示配套 CLI 与数据库均无需更新。
+
+候选源码完成构建和只读预检后，如默认 Codex CLI 缺失或其要求的版本与本机不一致，交互终端会显示当前版本和
 目标版本，并询问是否现在全局安装精确的 `@openai/codex` 版本；提示为 `[Y/n]`，直接回车表示确认。
 确认后先把目标 CLI 安装到随候选源码一同清理的临时目录，以该二进制完成真实公开合同和用户设置
 检查；只有检查通过才修改全局 CLI 并继续同一次源码更新。输入 `N/n`、临时候选或全局安装失败、

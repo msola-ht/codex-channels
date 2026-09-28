@@ -16,6 +16,7 @@ import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { uninstallManagedSourceInstallation } from "../scripts/source-uninstall.mjs";
+import { ensureSandboxDependencies } from "../scripts/sandbox-dependencies.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -412,6 +413,8 @@ function createFixtureRepository(
   const gatewayVersion = options.gatewayVersion ?? "0.147.0";
   mkdirSync(join(repository, "bin"), { recursive: true });
   mkdirSync(join(repository, "scripts"), { recursive: true });
+  mkdirSync(join(repository, "runtime"), { recursive: true });
+  for (const name of ["scripts/sandbox-dependencies.mjs", "runtime/executable.mjs"]) copyFileSync(resolve(name), join(repository, name));
   mkdirSync(join(repository, "src", "codex-protocol"), { recursive: true });
   mkdirSync(join(repository, "webui"), { recursive: true });
   writeFileSync(join(repository, "package.json"), JSON.stringify({
@@ -479,6 +482,7 @@ function runInstaller(
 ) {
   const fakeBin = join(root, "fake-bin");
   mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "bwrap"), `#!${process.execPath}\nconsole.log('--perms');\n`, { mode: 0o755 });
   const codex = join(fakeBin, "codex");
   if (options.codexInstalled !== false) {
     writeFileSync(codex, fakeCodexScript(true));
@@ -552,3 +556,98 @@ function fixtureLock(name: string): string {
 function runGit(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
 }
+
+
+describe.skipIf(process.platform === "win32")("local source install Codex bootstrap", () => {
+  it.each(["missing", "matching", "mismatch", "install-failed", "path-missing", "explicit-missing", "broken", "wrong-installed"])(
+    "handles %s CLI before registering Gateway without requiring init or a channel",
+    (mode) => {
+      const root = temporaryDirectory("codexc-local-bootstrap-");
+      for (const name of ["scripts", "runtime", "dist", "webui/dist", "src/codex-protocol", "bin"]) mkdirSync(join(root, name), { recursive: true });
+      for (const name of ["scripts/install-global-source.mjs", "scripts/sandbox-dependencies.mjs", "scripts/package-path.mjs", "runtime/executable.mjs"]) copyFileSync(resolve(name), join(root, name));
+      writeFileSync(join(root, "bin/bwrap"), `#!${process.execPath}\nconsole.log('--perms');\n`, { mode: 0o755 });
+      writeFileSync(join(root, "tsconfig.build.json"), "{}");
+      writeFileSync(join(root, "dist/main.js"), "");
+      writeFileSync(join(root, "webui/dist/index.html"), "");
+      writeFileSync(join(root, "src/codex-protocol/version.json"), JSON.stringify({ codexCli: "codex-cli 0.156.1" }));
+      const log = join(root, "calls.jsonl");
+      const codex = join(root, "bin/codex");
+      const makeCli = (version: string) => `#!${process.execPath}\nconsole.log('codex-cli ${version}');\n`;
+      if (["matching", "mismatch", "broken"].includes(mode)) {
+        writeFileSync(codex, mode === "broken" ? `#!${process.execPath}\nprocess.exit(1);` : makeCli(mode === "matching" ? "0.156.1" : "0.155.0"), { mode: 0o755 });
+      }
+      const npm = join(root, "bin/npm");
+      writeFileSync(npm, `#!${process.execPath}
+        const fs = require('node:fs');
+        const args = process.argv.slice(2);
+        fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+        if (args.includes('@openai/codex@0.156.1')) {
+          if (${JSON.stringify(mode)} === 'install-failed') process.exit(1);
+          if (${JSON.stringify(mode)} !== 'path-missing') fs.writeFileSync(${JSON.stringify(codex)}, ${JSON.stringify(makeCli(mode === "wrong-installed" ? "0.155.0" : "0.156.1"))}, {mode: 0o755});
+        }
+        if (args[0] === 'pack') console.log(JSON.stringify([{filename:'fixture.tgz'}]));
+      `, { mode: 0o755 });
+      const result = spawnSync(process.execPath, [join(root, "scripts/install-global-source.mjs"), "--prepared"], {
+        cwd: root, encoding: "utf8", timeout: 10_000,
+        env: { ...process.env, PATH: join(root, "bin"), CODEX_BINARY: mode === "explicit-missing" ? join(root, "absent") : "", HOME: root },
+      });
+      const calls: string[][] = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]) : [];
+      const success = ["missing", "matching", "mismatch"].includes(mode);
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(success ? 0 : 1);
+      expect(calls.some((args) => args[0] === "pack")).toBe(success);
+      expect(calls.filter((args) => args.includes("@openai/codex@0.156.1"))).toHaveLength(
+        ["missing", "install-failed", "path-missing", "wrong-installed"].includes(mode) ? 1 : 0,
+      );
+      if (mode === "mismatch") expect(result.stdout).toContain("保留已有 Codex CLI 0.155.0");
+      if (mode === "path-missing") expect(result.stderr).toContain("PATH");
+      if (mode === "explicit-missing") expect(result.stderr).toContain("CODEX_BINARY");
+      expect(existsSync(join(root, ".codex-connect"))).toBe(false);
+    },
+  );
+});
+
+describe("sandbox installation prerequisites", () => {
+  it.each(["present", "missing"])("checks macOS system sandbox without a package install (%s)", (mode) => {
+    const run = () => { throw new Error("must not invoke a package manager"); };
+    const check = () => ensureSandboxDependencies({ platform: "darwin", resolve: (name: string) => {
+      expect(name).toBe("/usr/bin/sandbox-exec");
+      return mode === "present" ? name : undefined;
+    }, run, log: () => {} });
+    if (mode === "missing") expect(check).toThrow("无需安装 bubblewrap");
+    else check();
+  });
+
+  it.each(["existing", "apt", "dnf", "sudo", "unsupported", "no-sudo", "failed", "not-on-path", "broken", "old"])(
+    "checks and installs Linux bubblewrap with bounded failures (%s)", (mode) => {
+      let installed = ["existing", "broken", "old"].includes(mode);
+      const calls: Array<{ file: string; args: string[] }> = [];
+      const check = () => ensureSandboxDependencies({ platform: "linux", uid: ["sudo", "no-sudo"].includes(mode) ? 1000 : 0,
+        resolve: (name: string) => {
+          if (name === "bwrap") return installed ? "/fixture/bwrap" : undefined;
+          if (name === "sudo") return mode === "sudo" ? "/fixture/sudo" : undefined;
+          if (mode === "unsupported") return undefined;
+          return name === (mode === "dnf" ? "dnf" : "apt-get") ? `/fixture/${name}` : undefined;
+        },
+        run: (file: string, args: string[]) => {
+          calls.push({ file, args });
+          if (args[0] === "--help") return { status: mode === "broken" ? 1 : 0, stdout: mode === "old" ? "" : "--perms" };
+          installed = mode !== "not-on-path";
+          return { status: mode === "failed" ? 1 : 0, stdout: "" };
+        }, log: () => {},
+      });
+      if (["unsupported", "no-sudo", "failed", "not-on-path", "broken", "old"].includes(mode)) expect(check).toThrow(/bubblewrap|bwrap/u);
+      else check();
+      if (["existing", "broken", "old"].includes(mode)) expect(calls).toEqual([{ file: "/fixture/bwrap", args: ["--help"] }]);
+      if (["unsupported", "no-sudo"].includes(mode)) expect(calls).toEqual([]);
+      if (["apt", "dnf", "sudo", "failed", "not-on-path"].includes(mode)) expect(calls[0]).toEqual({
+        file: mode === "sudo" ? "/fixture/sudo" : `/fixture/${mode === "dnf" ? "dnf" : "apt-get"}`,
+        args: [...(mode === "sudo" ? ["-n", "/fixture/apt-get"] : []), "install", "-y", "bubblewrap"],
+      });
+    },
+  );
+
+  it("does not provision Windows users or alter permissions during dependency installation", () => {
+    ensureSandboxDependencies({ platform: "win32", resolve: () => { throw new Error("unexpected lookup"); }, log: () => {} });
+  });
+});

@@ -44,6 +44,40 @@ afterEach(async () => {
 });
 
 describe("ModelTrafficDump V2", () => {
+  it.each([false, true])("preserves only valid first-token values in summaries (paged=%s)", async (paged) => {
+    const directory = mkdtempSync(join(tmpdir(), "codexc-first-token-summary-"));
+    temporaryDirectories.push(directory);
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({
+      version: 2, label: "fixture", session: "first-token", createdAtMs: 1,
+    }));
+    const values = ["0", "23.5", undefined, "null", "-1", '"23.5"', "1e309"];
+    const lines = values.flatMap((value, index) => [
+      JSON.stringify({ version: 2, kind: "request", id: index + 1,
+        transport: "http", method: "POST", path: "/responses", startedAtMs: index + 1 }),
+      `{"version":2,"kind":"response","id":${index + 1},"state":"completed"${value === undefined ? "" : `,"firstTokenMs":${value}`}}`,
+    ]);
+    lines.push(JSON.stringify({ version: 2, kind: "request", id: 8,
+      transport: "http", method: "POST", path: "/responses", startedAtMs: 8 }));
+    writeFileSync(join(directory, "interactions.jsonl"), `${lines.join("\n")}\n`);
+
+    const exchanges = [];
+    if (paged) {
+      for (const offset of [0, 3, 6]) {
+        const page = await summarizeDumpFiles([directory], { limit: 3, offset, newestFirst: true });
+        expect(page.total).toBe(8);
+        exchanges.push(...page.exchanges);
+      }
+    } else {
+      exchanges.push(...(await summarizeDumpFiles([directory])).exchanges);
+    }
+    expect(exchanges.map((entry) => entry.id).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    for (const exchange of exchanges) {
+      if (exchange.id === 1) expect(exchange.firstTokenMs).toBe(0);
+      else if (exchange.id === 2) expect(exchange.firstTokenMs).toBe(23.5);
+      else expect(exchange).not.toHaveProperty("firstTokenMs");
+    }
+  });
+
   it.each(["http", "websocket"])("uses one failure timestamp for %s metrics and call details", async (transport) => {
     const directory = mkdtempSync(join(tmpdir(), "codexc-failure-timing-"));
     temporaryDirectories.push(directory);
@@ -486,9 +520,10 @@ describe("ModelTrafficDump V2", () => {
     const sessions = listDumpFiles(directory);
     const list = await summarizeDumpFiles(sessions);
     expect(list.exchanges).toMatchObject([
-      { id: 1, state: "completed", threadId: "thread-ws", transport: "websocket" },
+      { id: 1, state: "completed", threadId: "thread-ws", transport: "websocket", firstTokenMs: 23.5 },
       { id: 2, state: "failed", transport: "websocket" },
     ]);
+    expect(list.exchanges[1]).not.toHaveProperty("firstTokenMs");
     expect((await describeDumpExchange(sessions, 1)).trace)
       .toHaveLength(2);
     expect((await describeDumpExchange(sessions, 1)).response.firstTokenMs).toBe(23.5);

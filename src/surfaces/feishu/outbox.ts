@@ -1,3 +1,8 @@
+import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
+import { isPersistentOutput } from "../persistent-output.js";
+import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
+import { FeishuTextStreams } from "./text-streams.js";
 import type { Logger } from "pino";
 import { withSurfaceOutputDiagnostics, surfaceDiagnosticContext } from "../diagnostics.js";
 
@@ -29,7 +34,7 @@ import type {
 } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
-import { FeishuMessageError } from "./client.js";
+import { FeishuMessageError } from "./message-error.js";
 import { bindOutboxMessagePort, type FeishuMessagePort } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
 import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
@@ -39,10 +44,7 @@ import {
   renderFeishuComputerUseCard,
 } from "./operation-format.js";
 import {
-  appendBoundedStreamText,
-  appendFeishuStreamingTruncation,
-  boundedStreamText,
-  feishuTruncationNotice,
+  feishuPreviewNotice,
   maximumFeishuMessageChunks,
   maximumFeishuStreamingCards,
   maximumFeishuStreamingElementCharacters,
@@ -57,42 +59,13 @@ import {
   renderFeishuThreadStatusCard,
 } from "./status-card.js";
 
-const feishuStreamFlushDelayMs = 300;
-const maximumFeishuActiveStreams = 100;
-const maximumFeishuFinishedStreams = 100;
 const maximumFeishuFinalAnswerFileBytes = 1_000_000;
 const feishuFinalAnswerFileName = "codex-final-answer.txt";
-const feishuPreviewNotice = "\n\n[内容预览，完整回复见附件]";
+const maximumFeishuFinalPreviewCharacters = 1_200;
 const feishuFileFailureNotice = "[完整文件发送失败，已改为分段文本]\n\n";
 
-interface FeishuStreamState {
-  chatId: string;
-  threadId: string;
-  turnId: string;
-  itemId: string;
-  phase?: "commentary" | "final_answer" | null;
-  text: string;
-  cardText: string;
-  flushGeneration: number;
-  truncated: boolean;
-  sequence: number;
-  cardCount: number;
-  cardId?: string;
-  lastSentText?: string;
-  timer?: NodeJS.Timeout;
-  failed: boolean;
-  deliveryUncertain?: boolean;
-  completionFooter?: string;
-}
-
-interface FinishedFeishuStream {
-  chatId: string;
-  cardId: string;
-  sequence: number;
-  summary: string;
-}
-
 interface FeishuPlanState {
+  chatId: string;
   messageId?: string;
   fingerprint?: string;
 }
@@ -122,6 +95,7 @@ export interface FeishuOutboxOptions {
 }
 
 export class FeishuOutbox implements SurfaceOutputPort {
+  private readonly textStreams: FeishuTextStreams;
   private readonly compactionNotices = new ContextCompactionNotices();
   private readonly delivery: ConversationDeliveryQueue;
   private readonly messagePort: FeishuMessagePort;
@@ -139,19 +113,17 @@ export class FeishuOutbox implements SurfaceOutputPort {
     string,
     FeishuPlanState
   >();
-  private readonly streams = new Map<string, FeishuStreamState>();
-  private readonly finishedStreams = new Map<string, FinishedFeishuStream>();
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
   private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
+  private readonly snapshots = new SnapshotDelivery();
   private readonly reasoningGenerations = new Map<string, number>();
-  private readonly operationDisplays = new Map<string, string>();
-  private readonly computerUseCards = new Map<string, { messageId?: string }>();
+  private readonly operationDisplays = new Map<string, { chatId: string; markdown: string }>();
+  private readonly computerUseCards = new Map<string, { chatId: string; messageId?: string }>();
   private readonly pendingApprovalOperations = new Set<string>();
   private readonly heldApprovalOperations = new Map<string, Extract<OutputEvent, { type: "operation.updated" }>['operation']>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
   private readonly replyTargets = new TurnReplyTargets<string>();
-  private streamCapacityWarningIssued = false;
   private closed = false;
   private closeFinished = false;
 
@@ -164,11 +136,44 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.messagePort = bindOutboxMessagePort(messagePort, this.deliveryAbort.signal);
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Feishu",
+      maximumPendingOperations: 512,
       drainOnClose: true,
     });
+    this.textStreams = new FeishuTextStreams(
+      this.messagePort, this.delivery, this.replyTargets, logger,
+      () => this.closeFinished,
+      (chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal, truncationNotice) =>
+        this.sendMarkdown(chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal, truncationNotice),
+      (chatId, markdown, maximumChunks, signal, replyTo, truncationNotice) => this.sendPost(chatId, markdown, maximumChunks, signal, replyTo, truncationNotice),
+    );
   }
 
-  handle(event: OutputEvent): void {
+  observe(event: OutputEvent): void {
+    if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
+    this.snapshots.observe(event);
+    if (event.type === "turn.started") {
+      this.clearExecutionTurns(event.threadId);
+      this.reasoningCards.delete(event.threadId);
+      this.replyTargets.bindPending(event.target.conversationId, turnKey(event.threadId, event.turnId));
+    } else if (event.type === "connection.lost") {
+      this.clearExecutionTurns(event.threadId);
+      this.reasoningCards.delete(event.threadId);
+      this.replyTargets.clearThread(event.threadId);
+      this.textStreams.clearThread(event.threadId);
+      this.operationUpdates.clearThread(event.threadId);
+      for (const key of this.planMessages.keys()) {
+        if (key.startsWith(`${event.threadId}:`)) this.planMessages.delete(key);
+      }
+      for (const key of this.heldApprovalOperations.keys()) {
+        if (key.startsWith(`${event.threadId}:`)) this.heldApprovalOperations.delete(key);
+      }
+      for (const key of this.pendingApprovalOperations) {
+        if (key.startsWith(`${event.threadId}:`)) this.pendingApprovalOperations.delete(key);
+      }
+    }
+  }
+
+  handle(event: OutputEvent): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "feishu"
@@ -176,21 +181,55 @@ export class FeishuOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    if (!DeliveryReceipt.current()) this.observe(event);
+    if (!DeliveryReceipt.current() && surfaceOutputSnapshotKey(event) !== undefined) {
+      const delivery = this.deliverSnapshot(event, new AbortController().signal, () => true);
+      // Direct callers may intentionally ignore the asynchronous result; the owner still sees rejection.
+      void delivery.catch(() => {});
+      return delivery;
+    }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    return this.snapshots.run(event, signal, authorized, () => {
+      if (this.closed || event.target.surface !== "feishu"
+        || event.target.accountId !== this.accountId
+        || surfaceOutputSnapshotKey(event) === undefined) throw new Error("状态投递目标无效或已关闭");
+      withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    });
+  }
+
+  retains(event: OutputEvent): boolean {
+    return isPersistentOutput(event, this.options.operationUpdateDisplay ?? "full");
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+    if (this.closed || event.target.surface !== "feishu"
+      || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
+    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    await captureDelivery(() => {
+      void this.handle(event);
+      if (event.type === "text.completed") {
+        // Runs after the rendered output. Preview success alone cannot ACK a
+        // truncated result; an already-confirmed full file avoids a duplicate.
+        this.delivery.enqueue(event.target.conversationId, async (active) => {
+          const receipt = DeliveryReceipt.current();
+          if (!receipt?.needsCompleteContent()) return;
+          await this.sendCompleteContentFile(event.target.conversationId, event.text, active);
+        }, true);
+      }
+      if (event.type === "operation.updated" && event.operation.status !== "running") {
+        const buffered = this.operationUpdates.flushTurn(event);
+        if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
+      }
+    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" });
   }
 
   private handleEvent(event: OutputEvent): void {
     if (event.type === "text.delta") {
-      this.acceptStreamDelta(event);
+      this.textStreams.acceptStreamDelta(event);
       return;
-    }
-    if (event.type === "turn.started") {
-      this.clearExecutionTurns(event.threadId);
-      this.reasoningCards.delete(event.threadId);
-      this.replyTargets.bindPending(
-        event.target.conversationId,
-        turnKey(event.threadId, event.turnId),
-      );
     }
     if (event.type === "turn.reasoning") {
       if (this.options.reasoningEnabled === false) {
@@ -217,16 +256,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "text.completed") {
       this.flushOperationUpdates(event.target.conversationId, event);
-      if (this.completeStream(event)) {
+      if (this.textStreams.completeStream(event, this.canSendCompleteContentFile(event.text)
+        && (DeliveryReceipt.current() !== undefined
+          || (event.phase !== "commentary" && this.canSendCompletedAnswerFile(event.text))))) {
         this.enqueueCompletedAnswerFile(event);
         return;
       }
     }
     if (event.type === "operation.updated") {
       if (event.operation.kind === "contextCompaction") {
-        const text = this.compactionNotices.accept(event);
+        const text = this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
         if (text !== null) {
-          this.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+          this.textStreams.flushStreamsBeforeVisibleOutput(event.target.conversationId, event.threadId, event.turnId);
           this.delivery.enqueue(event.target.conversationId,
             (signal) => this.sendMarkdown(event.target.conversationId, text, maximumFeishuMessageChunks, undefined, undefined, signal), true);
         }
@@ -238,7 +279,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         if (event.operation.status === "running") {
           this.activeOperations.add(key);
           this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
-          this.sealReasoningCard(event.threadId, event.turnId);
+          this.sealReasoningCard(event.target.conversationId, event.threadId, event.turnId);
         } else {
           this.activeOperations.delete(key);
         }
@@ -249,7 +290,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           return;
         }
         streamFlushed = true;
-        this.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+        this.textStreams.flushStreamsBeforeVisibleOutput(event.target.conversationId, event.threadId, event.turnId);
       };
       const imagePath = event.operation.imagePath;
       if (
@@ -306,18 +347,27 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       flushStreamBeforeOutput();
       const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
-      if (!this.acceptOperationDisplay(event, markdown)) return;
       if (isComputerUseOperation(event.operation)) {
         const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-        const state = this.computerUseCards.get(key) ?? {};
+        const previous = this.computerUseCards.get(key);
+        const state = previous?.chatId === event.target.conversationId ? previous : { chatId: event.target.conversationId };
         this.computerUseCards.set(key, state);
         this.delivery.enqueue(
           event.target.conversationId,
-          (signal) => this.deliverComputerUseCard(event, state, markdown, signal),
+          async (signal) => {
+            if (!this.acceptOperationDisplay(event, markdown)) return;
+            try { await this.deliverComputerUseCard(event, state, markdown, signal); }
+            catch (error) {
+              const displayed = this.operationDisplays.get(key);
+              if (displayed?.chatId === event.target.conversationId && displayed.markdown === markdown) this.operationDisplays.delete(key);
+              throw error;
+            }
+          },
           isCriticalOutputEvent(event),
         );
         return;
       }
+      if (!this.acceptOperationDisplay(event, markdown)) return;
       this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), isCriticalOutputEvent(event));
       return;
     }
@@ -326,7 +376,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const key = turnKey(event.threadId, event.turnId);
-      const state = this.planMessages.get(key) ?? {};
+      const previous = this.planMessages.get(key);
+      const state = previous?.chatId === event.target.conversationId ? previous : { chatId: event.target.conversationId };
       this.planMessages.set(key, state);
       const snapshot = createPlanPresentation(event);
       this.delivery.enqueue(
@@ -355,7 +406,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       if (
         completion !== null
-        && this.finishStreamsForTurn(event.threadId, event.turnId, completion)
+        && this.textStreams.finishStreamsForTurn(event.target.conversationId, event.threadId, event.turnId, completion)
       ) {
         return;
       }
@@ -490,7 +541,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const chatId = event.target.conversationId;
     const existing = this.reasoningCards.get(event.threadId);
-    if (existing !== undefined && existing.turnId !== event.turnId) {
+    if (existing !== undefined && (existing.turnId !== event.turnId || existing.chatId !== event.target.conversationId)) {
       this.reasoningCards.delete(event.threadId);
       this.deliverReasoning(event, generation);
       return;
@@ -715,7 +766,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   replyToTurn(chatId: string, threadId: string, turnId: string, markdown: string): boolean {
-    const replyTo = this.replyTargets.get(turnKey(threadId, turnId));
+    const replyTo = this.replyTargets.get(chatId, turnKey(threadId, turnId));
     if (replyTo === undefined) return false;
     return this.replyMarkdown(chatId, replyTo, markdown);
   }
@@ -768,24 +819,13 @@ export class FeishuOutbox implements SurfaceOutputPort {
     for (const { target, summary } of this.operationUpdates.drain()) {
       this.enqueueOperationSummary(target, summary);
     }
-    for (const [key, state] of this.streams) {
-      if (state.timer) {
-        clearTimeout(state.timer);
-        delete state.timer;
-      }
-      this.delivery.enqueue(
-        state.chatId,
-        (signal) => this.flushStream(key, true, false, signal),
-        true,
-      );
-    }
+    this.textStreams.prepareClose();
     await this.delivery.close();
     this.closeFinished = true;
     this.deliveryAbort.abort();
     this.threadStatusMessages.clear();
     this.planMessages.clear();
-    this.streams.clear();
-    this.finishedStreams.clear();
+    this.textStreams.clear();
     this.reasoningCards.clear();
     this.activeOperations.clear();
     this.reasoningGenerations.clear();
@@ -824,7 +864,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private clearExecutionTurns(threadId: string): void {
-    const prefix = `${threadId}\u0000`;
+    const prefix = `${threadId}:`;
     for (const key of this.activeOperations) {
       if (key.startsWith(prefix)) this.activeOperations.delete(key);
     }
@@ -849,10 +889,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
   ): boolean {
     const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-    if (this.operationDisplays.get(key) === markdown) {
+    const receipt = DeliveryReceipt.current();
+    const displayed = this.operationDisplays.get(key);
+    if ((!receipt || receipt.transient) && displayed?.chatId === event.target.conversationId && displayed.markdown === markdown) {
       return false;
     }
-    this.operationDisplays.set(key, markdown);
+    this.operationDisplays.set(key, { chatId: event.target.conversationId, markdown });
     return true;
   }
 
@@ -875,9 +917,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
 
-  private sealReasoningCard(threadId: string, turnId: string): void {
+  private sealReasoningCard(chatId: string, threadId: string, turnId: string): void {
     const state = this.reasoningCards.get(threadId);
-    if (state === undefined || state.turnId !== turnId) {
+    if (state === undefined || state.turnId !== turnId || state.chatId !== chatId) {
       return;
     }
     this.reasoningCards.delete(threadId);
@@ -916,10 +958,18 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
     maximumChunks = maximumFeishuMessageChunks,
     signal?: AbortSignal,
-  ): Promise<void> {
-    for (const chunk of splitFeishuPost(markdown, maximumChunks)) {
-      await this.messagePort.sendPost(chatId, chunk, signal);
+    replyTo?: string,
+    truncationNotice?: string,
+  ): Promise<number> {
+    const chunks = splitFeishuPost(markdown, maximumChunks, truncationNotice);
+    for (const [index, chunk] of chunks.entries()) {
+      if (index === 0 && replyTo !== undefined && this.messagePort.replyPost) {
+        await this.messagePort.replyPost(replyTo, chunk, signal);
+      } else {
+        await this.messagePort.sendPost(chatId, chunk, signal);
+      }
     }
+    return chunks.length;
   }
 
   private async sendMarkdown(
@@ -929,9 +979,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     replyTo?: string,
     onFirstMessageId?: (messageId: string) => void,
     signal?: AbortSignal,
+    truncationNotice?: string,
   ): Promise<void> {
     let first = true;
-    for (const chunk of splitFeishuMarkdownCards(markdown, maximumChunks)) {
+    let remainingBudget = maximumChunks;
+    const chunks = splitFeishuMarkdownCards(markdown, maximumChunks, truncationNotice);
+    for (const [index, chunk] of chunks.entries()) {
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
           const messageId = await this.messagePort.replyMarkdownCard(replyTo, chunk, signal);
@@ -959,12 +1012,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
           },
           "飞书静态 CardKit 创建失败，已降级为富文本",
         );
-        if (first && replyTo !== undefined && this.messagePort.replyPost) {
-          await this.messagePort.replyPost(replyTo, chunk, signal);
-        } else {
-          await this.sendPost(chatId, chunk, 1, signal);
-        }
+        // Card limits count characters; Post limits count encoded bytes.
+        // Reserve one slot for each later card and share the same total budget.
+        remainingBudget -= await this.sendPost(
+          chatId, chunk, remainingBudget - (chunks.length - index - 1),
+          signal, first ? replyTo : undefined, truncationNotice,
+        );
+        first = false;
+        continue;
       }
+      remainingBudget--;
       first = false;
     }
   }
@@ -1030,7 +1087,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           ...(event.identity ? { identity: event.identity } : {}),
         });
         const replyTo = this.replyTargets.get(
-          turnKey(event.threadId, event.turnId),
+          event.target.conversationId, turnKey(event.threadId, event.turnId),
         );
         if (replyTo !== undefined) {
           await this.sendMarkdown(
@@ -1045,7 +1102,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const replyTo = this.replyTargets.get(
-        turnKey(event.threadId, event.turnId),
+        event.target.conversationId, turnKey(event.threadId, event.turnId),
       );
       if (replyTo !== undefined) {
         await this.sendMarkdown(
@@ -1085,10 +1142,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     const key = turnKey(event.threadId, event.turnId);
-    const replyTo = this.replyTargets.get(key);
+    const replyTo = this.replyTargets.get(event.target.conversationId, key);
     if (
       event.type === "text.completed"
-      && event.phase !== "commentary"
+      && (event.phase !== "commentary" || DeliveryReceipt.current() !== undefined)
       && this.canSendCompletedAnswerFile(event.text)
     ) {
       await this.sendLongFinalAnswer(
@@ -1107,10 +1164,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
         replyTo,
         undefined,
         signal,
+        event.type === "text.completed" && DeliveryReceipt.current() && this.canSendCompleteContentFile(event.text)
+          ? feishuPreviewNotice : undefined,
       );
     } finally {
       if (event.type === "turn.completed") {
-        this.replyTargets.delete(key);
+        this.replyTargets.delete(event.target.conversationId, key);
       }
     }
   }
@@ -1135,6 +1194,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
             file,
             signal,
           );
+          DeliveryReceipt.current()?.confirmCompleteContent();
         } catch (error) {
           await this.sendText(
             event.target.conversationId,
@@ -1157,8 +1217,22 @@ export class FeishuOutbox implements SurfaceOutputPort {
     ) {
       return false;
     }
+    return this.canSendCompleteContentFile(text);
+  }
+
+  private canSendCompleteContentFile(text: string): boolean {
+    if (!this.messagePort.sendFile) return false;
     const bytes = Buffer.byteLength(text, "utf8");
     return bytes > 0 && bytes <= maximumFeishuFinalAnswerFileBytes;
+  }
+
+  private async sendCompleteContentFile(chatId: string, text: string, signal?: AbortSignal): Promise<void> {
+    const file = Buffer.from(text, "utf8");
+    if (!this.messagePort.sendFile || file.length > maximumFeishuFinalAnswerFileBytes) {
+      throw new Error("可靠结果无法通过完整文件确认");
+    }
+    await this.messagePort.sendFile(chatId, feishuFinalAnswerFileName, file, signal);
+    DeliveryReceipt.current()?.confirmCompleteContent();
   }
 
   private async sendLongFinalAnswer(
@@ -1168,7 +1242,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
   ): Promise<void> {
     const maximumPreviewCharacters =
-      maximumFeishuStreamingElementCharacters
+      maximumFeishuFinalPreviewCharacters
       - [...feishuPreviewNotice].length;
     const [head, tail] = splitFeishuStreamingContent(
       text,
@@ -1183,12 +1257,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       signal,
     );
     try {
-      await this.messagePort.sendFile!(
-        chatId,
-        feishuFinalAnswerFileName,
-        Buffer.from(text, "utf8"),
-        signal,
-      );
+      await this.sendCompleteContentFile(chatId, text, signal);
     } catch (error) {
       await this.sendMarkdown(
         chatId,
@@ -1238,6 +1307,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
           "飞书状态卡已原地更新",
         );
       } catch (error) {
+        if (signal?.aborted) {
+          if (this.threadStatusMessages.get(event.threadId) === current) this.threadStatusMessages.delete(event.threadId);
+          throw error;
+        }
         this.logger.warn(
           {
             ...surfaceDiagnosticContext(),
@@ -1307,502 +1380,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
   }
 
-  private acceptStreamDelta(
-    event: Extract<OutputEvent, { type: "text.delta" }>,
-  ): void {
-    const key = streamKey(event.threadId, event.turnId, event.itemId);
-    const existing = this.streams.get(key);
-    if (!existing && this.streams.size >= maximumFeishuActiveStreams) {
-      if (!this.streamCapacityWarningIssued) {
-        this.streamCapacityWarningIssued = true;
-        this.logger.warn(
-          {
-            ...surfaceDiagnosticContext(),
-            component: "Feishu",
-            maximumActiveStreams: maximumFeishuActiveStreams,
-          },
-          "飞书活动流状态已满，当前非关键增量未接收",
-        );
-      }
-      return;
-    }
-    if (this.streams.size < maximumFeishuActiveStreams) {
-      this.streamCapacityWarningIssued = false;
-    }
-    const state = existing ?? {
-      chatId: event.target.conversationId,
-      threadId: event.threadId,
-      turnId: event.turnId,
-      itemId: event.itemId,
-      ...(event.phase === undefined ? {} : { phase: event.phase }),
-      text: "",
-      cardText: "",
-      flushGeneration: 0,
-      truncated: false,
-      sequence: 0,
-      cardCount: 0,
-      failed: false,
-    };
-    if (event.phase !== undefined) {
-      state.phase = event.phase;
-    }
-    const previousText = state.text;
-    const appended = appendBoundedStreamText(state.text, event.text);
-    state.text = appended.text;
-    state.truncated ||= appended.truncated;
-    state.cardText = appendBoundedStreamText(
-      state.cardText,
-      state.text.slice(previousText.length),
-    ).text;
-    this.streams.set(key, state);
-    if (!state.timer) {
-      state.timer = setTimeout(() => {
-        delete state.timer;
-        this.delivery.enqueue(
-          state.chatId,
-          (signal) => this.flushStream(key, false, false, signal),
-          false,
-          { coalesceKey: `stream:${key}:${state.flushGeneration}` },
-        );
-      }, feishuStreamFlushDelayMs);
-      state.timer.unref();
-    }
-  }
 
-  private completeStream(
-    event: Extract<OutputEvent, { type: "text.completed" }>,
-  ): boolean {
-    const key = streamKey(event.threadId, event.turnId, event.itemId);
-    const state = this.streams.get(key);
-    if (!state) {
-      return false;
-    }
-    const bounded = boundedStreamText(event.text);
-    if (event.phase !== undefined) {
-      state.phase = event.phase;
-    }
-    const completedText = bounded.text;
-    state.truncated = bounded.truncated;
-    if (completedText.startsWith(state.text)) {
-      state.cardText = appendBoundedStreamText(
-        state.cardText,
-        completedText.slice(state.text.length),
-      ).text;
-    } else if (state.cardCount <= 1) {
-      state.cardText = completedText;
-    } else {
-      state.failed = true;
-    }
-    state.text = completedText;
-    if (state.timer) {
-      clearTimeout(state.timer);
-      delete state.timer;
-    }
-    state.flushGeneration += 1;
-    this.delivery.enqueue(
-      state.chatId,
-      (signal) => this.flushStream(key, true, true, signal),
-      true,
-    );
-    return true;
-  }
-
-  private flushStreamsBeforeVisibleOutput(
-    threadId: string,
-    turnId: string,
-  ): void {
-    for (const [key, state] of this.streams) {
-      if (state.threadId !== threadId || state.turnId !== turnId) {
-        continue;
-      }
-      if (state.timer) {
-        clearTimeout(state.timer);
-        delete state.timer;
-      }
-      state.flushGeneration += 1;
-      this.delivery.enqueue(
-        state.chatId,
-        (signal) => this.flushStream(key, false, false, signal),
-        true,
-      );
-    }
-  }
-
-  private finishStreamsForTurn(
-    threadId: string,
-    turnId: string,
-    footer: string,
-  ): boolean {
-    const matching = [...this.streams].filter(([, state]) =>
-      state.threadId === threadId && state.turnId === turnId
-    );
-    const footerTarget = matching.findLast(([, state]) =>
-      state.phase !== "commentary"
-    );
-    for (const [key, state] of matching) {
-      if (footerTarget?.[0] === key) {
-        state.completionFooter = footer;
-      }
-      if (state.timer) {
-        clearTimeout(state.timer);
-        delete state.timer;
-      }
-      state.flushGeneration += 1;
-      this.delivery.enqueue(
-        state.chatId,
-        (signal) => this.flushStream(key, true, true, signal),
-        true,
-      );
-    }
-    if (footerTarget !== undefined) {
-      return true;
-    }
-    const key = turnKey(threadId, turnId);
-    const completed = this.finishedStreams.get(key);
-    if (!completed) {
-      return false;
-    }
-    this.finishedStreams.delete(key);
-    this.delivery.enqueue(
-      completed.chatId,
-      async (signal) => {
-        try {
-          await this.messagePort.finishStreamingCard(
-            completed.cardId,
-            completed.sequence + 1,
-            completed.summary,
-            footer,
-            signal,
-          );
-        } catch (error) {
-          await this.sendMarkdown(completed.chatId, footer, maximumFeishuMessageChunks, undefined, undefined, signal);
-          throw error;
-        }
-      },
-      true,
-    );
-    return true;
-  }
-
-  private async withStreamFooter(
-    state: FeishuStreamState,
-    signal: AbortSignal | undefined,
-    sendBody: () => Promise<void>,
-  ): Promise<void> {
-    try {
-      await sendBody();
-    } finally {
-      if (!this.closeFinished && !signal?.aborted && state.completionFooter !== undefined) {
-        await this.sendMarkdown(state.chatId, state.completionFooter, maximumFeishuMessageChunks, undefined, undefined, signal);
-      }
-    }
-  }
-
-  private async flushStream(
-    key: string,
-    terminal: boolean,
-    fallbackPost: boolean,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const state = this.streams.get(key);
-    if (!state) {
-      return;
-    }
-    if (state.failed) {
-      if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost, signal);
-      }
-      return;
-    }
-    if (!state.cardId && terminal) {
-      this.streams.delete(key);
-      await this.withStreamFooter(state, signal, async () => {
-        const remainingMessageBudget =
-          maximumFeishuMessageChunks - state.cardCount;
-        if (fallbackPost && remainingMessageBudget > 0) {
-          const markdown = state.truncated
-            ? `${state.cardText}${feishuTruncationNotice}`
-            : state.cardText;
-          const replyKey = turnKey(state.threadId, state.turnId);
-          const replyTo = this.replyTargets.get(replyKey);
-          await this.sendMarkdown(
-            state.chatId,
-            markdown,
-            remainingMessageBudget,
-            replyTo,
-            undefined,
-            signal,
-          );
-        }
-      });
-      return;
-    }
-    try {
-      const ready = await this.rollStreamingCards(state, terminal, signal);
-      if (!ready || this.closeFinished || signal?.aborted) {
-        return;
-      }
-      if (!terminal && state.lastSentText !== state.cardText) {
-        const sentText = state.cardText;
-        state.sequence += 1;
-        try {
-          if (signal) {
-            await this.messagePort.updateStreamingCard(state.cardId!, sentText, state.sequence, signal);
-          } else {
-            await this.messagePort.updateStreamingCard(state.cardId!, sentText, state.sequence);
-          }
-        } catch (error) {
-          if (
-            !terminal
-            && error instanceof FeishuMessageError
-            && error.code === "rate-limited"
-          ) {
-            return;
-          }
-          throw error;
-        }
-        state.lastSentText = sentText;
-      }
-    } catch (error) {
-      state.failed = true;
-      if (terminal && !signal?.aborted) {
-        await this.recoverFailedStream(key, state, fallbackPost, signal);
-      }
-      throw error;
-    }
-    if (terminal) {
-      try {
-        const footerAtStart = state.completionFooter;
-        await this.finishStreamCard(state, state.cardText, footerAtStart, signal);
-        if (footerAtStart === undefined && state.completionFooter !== undefined) {
-          await this.finishStreamCard(state, state.cardText, state.completionFooter, signal);
-        }
-      } catch (error) {
-        this.streams.delete(key);
-        await this.withStreamFooter(state, signal, async () => {
-          if (!this.closeFinished && !signal?.aborted && fallbackPost && !state.deliveryUncertain
-            && state.lastSentText !== state.cardText) {
-            const remaining = maximumFeishuMessageChunks - state.cardCount;
-            if (remaining > 0) {
-              const replyTo = this.replyTargets.get(turnKey(state.threadId, state.turnId));
-              if (replyTo !== undefined && this.messagePort.replyPost) {
-                await this.messagePort.replyPost(replyTo, state.cardText, signal);
-              } else {
-                await this.sendPost(state.chatId, state.cardText, remaining, signal);
-              }
-            }
-          }
-        });
-        throw error;
-      }
-      if (state.completionFooter === undefined && state.phase !== "commentary") {
-        this.rememberFinishedStream(turnKey(state.threadId, state.turnId), {
-          chatId: state.chatId,
-          cardId: state.cardId!,
-          sequence: state.sequence,
-          summary: state.cardText,
-        });
-      }
-      this.streams.delete(key);
-    }
-  }
-
-  /** 已知卡片的覆盖更新可安全重试；不确定结果不切换为新消息重播。 */
-  private async finishStreamCard(
-    state: FeishuStreamState,
-    body: string,
-    footer: string | undefined,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (this.closeFinished) throw new Error("飞书输出已关闭");
-      signal?.throwIfAborted();
-      state.sequence += 1;
-      try {
-        if (signal !== undefined) {
-          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body, footer, signal);
-        } else if (footer !== undefined) {
-          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body, footer);
-        } else {
-          await this.messagePort.finishStreamingCard(state.cardId!, state.sequence, body);
-        }
-        state.lastSentText = body;
-        state.deliveryUncertain = false;
-        return;
-      } catch (error) {
-        if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
-        const rejected = error instanceof FeishuMessageError
-          && (error.code === "rate-limited" || error.code === "invalid-response");
-        if (!rejected) state.deliveryUncertain = true;
-        if (rejected || attempt === 1) throw error;
-      }
-    }
-  }
-
-  private rememberFinishedStream(
-    key: string,
-    stream: FinishedFeishuStream,
-  ): void {
-    if (
-      !this.finishedStreams.has(key)
-      && this.finishedStreams.size >= maximumFeishuFinishedStreams
-    ) {
-      const oldest = this.finishedStreams.keys().next().value;
-      if (oldest !== undefined) {
-        this.finishedStreams.delete(oldest);
-      }
-    }
-    this.finishedStreams.set(key, stream);
-  }
-
-  private async rollStreamingCards(
-    state: FeishuStreamState,
-    terminal: boolean,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    while (
-      [...state.cardText].length > maximumFeishuStreamingElementCharacters
-    ) {
-      if (
-        !terminal
-        && !state.cardId
-        && state.cardCount >= maximumFeishuStreamingCards - 1
-      ) {
-        return false;
-      }
-      const maximumCharacters = maximumFeishuStreamingElementCharacters;
-      const snapshot = state.cardText;
-      const [rawHead, tail] = splitFeishuStreamingContent(
-        snapshot,
-        maximumCharacters,
-      );
-      const currentCardNumber = state.cardId
-        ? state.cardCount
-        : state.cardCount + 1;
-      const reachesCardLimit =
-        currentCardNumber >= maximumFeishuStreamingCards;
-      const head = reachesCardLimit
-        ? appendFeishuStreamingTruncation(rawHead, maximumCharacters)
-        : rawHead;
-      await this.ensureStreamingCard(state, head, signal);
-      await this.finishStreamCard(state, head, undefined, signal);
-      delete state.cardId;
-      delete state.lastSentText;
-      state.sequence = 0;
-      // New deltas may arrive while the platform request is in flight.
-      if (!state.cardText.startsWith(snapshot)) {
-        throw new Error("飞书流式正文在分卡期间已被修正");
-      }
-      state.cardText = tail + state.cardText.slice(snapshot.length);
-      if (reachesCardLimit) {
-        throw new Error("飞书流式卡片数量超过单个结果上限");
-      }
-    }
-    if (
-      !terminal
-      && !state.cardId
-      && state.cardCount >= maximumFeishuStreamingCards - 1
-    ) {
-      return false;
-    }
-    await this.ensureStreamingCard(state, state.cardText, signal);
-    // Card creation can span enough deltas to require another split.
-    if ([...state.cardText].length > maximumFeishuStreamingElementCharacters) {
-      return this.rollStreamingCards(state, terminal, signal);
-    }
-    return true;
-  }
-
-  private async ensureStreamingCard(
-    state: FeishuStreamState,
-    initialText: string,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (this.closeFinished) throw new Error("飞书输出已关闭");
-    if (state.cardId) {
-      return;
-    }
-    if (state.cardCount >= maximumFeishuStreamingCards) {
-      throw new Error("飞书流式卡片数量超过单个结果上限");
-    }
-    const replyKey = turnKey(state.threadId, state.turnId);
-    const replyTo = this.replyTargets.get(replyKey);
-    try {
-      const created =
-        replyTo !== undefined && this.messagePort.createStreamingReplyCard
-          ? await this.messagePort.createStreamingReplyCard(replyTo, initialText, signal)
-          : await this.messagePort.createStreamingCard(
-              state.chatId,
-              initialText,
-              signal,
-            );
-      state.cardId = created.cardId;
-      state.lastSentText = initialText;
-      state.cardCount += 1;
-    } catch (error) {
-      // 没有拿到消息 ID 的发送可能已经成功；只对确定未发送的错误允许新消息降级。
-      const rejected = error instanceof FeishuMessageError
-        && (error.code === "rate-limited" || error.code === "card-create-failed"
-          || error.code === "client-create-failed" || error.code === "invalid-credentials");
-      if (!rejected) state.deliveryUncertain = true;
-      throw error;
-    }
-  }
-
-  private async recoverFailedStream(
-    key: string,
-    state: FeishuStreamState,
-    fallbackPost: boolean,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    this.streams.delete(key);
-    let finishError: unknown;
-    if (state.cardId && !state.deliveryUncertain && !this.closeFinished) {
-      state.sequence += 1;
-      try {
-        if (signal) {
-          await this.messagePort.finishStreamingCard(state.cardId, state.sequence, state.lastSentText ?? state.cardText, undefined, signal);
-        } else {
-          await this.messagePort.finishStreamingCard(state.cardId, state.sequence, state.lastSentText ?? state.cardText);
-        }
-      } catch (error) {
-        finishError = error;
-      }
-    }
-    await this.withStreamFooter(state, signal, async () => {
-      const remainingMessageBudget =
-        maximumFeishuMessageChunks - state.cardCount;
-      if (!this.closeFinished && !signal?.aborted && fallbackPost && !state.deliveryUncertain && remainingMessageBudget > 0) {
-        const markdown = state.truncated
-          ? `${state.text}${feishuTruncationNotice}`
-          : state.text;
-        const replyKey = turnKey(state.threadId, state.turnId);
-        const replyTo = this.replyTargets.get(replyKey);
-        if (replyTo !== undefined && this.messagePort.replyPost) {
-          await this.messagePort.replyPost(replyTo, markdown, signal);
-        } else {
-          await this.sendPost(
-            state.chatId,
-            markdown,
-            remainingMessageBudget,
-            signal,
-          );
-        }
-      }
-    });
-    if (state.deliveryUncertain) {
-      throw new FeishuMessageError("send-failed", "飞书正文投递结果未确认，未重播正文");
-    }
-    if (finishError) {
-      throw finishError instanceof Error
-        ? finishError
-        : new Error("飞书流式卡片结束失败");
-    }
-  }
-}
-
-function streamKey(threadId: string, turnId: string, itemId: string): string {
-  return JSON.stringify([threadId, turnId, itemId]);
 }
 
 function turnKey(threadId: string, turnId: string): string {

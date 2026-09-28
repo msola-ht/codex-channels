@@ -51,7 +51,7 @@
 | 70 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 45 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
-| 16 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
+| 17 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
 这里的数量描述协议结构，不等于本项目已实现的功能数。只有 `codex-client` 可以使用
 `src/codex-protocol/index.ts` 的受控导出；生成目录可能包含尚未采用、实验中或仅供其他客户端
@@ -87,7 +87,9 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 本次图片接入增加一个认证响应导出和一个请求方法，审批种类没有增加；具体取舍见[升级决策记录](codex-cli-upgrade-decisions.md#01561)。
 本地构建或 Registry 包的 `codexc update` 由 [`source-update.mjs`](../scripts/source-update.mjs)
 按已安装包的精确 CLI 基线完成临时候选公开合同校验、确认安装与服务恢复，验证见
-[`source-update.test.ts`](../tests/source-update.test.ts)。
+[`source-update.test.ts`](../tests/source-update.test.ts)。默认 CLI 缺失也进入确认安装流程，显式 `CODEX_BINARY` 无效时拒绝。首次本地源码安装由 [`install-global-source.mjs`](../scripts/install-global-source.mjs) 在注册 Gateway 前补装协议锁定的缺失 CLI，不依赖渠道初始化；验证见 [`source-install.test.ts`](../tests/source-install.test.ts)。
+
+安装阶段的系统沙盒依赖由 [`sandbox-dependencies.mjs`](../scripts/sandbox-dependencies.mjs) 统一检查，验证同上：macOS 固定系统入口依据 [`seatbelt.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/sandboxing/src/seatbelt.rs)，Linux 系统 `bwrap` 能力与内置回退依据 [`launcher.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/linux-sandbox/src/launcher.rs)。只处理 OS 依赖，不增加 App Server RPC 或权限配置能力。
 
 1. [Codex App Server](https://learn.chatgpt.com/docs/app-server)：协议定位、Transport、
    JSON-RPC 消息、初始化、Thread/Turn/Item、审批、通知和 Schema 生成的主文档。
@@ -197,7 +199,17 @@ Default 执行模式的等待提问只作隔离能力探测，不属于 Gateway 
 [`features/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/features/src/lib.rs)
 将 `default_mode_request_user_input` 标记为开发中且默认关闭。
 Client 验证并保留 `isBlocking`，Approval 呈现阻塞或可跳过问题；渠道有效期使用现有配置，
-不再由已弃用的 `autoResolutionMs` 控制。原生 TUI 的非阻塞自动跳过及输入暂停机制见
+不再由已弃用的 `autoResolutionMs` 控制。`InteractionRouter` 从接收请求开始统一约束排队、渠道准备和答复期限，
+超时沿现有交互取消路径返回安全决定；三渠道 Outbox 链路由 `tests/interaction-cancellation.test.ts` 验证，
+真实 MCP 准备期超时由 `tests/real-app-server-isolated-state.test.ts` 的 `deadline` 合同验证。
+
+渠道投递存量通过组合根 [`output-execution-admission.ts`](../src/bootstrap/output-execution-admission.ts)
+在现有 Turn、Review、Goal 与 Queue 输入/启动端口前实施本地准入；不改变 RPC 字段或 App Server 原生 Queue 持久语义。
+计划任务在调度容量检查及创建 Thread 前复核同一准入，临时超载不永久阻塞周期任务；
+执行前竞态及后续恢复由 `tests/scheduled-task-executor.test.ts` 联合调度器和 SQLite 验证。
+停止、只读查询及 Queue 删除保留可用。隔离真实 App Server 的 `fences Turn execution under delivery pressure`
+合同验证暂停、恢复与停止请求；容量、确认及离线恢复见[投递箱](delivery.md)。
+原生 TUI 的非阻塞自动跳过及输入暂停机制见
 [`request_user_input/mod.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/tui/src/bottom_pane/request_user_input/mod.rs)，
 与渠道的差异见[等待式问题](display.md#等待式问题)。
 探测入口为 `RUN_CODEX_CONTRACT=1 npx vitest run tests/real-app-server-supervised-tools.test.ts -t 'probes Default-mode user input'`，
@@ -395,7 +407,7 @@ Application 的 `TurnInput` 是只含 `text`、内联 `image` 与 `localAudio` �
 先通过当前模型能力检查。Codex Client 映射这些稳定输入，OpenAI ChatGPT 图片经账户校验和上传转换为官方 fileId，其他 Provider 保持内联路径。模块边界测试同时禁止生产 Client 调用 `thread/realtime/*`，Surface
 不得把平台音频地址、密钥、实时音频或未验证的编解码数据带入 Application/Core。
 
-会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。
+会话列表命令（`/resume`、`/sessions`、`/archived`）优先显示本机指标/派生缓存中的 Turn 轮数，打开列表不等待 `thread/turns/list` 历史扫描；该口径与 WebUI 一致，按本机已记录模型请求的不同 Turn 统计，缓存缺失时不猜测轮数。列表投影与缓存状态由 [`conversation-session-query-service.ts`](../src/application/conversation-session-query-service.ts) 持有，稳定通知的缓存失效、待生效设置清理及 Reserve 前后置协调由 [`conversation-event-coordinator.ts`](../src/application/conversation-event-coordinator.ts) 执行，组合根保留协议解码与生命周期接线。`thread-adapter.ts` 同时保留 `thread/list` 的 `updatedAt` / `recencyAt` 供 CLI 清理的空闲过滤，精确历史计数只在清理候选校验等显式路径使用。
 
 历史恢复限定当前工作区，复用 `thread/list`、元数据 `thread/read` 和 `thread/resume`：
 [`router.ts`](../src/session-routing/router.ts) 在恢复和重连前核对历史目录，恢复后校验实际目录、权限和活动状态；

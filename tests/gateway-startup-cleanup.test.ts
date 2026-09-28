@@ -29,15 +29,24 @@ type GatewayApplicationFixture = GatewayApplication & Record<string, unknown>;
 it.each(["removed", "moved"])("drops pending recovery when its original binding was %s", async (change) => {
   const target = { surface: "feishu" as const, accountId: "default", conversationId: "review" };
   const binding = { target, workspaceId: "old", threadId: "history", sessionId: "history" };
-  const pending = new Map([[binding.threadId, { binding, occupiedNotified: true, failureCount: 3 }]]);
+  let bindings = [binding];
   const coordinator = new BindingRestoreCoordinator({
-    router: { allBindings: () => change === "removed" ? [] : [{ ...binding, workspaceId: "new" }] },
-  } as unknown as BindingRestoreCoordinatorOptions, {
-    disconnectedProviders: new Set(), disconnectedBindingsByProvider: new Map(),
-    pendingBindingRestores: pending, restoringThreadIds: new Set(), restoreAttempt: 1,
-  });
+    codex: { knownProvider: () => "openai" },
+    router: {
+      allBindings: () => bindings,
+      isBackgroundThread: () => false,
+      restoreSubscriptions: async () => [{ binding, bindingRemoved: false, reason: "active-writer", error: new Error("occupied") }],
+    },
+    enabledSurfaces: () => [target],
+    scheduledRecovery: () => undefined,
+    output: { publish: () => undefined },
+    logger: pino({ level: "silent" }),
+  } as unknown as BindingRestoreCoordinatorOptions);
+  await coordinator.restore();
+  expect(coordinator.hasPending(binding.threadId)).toBe(true);
+  bindings = change === "removed" ? [] : [{ ...binding, workspaceId: "new" }];
   coordinator.schedule();
-  expect(pending.size).toBe(0);
+  expect(coordinator.hasPending(binding.threadId)).toBe(false);
   await coordinator.close();
 });
 
@@ -48,6 +57,7 @@ function createGatewayApplicationFixture(
     Object.create(GatewayApplication.prototype),
     { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
+    { surfaceManager: { preparePersistence: async () => undefined, ...(properties.surfaceManager as object) } },
   ) as GatewayApplicationFixture;
 }
 
@@ -159,11 +169,6 @@ function createRestoreApplication(options: {
     },
     stopping: false,
     queueLifecycleTasks: new Set<Promise<void>>(),
-    disconnectedProviders: new Set<string>(),
-    disconnectedBindingsByProvider: new Map<string, Set<string>>(),
-    pendingBindingRestores: new Map(),
-    restoringThreadIds: new Set<string>(),
-    bindingRestoreAttempt: 0,
     codex: {
       onNotification: () => () => undefined,
       onDisconnect: () => () => undefined,
@@ -244,6 +249,7 @@ describe("GatewayApplication startup cleanup", () => {
         sandbox: "read-only", approvalPolicy: "never" }], "main"),
       core: Reflect.get(application, "core"), output: { subscribe: () => undefined },
       logger: pino({ level: "silent" }), isSurfaceEnabled: () => true,
+      acceptsExecution: () => true,
       creationContext: () => { throw new Error("unexpected creation"); }, presentConfirmation: () => undefined,
     } as unknown as ScheduledTaskCompositionOptions);
     Reflect.set(application, "scheduledTasks", composition);
@@ -279,7 +285,7 @@ describe("GatewayApplication startup cleanup", () => {
     }
   });
 
-  it.each(["metrics", "surface", "spool"])("stops startup after the pending %s stage", async (stage) => {
+  it.each(["persistence", "metrics", "surface", "spool"])("stops startup after the pending %s stage", async (stage) => {
     let release!: () => void;
     let entered!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
@@ -296,7 +302,7 @@ describe("GatewayApplication startup cleanup", () => {
       restoreSubscriptions: async () => [],
       overrides: {
         providerMetrics: { start: stage === "metrics" ? pause : async () => undefined, close: async () => undefined },
-        surfaceManager: { start: surfaceStart, stop: async () => undefined },
+        surfaceManager: { preparePersistence: stage === "persistence" ? pause : async () => undefined, start: surfaceStart, stop: async () => undefined },
         channelImageSpool: { start: spoolStart, stop: async () => undefined },
         conversationIdleReleaser: { start: idleStart, stop: async () => undefined },
       },
@@ -309,7 +315,7 @@ describe("GatewayApplication startup cleanup", () => {
     release();
     await rejected;
     await stopping;
-    if (stage === "metrics") expect(connect).not.toHaveBeenCalled();
+    if (stage === "metrics" || stage === "persistence") expect(connect).not.toHaveBeenCalled();
     if (stage !== "spool") expect(spoolStart).not.toHaveBeenCalled();
     expect(idleStart).not.toHaveBeenCalled();
   });
@@ -428,20 +434,19 @@ describe("GatewayApplication startup cleanup", () => {
   it("skips idle release for a binding while its Provider is disconnected", () => {
     const application = createGatewayApplicationFixture({
       codex: { knownProvider: () => "deepseek" },
-      disconnectedProviders: new Set(["deepseek"]),
-      pendingBindingRestores: new Map(),
-      restoringThreadIds: new Set(),
     });
     const isBindingRestoring = Reflect.get(
       GatewayApplication.prototype,
       "isBindingRestoring",
     ) as (this: GatewayApplication, threadId: string) => boolean;
 
+    const recovery = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    recovery.markProviderDisconnected("deepseek", new Set(["thread-1"]));
     expect(isBindingRestoring.call(
       application,
       "thread-1",
     )).toBe(true);
-    (application["disconnectedProviders"] as Set<string>).delete("deepseek");
+    recovery.completeProviderReconnect("deepseek");
     expect(isBindingRestoring.call(
       application,
       "thread-1",
@@ -467,10 +472,6 @@ describe("GatewayApplication startup cleanup", () => {
       stopping: false,
       logger: pino({ level: "silent" }),
       surfaces: [{ surface: "feishu", accountId: "default" }],
-      restoringThreadIds: new Set<string>(),
-      disconnectedProviders: new Set<string>(),
-      pendingBindingRestores: new Map(),
-      bindingRestoreAttempt: 0,
       codex: { knownProvider: () => undefined },
       output: { publish: () => undefined },
       core: { markTurnStarted: () => undefined },
@@ -528,8 +529,6 @@ describe("GatewayApplication startup cleanup", () => {
       },
       router: { allBindings: () => [] },
       codex: { knownProvider: () => undefined },
-      restoringThreadIds: new Set<string>(),
-      disconnectedProviders: new Set<string>(),
     });
     const restoreBindings = Reflect.get(
       GatewayApplication.prototype,
@@ -954,6 +953,7 @@ describe("GatewayApplication startup cleanup", () => {
     };
     const published: unknown[] = [];
     let restoreCalls = 0;
+    let occupied = true;
     vi.mocked(inspectThreadWriterLock).mockClear();
     vi.mocked(terminateThreadWriterHolder).mockClear();
     vi.mocked(inspectThreadWriterLock).mockReturnValue({
@@ -976,21 +976,18 @@ describe("GatewayApplication startup cleanup", () => {
           current: () => binding,
           restoreSubscriptions: async () => {
             restoreCalls += 1;
-            return [];
+            return occupied ? [{ binding, bindingRemoved: false, reason: "active-writer", error: new Error("occupied") }] : [];
           },
           allBindings: () => [binding],
           isBackgroundThread: () => false,
         },
-        pendingBindingRestores: new Map([
-          ["thread-release", {
-            binding,
-            occupiedNotified: true,
-            failureCount: 2,
-          }],
-        ]),
-        bindingRestoreAttempt: 1,
       },
     });
+    const recovery = (Reflect.get(application, "bindingRestoreCoordinator") as () => BindingRestoreCoordinator).call(application);
+    await recovery.restore();
+    expect(recovery.hasPending(binding.threadId)).toBe(true);
+    occupied = false;
+    restoreCalls = 0;
     const releaseThread = Reflect.get(
       GatewayApplication.prototype,
       "releaseThread",
@@ -1181,11 +1178,6 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       queueLifecycleTasks: new Set<Promise<void>>(),
-      disconnectedProviders: new Set<string>(),
-      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
-      pendingBindingRestores: new Map(),
-      restoringThreadIds: new Set<string>(),
-      bindingRestoreAttempt: 0,
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: () => () => undefined,
@@ -1277,11 +1269,6 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       queueLifecycleTasks: new Set<Promise<void>>(),
-      disconnectedProviders: new Set<string>(),
-      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
-      pendingBindingRestores: new Map(),
-      restoringThreadIds: new Set<string>(),
-      bindingRestoreAttempt: 0,
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: (handler: (error: Error, provider: string) => void) => {
@@ -1449,11 +1436,6 @@ describe("GatewayApplication startup cleanup", () => {
       },
       stopping: false,
       queueLifecycleTasks: new Set<Promise<void>>(),
-      disconnectedProviders: new Set<string>(),
-      disconnectedBindingsByProvider: new Map<string, Set<string>>(),
-      pendingBindingRestores: new Map(),
-      restoringThreadIds: new Set<string>(),
-      bindingRestoreAttempt: 0,
       codex: {
         onNotification: () => () => undefined,
         onDisconnect: (handler: (error: Error, provider: string) => void) => {

@@ -2,9 +2,17 @@ import { UserFacingError } from "../conversation-core/index.js";
 import {
   scheduleWeekdays,
   validateIanaTimeZone,
+  type Schedule,
   type ScheduleWeekday,
 } from "../scheduled-tasks/index.js";
-import type { ScheduledTaskCreateRequest } from "./scheduled-task-service.js";
+
+export interface ScheduledTaskCreateRequest {
+  readonly schedule: Schedule;
+  readonly timezone: string;
+  readonly prompt: string;
+  /** Optional explicit model ID or a provider/model composite; defaults to the current session. */
+  readonly model?: string;
+}
 
 export const scheduledTaskCommandUsageText = [
   "/schedule <自然语言描述（必须明确时区）>；固定句式可直接创建预览：N 分钟后 / 每 N 分钟 / 每天 HH:mm / 每月 N 号 HH:mm / 每周 DAYS HH:mm",

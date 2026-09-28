@@ -120,6 +120,17 @@ describe("request metrics aggregate reports", () => {
       reader.close();
       writer.close();
     }
+    for (const read of [
+      () => reader.aggregate(query),
+      () => reader.page({ ...query, limit: 10 }),
+      () => reader.daily(query),
+      () => reader.hourly(query),
+      () => reader.errors(query),
+      () => reader.threadSummary("thread-1"),
+      () => reader.threadTurnSummary("thread-1", "turn-1"),
+      () => reader.threadList({ ...query, limit: 10 }),
+      () => reader.count(),
+    ]) expect(read).toThrow("模型请求指标数据库已关闭");
   });
   it("aggregates all request sources uniformly by provider and model within a time range", () => {
     vi.useFakeTimers();

@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
+import { ensureSandboxDependencies } from "./sandbox-dependencies.mjs";
 
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const webuiDir = join(packageDir, "webui");
@@ -22,6 +23,8 @@ const prepared = alreadyPrepared
   : run(process.execPath, [join(packageDir, "scripts", "prepare-package.mjs")]);
 const webuiBuilt = prepared === 0 && !alreadyPrepared ? buildWebui() : prepared;
 if (prepared === 0 && webuiBuilt === 0) {
+  ensureCodexCli();
+  ensureSandboxDependencies();
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "codexc-source-install-"));
   try {
     const tarballPath = packSource(temporaryDirectory);
@@ -121,4 +124,37 @@ function runQuiet(command, args, cwd = packageDir) {
     if (result.stderr) process.stderr.write(result.stderr);
   }
   return result.status ?? 1;
+}
+
+// Source installation must work before init/setup; do not depend on channel configuration.
+function ensureCodexCli() {
+  const metadata = JSON.parse(readFileSync(join(packageDir, "src", "codex-protocol", "version.json"), "utf8"));
+  const expected = /^codex-cli (\d+\.\d+\.\d+)$/u.exec(metadata.codexCli)?.[1];
+  if (!expected) throw new Error("源码协议元数据缺少正式 Codex CLI 版本");
+  const configured = process.env.CODEX_BINARY?.trim();
+  const command = configured || "codex";
+  let executable = resolveOptionalExecutable(command);
+  let installed = false;
+  if (!executable) {
+    if (configured) throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新安装");
+    console.log(`未检测到 Codex CLI，正在安装 @openai/codex@${expected}`);
+    if (run("npm", ["install", "--global", "--no-audit", "--no-fund", `@openai/codex@${expected}`]) !== 0) {
+      throw new Error(`Codex CLI 安装失败；请检查 npm 全局目录权限后重试 npm run install:global`);
+    }
+    installed = true;
+    executable = resolveOptionalExecutable(command);
+    if (!executable) throw new Error("Codex CLI 安装后仍不在 PATH，请将当前 npm 全局命令目录加入 PATH 后重新运行 npm run install:global");
+  }
+  const invocation = resolveExecutableInvocation(executable, ["--version"]);
+  const result = spawnSync(invocation.file, invocation.args, {
+    encoding: "utf8", windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+  });
+  if (result.error || result.status !== 0) throw new Error("Codex CLI 版本检查失败，请修复可执行文件后重试安装");
+  const actual = result.stdout.trim().split(/\s+/u).at(-1)?.replace(/^v/u, "");
+  if (actual !== expected) {
+    if (installed) throw new Error(`Codex CLI 安装版本不匹配：需要 ${expected}，当前 ${actual || "未知"}`);
+    console.log(`保留已有 Codex CLI ${actual || "未知"}；Gateway 需要 ${expected}，完成渠道配置后运行 codexc update 确认同步版本。`);
+  } else {
+    console.log(`Codex CLI ${expected} 检测通过；首次使用继续运行 codexc init、codexc setup、codexc service install。`);
+  }
 }

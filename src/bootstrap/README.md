@@ -5,8 +5,11 @@
 ## 文件
 
 - `index.ts`：向进程入口公开 `GatewayApplication`、计划任务执行/恢复端口、进程生命周期入口和安全的 Gateway 所有权错误。
+- `persistent-surface-output.ts`：在总线发布时取得原目标归属，按有界窗口异步生成快照并提交独立 Delivery；恢复时复核当前授权，通过 Surface 可等待端口记录实际平台确认；进程内登记实时到达序号供输入镜像排序，序号不进入持久载荷，提交拒绝或开始投递时释放对应登记。
+- `persistent-interaction-port.ts`：审批和问题先等待同 Conversation 的前序持久结果；等待纳入原交互期限，取消立即释放所有权并拒绝迟到结果，不保存交互正文。
+- `output-execution-admission.ts`：在既有 Turn/Queue 执行端口前复核投递容量，统一覆盖普通输入、扩展调用、Review 和计划任务；保留停止、查询与 Queue 删除能力，不修改协议字段。
 - `async-question-coordinator.ts`：在同一入站通知链路登记实时异步问题并处理生命周期取消，避免输出积压导致旧问题重新登记；拥有有界去重、交互分批和超时，复用 Surface 输入组件，将完整回答经 Application 作为原 Thread 的普通输入提交。已进入提交的回答失败时仍提示未确认送达，不被后续取消吞掉；不处理审批响应，不保存历史。
-- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，强制创建 `automation` 后台 Thread 并启动单个 Turn；写请求结果未知时失败关闭。
+- `scheduled-task-executor.ts`：在每次计划任务运行前重新校验 Actor、Conversation、Workspace、Provider、模型和无人值守权限，在调度容量检查及创建 Thread 前复核投递准入，临时容量拒绝不撤销周期任务；强制创建 `automation` 后台 Thread 并启动单个 Turn，写请求结果未知时失败关闭。
 - `scheduled-task-run-coordinator.ts`：按持久化 Thread/Turn ID 关联 Run，接收既有 Core 输出完成事件，并在重启后读取权威分页 Turn 历史恢复或收敛运行状态。启动前置校验与绑定恢复均传递所属生命周期的取消信号，停止后的校验与历史读取结果不改写 Run 状态或继续翻页，保留运行记录供下次启动恢复。
 - `scheduled-task-server-request.ts`：为已关联的计划任务 Thread 返回五类 Server Request 的官方安全拒绝形状，其他方法明确失败；非计划任务请求交给既有审批处理器。只在 `scheduled_tasks.enabled=true` 时由组合根安装。
 - `scheduled-task-tool-request.ts`：校验前台 `item/tool/call` 的 Thread 绑定、唯一授权 Actor 和
@@ -14,14 +17,15 @@
   `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
   同类请求先由 `scheduled-task-server-request.ts` 拒绝。
 - `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
-  把具体组件所有权交给组件图。
+  把具体组件所有权交给组件图；只持有启动/停止幂等任务，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
+  私有持有当前配置、Workspace Registry、Surface 集合与管理器，统一协调配置重载和重启通知接收方的临时切换与恢复；
   启动账户预热绑定应用关闭信号，按账户记录安全失败分类，在指标存储关闭前最多等待 5 秒；
   迟到的用量与额度结果均禁止写入。把同一 Client 的
   原生 Thread Queue 与分页历史/Revert 端口注入 Application，并把 Queue changed、Thread reverted 通知
   仅用于失效短期选择快照和校正 Core 派生状态；提供连接启动、订阅恢复与组件关闭原语，重连委托给 `gateway-reconnect-coordinator.ts`，
-  并通过 Client 适配器把稳定事件分别转交 Core 与 `session-routing`、把
+  并通过 Client 适配器把稳定事件交给 Application 的 `ConversationEventCoordinator` 按序协调 Core，Thread 状态交给 `session-routing`，把
   Server Request 转交 Approval；未知或畸形 Notification 只记录 method 后忽略，未知或畸形
   高权限请求明确拒绝；受支持版本通过 Client 运行时信息读取，并把显示版本注入 Surface；
   对当前授权 Workspace 执行有时限的只读 Git 分支查询并注入 Application 状态；按 Setup 管理
@@ -35,6 +39,7 @@
   切换通知复用平台无关输出事件，不让 App Server Reader 等待额度 RPC 或渠道网络。
 - `gateway-reconnect-coordinator.ts`：拥有断线检查去重、串行 Provider 重连、12 次有界退避和关闭取消；通过断线代次拒绝过期恢复确认，重复断线不会重置未完成恢复的重试预算。连接成功后的绑定恢复失败只重试恢复阶段，不重复握手。主动停止的 Provider 不自动重启。关闭时等待断线检查与重连任务，等待时限仍由顶层生命周期控制；绑定状态由 Binding Restore Coordinator 管理。
 - `binding-restore-coordinator.ts`：单独拥有待恢复 Thread、Provider 断线绑定、恢复中集合、写锁占用通知和有界退避任务；Provider 重连与 Gateway 停止通过显式方法恢复、取消并等待，不保存第二套绑定。
+  恢复容器及退避计数只在协调器内部创建，组合根不持有或注入其可变状态。
 - `scheduled-task-composition.ts`：在功能启用时集中创建计划任务 Store、Executor、Run Coordinator、Scheduler、
   Application Service 与动态工具 Handler，并拥有恢复、启动、停止和关闭顺序；Gateway 组合根只保留
   Surface 创建上下文、无人值守权限边界和 App Server 请求接线。
@@ -157,7 +162,8 @@
   失败时保留 Core 已归约的本轮统计并省略不可靠的累计值，不阻断原始完成事件；整组统计读取共享
   250 ms 预算，耗尽后不再启动后续查询，已启动查询的迟到失败仍被捕获。第三方完成卡并行读取本次账户额度，独立上限 2 秒，失败或超时省略；超时和关闭取消出站查询，不回退到其他账户或缓存。并行完成各 Surface 的首次启动，
   单个渠道启动或运行失败时只取消该渠道交互并独立退避恢复，不停止 Gateway 或其他渠道。
-  首次启动和故障恢复期间只在有界内存队列中保留关键输出，就绪后按序补投；补投与实时输出共用每 Conversation 的有界顺序队列；
+  生产装配将终态与独立生命周期通知写入投递箱，实时调用 Surface 的本地生命周期观察端口；最新展示状态在 512 项/8 MiB 内存预算内按键合并，前序持久结果排空后复核归属再展示，直到渠道实际结算才释放预算，同键在途状态和最新替换值共同计费。
+  实时状态与持久结果共用 Conversation 调度，CLI 输入镜像按到达序号排在前序通知之后、后续结果之前；完成或断线将失效传播到渠道队列。永久隔离账号时移除其临时快照，排队任务取消后释放预算，在途任务等实际结算，持久记录不删除。未装配持久投递的独立路径保留原有内存恢复队列；补投与实时输出共用每 Conversation 的有界顺序队列；
   完成统计与额度查询只等待本会话，不阻塞其他会话或渠道。恢复前限时排空旧队列，
   故障期间的输出与在途返回事件按原始到达序号归并，旧快照不覆盖新快照；关闭后不再启动恢复。
   不可用期间不积压流式增量。渠道失效与启动失败日志附带受控的

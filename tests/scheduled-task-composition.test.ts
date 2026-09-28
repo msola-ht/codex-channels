@@ -36,6 +36,7 @@ describe("ScheduledTaskComposition", () => {
       output: { subscribe } as unknown as EventBus<OutputEvent>,
       logger: pino({ level: "silent" }),
       isSurfaceEnabled: () => true,
+      acceptsExecution: () => true,
       creationContext: () => {
         throw new Error("空 Store 恢复不应读取创建上下文");
       },

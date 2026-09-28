@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { resolveExecutableInvocation } from "../runtime/executable.mjs";
+import { resolveExecutableInvocation, resolveOptionalExecutable } from "../runtime/executable.mjs";
 import { packageDir } from "./package-path.mjs";
 import { userDataDir } from "./runtime-config.mjs";
 import {
@@ -705,7 +705,12 @@ function validateCodexContract(checkout, environment, options) {
 }
 
 function installedCodexVersion(environment, captureCommand) {
-  const executable = environment.CODEX_BINARY?.trim() || "codex";
+  const configured = environment.CODEX_BINARY?.trim();
+  const executable = configured || "codex";
+  if (!captureCommand && !resolveOptionalExecutable(executable, environment)) {
+    if (configured) throw new Error("CODEX_BINARY 指定的可执行文件不存在，请修正后重新运行 codexc update");
+    return "";
+  }
   const output = capture(
     executable,
     ["--version"],

@@ -277,7 +277,7 @@ describe("Feishu outbox routing and bounded output", () => {
     expect(operations[0]).toMatch(/^card:/u);
     expect(operations[0]).toMatch(/\[内容预览，完整回复见附件\]$/u);
     expect([...operations[0]!.slice("card:".length)].length)
-      .toBeLessThanOrEqual(5_000);
+      .toBeLessThanOrEqual(1_200);
     expect(operations[1]).toBe("file:codex-final-answer.txt");
     expect(files).toEqual([{
       chatId: "oc_chat",

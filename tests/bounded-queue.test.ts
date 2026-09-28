@@ -178,6 +178,30 @@ function nonCriticalCount<T>(queue: BoundedAsyncQueue<T>): number {
 }
 
 describe("EventBus", () => {
+  it("coalesces waiting snapshots independently for slow subscribers without blocking fast ones", async () => {
+    const bus = new EventBus<{ value: number; key?: string }>(pino({ level: "silent" }), 2, (event) => event.key);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const slow: number[] = [];
+    const fast: number[] = [];
+    bus.subscribe("slow", async (event) => {
+      if (event.value === 0) await gate;
+      slow.push(event.value);
+    });
+    bus.subscribe("fast", (event) => { fast.push(event.value); });
+    bus.publish({ value: 0 }, true);
+    await Promise.resolve();
+    for (let value = 1; value <= 100; value++) {
+      bus.publish({ value, key: "snapshot" }, true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(fast).toHaveLength(101);
+    expect(slow).toEqual([]);
+    release();
+    await bus.close();
+    expect(slow).toEqual([0, 100]);
+  });
+
   it("measures consumer backlog separately from handler execution", async () => {
     vi.useFakeTimers();
     try {
