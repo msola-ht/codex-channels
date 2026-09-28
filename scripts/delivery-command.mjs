@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DeliveryJournal } from "../dist/delivery/index.js";
-import { decodePersistentOutput, mayReleaseUncertainOutputBarrier } from "../dist/surfaces/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
@@ -35,6 +34,7 @@ export async function runDeliveryCommand(args, environment = process.env) {
   try {
     await journal.ready;
     if (read) {
+      const { decodePersistentOutput, mayReleaseUncertainOutputBarrier } = await import("../dist/surfaces/delivery-diagnostics/index.js");
       const summary = await journal.summary();
       let retainedNotices = 0;
       const blockedConversations = new Set();

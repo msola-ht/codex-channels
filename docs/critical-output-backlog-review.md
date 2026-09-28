@@ -604,3 +604,28 @@ Coordinator 恢复扫描与实时失败维护会话级人工恢复状态；准�
 | 计划任务异步预检与 Thread 创建后重新复核，失败清理订阅 | scheduled-task-executor、SessionRouter 及隔离真实 unsubscribe 合同 |
 
 本次复审未发现上述范围的新代码阻断项；修正文档中数据库 schema 与 owner 版本的区分，并补全子代理关闭结算说明。下一步由正常提交钩子运行完整 verify:commit；本节不提前宣称门禁通过。部署仍需按 delivery 文档停写备份和核对旧记录，此次提交不执行部署。
+
+
+### 微信实渠道投递验收（2026-09-28）
+
+验收编号 `WEIXIN-LIVE-20260928-01`，部署分支包含 `52780201`。发送前只读确认当前 Thread 已绑定配置中的微信账号、Actor 在允许名单内、Workspace 目录一致且存在有效加密回复上下文。参考仓库 `upstream/openclaw-weixin` HEAD 与锁定 v2.4.9 提交一致，沿用既有消息、文件及回复上下文合同。
+
+使用已部署的 PersistentSurfaceOutput、WeixinOutbox、凭据 Client 和代理感知 Fetch，通过独立临时投递箱向当前授权微信私聊依次发送：SHORT-OK 短消息、长文预览、codex-final-answer.txt、NEXT-OK 后续消息。每次实际发送前重新检查配置、绑定、Workspace、Actor 及最新回复上下文。未启动额外入站轮询，未修改生产投递箱或用户历史，未输出凭据。
+
+- 平台确认：3 次 sendText、1 次 sendFile 均成功，各自 started/confirmed 检查点完整；faults 为空，测试投递箱最终 records/pending/sending/uncertain/blocked 均为 0。
+- 长文：编号 001–300，88,622 字节；SHA-256 为 `15cd2d0432824cb3a681f52c5ad7e6b068df01ba9767675be971053366eafdc9`。
+- 用户确认：四项齐全、顺序正确、没有重复；附件编号完整，最后一行为 `WEIXIN-LIVE-20260928-01-END`。
+- 生产旁路只读核对：当前微信 Conversation 的未确认记录查询为空；抽查 Gateway 最近 350 条日志中的 11 条微信记录，输出任务完成 1 次，告警和错误均为 0。临时测试本身的四次发送由独立验收报告记录，不冒充生产 Gateway 的四次日志。
+
+结论：微信普通文本、长正文预览与完整附件、连续输出顺序的实渠道组件验收通过，当前生产输入与回复窗口可用。此次长正文由临时测试入口注入已部署投递组件，未覆盖 App Server 生成长正文到生产 Gateway 归约的完整路径；也未覆盖生产重启恢复、网络中断、超时、未知投递或撤权故障注入。微信当前不支持出站原生引用，不以引用关系作为验收条件。报告及预期全文保存在本机 `/tmp/codexc-weixin-acceptance-68N1Km/`，该临时目录不作为长期资料或仓库文件。
+
+
+### PR #196 Node 22 CI 失败修复（2026-09-28）
+
+检查运行 `36437927140`：Linux 完整验证 11 项失败，macOS 13 项失败；Windows 与独立真实 App Server 合同通过。失败集中于 CLI 标准错误输出与进程启动密集用例超时。定位到 delivery-command 静态导入 Surface 总出口，将平台 SDK 及其传递 SQLite 依赖提前引入所有 CLI 命令。在 CI 精确版本 Node 22.13.0 上，仅导入原总出口即可复现 SQLite ExperimentalWarning 和 punycode DEP0040；本地 Node 24 门禁通过不能代替最低支持版本验证。
+
+修复采用 Surface 的 delivery-diagnostics/index.ts 窄公开出口，复用原有载荷解码和屏障策略，不复制策略、不加载平台 SDK；仅在实际 status/list 操作时动态加载。运行时边界白名单从总出口收窄到此入口，帮助和其他命令不再承担该依赖链。新增无警告抑制的模块加载回归，显式拒绝诊断入口及命令模块引入 node:sqlite、Telegram 或飞书 SDK。
+
+Node 22 首轮针对性回归中，六个关联文件通过，投递 CLI 的一个组合用例仍因连续九次子进程启动超出 5 秒失败。将其拆为查询/互斥、显式重试、送达确认三个独立合同，保留全部断言与原有期限。实际投递 CLI 夹具按既有可执行入口的 --disable-warning=ExperimentalWarning 启动，以匹配工作线程 SQLite 的公开命令行为；新依赖边界回归不采用该选项，不用警告过滤掩盖错误导入。未扩大生产重试或超时，未修改 CI 跳过规则。
+
+微信实渠道验收记录与本次修复一起交付；Provider 草案不纳入。提交时使用 Node 22.13.0 经正常 pre-commit 运行完整门禁，macOS 的远程结果仍需推送后重新验证，不能用本机 Linux 结果代替。

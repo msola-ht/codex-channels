@@ -2,8 +2,9 @@
 
 本目录保存外部交互平台适配器。Surface 负责把平台输入转换为 Application 命令，并把 Core 输出和审批交互渲染为平台消息。
 
-`index.ts` 是所有 Surface 的公开导出入口。
+`index.ts` 是 Gateway 装配各 Surface 的主公开入口。
 
+`delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
 `persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，限定未知辅助通知可解除顺序屏障，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
 等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`

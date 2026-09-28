@@ -68,7 +68,7 @@
 - `session-cleanup.mjs` / `session-cleanup.d.mts`：实现并声明 `codexc sessions cleanup`，通过
   App Server 枚举多 Provider/Workspace，按主会话真实轮数和整组可查询成员的空闲条件预览；所属 Provider 读取状态，后代参与绑定、活动、固定与 Workspace 检查，确认后每个父会话只发一次官方归档并核验结果。
 - `cli-help.mjs`：校验公开命令的精确帮助路径，拒绝未知子命令和多余参数。
-- `delivery-command.mjs`：通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
+- `delivery-command.mjs`：仅执行 status/list 时从 Surface 窄诊断入口加载载荷解码与屏障策略，避免帮助及其他 CLI 命令加载平台 SDK；通过 Surface 公开入口复用持久输出分类，离线查看独立投递箱的计数、事件身份、阻塞策略与检查点，并根据明确参数重发或确认送达；不输出正文、不自动清理未确认记录。
 - `cli-menu.mjs` / `cli-menu.d.mts`：顶层导航、运行与连接子菜单和服务操作菜单，以及交互操作失败呈现；只分派现有命令，保留进程终止信号语义。
 - `cleanup-menu.mjs` / `cleanup-menu.d.mts`：统一清理交互入口，复用会话参数菜单、指标维护菜单和现有执行命令；转储先预览再确认删除，Provider 指标按精确 ID 确认清理，单项完成后返回菜单。
 - `session-menu.mjs` / `session-menu.d.mts`：统一清理菜单使用的会话归档参数收集；收集 Turn 上限和空闲天数后调用
