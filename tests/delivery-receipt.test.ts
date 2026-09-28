@@ -7,6 +7,7 @@ import { FeishuOutbox } from "../src/surfaces/feishu/index.js";
 import { FeishuMessageError } from "../src/surfaces/feishu/message-error.js";
 import { WeixinOutbox, WeixinReplyContextStore } from "../src/surfaces/weixin/index.js";
 import { captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../src/surfaces/delivery-receipt.js";
+import { SnapshotDelivery } from "../src/surfaces/snapshot-delivery.js";
 import { ConversationDeliveryQueue } from "../src/surfaces/conversation-delivery-queue.js";
 
 const logger = pino({ level: "silent" });
@@ -124,6 +125,15 @@ it("rejects an output that never schedules a delivery", async () => {
   await expect(captureDelivery(() => {}, new AbortController().signal, async () => {})).rejects.toThrow("未产生投递操作");
 });
 
+it("rejects a reliable body whose queued operation finishes without a platform confirmation", async () => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "fixture" });
+  try {
+    await expect(captureDelivery(() => {
+      queue.enqueue("chat", async () => {}, true);
+    }, new AbortController().signal, async () => {}, { requireConfirmation: true })).rejects.toThrow("没有平台送达确认");
+  } finally { await queue.close(); }
+});
+
 it("filters hidden operations at intake and refuses to acknowledge an older retained operation under a changed policy", async () => {
   const send = vi.fn(async () => ({ message_id: 1 }));
   const outbox = new TelegramOutbox({ sendMessage: send } as unknown as Api, logger, undefined, { operationUpdateDisplay: "hidden" });
@@ -165,4 +175,103 @@ it.each([false, true])("splits Feishu Post fallback by encoded bytes without los
     expect(content).not.toContain("截断");
     expect(posts.length).toBeLessThanOrEqual(5);
   } finally { await outbox.close(); }
+});
+
+
+describe.each(["telegram", "feishu"] as const)("%s live snapshot invalidation", (surface) => {
+  it.each(["lost", "completed", "next-turn"] as const)("cancels already queued reasoning and plans on %s without cancelling results", async (ending) => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const sent: string[] = [];
+    const send = async (_chat: string, text: string): Promise<string> => {
+      sent.push(text);
+      if (sent.length === 1) await blocked;
+      return String(sent.length);
+    };
+    const outbox = surface === "telegram"
+      ? new TelegramOutbox({ sendMessage: async (chat: string, text: string) => ({ message_id: Number(await send(chat, text)) }),
+        sendChatAction: async () => true } as unknown as Api, logger, undefined, { planUpdatesEnabled: true })
+      : new FeishuOutbox("default", {
+        sendText: async (chat, text) => { await send(chat, text); }, sendPost: async (chat, text) => { await send(chat, text); },
+        sendMarkdownCard: send, sendCard: (chat, card) => send(chat, JSON.stringify(card)), updateCard: async () => {},
+        createStreamingCard: async (chat, text) => ({ cardId: "card", messageId: await send(chat, text) }),
+        updateStreamingCard: async () => {}, finishStreamingCard: async () => {},
+      }, logger, { planUpdatesEnabled: true });
+    const target = { surface, accountId: "default", conversationId: "chat" };
+    const base = { target, threadId: "thread", turnId: "turn" };
+    try {
+      outbox.handle({ target, type: "warning", message: "barrier" });
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      outbox.handle({ ...base, type: "turn.reasoning", summary: "", elapsedMs: 1000 });
+      outbox.handle({ ...base, type: "plan.updated", explanation: null, steps: [{ step: "stale plan", status: "inProgress" }] });
+      outbox.observe(ending === "lost" ? { target, threadId: "thread", type: "connection.lost", message: "lost" }
+        : ending === "completed" ? { ...base, type: "turn.completed", status: "completed" }
+          : { ...base, type: "turn.started", turnId: "next" });
+      const result = outbox.deliver({ ...base, type: "text.completed", itemId: "answer", text: "kept result", phase: "final_answer" },
+        new AbortController().signal, async () => {});
+      release();
+      await result;
+      expect(sent).toHaveLength(2);
+      expect(sent[1]).toContain("kept result");
+    } finally { release(); await outbox.close(); }
+  });
+});
+
+
+it("does not leak the first worker receipt into later ordinary output", async () => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "fixture" });
+  const checkpoints: DeliveryCheckpoint[] = [];
+  const calls: string[] = [];
+  const receipt = captureDelivery(() => {
+    queue.enqueue("chat", async () => { await checkpointDelivery("reliable", async () => { calls.push("reliable"); }); }, true);
+  }, new AbortController().signal, async (value) => { checkpoints.push(value); });
+  queue.enqueue("chat", async () => { await checkpointDelivery("ordinary", async () => { calls.push("ordinary"); }); }, true);
+  await receipt;
+  await queue.close();
+  expect(calls).toEqual(["reliable", "ordinary"]);
+  expect(checkpoints.map((value) => value.operation)).toEqual(["reliable", "reliable"]);
+});
+
+it("cancels a buffered running command before turn completion can flush it as a late running message", async () => {
+  const sent: string[] = [];
+  const outbox = new TelegramOutbox({ sendMessage: async (_chat: string, text: string) => {
+    sent.push(text); return { message_id: sent.length };
+  } } as unknown as Api, logger);
+  const base = { target: { surface: "telegram" as const, accountId: "default", conversationId: "chat" }, threadId: "thread", turnId: "turn" };
+  try {
+    outbox.handle({ ...base, type: "operation.updated", operation: { itemId: "command", kind: "command", status: "running", detail: "STALE_COMMAND" } });
+    outbox.observe({ ...base, type: "turn.completed", status: "completed" });
+    await outbox.deliver({ ...base, type: "turn.completed", status: "completed" }, new AbortController().signal, async () => {});
+    expect(sent).toHaveLength(1);
+    expect(sent.join(" ")).not.toContain("STALE_COMMAND");
+  } finally { await outbox.close(); }
+});
+
+
+it("settles replaced and cancelled snapshots and immediately returns their shared queue budget", async () => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "fixture", maximumPendingOperations: 2 });
+  const snapshots = new SnapshotDelivery();
+  const event: OutputEvent = { type: "account.updated", target: { surface: "telegram", accountId: "default", conversationId: "chat" }, authMode: "chatgpt", planType: "free" };
+  let release!: () => void;
+  queue.enqueue("chat", () => new Promise<void>((resolve) => { release = resolve; }), true);
+  await settle();
+  const send = vi.fn(async () => {});
+  const abort = new AbortController();
+  const first = snapshots.run(event, new AbortController().signal, () => true, () => {
+    queue.enqueue("chat", send, true, { coalesceKey: "state" });
+  });
+  void first.catch(() => {});
+  const latest = snapshots.run(event, abort.signal, () => true, () => {
+    queue.enqueue("chat", send, true, { coalesceKey: "state" });
+  });
+  void latest.catch(() => {});
+  try {
+    await expect(first).rejects.toThrow("替换");
+    abort.abort();
+    await expect(latest).rejects.toThrow("取消");
+    expect(queue.enqueue("chat", send, true)).toBe(true);
+    release();
+    await queue.close();
+    expect(send).toHaveBeenCalledOnce();
+  } finally { release(); await queue.close(); }
 });

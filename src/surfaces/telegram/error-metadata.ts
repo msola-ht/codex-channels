@@ -39,6 +39,6 @@ export function isTelegramDeliveryUncertain(error: unknown): boolean {
 }
 
 export function isTelegramMessageNotModified(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("message is not modified");
+  return error instanceof GrammyError && error.method === "editMessageText" && error.error_code === 400
+    && /^(?:Bad Request: )?message is not modified(?:$|:)/i.test(error.description);
 }

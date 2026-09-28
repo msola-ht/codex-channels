@@ -2,7 +2,7 @@ import { checkpointDelivery } from "../delivery-receipt.js";
 import { GrammyError, HttpError } from "grammy";
 import type { Logger } from "pino";
 
-import { telegramErrorMetadata } from "./error-metadata.js";
+import { isTelegramMessageNotModified, telegramErrorMetadata } from "./error-metadata.js";
 import { observeSurfaceStage, surfaceDiagnosticContext, withSurfaceDiagnosticContext } from "../diagnostics.js";
 
 interface TelegramApiCall {
@@ -13,6 +13,20 @@ interface TelegramApiCall {
 
 export class TelegramApiExecutor {
   constructor(private readonly logger: Logger) {}
+
+  /** A verified unchanged edit confirms the requested content, before receipt settlement. */
+  async editMessageText(
+    context: Omit<TelegramApiCall, "operation">,
+    operation: (signal: AbortSignal) => Promise<unknown>,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<void> {
+    await checkpointDelivery("editMessageText", async () => {
+      try { await this.execute({ ...context, operation: "editMessageText" }, operation, signal); }
+      catch (error) {
+        if (signal.aborted || !isTelegramMessageNotModified(error)) throw error;
+      }
+    }, (error) => error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500);
+  }
 
   async call<T>(
     context: TelegramApiCall,

@@ -139,3 +139,37 @@ const backlogSheddableEventTypes: ReadonlySet<OutputEvent["type"]> =
 export function isSheddableBacklogEvent(event: OutputEvent): boolean {
   return backlogSheddableEventTypes.has(event.type);
 }
+
+/** Latest presentation state, held only in bounded memory; text deltas use their complete Item instead. */
+export function surfaceOutputSnapshotKey(event: OutputEvent): string | undefined {
+  let detail: string | null = null;
+  switch (event.type) {
+    case "operation.updated":
+      if (event.operation.status !== "running" || event.operation.kind === "contextCompaction") return undefined;
+      detail = event.operation.itemId;
+      break;
+    case "user.message": detail = event.itemId; break;
+    case "mcp.status.updated": detail = event.name; break;
+    case "plan.updated": case "turn.reasoning": case "thread.status":
+    case "account.updated": case "account.rateLimits.updated": break;
+    default: return undefined;
+  }
+  return JSON.stringify([event.target.surface, event.target.accountId, event.target.conversationId,
+    "threadId" in event ? event.threadId : null, "turnId" in event ? event.turnId : null, event.type, detail]);
+}
+
+export function supersedesSurfaceSnapshot(event: OutputEvent, snapshot: OutputEvent): boolean {
+  if (event.target.surface !== snapshot.target.surface || event.target.accountId !== snapshot.target.accountId
+    || event.target.conversationId !== snapshot.target.conversationId) return false;
+  if (!("threadId" in event) || !("threadId" in snapshot) || event.threadId !== snapshot.threadId) return false;
+  if (event.type === "connection.lost") return true;
+  // A mirrored input still explains the result after the Turn has finished.
+  if (snapshot.type === "user.message") return false;
+  if (event.type === "turn.started" && "turnId" in snapshot && event.turnId !== snapshot.turnId) return true;
+  if (!("turnId" in event) || !("turnId" in snapshot) || event.turnId !== snapshot.turnId) return false;
+  if (event.type === "turn.completed") return true;
+  if (event.type === "operation.updated" && event.operation.status !== "running") {
+    return snapshot.type === "operation.updated" && snapshot.operation.itemId === event.operation.itemId;
+  }
+  return event.type === "text.completed" && snapshot.type === "turn.reasoning";
+}

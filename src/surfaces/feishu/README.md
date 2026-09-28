@@ -67,11 +67,11 @@ Application 的内联 Data URL 输入，同一 Thread 的
   映射为稳定文本内容；CLI/TUI 输入使用共享“CLI 输入”语义，启动通知、`/status` 与
   `turn.completed` 结束统计均包含当前 Workspace Git 分支。
 - `message-error.ts`：Client 与 Outbox 共用的结构化消息错误合同，不依赖 SDK；Client 保留原错误类及类型导出。
-- `text-streams.ts`：独占正文活动流与已完成流、刷新计时器、卡片序号、分卡与终态页脚；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。
+- `text-streams.ts`：独占按 Conversation、Thread、Turn 隔离的正文活动流与已完成流、刷新计时器、卡片序号、分卡与终态页脚；共用 Outbox 已绑定关闭信号的消息端口、投递队列和降级发送方法。断线清理使完成缓存立即失效，在途终态不能重新登记旧缓存；无法复用卡片时向当前目标发送完成信息。
 - `outbox-message-port.ts`：定义窄消息端口并统一绑定 Outbox 关闭信号，覆盖正文、分片、回复、媒体与原地更新；关闭期限结束后不再启动平台调用。
 - `outbox.ts`：精确账号路由并通过通用有界队列调用窄消息发送端口；在内存中按 Turn 关联
   原始输入消息，使开始确认、阶段性最终正文及首张流式卡片原生回复同一输入；回复目标
-  保留到 Turn 终态；Computer Use 按 Item 保存卡片消息 ID 并原地更新终态，更新失败时记录错误并
+  保留到 Turn 终态；计划、思考和 Computer Use 复用消息前均核对 Conversation，Computer Use 按 Item 保存卡片消息 ID 并原地更新终态，更新失败时记录错误并
   单独发送终态消息。完成的原生生成图片
   独立于操作显示档位上传并发送。
 - `status-card.ts`：把 Session 状态和计划进度映射为可原地更新的轻量 CardKit 2.0 卡片。

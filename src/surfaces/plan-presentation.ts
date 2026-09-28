@@ -1,6 +1,7 @@
-import type {
-  OutputEvent,
-  TurnPlanStep,
+import {
+  conversationTargetKey,
+  type OutputEvent,
+  type TurnPlanStep,
 } from "../conversation-core/index.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 
@@ -20,18 +21,24 @@ export class TurnPlanProgressState {
   accept(
     event: Extract<OutputEvent, { type: "plan.updated" }>,
   ): readonly PlanPresentation[] {
-    const key = planTurnKey(event.threadId, event.turnId);
+    const key = planTurnKey(event);
     const tracker = this.trackers.get(key) ?? new PlanProgressTracker();
     this.trackers.set(key, tracker);
     return tracker.accept(event);
   }
 
   complete(event: Extract<OutputEvent, { type: "turn.completed" }>): void {
-    this.trackers.delete(planTurnKey(event.threadId, event.turnId));
+    this.trackers.delete(planTurnKey(event));
   }
 
   clear(): void {
     this.trackers.clear();
+  }
+
+  clearThread(threadId: string): void {
+    for (const key of this.trackers.keys()) {
+      if (key.startsWith(`${threadId}:`)) this.trackers.delete(key);
+    }
   }
 }
 
@@ -141,6 +148,6 @@ function boundedText(value: string, maximumCharacters: number): string {
     : `${characters.slice(0, Math.max(0, maximumCharacters - 1)).join("")}…`;
 }
 
-function planTurnKey(threadId: string, turnId: string): string {
-  return `${threadId}:${turnId}`;
+function planTurnKey(event: Extract<OutputEvent, { type: "plan.updated" | "turn.completed" }>): string {
+  return `${event.threadId}:${event.turnId}:${conversationTargetKey(event.target)}`;
 }

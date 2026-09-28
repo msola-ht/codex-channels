@@ -28,6 +28,19 @@ afterEach(() => {
 
 
 describe("Feishu outbox operation summaries", () => {
+  it("does not let a failed running CUA snapshot suppress the next identical live update", async () => {
+    const sendCard = vi.fn(async () => "om_cua").mockRejectedValueOnce(new Error("unknown creation outcome"));
+    const outbox = new FeishuOutbox("cli_app", {
+      ...cardMethods, sendCard, sendText: async () => {}, sendPost: async () => {},
+    }, pino({ level: "silent" }));
+    try {
+      await expect(outbox.handle(computerUseEvent("running"))).rejects.toThrow("unknown creation outcome");
+      expect(sendCard).toHaveBeenCalledOnce();
+      await outbox.handle(computerUseEvent("running"));
+      expect(sendCard).toHaveBeenCalledTimes(2);
+    } finally { await outbox.close(); }
+  });
+
   it.each(["full", "compact", "hidden"] as const)("delivers distinct compaction notices in %s mode", async (display) => {
     const sent: string[] = [];
     const outbox = new FeishuOutbox("cli_app", {
@@ -100,7 +113,7 @@ describe("Feishu outbox operation summaries", () => {
     },
   );
 
-  it("keeps queued CUA updates attached to their own item and turn while creation is pending", async () => {
+  it("keeps terminal CUA updates attached to their own turn while cancelling obsolete running cards", async () => {
     const calls: string[] = [];
     let release!: (messageId: string) => void;
     const firstMessage = new Promise<string>((resolve) => { release = resolve; });
@@ -126,9 +139,8 @@ describe("Feishu outbox operation summaries", () => {
     await outbox.close();
     expect(calls.filter((call) => call.includes("电脑与浏览器操作"))).toEqual([
       "create:1:电脑与浏览器操作 · 运行中",
-      "update:om_cua_1:电脑与浏览器操作 · 已完成",
-      "create:2:电脑与浏览器操作 · 运行中",
-      "update:om_cua_2:电脑与浏览器操作 · 已完成",
+      "create:2:电脑与浏览器操作 · 已完成",
+      "create:3:电脑与浏览器操作 · 已完成",
     ]);
   });
 
@@ -139,7 +151,10 @@ describe("Feishu outbox operation summaries", () => {
     const outbox = new FeishuOutbox("cli_app", {
       ...cardMethods, sendText: async () => {}, sendPost: async () => {}, sendCard, updateCard,
     }, pino({ level: "silent" }));
-    if (failedStart) outbox.handle(computerUseEvent("running"));
+    if (failedStart) {
+      outbox.handle(computerUseEvent("running"));
+      await settle();
+    }
     outbox.handle(computerUseEvent("completed"));
     await outbox.close();
     expect(sendCard).toHaveBeenCalledTimes(failedStart ? 2 : 1);
@@ -160,6 +175,7 @@ describe("Feishu outbox operation summaries", () => {
       sendMarkdownCard: async (_chatId, markdown) => { markdownCards.push(markdown); },
     }, logger);
     outbox.handle(computerUseEvent("running"));
+    await settle();
     outbox.handle(computerUseEvent("completed"));
     outbox.handle(completed({}, "最终回复"));
     await outbox.close();

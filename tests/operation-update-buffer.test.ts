@@ -10,6 +10,20 @@ import {
 } from "../src/surfaces/operation-update-buffer.js";
 
 describe("OperationUpdateBuffer", () => {
+  it("does not flush a previous Conversation's operations into a new recipient", () => {
+    const buffer = new OperationUpdateBuffer<string>();
+    const first = operationEvent(operation("query", "mcpTool", "completed"));
+    const second = { ...first, target: { ...first.target, conversationId: "other" } };
+    buffer.accept(first, "chat");
+    expect(buffer.flush({ ...turnCompleted(), target: second.target })).toBeNull();
+    buffer.accept(second, "other");
+    expect(buffer.flushTurn(second)?.target).toBe("other");
+    expect(buffer.flush(turnCompleted())?.target).toBe("chat");
+    buffer.accept(second, "other");
+    buffer.clearThread("thread");
+    expect(buffer.flushTurn(second)).toBeNull();
+  });
+
   it.each(["running", "completed", "failed", "declined"] as const)(
     "does not defer CUA %s updates to the final answer", (status) => {
       const buffer = new OperationUpdateBuffer<string>();

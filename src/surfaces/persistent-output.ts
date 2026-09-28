@@ -12,15 +12,15 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
   if (resolveSurfaceDelivery(event.target.surface, event).disposition === "ignore") return false;
   switch (event.type) {
     case "text.completed": case "turn.completed": case "subagent.completed":
+    case "turn.started": case "subagent.spawned": case "subagent.contacted":
+    case "connection.lost": case "connection.restored": case "thread.availability": case "thread.name":
     case "mcp.oauth.completed": case "warning": case "conversation.idle.released": return true;
     case "operation.updated": return event.operation.kind === "contextCompaction" || (event.operation.status !== "running" && (
       (event.operation.kind === "imageGeneration" && event.operation.status === "completed" && event.operation.imagePath !== undefined)
       || shouldDisplayOperation(event.operation, display)
     ));
-    case "turn.started": return event.target.surface === "weixin";
-    case "text.delta": case "user.message": case "plan.updated": case "subagent.spawned":
-    case "subagent.contacted": case "thread.status": case "thread.name": case "thread.availability":
-    case "turn.reasoning": case "connection.lost": case "connection.restored": case "account.updated":
+    case "text.delta": case "user.message": case "plan.updated": case "thread.status":
+    case "turn.reasoning": case "account.updated":
     case "account.rateLimits.updated": case "mcp.status.updated": return false;
     default: { const exhaustive: never = event; throw new Error(`未分类输出：${String(exhaustive)}`); }
   }

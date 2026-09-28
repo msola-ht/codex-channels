@@ -14,6 +14,8 @@ interface DeliveryOperation {
   run(signal: AbortSignal): Promise<void>;
   receipt?: DeliveryReceipt;
   release?: () => void;
+  cleanup?: () => void;
+  settled?: () => void;
 }
 
 export interface ConversationDeliveryOptions {
@@ -23,6 +25,9 @@ export interface ConversationDeliveryOptions {
    */
   coalesceKey?: string;
   purpose?: DeliveryOperation["purpose"];
+  signal?: AbortSignal;
+  /** Called after execution or removal, once the queue no longer owns the operation. */
+  settled?: () => void;
 }
 
 interface ConversationWorker {
@@ -86,10 +91,25 @@ export class ConversationDeliveryQueue {
         conversationId, critical, reason: "closed" }, "Surface 输出未入队");
       return false;
     }
-    if (!this.hasCapacity()) return false;
+    if (DeliveryReceipt.current()?.controller.signal.aborted || options?.signal?.aborted) return false;
+    const replacesPending = options?.coalesceKey !== undefined
+      && this.workers.get(conversationId)?.queue.hasPendingKey(options.coalesceKey) === true;
+    if (!replacesPending && !this.hasCapacity()) return false;
     const worker = this.worker(conversationId);
     const operation = this.operation(conversationId, critical, run, options?.purpose);
+    if (options?.signal) operation.requestSignal = options.signal;
+    if (options?.settled) operation.settled = options.settled;
     const accepted = worker.queue.push(operation, critical, options?.coalesceKey);
+    if (accepted && (operation.receipt || options?.signal)) {
+      const signal = AbortSignal.any([...(operation.receipt ? [operation.receipt.controller.signal] : []),
+        ...(options?.signal ? [options.signal] : [])]);
+      const cancel = (): void => {
+        if (worker.queue.remove(operation)) operation.release?.();
+      };
+      operation.cleanup = () => signal.removeEventListener("abort", cancel);
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) cancel();
+    }
     this.stageLogger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
       "Surface 输出入队结果");
     if (!accepted) {
@@ -201,14 +221,16 @@ export class ConversationDeliveryQueue {
     this.pendingOperations++;
     const releaseReceipt = receipt?.retain();
     let released = false;
-    return {
+    const operation: DeliveryOperation = {
       critical, run, purpose, enqueuedAt: performance.now(),
       ...(receipt ? { receipt } : {}),
       release: () => {
         if (released) return;
         released = true;
+        operation.cleanup?.();
         this.pendingOperations--;
         releaseReceipt?.();
+        operation.settled?.();
       },
       context: {
         ...surfaceDiagnosticContext(),
@@ -217,6 +239,7 @@ export class ConversationDeliveryQueue {
         deliveryId: randomUUID(),
       },
     };
+    return operation;
   }
 
   private hasCapacity(): boolean {
@@ -240,6 +263,7 @@ export class ConversationDeliveryQueue {
           "Surface Conversation 输出队列合并了同键输出",
         );
       }, (operation, reason) => {
+        operation.cleanup?.();
         operation.receipt?.fail(new Error("可靠输出被替换"));
         operation.release?.();
         const fields = { ...operation.context, critical: operation.critical, reason };
@@ -250,7 +274,7 @@ export class ConversationDeliveryQueue {
       worker = {
         queue,
         controller,
-        done: this.runWorker(conversationId, queue, controller.signal),
+        done: DeliveryReceipt.without(() => this.runWorker(conversationId, queue, controller.signal)),
       };
       this.workers.set(conversationId, worker);
     }
@@ -345,7 +369,7 @@ export class ConversationDeliveryQueue {
             // receipts and ordered requests must never start after cancellation.
             operation.receipt?.controller.signal.throwIfAborted();
             operation.requestSignal?.throwIfAborted();
-            return operation.receipt ? operation.receipt.run(() => operation.run(operationSignal)) : operation.run(operationSignal);
+            return operation.receipt ? operation.receipt.run(() => operation.run(operationSignal)) : DeliveryReceipt.without(() => operation.run(operationSignal));
           },
         ));
       } catch (error) {

@@ -6,12 +6,14 @@ export interface DeliveryCheckpoint {
   messageId?: string;
 }
 
-const context = new AsyncLocalStorage<DeliveryReceipt>();
+const context = new AsyncLocalStorage<DeliveryReceipt | undefined>();
 
-/** Tracks the actual queued operations produced by one durable output, including nested enqueues. */
+/** Tracks actual queued operations for one output, including nested enqueues and live snapshots. */
 export class DeliveryReceipt {
   private pending = 1;
   private retained = false;
+  private confirmationRequired = false;
+  private confirmed = false;
   private failure: unknown;
   private contentIncomplete = false;
   private completeContentConfirmed = false;
@@ -20,11 +22,13 @@ export class DeliveryReceipt {
   readonly done = new Promise<void>((resolve, reject) => { this.resolve = resolve; this.reject = reject; });
   readonly controller = new AbortController();
 
-  constructor(readonly checkpoint: (value: DeliveryCheckpoint) => Promise<void>, signal: AbortSignal) {
+  constructor(readonly checkpoint: (value: DeliveryCheckpoint) => Promise<void>, signal: AbortSignal,
+    readonly transient = false) {
     void this.done.catch(() => {});
     const abort = (): void => {
+      this.failure ??= new Error("输出投递已取消");
       this.controller.abort();
-      this.reject(new Error("可靠投递已取消"));
+      if (!this.transient) this.reject(this.failure);
     };
     if (signal.aborted) abort();
     else signal.addEventListener("abort", abort, { once: true });
@@ -32,6 +36,7 @@ export class DeliveryReceipt {
   }
 
   static current(): DeliveryReceipt | undefined { return context.getStore(); }
+  static without<T>(call: () => T): T { return context.run(undefined, call); }
   run<T>(call: () => T): T { return context.run(this, call); }
   retain(): () => void {
     this.retained = true;
@@ -39,20 +44,25 @@ export class DeliveryReceipt {
     let released = false;
     return () => { if (!released) { released = true; this.release(); } };
   }
+  requireConfirmation(): void { this.confirmationRequired = true; }
   markContentIncomplete(): void { this.contentIncomplete = true; }
   /** Only a confirmed artifact containing the original full result can satisfy this. */
   confirmCompleteContent(): void { this.completeContentConfirmed = true; }
   needsCompleteContent(): boolean { return this.contentIncomplete && !this.completeContentConfirmed; }
   fail(error: unknown): void { this.failure ??= error; this.controller.abort(); }
   async record(value: DeliveryCheckpoint): Promise<void> {
-    try { await this.checkpoint(value); }
+    try {
+      await this.checkpoint(value);
+      if (value.state === "confirmed") this.confirmed = true;
+    }
     catch (error) { this.fail(error); throw error; }
   }
   release(): void {
     if (--this.pending !== 0) return;
     if (this.failure) this.reject(this.failure);
-    else if (this.needsCompleteContent()) this.reject(new Error("可靠结果内容未完整确认"));
-    else if (!this.retained) this.reject(new Error("可靠输出未产生投递操作"));
+    else if (!this.transient && this.needsCompleteContent()) this.reject(new Error("可靠结果内容未完整确认"));
+    else if (this.confirmationRequired && !this.confirmed) this.reject(new Error("可靠正文没有平台送达确认"));
+    else if (!this.retained && !this.transient) this.reject(new Error("可靠输出未产生投递操作"));
     else this.resolve();
   }
 }
@@ -61,9 +71,11 @@ export async function captureDelivery(
   call: () => void,
   signal: AbortSignal,
   checkpoint: (value: DeliveryCheckpoint) => Promise<void>,
+  options?: { requireConfirmation?: boolean },
 ): Promise<void> {
   signal.throwIfAborted();
   const receipt = new DeliveryReceipt(checkpoint, signal);
+  if (options?.requireConfirmation) receipt.requireConfirmation();
   try { receipt.run(call); } catch (error) { receipt.fail(error); }
   finally { receipt.release(); }
   await receipt.done;

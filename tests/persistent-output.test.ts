@@ -227,6 +227,24 @@ it("rechecks authorization before each fragment and retains a partly delivered r
   } finally { await journal.close(); }
 });
 
+it("reports durable admission separately from rejected submissions", async () => {
+  const journal = new DeliveryJournal(fixture(), { workerUrl, limits: { ...defaultDeliveryLimits, records: 1 } });
+  const faults: string[] = [];
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, deliver: async () => {}, fault: (code) => { faults.push(code); },
+  });
+  try {
+    expect(await coordinator.submit(submission("before-start"))).toBe(false);
+    await coordinator.start();
+    expect(await coordinator.submit(submission("retained"))).toBe(true);
+    expect(await coordinator.submit(submission("overflow", "other"))).toBe(false);
+    expect(coordinator.hasOutstanding("other")).toBe(false);
+    expect(await journal.summary()).toMatchObject({ records: 1, pending: 1 });
+  } finally { await coordinator.close(); }
+  expect(await coordinator.submit(submission("after-close"))).toBe(false);
+  expect(faults).toEqual(["closed", "capacity", "closed"]);
+});
+
 it("fences an ambiguous send and revoked ownership without blocking another Conversation", async () => {
   const journal = new DeliveryJournal(fixture(), { workerUrl });
   const delivered: string[] = [];
@@ -307,6 +325,7 @@ it("retains an unavailable channel's output, restarts, delivers through the actu
   };
   const first = create(false);
   await first.manager.start();
+  first.output.publish({ type: "turn.started", target, threadId: "thread", turnId: "turn" }, false);
   first.output.publish({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", text: "durable answer", phase: "final_answer" }, true);
   for (const status of ["running", "completed"] as const) {
     first.output.publish({ type: "operation.updated", target, threadId: "thread", turnId: "turn", operation: { itemId: "compaction", kind: "contextCompaction", status } }, true);
@@ -316,19 +335,20 @@ it("retains an unavailable channel's output, restarts, delivers through the actu
   expect(sent).toEqual([]);
   const pending = new DeliveryJournal(directory, { workerUrl });
   await pending.ready;
-  expect(await pending.summary()).toMatchObject({ records: 3, pending: 3 });
+  expect(await pending.summary()).toMatchObject({ records: 4, pending: 4 });
   await pending.close();
   const second = create(true);
   try {
     await second.manager.start();
-    await vi.waitFor(() => expect(sent).toHaveLength(3));
+    await vi.waitFor(() => expect(sent).toHaveLength(4));
     await vi.waitFor(() => {
       const database = new DatabaseSync(join(directory, "outbox.sqlite3"), { readOnly: true });
       try { expect(database.prepare("SELECT COUNT(*) AS count FROM deliveries").get()?.count).toBe(0); }
       finally { database.close(); }
     });
-    expect(sent[0]).toContain("durable answer");
-    expect(sent.slice(1)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
+    expect(sent[0]).toContain("已开始处理");
+    expect(sent[1]).toContain("durable answer");
+    expect(sent.slice(2)).toEqual(["开始压缩上下文…", "上下文压缩已完成。"]);
     expect(faults).toEqual([]);
   } finally {
     await second.manager.stop();

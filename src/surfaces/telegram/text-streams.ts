@@ -1,5 +1,4 @@
 import { DeliveryReceipt } from "../delivery-receipt.js";
-import { isTelegramMessageNotModified } from "./error-metadata.js";
 import { InputFile, type Api } from "grammy";
 import type { InputRichMessage } from "grammy/types";
 import type { Logger } from "pino";
@@ -56,7 +55,7 @@ export class TelegramTextStreams {
   delta(event: Extract<OutputEvent, { type: "text.delta" }>): void {
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
-    const key = this.streamKey(turnKey, event.itemId);
+    const key = this.streamKey(chatId, turnKey, event.itemId);
     const existing = this.streams.get(key);
     if (!existing && this.streams.size >= maximumTelegramActiveStreams) {
       if (!this.streamCapacityWarningIssued) {
@@ -96,10 +95,17 @@ export class TelegramTextStreams {
     return;
   }
 
+  discard(event: Extract<OutputEvent, { type: "text.completed" }>): void {
+    const key = this.streamKey(event.target.conversationId, this.turnKey(event.threadId, event.turnId), event.itemId);
+    const state = this.streams.get(key);
+    if (state?.timer) clearTimeout(state.timer);
+    this.streams.delete(key);
+  }
+
   complete(event: Extract<OutputEvent, { type: "text.completed" }>): void {
     const chatId = event.target.conversationId;
     const turnKey = this.turnKey(event.threadId, event.turnId);
-    const key = this.streamKey(turnKey, event.itemId);
+    const key = this.streamKey(chatId, turnKey, event.itemId);
     const existing = this.streams.get(key);
     const state = existing ?? this.createStream(chatId, turnKey);
     const completedText = `${event.background ? `后台任务 · ${event.threadId.slice(0, 12)}\n\n` : ""}${event.text}`;
@@ -123,15 +129,16 @@ export class TelegramTextStreams {
     }
     this.enqueue(
       chatId,
-      (signal) => this.flush(chatId, key, true, existing ? undefined : state, signal),
+      // Reliable output owns this state even if lifecycle observation clears the live Map.
+      (signal) => this.flush(chatId, key, true, state, signal),
       true,
       { purpose: "answer" },
     );
     return;
   }
 
-  prepareTurnCompletion(threadId: string, turnId: string): (chatId: string, signal?: AbortSignal) => Promise<void> {
-    const keys = this.streamKeysForTurn(threadId, turnId);
+  prepareTurnCompletion(chatId: string, threadId: string, turnId: string): (chatId: string, signal?: AbortSignal) => Promise<void> {
+    const keys = this.streamKeysForTurn(chatId, threadId, turnId);
     for (const key of keys) {
       const stream = this.streams.get(key);
       if (stream?.timer) {
@@ -197,7 +204,7 @@ export class TelegramTextStreams {
 
   flushBeforeVisibleOutput(chatId: string, turnKey: string): void {
     for (const [key, state] of this.streams) {
-      if (state.turnKey !== turnKey || !state.timer) {
+      if (state.chatId !== chatId || state.turnKey !== turnKey || !state.timer) {
         continue;
       }
       clearTimeout(state.timer);
@@ -218,7 +225,7 @@ export class TelegramTextStreams {
       return;
     }
     // 终态尝试从活动流脱离，Turn 完成不能从头重播一次已部分发送或结果不确定的回复。
-    if (final && !standaloneState) this.streams.delete(key);
+    if (final && this.streams.get(key) === state) this.streams.delete(key);
     await this.flushState(chatId, state, final, signal);
     if (final && state.phase !== "commentary") {
       this.logger.info({ ...surfaceDiagnosticContext(), chatId, messageId: state.messageId },
@@ -259,7 +266,6 @@ export class TelegramTextStreams {
               "Telegram 完成正文已格式化");
             return;
           } catch (error) {
-            if (isTelegramMessageNotModified(error)) return;
             if (signal?.aborted || !isTelegramFormatRejection(error)) throw error;
             this.logger.warn(
               {
@@ -280,15 +286,13 @@ export class TelegramTextStreams {
     }
     if (state.messageId) {
       try {
-        await this.executor.call(
-          { chatId, operation: "editMessageText", critical: final },
+        await this.executor.editMessageText(
+          { chatId, critical: final },
           (requestSignal) => this.api.editMessageText(chatId, state.messageId!, first, {}, telegramAbortSignal(requestSignal)),
           signal,
         );
       } catch (error) {
-        if (isTelegramMessageNotModified(error)) {
-          // The authoritative final text is already visible.
-        } else if (final && !signal?.aborted && isTelegramBadRequest(error)) {
+        if (final && !signal?.aborted && isTelegramBadRequest(error)) {
           state.messageId = await this.sendFirstChunk(chatId, state, first, signal);
         } else {
           throw error;
@@ -318,13 +322,13 @@ export class TelegramTextStreams {
     };
   }
 
-  private streamKey(turnKey: string, itemId: string): string {
-    return `${turnKey}:${itemId}`;
+  private streamKey(chatId: string, turnKey: string, itemId: string): string {
+    return JSON.stringify([chatId, turnKey, itemId]);
   }
 
-  private streamKeysForTurn(threadId: string, turnId: string): string[] {
-    const prefix = `${this.turnKey(threadId, turnId)}:`;
-    return [...this.streams.keys()].filter((key) => key.startsWith(prefix));
+  private streamKeysForTurn(chatId: string, threadId: string, turnId: string): string[] {
+    const turnKey = this.turnKey(threadId, turnId);
+    return [...this.streams].filter(([, state]) => state.chatId === chatId && state.turnKey === turnKey).map(([key]) => key);
   }
 
   private turnKey(threadId: string, turnId: string): string {
@@ -336,7 +340,7 @@ export class TelegramTextStreams {
   }
 
   private async sendFirstChunk(chatId: string, state: StreamState, text: string, signal?: AbortSignal): Promise<number> {
-    const replyTo = this.replyTargets.get(state.turnKey);
+    const replyTo = this.replyTargets.get(chatId, state.turnKey);
     const silent = state.phase === "commentary" || this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -362,20 +366,19 @@ export class TelegramTextStreams {
     const richMessage: InputRichMessage = { markdown };
     if (state.messageId !== undefined) {
       try {
-        await this.executor.call(
-          { chatId, operation: "editMessageText", critical: true },
+        await this.executor.editMessageText(
+          { chatId, critical: true },
           (requestSignal) => this.api.editMessageText(chatId, state.messageId!, richMessage, {}, telegramAbortSignal(requestSignal)),
           signal,
         );
         return state.messageId;
       } catch (error) {
-        if (isTelegramMessageNotModified(error)) return state.messageId;
         if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
         state.messageId = undefined;
       }
     }
 
-    const replyTo = this.replyTargets.get(state.turnKey);
+    const replyTo = this.replyTargets.get(chatId, state.turnKey);
     const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendRichMessage", critical: true },
@@ -401,20 +404,19 @@ export class TelegramTextStreams {
   ): Promise<number> {
     if (state.messageId !== undefined) {
       try {
-        await this.executor.call(
-          { chatId, operation: "editMessageText", critical: true },
+        await this.executor.editMessageText(
+          { chatId, critical: true },
           (requestSignal) => this.api.editMessageText(chatId, state.messageId!, html, operationEditOptions(), telegramAbortSignal(requestSignal)),
           signal,
         );
         return state.messageId;
       } catch (error) {
-        if (isTelegramMessageNotModified(error)) return state.messageId;
         if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
         state.messageId = undefined;
       }
     }
 
-    const replyTo = this.replyTargets.get(state.turnKey);
+    const replyTo = this.replyTargets.get(chatId, state.turnKey);
     const silent = this.notifiedTurns.has(state.turnKey);
     const message = await this.executor.call(
       { chatId, operation: "sendMessage", critical: true },
@@ -482,18 +484,17 @@ export class TelegramTextStreams {
       const first = !deliveredChunk;
       const deliver = async (text: string, formatted: boolean): Promise<void> => {
         if (first && state.messageId !== undefined) {
-          await this.executor.call(
-            { chatId, operation: "editMessageText", critical: true },
+          await this.executor.editMessageText(
+            { chatId, critical: true },
             (requestSignal) => this.api.editMessageText(chatId, state.messageId!, text,
               formatted ? operationEditOptions() : {}, telegramAbortSignal(requestSignal)), signal,
           ).catch(async (error: unknown) => {
-            if (isTelegramMessageNotModified(error)) return;
             if (signal?.aborted || !isTelegramMissingMessage(error)) throw error;
             state.messageId = undefined;
             await deliver(text, formatted);
           });
         } else {
-          const replyTo = first ? this.replyTargets.get(state.turnKey) : undefined;
+          const replyTo = first ? this.replyTargets.get(chatId, state.turnKey) : undefined;
           const silent = !first || this.notifiedTurns.has(state.turnKey);
           const message = await this.executor.call(
             { chatId, operation: "sendMessage", critical: true },

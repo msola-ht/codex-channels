@@ -4,9 +4,10 @@
 
 `index.ts` 是所有 Surface 的公开导出入口。
 
-`persistent-output.ts` 分类可恢复的终态输出和上下文压缩开始通知，并将必要图片纳入同一有界快照；
+`persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
-等待实际操作结算，Bootstrap 才能确认持久记录；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。普通 `handle` 继续用于中间输出。
+等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
+允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。
 
 Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
 [`docs/index.md`](../../docs/index.md) 的支持矩阵为准；平台 SDK 提供某项能力或生成协议中出现
@@ -39,14 +40,18 @@ DPAPI 主密钥 + AES-256-GCM 字符串记录机制；平台模块仍各自拥�
 只通过编译期内置插件注册表显式注册。
 Bootstrap 的内置插件注册表负责把一个渠道插件展开为零到多个账号实例并验证身份唯一性；
 Telegram、飞书目录仍只实现平台 Adapter，不导入插件宿主或组合根类型。
-`SurfaceOutputPort` 接收平台无关的 `OutputEvent`，只负责同步入队，不得等待平台网络请求。
+`SurfaceOutputPort` 接收平台无关的 `OutputEvent`。Reader 只同步调用 `observe`；`deliver` 和
+`deliverSnapshot` 的等待发生在后台 Conversation 队列，不阻塞 Reader。
+可选 `observe` 在实时发布时执行本地生命周期处理，持久重放不再调用；`handle` 的直接调用仍处理本地状态。
+`delivery-policy.ts` 定义最新展示快照的键及终态淘汰关系；Bootstrap 持有有界临时快照，平台不维护第二套投递恢复队列。状态进入渠道队列后仍属于该快照的预算；断线、终态与新轮次
+会取消对应旧状态的未发送操作。状态发送失败或结果未知会向调用方报告，不自动重试整个状态。
 Bootstrap 按 `surface + accountId` 精确选择一个输出端口，Surface 不再各自订阅全局事件总线。
-只有成功启动且仍处于运行状态的 Surface 才会收到输出；单个输出端口拒绝事件不得中断后续路由。
+平台投递只交给成功启动且仍处于运行状态的 Surface；本地生命周期观察不依赖渠道就绪。单个输出端口拒绝事件不得中断后续路由。
 运行连接失败后，同一 Adapter 的 `start()` 必须能重新建立输入连接；Bootstrap 对每个账号实例
-独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 只用于 Gateway 关闭，必须可在部分启动后
+独立退避，不通过重启 Gateway 恢复单个渠道。`stop()` 用于 Gateway 关闭或账号永久隔离，必须可在部分启动后
 安全调用并保持幂等。生产装配中的关键终态由 Bootstrap 提交独立持久投递箱，不写入 StateStore；
 渠道恢复后按 Conversation 顺序交给 `deliver`，实际发送确认成功后才清除记录。渠道离线或存在前序
-持久结果时，中间输出不另建恢复队列。未装配持久投递的独立使用路径仍采用内存恢复缓冲，按
+持久结果时，展示状态按键保留最新快照，正文增量依赖完整 Item，不另建流式恢复队列。未装配持久投递的独立使用路径仍采用内存恢复缓冲，按
 `isSheddableBacklogEvent` 合并或削减中间输出。容量与恢复合同见[关键结果投递](../../docs/delivery.md)。
 临时连接故障只能取消当前交互，不能把可恢复端口永久关闭。
 配置变更通知使用结构化动作区分热加载、自动重启、需要重装、加载失败，以及第三方模型设置的
@@ -58,7 +63,8 @@ Surface，因此未匹配到具体变更的 Surface 仍会收到不包含平台�
 
 `ConversationDeliveryQueue` 提供可复用的每 Conversation 有界顺序队列：同一 Conversation 串行，
 不同 Conversation 可并行；关键输出可以替换仍在等待的非关键输出。入队时可携带合并键，仍在等待
-执行的同键条目会就地替换为最新载荷并保持顺序与容量计数，用于按秒刷新的中间状态。新增 Surface
+执行的同键条目会就地替换为最新载荷并保持顺序与容量计数，达到硬预算时仍允许等量替换。
+取消会移除未执行操作并释放预算；不带回执的普通任务显式清除上个任务的异步回执上下文。新增 Surface
 时应实现统一输入、输出和审批边界，通过 Application/Core 接入，并把平台发送操作放入该队列或
 提供等价约束。`waitForIdle()` 在暂停新入队后限时等待当前任务结束，保留队列供恢复后继续使用。
 Bootstrap 复用该队列隔离每个会话的完成统计准备，并关闭逐 Token 的普通阶段
@@ -100,7 +106,7 @@ Telegram 和飞书在交互消息创建成功或失败时
 关闭队列时拒绝新输出，立即结束 `runOrdered` 等待者并限时等待在途发送；超时记录告警，
 清除余下积压且不再执行发送回调。飞书普通输出选择在期限内排空，期限结束再取消；
 有序交互在所有模式下立即取消，其取消信号与普通输出相互独立。并发关闭调用等待同一个关闭结果，不能提前报告完成。
-实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。
+实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。`enqueue` 可关联取消信号；已接受任务通过 `settled` 在移出队列或实际执行结束时结算一次，调用方据此释放上游载荷预算。取消在途任务不会提前结算。
 `diagnostics.ts` 提供 Surface 内部共用的脱敏阶段计时与异步关联上下文，只携带账号、会话、
 Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处理和平台调用复用该上下文，
 不保留事件正文。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
@@ -126,12 +132,12 @@ Markdown、Telegram HTML、微信结构化字段渲染列表。
 自定义会话分区入口及其管理员权限已移除。内置 Pinned 在三渠道统一复用 `/pin` 与 `/unpin`，
 渠道只提交选择，不保存分区状态。
 `turn-reply-targets.ts` 只在 Surface 内存中把待提交输入的精确平台消息 ID 绑定到实际
-Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；不保存消息正文，
-Turn、Thread 或 Surface 关闭时清理。
+Thread 与 Turn，允许 `turn.started` 早于提交响应时仍原生回复正确输入；读取、登记与删除均核对
+Conversation，旧会话完成不能删除新会话已登记的回复目标。不保存消息正文，Turn、Thread 或 Surface 关闭时清理。
 `quoted-input.ts` 把各平台已验证的回复/引用正文转换为有界、明确标记且与当前消息分离的上下文；
 引用获取仍由各 Surface 负责，不能读取 Gateway 私有历史或让引用内容参与命令解析。
 `plan-presentation.ts` 统一完整计划与新增完成步骤的有界展示、状态符号和去重指纹；Telegram 复用
-同一个按 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态；微信不展示
+同一个按完整 Conversation 与 Turn 隔离并在完成时释放的进度状态，飞书保留原地更新卡片所需的平台消息状态并核对接收会话；微信不展示
 结构化计划，其回复窗口只保留生命周期、终态与全局空闲通知。各渠道只决定完整计划是原地更新还是
 追加紧凑进度。
 `lifecycle-presentation.ts` 统一 Telegram、飞书与微信的 Gateway 上线、Turn 开始确认、子代理
@@ -219,7 +225,7 @@ Workspace 操作提示只在 Telegram 实际提供切换按钮时声明可点击
 并为三个渠道提供有界的压缩通知去重与文案；
 Telegram HTML、飞书 CardKit Markdown 与微信安全文本的转义、布局、分组和发送仍由各自
 Adapter 负责。
-`operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作，并统一在非 Commentary
+`operation-update-buffer.ts` 在 Surface 边界按完整 Conversation 与 Turn 有界暂存成功的查询操作，并统一在非 Commentary
 最终文本或 Turn 完成前 Flush；最终回复前单项
 保持原详情，多项生成一次分类计数汇总，并展示最多 8 个去重后的详情及各自次数；
 超出时明确省略数量。可靠投递入口在每个终态操作后显式排空所属 Turn 的缓冲，避免仅凭内存聚合就确认持久记录。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样

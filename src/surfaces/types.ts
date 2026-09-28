@@ -28,8 +28,12 @@ export interface SurfaceConfigurationChange {
 }
 
 export interface SurfaceOutputPort {
+  /** Apply live local lifecycle state synchronously; never await platform delivery. Not called on replay. */
+  observe?(event: OutputEvent): void;
   retains?(event: OutputEvent): boolean;
   handle(event: OutputEvent): Promise<void> | void;
+  /** Settle actual transient operations (including intentional no-op); validate ownership before sending. */
+  deliverSnapshot?(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void>;
   deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void>;
 }
 

@@ -880,7 +880,7 @@ describe("TelegramOutbox", () => {
     const outbox = createOutbox(api);
 
     outbox.handle(turnStarted());
-    outbox.setTurnReplyTarget("thread-1", "turn-1", 42);
+    outbox.setTurnReplyTarget(target.conversationId, "thread-1", "turn-1", 42);
     outbox.handle(textDelta("commentary", "正在检查", "commentary"));
     await vi.advanceTimersByTimeAsync(1_000);
     await settle();
@@ -1086,7 +1086,7 @@ describe("TelegramOutbox", () => {
       ok: false, error_code: 400, description: "Bad Request: message is not modified",
     }, "editMessageText", {}));
     const text = "## 报告\n" + "字段： `output_tokens`\n".repeat(350);
-    outbox.handle(textCompleted("final", text));
+    await outbox.deliver(textCompleted("final", text), new AbortController().signal, async () => {});
     outbox.handle(turnCompleted());
     await settle();
     await outbox.close();
@@ -1344,7 +1344,7 @@ describe("TelegramOutbox", () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
 
-    outbox.setTurnReplyTarget("thread-1", "turn-1", 42);
+    outbox.setTurnReplyTarget(target.conversationId, "thread-1", "turn-1", 42);
     outbox.handle(operationUpdated("command-1", "running", "command", "TOKEN=[REDACTED] git status --short"));
     await vi.advanceTimersByTimeAsync(750);
     await settle();
@@ -1672,7 +1672,7 @@ describe("TelegramOutbox", () => {
     const api = new FakeTelegramApi();
     const outbox = createOutbox(api);
 
-    outbox.setTurnReplyTarget("thread-1", "turn-1", 42);
+    outbox.setTurnReplyTarget(target.conversationId, "thread-1", "turn-1", 42);
     outbox.handle(textCompleted("final-1", "来自 Codex 的回复", "final_answer"));
     outbox.handle(textCompleted("final-2", "补充说明", "final_answer"));
     outbox.handle(turnCompleted());
@@ -1840,6 +1840,26 @@ describe("TelegramOutbox", () => {
     expect(api.sendOptions.at(-1)).not.toHaveProperty("disable_notification");
 
     await outbox.close();
+  });
+
+  it("cleans live state before a deferred disconnect notice and does not clear a newer turn on replay", async () => {
+    vi.useFakeTimers();
+    const api = new FakeTelegramApi();
+    const outbox = createOutbox(api);
+    const lost = { type: "connection.lost" as const, target, threadId: "thread-1", message: "连接已断开" };
+    try {
+      outbox.handle(turnStarted());
+      await vi.advanceTimersByTimeAsync(400);
+      outbox.observe(lost);
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(api.actions).toEqual(["typing"]);
+      expect(api.sent).toEqual([turnStartedPanel]);
+      outbox.observe({ ...turnStarted(), turnId: "new-turn" });
+      await outbox.deliver(lost, new AbortController().signal, async () => {});
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(api.actions).toEqual(["typing", "typing"]);
+      expect(api.sent.at(-1)).toBe("Codex 连接已中断：连接已断开");
+    } finally { await outbox.close(); }
   });
 
   it("sends a connection restore notice without clearing stream output", async () => {

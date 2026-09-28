@@ -767,8 +767,8 @@ export class TelegramInteractionPort implements InteractionPort {
     outcome: string,
   ): Promise<void> {
     return this.queue.runOrdered(target.conversationId, (signal) =>
-      this.executor.call(
-        { chatId: target.conversationId, operation: "editMessageText", critical: true },
+      this.executor.editMessageText(
+        { chatId: target.conversationId, critical: true },
         (requestSignal) => this.bot.api.editMessageText(
           target.conversationId,
           messageId,

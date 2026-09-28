@@ -1,6 +1,6 @@
 export class TurnReplyTargets<T> {
   private readonly pending = new Map<string, T[]>();
-  private readonly byTurn = new Map<string, T>();
+  private readonly byTurn = new Map<string, { conversationId: string; target: T }>();
 
   prepare(conversationId: string, target: T): void {
     const current = this.pending.get(conversationId) ?? [];
@@ -14,11 +14,11 @@ export class TurnReplyTargets<T> {
   ): T | undefined {
     const pending = this.pending.get(conversationId);
     if (pending === undefined || pending.length === 0) {
-      return this.byTurn.get(turnKey);
+      return this.get(conversationId, turnKey);
     }
     this.pending.delete(conversationId);
     const target = pending[0]!;
-    this.byTurn.set(turnKey, target);
+    this.set(conversationId, turnKey, target);
     return target;
   }
 
@@ -26,16 +26,17 @@ export class TurnReplyTargets<T> {
     this.pending.delete(conversationId);
   }
 
-  set(turnKey: string, target: T): void {
-    this.byTurn.set(turnKey, target);
+  set(conversationId: string, turnKey: string, target: T): void {
+    this.byTurn.set(turnKey, { conversationId, target });
   }
 
-  get(turnKey: string): T | undefined {
-    return this.byTurn.get(turnKey);
+  get(conversationId: string, turnKey: string): T | undefined {
+    const entry = this.byTurn.get(turnKey);
+    return entry?.conversationId === conversationId ? entry.target : undefined;
   }
 
-  delete(turnKey: string): void {
-    this.byTurn.delete(turnKey);
+  delete(conversationId: string, turnKey: string): void {
+    if (this.byTurn.get(turnKey)?.conversationId === conversationId) this.byTurn.delete(turnKey);
   }
 
   clearThread(threadId: string): void {

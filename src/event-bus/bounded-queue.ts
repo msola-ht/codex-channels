@@ -41,6 +41,10 @@ export class BoundedAsyncQueue<T> {
     }
   }
 
+  hasPendingKey(key: string): boolean {
+    return this.pendingByCoalesceKey.has(key);
+  }
+
   get size(): number {
     return this.entries.length;
   }

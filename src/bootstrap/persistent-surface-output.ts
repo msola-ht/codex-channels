@@ -9,8 +9,9 @@ export interface PersistentSurfaceOutputOptions {
   owner(event: OutputEvent): string;
   authorized(event: OutputEvent, owner: string): boolean;
   accounts(): string[];
-  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean): Promise<void>;
+  deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
   fault(code: string, account?: string): void;
+  changed?(): void;
   workerUrl?: URL;
 }
 
@@ -21,6 +22,7 @@ export class PersistentSurfaceOutput {
   private readonly preparingConversations = new Map<string, number>();
   private readonly tails = new Map<string, Promise<void>>();
   private pendingBytes = 0;
+  private readonly liveOrders = new Map<string, number>();
   private closed = false;
   private readonly idleWaiters = new Set<() => void>();
 
@@ -33,6 +35,8 @@ export class PersistentSurfaceOutput {
         return options.authorized(payload.event, payload.owner);
       },
       deliver: async (record, signal) => {
+        const liveOrder = this.liveOrders.get(record.id);
+        this.liveOrders.delete(record.id);
         const payload = decodePersistentOutput(record.payload);
         if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
         await withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
@@ -41,7 +45,7 @@ export class PersistentSurfaceOutput {
             signal.throwIfAborted();
             if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
           }
-        }, () => options.authorized(payload.event, payload.owner)));
+        }, () => options.authorized(payload.event, payload.owner), liveOrder));
       },
       fault: (code, account) => options.fault(code, account),
       changed: () => this.notifyIdleWaiters(),
@@ -72,7 +76,7 @@ export class PersistentSurfaceOutput {
     return this.preparingConversations.has(key) || this.coordinator.hasOutstanding(key);
   }
 
-  accept(event: OutputEvent): void {
+  accept(event: OutputEvent, liveOrder?: number): void {
     const account = surfaceAccountKey(event.target.surface, event.target.accountId);
     if (this.closed) return;
     let encoded: string;
@@ -95,11 +99,15 @@ export class PersistentSurfaceOutput {
     this.preparingConversations.set(conversation, (this.preparingConversations.get(conversation) ?? 0) + 1);
     const snapshot = JSON.parse(encoded) as OutputEvent;
     const previous = this.tails.get(conversation) ?? Promise.resolve();
+    const id = randomUUID();
+    let submitted = false;
+    if (liveOrder !== undefined) this.liveOrders.set(id, liveOrder);
     const task = previous.then(async () => {
       const payload = await snapshotPersistentOutput(snapshot, owner);
       if (this.closed && this.closeExpired) throw new Error("投递箱快照关闭期限已结束");
-      await this.coordinator.submit({ id: randomUUID(), account, conversation, payload: JSON.stringify(payload) });
+      submitted = await this.coordinator.submit({ id, account, conversation, payload: JSON.stringify(payload) });
     }).catch(() => this.options.fault("snapshot-failed", account)).finally(() => {
+      if (!submitted) this.liveOrders.delete(id);
       this.pendingBytes -= bytes;
       this.preparing.delete(task);
       const count = (this.preparingConversations.get(conversation) ?? 1) - 1;
@@ -125,11 +133,14 @@ export class PersistentSurfaceOutput {
           resolve();
         }, 5_000); }),
       ]);
-    } finally { clearTimeout(timer); await this.coordinator.close(); }
+    } finally { clearTimeout(timer); await this.coordinator.close(); this.liveOrders.clear(); }
   }
 
   private closeExpired = false;
-  private notifyIdleWaiters(): void { for (const check of [...this.idleWaiters]) check(); }
+  private notifyIdleWaiters(): void {
+    for (const check of [...this.idleWaiters]) check();
+    this.options.changed?.();
+  }
 }
 
 function checkPayloadBudget(value: unknown): void {

@@ -40,7 +40,7 @@
   长回复展开为 HTML 分段，特别长的内容使用预览加附件；明确的格式拒绝只降级当前分段；网络结果不确定时停止本次发送，Turn 完成不重播失败正文；完成的原生 `imageGeneration`
   PNG/JPEG 经过共享安全读取边界后使用 `sendPhoto` 静默发送，且不受操作过程显示档位影响。
 - `approval-operation-coordinator.ts`：隔离审批请求与操作日志之间的等待、拒绝抑制和 Turn 清理状态。
-- `text-streams.ts`：拥有正文流、刷新计时器、消息 ID、首次发送结果未知状态及每 Turn 的正文提醒状态；处理最终 HTML/Rich Markdown、长回复与附件降级，复用 Outbox 的同一投递队列与只读回复目标。
+- `text-streams.ts`：拥有按 Conversation、Turn、Item 隔离的正文流、刷新计时器、消息 ID、首次发送结果未知状态及每 Turn 的正文提醒状态；处理最终 HTML/Rich Markdown、长回复与附件降级，复用 Outbox 的同一投递队列与只读回复目标。空白 commentary 由 Outbox 明确省略并清理对应流，非空可靠正文必须取得发送确认。
 - `message-options.ts`：正文、操作与面板共用的原生回复、静默和 HTML 消息选项。
 - 通知策略按逻辑事件降噪。Gateway 启动、CLI 输入镜像、思考/过程增量、操作过程、Turn 结束统计、
   账户/额度更新、普通 warning 和同一回复的后续分片使用 Telegram `disable_notification`；
@@ -79,7 +79,7 @@
   不记录消息正文，也不让 Surface 生命周期无限悬挂。
   有界重试耗尽后向 Bootstrap 报告渠道故障，由该
   Telegram 实例独立退避重连，不停止 Gateway 或其他 Surface。
-- `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试；新建消息仅重试明确的限流拒绝，编辑与删除可重试网络异常及服务端错误。
+- `api-executor.ts`：统一执行 Telegram API 调用，处理超时、限流和有限重试；新建消息仅重试明确的限流拒绝，编辑与删除可重试网络异常及服务端错误。`editMessageText` 入口在检查点结算前将该方法明确返回的 `400 message is not modified` 归一为确认，正文、操作与交互共用该入口。
 - `sdk-signal.ts`：在 SDK 边界保留原生取消信号身份，并适配 grammY 的信号类型声明。
 - `error-metadata.ts`：只保留异常类型、受约束的机器错误码及消息未变化分类，不记录任意异常消息。
 - `user-error-renderer.ts`：把平台无关的结构化用户错误映射为 Telegram 专属提示与命令用法。

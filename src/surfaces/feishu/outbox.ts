@@ -1,3 +1,5 @@
+import { SnapshotDelivery } from "../snapshot-delivery.js";
+import { surfaceOutputSnapshotKey } from "../delivery-policy.js";
 import { isPersistentOutput } from "../persistent-output.js";
 import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { FeishuTextStreams } from "./text-streams.js";
@@ -63,6 +65,7 @@ const maximumFeishuFinalPreviewCharacters = 1_200;
 const feishuFileFailureNotice = "[完整文件发送失败，已改为分段文本]\n\n";
 
 interface FeishuPlanState {
+  chatId: string;
   messageId?: string;
   fingerprint?: string;
 }
@@ -113,9 +116,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
   private readonly reasoningCards = new Map<string, FeishuReasoningCard>();
   private nextReasoningSegment = 0;
   private readonly activeOperations = new Set<string>();
+  private readonly snapshots = new SnapshotDelivery();
   private readonly reasoningGenerations = new Map<string, number>();
-  private readonly operationDisplays = new Map<string, string>();
-  private readonly computerUseCards = new Map<string, { messageId?: string }>();
+  private readonly operationDisplays = new Map<string, { chatId: string; markdown: string }>();
+  private readonly computerUseCards = new Map<string, { chatId: string; messageId?: string }>();
   private readonly pendingApprovalOperations = new Set<string>();
   private readonly heldApprovalOperations = new Map<string, Extract<OutputEvent, { type: "operation.updated" }>['operation']>();
   private readonly operationUpdates = new OperationUpdateBuffer<string>();
@@ -144,7 +148,32 @@ export class FeishuOutbox implements SurfaceOutputPort {
     );
   }
 
-  handle(event: OutputEvent): void {
+  observe(event: OutputEvent): void {
+    if (this.closed || event.target.surface !== "feishu" || event.target.accountId !== this.accountId) return;
+    this.snapshots.observe(event);
+    if (event.type === "turn.started") {
+      this.clearExecutionTurns(event.threadId);
+      this.reasoningCards.delete(event.threadId);
+      this.replyTargets.bindPending(event.target.conversationId, turnKey(event.threadId, event.turnId));
+    } else if (event.type === "connection.lost") {
+      this.clearExecutionTurns(event.threadId);
+      this.reasoningCards.delete(event.threadId);
+      this.replyTargets.clearThread(event.threadId);
+      this.textStreams.clearThread(event.threadId);
+      this.operationUpdates.clearThread(event.threadId);
+      for (const key of this.planMessages.keys()) {
+        if (key.startsWith(`${event.threadId}:`)) this.planMessages.delete(key);
+      }
+      for (const key of this.heldApprovalOperations.keys()) {
+        if (key.startsWith(`${event.threadId}:`)) this.heldApprovalOperations.delete(key);
+      }
+      for (const key of this.pendingApprovalOperations) {
+        if (key.startsWith(`${event.threadId}:`)) this.pendingApprovalOperations.delete(key);
+      }
+    }
+  }
+
+  handle(event: OutputEvent): void | Promise<void> {
     if (
       this.closed
       || event.target.surface !== "feishu"
@@ -152,7 +181,23 @@ export class FeishuOutbox implements SurfaceOutputPort {
     ) {
       return;
     }
+    if (!DeliveryReceipt.current()) this.observe(event);
+    if (!DeliveryReceipt.current() && surfaceOutputSnapshotKey(event) !== undefined) {
+      const delivery = this.deliverSnapshot(event, new AbortController().signal, () => true);
+      // Direct callers may intentionally ignore the asynchronous result; the owner still sees rejection.
+      void delivery.catch(() => {});
+      return delivery;
+    }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  deliverSnapshot(event: OutputEvent, signal: AbortSignal, authorized: () => boolean): Promise<void> {
+    return this.snapshots.run(event, signal, authorized, () => {
+      if (this.closed || event.target.surface !== "feishu"
+        || event.target.accountId !== this.accountId
+        || surfaceOutputSnapshotKey(event) === undefined) throw new Error("状态投递目标无效或已关闭");
+      withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+    });
   }
 
   retains(event: OutputEvent): boolean {
@@ -164,7 +209,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
     if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
     await captureDelivery(() => {
-      this.handle(event);
+      void this.handle(event);
       if (event.type === "text.completed") {
         // Runs after the rendered output. Preview success alone cannot ACK a
         // truncated result; an already-confirmed full file avoids a duplicate.
@@ -175,24 +220,16 @@ export class FeishuOutbox implements SurfaceOutputPort {
         }, true);
       }
       if (event.type === "operation.updated" && event.operation.status !== "running") {
-        const buffered = this.operationUpdates.flushTurn(event.threadId, event.turnId);
+        const buffered = this.operationUpdates.flushTurn(event);
         if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
       }
-    }, signal, checkpoint);
+    }, signal, checkpoint, { requireConfirmation: event.type === "text.completed" });
   }
 
   private handleEvent(event: OutputEvent): void {
     if (event.type === "text.delta") {
       this.textStreams.acceptStreamDelta(event);
       return;
-    }
-    if (event.type === "turn.started") {
-      this.clearExecutionTurns(event.threadId);
-      this.reasoningCards.delete(event.threadId);
-      this.replyTargets.bindPending(
-        event.target.conversationId,
-        turnKey(event.threadId, event.turnId),
-      );
     }
     if (event.type === "turn.reasoning") {
       if (this.options.reasoningEnabled === false) {
@@ -230,7 +267,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       if (event.operation.kind === "contextCompaction") {
         const text = this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
         if (text !== null) {
-          this.textStreams.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+          this.textStreams.flushStreamsBeforeVisibleOutput(event.target.conversationId, event.threadId, event.turnId);
           this.delivery.enqueue(event.target.conversationId,
             (signal) => this.sendMarkdown(event.target.conversationId, text, maximumFeishuMessageChunks, undefined, undefined, signal), true);
         }
@@ -242,7 +279,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         if (event.operation.status === "running") {
           this.activeOperations.add(key);
           this.reasoningGenerations.set(turn, (this.reasoningGenerations.get(turn) ?? 0) + 1);
-          this.sealReasoningCard(event.threadId, event.turnId);
+          this.sealReasoningCard(event.target.conversationId, event.threadId, event.turnId);
         } else {
           this.activeOperations.delete(key);
         }
@@ -253,7 +290,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           return;
         }
         streamFlushed = true;
-        this.textStreams.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
+        this.textStreams.flushStreamsBeforeVisibleOutput(event.target.conversationId, event.threadId, event.turnId);
       };
       const imagePath = event.operation.imagePath;
       if (
@@ -310,18 +347,27 @@ export class FeishuOutbox implements SurfaceOutputPort {
       }
       flushStreamBeforeOutput();
       const markdown = formatFeishuOperation(event.operation, this.options.operationUpdateDisplay === "compact" ? "compact" : "full");
-      if (!this.acceptOperationDisplay(event, markdown)) return;
       if (isComputerUseOperation(event.operation)) {
         const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-        const state = this.computerUseCards.get(key) ?? {};
+        const previous = this.computerUseCards.get(key);
+        const state = previous?.chatId === event.target.conversationId ? previous : { chatId: event.target.conversationId };
         this.computerUseCards.set(key, state);
         this.delivery.enqueue(
           event.target.conversationId,
-          (signal) => this.deliverComputerUseCard(event, state, markdown, signal),
+          async (signal) => {
+            if (!this.acceptOperationDisplay(event, markdown)) return;
+            try { await this.deliverComputerUseCard(event, state, markdown, signal); }
+            catch (error) {
+              const displayed = this.operationDisplays.get(key);
+              if (displayed?.chatId === event.target.conversationId && displayed.markdown === markdown) this.operationDisplays.delete(key);
+              throw error;
+            }
+          },
           isCriticalOutputEvent(event),
         );
         return;
       }
+      if (!this.acceptOperationDisplay(event, markdown)) return;
       this.delivery.enqueue(event.target.conversationId, (signal) => this.sendMarkdown(event.target.conversationId, markdown, maximumFeishuMessageChunks, undefined, undefined, signal), isCriticalOutputEvent(event));
       return;
     }
@@ -330,7 +376,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const key = turnKey(event.threadId, event.turnId);
-      const state = this.planMessages.get(key) ?? {};
+      const previous = this.planMessages.get(key);
+      const state = previous?.chatId === event.target.conversationId ? previous : { chatId: event.target.conversationId };
       this.planMessages.set(key, state);
       const snapshot = createPlanPresentation(event);
       this.delivery.enqueue(
@@ -359,7 +406,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
       if (
         completion !== null
-        && this.textStreams.finishStreamsForTurn(event.threadId, event.turnId, completion)
+        && this.textStreams.finishStreamsForTurn(event.target.conversationId, event.threadId, event.turnId, completion)
       ) {
         return;
       }
@@ -494,7 +541,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     const chatId = event.target.conversationId;
     const existing = this.reasoningCards.get(event.threadId);
-    if (existing !== undefined && existing.turnId !== event.turnId) {
+    if (existing !== undefined && (existing.turnId !== event.turnId || existing.chatId !== event.target.conversationId)) {
       this.reasoningCards.delete(event.threadId);
       this.deliverReasoning(event, generation);
       return;
@@ -719,7 +766,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   replyToTurn(chatId: string, threadId: string, turnId: string, markdown: string): boolean {
-    const replyTo = this.replyTargets.get(turnKey(threadId, turnId));
+    const replyTo = this.replyTargets.get(chatId, turnKey(threadId, turnId));
     if (replyTo === undefined) return false;
     return this.replyMarkdown(chatId, replyTo, markdown);
   }
@@ -817,7 +864,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
   private clearExecutionTurns(threadId: string): void {
-    const prefix = `${threadId}\u0000`;
+    const prefix = `${threadId}:`;
     for (const key of this.activeOperations) {
       if (key.startsWith(prefix)) this.activeOperations.delete(key);
     }
@@ -842,10 +889,12 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
   ): boolean {
     const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-    if (!DeliveryReceipt.current() && this.operationDisplays.get(key) === markdown) {
+    const receipt = DeliveryReceipt.current();
+    const displayed = this.operationDisplays.get(key);
+    if ((!receipt || receipt.transient) && displayed?.chatId === event.target.conversationId && displayed.markdown === markdown) {
       return false;
     }
-    this.operationDisplays.set(key, markdown);
+    this.operationDisplays.set(key, { chatId: event.target.conversationId, markdown });
     return true;
   }
 
@@ -868,9 +917,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
   }
 
 
-  private sealReasoningCard(threadId: string, turnId: string): void {
+  private sealReasoningCard(chatId: string, threadId: string, turnId: string): void {
     const state = this.reasoningCards.get(threadId);
-    if (state === undefined || state.turnId !== turnId) {
+    if (state === undefined || state.turnId !== turnId || state.chatId !== chatId) {
       return;
     }
     this.reasoningCards.delete(threadId);
@@ -1038,7 +1087,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
           ...(event.identity ? { identity: event.identity } : {}),
         });
         const replyTo = this.replyTargets.get(
-          turnKey(event.threadId, event.turnId),
+          event.target.conversationId, turnKey(event.threadId, event.turnId),
         );
         if (replyTo !== undefined) {
           await this.sendMarkdown(
@@ -1053,7 +1102,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         return;
       }
       const replyTo = this.replyTargets.get(
-        turnKey(event.threadId, event.turnId),
+        event.target.conversationId, turnKey(event.threadId, event.turnId),
       );
       if (replyTo !== undefined) {
         await this.sendMarkdown(
@@ -1093,7 +1142,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     const key = turnKey(event.threadId, event.turnId);
-    const replyTo = this.replyTargets.get(key);
+    const replyTo = this.replyTargets.get(event.target.conversationId, key);
     if (
       event.type === "text.completed"
       && (event.phase !== "commentary" || DeliveryReceipt.current() !== undefined)
@@ -1120,7 +1169,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
       );
     } finally {
       if (event.type === "turn.completed") {
-        this.replyTargets.delete(key);
+        this.replyTargets.delete(event.target.conversationId, key);
       }
     }
   }
@@ -1258,6 +1307,10 @@ export class FeishuOutbox implements SurfaceOutputPort {
           "飞书状态卡已原地更新",
         );
       } catch (error) {
+        if (signal?.aborted) {
+          if (this.threadStatusMessages.get(event.threadId) === current) this.threadStatusMessages.delete(event.threadId);
+          throw error;
+        }
         this.logger.warn(
           {
             ...surfaceDiagnosticContext(),

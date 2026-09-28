@@ -28,6 +28,8 @@ export {
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
   SurfaceOutputCoalescer,
+  surfaceOutputSnapshotKey,
+  supersedesSurfaceSnapshot,
 } from "./delivery-policy.js";
 export {
   SurfaceInputCoalescer,

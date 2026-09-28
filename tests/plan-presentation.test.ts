@@ -4,6 +4,18 @@ import type { OutputEvent } from "../src/conversation-core/index.js";
 import { TurnPlanProgressState } from "../src/surfaces/plan-presentation.js";
 
 describe("TurnPlanProgressState", () => {
+  it("keeps plan deduplication and completion scoped to the full Conversation", () => {
+    const state = new TurnPlanProgressState();
+    const first = planUpdated("turn", [{ step: "work", status: "inProgress" }]);
+    const second = { ...first, target: { ...first.target, conversationId: "other" } };
+    expect(state.accept(first)).toHaveLength(1);
+    expect(state.accept(second)).toHaveLength(1);
+    state.complete(turnCompleted("turn"));
+    expect(state.accept(second)).toEqual([]);
+    state.clearThread("thread");
+    expect(state.accept(second)).toHaveLength(1);
+  });
+
   it("tracks completed steps independently for each Turn", () => {
     const state = new TurnPlanProgressState();
     const initial = planUpdated("turn-one", [

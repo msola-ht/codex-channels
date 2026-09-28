@@ -1,6 +1,7 @@
-import type {
-  OperationUpdate,
-  OutputEvent,
+import {
+  conversationTargetKey,
+  type OperationUpdate,
+  type OutputEvent,
 } from "../conversation-core/index.js";
 import { isComputerUseOperation, mcpToolCapabilityLabel } from "./operation-presentation.js";
 
@@ -52,7 +53,7 @@ export class OperationUpdateBuffer<T> {
 
   accept(event: OperationUpdatedEvent, target: T): boolean {
     const operation = event.operation;
-    const turnKey = outputTurnKey(event.threadId, event.turnId);
+    const turnKey = outputTurnKey(event);
     if (!isBufferedOperation(operation) || isComputerUseOperation(operation)) {
       return false;
     }
@@ -82,11 +83,11 @@ export class OperationUpdateBuffer<T> {
     if (event.type === "text.completed" && event.phase === "commentary") {
       return null;
     }
-    return this.take(outputTurnKey(event.threadId, event.turnId));
+    return this.take(outputTurnKey(event));
   }
 
-  flushTurn(threadId: string, turnId: string): BufferedOperationSummary<T> | null {
-    return this.take(outputTurnKey(threadId, turnId));
+  flushTurn(event: OperationUpdatedEvent): BufferedOperationSummary<T> | null {
+    return this.take(outputTurnKey(event));
   }
 
   private take(turnKey: string): BufferedOperationSummary<T> | null {
@@ -112,6 +113,12 @@ export class OperationUpdateBuffer<T> {
 
   clear(): void {
     this.turns.clear();
+  }
+
+  clearThread(threadId: string): void {
+    for (const key of this.turns.keys()) {
+      if (key.startsWith(`${threadId}:`)) this.turns.delete(key);
+    }
   }
 }
 
@@ -189,6 +196,6 @@ function isBufferedOperation(
     || operation.kind === "webSearch";
 }
 
-function outputTurnKey(threadId: string, turnId: string): string {
-  return `${threadId}:${turnId}`;
+function outputTurnKey(event: OperationUpdatedEvent | OperationFlushEvent): string {
+  return `${event.threadId}:${event.turnId}:${conversationTargetKey(event.target)}`;
 }

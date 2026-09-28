@@ -15,7 +15,7 @@ export interface DeliveryCoordinatorOptions {
 export class DeliveryCoordinator {
   private readonly active = new Map<string, { controller: AbortController; task: Promise<void> }>();
   private readonly outstanding = new Map<string, number>();
-  private readonly submissions = new Set<Promise<void>>();
+  private readonly submissions = new Set<Promise<boolean>>();
   private started = false;
   private stopped = false;
   private pumping = false;
@@ -58,16 +58,17 @@ export class DeliveryCoordinator {
     return this.started && !this.stopped && !this.total.paused && !this.usage.get(account)?.paused;
   }
 
-  submit(value: DeliverySubmission): Promise<void> {
-    if (this.stopped || !this.started) { this.options.fault("closed", value.account); return Promise.resolve(); }
-    if (this.submissions.size >= 128) { this.options.fault("mailbox-full", value.account); return Promise.resolve(); }
+  submit(value: DeliverySubmission): Promise<boolean> {
+    if (this.stopped || !this.started) { this.options.fault("closed", value.account); return Promise.resolve(false); }
+    if (this.submissions.size >= 128) { this.options.fault("mailbox-full", value.account); return Promise.resolve(false); }
     this.outstanding.set(value.conversation, (this.outstanding.get(value.conversation) ?? 0) + 1);
     const bytes = Buffer.byteLength(value.payload) + 64 * 1024;
     this.updateUsage(value.account, bytes, 1);
-    const task = this.journal.submit(value).then(() => this.wake(), (error: unknown) => {
+    const task = this.journal.submit(value).then(() => { this.wake(); return true; }, (error: unknown) => {
       this.release(value.conversation);
       this.updateUsage(value.account, -bytes, -1);
       this.options.fault(error instanceof DeliveryError ? error.code : "storage", value.account);
+      return false;
     });
     this.submissions.add(task);
     void task.finally(() => this.submissions.delete(task));

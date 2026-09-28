@@ -6,6 +6,32 @@ import { ConversationDeliveryQueue } from "../src/surfaces/index.js";
 const logger = pino({ level: "silent" });
 
 describe("ConversationDeliveryQueue", () => {
+  it("releases cancelled queued owners immediately but retains in-flight owners until actual settlement", async () => {
+    const delivery = new ConversationDeliveryQueue(logger, { component: "Test", maximumPendingOperations: 2 });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const active = new AbortController();
+    const queued = new AbortController();
+    const settledActive = vi.fn();
+    const settledQueued = vi.fn();
+    const skipped = vi.fn(async () => {});
+    try {
+      delivery.enqueue("chat", async () => { await blocked; }, true, { signal: active.signal, settled: settledActive });
+      await settle();
+      delivery.enqueue("chat", skipped, true, { signal: queued.signal, settled: settledQueued });
+      queued.abort();
+      expect(settledQueued).toHaveBeenCalledOnce();
+      active.abort();
+      expect(settledActive).not.toHaveBeenCalled();
+      expect(delivery.enqueue("chat", async () => {}, true)).toBe(true);
+      release();
+      await delivery.waitForIdle();
+      expect(settledActive).toHaveBeenCalledOnce();
+      expect(settledQueued).toHaveBeenCalledOnce();
+      expect(skipped).not.toHaveBeenCalled();
+    } finally { release(); await delivery.close(); }
+  });
+
   it("bounds recovery drain waits without closing the queue", async () => {
     vi.useFakeTimers();
     try {
@@ -429,3 +455,21 @@ function activeWorkerCount(delivery: ConversationDeliveryQueue): number {
     }
   ).workers.size;
 }
+
+
+it("replaces a waiting key even at the shared hard limit without admitting another conversation", async () => {
+  const delivery = new ConversationDeliveryQueue(logger, { component: "Test", maximumPendingOperations: 2 });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const calls: string[] = [];
+  delivery.enqueue("a", () => blocked, true);
+  await settle();
+  try {
+    expect(delivery.enqueue("a", async () => { calls.push("old"); }, true, { coalesceKey: "state" })).toBe(true);
+    expect(delivery.enqueue("a", async () => { calls.push("latest"); }, true, { coalesceKey: "state" })).toBe(true);
+    expect(delivery.enqueue("b", async () => { calls.push("overflow"); }, true, { coalesceKey: "state" })).toBe(false);
+    release();
+    await delivery.close();
+    expect(calls).toEqual(["latest"]);
+  } finally { release(); await delivery.close(); }
+});
