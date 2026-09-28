@@ -8,7 +8,7 @@ import { FeishuMessageError } from "./message-error.js";
 import type { FeishuMessagePort } from "./outbox-message-port.js";
 import {
   appendBoundedStreamText, appendFeishuStreamingTruncation, boundedStreamText,
-  feishuTruncationNotice, maximumFeishuMessageChunks, maximumFeishuStreamingCards,
+  feishuPreviewNotice, feishuTruncationNotice, maximumFeishuMessageChunks, maximumFeishuStreamingCards,
   maximumFeishuStreamingElementCharacters, splitFeishuStreamingContent,
 } from "./outbox-content.js";
 
@@ -34,6 +34,7 @@ interface FeishuStreamState {
   failed: boolean;
   deliveryUncertain?: boolean;
   completionFooter?: string;
+  truncationNotice?: string;
 }
 
 interface FinishedFeishuStream {
@@ -57,10 +58,10 @@ export class FeishuTextStreams {
     private readonly isClosed: () => boolean,
     private readonly sendMarkdown: (
       chatId: string, markdown: string, maximumChunks: number, replyTo?: string,
-      onFirstMessageId?: (messageId: string) => void, signal?: AbortSignal,
+      onFirstMessageId?: (messageId: string) => void, signal?: AbortSignal, truncationNotice?: string,
     ) => Promise<void>,
     private readonly sendPost: (
-      chatId: string, markdown: string, maximumChunks: number, signal?: AbortSignal, replyTo?: string,
+      chatId: string, markdown: string, maximumChunks: number, signal?: AbortSignal, replyTo?: string, truncationNotice?: string,
     ) => Promise<number>,
   ) {}
 
@@ -147,12 +148,14 @@ export class FeishuTextStreams {
 
   completeStream(
     event: Extract<OutputEvent, { type: "text.completed" }>,
+    completeFilePlanned = false,
   ): boolean {
     const key = streamKey(event.threadId, event.turnId, event.itemId);
     const state = this.streams.get(key);
     if (!state) {
       return false;
     }
+    state.truncationNotice = completeFilePlanned ? feishuPreviewNotice : feishuTruncationNotice;
     const bounded = boundedStreamText(event.text);
     if (event.phase !== undefined) {
       state.phase = event.phase;
@@ -298,7 +301,7 @@ export class FeishuTextStreams {
         if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
         if (fallbackPost && remainingMessageBudget > 0) {
           const markdown = state.truncated
-            ? `${state.cardText}${feishuTruncationNotice}`
+            ? `${state.cardText}${state.truncationNotice ?? feishuTruncationNotice}`
             : state.cardText;
           const replyKey = turnKey(state.threadId, state.turnId);
           const replyTo = this.replyTargets.get(replyKey);
@@ -309,6 +312,7 @@ export class FeishuTextStreams {
             replyTo,
             undefined,
             signal,
+            state.truncationNotice,
           );
         }
       });
@@ -363,7 +367,7 @@ export class FeishuTextStreams {
             const remaining = maximumFeishuMessageChunks - state.cardCount;
             if (remaining > 0) {
               const replyTo = this.replyTargets.get(turnKey(state.threadId, state.turnId));
-              await this.sendPost(state.chatId, state.cardText, remaining, signal, replyTo);
+              await this.sendPost(state.chatId, state.cardText, remaining, signal, replyTo, state.truncationNotice);
             }
           }
         });
@@ -456,7 +460,7 @@ export class FeishuTextStreams {
       const reachesCardLimit =
         currentCardNumber >= maximumFeishuStreamingCards;
       const head = reachesCardLimit
-        ? appendFeishuStreamingTruncation(rawHead, maximumCharacters)
+        ? appendFeishuStreamingTruncation(rawHead, maximumCharacters, state.truncationNotice)
         : rawHead;
       await this.ensureStreamingCard(state, head, signal);
       await this.finishStreamCard(state, head, undefined, signal);
@@ -554,7 +558,7 @@ export class FeishuTextStreams {
       if (fallbackPost && remainingMessageBudget <= 0) DeliveryReceipt.current()?.markContentIncomplete();
       if (!this.isClosed() && !signal?.aborted && fallbackPost && !state.deliveryUncertain && remainingMessageBudget > 0) {
         const markdown = state.truncated
-          ? `${state.text}${feishuTruncationNotice}`
+          ? `${state.text}${state.truncationNotice ?? feishuTruncationNotice}`
           : state.text;
         const replyKey = turnKey(state.threadId, state.turnId);
         const replyTo = this.replyTargets.get(replyKey);
@@ -564,6 +568,7 @@ export class FeishuTextStreams {
           remainingMessageBudget,
           signal,
           replyTo,
+          state.truncationNotice,
         );
       }
     });

@@ -377,9 +377,12 @@ it.each([false, true])("keeps the full durable Telegram result until its documen
 });
 
 
-it.each(["confirmed", "failed", "unavailable", "stream"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
+it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "stream-unavailable", "static-commentary"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
   const directory = fixture();
-  const text = "\u{20000}".repeat(mode === "stream" ? 30_000 : 24_990) + "END-OF-RESULT";
+  const streaming = mode.startsWith("stream");
+  const unavailable = mode.includes("unavailable");
+  const previews: string[] = [];
+  const text = "\u{20000}".repeat(streaming || mode === "static-commentary" ? 30_000 : 24_990) + "END-OF-RESULT";
   let fileText: string | undefined;
   let releaseFile!: () => void;
   const fileConfirmation = new Promise<void>((resolve) => { releaseFile = resolve; });
@@ -389,15 +392,15 @@ it.each(["confirmed", "failed", "unavailable", "stream"] as const)("requires a c
     if (mode === "failed") throw new Error("ambiguous file send");
   });
   const outbox = new FeishuOutbox("default", {
-    sendText: async () => {}, sendPost: async () => {},
+    sendText: async () => {}, sendPost: async (_chat, value) => { previews.push(value); },
     sendMarkdownCard: async () => { throw new FeishuMessageError("card-create-failed", "fixture rejection"); },
     sendCard: async () => "message", updateCard: async () => {},
     createStreamingCard: async () => ({ cardId: "card", messageId: "message" }),
-    updateStreamingCard: async () => {}, finishStreamingCard: async () => {},
-    ...(mode === "unavailable" ? {} : { sendFile }),
+    updateStreamingCard: async () => {}, finishStreamingCard: async (_id, _sequence, value) => { if (value) previews.push(value); },
+    ...(unavailable ? {} : { sendFile }),
   }, logger);
   const target = { surface: "feishu" as const, accountId: "default", conversationId: "chat" };
-  if (mode === "stream") {
+  if (streaming) {
     outbox.handle({ type: "text.delta", target, threadId: "thread", turnId: "turn", itemId: "item", text: "start", phase: "final_answer" });
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
@@ -407,18 +410,21 @@ it.each(["confirmed", "failed", "unavailable", "stream"] as const)("requires a c
     deliver: (record, signal) => outbox.deliver(JSON.parse(record.payload) as OutputEvent, signal,
       async (checkpoint) => { await journal.checkpoint(record.id, checkpoint); }),
   });
-  const event: OutputEvent = { type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", phase: "final_answer", text };
-  const retained = mode === "failed" || mode === "unavailable";
+  const event: OutputEvent = { type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", phase: mode.endsWith("commentary") ? "commentary" : "final_answer", text };
+  const retained = mode === "failed" || unavailable;
   try {
     await coordinator.start();
     await coordinator.submit({ ...submission("full-feishu"), payload: JSON.stringify(event) });
-    if (mode !== "unavailable") {
+    if (!unavailable) {
       await vi.waitFor(() => expect(fileText).toBe(text));
       expect(await journal.summary()).toMatchObject({ records: 1, sending: 1 });
       releaseFile();
     }
     await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }));
-    if (mode !== "unavailable") { expect(fileText).toBe(text); expect(sendFile).toHaveBeenCalledOnce(); }
+    if (!unavailable) { expect(fileText).toBe(text); expect(sendFile).toHaveBeenCalledOnce(); }
+    expect(previews.join("\n")).toContain(unavailable ? "内容过长，已截断" : "内容预览，完整回复见附件");
+    if (unavailable) expect(previews.join("\n")).not.toContain("完整回复见附件");
+    if (mode === "static-commentary") expect([...previews.join("")].length).toBeLessThanOrEqual(1_200);
   } finally { releaseFile(); await coordinator.close(); await outbox.close(); }
   const reopened = new SqliteDeliveryJournal(directory);
   try {

@@ -42,6 +42,7 @@ import {
   renderFeishuComputerUseCard,
 } from "./operation-format.js";
 import {
+  feishuPreviewNotice,
   maximumFeishuMessageChunks,
   maximumFeishuStreamingCards,
   maximumFeishuStreamingElementCharacters,
@@ -58,7 +59,7 @@ import {
 
 const maximumFeishuFinalAnswerFileBytes = 1_000_000;
 const feishuFinalAnswerFileName = "codex-final-answer.txt";
-const feishuPreviewNotice = "\n\n[内容预览，完整回复见附件]";
+const maximumFeishuFinalPreviewCharacters = 1_200;
 const feishuFileFailureNotice = "[完整文件发送失败，已改为分段文本]\n\n";
 
 interface FeishuPlanState {
@@ -137,9 +138,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.textStreams = new FeishuTextStreams(
       this.messagePort, this.delivery, this.replyTargets, logger,
       () => this.closeFinished,
-      (chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal) =>
-        this.sendMarkdown(chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal),
-      (chatId, markdown, maximumChunks, signal, replyTo) => this.sendPost(chatId, markdown, maximumChunks, signal, replyTo),
+      (chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal, truncationNotice) =>
+        this.sendMarkdown(chatId, markdown, maximumChunks, replyTo, onFirstMessageId, signal, truncationNotice),
+      (chatId, markdown, maximumChunks, signal, replyTo, truncationNotice) => this.sendPost(chatId, markdown, maximumChunks, signal, replyTo, truncationNotice),
     );
   }
 
@@ -218,7 +219,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "text.completed") {
       this.flushOperationUpdates(event.target.conversationId, event);
-      if (this.textStreams.completeStream(event)) {
+      if (this.textStreams.completeStream(event, this.canSendCompleteContentFile(event.text)
+        && (DeliveryReceipt.current() !== undefined
+          || (event.phase !== "commentary" && this.canSendCompletedAnswerFile(event.text))))) {
         this.enqueueCompletedAnswerFile(event);
         return;
       }
@@ -907,8 +910,9 @@ export class FeishuOutbox implements SurfaceOutputPort {
     maximumChunks = maximumFeishuMessageChunks,
     signal?: AbortSignal,
     replyTo?: string,
+    truncationNotice?: string,
   ): Promise<number> {
-    const chunks = splitFeishuPost(markdown, maximumChunks);
+    const chunks = splitFeishuPost(markdown, maximumChunks, truncationNotice);
     for (const [index, chunk] of chunks.entries()) {
       if (index === 0 && replyTo !== undefined && this.messagePort.replyPost) {
         await this.messagePort.replyPost(replyTo, chunk, signal);
@@ -926,10 +930,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     replyTo?: string,
     onFirstMessageId?: (messageId: string) => void,
     signal?: AbortSignal,
+    truncationNotice?: string,
   ): Promise<void> {
     let first = true;
     let remainingBudget = maximumChunks;
-    const chunks = splitFeishuMarkdownCards(markdown, maximumChunks);
+    const chunks = splitFeishuMarkdownCards(markdown, maximumChunks, truncationNotice);
     for (const [index, chunk] of chunks.entries()) {
       try {
         if (first && replyTo !== undefined && this.messagePort.replyMarkdownCard) {
@@ -962,7 +967,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
         // Reserve one slot for each later card and share the same total budget.
         remainingBudget -= await this.sendPost(
           chatId, chunk, remainingBudget - (chunks.length - index - 1),
-          signal, first ? replyTo : undefined,
+          signal, first ? replyTo : undefined, truncationNotice,
         );
         first = false;
         continue;
@@ -1091,7 +1096,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     const replyTo = this.replyTargets.get(key);
     if (
       event.type === "text.completed"
-      && event.phase !== "commentary"
+      && (event.phase !== "commentary" || DeliveryReceipt.current() !== undefined)
       && this.canSendCompletedAnswerFile(event.text)
     ) {
       await this.sendLongFinalAnswer(
@@ -1110,6 +1115,8 @@ export class FeishuOutbox implements SurfaceOutputPort {
         replyTo,
         undefined,
         signal,
+        event.type === "text.completed" && DeliveryReceipt.current() && this.canSendCompleteContentFile(event.text)
+          ? feishuPreviewNotice : undefined,
       );
     } finally {
       if (event.type === "turn.completed") {
@@ -1161,6 +1168,11 @@ export class FeishuOutbox implements SurfaceOutputPort {
     ) {
       return false;
     }
+    return this.canSendCompleteContentFile(text);
+  }
+
+  private canSendCompleteContentFile(text: string): boolean {
+    if (!this.messagePort.sendFile) return false;
     const bytes = Buffer.byteLength(text, "utf8");
     return bytes > 0 && bytes <= maximumFeishuFinalAnswerFileBytes;
   }
@@ -1181,7 +1193,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     signal?: AbortSignal,
   ): Promise<void> {
     const maximumPreviewCharacters =
-      maximumFeishuStreamingElementCharacters
+      maximumFeishuFinalPreviewCharacters
       - [...feishuPreviewNotice].length;
     const [head, tail] = splitFeishuStreamingContent(
       text,
