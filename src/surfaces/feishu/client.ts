@@ -22,7 +22,9 @@ import {
   sanitizeFeishuMarkdown,
 } from "./message-content.js";
 import { extractFeishuQuotedText } from "./inbound-content.js";
-import type { FeishuMessagePort } from "./outbox.js";
+import type { FeishuMessagePort } from "./outbox-message-port.js";
+import { FeishuMessageError } from "./message-error.js";
+export { FeishuMessageError, type FeishuMessageErrorCode } from "./message-error.js";
 import {
   abortableSleep,
   FeishuOAuthHttpClient,
@@ -82,29 +84,6 @@ export function createFeishuOAuthApi(
       }),
     },
   );
-}
-
-export type FeishuMessageErrorCode =
-  | "card-create-failed"
-  | "client-create-failed"
-  | "invalid-credentials"
-  | "invalid-response"
-  | "download-failed"
-  | "download-timeout"
-  | "read-failed"
-  | "read-timeout"
-  | "rate-limited"
-  | "send-failed"
-  | "send-timeout";
-
-export class FeishuMessageError extends Error {
-  readonly code: FeishuMessageErrorCode;
-
-  constructor(code: FeishuMessageErrorCode, message: string) {
-    super(message);
-    this.name = "FeishuMessageError";
-    this.code = code;
-  }
 }
 
 interface FeishuSdkMessagePayload {

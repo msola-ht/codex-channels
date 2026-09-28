@@ -29,7 +29,7 @@ import type {
 } from "../types.js";
 import type { FeishuCardDocument } from "./approval-card.js";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
-import { FeishuMessageError } from "./client.js";
+import { FeishuMessageError } from "./message-error.js";
 import { bindOutboxMessagePort, type FeishuMessagePort } from "./outbox-message-port.js";
 export type { FeishuMessagePort } from "./outbox-message-port.js";
 import { renderFeishuConversationIdleReleasedCard } from "./idle-release-card.js";
