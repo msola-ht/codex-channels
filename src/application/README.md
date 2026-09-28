@@ -11,6 +11,8 @@
   存在原 Thread 时，新会话结果同时携带原 Thread ID，供三个 Surface 像自动解除占用提示一样
   展示可复制的 `恢复会话：/r <Thread ID>`。
 - `conversation-command-parser.ts`：集中定义会话命令的参数语法、用法提示和查询视图；只做纯解析，不调用 Application 用例。
+- `scheduled-task-command.ts`：定义计划任务命令的解析结果与创建请求类型，解析固定句式和模型标记，不依赖具体用例服务。
+- `scheduled-task-service.ts`：执行计划任务用例，持有列表选择器和一次性确认状态；消费命令解析结果，并通过注入端口检查授权、取得创建上下文及触发运行。
 - `scheduled-task-tool.ts`：定义前台 Agent 可见的 `schedule_task` 输入 Schema，并把模型传回的
   参数校验后映射到 `ScheduledTaskApplicationService`；创建和删除仍返回待确认预览，不直接改写 Store。
 - `conversation-account-metrics-service.ts`：组合账户、Provider 额度与本地请求指标查询；`ConversationService` 只保留兼容门面委托。

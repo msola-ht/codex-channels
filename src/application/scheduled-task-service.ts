@@ -20,7 +20,10 @@ import {
   parseNaturalScheduledTaskDraft,
   scheduledTaskCommandUsageText,
   splitModelMarker,
+  type ScheduledTaskCreateRequest,
 } from "./scheduled-task-command.js";
+
+export type { ScheduledTaskCreateRequest } from "./scheduled-task-command.js";
 
 const taskPageSize = 8;
 const runPageSize = 10;
@@ -54,14 +57,6 @@ export interface ScheduledTaskApplicationPort {
   runTaskNow(taskId: string): Promise<ScheduledRun>;
   /** Synchronous fail-closed check used when a Provider is explicitly requested. */
   isProviderConfigured(provider: string): boolean;
-}
-
-export interface ScheduledTaskCreateRequest {
-  readonly schedule: Schedule;
-  readonly timezone: string;
-  readonly prompt: string;
-  /** Optional explicit model ID or a provider/model composite; defaults to the current session. */
-  readonly model?: string;
 }
 
 export interface ScheduledTaskView {
