@@ -119,7 +119,13 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
   ): Promise<ScheduledTaskExecutionResult> {
     const target = toTarget(task);
     if (!this.acceptsExecution(target)) return { kind: "failed", category: "capacity" };
-    const validation = await this.validate(task, target);
+    let validation: ValidationFailure | undefined;
+    try { validation = await this.validate(task, target, signal); }
+    catch (error) {
+      if (signal.aborted) return { kind: "interrupted" };
+      throw error;
+    }
+    validation ??= this.validateCurrent(task, target);
     if (validation) {
       return {
         kind: "failed",
@@ -175,6 +181,22 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
       // a later unsubscribe/recovery attempt.
       await this.releaseFreshBackground(threadId);
       return { kind: "interrupted", threadId };
+    }
+
+    // Thread creation itself is asynchronous. Revoke before the Turn write,
+    // even when capacity remains available and the Thread was already created.
+    const currentValidation = this.validateCurrent(task, target);
+    const currentWorkspace = this.workspaces.get(task.workspaceId);
+    const workspaceChanged = currentWorkspace?.cwd !== workspace.cwd
+      || currentWorkspace.sandbox !== workspace.sandbox
+      || currentWorkspace.approvalPolicy !== workspace.approvalPolicy
+      || currentWorkspace.permissions !== workspace.permissions;
+    if (currentValidation || workspaceChanged || !this.acceptsExecution(target)) {
+      await this.releaseFreshBackground(threadId);
+      return { kind: "failed", threadId,
+        category: currentValidation?.category ?? (workspaceChanged ? "workspace" : "capacity"),
+        ...(currentValidation?.blockTask ? { blockTask: true } : {}),
+      };
     }
 
     const actualProvider = started.session.modelProvider ?? started.session.thread.modelProvider;
@@ -234,12 +256,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     }
   }
 
-  private async validate(
-    task: ScheduledTask,
-    target: ConversationTarget,
-    signal?: AbortSignal,
-  ): Promise<ValidationFailure | undefined> {
-    signal?.throwIfAborted();
+  private validateCurrent(task: ScheduledTask, target: ConversationTarget): ValidationFailure | undefined {
     if (!isSupportedSurface(target.surface)) return permanent("authorization");
     if (!this.isSurfaceEnabled(target)) return permanent("authorization");
     if (!this.bindings.conversations().some((candidate) => sameTarget(candidate, target))) {
@@ -268,6 +285,18 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
     ) {
       return permanent("provider");
     }
+    return undefined;
+  }
+
+  private async validate(
+    task: ScheduledTask,
+    target: ConversationTarget,
+    signal?: AbortSignal,
+  ): Promise<ValidationFailure | undefined> {
+    signal?.throwIfAborted();
+    const current = this.validateCurrent(task, target);
+    if (current) return current;
+    const provider = task.modelProvider ?? "openai";
     try {
       await this.models.ensureProvider(provider);
       signal?.throwIfAborted();
@@ -288,7 +317,7 @@ export class ScheduledTaskExecutor implements ScheduledTaskExecutionPort {
         return { category: "model", blockTask: false };
       }
     }
-    return undefined;
+    return this.validateCurrent(task, target);
   }
 }
 

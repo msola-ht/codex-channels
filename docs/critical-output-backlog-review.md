@@ -517,3 +517,90 @@ PR #195 的首轮 Linux/macOS CI 在 Node 22.13.0 发现两项失败。本地同
 本次新增启动屏障修复验证：4 个关联测试文件、93 项通过；类型与运行时边界检查、受影响文件 Lint、文档检查及差异格式检查通过。启动屏障补充修复未再次部署。
 
 提交前再次复核分类、Worker 调度例外、存储计费、实时及分页恢复、交互等待和文档合同，未发现新的阻断项；本批次通过正常提交钩子执行完整门禁，Provider 草案及其索引改动不纳入。
+
+
+### 连接通知修复后的全链路关联审查（2026-09-28）
+
+审查基线 `ace04d24`。本轮为审查，不修改生产投递记录、不提交或部署。沿输出分类、同步观察/有界准入、快照与 Worker、Coordinator/SQL 顺序、SurfaceManager 路由、三渠道可靠确认入口、交互等待、执行准入、关闭/恢复和离线维护核对。未重新执行已通过且输入未变的完整门禁；新增隔离探针使用真实临时加密 Journal 和 Worker，经 PersistentSurfaceOutput 启动恢复，模拟前序发送中断。平台发送端为记录调用的隔离桩，不作为新实机验收。
+
+- P1，辅助通知屏障仍过宽：turn.started、thread.name、thread.availability、conversation.idle.released、subagent.spawned、subagent.contacted、contextCompaction running 共 7 类逐项复现。每例保留一条 uncertain 通知及一条 pending 正文，启动恢复后后续发送次数为 0、交互共用等待屏障不能通过。当前仅 connection.lost/restored 允许解除屏障。建议按是否属于必须核对的结果统一分类，辅助通知保留载荷和计费但不无限阻塞正文；不得把操作失败、完成结果与图片等一并放宽。
+- P1，会话阻塞与执行准入脱节：以上 7 例及一条未知 final_answer 对照例中，等待屏障都阻塞，但 acceptsExecution 返回 true。SurfaceManager 只把 account 传给 Coordinator，后者仅看容量和停止状态，不看当前 Conversation 的永久阻塞。新执行、Queue 写入及计划任务可继续产生未能交付的结果，直到账号高水位才暂停。建议区分正常 pending/sending 与需人工恢复的 uncertain/blocked，按会话拒绝新的执行并保留停止、查询、删除 Queue 的入口；不应暂停同账号其他正常会话。正文对照例继续阻塞是正确的防重复行为，缺口在新增输入准入。
+- P2，维护输出不足以解释屏障：delivery list 直接输出 Journal 摘要，缺少事件类型、Thread/Turn 与“是否阻塞后续”的说明；解除屏障后的未知连接通知与仍阻塞的未知正文都显示 uncertain，status 也只有存储计数。建议从认证载荷提取安全元数据并按当前策略说明屏障，不输出正文或授权快照，避免操作者误确认/误重发。
+
+边界复核：源码保持 Reader 不等待平台网络；恢复及发送前复核目标/授权；未知正文不自动重发；保留通知不释放磁盘额度；启动扫描完成前不放行等待；关闭传播取消并保留未确认记录。未在这些已覆盖路径找到新的证据充分的回归。本轮没有对真实断网、限流或三渠道服务中断重新注入故障，不把源码审查视为全部生产场景通过。
+
+
+### 辅助通知、执行准入与维护诊断关联修复（2026-09-28）
+
+按上述审查处理三项问题。共享 Surface 策略扩大为：连接中断/恢复、Turn 开始、Thread 名称/占用变化、会话空闲释放、子代理启动/联系、压缩开始。只有这些辅助通知的 unknown 状态解除顺序屏障；正文、警告、操作终态、压缩完成/失败及任何授权 blocked 不放行。记录、检查点和磁盘额度继续保留。
+
+Coordinator 恢复扫描与实时失败维护会话级人工恢复状态；准入参数贯通 SurfaceManager → PersistentSurfaceOutput → Coordinator，明确包含 Conversation，不再仅检查账号额度。新任务、Queue 写入与计划任务复用现有准入入口；正常 pending/sending 不因此拒收，停止、查询、删除 Queue 保留，同账号其他会话继续。多条阻塞必须全部解决后才能恢复；离线 retry/confirm 后启动重建状态，不在运行时清空阻塞或重发未知正文。
+
+离线 status/list 复用认证载荷解码和共享分类，显示存储占用、保留通知/阻塞会话计数，以及事件、Thread/Turn、操作类型/状态和逐条阻塞策略；不输出正文、图片或 owner。脚本通过 Surface 的公开 index 入口调用，更新运行时允许表及脚本职责说明；不改变数据库格式或协议字段。
+
+验证覆盖：TG/飞书各类辅助通知实时失败、恢复与重启、正文和压缩终态仍阻塞、同账号其他会话继续、正常排队准入、实时授权失效、多个屏障离线恢复，以及微信真实 Outbox 开始通知失败后的正文送达。CLI 子进程检查元数据、策略计数和内容隐藏；故障/归属及模块边界专项通过。平台端口仍为隔离桩，本轮未生产注入故障、未部署、未提交。
+
+因运行时依赖检查允许表变更，本轮手动运行完整 `verify:commit`。首次受限环境执行有 23 项失败，日志包含只读目录和 Socket 权限限制；按权限流程在沙盒外重跑后，353 个测试文件通过、10 个跳过，4708 项通过、99 项跳过。类型与版本、运行时边界、生产与测试 Lint、WebUI 构建/Lint/翻译、文档索引、Shell 语法和 tarball 安装冒烟全部通过，总耗时约 2 分 36 秒。最终复核存储保留、调度例外、会话准入和诊断策略一致；Provider 草案及其索引保持原状，不纳入本轮修复。
+
+### 跨生命周期与授权边界的关联复审（2026-09-28，复现记录）
+
+本轮审查当前工作区，包括未提交修复，并扩大到其调用者和生命周期拥有者。覆盖输入授权与配置热加载、Application Turn/Queue 准入、SessionRouter 前后台绑定、Provider 请求身份隔离、Reader/入站总线、Core 输出与持久准入、投递与交互等待、计划任务、关闭及恢复、离线诊断。不是仅检查改动行，也不将此前完整门禁通过等同于生命周期组合已覆盖。
+
+发现三个 P1 问题，均经 `/tmp/codexc-cross-chain-review.mjs` 隔离探针复现（使用当前构建、真实模块和临时存储，平台及 App Server 写端口为桩）：
+
+1. **正常前台转后台误触发授权阻塞。** `ConversationService.newSession` → `SessionRouter.newSession(..., true)` → BindingStore demote 保留原 Thread 和目标；但 `GatewayComponentGraph.outputIdentity` 把可变的 `background` 纳入 owner，`outputAuthorized` 要求整个快照相等。前台期间入箱、转后台后尚待发送的结果因此变成 blocked。Coordinator 随后拒绝该 Conversation 新执行，并阻塞后续正文与交互。探针结果：目标仍相同、Thread 已转后台，平台发送 0 次，故障为 authorization-changed，存储 blocked=1，acceptsExecution=false。应将稳定接收归属与前后台生命周期分开，允许同 Actor/Workspace/Provider/目标的合法转换；同时保持撤权和跨渠道转移拒绝，覆盖积压、实时发送和重启恢复。不能仅放宽 blocked 调度。
+
+2. **关闭时先关持久输出，后排空入站队列。** `GatewayComponentGraph.shutdownComponentsOnce` 先执行 Surface stop，再执行 Inbound Event Bus close；SurfaceManager stop 会立即撤销持久观察者并停止接收。EventBus 已接收的通知仍能继续经 Core 产生最终输出，但此时没有入箱路径。探针在关闭前同步发布 100 个待归约事件，真实总线全部消费 100 个，临时投递箱仅保留 3 个，剩余 97 个未入箱。此为隔离调度下的确定性计数，不代表生产丢失数量。应由组合根分阶段停止新入口与新执行、限时排空已接收通知及其持久提交，再关闭投递与渠道；排空失败必须明确报告，保持取消和关闭期限，不终止共享 App Server。需同时覆盖正常停止、启动失败清理、过载停止和正在恢复的任务，不能只移动单条 close。
+
+3. **计划任务预检跨异步边界后未复核撤权。** `ScheduledTaskExecutor.validate` 在 Provider/模型网络预检前检查 Actor；等待期间飞书允许名单热加载可经 `createFeishuRuntimeModule.applyHotReload` 移除 Actor。预检返回后 execute 只复核投递容量，不再次核对当前 Actor/授权；Router 随后创建后台 Thread，Turn 仍可启动。探针调用真实飞书热加载模块，最终策略允许=false、Actor 列表为空，但 startTurn 调用 1 次、结果 running。应在 Thread 创建前及 Turn 写入前重新检查当前授权和取消状态；Thread 已创建时撤权，安全取消订阅并释放新绑定。准入容量不能替代授权。需覆盖预检期间撤权、Thread 创建期间撤权、停止取消和周期任务收敛。
+
+其他关联边界核对：JSON-RPC Response/Notification/Server Request 分流及读写重试边界、Provider request/resolved 身份命名空间、飞书交互回调当前 Actor 校验、交互截止与取消、正常排队和人工恢复准入、离线诊断的认证载荷与内容隐藏仍保持现有约束；本轮未发现这些已检查路径的新证据充分问题。没有重跑输入未变的完整门禁；新增探针证明既有测试缺少上述组合场景。审查当时仅补充记录，未改业务代码、提交、推送或部署，未对生产渠道和用户 Thread 注入故障；后续修复见下节。
+
+### 生命周期、授权与关闭关联修复（2026-09-28）
+
+三项复现一起处理：
+
+- 投递归属继续读取既有 owner，不迁移载荷。前后台标记仅作为历史展示元数据，不参与接收权限判等；同 Actor、Workspace 和已配置 Provider 下的正常解绑保留原接收归属，跨目标绑定、Workspace 选择变化、Actor 变化和撤权仍拒绝。覆盖前台入箱后转后台、后台结束取消订阅、重启后投递，以及前后台分别撤权/转移的对照。旧 blocked 不自动重发或清除。
+- SurfaceManager 增加幂等 beginShutdown，只先关闭新执行与交互准入；组合根停止生产者后，在持久观察者仍存活时排空入站，再关闭 Surface 并等待快照入箱。入站 close 的 requireDrained 模式在 5 秒未排空时明确失败，组合根继续资源清理但汇报失败，不伪报完整保存。启动失败、正常停止和过载请求停止共用这一路径；Client 仍先于最后的恢复等待关闭，以使在途 RPC 结束，独立 App Server 不被终止。
+- 计划任务把同步当前授权校验与网络预检分开，预检返回和 Thread 创建返回后检查撤权、取消、Workspace 和容量。未开始 Turn 时失败会清理新 Thread 订阅；Router 对已被撤权删除本地绑定的后台 Thread 仍执行 unsubscribe，保护已成为有效前台的绑定不被误清理。沿用固定版官方幂等 unsubscribe 合同，已核对锁定源码及其 not-subscribed 测试；不新增 RPC 或自动重试写执行。
+
+原始三个隔离探针复查：正常转后台 sends=1、faults=[]、acceptsExecution=true；关闭前接收/归约/保留均为 100；真实飞书热加载撤权后的任务 starts=0、返回 authorization 失败。没有修改生产投递箱。
+
+验证：关闭、入箱、审批期限、计划任务调度/恢复、归属、SessionRouter 和会话切换分批回归通过；扩展前台 Workspace 对照时曾因测试未先解绑而失败，按真实切换顺序修正夹具后通过，最后一批 5 个文件、152 项通过。新增严格排空超时回归通过。两项隔离真实 App Server 合同分别验证投递准入/停止与撤权后取消订阅、保留历史，均通过；使用临时 Codex Home，不调用生产账号或用户 Thread。最终类型、运行时边界、受影响文件 Lint 与文档检查通过。本阶段没有重复完整 verify:commit，不将前节 4708 项的历史结果冒充本阶段全量验证。未提交、推送或部署，Provider 草案与索引改动保留。
+
+### 修复边界复审（2026-09-28，另有两项待处理）
+
+重点检查上节修复是否覆盖派生输出和授权身份变化，而非重复普通正文成功路径。临时探针 `/tmp/codexc-edge-review.mjs` 使用实际 Gateway 关闭方法、EventBus、SubagentCompletionTracker、SurfaceManager、临时加密投递箱，以及组合根真实 owner 回调；不连接生产渠道或用户 Thread。
+
+1. **P1：子代理完成通知仍在关闭时丢失。** `shutdownComponentsOnce` 在入站排空之前调用 `subagentCompletion.close()`；该方法清空已跟踪状态和结算定时器，之后的 handleInput 直接返回。已收到、仍在入站队列的原生子代理完成事件虽然被消费，却不再派生 subagent.completed；即使事件已处理但仍处于指标结算等待，close 也会取消尚未入箱的终态。探针对照：正常路径 emitted=1、retained=1；关闭时排队、关闭时待结算两条路径均 reduced=1、emitted=0、retained=0。上一节的 100 条直接正文排空回归不能覆盖此路径。应先处理已接收生命周期事件，再限时结算已确认终态并入箱，最后销毁跟踪器；指标不可用可按现有缺省指标输出，但不能为仍运行的代理伪造完成。还须处理已开始的 complete Promise，不能只移动 close 位置。
+
+2. **P1：同 ID 替换 Workspace 目录后，旧结果仍可获得授权。** owner 只保存 Workspace ID，`outputAuthorized` 只检查 Registry 中存在该 ID；原绑定被移除时又按正常解绑恢复旧 binding/provider，无法区分目录变更导致的安全失效。Router 本身会因目录不匹配移除绑定，但投递授权会把这个状态当作允许继续发送的正常清理。探针把 main 从 `/old-authorized` 替换为 `/replacement` 并移除旧绑定，输出 authorized=true。应把稳定工作区身份及安全失效纳入投递授权，覆盖同 ID 改目录、跨重启恢复和正常解绑的区别；不能仅按 ID 存在判断。既有 owner 缺少原目录证据，若引入持久字段，必须先定义旧记录处理、备份和回滚合同，不能猜测或无提示改写既有载荷。
+
+本轮仅更新审查记录；两项尚未修复，当前不能标记审查通过。前节已验证的直接正文排空、正常前后台转换和计划任务撤权保护仍有效，但不覆盖本节两种条件。未重复完整门禁，未提交、推送、部署或修改生产存量。
+
+
+### 子代理关闭结算与 Workspace 身份修复（2026-09-28）
+
+上节两项已修复；用户明确接受旧 owner 缺少目录证据时保留并阻止自动发送的方案。未变更 StateStore、投递数据库 schema v1 或加密载荷外层 v1。
+
+- 关闭链路改为停止新入口及生产者、排空入站、排空输出登记消费者、结算子代理终态、关闭持久投递。EventBus 新增保留发布入口的有界 `drain`，超时明确失败。Tracker 跟踪分离的旧轮次，统一以 5 秒期限结算已确认终态；指标未完成或失败时发布统计不可用的终态，修订号与已发布标记抑制迟到重复；仍运行的子代理不被伪造为完成。入箱先于 Surface 停止。
+- 新 owner v2 同时保存所选与 Thread 绑定 Workspace 的规范化目录；每次恢复、发送和检查点授权均复核 ID 与目录。前后台切换及正常解绑仍允许，目录替换、撤权、跨目标转移仍拒绝。旧无版本 owner、未知版本或缺少证据不自动升级，不改写正文或归属；保留记录并阻止发送。人工 retry 不补写身份，仍会被拒绝。停写备份、故障保留与回滚要求已写入 delivery 文档；部署前须执行，不能用回滚自动发送无法核对的旧结果。
+
+复查原探针：同 ID 替换目录授权从 true 变为 false；正常、关闭时排队、关闭时待结算三种子代理场景均 emitted=1、retained=1。新增组合回归覆盖真实 EventBus → Tracker → SurfaceManager → 加密投递箱，并覆盖指标永不完成、拒绝、分离旧轮次和迟到结果。真实 App Server 隔离合同通过，官方完成活动在关闭结算时只生成一次终态；使用临时 Codex Home、本机模型夹具，无生产渠道操作。
+
+本阶段分批针对性测试通过：Tracker 与启动清理 63 项、输出链路 70 项、队列 26 项、归属恢复 21 项、模块边界 12 项；另有真实 App Server 合同 1 项通过、12 项按筛选跳过。首轮发现旧测试夹具未提供 drain 接口及子代理路径不匹配，补充 retry 断言时也纠正了测试变量作用域错误，修正后对应测试均通过。类型/版本/运行时边界检查、受影响文件 Lint、构建、文档检查和 diff 格式检查通过。复审未发现上述两条修复链路的新阻断项；不重复完整提交门禁，不宣称覆盖其他尚未执行的生产故障场景。未提交、推送、部署或修改生产投递存量。Provider 草案与索引改动保留。
+
+
+### 本批提交前关联复审（2026-09-28）
+
+范围固定为接收事件、派生输出、持久入箱、授权、平台发送、确认与重启恢复；不扩展 Provider 草案。复审核对：
+
+| 链路约束 | 对应验证 |
+| --- | --- |
+| 未知辅助通知保留记录和额度，关键结果仍保留屏障 | persistent-output、persistent-output-faults、delivery-cli |
+| 阻塞会话拒绝新执行，其他会话与停止/查询保持可用 | surface-output-chain、真实 App Server 投递准入合同 |
+| 停止时先排空直接及派生输出，再关闭持久入口 | gateway-startup-cleanup、bounded-queue、subagent-completion-tracker、surface-output-chain |
+| 正常切换/解绑允许，撤权/跨目标/目录变化拒绝，旧 owner 不补写 | persistent-output-ownership，含重启及 retry |
+| 计划任务异步预检与 Thread 创建后重新复核，失败清理订阅 | scheduled-task-executor、SessionRouter 及隔离真实 unsubscribe 合同 |
+
+本次复审未发现上述范围的新代码阻断项；修正文档中数据库 schema 与 owner 版本的区分，并补全子代理关闭结算说明。下一步由正常提交钩子运行完整 verify:commit；本节不提前宣称门禁通过。部署仍需按 delivery 文档停写备份和核对旧记录，此次提交不执行部署。

@@ -7,6 +7,35 @@ import {
 } from "../src/event-bus/index.js";
 
 describe("BoundedAsyncQueue", () => {
+  it("reports an incomplete required EventBus drain instead of confirming successful close", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    bus.subscribe("blocked", () => pending);
+    bus.publish(1, true);
+    const closing = bus.close({ requireDrained: true });
+    const rejected = expect(closing).rejects.toThrow("未排空");
+    try { await vi.advanceTimersByTimeAsync(5000); await rejected; }
+    finally { release(); vi.useRealTimers(); }
+  });
+  it("bounds open-bus drain and permits downstream publication afterward", async () => {
+    vi.useFakeTimers();
+    const bus = new EventBus<number>(pino({ level: "silent" }));
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const handled: number[] = [];
+    bus.subscribe("consumer", async (event) => { if (event === 1) await pending; handled.push(event); });
+    bus.publish(1, true);
+    try {
+      const rejected = expect(bus.drain()).rejects.toThrow("排空等待超时");
+      await vi.advanceTimersByTimeAsync(5_000); await rejected;
+      release(); await bus.drain();
+      bus.publish(2, true); await bus.drain();
+      expect(handled).toEqual([1, 2]);
+    } finally { release(); await bus.close(); vi.useRealTimers(); }
+  });
+
   it("removes only the selected entry while preserving capacity and priority ordering", async () => {
     const queue = new BoundedAsyncQueue<string>(3);
     queue.push("first", true);

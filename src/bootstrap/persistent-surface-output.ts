@@ -55,7 +55,9 @@ export class PersistentSurfaceOutput {
 
   start(): Promise<void> { return this.coordinator.start(); }
   wake(): void { this.coordinator.wake(); }
-  acceptsExecution(account: string): boolean { return this.coordinator.acceptsExecution(account); }
+  acceptsExecution(target: ConversationTarget): boolean {
+    return this.coordinator.acceptsExecution(surfaceAccountKey(target.surface, target.accountId), conversationTargetKey(target));
+  }
   waitForIdle(target: ConversationTarget, signal: AbortSignal): Promise<void> {
     const key = conversationTargetKey(target);
     if (this.idleWaiters.size >= 100) return Promise.reject(new Error("投递顺序等待容量已满"));

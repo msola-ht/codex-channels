@@ -570,7 +570,7 @@ export abstract class GatewayComponentGraph {
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
       if (!target || !this.surfaceManager.acceptsExecution(target)) throw new UserFacingError(
-        "delivery.overloaded", "渠道投递箱接近容量上限或不可用，已暂停新执行；请先处理未确认投递",
+        "delivery.overloaded", "当前会话投递受阻、投递箱接近容量上限或不可用，已暂停新执行；请先处理未确认投递",
       );
     });
     const service = new ConversationService(
@@ -1287,6 +1287,7 @@ export abstract class GatewayComponentGraph {
 
   protected async stopInternal(startup: Promise<void> | undefined, startupSettled: boolean): Promise<void> {
     this.stopping = true;
+    this.surfaceManager.beginShutdown?.();
     this.startupAbort?.abort();
     void this.startupNetworkRecovery?.stop();
     this.openAiConnectivityAbort?.abort(new Error("Gateway 正在停止"));
@@ -1332,9 +1333,13 @@ export abstract class GatewayComponentGraph {
     const target = event.target;
     const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
     const binding = threadId ? this.bindings.getByThread(threadId) : this.bindings.get(target);
+    const workspace = this.bindings.getWorkspace(target) ?? null;
     return {
+      version: 2,
+      workspaceCwd: workspace ? this.workspaces.get(workspace)?.cwd ?? null : null,
+      bindingWorkspaceCwd: binding ? this.workspaces.get(binding.workspaceId)?.cwd ?? null : null,
       actors: this.bindings.actors(target).sort(),
-      workspace: this.bindings.getWorkspace(target) ?? null,
+      workspace,
       binding: binding ? [binding.target.surface, binding.target.accountId, binding.target.conversationId, binding.workspaceId, binding.threadId] : null,
       provider: binding ? this.codex.knownProvider(binding.threadId) ?? null : null,
       background: typeof threadId === "string" && this.router.isBackgroundThread(threadId),
@@ -1343,19 +1348,27 @@ export abstract class GatewayComponentGraph {
 
   private outputAuthorized(event: OutputEvent, owner: string): boolean {
     const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
+    // Older owners cannot prove the directory that was authorized at admission.
+    // Preserve their records, but never infer or upgrade their identity here.
+    if (original?.version !== 2) return false;
     if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
     // Stored selections survive unbinding and configuration changes; they do
     // not establish current Workspace authorization.
     if ([original.workspace, original.binding?.[3]].some((id) => id != null && !this.workspaces.get(id))) return false;
+    if (original.workspace !== null && (!original.workspaceCwd
+      || this.workspaces.get(original.workspace)?.cwd !== original.workspaceCwd)) return false;
+    if (original.binding && (!original.bindingWorkspaceCwd
+      || this.workspaces.get(original.binding[3]!)?.cwd !== original.bindingWorkspaceCwd)) return false;
     const current = this.outputIdentity(event);
-    // Normal background completion releases its live binding before slow
-    // platform output finishes. The durable recipient remains the original
-    // Actor/Workspace; a new binding or a removed Provider still fails closed.
-    if (original.background && current.binding === null && original.provider
+    // Foreground/background is presentation state, not recipient authorization.
+    // Normal unsubscription may precede slow delivery, including after demotion.
+    // A Thread currently owned by another target must still fail the comparison.
+    current.background = original.background;
+    if (original.binding && current.binding === null && original.provider
       && this.codex.isProviderConfigured(original.provider)) {
       current.binding = original.binding;
       current.provider = original.provider;
-      current.background = true;
+      current.bindingWorkspaceCwd = original.bindingWorkspaceCwd;
     }
     if (JSON.stringify(current) !== owner) return false;
     const target = event.target;
@@ -1379,6 +1392,8 @@ export abstract class GatewayComponentGraph {
   }
 
   private async shutdownComponentsOnce(): Promise<void> {
+    this.stopping = true;
+    this.surfaceManager.beginShutdown?.();
     this.startupAbort?.abort();
     const restoringBindings = this.bindingRestoreCoordinator().close();
     this.openAiConnectivityAbort?.abort();
@@ -1387,7 +1402,6 @@ export abstract class GatewayComponentGraph {
     this.removeRpcNotification = undefined;
     this.removeRpcDisconnect?.();
     this.removeRpcDisconnect = undefined;
-    this.subagentCompletion?.close();
     const failures: unknown[] = [];
     for (const [component, close] of [
       ["Startup Network Recovery", () => this.startupNetworkRecovery?.stop()],
@@ -1398,6 +1412,11 @@ export abstract class GatewayComponentGraph {
       ["Conversation Idle Releaser", () => this.conversationIdleReleaser?.stop()],
       ["Luna Reserve", () => this.conversations?.closeLunaReserve()],
       ["Async Questions", () => this.asyncQuestions.close()],
+      // Keep synchronous durable admission alive until every accepted inbound
+      // notification has been reduced. Closing Surface first loses this tail.
+      ["Inbound Event Bus", () => this.inbound.close({ requireDrained: true })],
+      ["Derived Output Inputs", () => this.output.drain()],
+      ["Subagent Terminals", () => this.subagentCompletion?.drain()],
       ["Surface", () => this.surfaceManager.stop()],
       ["Account Snapshot Warmup", async () => {
         if (this.accountWarmupTask && !(await waitAtMost(this.accountWarmupTask, 5_000))) {
@@ -1405,7 +1424,6 @@ export abstract class GatewayComponentGraph {
         }
       }],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
-      ["Inbound Event Bus", () => this.inbound.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],
       ["Binding Recovery", async () => {

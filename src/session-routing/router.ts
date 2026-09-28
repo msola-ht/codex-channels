@@ -729,14 +729,16 @@ export class SessionRouter {
 
   async releaseBackground(threadId: string): Promise<ConversationTarget | undefined> {
     return this.withThreadLifecycle([threadId], async () => {
-      if (!this.bindings.isBackground(threadId)) return undefined;
       const binding = this.bindings.getByThread(threadId);
-      if (!binding) return undefined;
+      // Revocation may already have removed the local binding while a fresh
+      // background Thread was being created. Still cancel our subscription;
+      // never unsubscribe a Thread that has since become a valid foreground.
+      if (binding && !this.bindings.isBackground(threadId)) return undefined;
       await this.codex.unsubscribeThread(threadId);
-      this.bindings.removeThread(threadId);
+      if (binding) this.bindings.removeThread(threadId);
       this.contextCompactionItemIdsByThread.delete(threadId);
       this.onBindingsChanged?.();
-      return binding.target;
+      return binding?.target;
     });
   }
 

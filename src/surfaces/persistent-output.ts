@@ -26,9 +26,15 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
   }
 }
 
-/** Connection notices are retained for inspection, but an unknown send must not disable the conversation. */
+/** Auxiliary notices remain inspectable without indefinitely fencing subsequent results. */
 export function mayReleaseUncertainOutputBarrier(event: OutputEvent): boolean {
-  return event.type === "connection.lost" || event.type === "connection.restored";
+  switch (event.type) {
+    case "connection.lost": case "connection.restored": case "turn.started":
+    case "thread.name": case "thread.availability": case "conversation.idle.released":
+    case "subagent.spawned": case "subagent.contacted": return true;
+    case "operation.updated": return event.operation.kind === "contextCompaction" && event.operation.status === "running";
+    default: return false;
+  }
 }
 
 export interface PersistentOutputPayload {

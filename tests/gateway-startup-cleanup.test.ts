@@ -57,6 +57,7 @@ function createGatewayApplicationFixture(
     Object.create(GatewayApplication.prototype),
     { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
+    { output: { drain: async () => undefined, ...(properties.output as object) } },
     { surfaceManager: { preparePersistence: async () => undefined, ...(properties.surfaceManager as object) } },
   ) as GatewayApplicationFixture;
 }
@@ -716,6 +717,7 @@ describe("GatewayApplication startup cleanup", () => {
         },
       },
       output: {
+        drain: async () => undefined,
         close: async () => {
           calls.push("close:output");
         },
@@ -768,8 +770,8 @@ describe("GatewayApplication startup cleanup", () => {
       "remove:notification",
       "remove:disconnect",
       "close:channel-image-spool",
-      "close:surface",
       "close:inbound",
+      "close:surface",
       "close:output",
       "close:codex",
       "close:bindings",
@@ -1198,6 +1200,7 @@ describe("GatewayApplication startup cleanup", () => {
         },
       },
       output: {
+        drain: async () => undefined,
         close: async () => {
           closes.output += 1;
         },
@@ -1294,6 +1297,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       output: {
+        drain: async () => undefined,
         close: async () => undefined,
       },
       interactions: {
@@ -1462,6 +1466,7 @@ describe("GatewayApplication startup cleanup", () => {
         close: async () => undefined,
       },
       output: {
+        drain: async () => undefined,
         close: async () => undefined,
       },
       interactions: {
@@ -1574,6 +1579,6 @@ function accountWarmupFixture(service: ProviderAccountService, logger: Logger, c
     stopReconnect: close, bindingRestoreCoordinator: () => ({ close }),
     surfaceManager: { start: close, stop: close },
     channelImageSpool: { start: close, stop: close },
-    inbound: { close }, output: { close }, bindings: { close },
+    inbound: { close }, output: { close, drain: close }, bindings: { close },
   });
 }

@@ -4,7 +4,7 @@
 
 `index.ts` 是所有 Surface 的公开导出入口。
 
-`persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，限定未知连接通知可解除顺序屏障，并将必要图片纳入同一有界快照；
+`persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，限定未知辅助通知可解除顺序屏障，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
 等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
 允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。

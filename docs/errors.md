@@ -42,7 +42,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `conversation.name.invalid` | 会话名称必须为 1–64 个字符 | 重命名会话时名称长度非法 |
 | `conversation.missing` | 当前还没有 Codex Thread | 无绑定会话时执行需要 Thread 的命令 |
 | `conversation.busy` | 当前任务运行中，请先使用 /stop 停止当前任务 | 任务运行中提交新消息或切换会话 |
-| `delivery.overloaded` | 渠道投递箱接近容量上限或不可用，已暂停新执行 | 在本机使用 `codexc delivery` 核对未确认投递，见[投递箱恢复](delivery.md) |
+| `delivery.overloaded` | 当前会话投递受阻、投递箱接近容量上限或不可用，已暂停新执行 | 在本机使用 `codexc delivery` 核对未确认投递，见[投递箱恢复](delivery.md) |
 | `conversation.background-limit` | 后台任务数量达到上限 | 后台 Thread 超过允许数量 |
 | `conversation.background-queued` | 当前任务仍有下一 Turn 排队消息，暂不能切换会话 | 切换会话时存在排队输入 |
 

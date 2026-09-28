@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
 import { toConversationInputEvent } from "../src/codex-client/index.js";
@@ -1106,6 +1107,21 @@ contractSuite("real supervised App Server tools", () => {
         expect(parentSequence.indexOf("subagent.completed")).toBeGreaterThan(
           parentSequence.indexOf("parent.turn.completed"),
         );
+        // Feed the official terminal into shutdown settlement before its normal timer fires.
+        const terminalOutputs: unknown[] = [];
+        const tracker = new SubagentCompletionTracker({
+          readSummary: () => ({ latestTurn: null, threadAggregate: null }),
+          publish: (event) => terminalOutputs.push(event),
+        });
+        try {
+          tracker.handle({ type: "subagent.spawned",
+            target: { surface: "telegram", accountId: "fixture", conversationId: "fixture" },
+            threadId, turnId: parentTurnId, agentThreadId: spawned!.agentThreadId, agentPath: spawned!.agentPath });
+          tracker.handleInput(completed!);
+          await tracker.drain();
+          expect(terminalOutputs).toEqual([expect.objectContaining({ type: "subagent.completed",
+            parentThreadId: threadId, agentThreadId: spawned!.agentThreadId, status: "completed" })]);
+        } finally { tracker.close(); }
         const descendants = await client.listThreadDescendants(threadId, false);
         expect(descendants).toEqual(expect.arrayContaining([
           expect.objectContaining({ id: spawned?.agentThreadId, parentThreadId: threadId }),

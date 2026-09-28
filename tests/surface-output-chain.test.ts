@@ -5,10 +5,12 @@ import { GrammyError, type Api } from "grammy";
 import pino from "pino";
 import { afterEach, expect, it, vi } from "vitest";
 import { EventBus } from "../src/event-bus/index.js";
-import { conversationTargetKey, surfaceAccountKey, type OutputEvent } from "../src/conversation-core/index.js";
+import { conversationTargetKey, surfaceAccountKey, type OutputEvent, type ConversationInputEvent } from "../src/conversation-core/index.js";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
 import type { DeliveryRecord } from "../src/delivery/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
+import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
+import { GatewayComponentGraph } from "../src/bootstrap/gateway-component-graph.js";
 import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
 import { TelegramOutbox } from "../src/surfaces/telegram/outbox.js";
 import type { FeishuMessagePort } from "../src/surfaces/feishu/outbox-message-port.js";
@@ -21,6 +23,79 @@ const base = { target, threadId: "thread", turnId: "turn" };
 const answer: OutputEvent = { ...base, type: "text.completed", itemId: "answer", text: "full answer", phase: "final_answer" };
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+
+it("fences new execution but persists every accepted inbound result before closing the journal", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-stop-chain-")); directories.push(directory);
+  const inbound = new EventBus<number>(logger); const output = new EventBus<OutputEvent>(logger);
+  const surface: SurfaceAdapter = { surface: "telegram", accountId: "default", output: { handle: () => {} },
+    interactions: { request: async () => ({ type: "approval", approved: false }) },
+    start: async () => {}, stop: async () => {}, deliverConfigurationChange: async () => {} };
+  const manager = new SurfaceManager([surface], output, logger, undefined, { persistence: { directory,
+    workerUrl: new URL("../dist/delivery/worker.js", import.meta.url), owner: () => "actor", authorized: () => true, fault: vi.fn() } });
+  await manager.preparePersistence();
+  let reduced = 0;
+  inbound.subscribe("core", (id) => { reduced++; output.publish({ ...answer, itemId: String(id) }, true); });
+  const close = async () => {};
+  const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
+    bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
+    channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    inbound, output, codex: { close }, bindings: { close }, logger,
+  });
+  try {
+    for (let id = 0; id < 100; id++) inbound.publish(id, true);
+    const stopped = graph.shutdownComponents();
+    expect(manager.acceptsExecution(target)).toBe(false);
+    await stopped;
+    expect(reduced).toBe(100);
+    const journal = new SqliteDeliveryJournal(directory);
+    try { expect(journal.execute({ type: "summary" })).toMatchObject({ records: 100, pending: 100 }); }
+    finally { journal.close(); }
+  } finally { await manager.stop(); await inbound.close(); await output.close(); }
+});
+
+it.each(["queued", "settling", "checkpoint"] as const)("persists derived subagent completion during shutdown (%s)", async (stage) => {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-subagent-stop-")); directories.push(directory);
+  const inbound = new EventBus<ConversationInputEvent>(logger); const output = new EventBus<OutputEvent>(logger);
+  const surface: SurfaceAdapter = { surface: "telegram", accountId: "default", output: { handle: () => {} },
+    interactions: { request: async () => ({ type: "approval", approved: false }) },
+    start: async () => {}, stop: async () => {}, deliverConfigurationChange: async () => {} };
+  const manager = new SurfaceManager([surface], output, logger, undefined, { persistence: { directory,
+    workerUrl: new URL("../dist/delivery/worker.js", import.meta.url), owner: () => "actor", authorized: () => true, fault: vi.fn() } });
+  await manager.preparePersistence();
+  const emitted: OutputEvent[] = [];
+  const tracker = new SubagentCompletionTracker({
+    readSummary: () => ({ latestTurn: null, threadAggregate: null }),
+    waitForMetrics: () => new Promise<boolean>(() => {}),
+    publish: (event) => { emitted.push(event); output.publish(event, true); },
+  });
+  output.subscribe("subagent-metrics", (event) => tracker.handle(event));
+  inbound.subscribe("core", (event) => {
+    tracker.handleInput(event);
+    if (stage === "checkpoint") tracker.metricsAvailable("child");
+  });
+  const close = async () => {};
+  const graph = Object.assign(Object.create(GatewayComponentGraph.prototype) as { shutdownComponents(): Promise<void> }, {
+    bindingRestoreCoordinator: () => ({ close }), closeQueueLifecycleTasks: close,
+    channelImageSpool: { stop: close }, asyncQuestions: { close }, surfaceManager: manager, providerMetrics: { close },
+    subagentCompletion: tracker, inbound, output, codex: { close }, bindings: { close }, logger,
+  });
+  try {
+    output.publish({ ...base, type: "subagent.spawned", agentThreadId: "child", agentPath: "/root/child" }, true);
+    if (stage !== "queued") await output.drain();
+    inbound.publish({ type: "item.subagentActivity", threadId: "thread", turnId: "turn", itemId: "native-completion",
+      agentThreadId: "child", agentPath: "/root/child", kind: "completed" }, true);
+    if (stage !== "queued") await inbound.drain();
+    await graph.shutdownComponents();
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ type: "subagent.completed", status: "completed",
+      metricsStatus: stage === "checkpoint" ? "unavailable" : "empty" });
+    const journal = new SqliteDeliveryJournal(directory);
+    try {
+      // Spawn and terminal both survived; the derived terminal was admitted before journal close.
+      expect(journal.execute({ type: "summary" })).toMatchObject({ records: 2, pending: 2 });
+    } finally { journal.close(); }
+  } finally { tracker.close(); await manager.stop(); await inbound.close(); await output.close(); }
+}, 15_000);
 
 it.each(["html", "rich", "commentary"] as const)("confirms an unchanged Telegram %s body and drains its completion", async (format) => {
   const edit = vi.fn(async () => { throw new GrammyError("unchanged", {
@@ -324,7 +399,7 @@ it.each([false, true])("releases a suspended account's snapshots without deletin
 });
 
 async function fixture(block = false, platform: "telegram" | "feishu" = "telegram", failFirst = false, failAnswer = false, existingDirectory?: string,
-  options: { telegramEdit?: (...args: unknown[]) => Promise<unknown>; telegramFormat?: "html" | "rich"; feishu?: Partial<FeishuMessagePort> } = {}) {
+  options: { trackCards?: boolean; telegramEdit?: (...args: unknown[]) => Promise<unknown>; telegramFormat?: "html" | "rich"; feishu?: Partial<FeishuMessagePort> } = {}) {
   const target = { surface: platform, accountId: "default", conversationId: "chat" };
   const directory = existingDirectory ?? mkdtempSync(join(tmpdir(), "codexc-state-chain-"));
   if (!existingDirectory) directories.push(directory);
@@ -352,7 +427,7 @@ async function fixture(block = false, platform: "telegram" | "feishu" = "telegra
         ...(options.telegramFormat ? { finalMessageFormat: options.telegramFormat } : {}) })
     : new FeishuOutbox("default", {
       sendText: async (chat, text) => { await send(chat, text); }, sendPost: async (chat, text) => { await send(chat, text); },
-      sendMarkdownCard: send, sendCard: async () => "card", updateCard: async () => {},
+      sendMarkdownCard: send, sendCard: async (chat, card) => options.trackCards ? send(chat, JSON.stringify(card)) : "card", updateCard: async () => {},
       createStreamingCard: async (chat, text) => ({ cardId: "card", messageId: await send(chat, text) }),
       updateStreamingCard: async () => {}, finishStreamingCard: async () => {},
       ...options.feishu,
@@ -550,13 +625,22 @@ it("does not let a failed initial plan suppress a later live plan update", async
   } finally { await f.close(); }
 });
 
-it.each([
-  ["telegram", "connection.lost"], ["feishu", "connection.lost"],
-  ["telegram", "connection.restored"], ["feishu", "connection.restored"],
-] as const)("retains an unknown %s %s notice without fencing answers, snapshots or interaction waits", async (platform, type) => {
-  const f = await fixture(true, platform, true);
+const auxiliaryNotices: OutputEvent[] = [
+  { ...base, type: "connection.lost", message: "lost" },
+  { ...base, type: "connection.restored", message: "restored" },
+  { ...base, type: "turn.started" },
+  { ...base, type: "thread.name", name: "new name" },
+  { ...base, type: "thread.availability", availability: "available" },
+  { ...base, type: "conversation.idle.released", minutes: 10 },
+  { ...base, type: "subagent.spawned", agentThreadId: "child", agentPath: "agent" },
+  { ...base, type: "subagent.contacted", agentThreadId: "child", agentPath: "agent" },
+  { ...base, type: "operation.updated", operation: { itemId: "compact", kind: "contextCompaction", status: "running" } },
+];
+it.each(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).map((platform) => ({ platform, type: event.type, event }))))(
+  "retains an unknown $platform $type notice without fencing answers, snapshots or interaction waits", async ({ platform, event }) => {
+  const f = await fixture(true, platform, true, false, undefined, { trackCards: true });
   try {
-    f.output.publish({ target: f.target, threadId: "thread", type, message: "connection notice" });
+    f.output.publish({ ...event, target: f.target });
     await vi.waitFor(() => expect(f.sent).toHaveLength(1));
     f.output.publish({ ...answer, target: f.target });
     f.output.publish({ target: f.target, type: "account.updated", authMode: "chatgpt", planType: "pro" });
@@ -565,6 +649,7 @@ it.each([
     await vi.waitFor(() => expect(f.sent.some((text) => text.includes("Pro"))).toBe(true));
     expect(f.sent.filter((text) => text.includes("full answer"))).toHaveLength(1);
     expect(f.faults).toEqual(["delivery-uncertain"]);
+    expect(f.manager.acceptsExecution(f.target)).toBe(true);
   } finally { await f.close(); }
   const stored = new SqliteDeliveryJournal(f.directory);
   let retainedBytes: number;
@@ -579,17 +664,21 @@ it.each([
     restarted.output.publish({ ...answer, target: restarted.target, itemId: "after-restart" });
     await restarted.manager.waitForPersistentOutput(restarted.target, AbortSignal.timeout(3000));
     expect(restarted.sent).toEqual(["full answer"]);
+    expect(restarted.manager.acceptsExecution(restarted.target)).toBe(true);
   } finally { await restarted.close(); }
   const retained = new SqliteDeliveryJournal(f.directory);
   try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1, bytes: retainedBytes }); }
   finally { retained.close(); }
 });
 
-it.each(["connection", "answer", "warning", "blocked"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
+it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-recovered-barrier-"));
   directories.push(directory);
   const store = new SqliteDeliveryJournal(directory);
-  const event: OutputEvent = kind === "answer" ? answer : kind === "warning"
+  const event: OutputEvent = kind === "turn-completed" ? { ...base, type: "turn.completed", status: "completed" }
+    : kind === "compaction-completed" || kind === "compaction-failed"
+    ? { ...base, type: "operation.updated", operation: { itemId: "compact", kind: "contextCompaction", status: kind === "compaction-failed" ? "failed" : "completed" } }
+    : kind === "answer" ? answer : kind === "warning"
     ? { target, type: "warning", message: "warning" }
     : { target, threadId: "thread", type: "connection.lost", message: "lost" };
   try {
@@ -608,9 +697,57 @@ it.each(["connection", "answer", "warning", "blocked"] as const)("rebuilds only 
     } else {
       await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
       expect(f.sent).toEqual([]);
+      expect(f.manager.acceptsExecution(target)).toBe(false);
+      const other = { ...target, conversationId: "other-chat" };
+      expect(f.manager.acceptsExecution(other)).toBe(true);
+      f.output.publish({ ...answer, target: other });
+      await f.manager.waitForPersistentOutput(other, AbortSignal.timeout(3000));
+      expect(f.sentTargets).toEqual(["other-chat"]);
     }
   } finally { await f.close(); }
   const retained = new SqliteDeliveryJournal(directory);
   try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: kind === "connection" ? 1 : 2 }); }
   finally { retained.close(); }
+});
+
+
+it.each(["unknown", "authorization"] as const)("immediately closes only the affected conversation admission on a live %s failure", async (failure) => {
+  const f = await fixture(true, "telegram", false, failure === "unknown");
+  try {
+    f.output.publish({ ...base, type: "turn.started" });
+    await vi.waitFor(() => expect(f.sent).toHaveLength(1));
+    f.output.publish(answer);
+    expect(f.manager.acceptsExecution(target)).toBe(true); // Normal pending/sending is allowed.
+    if (failure === "authorization") f.revoke();
+    f.release();
+    await vi.waitFor(() => expect(f.manager.acceptsExecution(target)).toBe(false));
+    expect(f.manager.acceptsExecution({ ...target, conversationId: "other" })).toBe(true);
+    expect(f.faults).toContain(failure === "unknown" ? "delivery-uncertain" : "authorization-changed");
+  } finally { await f.close(); }
+});
+
+it("reopens execution only after every manual barrier is resolved offline and recovery succeeds", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "codexc-admission-recovery-"));
+  directories.push(directory);
+  let store = new SqliteDeliveryJournal(directory);
+  try {
+    for (const id of ["first", "second", "pending"]) {
+      store.execute({ type: "submit", value: { id, account: surfaceAccountKey(target.surface, target.accountId), conversation: conversationTargetKey(target),
+        payload: JSON.stringify({ version: 1, owner: "actor", event: { ...answer, itemId: id } }) } });
+      if (id !== "pending") store.execute({ type: "state", id, from: "pending", to: "uncertain" });
+    }
+    store.execute({ type: "resolve", id: "first", action: "confirm" });
+  } finally { store.close(); }
+  const blocked = await fixture(false, "telegram", false, false, directory);
+  try { expect(blocked.manager.acceptsExecution(target)).toBe(false); }
+  finally { await blocked.close(); }
+  store = new SqliteDeliveryJournal(directory);
+  try { expect(store.execute({ type: "resolve", id: "second", action: "retry" })).toBe(true); }
+  finally { store.close(); }
+  const restored = await fixture(false, "telegram", false, false, directory);
+  try {
+    await restored.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
+    expect(restored.manager.acceptsExecution(target)).toBe(true);
+    expect(restored.sent).toEqual(["full answer", "full answer"]);
+  } finally { await restored.close(); }
 });

@@ -174,6 +174,61 @@ function setup(options: {
 }
 
 describe("ScheduledTaskExecutor", () => {
+  it("does not let background cleanup unsubscribe a valid foreground binding", async () => {
+    const unsubscribeThread = vi.fn(async () => {});
+    const value = setup({ unsubscribeThread });
+    value.bindings.bind({ target, workspaceId: "main", threadId: "foreground", sessionId: "foreground" });
+    await value.router.releaseBackground("foreground");
+    expect(unsubscribeThread).not.toHaveBeenCalled();
+    expect(value.bindings.get(target)?.threadId).toBe("foreground");
+  });
+  it.each(["provider", "model", "thread", "bound"] as const)("rejects revocation during %s preparation before starting a Turn", async (stage) => {
+    let revoke = () => {};
+    const startTurn = vi.fn(async () => ({ turnId: "turn" }));
+    const unsubscribeThread = vi.fn(async () => {});
+    const startThread = vi.fn(async () => { if (stage === "thread") revoke(); return session("automation-thread"); });
+    const value = setup({ startThread, startTurn, unsubscribeThread,
+      executorOptions: { onThreadStarted: () => { if (stage === "bound") revoke(); } }, models: {
+      ensureProvider: async () => { if (stage === "provider") revoke(); },
+      isModelAvailable: async () => { if (stage === "model") revoke(); return true; },
+    } });
+    revoke = () => { value.bindings.retainActors(target, new Set()); };
+    expect(await value.executor.execute(task(), run, new AbortController().signal)).toMatchObject({ kind: "failed", category: "authorization", blockTask: true });
+    expect(startTurn).not.toHaveBeenCalled();
+    expect(startThread).toHaveBeenCalledTimes(stage === "thread" || stage === "bound" ? 1 : 0);
+    expect(unsubscribeThread).toHaveBeenCalledTimes(stage === "thread" || stage === "bound" ? 1 : 0);
+    expect(value.router.backgroundBindings(target)).toHaveLength(0);
+  });
+
+  it.each(["cancel", "capacity", "workspace"] as const)("cleans up a newly created Thread after %s changes without starting a Turn", async (change) => {
+    const controller = new AbortController(); let available = true;
+    let update = () => {};
+    const startTurn = vi.fn(async () => ({ turnId: "turn" }));
+    const unsubscribeThread = vi.fn(async () => {});
+    const value = setup({ startTurn, unsubscribeThread,
+      startThread: async () => { update(); return session("automation-thread"); },
+      executorOptions: { acceptsExecution: () => available },
+    });
+    update = () => {
+      if (change === "cancel") controller.abort();
+      if (change === "capacity") available = false;
+      if (change === "workspace") value.workspaces.replace([{ id: "main", name: "Main", cwd: "/changed", sandbox: "read-only", approvalPolicy: "never" }], "main");
+    };
+    expect(await value.executor.execute(task(), run, controller.signal)).toMatchObject(change === "cancel"
+      ? { kind: "interrupted" } : { kind: "failed", category: change });
+    expect(startTurn).not.toHaveBeenCalled(); expect(unsubscribeThread).toHaveBeenCalledOnce();
+    expect(value.router.backgroundBindings(target)).toHaveLength(0);
+  });
+
+  it("stops model preflight after cancellation without issuing a Thread write", async () => {
+    const controller = new AbortController();
+    const startThread = vi.fn(async () => session("automation-thread"));
+    const isModelAvailable = vi.fn(async () => true);
+    const value = setup({ startThread, models: { ensureProvider: async () => { controller.abort(); }, isModelAvailable } });
+    expect(await value.executor.execute(task(), run, controller.signal)).toEqual({ kind: "interrupted" });
+    expect(isModelAvailable).not.toHaveBeenCalled(); expect(startThread).not.toHaveBeenCalled();
+  });
+
   it("fails closed when mandatory unattended validation dependencies are missing", () => {
     const { router, turns, bindings, workspaces, core } = setup();
 
