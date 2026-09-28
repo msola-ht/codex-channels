@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { PersistentSurfaceOutput, type PersistentSurfaceOutputOptions } from "./persistent-surface-output.js";
 
 import type { ScheduledTaskConfirmation } from "../application/index.js";
 import {
@@ -13,6 +14,7 @@ import type { EventBus } from "../event-bus/index.js";
 import {
   ConversationDeliveryQueue,
   SurfaceOutputCoalescer,
+  isPersistentOutput,
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceErrorMetadata,
@@ -71,6 +73,7 @@ interface PendingOutputEntry {
 }
 
 export interface SurfaceManagerOptions {
+  persistence?: Pick<PersistentSurfaceOutputOptions, "directory" | "owner" | "authorized" | "fault" | "workerUrl">;
   retryDelaysMs?: readonly number[];
   maximumPendingCriticalOutput?: number;
   setInteractionAvailable?(
@@ -107,6 +110,11 @@ export class SurfaceManager {
   private stopping = false;
   private readonly accountQueriesAbort = new AbortController();
   private readonly outputCoalescer = new SurfaceOutputCoalescer();
+  private readonly persistent: PersistentSurfaceOutput | undefined;
+  private persistenceStart: Promise<void> | undefined;
+  private removePersistenceObserver: (() => void) | undefined;
+  private readonly suspended = new Set<string>();
+  private readonly surfaceStops = new Map<SurfaceAdapter, Promise<void>>();
 
   constructor(
     private readonly surfaces: readonly SurfaceAdapter[],
@@ -136,15 +144,46 @@ export class SurfaceManager {
         retryAttempt: 0,
         pendingCriticalOutput: [],
         nextOutputOrder: 0,
-        delivery: new ConversationDeliveryQueue(logger, { component: "SurfaceRouting", logIntermediateStages: false }),
+        delivery: new ConversationDeliveryQueue(logger, {
+          component: "SurfaceRouting", logIntermediateStages: false,
+          maximumPendingOperations: 512,
+          onOverload: () => this.suspendPersistentAccount(key),
+        }),
         shedBacklogCount: 0,
         nextShedBacklogReport: 1,
         nextPendingThresholdReport: this.maximumPendingCriticalOutput,
       });
     }
+    this.persistent = options.persistence ? new PersistentSurfaceOutput({
+      ...options.persistence,
+      accounts: () => [...this.active].map((surface) => surfaceAccountKey(surface.surface, surface.accountId)),
+      deliver: async (event, signal, checkpoint, authorized) => {
+        const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
+        if (!surface || !this.active.has(surface) || !surface.output.deliver) throw new Error("可靠投递端口不可用");
+        const enriched = await this.enrichCompletionOutput(event);
+        signal.throwIfAborted();
+        if (!authorized()) throw new Error("可靠投递授权已变化");
+        await surface.output.deliver(enriched, signal, checkpoint);
+      },
+    }) : undefined;
+    if (this.persistent) this.removePersistenceObserver = output.observe((event) => {
+      if (!this.acceptingOutput || !isPersistentOutput(event)) return;
+      const key = surfaceAccountKey(event.target.surface, event.target.accountId);
+      const surface = this.surfacesByAccount.get(key);
+      if (surface && !this.suspended.has(key) && (surface.output.retains?.(event) ?? true)) this.persistent!.accept(event);
+    });
     this.removeOutputSubscription = output.subscribe(
       "surface-output-router",
       (event, _signal, eventBusWaitMs) => {
+        if (this.persistent) {
+          if (isPersistentOutput(event)) return;
+          const surface = this.surfacesByAccount.get(surfaceAccountKey(event.target.surface, event.target.accountId));
+          if (surface && (!this.active.has(surface) || this.persistent.hasOutstanding(event))) {
+            // Intermediate output is not a second restart/recovery backlog.
+            this.reportShedBacklogOutput(surface, this.requireRuntime(surface), event, event);
+            return;
+          }
+        }
         const started = performance.now();
         const fields = {
           surface: event.target.surface, accountId: event.target.accountId,
@@ -169,10 +208,47 @@ export class SurfaceManager {
   }
 
   async start(): Promise<void> {
+    await this.preparePersistence();
     if (this.stopping) {
       throw new Error("SurfaceManager 正在停止");
     }
     await Promise.all(this.surfaces.map((surface) => this.startSurface(surface)));
+  }
+
+  preparePersistence(): Promise<void> {
+    this.persistenceStart ??= this.persistent?.start() ?? Promise.resolve();
+    return this.persistenceStart;
+  }
+
+  acceptsExecution(target: ConversationTarget): boolean {
+    const account = surfaceAccountKey(target.surface, target.accountId);
+    return !this.stopping && !this.suspended.has(account) && (this.persistent?.acceptsExecution(account) ?? true);
+  }
+
+  waitForPersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {
+    return this.persistent?.waitForIdle(target, signal) ?? Promise.resolve();
+  }
+
+  suspendPersistentAccount(account: string): void {
+    if (this.suspended.has(account)) return;
+    this.suspended.add(account);
+    const surface = this.surfacesByAccount.get(account);
+    if (!surface) return;
+    this.active.delete(surface);
+    this.setInteractionAvailable(surface, false, "可靠投递存储不可接收新结果，请检查本地状态");
+    const runtime = this.requireRuntime(surface);
+    if (runtime.retryTimer) clearTimeout(runtime.retryTimer);
+    void this.stopSurface(surface).catch(() => this.logger.error({ account }, "超载渠道停止失败"));
+  }
+
+  private stopSurface(surface: SurfaceAdapter): Promise<void> {
+    const pending = this.surfaceStops.get(surface);
+    if (pending) return pending;
+    const task = Promise.resolve().then(() => surface.stop());
+    this.surfaceStops.set(surface, task);
+    const clear = (): void => { if (this.surfaceStops.get(surface) === task) this.surfaceStops.delete(surface); };
+    void task.then(clear, clear);
+    return task;
   }
 
   async sendChannelImage(
@@ -265,6 +341,10 @@ export class SurfaceManager {
     this.stopping = true;
     this.accountQueriesAbort.abort();
     this.acceptingOutput = false;
+    this.removePersistenceObserver?.();
+    let persistenceError: unknown;
+    try { await this.persistent?.close(); }
+    catch (error) { persistenceError = error; }
     this.outputCoalescer.clear();
     this.removeOutputSubscription?.();
     this.removeOutputSubscription = undefined;
@@ -288,7 +368,7 @@ export class SurfaceManager {
     this.attempted.clear();
     for (const surface of attempted.reverse()) {
       try {
-        await surface.stop();
+        await this.stopSurface(surface);
       } catch (error) {
         failures.push({ surface, error });
         this.logger.error(
@@ -310,6 +390,7 @@ export class SurfaceManager {
         "部分 Surface 未能停止",
       );
     }
+    if (persistenceError) throw new AggregateError([persistenceError], "持久输出关闭失败");
   }
 
   configurationChanged(change: SurfaceConfigurationChange): void {
@@ -579,6 +660,7 @@ export class SurfaceManager {
   }
 
   private async startSurface(surface: SurfaceAdapter): Promise<void> {
+    if (this.suspended.has(surfaceAccountKey(surface.surface, surface.accountId))) return;
     if (this.stopping) {
       return;
     }
@@ -616,13 +698,15 @@ export class SurfaceManager {
       this.scheduleRetry(surface);
       return;
     }
-    if (this.stopping) {
+    if (this.stopping || this.suspended.has(surfaceAccountKey(surface.surface, surface.accountId))) {
+      await this.stopSurface(surface);
       return;
     }
     runtime.state = "running";
     runtime.retryAttempt = 0;
     this.setInteractionAvailable(surface, true);
     this.active.add(surface);
+    this.persistent?.wake();
     runtime.shedBacklogCount = 0;
     runtime.nextShedBacklogReport = 1;
     runtime.nextPendingThresholdReport = this.maximumPendingCriticalOutput;

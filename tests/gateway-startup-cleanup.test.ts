@@ -57,6 +57,7 @@ function createGatewayApplicationFixture(
     Object.create(GatewayApplication.prototype),
     { asyncQuestions: { close: vi.fn(async () => undefined), cancelThread: vi.fn() } },
     properties,
+    { surfaceManager: { preparePersistence: async () => undefined, ...(properties.surfaceManager as object) } },
   ) as GatewayApplicationFixture;
 }
 
@@ -283,7 +284,7 @@ describe("GatewayApplication startup cleanup", () => {
     }
   });
 
-  it.each(["metrics", "surface", "spool"])("stops startup after the pending %s stage", async (stage) => {
+  it.each(["persistence", "metrics", "surface", "spool"])("stops startup after the pending %s stage", async (stage) => {
     let release!: () => void;
     let entered!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
@@ -300,7 +301,7 @@ describe("GatewayApplication startup cleanup", () => {
       restoreSubscriptions: async () => [],
       overrides: {
         providerMetrics: { start: stage === "metrics" ? pause : async () => undefined, close: async () => undefined },
-        surfaceManager: { start: surfaceStart, stop: async () => undefined },
+        surfaceManager: { preparePersistence: stage === "persistence" ? pause : async () => undefined, start: surfaceStart, stop: async () => undefined },
         channelImageSpool: { start: spoolStart, stop: async () => undefined },
         conversationIdleReleaser: { start: idleStart, stop: async () => undefined },
       },
@@ -313,7 +314,7 @@ describe("GatewayApplication startup cleanup", () => {
     release();
     await rejected;
     await stopping;
-    if (stage === "metrics") expect(connect).not.toHaveBeenCalled();
+    if (stage === "metrics" || stage === "persistence") expect(connect).not.toHaveBeenCalled();
     if (stage !== "spool") expect(spoolStart).not.toHaveBeenCalled();
     expect(idleStart).not.toHaveBeenCalled();
   });

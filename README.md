@@ -85,6 +85,7 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 - [完整使用指导](docs/user-guide.md)
 - [源码安装与更新](docs/source-install.md)
 - [渠道展示与本地指标](docs/display.md)
+- [关键结果投递与离线恢复](docs/delivery.md)
 - [错误字典](docs/errors.md)
 - [本地指标 WebUI](docs/webui.md)
 - [DeepSeek 多账户管理](docs/deepseek.md)

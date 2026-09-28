@@ -69,6 +69,7 @@ import {
 } from "../scripts/service-command.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
+import { runDeliveryCommand } from "../scripts/delivery-command.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -100,6 +101,7 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
+  delivery                     离线核对并处理未确认的渠道投递
   cleanup                      统一交互清理会话、转储和指标
   traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
   sessions                     管理会话（包括按 Turn 清理旧会话）
@@ -465,6 +467,9 @@ async function executeCommand(command, args) {
       break;
     case "metrics":
       await metrics(args);
+      break;
+    case "delivery":
+      await runDeliveryCommand(args);
       break;
     case "cleanup":
       if (showRequestedHelp(args, "cleanup")) break;

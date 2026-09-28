@@ -137,12 +137,12 @@ describe("WeixinOutbox", () => {
     expect(sendText.mock.calls[1]?.[0].text).toBe("final reply");
   });
 
-  it("does not retry an ambiguous WeChat failure", async () => {
+  it.each(["timeout", "http-error"] as const)("does not retry an ambiguous WeChat failure (%s)", async (code) => {
     const { outbox, sendText } = outboxFixture(
       { value: true },
       {},
       async () => {
-        throw new WeixinProtocolError("timeout", "微信发送超时");
+        throw new WeixinProtocolError(code, "微信发送结果未知", code === "http-error" ? 503 : undefined);
       },
     );
 

@@ -1,3 +1,5 @@
+import { isPersistentOutput } from "../persistent-output.js";
+import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { FeishuTextStreams } from "./text-streams.js";
 import type { Logger } from "pino";
 import { withSurfaceOutputDiagnostics, surfaceDiagnosticContext } from "../diagnostics.js";
@@ -129,6 +131,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     this.messagePort = bindOutboxMessagePort(messagePort, this.deliveryAbort.signal);
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Feishu",
+      maximumPendingOperations: 512,
       drainOnClose: true,
     });
     this.textStreams = new FeishuTextStreams(
@@ -149,6 +152,23 @@ export class FeishuOutbox implements SurfaceOutputPort {
       return;
     }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  retains(event: OutputEvent): boolean {
+    return isPersistentOutput(event, this.options.operationUpdateDisplay ?? "full");
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+    if (this.closed || event.target.surface !== "feishu"
+      || event.target.accountId !== this.accountId) throw new Error("可靠输出目标无效或已关闭");
+    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    await captureDelivery(() => {
+      this.handle(event);
+      if (event.type === "operation.updated" && event.operation.status !== "running") {
+        const buffered = this.operationUpdates.flushTurn(event.threadId, event.turnId);
+        if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
+      }
+    }, signal, checkpoint);
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -196,7 +216,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     }
     if (event.type === "operation.updated") {
       if (event.operation.kind === "contextCompaction") {
-        const text = this.compactionNotices.accept(event);
+        const text = this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
         if (text !== null) {
           this.textStreams.flushStreamsBeforeVisibleOutput(event.threadId, event.turnId);
           this.delivery.enqueue(event.target.conversationId,
@@ -810,7 +830,7 @@ export class FeishuOutbox implements SurfaceOutputPort {
     markdown: string,
   ): boolean {
     const key = this.operationKey(event.threadId, event.turnId, event.operation.itemId);
-    if (this.operationDisplays.get(key) === markdown) {
+    if (!DeliveryReceipt.current() && this.operationDisplays.get(key) === markdown) {
       return false;
     }
     this.operationDisplays.set(key, markdown);

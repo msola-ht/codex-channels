@@ -3,6 +3,7 @@ export type UserFacingErrorCode =
   | "conversation.name.invalid"
   | "conversation.missing"
   | "conversation.busy"
+  | "delivery.overloaded"
   | "conversation.background-limit"
   | "conversation.background-queued"
   | "image.reference.failed"

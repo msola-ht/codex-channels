@@ -37,6 +37,7 @@
 
 - [`docs/modularity-review.md`](docs/modularity-review.md)：模块关联审查、职责重构计划、实时进度与复查结果。
 - [`docs/critical-output-backlog-review.md`](docs/critical-output-backlog-review.md)：关键输出积压的端到端链路、容量边界、复现证据与分阶段治理计划。
+- [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
   当前边界、实现入口、验证范围与正式发布门槛。
@@ -71,6 +72,7 @@
 ## 源码与运行
 
 - [`src/README.md`](src/README.md)：源码模块与边界。
+- [`src/delivery/README.md`](src/delivery/README.md)：独立持久投递模块及公开接口。
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。

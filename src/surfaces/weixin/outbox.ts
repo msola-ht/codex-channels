@@ -1,3 +1,5 @@
+import { isPersistentOutput } from "../persistent-output.js";
+import { DeliveryReceipt, captureDelivery, checkpointDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import type { Logger } from "pino";
 import type { InteractionDecision, InteractionRequest } from "../../approval/index.js";
 import { withSurfaceOutputDiagnostics } from "../diagnostics.js";
@@ -114,6 +116,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     };
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Weixin",
+      maximumPendingOperations: 512,
       ...(options.capacity === undefined
         ? {}
         : { capacity: options.capacity }),
@@ -133,6 +136,18 @@ export class WeixinOutbox implements SurfaceOutputPort {
       return;
     }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  retains(event: OutputEvent): boolean {
+    return isPersistentOutput(event);
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+    if (this.closed || !this.matches(event.target)) throw new Error("可靠输出目标无效或已关闭");
+    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    await captureDelivery(() => {
+      this.handle(event);
+    }, signal, checkpoint);
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -257,7 +272,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
   private render(event: OutputEvent): string | null {
     switch (event.type) {
       case "operation.updated":
-        return this.compactionNotices.accept(event);
+        return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
       case "text.completed":
         if (event.phase !== "final_answer") {
           return null;
@@ -349,13 +364,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
         file,
       };
       try {
-        await this.withSendRetry(
+        await checkpointDelivery("sendFile", () => this.withSendRetry(
           "sendFile",
           () => (signal
             ? fileClient.sendFile(input, signal)
             : fileClient.sendFile(input)),
           signal,
-        );
+        ), isDefinitelyRejectedWeixinSend);
       } catch (error) {
         if (isRejectedReplyContext(error)) {
           await this.invalidateContext(target, context.contextToken);
@@ -413,9 +428,9 @@ export class WeixinOutbox implements SurfaceOutputPort {
           text: chunk,
         };
         if (signal) {
-          await this.client.sendText(input, signal);
+          await checkpointDelivery("sendText", () => this.client.sendText(input, signal), isDefinitelyRejectedWeixinSend);
         } else {
-          await this.client.sendText(input);
+          await checkpointDelivery("sendText", () => this.client.sendText(input), isDefinitelyRejectedWeixinSend);
         }
       } catch (error) {
         if (isRejectedReplyContext(error)) {
@@ -466,13 +481,13 @@ export class WeixinOutbox implements SurfaceOutputPort {
       image,
     };
     try {
-      await this.withSendRetry(
+      await checkpointDelivery("sendImage", () => this.withSendRetry(
         "sendImage",
         () => (signal
           ? client.sendImage(input, signal)
           : client.sendImage(input)),
         signal,
-      );
+      ), isDefinitelyRejectedWeixinSend);
     } catch (error) {
       if (isRejectedReplyContext(error)) {
         await this.invalidateContext(target, context.contextToken);
@@ -617,7 +632,7 @@ function isRejectedReplyContext(error: unknown): boolean {
 }
 
 /**
- * 只有能证明消息未送达的失败才重试：平台业务返回码拒绝，以及 429 或 5xx 服务端拒绝。
+ * 只有能证明消息未送达的失败才重试：平台业务返回码拒绝，以及 429 限流拒绝。
  * 超时、网络中断和响应不可解析都可能已经送达，重试会产生重复气泡；回复上下文失效
  * （返回码 -2）是永久错误，由调用方作废上下文后交给用户重新发送。
  */
@@ -630,9 +645,14 @@ function weixinSendRetryDelay(error: unknown, attempt: number): number | undefin
   }
   if (
     error.code === "http-error"
-    && (error.status === 429 || (error.status !== undefined && error.status >= 500))
+    && error.status === 429
   ) {
     return exponentialRetryDelay(attempt);
   }
   return undefined;
+}
+
+function isDefinitelyRejectedWeixinSend(error: unknown): boolean {
+  return error instanceof WeixinProtocolError
+    && (error.code === "api-error" || (error.code === "http-error" && error.status === 429));
 }

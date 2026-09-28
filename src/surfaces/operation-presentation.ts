@@ -118,7 +118,7 @@ export function operationTitle(record: OperationUpdate): string {
 export class ContextCompactionNotices {
   private readonly states = new Map<string, OperationUpdate["status"]>();
 
-  accept(event: Extract<OutputEvent, { type: "operation.updated" }>): string | null {
+  accept(event: Extract<OutputEvent, { type: "operation.updated" }>, retained = false): string | null {
     if (event.operation.kind !== "contextCompaction") return null;
     const { itemId, status } = event.operation;
     const key = JSON.stringify([
@@ -126,7 +126,7 @@ export class ContextCompactionNotices {
       event.threadId, event.turnId, itemId,
     ]);
     const previous = this.states.get(key);
-    if (previous === status || (previous !== undefined && previous !== "running")) return null;
+    if (!retained && (previous === status || (previous !== undefined && previous !== "running"))) return null;
     this.states.set(key, status);
     // Keep only recent presentation state; this is not a second Item history.
     if (this.states.size > 256) {

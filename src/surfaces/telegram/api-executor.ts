@@ -1,3 +1,4 @@
+import { checkpointDelivery } from "../delivery-receipt.js";
 import { GrammyError, HttpError } from "grammy";
 import type { Logger } from "pino";
 
@@ -17,6 +18,15 @@ export class TelegramApiExecutor {
     context: TelegramApiCall,
     operation: (signal: AbortSignal) => Promise<T>,
     signal: AbortSignal = new AbortController().signal,
+  ): Promise<T> {
+    return checkpointDelivery(context.operation, () => this.execute(context, operation, signal),
+      (error) => error instanceof GrammyError && error.error_code >= 400 && error.error_code < 500);
+  }
+
+  private async execute<T>(
+    context: TelegramApiCall,
+    operation: (signal: AbortSignal) => Promise<T>,
+    signal: AbortSignal,
   ): Promise<T> {
     const maximumAttempts = context.critical ? 3 : 1;
     for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {

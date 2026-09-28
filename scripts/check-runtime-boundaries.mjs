@@ -16,6 +16,7 @@ const allowedDistEntries = new Map([
   ["scripts", new Set([
     "dist/codex-client/index.js",
     "dist/config/index.js",
+    "dist/delivery/index.js",
     "dist/observability/index.js",
     "dist/observability/query/index.js",
     "dist/scheduled-tasks/index.js",

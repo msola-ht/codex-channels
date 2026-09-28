@@ -85,6 +85,10 @@ export class OperationUpdateBuffer<T> {
     return this.take(outputTurnKey(event.threadId, event.turnId));
   }
 
+  flushTurn(threadId: string, turnId: string): BufferedOperationSummary<T> | null {
+    return this.take(outputTurnKey(threadId, turnId));
+  }
+
   private take(turnKey: string): BufferedOperationSummary<T> | null {
     const buffered = this.turns.get(turnKey);
     this.turns.delete(turnKey);

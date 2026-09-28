@@ -4,6 +4,10 @@
 
 `index.ts` 是所有 Surface 的公开导出入口。
 
+`persistent-output.ts` 分类可恢复的终态输出，并将必要图片纳入同一有界快照；
+`delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
+等待实际操作结算，Bootstrap 才能确认持久记录；普通 `handle` 继续用于中间输出。
+
 Surface 只运输和呈现项目已经接入的 Codex CLI/App Server 能力。当前能力范围以
 [`docs/index.md`](../../docs/index.md) 的支持矩阵为准；平台 SDK 提供某项能力或生成协议中出现
 某个类型，不代表 Surface 可以自行建立新的 Thread、Turn、历史、工具或审批语义。Setup、
@@ -219,7 +223,7 @@ Adapter 负责。
 `operation-update-buffer.ts` 在 Surface 边界按 Turn 有界暂存成功的查询操作，并统一在非 Commentary
 最终文本或 Turn 完成前 Flush；最终回复前单项
 保持原详情，多项生成一次分类计数汇总，并展示最多 8 个去重后的详情及各自次数；
-超出时明确省略数量。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样
+超出时明确省略数量。可靠投递入口在每个终态操作后显式排空所属 Turn 的缓冲，避免仅凭内存聚合就确认持久记录。飞书网页搜索完成后直接发送，不进入该缓冲；失败、拒绝和其他操作同样
 不进入缓冲。
 Computer Use 的 MCP 操作也不进入查询缓冲；飞书在同一卡片展示调用开始和终态，复用已有去重、
 顺序队列及 `hidden` 模式。具体操作说明已在 Client 边界提取并清洗，过程展示不使用 MCP 读写声明标签。

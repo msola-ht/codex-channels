@@ -11,6 +11,7 @@
 - [`codex-protocol/`](codex-protocol/README.md)：生成协议类型、受控导出和版本基线。
 - [`config/`](config/README.md)：统一 TOML 配置解析和边界验证。
 - [`conversation-core/`](conversation-core/README.md)：Thread、Turn、Item 状态归约和输出事件。
+- [`delivery/`](delivery/README.md)：有界持久投递、确认与恢复调度。
 - [`event-bus/`](event-bus/README.md)：有界异步队列和消费者隔离。
 - [`model-api/`](model-api/README.md)：独立 Responses 与 Chat 消息及流式事件转换。
 - [`observability/`](observability/README.md)：结构化日志与脱敏模型请求指标库。

@@ -4,6 +4,7 @@ import {
   ScheduledTaskApplicationService,
   ScheduledTaskToolService,
   type ScheduledTaskCreationContext,
+  type TurnExecutionPort,
 } from "../application/index.js";
 import type {
   ProviderRoutingClient,
@@ -35,6 +36,7 @@ export interface ScheduledTaskCompositionOptions {
   stateDatabasePath: string;
   router: SessionRouter;
   codex: ProviderRoutingClient;
+  turns?: TurnExecutionPort;
   bindings: SqliteBindingStore;
   workspaces: WorkspaceRegistry;
   core: ConversationCore;
@@ -65,7 +67,7 @@ export class ScheduledTaskComposition {
     };
     const executor: ScheduledTaskExecutor = new ScheduledTaskExecutor(
       options.router,
-      options.codex,
+      options.turns ?? options.codex,
       options.bindings,
       options.workspaces,
       {

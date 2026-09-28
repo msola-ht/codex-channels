@@ -6,6 +6,8 @@ import startupNetworkPolicy from "../../startup-network-policy.json" with { type
 import { GatewayReconnectCoordinator } from "./gateway-reconnect-coordinator.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
+import { withOutputExecutionAdmission } from "./output-execution-admission.js";
+import { PersistentInteractionPort } from "./persistent-interaction-port.js";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -100,7 +102,7 @@ import {
   modelRequestMetricsDatabasePath,
   SqliteModelRequestMetricsStore,
 } from "../observability/index.js";
-import { WorkspaceRegistry } from "../policy/index.js";
+import { WorkspaceRegistry, TelegramAccessPolicy, FeishuAccessPolicy, WeixinAccessPolicy } from "../policy/index.js";
 import {
   SessionRouter,
   ThreadStateSynchronizer,
@@ -310,8 +312,24 @@ export abstract class GatewayComponentGraph {
           : this.providerIdleReleaser.runOperation(provider, operation);
       },
     );
-    this.inbound = new EventBus<RpcNotification>(logger, 2_000);
-    this.output = new EventBus<OutputEvent>(logger, 1_000, new SurfaceOutputCoalescer().key);
+    this.inbound = new EventBus<RpcNotification>(logger, 2_000, undefined, {
+      entries: 4_096,
+      bytes: 32 * 1024 * 1024,
+      size: (event) => Buffer.byteLength(JSON.stringify(event)),
+      overflow: () => {
+        logger.error("协议通知消费预算耗尽，停止 Gateway 消费；尚未持久接收的通知存在缺口");
+        void this.requestStop().catch(() => logger.error("协议通知超载后的 Gateway 清理失败"));
+      },
+    });
+    this.output = new EventBus<OutputEvent>(logger, 1_000, new SurfaceOutputCoalescer().key, {
+      entries: 2_048,
+      bytes: 32 * 1024 * 1024,
+      size: (event) => Buffer.byteLength(JSON.stringify(event)),
+      overflow: () => {
+        logger.error("共享输出预算耗尽，停止 Gateway 消费；已持久接收记录保留，未接收区间存在缺口");
+        void this.requestStop().catch(() => logger.error("共享输出超载后的 Gateway 清理失败"));
+      },
+    });
     this.bindings = new SqliteBindingStore(config.stateDatabasePath);
     this.sessionDisplayCache = new SqliteSessionDisplayCache(
       join(dirname(config.stateDatabasePath), "session-display-cache.sqlite3"),
@@ -549,8 +567,14 @@ export abstract class GatewayComponentGraph {
         });
       },
     });
+    const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
+      const target = this.bindings.getByThread(threadId)?.target;
+      if (!target || !this.surfaceManager.acceptsExecution(target)) throw new UserFacingError(
+        "delivery.overloaded", "渠道投递箱接近容量上限或不可用，已暂停新执行；请先处理未确认投递",
+      );
+    });
     const service = new ConversationService(
-      this.codex,
+      execution,
       this.router,
       this.core,
       models,
@@ -604,7 +628,7 @@ export abstract class GatewayComponentGraph {
       {
         releaseThread: (target, force) => this.releaseThread(target, force),
       },
-      this.codex,
+      execution,
       this.codex,
       (parentThreadId) =>
         this.subagentCompletion.hasPendingForParentThread(parentThreadId),
@@ -778,6 +802,7 @@ export abstract class GatewayComponentGraph {
           stateDatabasePath: config.stateDatabasePath,
           router: this.router,
           codex: this.codex,
+          turns: execution,
           bindings: this.bindings,
           workspaces: this.workspaces,
           core: this.core,
@@ -856,6 +881,18 @@ export abstract class GatewayComponentGraph {
       logger,
       (target) => service.status(target, { includeGitBranch: true }).gitBranch,
       {
+        persistence: {
+          directory: join(dirname(config.stateDatabasePath), "delivery-outbox"),
+          workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
+          owner: (event) => this.outputOwner(event),
+          authorized: (event, owner) => this.outputAuthorized(event, owner),
+          fault: (code, account) => {
+            logger.error({ code, account }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
+            if (code === "delivery-uncertain" || code === "authorization-changed") return;
+            if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
+            else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));
+          },
+        },
         setInteractionAvailable: (
           surface,
           accountId,
@@ -918,7 +955,8 @@ export abstract class GatewayComponentGraph {
       logger,
     });
     for (const surface of this.surfaces) {
-      this.interactions.register(surface.surface, surface.accountId, surface.interactions);
+      this.interactions.register(surface.surface, surface.accountId, new PersistentInteractionPort(surface.interactions,
+        (target, signal) => this.surfaceManager.waitForPersistentOutput(target, signal)));
       this.interactions.setAvailable(surface.surface, surface.accountId, false);
     }
     this.approval = new ApprovalCoordinator(
@@ -1152,6 +1190,8 @@ export abstract class GatewayComponentGraph {
     try {
       this.requireRunning();
       this.startupAbort = new AbortController();
+      await this.surfaceManager.preparePersistence();
+      this.requireRunning();
       await this.providerMetrics.start();
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
@@ -1281,6 +1321,52 @@ export abstract class GatewayComponentGraph {
     if (failures.length > 0) {
       throw new AggregateError(failures, "Gateway 资源未完全关闭");
     }
+  }
+
+  private outputOwner(event: OutputEvent): string {
+    return JSON.stringify(this.outputIdentity(event));
+  }
+
+  private outputIdentity(event: OutputEvent) {
+    const target = event.target;
+    const threadId = "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : undefined;
+    const binding = threadId ? this.bindings.getByThread(threadId) : this.bindings.get(target);
+    return {
+      actors: this.bindings.actors(target).sort(),
+      workspace: this.bindings.getWorkspace(target) ?? null,
+      binding: binding ? [binding.target.surface, binding.target.accountId, binding.target.conversationId, binding.workspaceId, binding.threadId] : null,
+      provider: binding ? this.codex.knownProvider(binding.threadId) ?? null : null,
+      background: typeof threadId === "string" && this.router.isBackgroundThread(threadId),
+    };
+  }
+
+  private outputAuthorized(event: OutputEvent, owner: string): boolean {
+    const original = JSON.parse(owner) as ReturnType<typeof this.outputIdentity>;
+    if (original.provider && !this.codex.isProviderConfigured(original.provider)) return false;
+    const current = this.outputIdentity(event);
+    // Normal background completion releases its live binding before slow
+    // platform output finishes. The durable recipient remains the original
+    // Actor/Workspace; a new binding or a removed Provider still fails closed.
+    if (original.background && current.binding === null && original.provider
+      && this.codex.isProviderConfigured(original.provider)) {
+      current.binding = original.binding;
+      current.provider = original.provider;
+      current.background = true;
+    }
+    if (JSON.stringify(current) !== owner) return false;
+    const target = event.target;
+    const actors = this.bindings.actors(target);
+    const policy = target.surface === "telegram" && this.config.telegramEnabled
+      ? new TelegramAccessPolicy(this.config.telegramAllowedUserIds, "default")
+      : target.surface === "feishu" && this.config.feishu
+      ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
+      : target.surface === "weixin" && this.config.weixin
+      ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
+      : undefined;
+    if (!policy) return false;
+    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
+    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
+      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
   }
 
   private shutdownComponents(): Promise<void> {

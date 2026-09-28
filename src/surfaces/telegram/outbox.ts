@@ -1,3 +1,5 @@
+import { isPersistentOutput } from "../persistent-output.js";
+import { DeliveryReceipt, captureDelivery, type DeliveryCheckpoint } from "../delivery-receipt.js";
 import { isTelegramMessageNotModified } from "./error-metadata.js";
 import { TelegramTextStreams, type TelegramFinalMessageFormat } from "./text-streams.js";
 import { replyOptions, htmlSendOptions, operationEditOptions } from "./message-options.js";
@@ -134,6 +136,7 @@ export class TelegramOutbox {
   ) {
     this.delivery = new ConversationDeliveryQueue(logger, {
       component: "Telegram",
+      maximumPendingOperations: 512,
       errorMetadata: (error) => ({ ...telegramErrorMetadata(error) }),
     });
     this.textStreams = new TelegramTextStreams(
@@ -184,6 +187,26 @@ export class TelegramOutbox {
       return;
     }
     withSurfaceOutputDiagnostics(this.logger, event, () => this.handleEvent(event));
+  }
+
+  retains(event: OutputEvent): boolean {
+    if (event.type === "operation.updated" && this.approvalOperations.isSuppressed(
+      this.operationKey(this.turnKey(event.threadId, event.turnId), event.operation.itemId),
+    )) return false;
+    return isPersistentOutput(event, this.options.operationUpdateDisplay ?? "full");
+  }
+
+  async deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void> {
+    if (this.closed || event.target.surface !== "telegram"
+      || event.target.accountId !== (this.options.accountId ?? telegramDefaultAccountId)) throw new Error("可靠输出目标无效或已关闭");
+    if (!this.retains(event)) throw new Error("当前展示规则不允许投递此持久结果");
+    await captureDelivery(() => {
+      this.handle(event);
+      if (event.type === "operation.updated" && event.operation.status !== "running") {
+        const buffered = this.operationUpdates.flushTurn(event.threadId, event.turnId);
+        if (buffered) this.enqueueOperationSummary(event.target.conversationId, buffered.summary);
+      }
+    }, signal, checkpoint);
   }
 
   private handleEvent(event: OutputEvent): void {
@@ -252,7 +275,7 @@ export class TelegramOutbox {
         return;
       case "operation.updated": {
         if (event.operation.kind === "contextCompaction") {
-          const text = this.compactionNotices.accept(event);
+          const text = this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
           if (text !== null) {
             this.textStreams.flushBeforeVisibleOutput(chatId, this.turnKey(event.threadId, event.turnId));
             this.enqueue(chatId, async (signal) => {
@@ -306,7 +329,7 @@ export class TelegramOutbox {
           chatId,
           turnKey,
           operation: event.operation,
-        });
+        }, event.operation.status === "running");
         if (disposition === "suppress") {
           return;
         }

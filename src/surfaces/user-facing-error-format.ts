@@ -23,6 +23,8 @@ export function formatSurfaceUserFacingError(
       return "当前还没有 Codex Session";
     case "conversation.busy":
       return "当前任务运行中，请先使用 /stop 停止当前任务";
+    case "delivery.overloaded":
+      return "渠道投递箱接近容量上限或不可用，已暂停新执行；请先在本机使用 codexc delivery 核对未确认投递";
     case "conversation.background-limit":
       return error.message;
     case "conversation.background-queued":

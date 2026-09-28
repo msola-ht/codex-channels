@@ -24,6 +24,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
     "config",
     "conversation-core",
     "event-bus",
+    "delivery",
     "observability",
     "policy",
     "provider-proxy",
@@ -43,6 +44,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   config: [],
   "conversation-core": ["event-bus"],
   "event-bus": [],
+  delivery: [],
   "model-api": [],
   "provider-proxy": ["model-api"],
   observability: ["config"],
@@ -252,6 +254,7 @@ function runtimeImportViolations(): string[] {
   const allowedModules = new Set([
     "bootstrap",
     "config",
+    "delivery",
     "observability",
     "provider-proxy",
     "scheduled-tasks",

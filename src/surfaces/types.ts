@@ -10,6 +10,7 @@ import type {
   SurfaceId,
 } from "../conversation-core/index.js";
 import type { Workspace } from "../policy/index.js";
+import type { DeliveryCheckpoint } from "./delivery-receipt.js";
 
 export interface SurfaceConfigurationChange {
   action:
@@ -27,7 +28,9 @@ export interface SurfaceConfigurationChange {
 }
 
 export interface SurfaceOutputPort {
+  retains?(event: OutputEvent): boolean;
   handle(event: OutputEvent): Promise<void> | void;
+  deliver?(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>): Promise<void>;
 }
 
 export type { OperationUpdateDisplay };

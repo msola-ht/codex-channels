@@ -51,7 +51,7 @@
 | 70 | Codex Client 适配边界使用的受控协议类型导出 | [`src/codex-protocol/index.ts`](../src/codex-protocol/index.ts) |
 | 45 | 本项目直接调用的业务 Request 方法，不含连接层的 `initialize` | [`client.ts`](../src/codex-client/client.ts) |
 | 5 | 本项目显式协调的 Server Request 类型 | [`server-request-adapter.ts`](../src/codex-client/server-request-adapter.ts)、[`bootstrap/scheduled-task-tool-request.ts`](../src/bootstrap/scheduled-task-tool-request.ts) |
-| 16 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
+| 17 | 本项目 TypeScript Gateway 的一级业务模块 | [`src/README.md`](../src/README.md) |
 
 这里的数量描述协议结构，不等于本项目已实现的功能数。只有 `codex-client` 可以使用
 `src/codex-protocol/index.ts` 的受控导出；生成目录可能包含尚未采用、实验中或仅供其他客户端
@@ -200,6 +200,11 @@ Client 验证并保留 `isBlocking`，Approval 呈现阻塞或可跳过问题；
 不再由已弃用的 `autoResolutionMs` 控制。`InteractionRouter` 从接收请求开始统一约束排队、渠道准备和答复期限，
 超时沿现有交互取消路径返回安全决定；三渠道 Outbox 链路由 `tests/interaction-cancellation.test.ts` 验证，
 真实 MCP 准备期超时由 `tests/real-app-server-isolated-state.test.ts` 的 `deadline` 合同验证。
+
+渠道投递存量通过组合根 [`output-execution-admission.ts`](../src/bootstrap/output-execution-admission.ts)
+在现有 Turn、Review、Goal 与 Queue 输入/启动端口前实施本地准入；不改变 RPC 字段或 App Server 原生 Queue 持久语义。
+停止、只读查询及 Queue 删除保留可用。隔离真实 App Server 的 `fences Turn execution under delivery pressure`
+合同验证暂停、恢复与停止请求；容量、确认及离线恢复见[投递箱](delivery.md)。
 原生 TUI 的非阻塞自动跳过及输入暂停机制见
 [`request_user_input/mod.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/tui/src/bottom_pane/request_user_input/mod.rs)，
 与渠道的差异见[等待式问题](display.md#等待式问题)。

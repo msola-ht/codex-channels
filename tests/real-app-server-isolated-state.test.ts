@@ -15,6 +15,8 @@ import pino from "pino";
 
 import { GatewayReconnectCoordinator } from "../src/bootstrap/gateway-reconnect-coordinator.js";
 import { BindingRestoreCoordinator } from "../src/bootstrap/binding-restore-coordinator.js";
+import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
+import { PersistentInteractionPort } from "../src/bootstrap/persistent-interaction-port.js";
 import { EventBus } from "../src/event-bus/index.js";
 import type { OutputEvent } from "../src/conversation-core/index.js";
 import { ProviderRoutingClient } from "../src/codex-client/index.js";
@@ -552,6 +554,37 @@ contractSuite("isolated Codex App Server state contract", () => {
     }
   }, 20_000);
 
+  it("fences Turn execution under delivery pressure and preserves stop after recovery", async () => {
+    const started = await ownerClient.startThread(workdir);
+    const threadId = started.thread.id;
+    let allowed = false;
+    let turnId: string | undefined;
+    const port = withOutputExecutionAdmission(ownerClient, () => {
+      if (!allowed) throw new Error("delivery pressure");
+    });
+    try {
+      await expect(port.startTurn(threadId, [{ type: "text", text: "blocked fixture" }],
+        "codex_connect:delivery-blocked", workdir)).rejects.toThrow("delivery pressure");
+      expect((await ownerClient.readThread(threadId)).status.type).not.toBe("active");
+      allowed = true;
+      const turn = await port.startTurn(threadId, [{ type: "text", text: "delivery admission fixture" }],
+        "codex_connect:delivery-accepted", workdir);
+      turnId = turn.turnId;
+      expect(turnId).not.toBe("");
+      allowed = false;
+      await port.interruptTurn(threadId, turnId).catch((error: unknown) => {
+        // The isolated mock Turn can complete before interrupt reaches the
+        // server. Its explicit terminal rejection still proves admission did
+        // not intercept the recovery RPC.
+        expect(error).toMatchObject({ message: "no active turn to interrupt" });
+      });
+    } finally {
+      if (turnId) await ownerClient.interruptTurn(threadId, turnId).catch(() => undefined);
+      await ownerClient.unsubscribeThread(threadId).catch(() => undefined);
+      await ownerClient.deleteThread(threadId);
+    }
+  }, 15_000);
+
   it("accepts the official Skill marker and structured input together", async () => {
     const skill = await ownerClient.resolveSkill(workdir, "contract-skill");
     expect(skill).toEqual({
@@ -903,7 +936,7 @@ contractSuite("isolated Codex App Server state contract", () => {
     let release!: (decision: InteractionDecision) => void;
     const preparing = vi.fn(() => new Promise<InteractionDecision>((resolveDecision) => { release = resolveDecision; }));
     const resolved = vi.fn();
-    interactions.register("telegram", "contract", { request: preparing, resolved });
+    interactions.register("telegram", "contract", new PersistentInteractionPort({ request: preparing, resolved }, async () => {}));
     const coordinator = new ApprovalCoordinator(router, interactions, scope === "deadline" ? 200 : 5_000);
     ownerClient.setServerRequestHandler((request) => handleApprovalServerRequest(request, coordinator));
     try {

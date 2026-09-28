@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 
 import { BoundedAsyncQueue } from "../event-bus/index.js";
 import { observeSurfaceStage, surfaceDiagnosticContext, withSurfaceDiagnosticContext } from "./diagnostics.js";
+import { DeliveryReceipt } from "./delivery-receipt.js";
 
 interface DeliveryOperation {
   critical: boolean;
@@ -11,6 +12,8 @@ interface DeliveryOperation {
   purpose: "output" | "ordered" | "answer" | "operation-log" | "turn-completion";
   requestSignal?: AbortSignal;
   run(signal: AbortSignal): Promise<void>;
+  receipt?: DeliveryReceipt;
+  release?: () => void;
 }
 
 export interface ConversationDeliveryOptions {
@@ -36,6 +39,8 @@ export interface ConversationDeliveryQueueOptions {
   closeTimeoutMs?: number;
   /** 普通输出可在关闭期限内排空；有序交互仍立即取消。 */
   drainOnClose?: boolean;
+  maximumPendingOperations?: number;
+  onOverload?(): void;
   errorMetadata?(error: unknown): Record<string, unknown>;
 }
 
@@ -48,6 +53,7 @@ export class ConversationDeliveryQueue {
   private stopped = false;
   private readonly orderedCancellations = new Set<() => void>();
   private closePromise: Promise<void> | undefined;
+  private pendingOperations = 0;
 
   constructor(
     private readonly logger: Logger,
@@ -64,6 +70,8 @@ export class ConversationDeliveryQueue {
     if (!Number.isInteger(this.closeTimeoutMs) || this.closeTimeoutMs <= 0) {
       throw new Error("Conversation 输出队列关闭超时必须是正整数");
     }
+    if (options.maximumPendingOperations !== undefined
+      && (!Number.isSafeInteger(options.maximumPendingOperations) || options.maximumPendingOperations <= 0)) throw new Error("输出操作硬上限必须是正整数");
   }
 
   enqueue(
@@ -73,16 +81,20 @@ export class ConversationDeliveryQueue {
     options?: ConversationDeliveryOptions,
   ): boolean {
     if (this.closed) {
+      DeliveryReceipt.current()?.fail(new Error("可靠输出队列已关闭"));
       this.logger.warn({ ...surfaceDiagnosticContext(), component: this.options.component,
         conversationId, critical, reason: "closed" }, "Surface 输出未入队");
       return false;
     }
+    if (!this.hasCapacity()) return false;
     const worker = this.worker(conversationId);
     const operation = this.operation(conversationId, critical, run, options?.purpose);
     const accepted = worker.queue.push(operation, critical, options?.coalesceKey);
     this.stageLogger.debug({ ...operation.context, critical, accepted, pending: worker.queue.size },
       "Surface 输出入队结果");
     if (!accepted) {
+      operation.receipt?.fail(new Error("可靠输出未入队"));
+      operation.release?.();
       this.logger.warn(
         {
           ...operation.context,
@@ -109,6 +121,7 @@ export class ConversationDeliveryQueue {
         new Error(`${this.options.component} Conversation 输出队列已关闭`),
       );
     }
+    if (!this.hasCapacity()) return Promise.reject(new Error("输出操作硬预算已满"));
     return new Promise<T>((resolve, reject) => {
       const worker = this.worker(conversationId);
       const cancellation = new AbortController();
@@ -122,7 +135,10 @@ export class ConversationDeliveryQueue {
         if (settled) return;
         settled = true;
         cancellation.abort();
-        worker.queue.remove(operation);
+        if (worker.queue.remove(operation)) {
+          operation.receipt?.fail(new Error("可靠输出操作已取消"));
+          operation.release?.();
+        }
         this.logger.debug({ ...operation.context, started, outcome: "cancelled" },
           "Surface 有序输出已取消");
         cleanup();
@@ -157,6 +173,8 @@ export class ConversationDeliveryQueue {
         "Surface 输出入队结果");
       if (!accepted) {
         cleanup();
+        operation.receipt?.fail(new Error("可靠输出未入队"));
+        operation.release?.();
         this.logger.warn(
           {
             ...operation.context,
@@ -179,8 +197,19 @@ export class ConversationDeliveryQueue {
     run: DeliveryOperation["run"],
     purpose: DeliveryOperation["purpose"] = "output",
   ): DeliveryOperation {
+    const receipt = DeliveryReceipt.current();
+    this.pendingOperations++;
+    const releaseReceipt = receipt?.retain();
+    let released = false;
     return {
       critical, run, purpose, enqueuedAt: performance.now(),
+      ...(receipt ? { receipt } : {}),
+      release: () => {
+        if (released) return;
+        released = true;
+        this.pendingOperations--;
+        releaseReceipt?.();
+      },
       context: {
         ...surfaceDiagnosticContext(),
         component: this.options.component,
@@ -188,6 +217,14 @@ export class ConversationDeliveryQueue {
         deliveryId: randomUUID(),
       },
     };
+  }
+
+  private hasCapacity(): boolean {
+    if (this.pendingOperations < (this.options.maximumPendingOperations ?? Infinity)) return true;
+    DeliveryReceipt.current()?.fail(new Error("可靠输出操作硬预算已满"));
+    this.logger.error({ component: this.options.component, pending: this.pendingOperations }, "输出操作硬预算耗尽，未入队输出不得视为送达");
+    this.options.onOverload?.();
+    return false;
   }
 
   private worker(conversationId: string): ConversationWorker {
@@ -203,6 +240,8 @@ export class ConversationDeliveryQueue {
           "Surface Conversation 输出队列合并了同键输出",
         );
       }, (operation, reason) => {
+        operation.receipt?.fail(new Error("可靠输出被替换"));
+        operation.release?.();
         const fields = { ...operation.context, critical: operation.critical, reason };
         if (reason === "capacity") this.logger.warn(fields, "Surface 中间输出因积压被替换");
         else this.logger.debug(fields, "Surface 中间输出已合并");
@@ -253,7 +292,11 @@ export class ConversationDeliveryQueue {
         const pending = worker.queue.size;
         if (pending > 0) this.logger.warn({ component: this.options.component, conversationId, pending },
           "Surface 关闭超时，排队输出未投递");
-        while (worker.queue.size > 0) await worker.queue.shift();
+        while (worker.queue.size > 0) {
+          const operation = await worker.queue.shift();
+          operation?.receipt?.fail(new Error("可靠输出未完成即关闭"));
+          operation?.release?.();
+        }
       }
       this.logger.warn(
         {
@@ -275,11 +318,15 @@ export class ConversationDeliveryQueue {
     while (true) {
       const operation = await queue.shift();
       if (!operation || this.stopped) {
+        operation?.receipt?.fail(new Error("可靠输出未完成即关闭"));
+        operation?.release?.();
         return;
       }
       try {
-        const operationSignal = operation.requestSignal
-          ? AbortSignal.any([signal, operation.requestSignal]) : signal;
+        const operationSignal = AbortSignal.any([signal,
+          ...(operation.requestSignal ? [operation.requestSignal] : []),
+          ...(operation.receipt ? [operation.receipt.controller.signal] : []),
+        ]);
         await withSurfaceDiagnosticContext(operation.context, () => observeSurfaceStage(
           this.stageLogger,
           {
@@ -293,10 +340,19 @@ export class ConversationDeliveryQueue {
               errorMetadata: (error: unknown) => this.options.errorMetadata!(error),
             }),
           },
-          () => operation.run(operationSignal),
+          () => {
+            // Ordinary output retains its existing close/drain policy. Durable
+            // receipts and ordered requests must never start after cancellation.
+            operation.receipt?.controller.signal.throwIfAborted();
+            operation.requestSignal?.throwIfAborted();
+            return operation.receipt ? operation.receipt.run(() => operation.run(operationSignal)) : operation.run(operationSignal);
+          },
         ));
-      } catch {
+      } catch (error) {
+        operation.receipt?.fail(error);
         // 诊断边界已经记录失败，继续处理后续输出。
+      } finally {
+        operation.release?.();
       }
       if (queue.size === 0) {
         const current = this.workers.get(conversationId);
