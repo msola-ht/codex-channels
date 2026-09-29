@@ -29,6 +29,7 @@ export interface DirectChatCall {
 export async function sendDirectChat(call: DirectChatCall): Promise<void> {
   const payload = JSON.stringify(call.request);
   const forwarded = endToEndHeaders(call.clientHeaders ?? {});
+  const originalHeaderNames = Object.keys(call.clientHeaders ?? {});
   for (const name of Object.keys(forwarded)) {
     if (["authorization", "cookie", "host", "content-length", "content-type", "content-encoding", "accept", "accept-encoding", "expect",
       "forwarded", "x-real-ip", "x-api-key", "api-key", "x-provider"].includes(name)
@@ -37,6 +38,8 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
   const headers = { ...forwarded, authorization: call.target.authorization, "content-type": "application/json",
     "accept-encoding": "identity",
     accept: call.request.stream ? "text/event-stream" : "application/json", "content-length": String(Buffer.byteLength(payload)) };
+  if (originalHeaderNames.some(name => !Object.hasOwn(forwarded, name))) call.capture?.transformed?.("headers_filtered");
+  call.capture?.transformed?.("headers_overridden");
   call.signal.throwIfAborted();
   call.recheck();
   // No asynchronous boundary is permitted between recheck and request creation.
@@ -84,6 +87,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     const envelopeError = chatStreamError(parsed);
     if (envelopeError) throw envelopeError;
     const value = directChatJsonPayload(parsed);
+    if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
     const error = chatStreamError(value);
     if (error) throw error;
     const output = directChatJson(value, call.observer);

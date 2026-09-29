@@ -560,6 +560,16 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("codexc service restart app-server");
   });
 
+  it("selects the shared debug capture mode without enabling collection", async () => {
+    const fixture = createFixture();
+    const result = await runConfig({ input: { isTTY: true }, environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true }, prompts: { intro: vi.fn(),
+        select: vi.fn().mockResolvedValueOnce("system").mockResolvedValueOnce("model_traffic_mode").mockResolvedValueOnce("debug"),
+        isCancel: () => false, cancel: vi.fn() } });
+    expect(result).toMatchObject({ modelTrafficMode: "debug", activation: "restart-app-server" });
+    expect(readGatewayConfig(fixture.configPath).debug).toEqual({ model_traffic_input_items: 0, model_traffic_item_max_bytes: 0 });
+  });
+
   it("updates model traffic retention through the system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];

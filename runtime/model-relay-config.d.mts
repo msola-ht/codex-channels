@@ -7,7 +7,6 @@ export interface ModelRelayCallerConfig {
   enabled: boolean; provider: string; models: string[];
 }
 export interface ModelRelayConfig extends ModelRelayLimitConfig {
-  traffic_dump: boolean;
   enabled: boolean; host: "127.0.0.1" | "::1"; port: number;
   accounts: Array<{ provider: string }>;
   callers: ModelRelayCallerConfig[];
@@ -22,3 +21,4 @@ export function relayPolicyFromConfig(config: ModelRelayConfig): {
 };
 
 export function upgradeModelRelayLimits(value: unknown): ModelRelayConfig;
+export function removeLegacyRelayCapture(value: unknown): Record<string, unknown>;

@@ -44,6 +44,7 @@ import {
   TRAFFIC_CLEANUP_USAGE,
   TRAFFIC_USAGE,
 } from "../scripts/traffic-command-options.mjs";
+import { TRAFFIC_UPGRADE_USAGE, parseTrafficUpgradeArgs, upgradeTrafficCapture } from "../scripts/traffic-upgrade.mjs";
 import {
   desktopAppCommandUsage,
   runDesktopAppCommand,
@@ -230,6 +231,7 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
   traffic: TRAFFIC_USAGE,
   "traffic.cleanup": TRAFFIC_CLEANUP_USAGE,
+  "traffic.upgrade": TRAFFIC_UPGRADE_USAGE,
   channel: `用法：codexc channel <send-image>
 
 渠道图片能力：由 Gateway 使用 Thread 绑定渠道的机器人凭据发送本地 PNG/JPEG 图片。`,
@@ -498,11 +500,15 @@ async function executeCommand(command, args) {
       });
       break;
     case "traffic":
-      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup")) break;
+      if (showRequestedHelp(args, "traffic") || showSubcommandHelp(args, "cleanup", "traffic.cleanup") || showSubcommandHelp(args, "upgrade", "traffic.upgrade")) break;
       if (args.some(isHelpArgument)) throw new Error(TRAFFIC_USAGE);
       if (args[0] === "cleanup") {
         parseTrafficCleanupArgs(args.slice(1));
         runStandaloneScript("scripts/traffic-cleanup.mjs", args.slice(1));
+        break;
+      }
+      if (args[0] === "upgrade") {
+        console.log(JSON.stringify(await upgradeTrafficCapture(parseTrafficUpgradeArgs(args.slice(1))), null, 2));
         break;
       }
       parseTrafficCommandArgs(args);

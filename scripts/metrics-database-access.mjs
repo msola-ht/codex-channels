@@ -67,7 +67,7 @@ export function validateMetricsDatabaseStructure(
   } catch (error) {
     throw new Error(
       `指标数据库 Schema ${status.schemaVersion} 结构不完整，`
-      + "请运行 codexc metrics reset",
+      + "请核对数据库版本及备份，并按显式升级流程处理，勿删除数据库",
       { cause: error },
     );
   } finally {
@@ -94,7 +94,7 @@ export function openReadOnlyMetricsDatabase(environment = process.env, nowMs = D
   } catch (error) {
     if (error instanceof ModelRequestMetricsSchemaError) {
       throw new MetricsDatabaseAccessError("metrics_database_incompatible",
-        "模型请求指标数据库版本或结构不兼容；请停止 Gateway 后运行 codexc metrics reset", error);
+        "模型请求指标数据库版本或结构不兼容；请核对数据库版本及备份，并按显式升级流程处理，勿删除数据库", error);
     }
     throw error;
   }
@@ -304,7 +304,7 @@ export function requireCompatibleMetricsDatabase(environment = process.env) {
   if (!status.compatible) {
     throw new Error([20, 21].includes(status.schemaVersion)
       ? `模型请求指标库需要显式升级；停止 Gateway 与 Relay 后运行 codexc metrics upgrade --from ${status.schemaVersion} --to 22，核对后加 --apply`
-      : "模型请求指标数据库版本不兼容；请停止 Gateway 后运行 codexc metrics reset");
+      : "模型请求指标数据库版本不兼容；请核对数据库版本及备份，并按显式升级流程处理，勿删除数据库");
   }
   return status.databasePath;
 }

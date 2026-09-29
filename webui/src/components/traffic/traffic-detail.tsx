@@ -72,13 +72,13 @@ export function TrafficDetail({
       {traceLoading ? <p role="status" className="text-sm text-muted-foreground">{t("traffic.refreshingTrace")}</p> : null}
       {detail.response === null ? (
         <Card size="sm" aria-label={t("filters.response")}>
-          <CardHeader><CardTitle>{t("filters.response")}</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle></CardHeader>
           <CardContent><Empty><EmptyHeader><EmptyTitle>{t("traffic.statePending")}</EmptyTitle><EmptyDescription>{t("traffic.noTerminalDescription")}</EmptyDescription></EmptyHeader></Empty></CardContent>
         </Card>
       ) : (
         <Card size="sm" className="min-w-0 shrink-0">
           <CardHeader>
-            <CardTitle>{t("filters.response")}</CardTitle>
+            <CardTitle>{t(detail.debug ? "traffic.debugUpstream" : "filters.response")}</CardTitle>
             <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
           </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -107,7 +107,7 @@ export function TrafficDetail({
                   <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.responseId", { id: detail.response.responseId })}</p>
                 )}
                 {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined || detail.response.capture === "redacted_upstream_chat" ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
-                <HeaderTable title={t("traffic.responseHeadersTitle")} headers={detail.response.headers} />
+                <HeaderTable title={t("traffic.responseHeadersTitle")} headers={detail.response.headers} truncated={detail.response.headersTruncated} />
                 <TrafficContent title={t("traffic.responseBodyRawTitle")} text={detail.response.body} json truncated={detail.response.bodyTruncated} />
               </div>
             </TrafficDisclosure>
@@ -117,7 +117,7 @@ export function TrafficDetail({
 
       <Card size="sm" className="min-w-0 shrink-0">
         <CardHeader>
-          <CardTitle>{t("metrics.requests")}</CardTitle>
+          <CardTitle>{t(detail.debug ? "traffic.debugOutbound" : "metrics.requests")}</CardTitle>
           <CardDescription className="break-all">
             {requestLabel(detail)}
           </CardDescription>
@@ -135,12 +135,31 @@ export function TrafficDetail({
                 <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.previousResponseId", { id: detail.request.parameters.previousResponseId })}</p>
               )}
               {detail.request.bytes === undefined && detail.request.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.request.bytes === undefined ? null : t("traffic.requestBytesRaw", { size: formatBytes(detail.request.bytes) }), detail.request.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.request.storedBytes) })].filter(Boolean).join(" · ")}</p>}
-              <HeaderTable title={t("traffic.requestHeadersTitle")} headers={detail.request.headers} />
+              <HeaderTable title={t("traffic.requestHeadersTitle")} headers={detail.request.headers} truncated={detail.request.headersTruncated} />
               <TrafficContent title={t("traffic.requestBodyTitle")} text={detail.request.body} json truncated={detail.request.bodyTruncated} />
             </div>
           </TrafficDisclosure>
         </CardContent>
       </Card>
+
+      {detail.debug ? <Card size="sm">
+        <CardHeader><CardTitle>{t("traffic.debugTitle")}</CardTitle><CardDescription>{t("traffic.debugNote")}</CardDescription></CardHeader>
+        <CardContent className="flex min-w-0 flex-col gap-3">
+          {(["inbound", "delivered"] as const).map(stage => {
+            const record = detail.debug![stage]
+            return <TrafficDisclosure key={stage} title={t(stage === "inbound" ? "traffic.debugInbound" : "traffic.debugDelivered")}>
+              {record ? <div className="flex min-w-0 flex-col gap-3">
+                {record.state ? <p>{t(`traffic.debugState.${record.state}`)}{record.status === undefined ? "" : ` · HTTP ${record.status}`}</p> : null}
+                <HeaderTable title={t(stage === "inbound" ? "traffic.requestHeadersTitle" : "traffic.responseHeadersTitle")} headers={record.headers} truncated={record.headersTruncated} />
+                <TrafficContent title={t(stage === "inbound" ? "traffic.requestBodyTitle" : "traffic.responseBodyRawTitle")} text={record.body} json truncated={record.bodyTruncated} />
+              </div> : <p>{t("traffic.notRecorded")}</p>}
+            </TrafficDisclosure>
+          })}
+          <TrafficDisclosure title={t("traffic.debugChanges")}>
+            {detail.debug.transformations.map(change => <p key={change}>{t(`traffic.debugChange.${change}`)}</p>)}
+          </TrafficDisclosure>
+        </CardContent>
+      </Card> : null}
 
       <Card size="sm" aria-label={t("traffic.diagnosticsTitle")}>
         <CardHeader><CardTitle>{t("traffic.diagnosticsTitle")}</CardTitle><CardDescription>{t("traffic.diagnosticsDescription")}</CardDescription></CardHeader>
@@ -284,12 +303,14 @@ function requestLabel(detail: TrafficExchangeDetail): string {
   return `${detail.request.method ?? "HTTP"} ${detail.request.path ?? ""}`.trim()
 }
 
-function HeaderTable({ title, headers }: { title: string; headers: Record<string, TrafficHeaderValue> }) {
+function HeaderTable({ title, headers, truncated }: { title: string; headers: Record<string, TrafficHeaderValue>; truncated?: boolean }) {
+  const { t } = useTranslation()
   const entries = Object.entries(headers)
-  if (entries.length === 0) return null
+  if (entries.length === 0 && !truncated) return null
   return (
     <section className="flex flex-col gap-1">
       <p className="break-all text-xs font-medium">{title}</p>
+      {truncated ? <p className="text-xs text-muted-foreground">{t("traffic.debugHeadersTruncated")}</p> : null}
       <div className="rounded-md border bg-muted/50 p-3 font-mono text-xs">
         {entries.map(([name, value]) => (
           <p key={name} className="break-all">{name}: {Array.isArray(value) ? value.join(", ") : value}</p>

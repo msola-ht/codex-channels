@@ -8,10 +8,14 @@ const limits = (concurrency, burst) => ({
   requests_per_minute: z.number().int().min(0).max(600).default(0),
   burst: z.number().int().min(1).max(32).default(burst),
 });
-function schema(legacy) {
+function schema(legacy, legacyCapture = false) {
   return z.strictObject({
     enabled: z.boolean().default(false),
-    traffic_dump: z.boolean().default(false),
+    ...(legacyCapture ? {
+      traffic_dump: z.boolean().default(false),
+      traffic_dump_mode: z.enum(["production", "debug"]).default("production"),
+      traffic_dump_debug: z.strictObject({ caller_id: identity, expires_at_ms: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).optional(),
+    } : {}),
     host: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
     port: z.number().int().min(1024).max(65535).default(4119),
     ...limits(10, 10),
@@ -28,6 +32,10 @@ function schema(legacy) {
       ...(legacy ? limits(10, 10) : {}),
     })).max(128).default([]),
   }).superRefine((value, context) => {
+    if (legacyCapture && (value.traffic_dump_mode === "debug" ? !value.traffic_dump || !value.traffic_dump_debug || !value.callers.some(caller => caller.caller_id === value.traffic_dump_debug.caller_id)
+      : value.traffic_dump_debug !== undefined)) {
+      context.addIssue({ code: "custom", path: ["traffic_dump_debug"], message: "Relay 调试采集必须启用、指定已存在调用方和截止时间；生产模式不接受调试表" });
+    }
     for (const [values, key, path] of [[value.accounts, "provider", "accounts"],
       [value.callers, "caller_id", "callers"], [value.callers, "key_id", "callers"]]) {
       if (new Set(values.map(entry => entry[key])).size !== values.length) {
@@ -64,4 +72,12 @@ export function relayPolicyFromConfig(config) {
 
 export function modelRelayConfigDigest(config) {
   return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+}
+
+/** Only the explicit traffic upgrade accepts the removed capture fields. */
+export function removeLegacyRelayCapture(value) {
+  schema(false, true).parse(value);
+  const current = { ...value };
+  for (const key of ["traffic_dump", "traffic_dump_mode", "traffic_dump_debug"]) delete current[key];
+  return current;
 }

@@ -32,7 +32,6 @@ export type {
   RequestSortDirection,
   RequestSortKey,
   RequestsResponse,
-  RequestDetailResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,

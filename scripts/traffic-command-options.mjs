@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 
 export const TRAFFIC_USAGE = `用法：codexc traffic [选项] [V2 session 目录]
+      codexc traffic upgrade --enabled true|false --mode production|debug
       codexc traffic cleanup [--dir 目录] [--confirm]
 
 把自有代理或可选 Relay 生成的 V2 转储渲染成人可读文本：每次逻辑模型调用只展示一条请求

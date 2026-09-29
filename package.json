@@ -143,6 +143,8 @@
     "scripts/telegram-setup.mjs",
     "scripts/terminal-prompter.mjs",
     "scripts/timezone-command.mjs",
+    "scripts/config-backup.mjs",
+    "scripts/traffic-upgrade.mjs",
     "scripts/traffic-cleanup.mjs",
     "scripts/traffic-command-options.mjs",
     "scripts/traffic-command.mjs",

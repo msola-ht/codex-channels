@@ -107,7 +107,7 @@
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
   `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
-  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/requests/:id`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
+  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
   Threads 返回指标库首个请求开始时间，
@@ -259,7 +259,7 @@
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；模型请求转储独立写入
-  `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
+  `[debug].model_traffic_dump` / 既有裁剪模式参数 / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
   编辑，留空即删除配置；模型可见时区与网关时区分别复用 `codexc timezone` 与 `codexc timezone --gateway`。
 - `timezone-command.mjs`：实现公开 `codexc timezone`，解析 IANA 时区名称与 `--system` / `--json`，
   交互入口只列常见时区，并提供「恢复系统时区」与「其他（手动输入 IANA 名称）」两个动作项，
@@ -425,6 +425,8 @@
   阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
+- `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存；Relay 管理与全局转储升级共用。
+- `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；验证并移除旧 Relay 采集字段，保留身份、凭据、保留天数和其他配置。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
@@ -433,7 +435,7 @@
   未识别文件与目录保持不变。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
-- `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
+- `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。
   `readDumpResponseProviders` 为指标列表按单批次的精确调用编号扫描响应索引，只保留命中的上游提供商，不读取正文。正文和独立 trace
@@ -540,7 +542,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
 
-- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 队列状态与脱敏调用方查询、签发、轮换、停用及启用、显式旧限流字段升级、报文采集开关与仅删除该开关的回滚；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 队列状态与脱敏调用方查询、签发、轮换、停用及启用、显式旧限流字段升级；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
 `metrics-database.mjs` 的 `upgrade --from 21 --to 22` 默认只预检，`--apply` 才持锁备份迁移；

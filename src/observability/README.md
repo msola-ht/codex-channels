@@ -16,7 +16,7 @@
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
   `firstTokenMs` 保留代理单请求首 Token 延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
   `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
-- `request-metrics-query-service.ts`：在只读 Store 之上提供 `requestById` 精确单条查询，并统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
+- `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，

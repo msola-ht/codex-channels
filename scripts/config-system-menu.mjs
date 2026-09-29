@@ -32,6 +32,7 @@ export async function runSystemSettings({
         label: "调用详情记录",
         hint: "记录完整模型报文；仅排查时临时开启",
       },
+      { value: "model_traffic_mode", label: "调用记录模式", hint: "Codex 与 Relay 共用；生产精简，调试增加报文信息" },
       {
         value: "model_traffic_retention",
         label: "调用记录保留天数",
@@ -81,6 +82,7 @@ export async function runSystemSettings({
   if (section === "model_traffic_dump") {
     return runModelTrafficDump({ environment, output, prompts, writeConfig });
   }
+  if (section === "model_traffic_mode") return runModelTrafficMode({ environment, output, prompts, writeConfig });
   if (section === "model_traffic_retention") {
     return runModelTrafficRetention({ environment, output, prompts, writeConfig });
   }
@@ -428,4 +430,20 @@ async function runAppServerTimezone({ environment, input, output, prompts, write
     writeConfig,
   });
   return result.action === "cancelled" ? { action: "back" } : result;
+}
+
+async function runModelTrafficMode({ environment, output, prompts, writeConfig }) {
+  const settings = loadGatewaySettings(environment);
+  const value = await prompts.select({ message: "调用记录模式（Codex 与 Relay 共用）", showInstructions: false,
+    initialValue: settings.system.modelTrafficMode, options: [
+      { value: "production", label: "生产", hint: "精简报文；Codex 使用 3/65536 裁剪参数" },
+      { value: "debug", label: "调试", hint: "Codex 使用 0/0；Relay 增加入站与交付阶段，仍脱敏并限制容量" },
+      { value: "back", label: "返回上一级" },
+    ] });
+  if (prompts.isCancel(value) || value === "back") return { action: "back" };
+  const result = updateGatewaySetting({ kind: "system.model-traffic-mode", value },
+    { environment, expectedRevision: settings.revision, writeConfig });
+  output.write(`调用记录模式已保存：${result.configPath}\n`);
+  writeGatewayConfigActivationNotice(output, environment, result.activationResult);
+  return { modelTrafficMode: value, configPath: result.configPath, activation: result.activation, activationResult: result.activationResult };
 }

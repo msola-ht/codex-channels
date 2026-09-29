@@ -209,11 +209,13 @@ export async function describeDumpExchange(
   const collected = output.result();
   return {
     ...summaryOf(interaction, requestBody),
+    ...debugDetail(interaction, maxSectionBytes),
     modelEvidence: models.result(),
     chatDiagnostics: trace.chatDiagnostics,
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
+      headersTruncated: interaction.request.headersTruncated === true,
       method: interaction.request.method,
       path: interaction.request.path,
       url: interaction.request.url,
@@ -228,6 +230,7 @@ export async function describeDumpExchange(
       state: interaction.response.state,
       status: interaction.response.status ?? null,
       headers: interaction.response.headers ?? {},
+      headersTruncated: interaction.response.headersTruncated === true,
       body: responsePayload.text,
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
@@ -550,4 +553,30 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
 
 function numericSuffix(name) {
   return Number(/-([1-9][0-9]*)\.jsonl$/u.exec(name)?.[1] ?? 0);
+}
+
+export class TrafficDumpDebugError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+
+function debugDetail(interaction, limit) {
+  const request = interaction.request.debug;
+  const response = interaction.response?.debug;
+  if (request === undefined && response === undefined) return {};
+  if (request?.version !== 1 || response !== undefined && response?.version !== 1) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试转储版本");
+  const stage = value => {
+    if (!value || !value.headers || typeof value.headers !== "object" || Array.isArray(value.headers) || !value.payload
+      || typeof value.headersTruncated !== "boolean"
+      || Object.values(value.headers).some(header => typeof header !== "string" && (!Array.isArray(header) || header.some(item => typeof item !== "string")))
+      || value.state !== undefined && !["finished", "disconnected", "failed", "not_started"].includes(value.state)) {
+      throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试阶段记录不完整或损坏");
+    }
+    const body = readPayload(interaction.directory, value.payload, limit);
+    return { headers: value.headers, headersTruncated: value.headersTruncated, body: body.text, bodyTruncated: body.truncated,
+      ...(value.status === undefined ? {} : { status: value.status }), ...(value.state === undefined ? {} : { state: value.state }) };
+  };
+  if (!Array.isArray(request.transformations) || response !== undefined && !Array.isArray(response.transformations)) throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试处理标记损坏");
+  const transformations = [...request.transformations, ...(response?.transformations ?? [])];
+  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
+  return { debug: { inbound: stage(request.inbound), delivered: response ? stage(response.delivered) : null, transformations } };
 }

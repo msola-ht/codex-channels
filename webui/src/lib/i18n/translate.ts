@@ -28,7 +28,6 @@ const apiErrorKeys: Record<string, MessageKey> = {
   unauthorized: "errors.unauthorized",
   forbidden: "errors.forbidden",
   not_found: "errors.notFound",
-  request_not_found: "requestDetail.notFound",
   invalid_range: "errors.invalidQuery",
   invalid_filter: "errors.invalidQuery",
   unsupported_parameter: "errors.invalidQuery",

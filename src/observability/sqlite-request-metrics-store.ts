@@ -422,10 +422,6 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return this.queries.forEachProviderTokenMetric(query, visit);
   }
 
-  requestById(id: number): StoredModelRequestMetric | null {
-    return this.queries.requestById(id);
-  }
-
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage {
     return this.queries.page(query);
   }

@@ -253,10 +253,6 @@ export interface RequestRecord {
   recordedAtMs: number
 }
 
-export interface RequestDetailResponse {
-  record: RequestRecord & { requestStartedAtMs: number; responseCompletedAtMs: number }
-}
-
 export type RequestSortKey =
   | "totalDuration"
   | "time"
@@ -307,6 +303,7 @@ export interface SettingsSummaryResponse {
       sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
+      modelTrafficMode: "production" | "debug"
       modelTrafficDumpEnabled: boolean
       modelTrafficRetentionDays: number
     }
@@ -397,7 +394,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -910,7 +907,18 @@ export interface TrafficTurnStatesResponse {
 
 export type TrafficHeaderValue = string | string[]
 
+export interface TrafficDebugStage {
+  headers: Record<string, TrafficHeaderValue>
+  headersTruncated: boolean
+  body: string
+  bodyTruncated: boolean
+  status?: number
+  state?: "finished" | "disconnected" | "failed" | "not_started"
+}
+
 export interface TrafficExchangeDetail {
+  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped"> }
+
   chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
@@ -938,6 +946,7 @@ export interface TrafficExchangeDetail {
     path?: string
     url?: string
     headers: Record<string, TrafficHeaderValue>
+    headersTruncated?: boolean
     body: string
     bodyTruncated: boolean
     bytes?: number
@@ -962,6 +971,7 @@ export interface TrafficExchangeDetail {
     state: "completed" | "failed" | "incomplete"
     status: number | null
     headers: Record<string, TrafficHeaderValue>
+    headersTruncated?: boolean
     body: string
     bodyTruncated: boolean
     bytes?: number

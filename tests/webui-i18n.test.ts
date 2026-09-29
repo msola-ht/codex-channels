@@ -519,9 +519,9 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.requestsTableEn).toContain("Records");
     expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
     expect(result.requestsTableEn).toContain("Request duration");
-    expect(result.requestsTableEn).toContain("Call details");
-    expect(result.requestsTableEn).toContain("View call details");
-    expect(result.requestsTableEn).toContain('href="/requests/42"');
+    expect(result.requestsTableEn).toContain("Traffic");
+    expect(result.requestsTableEn).toContain("Not linked");
+    expect(result.requestsTableEn).not.toContain('href="/requests/');
     expect(result.requestsTableEn).toContain("Response model: model-other (Name mismatch)");
     expect(result.requestsTableEmptyEn).toContain("No records");
     expect(result.requestsTableLoadingEn).toContain('aria-label="Loading…"');

@@ -14,7 +14,7 @@ export async function startModelRelayService(configPath, environment = process.e
   const paths = modelRelayPaths(configPath);
   const reader = new ModelRelayMaterialReader(configPath, environment);
   const dump = new RelayTrafficDump({ directory: join(dirname(configPath), "traffic"),
-    onError: () => console.error("Relay traffic dump capture unavailable; model forwarding continues.") });
+    onError: error => console.error(error.message) });
   let snapshot;
   let relay;
   let selector;
@@ -53,8 +53,18 @@ export async function startModelRelayService(configPath, environment = process.e
     for (const old of snapshot?.materials ?? []) {
       if (next.materials.find(value => value.provider === old.provider)?.revision !== old.revision) relay?.admission.invalidateProvider(old.provider);
     }
+    dump.setRetentionDays(next.debug.model_traffic_retention_days);
+    if (next.debug.model_traffic_dump) void dump.prepare();
     snapshot = next;
-    relay ??= new ModelRelayServer({ capture: provider => snapshot?.config.traffic_dump ? dump.begin(provider) : undefined, policy: relayPolicyFromConfig(next.config), enqueueMetric: sample => sender.enqueue(sample),
+    relay ??= new ModelRelayServer({ capture: async (provider, signal) => {
+      if (!snapshot?.debug.model_traffic_dump) return undefined;
+      await dump.prepare(signal);
+      signal.throwIfAborted();
+      // Initialization may outlive a configuration refresh; use the latest global settings.
+      if (closed || !snapshot?.debug.model_traffic_dump) return undefined;
+      const debug = snapshot.debug;
+      return dump.begin(provider, debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0);
+    }, policy: relayPolicyFromConfig(next.config), enqueueMetric: sample => sender.enqueue(sample),
       prepare: async (provider, signal) => {
         await refreshCurrent(); signal.throwIfAborted();
         const initial = snapshot?.materials.find(value => value.provider === provider);

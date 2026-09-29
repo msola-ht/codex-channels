@@ -461,11 +461,6 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     handleRequestsExport(environment, url, response);
     return;
   }
-  const requestMatch = apiPath.match(/^\/requests\/([^/]+)$/u);
-  if (requestMatch) {
-    handleRequestDetail(environment, requestMatch[1], url, response);
-    return;
-  }
   if (apiPath === "/errors") {
     await handleErrors(environment, url, response);
     return;
@@ -601,19 +596,6 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   } finally {
     store.close();
   }
-}
-
-function handleRequestDetail(environment, id, url, response) {
-  if (!/^[1-9][0-9]*$/u.test(id) || !Number.isSafeInteger(Number(id))) {
-    throw new ApiError(400, "invalid_parameter", "请求记录 ID 无效");
-  }
-  if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "单条请求查询不接受筛选参数");
-  const store = openMetricsStore(environment);
-  try {
-    const record = new RequestMetricsQueryService(store).requestById(Number(id));
-    if (record === null) throw new ApiError(404, "request_not_found", "请求记录不存在或已清理");
-    sendJson(response, 200, { record });
-  } finally { store.close(); }
 }
 
 async function handleRequests(environment, url, response) {
@@ -766,6 +748,7 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
         sandbox: gateway.system.sandbox,
         defaultWorkspace: gateway.system.defaultWorkspace,
         defaultModel: gateway.system.defaultModel,
+        modelTrafficMode: gateway.system.modelTrafficMode,
         modelTrafficDumpEnabled: gateway.system.modelTrafficDumpEnabled,
         modelTrafficRetentionDays: gateway.system.modelTrafficRetentionDays,
       },

@@ -26,24 +26,6 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
-  it("reads exact IDs outside the recent page and respects read-only lifecycle", () => {
-    const path = join(temporaryDirectory(), "metrics.sqlite3");
-    const writer = new SqliteModelRequestMetricsStore(path);
-    writer.record({ ...sample(), provider: "first" });
-    writer.record({ ...sample(), provider: "last" });
-    writer.close();
-    const reader = new SqliteModelRequestMetricsStore(path, Date.now(), { readOnly: true });
-    try {
-      expect(reader.recent(1)[0]?.provider).toBe("last");
-      expect(reader.requestById(1)?.provider).toBe("first");
-      expect(reader.requestById(3)).toBeNull();
-      for (const id of [0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1]) {
-        expect(() => reader.requestById(id)).toThrow("正安全整数");
-      }
-    } finally { reader.close(); }
-    expect(() => reader.requestById(1)).toThrow("模型请求指标数据库已关闭");
-  });
-
   it("keeps quota queries in the caller's read snapshot and rejects them after close", () => {
     const now = Date.now();
     const path = join(temporaryDirectory(), "metrics.sqlite3");

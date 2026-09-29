@@ -11,6 +11,8 @@ import { RelayMetricsSender } from "../src/model-relay/index.js";
 import { sendRelayMetrics, RelayTrafficDump, pruneModelTrafficDumpSessions } from "../src/provider-proxy/index.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
+import * as retention from "../src/provider-proxy/traffic-dump-retention.js";
+import { relayDebugHeaders } from "../src/provider-proxy/relay-debug-headers.js";
 import { RelayMetricsComposition } from "../src/bootstrap/relay-metrics-composition.js";
 import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 
@@ -27,14 +29,14 @@ const answer = { id: "reply-1", model: "fixture/model", choices: [{ index: 0, me
   usage: { prompt_tokens: 3, completion_tokens: 2 } };
 const frame = (value: unknown): string => `data: ${JSON.stringify(value)}\n\n`;
 async function fixture(reply: (request: IncomingMessage, response: ServerResponse) => void,
-  prepareOverride?: (prepared: PreparedRelayProvider) => Promise<PreparedRelayProvider>, sink?: (sample: RelayMetric) => void, dump?: RelayTrafficDump) {
+  prepareOverride?: (prepared: PreparedRelayProvider) => Promise<PreparedRelayProvider>, sink?: (sample: RelayMetric) => void, dump?: RelayTrafficDump, debug = false) {
   let calls = 0; let preparedCount = 0;
   const backend = createServer((request, response) => { calls++; reply(request, response); });
   await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve())); });
   const address = backend.address(); if (!address || typeof address === "string") throw new Error("fixture");
   const metrics: RelayMetric[] = [];
-  const relay = new ModelRelayServer({ ...(dump ? { capture: provider => dump.begin(provider) } : {}), policy: config(), enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
+  const relay = new ModelRelayServer({ ...(dump ? { capture: (provider, signal) => dump.open(provider, signal, debug) } : {}), policy: config(), enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
     prepare: async () => {
       preparedCount++;
       const prepared: PreparedRelayProvider = { target: { host: "127.0.0.1", port: address.port, protocol: "http", basePath: "/v1", authorization: "Bearer UPSTREAM-SECRET" },
@@ -49,6 +51,170 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 
 describe("isolated Relay vertical request chain", () => {
 
+  it("prepares bounded debug headers without exposing credentials or URL details", () => {
+    const result = relayDebugHeaders({
+      Authorization: "Bearer PRIVATE", "Proxy-Authorization": "PRIVATE", Cookie: "PRIVATE",
+      "set-cookie": ["PRIVATE", "PRIVATE"], "x-api-key": "PRIVATE", "x-access-token": "PRIVATE",
+      "x-unknown-client": "PRIVATE", "user-agent": "browser-fixture", accept: "application/json",
+      origin: "https://example.test", referer: "https://example.test/private/path?secret=PRIVATE#PRIVATE",
+    });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(result.headers["x-unknown-client"]).toBe("[REDACTED]");
+    expect(result.headers["user-agent"]).toBe("browser-fixture");
+    expect(result.headers.referer).toBe("https://example.test");
+    expect(result.headers["set-cookie"]).toEqual(["[REDACTED]", "[REDACTED]"]);
+    expect(result.truncated).toBe(false);
+    expect(relayDebugHeaders({ origin: "https://user:pass@example.test", referer: "file:///private" }).headers)
+      .toEqual({ origin: "[REDACTED]", referer: "[REDACTED]" });
+    expect(relayDebugHeaders({ "user-agent": "中".repeat(1024) }).truncated).toBe(true);
+    const many = relayDebugHeaders(Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`x-header-${i}`, "PRIVATE"])));
+    expect(many.truncated).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(many.headers))).toBeLessThanOrEqual(16 * 1024);
+  });
+
+  it("captures the first concurrent requests after initialization without sending cancelled waiters", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-startup-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const original = retention.pruneModelTrafficDumpSessionsAsync;
+    const scans = vi.spyOn(retention, "pruneModelTrafficDumpSessionsAsync").mockImplementationOnce(async (...args) => { await gate; return original(...args); });
+    cleanups.push(async () => { scans.mockRestore(); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)), undefined, undefined, dump);
+    try {
+      const cancelled = new AbortController();
+      const waiting = dump.open("clp-a", cancelled.signal);
+      cancelled.abort(); await expect(waiting).rejects.toThrow();
+      const first = f.post(); const second = f.post();
+      await vi.waitFor(() => expect(f.preparedCount()).toBe(2));
+      expect(f.calls()).toBe(0); expect(scans).toHaveBeenCalledOnce();
+      resume();
+      expect((await first).status).toBe(200); expect((await second).status).toBe(200);
+      await vi.waitFor(() => expect(f.metrics).toHaveLength(2));
+      expect(f.metrics.every(metric => metric.traffic)).toBe(true);
+      expect(f.metrics[0]!.traffic).not.toEqual(f.metrics[1]!.traffic);
+    } finally { resume(); }
+  });
+
+  it("rechecks revocation after waiting for capture initialization", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-revoke-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const original = retention.pruneModelTrafficDumpSessionsAsync;
+    const scans = vi.spyOn(retention, "pruneModelTrafficDumpSessionsAsync").mockImplementationOnce(async (...args) => { await gate; return original(...args); });
+    cleanups.push(async () => { scans.mockRestore(); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const f = await fixture((_request, response) => response.end(JSON.stringify(answer)), undefined, undefined, dump);
+    try {
+      const pending = f.post();
+      await vi.waitFor(() => expect(scans).toHaveBeenCalledOnce());
+      const policy = config();
+      f.relay.admission.apply({ ...policy, callers: policy.callers.map(caller => ({ ...caller, enabled: false })) });
+      await pending;
+      expect(f.calls()).toBe(0);
+      resume(); await dump.prepare();
+      expect(f.calls()).toBe(0);
+      expect(f.metrics).toHaveLength(0);
+    } finally { resume(); }
+  });
+
+  it("coalesces asynchronous maintenance without blocking forwarding or pruning active captures", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-maintenance-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const history = join(directory, "relay.chat-history"); mkdirSync(history);
+    writeFileSync(join(history, "manifest.json"), JSON.stringify({ version: 2, label: "relay.chat", session: "history", createdAtMs: Date.now() }));
+    const syncScans = vi.spyOn(retention, "pruneModelTrafficDumpSessions");
+    cleanups.push(async () => { syncScans.mockRestore(); });
+    const original = retention.pruneModelTrafficDumpSessionsAsync;
+    const scans = vi.spyOn(retention, "pruneModelTrafficDumpSessionsAsync");
+    cleanups.push(async () => { scans.mockRestore(); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)), undefined, undefined, dump);
+    await dump.prepare();
+    for (let index = 0; index < 20; index++) dump.begin("clp-a")!.finish("disconnected");
+    expect(scans).toHaveBeenCalledTimes(1);
+    expect(syncScans).not.toHaveBeenCalled();
+    const active = dump.begin("clp-a")!;
+    const clock = vi.spyOn(performance, "now").mockReturnValue(performance.now() + 61_000);
+    cleanups.push(async () => { clock.mockRestore(); });
+    let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    scans.mockImplementationOnce(async (options, signal) => { await gate; return original({ ...options, maximumBytes: 0 }, signal); });
+    try {
+      dump.begin("clp-a")!.finish("disconnected");
+      await vi.waitFor(() => expect(scans).toHaveBeenCalledTimes(2));
+      // Rotate while scanning: both the old active session and newly created session must survive.
+      const date = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 86400_001);
+      cleanups.push(async () => { date.mockRestore(); });
+      // More than 56 small calls previously exhausted the full 9 MiB reservation per call.
+      const policy = config(); f.relay.admission.apply({ ...policy, requestsPerMinute: 0 });
+      for (let index = 0; index < 70; index++) {
+        expect(await (await f.post()).json()).toMatchObject({ choices: answer.choices });
+      }
+      expect(f.metrics).toHaveLength(70);
+      expect(f.metrics.every(metric => metric.traffic)).toBe(true);
+      expect(new Set(f.metrics.map(metric => `${metric.traffic!.session}/${metric.traffic!.interaction}`)).size).toBe(70);
+      expect(scans).toHaveBeenCalledTimes(2);
+    } finally { active.finish("disconnected"); resume(); }
+    await scans.mock.results[1]!.value;
+    expect(readdirSync(directory)).not.toContain("relay.chat-history");
+    await dump.close();
+    for (const metric of f.metrics) {
+      const ref = metric.traffic!;
+      const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);
+      expect(detail.request.body).toContain('"model":"fixture/model"');
+      expect(detail.response.body).toContain('"id":"reply-1"');
+    }
+  });
+  it("keeps the disk cap while rate limiting maintenance retries", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-full-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const scans = vi.spyOn(retention, "pruneModelTrafficDumpSessionsAsync").mockResolvedValue(512 * 1024 * 1024);
+    const dump = new RelayTrafficDump({ directory, onError: () => {} });
+    let clock: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await dump.prepare();
+      for (let index = 0; index < 20; index++) expect(dump.begin("clp-a")).toBeUndefined();
+      expect(scans).toHaveBeenCalledOnce();
+      clock = vi.spyOn(performance, "now").mockReturnValue(performance.now() + 2000);
+      scans.mockImplementation(async options => { options.onRemoved?.(512 * 1024 * 1024); return 0; });
+      expect(dump.begin("clp-a")).toBeUndefined();
+      await vi.waitFor(() => {
+        const capture = dump.begin("clp-a"); expect(capture).toBeDefined(); capture?.finish("disconnected");
+      });
+      expect(scans).toHaveBeenCalledTimes(2);
+    } finally { await dump.close(); clock?.mockRestore(); scans.mockRestore(); }
+  });
+  it("cancels a pending scan on shutdown without deleting history after close", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-cancel-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const original = retention.pruneModelTrafficDumpSessionsAsync;
+    const scans = vi.spyOn(retention, "pruneModelTrafficDumpSessionsAsync").mockImplementationOnce(async (...args) => { await gate; return original(...args); });
+    const error = vi.fn(); const dump = new RelayTrafficDump({ directory, onError: error });
+    try {
+      const prepare = dump.prepare();
+      await vi.waitFor(() => expect(scans).toHaveBeenCalledOnce());
+      const closing = dump.close(); resume(); await closing; await prepare;
+      expect(dump.begin("clp-a")).toBeUndefined(); expect(error).not.toHaveBeenCalled();
+    } finally { resume(); await dump.close(); scans.mockRestore(); }
+  });
+
+  it.each([0, 7, 30])("uses the configured global retention period (%i days)", async days => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-dump-retention-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const old = join(directory, "relay.chat-history"); mkdirSync(old);
+    const oldTime = Date.now() - 8 * 86400_000;
+    writeFileSync(join(old, "manifest.json"), JSON.stringify({ version: 2, label: "relay.chat", session: "history", createdAtMs: oldTime }));
+    for (const path of [join(old, "manifest.json"), old]) utimesSync(path, new Date(oldTime), new Date(oldTime));
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    dump.setRetentionDays(days); await dump.prepare();
+    expect(readdirSync(directory).includes("relay.chat-history")).toBe(days !== 7);
+  });
+
   it("bounds capture, prunes only retired Relay batches and survives restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "relay-dump-budget-"));
     cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
@@ -58,6 +224,7 @@ describe("isolated Relay vertical request chain", () => {
     writeFileSync(join(old, "payload-1.bin"), ""); truncateSync(join(old, "payload-1.bin"), 512 * 1024 * 1024);
     for (const path of [join(old, "manifest.json"), join(old, "payload-1.bin"), old]) utimesSync(path, new Date(oldTime), new Date(oldTime));
     const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    await dump.prepare();
     const capture = dump.begin("clp-a")!;
     capture.submitted({ ...body, stream: true }, {}, "/v1/chat/completions");
     expect(readdirSync(directory)).not.toContain(old.split("/").at(-1));
@@ -70,6 +237,7 @@ describe("isolated Relay vertical request chain", () => {
     expect(detail.response.bodyTruncated).toBe(true);
     expect(detail.response.storedBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
     const restarted = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => restarted.close());
+    await restarted.prepare();
     const next = restarted.begin("clp-b")!; next.submitted({ ...body, stream: false }, {}, "/v1/chat/completions");
     const nextRef = next.finish("disconnected")!; await restarted.close();
     expect(nextRef.session).not.toBe(reference.session);
@@ -79,6 +247,7 @@ describe("isolated Relay vertical request chain", () => {
     const directory = mkdtempSync(join(tmpdir(), "relay-dump-memory-"));
     cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
     const error = vi.fn(); const dump = new RelayTrafficDump({ directory, onError: error }); cleanups.push(() => dump.close());
+    await dump.prepare();
     const captures = Array.from({ length: 3 }, () => dump.begin("clp-a")!);
     for (const capture of captures) { capture.submitted({ ...body, stream: false }, {}, "/v1/chat/completions"); capture.value({ content: "x".repeat(6 * 1024 * 1024) }, false); }
     for (const capture of captures) expect(capture.finish("finished")).toBeUndefined();
@@ -90,7 +259,7 @@ describe("isolated Relay vertical request chain", () => {
     const errors: Error[] = [];
     const dump = new RelayTrafficDump({ directory, onError: error => errors.push(error) });
     cleanups.push(() => dump.close());
-    const payload = stream ? { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }], usage: answer.usage, secret: "HIDDEN" }
+    const payload = stream ? { model: answer.model, choices: [{ delta: { content: "hello" }, finish_reason: "stop" }], usage: answer.usage, secret: "HIDDEN" }
       : { success: true, data: answer, secret: "HIDDEN" };
     const f = await fixture((_request, response) => response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "set-cookie": "HIDDEN" })
       .end(stream ? frame(payload) + "data: [DONE]\n\n" : JSON.stringify(payload)), undefined, undefined, dump);
@@ -106,6 +275,7 @@ describe("isolated Relay vertical request chain", () => {
     expect(detail.request.body).toContain("[REDACTED]");
     expect(detail.response.body).toContain("[REDACTED]");
     expect(detail.response.deliveryStatus).toBe("finished");
+    expect(detail.responseModels).toEqual([answer.model]);
     if (stream) expect(detail.response.body).toContain("data: [DONE]");
     expect(detail.response.output[0].text).toBe("hello");
     expect(detail.response.usage).toMatchObject({ inputTokens: 3, outputTokens: 2 });
@@ -143,6 +313,83 @@ describe("isolated Relay vertical request chain", () => {
     const broken = new RelayTrafficDump({ directory: file, onError: () => {} }); cleanups.push(() => broken.close());
     const good = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)), undefined, undefined, broken);
     expect((await good.post()).status).toBe(200); expect(good.metrics[0]?.traffic).toBeUndefined();
+  });
+
+  it.each([false, true])("records four debug stages with one metric and no credentials (stream=%s)", async stream => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-debug-four-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const value = stream ? { model: answer.model, choices: [{ index: 0, delta: { content: "hello" }, finish_reason: "stop" }] }
+      : { success: true, data: answer };
+    const f = await fixture((_req, res) => res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "PRIVATE" })
+      .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value)), undefined, undefined, dump, true);
+    const input = stream ? { ...body, stream } : body;
+    const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/PRIVATE?q=PRIVATE", "x-client": "PRIVATE", cookie: "PRIVATE" });
+    const received = await reply.text();
+    await f.relay.close(); await dump.close();
+    expect(f.metrics).toHaveLength(1);
+    const ref = f.metrics[0]!.traffic!;
+    const path = join(directory, `relay.chat-${ref.session}`);
+    const detail = await describeDumpExchange([path], ref.interaction);
+    expect(JSON.parse(detail.debug.inbound.body)).toEqual(input);
+    expect(JSON.parse(detail.request.body).stream).toBe(stream);
+    expect(detail.debug.delivered.body).toBe(received);
+    expect(detail.debug.delivered.state).toBe("finished");
+    expect(detail.debug.inbound.headers["x-client"]).toBe("[REDACTED]");
+    expect(detail.request.headers.authorization).toBe("[REDACTED]");
+    expect(detail.debug.transformations).toContain("headers_filtered");
+    if (!stream) { expect(detail.debug.transformations).toContain("stream_defaulted"); expect(detail.debug.transformations).toContain("json_unwrapped"); }
+    for (const file of readdirSync(path)) {
+      const text = readFileSync(join(path, file), "utf8");
+      expect(text).not.toContain("PRIVATE"); expect(text).not.toContain("UPSTREAM-SECRET"); expect(text).not.toContain(authorization);
+    }
+    const indexes = join(path, "interactions.jsonl");
+    writeFileSync(indexes, readFileSync(indexes, "utf8").replace('"debug":{"version":1', '"debug":{"version":2'));
+    await expect(describeDumpExchange([path], ref.interaction)).rejects.toThrow("调试转储版本");
+  });
+
+  it("marks each debug stage truncated independently and records failed delivery", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-debug-limits-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    await dump.prepare(); const capture = dump.begin("clp-a", true)!;
+    const request = { ...body, stream: false, padding: "x".repeat(600 * 1024) };
+    capture.inbound!(request, { "user-agent": "x".repeat(2048) }); capture.submitted(request, {}, "/v1/chat/completions");
+    capture.head(200, {}); capture.value({ content: "x".repeat(4 * 1024 * 1024) }, false);
+    capture.delivered!({ error: { code: "fixture" } }, false, 502, {});
+    const ref = capture.finish("failed", "fixture")!; await dump.close();
+    const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);
+    expect(detail.debug.inbound.bodyTruncated).toBe(true); expect(detail.debug.inbound.headersTruncated).toBe(true);
+    expect(detail.request.bodyTruncated).toBe(true); expect(detail.response.bodyTruncated).toBe(true);
+    expect(detail.debug.delivered.bodyTruncated).toBe(false); expect(detail.debug.delivered.state).toBe("failed");
+    expect(detail.debug.delivered.status).toBe(502);
+  });
+
+  it("keeps the upstream failure separate from the actual client error response in debug", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-debug-error-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    const f = await fixture((_req, res) => res.writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ choices: null, secret: "DO-NOT-STORE" })), undefined, undefined, dump, true);
+    const reply = await f.post(); const received = await reply.text();
+    expect(reply.status).toBe(502);
+    await f.relay.close(); await dump.close();
+    const ref = f.metrics[0]!.traffic!;
+    const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);
+    expect(detail.response.status).toBe(200); expect(detail.response.body).toContain('"choices":null');
+    expect(detail.response.body).not.toContain("DO-NOT-STORE");
+    expect(detail.debug.delivered.status).toBe(502); expect(detail.debug.delivered.state).toBe("failed");
+    expect(detail.debug.delivered.body).toBe(received); expect(f.metrics).toHaveLength(1);
+  });
+
+  it("does not persist debug input when outbound preparation never submits", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-debug-unsubmitted-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} });
+    await dump.prepare(); const capture = dump.begin("clp-a", true)!;
+    capture.inbound!({ ...body, privateText: "NO-OUTBOUND-NO-DUMP" }, {});
+    expect(capture.finish("failed")).toBeUndefined(); await dump.close();
+    for (const session of readdirSync(directory)) expect(readdirSync(join(directory, session))).toEqual(["manifest.json"]);
   });
 
   it("queues behind ten executing requests and delivers JSON/SSE exactly once after release", async () => {

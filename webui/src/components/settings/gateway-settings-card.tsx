@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import { useEffect } from "react"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
@@ -15,6 +16,7 @@ export function GatewaySettingsCard({ management, upstreamAgent }: {
   management: GatewaySettingsController
   upstreamAgent: UseApiState<UpstreamUserAgentResponse>
 }) {
+  const { t } = useTranslation()
   const managedSettings = management.managedSettings
   const identity = managedSettings?.system.officialTuiIdentity
   const [draft, patch, reset] = useSettingsDraft({
@@ -72,6 +74,8 @@ export function GatewaySettingsCard({ management, upstreamAgent }: {
         <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label="空闲自动解除（分钟）" type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder="0–1440，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), "空闲自动解除")} />
         <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.default-model" ? management.lastAppliedSetting : null} label="渠道新会话模型" defaultValue={managedSettings.system.defaultModel ?? ""} placeholder="留空跟随 Codex 全局默认" disabled={disabled} onBlur={(value) => void management.previewSetting("system.default-model", value === "" ? null : value, "渠道新会话模型")} />
         <ManagedSelect label="记录调用详情" value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", "记录调用详情")} />
+        <ManagedSelect label={t("capture.mode")} value={managedSettings.system.modelTrafficMode} options={[["production", t("capture.production")], ["debug", t("capture.debug")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-mode", value, t("capture.mode"))} />
+        <FieldDescription>{t("capture.scope")}</FieldDescription>
         <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.model-traffic-retention-days" ? management.lastAppliedSetting : null} label="调用记录保留天数" type="number" defaultValue={String(managedSettings.system.modelTrafficRetentionDays)} placeholder="0–36500，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.model-traffic-retention-days", Number(value), "调用记录保留天数")} />
         <ManagedSelect label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={disabled || managedSettings.system.workspaces.length === 0} onChange={(value) => void management.previewSetting("system.default-workspace", value, "默认 Workspace")} />
         <ManagedSelect label="Telegram 消息格式" value={managedSettings.telegram.messageFormat} options={[["html", "HTML"], ["rich", "富文本"]]} disabled={disabled || !managedSettings.telegram.configured} onChange={(value) => void management.previewSetting("telegram.message-format", value, "Telegram 消息格式")} />

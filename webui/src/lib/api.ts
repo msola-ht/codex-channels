@@ -7,7 +7,6 @@ import type {
   MetricsQuery,
   MetricsProvidersResponse,
   RequestsResponse,
-  RequestDetailResponse,
   SettingsSummaryResponse,
   ManagementSettingsResponse,
   ManagementServicesResponse,
@@ -175,10 +174,6 @@ export function fetchThreadTurns(
     `${API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns?${metricsQueryParams(query)}`,
     signal,
   )
-}
-
-export function fetchRequestDetail(id: string, signal?: AbortSignal): Promise<RequestDetailResponse> {
-  return getJson<RequestDetailResponse>(`${API_PREFIX}/requests/${encodeURIComponent(id)}`, signal)
 }
 
 export function fetchRequests(

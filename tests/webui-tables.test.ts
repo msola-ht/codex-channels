@@ -4,25 +4,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("renders request details without confusing missing usage, upstream success and delivery failure", () => {
-    expect(markup.relayDetail).toContain("relay-uuid");
-    expect(markup.relayDetail).toContain("translator");
-    expect(markup.relayDetail).toContain("key-2");
-    expect(markup.relayDetail).toContain("200");
-    expect(markup.relayDetail).toContain("JSON");
-    expect(markup.relayDetail).toContain("&lt;script&gt;unsafe&lt;/script&gt;");
-    expect(markup.relayDetail).not.toContain("<script>");
-    expect(markup.relayDetail).not.toContain('href="/traffic');
-    expect(markup.relayDetail).toContain("1970-01-01");
-    expect(markup.relayDetail).toContain(">0</dd>");
-  });
   beforeAll(() => {
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
       import { createServer } from "vite";
       import { createElement as h } from "react";
       import { renderToStaticMarkup } from "react-dom/server";
-      import { MemoryRouter, Routes, Route } from "react-router";
+      import { MemoryRouter } from "react-router";
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
@@ -34,8 +22,6 @@ describe("WebUI metrics table presentation", () => {
       });
       try {
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
-        const { RequestDetailPage } = await server.ssrLoadModule("/src/pages/request-detail-page.tsx");
-        const { RequestDetail } = await server.ssrLoadModule("/src/components/requests/request-detail.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
@@ -87,7 +73,6 @@ describe("WebUI metrics table presentation", () => {
         const rollingWindow = quotaWindow("rolling", "5小时", 10);
         const fiveHourWindow = quotaWindow("five-hour", "5小时", 10);
         const result = {
-          relayDetail: render(RequestDetail, { record: { ...record, id: 42, source: "relay", callerId: "translator", keyId: "key-2", credentialGeneration: 2, relayRequestId: "relay-uuid", deliveryStatus: "failed", status: "completed", httpStatus: 200, responseFormat: "json", requestStartedAtMs: 1000, responseCompletedAtMs: 2000, inputTokens: 0, totalTokens: null, userAgent: "<script>unsafe</script>" } }),
           ocgQuotaOrder: render(OpencodeGoUsageCard, { accounts: [{ ...quotaAccount, displayName: "OpenCode Go main",
             windows: [monthlyWindow, weeklyWindow, rollingWindow] }], refreshControls: {}, onAccountsChanged: noop }),
           clineQuotaOrder: render(ClinePassUsageCard, { account: { ...quotaAccount, displayName: "Cline Pass main",
@@ -128,6 +113,10 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          relayDebug: render(TrafficDetail, { detail: { ...detail, debug: {
+            inbound: { headers: { "x-client": "[REDACTED]" }, headersTruncated: true, body: "<script>private</script>", bodyTruncated: false },
+            delivered: { headers: {}, headersTruncated: false, body: "{}", bodyTruncated: true, state: "finished", status: 200 },
+            transformations: ["stream_defaulted", "json_unwrapped"] } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
@@ -281,14 +270,12 @@ describe("WebUI metrics table presentation", () => {
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
         result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
         result.activeFilters = render(QueryFilters, { query: { range: "7d", provider: ["openai"], model: "test" }, onChange: noop });
-        const { useRequests, useRequestDetail } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
+        const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
         const { useThreadTurns } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
-        globalThis.fixtureApiState = { data: { id: "42", data: { record: { id: 42 } } }, loading: false, error: null };
-        result.requestDetailStates = JSON.stringify({ current: useRequestDetail("42"), changed: useRequestDetail("43") });
         result.queryStates = JSON.stringify([
           [useRequests, JSON.stringify(query)],
           [useThreads, JSON.stringify(query)],
@@ -307,12 +294,6 @@ describe("WebUI metrics table presentation", () => {
           const initial = hook(query);
           return { ready, changed, returned, pending, failed, initial };
         }));
-        const relayRecord = { ...record, id: 42, source: "relay", callerId: "translator", relayRequestId: "relay-uuid", status: "completed", deliveryStatus: "failed", responseFormat: "json", requestStartedAtMs: 1000, responseCompletedAtMs: 2000, totalTokens: null };
-        const detailRoute = { children: h(Route, { path: "/requests/:id", element: h(RequestDetailPage) }) };
-        globalThis.fixtureApiState = { data: { id: "42", data: { record: relayRecord } }, loading: false, error: null };
-        result.requestDetailPage = render(Routes, detailRoute, "en", "/requests/42?source=relay&offset=10");
-        globalThis.fixtureApiState = { data: null, loading: false, error: "raw internal error", errorCode: "request_not_found" };
-        result.requestDetailMissing = render(Routes, detailRoute, "en", "/requests/99");
         console.log(JSON.stringify(result));
       } finally { await server.close(); }
     `;
@@ -322,26 +303,16 @@ describe("WebUI metrics table presentation", () => {
     })) as Record<string, string>;
   }, 35_000);
 
-  it("hides a previous request when navigating to a different record", () => {
-    expect(JSON.parse(markup.requestDetailStates!)).toMatchObject({
-      current: { data: { record: { id: 42 } }, loading: false },
-      changed: { data: null, loading: true },
-    });
-  });
-
-  it("opens detail routes with a stable back link and localized missing-record errors", () => {
-    expect(markup.requestDetailPage).toContain("relay-uuid");
-    expect(markup.requestDetailPage).toContain("Call details");
-    expect(markup.requestDetailPage).toContain('href="/requests?source=relay&amp;offset=10"');
-    expect(markup.requestDetailPage).toContain("Model completion does not guarantee delivery");
-    expect(markup.requestDetailMissing).toContain("This request does not exist or has been removed");
-    expect(markup.requestDetailMissing).not.toContain("raw internal error");
-    expect(markup.requestDetailMissing).not.toContain("relay-uuid");
-  });
-
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
 
+  it("renders Relay debug stages within the existing detail", () => {
+    expect(markup.relayDebug).toContain("调试报文");
+    expect(markup.relayDebug).toContain("客户端入站请求");
+    expect(markup.relayDebug).toContain("客户端交付报文");
+    expect(markup.relayDebug).toContain("Relay 出站请求");
+    expect(markup.relayDebug).not.toContain("<script>private</script>");
+  });
   it("distinguishes account loading and failures from confirmed empty configuration", () => {
     expect(markup.consoleAccountsLoading).toContain("正在加载账户列表");
     expect(markup.consoleAccountsLoading).not.toContain("尚未配置");
@@ -552,7 +523,9 @@ describe("WebUI metrics table presentation", () => {
       "来源", "调用方", "交付", "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
-    expect(markup.requests).toContain('href="/requests/42"');
+    expect(markup.requests).toContain("未关联");
+    expect(markup.requests).not.toContain('href="/requests/');
+    expect(markup.requests).not.toContain('href="/traffic');
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
     expect(markup.requests).toContain("名称不一致");

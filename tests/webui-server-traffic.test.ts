@@ -23,15 +23,15 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
-  it("reports the independent Relay capture switch and retention for its label", async () => {
+  it("reports the shared global capture switch and retention for Relay", async () => {
     const fixture = createFixture(); const configPath = fixture.environment.CODEX_CONNECT_CONFIG_FILE;
     const document = readGatewayConfig(configPath);
-    document.debug = { model_traffic_dump: false }; document.model_relay = { traffic_dump: true };
+    document.debug = { model_traffic_dump: true, model_traffic_retention_days: 14 };
     writeGatewayConfig(configPath, document);
     writeSession(fixture.trafficDir, "relay.chat", "2026-09-29T00-00-00-000Z", [httpInteraction(1)]);
     const server = await startServer(fixture.environment);
     const result = await getJson<{ enabled: boolean; retentionDays: number }>(`${server.origin}/api/v1/traffic?label=relay.chat`);
-    expect(result.status).toBe(200); expect(result.body).toMatchObject({ enabled: true, retentionDays: 7 });
+    expect(result.status).toBe(200); expect(result.body).toMatchObject({ enabled: true, retentionDays: 14 });
   });
 
   it("does not infer new stages from legacy wall-clock records or invalid offsets", async () => {
@@ -630,6 +630,18 @@ describe("webui traffic V2 API", () => {
     const result = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic`);
     expect(result.status).toBe(503);
     expect(result.body.error.code).toBe("traffic_unsupported_version");
+  });
+
+  it.each([
+    [{ version: 2 }, "traffic_unsupported_version"],
+    [{ version: 1, transformations: [], inbound: { headers: null, headersTruncated: false, payload: {} } }, "traffic_unavailable"],
+  ])("reports unsupported or damaged debug records through a controlled API error", async (debug, code) => {
+    const fixture = createFixture(); const session = "2026-09-29T00-00-00-000Z";
+    const call = httpInteraction(1); call.request.debug = debug;
+    writeSession(fixture.trafficDir, "relay.chat", session, [call]);
+    const server = await startServer(fixture.environment);
+    const result = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange?label=relay.chat&session=${session}&id=1`);
+    expect(result.status).toBe(503); expect(result.body.error.code).toBe(code);
   });
 
   it.each(["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"])("rejects non-loopback callers before reading %s", async (apiPath) => {

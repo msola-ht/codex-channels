@@ -598,13 +598,27 @@ n=1 和请求大小等边界由 Relay 校验；省略 stream 时默认 JSON。�
 Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给 CLP。
 上游 Authorization 和传输头由 Relay 控制；Cookie、代理凭据、转发来源与内部身份头剔除。
 
-在 WebUI“请求明细”点击唯一的“查看调用详情”：已采集报文直接打开现有转储视图；未关联时显示指标摘要与缺失说明。Relay 没有 Codex 会话或轮次，HTTP 200 不等于客户端交付成功。出站 User-Agent 只记录新调用实际发送的值，缺失时不推断客户端类型。
+在 WebUI“请求明细”点击唯一的“查看调用详情”：已采集报文直接打开现有转储视图；未关联时仅显示“未关联”，不提供详情链接。Relay 没有 Codex 会话或轮次，HTTP 200 不等于客户端交付成功。出站 User-Agent 只记录新调用实际发送的值，缺失时不推断客户端类型。
 
-Relay 正文采集默认关闭，与自有代理的 debug 开关独立。完成 v22 指标库升级并安装匹配的 Gateway/Relay 后，执行 `codexc relay dump --enabled true` 开启，`codexc relay dump --enabled false` 关闭；命令先备份再原子保存并核验运行进程的配置摘要，不自动启动服务。仅采集随后实际出站的调用，不补录历史。
+Codex 和 Relay 共用 `[debug].model_traffic_dump`，默认关闭。在 WebUI 的 Gateway 系统设置或 `codexc config` 系统设置中，用“记录调用详情”控制采集，用“调用记录模式”选择生产或调试；不再单独按 Key 开启。只记录启用后实际出站的调用，不补录历史。
 
-转储保存脱敏后的出站 Chat 参数、消息和上游 JSON/SSE，交付状态另行显示。结构化凭据字段遮蔽，头只留 content-type、accept、user-agent；翻译原文、回答及自由文本内的秘密仍会保存。每次请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘、7 天保留和 16 MiB 待写预算。容量不足先清理最旧非活动批次，仍不足跳过采集并记服务日志，不中断转发；超限、解析失败和展示截断会明确标记。停止采集后已有文件继续保留；自动清理在后续 Relay 采集时执行。写入或待写内存故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
+如果配置仍含旧 `model_relay.traffic_dump`、`traffic_dump_mode` 或 `traffic_dump_debug`，运行时会明确拒绝。安装新版本后、运行 `codexc update` 或启动服务前，先停止旧 Gateway（包括前台进程），再显式选择统一后的状态。旧进程会按旧 Schema 自动补齐刚移除的字段；安装新文件不会替换其内存中的代码。例如保留关闭并采用生产模式：
 
-回退旧程序前，先用 `codexc relay disable` 禁用入口配置，再停止相关服务，使用 `codexc relay rollback-dump` 备份并仅移除新增开关，保留当前调用方身份、哈希和凭据代次；已有转储文件不删除。指标库按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 22 --to 21 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。不要恢复旧配置备份覆盖已轮换凭据。
+```bash
+codexc service stop gateway
+codexc traffic upgrade --enabled false --mode production
+codexc update
+```
+
+要统一开启调试，可明确选择 `--enabled true --mode debug`。升级命令锁定配置、校验旧字段、保存并校验私有备份后原子替换；不修改身份、凭据、数据库或已有转储，不自动重启服务。不能用旧开关的逻辑“或”自动扩大采集范围。
+
+模式复用已有裁剪参数：生产预设为 `model_traffic_input_items = 3`、`model_traffic_item_max_bytes = 65536`，调试预设为 `0/0`；仅两项都为 0 时视为调试。自定义非零裁剪值仍受支持，切换模式才会写入预设值。Codex 沿用现有精简/完整转储，Relay 生产记录出站请求与上游响应，调试为所有调用方增加入站、交付及实际处理记录。调试没有 Key 限定或自动到期；排查完可手动恢复生产或关闭采集。Codex 更改在重启 App Server 后生效，运行中的 Relay 在配置刷新后用于新请求；已开始采集的请求按开始时的模式完成。
+
+Relay 调试尽量保留全部头名称；凭据与未知扩展头值遮蔽，Origin/Referer 只保留源。头超限、正文截断均明确标记。每侧请求最多 512 KiB、每侧响应最多 4 MiB，合计仍为 1 MiB/8 MiB；不是网络抓包。交付完成表示本地 HTTP 写入完成，不等于客户端已处理。鉴权/准入失败且未实际出站的请求不新增调用转储或指标。
+
+Relay 生产记录脱敏后的出站 Chat 参数、消息和上游 JSON/SSE；头只留 content-type、accept、user-agent。翻译原文、回答及自由文本内的秘密仍会保存。请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘和 16 MiB 待写预算。保留天数统一使用 `[debug].model_traffic_retention_days`，默认 30 天，0 关闭按时间清理但保留 Relay 容量上限。首次启用在取消/超时边界内等待异步容量初始化，随后按实际已写及待写字节记账，并为在途调用预留空间。后台清理保护活动批次及扫描期间新建批次，整理期间继续采集；容量不足、写入故障或超限会留下日志或截断标记。写入故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
+
+停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 22 --to 21 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
 
 Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响应提供 `code`、`phase`、
 `request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。

@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { readPrivateFileSync, assertPrivateConfigAccessSync } from "./private-file.mjs";
-import { parseGatewayConfig, validateGatewayConfigDocument } from "./gateway-config.mjs";
+import { parseGatewayConfig, validateGatewayConfigDocument, validateDebugConfigDocument } from "./gateway-config.mjs";
 import { modelRelayConfigSchema, modelRelayConfigDigest } from "./model-relay-config.mjs";
 import { loadConfiguredChatProviderMaterial } from "./model-provider-runtime.mjs";
 import { readCodexProxySnapshot } from "./codex-proxy-env.mjs";
@@ -29,7 +29,7 @@ parentPort.on("message", () => {
     }
     const proxy = readCodexProxySnapshot(environment);
     if (readPrivateFileSync(configPath, 1024 * 1024) !== content) throw new Error("Configuration changed during read");
-    parentPort.postMessage({ ok: true, config, digest: modelRelayConfigDigest(config), materials, unavailable,
+    parentPort.postMessage({ ok: true, config, debug: validateDebugConfigDocument(document.debug ?? {}), digest: modelRelayConfigDigest(config), materials, unavailable,
       proxy: proxy.settings, proxyPath: proxy.path });
   } catch { parentPort.postMessage({ ok: false }); }
 });

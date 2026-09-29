@@ -15,7 +15,7 @@ export interface PreparedRelayProvider {
 export type { RelayMetric } from "../provider-proxy/index.js";
 export interface ModelRelayOptions {
   policy: RelayPolicy;
-  capture?(provider: string): DirectChatCapture | undefined;
+  capture?(provider: string, signal: AbortSignal): DirectChatCapture | undefined | Promise<DirectChatCapture | undefined>;
   prepare(provider: string, signal: AbortSignal): Promise<PreparedRelayProvider>;
   enqueueMetric(metric: RelayMetric): void;
 }
@@ -94,6 +94,7 @@ export class ModelRelayServer {
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
     let capture: DirectChatCapture | undefined;
+    let inbound: unknown;
     let started: number | undefined;
     let submittedAt: number | undefined;
     let completedAt: number | undefined;
@@ -127,7 +128,11 @@ export class ModelRelayServer {
         const uploadTimer = setTimeout(() => controller.abort(new RelayAdmissionError(408, "upload_timeout")), 15_000);
         try {
           const text = await readChatBody(request, signal, 1024 * 1024);
-          body = validateDirectChatRequest(JSON.parse(text) as unknown);
+          inbound = JSON.parse(text) as unknown;
+          body = validateDirectChatRequest(inbound);
+          const hadStream = Object.hasOwn(inbound as object, "stream");
+          inbound = { ...body };
+          if (!hadStream) delete (inbound as Record<string, unknown>).stream;
         } finally { clearTimeout(uploadTimer); }
         lease.check(body.model); requestModel = body.model; stream = body.stream;
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
@@ -148,7 +153,10 @@ export class ModelRelayServer {
       }
       if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
       phase = "upstream";
-      capture = this.options.capture?.(lease.caller.provider);
+      capture = await this.options.capture?.(lease.caller.provider, signal);
+      capture?.inbound?.(inbound, request.headers);
+      if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
+      inbound = undefined;
       await sendDirectChat({ ...(capture ? { capture } : {}), request: body!, clientHeaders: request.headers, target: prepared.target, signal, observer,
         recheck: () => { lease!.check(body!.model); prepared.recheck(); },
         submitted: ua => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
@@ -160,9 +168,14 @@ export class ModelRelayServer {
             const frame = `data: ${JSON.stringify(value)}\n\n`;
             if (Buffer.byteLength(frame) > 1024 * 1024) throw new ModelConversionError("Chat delivery frame exceeds size limit");
             if (!response.headersSent) response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+            capture?.delivered?.(value, true, response.statusCode, response.getHeaders());
             await writeChatData(response, frame, signal);
-            if (terminal) await endResponse(response, "data: [DONE]\n\n", signal);
-          } else await endResponse(response, JSON.stringify(value), signal);
+            if (terminal) { capture?.delivered?.(undefined, true, response.statusCode, response.getHeaders()); await endResponse(response, "data: [DONE]\n\n", signal); }
+          } else {
+            response.setHeader("content-type", "application/json");
+            capture?.delivered?.(value, false, response.statusCode, response.getHeaders());
+            await endResponse(response, JSON.stringify(value), signal);
+          }
         },
       });
       deliveryStatus = "finished";
@@ -196,13 +209,13 @@ export class ModelRelayServer {
         if (!request.complete) response.once("finish", () => request.destroy());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
-          if (response.headersSent) await endResponse(response, `data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000));
-          else { response.statusCode = status === 499 ? 502 : status; await endResponse(response, JSON.stringify(detail), AbortSignal.timeout(1000)); }
+          if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000)); }
+          else { response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), AbortSignal.timeout(1000)); }
         } catch { response.destroy(); }
       }
     } finally {
       clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
-      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs);
+      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
         const metric: RelayMetric = { source: "relay", threadId: null, turnId: null, relayRequestId,

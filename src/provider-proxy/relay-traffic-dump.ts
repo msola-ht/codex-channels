@@ -1,28 +1,29 @@
 import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import type { DirectChatRequest } from "../model-api/index.js";
-import { pruneModelTrafficDumpSessions } from "./traffic-dump-retention.js";
-import { TrafficDumpStorage, type TrafficDumpSession, type TrafficPayloadPart } from "./traffic-dump-storage.js";
+import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
+import { relayDebugHeaders } from "./relay-debug-headers.js";
+import { waitForChatOperation } from "./chat-io.js";
+import { pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
+import { TrafficDumpStorage, type TrafficDumpSession } from "./traffic-dump-storage.js";
 import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
 
 const MiB = 1024 * 1024;
 const reservationBytes = 9 * MiB + 64 * 1024;
-const sensitive = new Set(["authorization", "cookie", "set-cookie", "api_key", "api-key", "access_token", "refresh_token", "secret"]);
-function redact(value: unknown): unknown {
-  // JSON replacer avoids recursive traversal of attacker-controlled nesting.
-  return JSON.parse(JSON.stringify(value, (key, item: unknown) => sensitive.has(key.toLowerCase()) ? "[REDACTED]" : item)) as unknown;
-}
 function headersOf(headers: IncomingHttpHeaders | OutgoingHttpHeaders): Record<string, unknown> {
   return Object.fromEntries(Object.entries(headers).filter(([key]) => ["content-type", "accept", "user-agent"].includes(key.toLowerCase())));
 }
 
 export interface DirectChatCapture {
+  inbound?(value: unknown, headers: IncomingHttpHeaders): void;
+  delivered?(value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders): void;
+  transformed?(operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped"): void;
   submitted(request: DirectChatRequest, headers: IncomingHttpHeaders | OutgoingHttpHeaders, path: string): void;
   head(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders): void;
   value(value: unknown, stream: boolean): void;
   invalid(bytes: number): void;
   done(): void;
-  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number): ProviderProxyMetrics["traffic"];
+  finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string): ProviderProxyMetrics["traffic"];
 }
 
 /** One Relay owner, all accounts share the same V2 disk and pending-write budgets. */
@@ -30,105 +31,161 @@ export class RelayTrafficDump {
   private readonly sessions = new Set<TrafficDumpSession>();
   private readonly streams = new Set<WriteStream>();
   private queue = Promise.resolve();
-  private reserved = 0;
+  // Includes accepted writes that have not reached disk yet.
+  private retained = 0;
+  private protectedDuringMaintenance: string[] | undefined;
+  private ready = false;
+  private retentionDays = 30;
+  private maintenance: Promise<void> | undefined;
+  private lastMaintenance = -Infinity;
+  private readonly maintenanceAbort = new AbortController();
   private active = 0;
+  private reserved = 0;
   private closed = false;
   private failed = false;
-  private reported = false;
+  private readonly reported = new Set<string>();
   private readonly storage: TrafficDumpStorage;
   constructor(private readonly options: { directory: string; onError(error: Error): void }) {
-    this.storage = new TrafficDumpStorage({ ...options, label: "relay.chat", retentionDays: 7, maximumBytes: 512 * MiB,
-      maximumPendingBytes: 15 * MiB, rotateAfterPayloadBytes: 8 * MiB, onError: () => this.fail() }, {
+    this.storage = new TrafficDumpStorage({ ...options, label: "relay.chat", retentionDays: this.retentionDays,
+      retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, rotateAfterPayloadBytes: 8 * MiB,
+      onBytesAccepted: bytes => { this.retained += bytes; }, onError: () => this.fail() }, {
       sessions: this.sessions, streams: this.streams, getWriteQueue: () => this.queue, setWriteQueue: queue => { this.queue = queue; },
     });
   }
-  begin(provider: string): DirectChatCapture | undefined {
+  setRetentionDays(days: number): void { this.retentionDays = days; }
+  /** Initialize before enabling capture; never waits for model traffic. */
+  async prepare(signal?: AbortSignal): Promise<void> {
+    if (!this.ready) {
+      const task = this.maintain();
+      if (signal) await waitForChatOperation(task, signal);
+      else await task;
+    }
+  }
+  /** First enabled request waits for initialization, within its cancellation deadline. */
+  async open(provider: string, signal: AbortSignal, debug = false): Promise<DirectChatCapture | undefined> {
+    await this.prepare(signal);
+    signal.throwIfAborted();
+    return this.begin(provider, debug);
+  }
+  private maintain(): Promise<void> {
+    if (this.maintenance) return this.maintenance;
+    if (this.closed || this.failed) return Promise.resolve();
+    const initializing = !this.ready;
+    const protectedSessionDirectories = [...this.sessions].flatMap(session => session.sessionDirectory ? [session.sessionDirectory] : []);
+    this.protectedDuringMaintenance = protectedSessionDirectories;
+    this.maintenance = (async () => {
+      const retained = await pruneModelTrafficDumpSessionsAsync({ directory: this.options.directory, label: "relay.chat", retentionDays: this.retentionDays,
+        maximumBytes: 512 * MiB - reservationBytes - 128 * 1024,
+        protectedSessionDirectories,
+        onRemoved: bytes => { if (!initializing) this.retained -= bytes; } }, this.maintenanceAbort.signal);
+      if (initializing) this.retained = retained;
+      this.ready = true;
+    })().catch(() => { if (!this.closed) this.fail(); }).finally(() => {
+      this.lastMaintenance = performance.now(); this.maintenance = undefined; this.protectedDuringMaintenance = undefined;
+    });
+    return this.maintenance;
+  }
+  begin(provider: string, debug = false): DirectChatCapture | undefined {
     if (this.closed || this.failed || this.active >= 32) return undefined;
+    const reservation = reservationBytes + (debug ? 128 * 1024 : 0);
+    const full = this.retained + this.reserved + reservation > 512 * MiB;
+    const elapsed = performance.now() - this.lastMaintenance;
+    if (!this.ready || elapsed >= 60_000 || full && elapsed >= 1000) void this.maintain();
+    if (!this.ready || full) {
+      this.notice("Relay traffic dump capacity unavailable; capture skipped"); return undefined;
+    }
     try {
-      const budget = 512 * MiB - this.reserved - reservationBytes;
-      const retained = pruneModelTrafficDumpSessions({ directory: this.options.directory, label: "relay.chat", retentionDays: 7,
-        maximumBytes: Math.max(0, budget), protectedSessionDirectories: [...this.sessions].flatMap(session => session.sessionDirectory ? [session.sessionDirectory] : []) });
-      if (budget < 0 || retained > budget) { this.notice("Relay traffic dump disk capacity exceeded"); return undefined; }
-      this.reserved += reservationBytes;
-      this.active++;
+      this.active++; this.reserved += reservation;
       let finished = false;
       const startedAtMs = Date.now();
       let submittedAt = performance.now();
       const session = this.storage.beginLogicalInteraction(startedAtMs);
       const id = this.storage.nextInteractionId(session);
       const reference = this.storage.reference(session, id);
+      if (session.sessionDirectory && this.protectedDuringMaintenance && !this.protectedDuringMaintenance.includes(session.sessionDirectory)) {
+        this.protectedDuringMaintenance.push(session.sessionDirectory);
+      }
       let requestSaved = false;
       let status: number | undefined;
       let responseHeaders: Record<string, unknown> = {};
-      let bytes = 0;
-      let truncated = false;
       let complete = false;
       let completedAt: number | undefined;
       let streaming = false;
-      const parts: TrafficPayloadPart[] = [];
-      let pending: Buffer[] = [];
-      let pendingBytes = 0;
-      const flush = (): void => {
-        if (!pendingBytes) return;
-        const content = Buffer.concat(pending, pendingBytes); pending = []; pendingBytes = 0;
-        const part = this.storage.writePayload(session, content, "utf8");
-        if (part) {
-          const previous = parts.at(-1);
-          if (previous && previous.file === part.file && previous.offset + previous.bytes === part.offset) previous.bytes += part.bytes;
-          else parts.push(part);
-        }
-      };
-      const append = (content: Buffer): void => {
-        bytes += content.length;
-        if (truncated || bytes > 8 * MiB) { truncated = true; return; }
-        pending.push(content); pendingBytes += content.length;
-        if (pendingBytes >= 32 * 1024) flush();
-      };
+      const upstream = new RelayDumpPayload(this.storage, session, (debug ? 4 : 8) * MiB);
+      const delivered = debug ? new RelayDumpPayload(this.storage, session, 4 * MiB) : undefined;
+      let inbound: { headers: Record<string, string | string[]>; headersTruncated: boolean; payload: ReturnType<RelayDumpPayload["finish"]> } | undefined;
+      let inboundBody: unknown;
+      let inboundHead: ReturnType<typeof relayDebugHeaders> | undefined;
+      let deliveredStatus: number | undefined;
+      let deliveredHeaders: ReturnType<typeof relayDebugHeaders> = { headers: {}, truncated: false };
+      let upstreamHeadersTruncated = false;
+      const requestChanges = new Set<string>();
+      const responseChanges = new Set<string>();
       const safe = (operation: () => void): void => { if (!this.failed && !finished) try { operation(); } catch { this.fail(); } };
       return {
+        ...(debug ? {
+          inbound: (value: unknown, headers: IncomingHttpHeaders) => safe(() => {
+            // Retain only until actual submission, so a failed outbound recheck cannot persist input.
+            inboundBody = value; inboundHead = relayDebugHeaders(headers);
+          }),
+          delivered: (value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders) => safe(() => {
+            deliveredStatus = status; deliveredHeaders = relayDebugHeaders(headers); delivered!.value(value, stream);
+          }),
+          transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped") => safe(() => {
+            (operation === "json_unwrapped" ? responseChanges : requestChanges).add(operation);
+          }),
+        } : {}),
         submitted: (request, headers, path) => safe(() => {
           submittedAt = performance.now(); streaming = request.stream;
-          const content = Buffer.from(JSON.stringify(redact(request)));
-          const omitted = content.length > MiB;
+          if (debug && inboundHead) {
+            const content = new RelayDumpPayload(this.storage, session, MiB / 2); content.value(inboundBody, false);
+            inbound = { headers: inboundHead.headers, headersTruncated: inboundHead.truncated, payload: content.finish() };
+            inboundBody = undefined; inboundHead = undefined;
+          }
+          const content = Buffer.from(redactRelayValue(request));
+          const omitted = content.length > (debug ? MiB / 2 : MiB);
           const part = omitted ? undefined : this.storage.writePayload(session, content, "utf8");
+          const head = debug ? relayDebugHeaders(headers) : undefined;
           this.storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
-            method: "POST", path, headers: headersOf(headers), requestModel: request.model,
+            method: "POST", path, headers: head?.headers ?? headersOf(headers),
+            ...(debug ? { headersTruncated: head!.truncated, debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
             bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
           requestSaved = true;
         }),
-        head: (code, headers) => safe(() => { status = code; responseHeaders = headersOf(headers); }),
-        value: (value, stream) => safe(() => {
-          const content = Buffer.from(stream ? `data: ${JSON.stringify(redact(value))}\n\n` : JSON.stringify(redact(value)));
-          append(content);
-        }),
-        invalid: count => safe(() => { bytes += count; truncated = true; }),
-        done: () => safe(() => { complete = true; completedAt = performance.now(); if (streaming) append(Buffer.from("data: [DONE]\n\n")); }),
-        finish: (delivery, errorCode, firstTokenMs) => {
+        head: (code, headers) => safe(() => { status = code; const head = debug ? relayDebugHeaders(headers) : undefined; responseHeaders = head?.headers ?? headersOf(headers); upstreamHeadersTruncated = head?.truncated ?? false; }),
+        value: (value, stream) => safe(() => { upstream.value(value, stream); }),
+        invalid: count => safe(() => { upstream.invalid(count); }),
+        done: () => safe(() => { complete = true; completedAt = performance.now(); if (streaming) upstream.value(undefined, true); }),
+        finish: (delivery, errorCode, firstTokenMs, responseModel) => {
           if (finished) return undefined;
           safe(() => {
             if (!requestSaved) return;
-            flush();
+            const payload = upstream.finish();
             this.storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders,
+              ...(debug ? { headersTruncated: upstreamHeadersTruncated, debug: { version: 1,
+                delivered: { status: deliveredStatus, headers: deliveredHeaders.headers, headersTruncated: deliveredHeaders.truncated,
+                  payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
+              responseModels: responseModel === undefined ? [] : [responseModel],
               state: complete ? "completed" : "incomplete", deliveryStatus: delivery, error: errorCode,
-              errorScope: complete ? undefined : "upstream_response", bytes,
-              payload: { bytes: parts.reduce((sum, part) => sum + part.bytes, 0), parts, truncated },
+              errorScope: complete ? undefined : "upstream_response", bytes: upstream.bytes,
+              payload,
               capture: "redacted_upstream_chat", firstTokenMs, callTiming: { clock: "monotonic", basis: "submitted", endMs: (completedAt ?? performance.now()) - submittedAt } });
           });
-          finished = true; pending = []; pendingBytes = 0; this.active--;
+          finished = true; inboundBody = undefined; inboundHead = undefined;
+          upstream.discard(); delivered?.discard(); this.active--; this.reserved -= reservation;
           this.storage.completeLogicalInteraction(session);
-          void this.queue.finally(() => { this.reserved -= reservationBytes; });
           return requestSaved && !this.failed ? reference : undefined;
         },
       };
     } catch { this.fail(); return undefined; }
   }
   async close(): Promise<void> {
-    this.closed = true;
+    this.closed = true; this.maintenanceAbort.abort();
     let timer: NodeJS.Timeout | undefined;
-    try { await Promise.race([this.storage.close(), new Promise<void>(resolve => {
+    try { await Promise.race([Promise.all([this.storage.close(), this.maintenance]), new Promise<void>(resolve => {
       timer = setTimeout(() => { this.storage.abort(); resolve(); }, 5000);
     })]); } finally { clearTimeout(timer); }
   }
-  private notice(message: string): void { if (this.reported) return; this.reported = true; try { this.options.onError(new Error(message)); } catch { /* Capture is a side channel. */ } }
+  private notice(message: string): void { if (this.reported.has(message)) return; this.reported.add(message); try { this.options.onError(new Error(message)); } catch { /* Capture is a side channel. */ } }
   private fail(): void { this.failed = true; this.notice("Relay traffic dump capture failed"); }
 }

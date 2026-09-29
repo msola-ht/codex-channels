@@ -2,7 +2,7 @@
 
 `codexc webui` 启动本地指标 WebUI，展示模型请求指标数据库（`request-metrics.sqlite3`）中的全局统计、
 会话、请求明细与错误聚合；设置页还可修改结构化配置，并通过白名单异步任务执行受保护的服务与维护动作。回环监听未配置令牌时复用真实回环连接与 Origin 约束；配置令牌或绑定非回环地址时使用同一令牌鉴权。WebUI 不读取业务会话库，不接受任意命令。
-“调用详情”页另有一份受限视图，按逻辑模型调用展示自有代理或 Relay 的独立采集开关落盘的一条请求与一个
+“调用详情”页另有一份受限视图，按逻辑模型调用展示Codex 与 Relay 共用的全局采集开关落盘的一条请求与一个
 终态响应；原始事件默认收起，只对回环连接开放，并可在预览确认后清空全部已识别转储。
 
 ## 命令
@@ -85,7 +85,6 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 会话 | `#/threads` | `GET /api/v1/threads?range=&offset=&limit=&sort=&direction=`（包含期间首个匹配请求的开始时间） |
 | 会话详情 | `#/threads/:id` | `GET /api/v1/threads/:id/run`、`GET /api/v1/threads/:id/turns` |
 | 请求明细 | `#/requests` | `GET /api/v1/requests?range=&offset=&limit=&sort=&direction=` |
-| 请求详情 | `#/requests/:id` | `GET /api/v1/requests/:id`（按指标记录 ID 精确查询，不受列表时间范围或分页限制；不接受查询参数） |
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
@@ -99,9 +98,9 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 页头显示服务端当前日期、时间（精确到秒）、时区及 UTC 偏移；窄屏在导航栏下方显示。时钟基于服务端返回时间在本地逐秒推进，页面隐藏时暂停显示更新，重新可见时按包含休眠的经过时间推进，并在恢复可见或窗口重新获得焦点时合并请求服务端校准；校准失败保留时钟并提示“时间待校准”，不逐秒请求接口；夏令时按该时区在各时间点的规则计算。
 设置管理接口使用 GET 读取服务与配置，并仅以明确的 JSON POST/PATCH/DELETE 执行预览、写入和任务取消。管理请求始终要求真实回环连接和回环 Origin；WebUI 配置了令牌时还必须通过同一 Bearer 令牌鉴权。服务状态只读取平台服务管理器和受管运行日志（Linux 使用用户级 journald，macOS/Windows 使用私有错误日志）；高风险操作使用预览、一次性确认和白名单异步任务，仍不接受任意命令。
 
-请求列表统一为一个“调用详情”入口：有转储时直接进入现有报文视图，无关联时展示指标摘要及缺失说明；返回列表保留筛选与分页。详情展示已落盘的调用方、Key 标识与凭据代次、Relay 请求编号、请求/响应模型、JSON/SSE、上游 HTTP、模型状态、客户端交付状态、错误码、Token 与时间；缺失值显示“未记录”，零值保持为零。上游 HTTP 200 不代表客户端交付成功，也不代表 Relay 对客户端返回 200。记录被清理或不存在时返回 `404 request_not_found`；非法 ID 或查询参数返回 400。接口沿用 WebUI 的访问控制和只读指标查询，不采集正文、不回填客户端名称或下游 HTTP。Relay 的出站 User-Agent 仅新采集记录可用，最多 512 字符；历史缺失不补录，也不据此认定客户端类型。Relay 没有 Thread/Turn；启用独立采集后可关联报文，不再并列显示重复入口。
+请求列表仅在有关联转储时提供“查看调用详情”，直接进入现有报文视图；无关联时显示“未关联”，不提供独立指标详情页或单条指标 API。模型、Token、耗时、调用方和交付状态仍通过现有列表与导出查询。上游 HTTP 200 不代表客户端交付成功；Relay 没有 Thread/Turn。出站 User-Agent 只记录新调用实际发送的值，历史缺失不补录，也不据此认定客户端类型。
 
-调用详情页读取用户数据目录 `traffic/` 下自有代理 `[debug].model_traffic_dump` 或 Relay `[model_relay].traffic_dump` 生成的 V2 session，默认展示全部
+调用详情页读取用户数据目录 `traffic/` 下全局 `[debug].model_traffic_dump` 生成的 V2 session，默认展示全部
 提供商的全部保留批次，按请求开始时间倒序分页；选定提供商后，“记录批次”可筛选单个 writer session，
 重启产生新批次不会隐藏仍保留的旧记录。提供商、批次筛选、选中的逻辑调用、页码与每页条数
 （25/50/100/200）都保留在页面地址中；列表筛选使用 `label` / `session`，明细定位使用 `exchangeLabel` / `exchangeSession` 和编号，
@@ -328,7 +327,7 @@ webui/src/
   lib/         API 客户端、共享类型转出与格式化（Token/时间）
   hooks/       资源数据 hook（统一 loading/error/refetch）
   components/  Sidebar 布局、指标区块、共享数据表格组件与调用摘要/明细区块
-  pages/       概览、会话、会话详情、请求、请求详情、错误、调用详情、设置
+  pages/       概览、会话、会话详情、请求、错误、调用详情、设置
 ```
 
 设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。
@@ -377,6 +376,10 @@ Gateway 捕获到 `subAgentActivity` 通知的线程标注为“子代理”，�
 - 账户余额按实际返回的数据展示，不因账户不可用标志隐藏 DeepSeek 零余额。手动刷新替换快照后，旧请求的迟到结果不得覆盖新数据。
 - 设置确认弹窗在后台刷新时显示“正在刷新…”并禁用确认，仍可取消；实际提交期间禁用确认与取消，避免重复操作。输入草稿不因其他字段的配置版本变化而重建，失焦提交与草稿使用同一去空格值；成功写入后只释放对应设置（Workspace 按身份与字段匹配）的草稿。
 
-请求列表与导出支持 `source=owned|relay` 和 `callerId` 精确筛选。Relay 行展示真实调用方与独立交付状态，Thread/Turn 为空，不参与会话归属；启用独立采集后可关联转储正文。调用方密钥只通过 `codexc relay` 管理，WebUI 不签发或显示秘密。
+请求列表与导出支持 `source=owned|relay` 和 `callerId` 精确筛选。Relay 行展示真实调用方与独立交付状态，Thread/Turn 为空，不参与会话归属；启用全局采集后可关联转储正文。调用方密钥只通过 `codexc relay` 管理，WebUI 不签发或显示秘密。
 
 Relay 的 `relay.chat` 标签保存脱敏的 Chat 请求与上游 JSON/SSE，展示 `messages` 输入、请求参数、输出和原始保存报文；客户端交付状态与上游报文单独标识。开关、容量、保留与回滚见[模型 API 转发](user-guide.md#可选模型-api-转发)。无引用无法区分未开启与采集失败，不据此伪造正文；已有引用但文件未落盘、失败或清理时返回明确的定位错误。
+
+Relay 全局调试沿用“调用详情”页面：原请求/响应展示出站与上游报文，调试区域补充客户端入站、客户端交付和实际处理记录。头与正文的省略分别标注，凭据和未知扩展头值遮蔽；统一开关、模式及回退操作见[用户指南](user-guide.md)。
+
+Codex 与 Relay 共用 Gateway 系统设置中的“记录调用详情”和“调用记录模式”。生产/调试分别写入已有裁剪参数 3/65536 与 0/0，不新增模式字段；关闭采集不删除历史记录。

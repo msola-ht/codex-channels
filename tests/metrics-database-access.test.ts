@@ -58,11 +58,27 @@ describe("model request metrics database access", () => {
     for (const version of [3, modelRequestMetricsSchemaVersion]) {
       const { environment, databasePath } = fixture();
       createMetricsDatabase(databasePath, version, 1);
-      expect(() => readMetricsReport(environment)).toThrow(/不兼容/u);
+      expect(() => readMetricsReport(environment)).toThrow(/核对数据库版本及备份.*勿删除数据库/u);
+      if (version === modelRequestMetricsSchemaVersion) expect(() => validateMetricsDatabaseStructure(environment)).toThrow(/勿删除数据库/u);
       const database = new DatabaseSync(databasePath);
       expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1);
       database.close();
     }
+  });
+
+  it.each([19, 20, 21, 99])("preserves incompatible schema %s and gives non-destructive CLI guidance", (version) => {
+    const { environment, databasePath } = fixture();
+    createMetricsDatabase(databasePath, version, 1);
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import { requireCompatibleMetricsDatabase } from "./scripts/metrics-database-access.mjs";
+      try { requireCompatibleMetricsDatabase(); } catch (error) { console.log(error.message); }
+    `], { cwd: process.cwd(), encoding: "utf8", env: environment });
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("metrics reset");
+    expect(result.stdout).toContain(version === 20 || version === 21 ? `--from ${version} --to 22` : "勿删除数据库");
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    expect(database.prepare("SELECT value FROM schema_metadata WHERE name='schema_version'").get()?.value).toBe(version);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM model_request_metrics").get()?.count).toBe(1); database.close();
   });
 
   it("exports filtered Threads and Turns across all pages with the same request scope", () => {

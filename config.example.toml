@@ -72,8 +72,9 @@ reasoning = false
 plugin_api = false
 
 [debug]
-# 把模型请求和响应的完整报文写入 Gateway 数据目录下的 traffic 转储文件，默认关闭；
-# 仅在排查模型请求字段时临时开启，重启服务后生效。
+# Codex 与 Relay 共用的调用详情开关，写入 Gateway 数据目录下的 traffic，默认关闭；
+# Codex 重启 App Server 后生效；Relay 配置刷新后用于新请求。
+# 下方两项裁剪值同时为 0 表示全局调试模式，否则为生产模式；菜单预设分别是 0/0 和 3/65536。
 # V2 转储按逻辑模型调用保存一条请求和一个终态响应，完整 SSE/WS 传输轨迹另存为 trace；
 # 包含 prompt、工具输出和代码，但不包含 Authorization、Cookie 等凭据。写入失败不影响模型请求。
 model_traffic_dump = false

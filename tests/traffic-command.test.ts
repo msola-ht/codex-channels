@@ -44,6 +44,15 @@ afterEach(async () => {
 });
 
 describe("traffic command options", () => {
+  it("exposes upgrade help through both public help flags without loading user configuration", () => {
+    for (const flag of ["-h", "--help"]) {
+      const result = spawnSync(process.execPath, [resolve("bin/codexc.mjs"), "traffic", "upgrade", flag], {
+        encoding: "utf8", env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: "/nonexistent/fixture-config.toml" },
+      });
+      expect(result.status).toBe(0); expect(result.stdout).toContain("--enabled true|false --mode production|debug");
+    }
+  });
+
   it("defaults to listing the newest V2 session", () => {
     expect(parseTrafficCommandArgs([])).toEqual({
       all: false,

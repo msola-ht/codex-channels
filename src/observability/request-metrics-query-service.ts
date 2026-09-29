@@ -29,7 +29,7 @@ export interface ResolvedRequestMetricsRange {
 export type RequestMetricsQueryStore =
   & Pick<
     ModelRequestMetricsRequestQueryStore,
-    "aggregate" | "daily" | "hourly" | "errors" | "page" | "requestById"
+    "aggregate" | "daily" | "hourly" | "errors" | "page"
   >
   & Pick<
     ModelRequestMetricsThreadQueryStore,
@@ -168,7 +168,6 @@ export function queryRequestMetricsErrors(
 export class RequestMetricsQueryService {
   constructor(private readonly store: RequestMetricsQueryStore) {}
 
-  requestById(id: number) { return this.store.requestById(id); }
 
   aggregate(
     dimension: ModelRequestMetricsAggregationDimension,

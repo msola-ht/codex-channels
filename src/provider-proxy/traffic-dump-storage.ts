@@ -59,8 +59,10 @@ interface TrafficDumpStorageOptions {
   onError: (error: Error) => void;
   retentionDays: number;
   maximumPendingBytes?: number;
-  maximumBytes?: number;
   rotateAfterPayloadBytes?: number;
+  retentionManagedExternally?: boolean;
+  /** Count accepted writes (including queued data) for an external disk budget. */
+  onBytesAccepted?: (bytes: number) => void;
 }
 
 export interface TrafficDumpStorageState {
@@ -344,12 +346,14 @@ export class TrafficDumpStorage {
     }
     securePrivateDirectorySync(sessionState.sessionDirectory);
     const manifestPath = join(sessionState.sessionDirectory, "manifest.json");
-    writeFileSync(manifestPath, `${JSON.stringify({
+    const manifest = `${JSON.stringify({
       createdAtMs: sessionState.startedAtMs,
       label: this.label,
       session,
       version: 2,
-    }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    }, null, 2)}\n`;
+    writeFileSync(manifestPath, manifest, { flag: "wx", mode: 0o600 });
+    this.options.onBytesAccepted?.(Buffer.byteLength(manifest));
     securePrivateFileSync(manifestPath);
     sessionState.writerSession = session;
     this.pruneSessions();
@@ -357,6 +361,7 @@ export class TrafficDumpStorage {
   }
 
   private pruneSessions(): void {
+    if (this.options.retentionManagedExternally) return;
     const protectedSessionDirectories = [...this.sessions]
       .flatMap((session) => session.sessionDirectory === undefined
         ? []
@@ -365,7 +370,6 @@ export class TrafficDumpStorage {
       directory: this.directory,
       label: this.label,
       retentionDays: this.retentionDays,
-      ...(this.options.maximumBytes === undefined ? {} : { maximumBytes: this.options.maximumBytes }),
       protectedSessionDirectories,
     });
   }
@@ -376,6 +380,7 @@ export class TrafficDumpStorage {
       this.fail(new Error("Traffic dump pending capacity exceeded")); return;
     }
     this.queuedBytes += size;
+    this.options.onBytesAccepted?.(size);
     this.writeQueue = this.writeQueue.then(() => {
       if (this.failed) return;
       return new Promise<void>((resolveWrite, rejectWrite) => {

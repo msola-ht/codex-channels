@@ -1,3 +1,5 @@
+import { GatewayOwner } from "../runtime/gateway-owner.mjs";
+import { upgradeTrafficCapture, parseTrafficUpgradeArgs } from "../scripts/traffic-upgrade.mjs";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
@@ -115,7 +117,7 @@ it("accepts help only for exact public paths and rejects unknown options", async
   try {
     await runModelRelayCommand(["upgrade-limits", "-h"]);
     await runModelRelayCommand(["upgrade-limits", "--help"]);
-    for (const command of ["dump", "rollback-dump"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    for (const command of ["status", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
     expect(log).toHaveBeenCalledTimes(6);
   } finally { log.mockRestore(); }
   expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
@@ -162,7 +164,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
     const chunks: Buffer[] = []; request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       const input = JSON.parse(Buffer.concat(chunks).toString()) as { stream: boolean }; received.push(input);
-      if (received.length === 3) { pendingStarted(); return; }
+      if (received.length === 5) { pendingStarted(); return; }
       if (input.stream) response.writeHead(200, { "content-type": "text/event-stream" }).end(
         'data: {"model":"vendor/model@2026","choices":[{"delta":{"content":"fixture"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}\n\ndata: [DONE]\n\n');
       else response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ model: "vendor/model@2026", choices: [{ message: { role: "assistant", content: "fixture" }, finish_reason: "stop" }], usage: { prompt_tokens: 2, completion_tokens: 1 } }));
@@ -180,8 +182,30 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   writePrivateFileAtomicSync(f.configPath, stringify(document));
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
   await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment);
-  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay?.traffic_dump).toBe(false);
-  expect(await manageModelRelay(parseModelRelayCommand(["dump", "--enabled", "true"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
+  expect(gatewayConfig.validateDebugConfigDocument(parse(readFileSync(f.configPath, "utf8")).debug ?? {}).model_traffic_dump).toBe(false);
+  expect(await upgradeTrafficCapture({ enabled: true, mode: "debug" }, f.environment)).toMatchObject({ result: "upgraded" });
+  await service.refresh();
+  // Force capture preparation to overlap a global disable, after authentication/material preparation.
+  const { RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
+  let releasePreparation!: () => void; let preparationStarted!: () => void;
+  const preparationGate = new Promise<void>(resolve => { releasePreparation = resolve; });
+  const preparationEntered = new Promise<void>(resolve => { preparationStarted = resolve; });
+  const originalPrepare = RelayTrafficDump.prototype.prepare;
+  const preparation = vi.spyOn(RelayTrafficDump.prototype, "prepare").mockImplementation(async function (this: InstanceType<typeof RelayTrafficDump>, signal?: AbortSignal) {
+    await originalPrepare.call(this, signal);
+    if (signal) { preparationStarted(); await preparationGate; }
+  });
+  try {
+    const waiting = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
+      headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "waiting" }] }) });
+    await preparationEntered;
+    await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment);
+    await service.refresh(); releasePreparation();
+    const response = await waiting; expect(response.status).toBe(200); await response.text();
+  } finally { releasePreparation(); preparation.mockRestore(); }
+  await upgradeTrafficCapture({ enabled: true, mode: "debug" }, f.environment);
+  await service.refresh();
   let key = issued.key;
   for (const stream of [false, true]) {
     if (stream) key = (await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment)).key;
@@ -190,6 +214,11 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
       body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }], stream }) });
     expect(response.status).toBe(200); expect(await response.text()).toContain("fixture");
   }
+  const other = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "other", "--key", "other", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+  const otherResponse = await fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
+    headers: { authorization: `Bearer ${String(other.key)}`, "content-type": "application/json" },
+    body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }) });
+  expect(otherResponse.status).toBe(200); await otherResponse.text();
   // Default rate limits are disabled: further requests need no refill wait.
   const pending = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(key)}`, "content-type": "application/json" },
@@ -200,9 +229,18 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   await pending;
   await service.close(); await writer.waitForCurrentWrites();
   const rows = store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", callerId: "client", limit: 10 });
-  expect(rows.records).toHaveLength(3); expect(received).toHaveLength(3);
-  for (const row of rows.records) expect(row).toMatchObject({ traffic: { label: "relay.chat" }, callerId: "client", keyId: "key", threadId: null, turnId: null });
-  const completed = rows.records.filter(row => row.status === "completed");
+  expect(rows.records).toHaveLength(4); expect(received).toHaveLength(5);
+  expect(rows.records.filter(row => !row.traffic)).toHaveLength(1);
+  for (const row of store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", limit: 10 }).records) {
+    if (!row.traffic) continue;
+    const ref = row.traffic;
+    const records = readFileSync(join(dirname(f.configPath), "traffic", `relay.chat-${ref.session}`, "interactions.jsonl"), "utf8")
+      .trim().split("\n").map(line => JSON.parse(line) as { id: number; kind: string; debug?: { version: number } });
+    const request = records.find(record => record.id === ref.interaction && record.kind === "request")!;
+    expect(request.debug?.version).toBe(1);
+  }
+  for (const row of rows.records.filter(row => row.traffic)) expect(row).toMatchObject({ traffic: { label: "relay.chat" }, callerId: "client", keyId: "key", threadId: null, turnId: null });
+  const completed = rows.records.filter(row => row.status === "completed" && row.traffic);
   expect(completed).toHaveLength(2);
   for (const row of completed) expect(row).toMatchObject({ deliveryStatus: "finished", responseModel: "vendor/model@2026" });
   expect(completed.map(row => row.credentialGeneration).sort()).toEqual([1, 2]);
@@ -250,17 +288,63 @@ it("explicitly backs up and upgrades only legacy limits, preserving credentials 
   expect(readFileSync(f.configPath, "utf8")).toBe(malformed);
 });
 
-it("removes only the dump setting on rollback and preserves rotated credentials", async () => {
+it("explicitly unifies capture while preserving rotated credentials, retention and unrelated settings", async () => {
   const f = await fixture();
   await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
-  await manageModelRelay(parseModelRelayCommand(["dump", "--enabled", "true"]), f.environment);
   await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment);
   const before = parse(readFileSync(f.configPath, "utf8"));
-  await manageModelRelay(parseModelRelayCommand(["rollback-dump"]), f.environment);
-  const after = parse(readFileSync(f.configPath, "utf8"));
-  expect(gatewayConfig.validateGatewayConfigDocument(after).model_relay?.callers).toEqual(gatewayConfig.validateGatewayConfigDocument(before).model_relay?.callers);
-  expect(after.model_relay).not.toHaveProperty("traffic_dump");
-  const { traffic_dump: removed, ...preserved } = before.model_relay as Record<string, unknown>;
-  expect(removed).toBe(true); expect(after.model_relay).toEqual(preserved);
-  expect(() => parseModelRelayCommand(["dump", "--enabled", "yes"])).toThrow();
+  for (const legacy of [{}, { traffic_dump: true }, { traffic_dump: true, traffic_dump_mode: "debug", traffic_dump_debug: { caller_id: "client", expires_at_ms: 2000 } }]) {
+    const source = { ...before, debug: { model_traffic_dump: true, model_traffic_retention_days: 14 }, model_relay: { ...before.model_relay as object, ...legacy } };
+    writePrivateFileAtomicSync(f.configPath, stringify(source));
+    const original = readFileSync(f.configPath, "utf8");
+    const result = await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment);
+    expect(readFileSync(String(result.backupPath), "utf8")).toBe(original);
+    if (process.platform !== "win32") expect(statSync(String(result.backupPath)).mode & 0o777).toBe(0o600);
+    const after = parse(readFileSync(f.configPath, "utf8"));
+    expect(after.model_relay).toEqual(before.model_relay);
+    expect(after).toEqual({ ...before, debug: { model_traffic_dump: false, model_traffic_input_items: 3, model_traffic_item_max_bytes: 65536, model_traffic_retention_days: 14 } });
+    expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toEqual({ result: "unchanged", backupPath: null });
+  }
+  for (const command of ["dump", "rollback-dump"]) expect(() => parseModelRelayCommand([command])).toThrow();
+});
+
+it("requires an explicit global choice and keeps the original config on invalid input or failed backup/save", async () => {
+  for (const args of [[], ["--enabled", "true"], ["--enabled", "true", "--mode", "debug", "--caller", "client"], ["--enabled", "true", "--mode", "debug", "--mode", "debug"]]) {
+    expect(() => parseTrafficUpgradeArgs(args)).toThrow();
+  }
+  const f = await fixture();
+  const before = readFileSync(f.configPath, "utf8");
+  const command = parseTrafficUpgradeArgs(["--enabled", "true", "--mode", "debug"]);
+  const save = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("fixture save failure"); });
+  try { await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow("fixture save failure"); } finally { save.mockRestore(); }
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  const read = privateFile.readPrivateFileSync;
+  const brokenBackup = vi.spyOn(privateFile, "readPrivateFileSync").mockImplementation((path, max) => String(path).endsWith(".bak") ? "bad backup" : read(path, max));
+  try { await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow("备份校验失败"); } finally { brokenBackup.mockRestore(); }
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  expect(readdirSync(dirname(f.configPath)).filter(name => name.endsWith(".bak")).some(name => readFileSync(join(dirname(f.configPath), name), "utf8") === before)).toBe(true);
+  for (const patch of [{ debug: { model_traffic_dump: "yes" } }, { model_relay: { traffic_dump: true, unknown: 1 } }]) {
+    const invalid = stringify({ ...parse(before), ...patch }); writePrivateFileAtomicSync(f.configPath, invalid);
+    await expect(upgradeTrafficCapture(command, f.environment)).rejects.toThrow();
+    expect(readFileSync(f.configPath, "utf8")).toBe(invalid);
+  }
+  writePrivateFileAtomicSync(f.configPath, before);
+  const result = await upgradeTrafficCapture(command, f.environment);
+  expect(readFileSync(String(result.backupPath), "utf8")).toBe(before);
+  expect(parse(readFileSync(f.configPath, "utf8")).debug).toEqual({ model_traffic_dump: true, model_traffic_input_items: 0, model_traffic_item_max_bytes: 0 });
+});
+
+it("refuses traffic upgrade before any write while a Gateway owner is active, including not-ready owners", async () => {
+  const f = await fixture();
+  const owner = new GatewayOwner(f.configPath); await owner.start(); cleanups.push(() => owner.close());
+  const before = readFileSync(f.configPath, "utf8");
+  const files = readdirSync(dirname(f.configPath));
+  for (const ready of [false, true]) {
+    if (ready) owner.markReady();
+    await expect(upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).rejects.toThrow("codexc service stop gateway");
+    expect(readFileSync(f.configPath, "utf8")).toBe(before);
+    expect(readdirSync(dirname(f.configPath))).toEqual(files);
+  }
+  await owner.close();
+  expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toMatchObject({ result: "upgraded" });
 });

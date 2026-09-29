@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { modelRelayConfigSchema, relayPolicyFromConfig, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
+import { modelRelayConfigSchema, relayPolicyFromConfig, removeLegacyRelayCapture, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
 
 const caller = { caller_id: "client", key_id: "key", credential_generation: 1, secret_sha256: "a".repeat(64),
   enabled: true, provider: "clp-example", models: ["fixture/model"] };
 describe("Relay strict configuration", () => {
   it("defaults to disabled loopback and bounded limits without materializing identities", () => {
     const config = modelRelayConfigSchema.parse({});
-    expect(config).toEqual({ enabled: false, traffic_dump: false, host: "127.0.0.1", port: 4119, max_concurrency: 10, requests_per_minute: 0, burst: 10, callers: [], accounts: [] });
+    expect(config).toEqual({ enabled: false, host: "127.0.0.1", port: 4119, max_concurrency: 10, requests_per_minute: 0, burst: 10, callers: [], accounts: [] });
     expect(relayPolicyFromConfig(config).callers).toEqual([]);
+  });
+  it("rejects independent capture at runtime but validates it for explicit removal", () => {
+    const base = { accounts: [{ provider: "clp-example" }], callers: [caller] };
+    for (const patch of [{}, { traffic_dump: false }, { traffic_dump: true },
+      { traffic_dump: true, traffic_dump_mode: "debug", traffic_dump_debug: { caller_id: "client", expires_at_ms: 2000 } }]) {
+      expect(removeLegacyRelayCapture({ ...base, ...patch })).toEqual(base);
+      if (Object.keys(patch).length) expect(modelRelayConfigSchema.safeParse({ ...base, ...patch }).success).toBe(false);
+    }
+    for (const patch of [{ traffic_dump_mode: "debug" }, { traffic_dump_debug: { caller_id: "client", expires_at_ms: 2000 } },
+      { traffic_dump: "yes" }, { unknown: true }]) expect(() => removeLegacyRelayCapture({ ...base, ...patch })).toThrow();
   });
   it("projects already validated stable identities and exact account bindings", () => {
     const config = modelRelayConfigSchema.parse({ accounts: [{ provider: "clp-example" }], callers: [caller] });
