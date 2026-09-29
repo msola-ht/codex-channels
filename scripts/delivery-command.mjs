@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DeliveryJournal } from "../dist/delivery/index.js";
+import { DeliveryError, DeliveryJournal } from "../dist/delivery/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
@@ -44,17 +44,17 @@ export async function runDeliveryCommand(args, environment = process.env) {
         for (const record of page) {
           const stored = await journal.read(record.id);
           if (!stored) throw new Error("投递记录已变化");
-          const { event } = decodePersistentOutput(stored.payload);
-          const retainedNotice = record.state === "uncertain" && mayReleaseUncertainOutputBarrier(event);
+          const { event, image } = decodePersistentOutput(stored.payload);
+          const retainedNotice = (record.state === "uncertain" || record.state === "blocked") && mayReleaseUncertainOutputBarrier(event, image !== undefined);
           if (retainedNotice) retainedNotices++;
-          const blocksExecution = record.state === "blocked" || (record.state === "uncertain" && !retainedNotice);
-          if (blocksExecution) blockedConversations.add(record.conversation);
+          const blocksDelivery = (record.state === "blocked" || record.state === "uncertain") && !retainedNotice;
+          if (blocksDelivery) blockedConversations.add(record.conversation);
           if (command === "list") console.log(JSON.stringify({ ...record, eventType: event.type,
             threadId: "threadId" in event ? event.threadId : "parentThreadId" in event ? event.parentThreadId : null,
             turnId: "turnId" in event ? event.turnId : null,
             ...(event.type === "operation.updated" ? { operationKind: event.operation.kind, operationStatus: event.operation.status } : {}),
             blocksFollowing: !retainedNotice,
-            blocksExecution,
+            blocksExecution: false,
           }));
           after = record.sequence;
         }
@@ -66,5 +66,10 @@ export async function runDeliveryCommand(args, environment = process.env) {
       if (!(await journal.resolve(id, command))) throw new Error("仅能处理仍存在的 uncertain 或 blocked 记录；未修改记录");
       console.log(command === "retry" ? "已标记待重发；启动 Gateway 后复核授权，可能重复已送达分片" : "已按明确送达确认清除记录");
     }
+  } catch (error) {
+    if (error instanceof DeliveryError && error.code === "conflict") {
+      throw new Error("投递箱正被其他进程占用（通常是运行中的 Gateway）；请先在本机运行 codexc service stop gateway，再执行 codexc delivery。此命令仅支持离线维护，未修改投递记录。", { cause: error });
+    }
+    throw error;
   } finally { await journal.close(); }
 }

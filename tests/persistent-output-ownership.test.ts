@@ -124,7 +124,7 @@ it("retains a pending result as blocked after restart when its background Worksp
     value.workspaces.replace([{ id: "replacement", name: "Replacement", cwd: "/replacement" }], "replacement");
     output = create(true);
     await output.start();
-    await vi.waitFor(() => expect(fault).toHaveBeenCalledWith("authorization-changed", expect.any(String)));
+    await vi.waitFor(() => expect(fault).toHaveBeenCalledWith("authorization-changed", expect.any(String), expect.any(String)));
     await output.close();
     expect(deliver).not.toHaveBeenCalled();
     const journal = new SqliteDeliveryJournal(directory);
@@ -160,7 +160,7 @@ it.each(["legacy", "directory"] as const)("retains and blocks %s owners across r
     if (mode === "directory") value.workspaces.replace([{ id: "workspace", name: "Workspace", cwd: "/replacement" }], "workspace");
     output = create(true); await output.start();
     await vi.waitFor(() => expect(fault).toHaveBeenCalled());
-    expect(deliver).not.toHaveBeenCalled(); expect(output.acceptsExecution(value.target)).toBe(false);
+    expect(deliver).not.toHaveBeenCalled(); expect(output.acceptsExecution(value.target)).toBe(true);
     await output.close();
     const journal = new SqliteDeliveryJournal(directory);
     try {
@@ -173,6 +173,6 @@ it.each(["legacy", "directory"] as const)("retains and blocks %s owners across r
     fault.mockClear(); output = create(true); await output.start();
     await vi.waitFor(() => expect(fault).toHaveBeenCalled());
     expect(deliver).not.toHaveBeenCalled();
-    expect(output.acceptsExecution(value.target)).toBe(false);
+    expect(output.acceptsExecution(value.target)).toBe(true);
   } finally { await output.close(); rmSync(directory, { recursive: true, force: true }); }
 });

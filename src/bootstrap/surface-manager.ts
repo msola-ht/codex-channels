@@ -271,8 +271,13 @@ export class SurfaceManager {
   }
 
   acceptsExecution(target: ConversationTarget): boolean {
+    return this.executionBlockReason(target) === undefined;
+  }
+
+  executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {
     const account = surfaceAccountKey(target.surface, target.accountId);
-    return !this.stopping && !this.suspended.has(account) && (this.persistent?.acceptsExecution(target) ?? true);
+    if (this.stopping || this.suspended.has(account)) return "unavailable";
+    return this.persistent?.executionBlockReason(target);
   }
 
   waitForPersistentOutput(target: ConversationTarget, signal: AbortSignal): Promise<void> {

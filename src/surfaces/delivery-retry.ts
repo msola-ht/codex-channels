@@ -29,6 +29,7 @@ export async function withDeliveryRetry<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
+    signal?.throwIfAborted();
     try {
       return await observeSurfaceStage(options.logger, {
         stage: "api", attempt, maximumAttempts: options.maximumAttempts,

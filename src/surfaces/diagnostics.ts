@@ -16,6 +16,7 @@ interface SurfaceDiagnosticContext {
   phase?: string | null;
   inputId?: string;
   deliveryId?: string;
+  persistentDeliveryId?: string;
 }
 
 // 只传播身份字段，不持有事件、正文、平台请求或响应。异步发送、分片和重试共享投递 ID。
@@ -32,12 +33,20 @@ export function withSurfaceDiagnosticContext<T>(
   return context.run(fields, run);
 }
 
+/** Connect one durable record to all of its rendering, queue and platform operations. */
+export function withPersistentDeliveryDiagnostics<T>(id: string, run: () => T): T {
+  return context.run({ ...surfaceDiagnosticContext(), persistentDeliveryId: id }, run);
+}
+
 export function withSurfaceOutputDiagnostics(
   logger: Logger,
   event: OutputEvent,
   run: () => void,
 ): void {
   const fields: SurfaceDiagnosticContext = {
+    ...(surfaceDiagnosticContext().persistentDeliveryId === undefined ? {} : {
+      persistentDeliveryId: surfaceDiagnosticContext().persistentDeliveryId,
+    }),
     component: event.target.surface,
     accountId: event.target.accountId,
     conversationId: event.target.conversationId,

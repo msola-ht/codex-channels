@@ -118,3 +118,13 @@ describe("withDeliveryRetry", () => {
     await expect(pending).rejects.toMatchObject({ cause: failure });
   });
 });
+
+it("does not start an already cancelled send", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let attempts = 0;
+  const result = withDeliveryRetry({ component: "Test", maximumAttempts: 3, maximumDelayMs: 10,
+    delayMs: () => 0, logger }, async () => { attempts++; }, controller.signal);
+  await expect(result.then(() => "sent", () => "cancelled")).resolves.toBe("cancelled");
+  expect(attempts).toBe(0);
+});
