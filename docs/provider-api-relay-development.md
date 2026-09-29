@@ -469,9 +469,9 @@ CLP 非流式响应可为标准 Chat 对象，或 `{success:true,data:<Chat 对�
 真实结构诊断确认该包装与官方示例有差异：直接 Chat 网络适配只拆一层、显式要求 success 为 true，
 内部仍使用相同响应与 Usage 校验；包装失败、内部错误、嵌套包装或同时存在顶层 choices 时不猜测修复。
 JSON 必须有明确 finish_reason；SSE 必须同时有明确 finish_reason 和 `[DONE]`，允许终态后的独立
-usage 块，禁止终态后继续内容、第二个选择或冲突终态。stop/tool_calls 为 completed，length/content_filter
-为 incomplete；error、畸形帧、断流、缺少 DONE 为 failed。工具参数按调用索引累计且有界，合法完成
-前不交付可执行的完整工具调用；截断不补齐 JSON。SSE 以 UTF-8 字节限制帧与累计响应，不按字符计数。
+usage 块，禁止终态后继续内容、第二个选择或冲突终态。stop/tool_calls 为 completed，length/content_filter/insufficient_system_resource/aborted
+为 incomplete；error、畸形帧、断流、缺少 DONE 为 failed。工具参数按调用索引累计且有界，函数名最多 128 字符；
+参数字符串原样交付，不要求其为合法 JSON 对象，实际执行前的语义验证由客户端负责；截断不补齐 JSON。SSE 以 UTF-8 字节限制帧与累计响应，不按字符计数。
 模型终态与交付终态分开：模型终态已确认后，下游失败不清除 Usage 或改写模型状态。
 Usage 仅提取安全非负整数 prompt_tokens、completion_tokens、total_tokens 和缓存/推理明细；缺失为 null，
 不推算 total 或费用。Cline 的 cost、路由 metadata 不写入指标。
@@ -484,7 +484,8 @@ message 仅使用受控文案与本地产生的诊断字段，不包含上游自
 阶段、已知上游 HTTP 状态及请求编号，便于只显示 message 的客户端定位。
 400 参数、401 入口认证、403 模型授权、404 路径、405 方法、408 上传超时、413 大小、415 编码、
 429 本地限流、502 上游/协议错误、503 配置失效/关闭、504 上游期限。上游认证错误返回 502，
-不能误导调用方轮换 Relay Key；上游 429 可映射 429，但不透传响应头或原文。
+不能误导调用方轮换 Relay Key；上游 429 可映射 429；429/503 的 Retry-After 仅在为安全整数秒或规范 IMF-fixdate 日期且不超过 64 字符时保留，
+其他上游响应头与错误原文不透传。上游 503 沿用 502/server_error 映射，不自动重试。
 SSE 已开始时发送 `data: {"error":...}` 后关闭，不附加伪成功 DONE；连接不可写只记录交付失败。
 upstream_attempted 一旦提交发送即为 true，仅表示可能产生消耗，不等于上游确认收到。
 
@@ -1389,3 +1390,14 @@ SSE 保持事件名称与数据字段；终态之前断流为失败，incomplete
 部署与验收边界：用户自行部署、重启并执行 update；实际数据库与既有成功调用已按下段只读核验。上述转储修复沿用 v23 与现有 V2 格式，无需再次升级 Schema；尚未升级的部署仍须先完成显式升级。开发代理未修改实际配置、数据库或服务状态，也未主动发送真实上游请求；真实失败、撤销、过载及多平台验收仍未完成。
 
 部署后只读审查（2026-09-29，后续证据）：用户自行部署重启后，已核对 App Server、Gateway、Relay 均运行；6 个关键部署文件与工作区构建/脚本摘要一致，实际指标库为 v23。Relay 本次启动时间为 14:15:46 UTC，审查时其后 4 条实际调用（指标 ID 5812、5813、5816、5817）覆盖 DS Responses SSE、CLP Chat SSE 及两条 Chat JSON；全部 HTTP 200、completed/finished，指标和转储的 Provider、请求/响应模型、状态、用量一致，输出可读且未截断，Thread/Turn 为空，每次调用唯一落盘。当前进程 accepted=4，rejected/unconfirmed/local_dropped=0，等待队列为空；另从 SQLite 核实落盘，不以 accepted 替代持久化证据。重启前的 DS Responses JSON 记录 5801 亦可正常解析。调试阶段核实 DS 仅默认 store=false，两条 Chat JSON 按当前 Key 策略设置 reasoning.effort=none 并默认 stream=false。审查仅读取已发生调用，未主动发送真实请求、回写历史数据或操作服务。真实 failed/incomplete、撤销中断、过载和关闭竞态仍仅有隔离证据，不扩大为全部生产场景验收通过。
+
+
+### 15.15 原生转发兼容与退避诊断优化
+
+依据 [DeepSeek Chat 官方合同](https://api-docs.deepseek.com/api/create-chat-completion/)核实额外终态、128 字符函数名以及工具参数不保证合法 JSON；本地固定报文复现原实现的 invalid_upstream_finish/tools。参考锁定 CLIProxyAPI `d33f63f8` 的同协议保留与安全 Retry-After 处理，不引入其协议转换、账户轮换或 reasoning 占位回填。HTTP 退避语义参照 [RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)。
+
+本批实现：原生 Chat 接受上述终态，模型 incomplete 与交付 finished 分别记录；采集 done 传递观察器真实终态，纠正旧实现将 Chat length/content_filter 记为 completed 的问题。工具调用继续验证身份、索引、字段类型与字节预算，但参数文本不做 JSON 语义验证。转换桥的工具解析合同不变。两种原生协议的 HTTP 错误共用安全 Retry-After 提取，只传递受限整数秒或规范日期，不透传自由文本、Cookie 或其他上游头，不自动重试。旧转储不重写。
+
+范围遵守第 3.3 节：不新增配置、持久格式、依赖或服务；不扩展会话、缓存、Redis、SSE 心跳或超时开关。后两项需结合实际连接故障证据处理；缺少历史 reasoning 的供应商专用诊断待核实具体错误合同，不从错误自由文本猜测。
+
+验证证据：首批原生请求/纯模型/Relay 链路 3 文件 208 项通过；补齐参数字段缺失、非字符串和超长名称后，Relay/Chat 桥/准入/模块边界回归 4 文件 203 项通过（两批有重叠，不相加）。类型及运行时边界、针对性 ESLint、文档索引检查通过。补充的分钟限流测试曾误假设入口立即拒绝而超时；核对现有全局排队合同后移除该错误假设，不修改调度语义。最终 Relay Server 回归 122 项通过，HTTP 错误同时覆盖客户端请求 JSON/SSE 两种模式，最终 ESLint、diff 格式与文档检查通过。未执行真实账户调用、部署、重启或提交；生产验收仍需用户部署后的实际证据。

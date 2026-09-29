@@ -158,6 +158,77 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 
 describe("isolated Relay vertical request chain", () => {
 
+  it.each([false, true].flatMap(stream => ["stop", "length", "content_filter", "insufficient_system_resource", "aborted"].map(reason => ({ stream, reason }))))(
+    "keeps Chat terminal, delivery, metrics and dump consistent ($stream, $reason)", async ({ stream, reason }) => {
+      const directory = mkdtempSync(join(tmpdir(), "relay-chat-terminal-"));
+      const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+      cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+      const message = { role: "assistant", content: "partial", reasoning_content: "thinking" };
+      const value = { ...answer, choices: [{ index: 0, ...(stream ? { delta: message } : { message }), finish_reason: reason }] };
+      const wire = stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value);
+      const f = await fixture((_request, response) => {
+        response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" }).end(wire);
+      }, undefined, undefined, dump);
+      const response = await f.post({ ...body, stream });
+      expect(response.status).toBe(200); expect(await response.text()).toBe(wire);
+      const status = reason === "stop" ? "completed" : "incomplete";
+      expect(f.metrics).toHaveLength(1);
+      expect(f.metrics[0]).toMatchObject({ status, deliveryStatus: "finished", inputTokens: 3, outputTokens: 2, threadId: null, turnId: null });
+      await dump.close();
+      const ref = f.metrics[0]!.traffic!;
+      const detail = await describeDumpExchange([join(directory, `${ref.label}-${ref.session}`)], ref.interaction);
+      expect(detail.state).toBe(status); expect(detail.response.deliveryStatus).toBe("finished");
+    });
+
+  it.each([false, true].flatMap(stream => ["{", "[]", "{}"].map(args => ({ stream, args }))))(
+    "preserves 128-character tool names and opaque arguments ($stream, $args)", async ({ stream, args }) => {
+      const message = { role: "assistant", content: null, tool_calls: [{ ...(stream ? { index: 0 } : {}), id: "call_1", type: "function",
+        function: { name: "f".repeat(128), arguments: args } }] };
+      const value = { ...answer, choices: [{ index: 0, ...(stream ? { delta: message } : { message }), finish_reason: "tool_calls" }] };
+      const wire = stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value);
+      const f = await fixture((_request, response) => response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" }).end(wire));
+      const response = await f.post({ ...body, stream });
+      expect(response.status).toBe(200); expect(await response.text()).toBe(wire);
+      expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "finished" });
+    });
+
+  it.each([
+    { name: "f".repeat(129), arguments: "{}" },
+    { name: "f" },
+    { name: "f", arguments: {} },
+  ])("retains native tool field boundaries (%j)", async fn => {
+    const value = { ...answer, choices: [{ message: { role: "assistant", tool_calls: [{ id: "call", type: "function", function: fn }] }, finish_reason: "tool_calls" }] };
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value)));
+    const response = await f.post(); expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "invalid_upstream_tools" } });
+    expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed" });
+  });
+
+  it.each(["chat", "responses"].flatMap(protocol => [
+    { upstreamStatus: 429, retryAfter: "17", expected: "17", json: true },
+    { upstreamStatus: 503, retryAfter: "Wed, 21 Oct 2037 07:28:00 GMT", expected: "Wed, 21 Oct 2037 07:28:00 GMT", json: false },
+    { upstreamStatus: 429, retryAfter: "0", expected: "0", json: true },
+    { upstreamStatus: 429, retryAfter: "17, 18", expected: null, json: true },
+    { upstreamStatus: 429, retryAfter: "PRIVATE", expected: null, json: false },
+    { upstreamStatus: 429, retryAfter: "-1", expected: null, json: true },
+    { upstreamStatus: 429, retryAfter: "9007199254740992", expected: null, json: true },
+  ].map(test => ({ protocol, ...test }))))(
+    "forwards only safe Retry-After without retries ($protocol, $upstreamStatus, $retryAfter)", async ({ protocol, upstreamStatus, retryAfter, expected, json }) => {
+      const f = await fixture((_request, response) => response.writeHead(upstreamStatus, {
+        "retry-after": retryAfter, "set-cookie": "PRIVATE", "x-private": "PRIVATE", "content-type": json ? "application/json" : "text/plain",
+      }).end(json ? JSON.stringify({ error: { message: "PRIVATE" } }) : "PRIVATE"));
+      const response = protocol === "chat" ? await f.post({ ...body, stream: !json }) : await fetch(`${f.relay.address()}/v1/responses`, {
+        method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify({ model: body.model, input: "hello", stream: !json }),
+      });
+      expect(response.status).toBe(upstreamStatus === 429 ? 429 : 502);
+      expect(response.headers.get("retry-after")).toBe(expected);
+      expect(response.headers.get("set-cookie")).toBeNull(); expect(response.headers.get("x-private")).toBeNull();
+      const error = await response.json();
+      expect(error).toMatchObject({ error: { code: upstreamStatus === 429 ? "rate_limit" : "server_error", phase: "upstream", upstream_status: upstreamStatus, upstream_attempted: true } });
+      expect(JSON.stringify(error)).not.toContain("PRIVATE");
+      expect(f.calls()).toBe(1); expect(f.metrics).toHaveLength(1);
+    });
+
   it.each(["json", "wrapped", "sse"])("associates bounded final routing with the exact Relay call (%s)", async format => {
     const directory = mkdtempSync(join(tmpdir(), "relay-routing-"));
     cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
@@ -929,11 +1000,11 @@ describe("isolated Relay vertical request chain", () => {
     expect(response.status).toBe(200); expect(await response.text()).toContain("data: [DONE]");
     expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "finished" });
   });
-  it.each(["missing_done", "truncated_tool", "upstream_error"])("does not invent success for %s", async mode => {
+  it.each(["missing_done", "missing_tool_identity", "upstream_error"])("does not invent success for %s", async mode => {
     const f = await fixture((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(mode === "upstream_error" ? frame({ error: { code: "server_error", message: "UPSTREAM-SECRET" } })
-        : mode === "truncated_tool" ? frame({ choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "f", arguments: "{" } }] }, finish_reason: "tool_calls" }] }) + "data: [DONE]\n\n"
+        : mode === "missing_tool_identity" ? frame({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "f", arguments: "{" } }] }, finish_reason: "tool_calls" }] }) + "data: [DONE]\n\n"
           : frame({ choices: [{ delta: { content: "partial" }, finish_reason: "stop" }] }));
     });
     const response = await f.post({ ...body, stream: true }); const text = await response.text();

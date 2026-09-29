@@ -220,7 +220,9 @@ export class ModelRelayServer {
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
           if (response.headersSent) { capture?.delivered?.(detail, true, response.statusCode, response.getHeaders()); await endResponse(response, `${protocol === "responses" ? "event: error\n" : ""}data: ${JSON.stringify(detail)}\n\n`, AbortSignal.timeout(1000)); }
-          else { response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), AbortSignal.timeout(1000)); }
+          else {
+            if (failure instanceof ChatUpstreamError && failure.retryAfter !== undefined) response.setHeader("retry-after", failure.retryAfter);
+            response.statusCode = status === 499 ? 502 : status; response.setHeader("content-type", "application/json"); capture?.delivered?.(detail, false, response.statusCode, response.getHeaders()); await endResponse(response, JSON.stringify(detail), AbortSignal.timeout(1000)); }
         } catch { response.destroy(); }
       }
     } finally {

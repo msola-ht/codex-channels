@@ -1,4 +1,4 @@
-import { ModelConversionError, object, string, toolArguments } from "./validation.js";
+import { ModelConversionError, object, string } from "./validation.js";
 
 type ResponsePart = "metadata" | "choices" | "message" | "tools" | "finish" | "usage";
 type ChoicesIssue = "expected_array" | "empty_choices" | "multiple_choices" | "expected_choice_object" | "invalid_choice_index" | "choice_error";
@@ -26,8 +26,8 @@ export interface DirectChatUsage {
   reasoningOutputTokens?: number;
   totalTokens?: number;
 }
-type FinishReason = "stop" | "tool_calls" | "length" | "content_filter";
-interface ToolCall { id: string; name: string; arguments: string }
+type FinishReason = "stop" | "tool_calls" | "length" | "content_filter" | "insufficient_system_resource" | "aborted";
+interface ToolCall { id: string; name: string; arguments: string | undefined }
 
 /** Single owner of Chat terminal state and usage. Contains no HTTP or metrics submission. */
 export class DirectChatResponse {
@@ -107,7 +107,7 @@ export class DirectChatResponse {
       }
       part = "finish";
       if (choice.finish_reason != null) {
-        if (typeof choice.finish_reason !== "string" || !["stop", "tool_calls", "length", "content_filter"].includes(choice.finish_reason)) fail();
+        if (typeof choice.finish_reason !== "string" || !["stop", "tool_calls", "length", "content_filter", "insufficient_system_resource", "aborted"].includes(choice.finish_reason)) fail();
         this.reason = choice.finish_reason as FinishReason;
       }
       if (!stream && !this.reason) fail();
@@ -147,7 +147,7 @@ export class DirectChatResponse {
     const index = position ?? call.index;
     if (!Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= 64) fail();
     if (call.type !== undefined && call.type !== "function") fail();
-    const previous = this.calls.get(Number(index)) ?? { id: "", name: "", arguments: "" };
+    const previous = this.calls.get(Number(index)) ?? { id: "", name: "", arguments: undefined };
     if (call.id !== undefined) {
       const id = boundedString(call.id, 128);
       if (!/^[A-Za-z0-9_-]+$/u.test(id) || (previous.id && previous.id !== id)) fail();
@@ -156,18 +156,18 @@ export class DirectChatResponse {
     if (call.function !== undefined) {
       const fn = object(call.function);
       if (fn.name !== undefined) previous.name += string(fn.name);
-      if (fn.arguments !== undefined) previous.arguments += string(fn.arguments);
+      if (fn.arguments !== undefined) previous.arguments = (previous.arguments ?? "") + string(fn.arguments);
     }
-    if (previous.name.length > 64 || Buffer.byteLength(previous.arguments) > 1024 * 1024) fail();
+    if (previous.name.length > 128 || Buffer.byteLength(previous.arguments ?? "") > 1024 * 1024) fail();
     this.calls.set(Number(index), previous);
-    if ([...this.calls.values()].reduce((sum, item) => sum + Buffer.byteLength(item.arguments), 0) > 1024 * 1024) fail();
+    if ([...this.calls.values()].reduce((sum, item) => sum + Buffer.byteLength(item.arguments ?? ""), 0) > 1024 * 1024) fail();
   }
   private completeCalls(): unknown[] {
     if (this.calls.size === 0) fail();
     const ids = new Set<string>();
     return [...this.calls.entries()].sort(([a], [b]) => a - b).map(([index, call], expected) => {
-      if (index !== expected || !call.id || !/^[A-Za-z0-9_-]{1,64}$/u.test(call.name) || ids.has(call.id)) fail();
-      ids.add(call.id); toolArguments(call.arguments, "Invalid Chat tool result");
+      if (index !== expected || !call.id || !/^[A-Za-z0-9_-]{1,128}$/u.test(call.name) || call.arguments === undefined || ids.has(call.id)) fail();
+      ids.add(call.id); // Arguments remain opaque; the client validates before executing tools.
       return { index, id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
     });
   }

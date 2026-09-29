@@ -664,6 +664,9 @@ Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响�
 `X-Relay-Request-Id` 可与指标记录关联。`invalid_upstream_*` 表示上游响应类型或字段校验失败；
 例如上游 HTTP 200 配合 `invalid_upstream_tools` 表示工具响应字段校验未通过，并非上游返回了 502。
 WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
+上游 429/503 提供的 `Retry-After` 在为受限整数秒或规范 HTTP 日期时会保留，客户端可据此退避；Relay 不自动重试。
+Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborted` 终态原样交付，指标与新转储记为未完整完成。
+工具参数字符串原样保留，客户端须在执行工具前验证 JSON 与参数含义；Relay 不执行工具或补齐参数。
 
 Relay 返回 403 `model_not_allowed` 时，请使用当前 Key 的 `GET /v1/models` 返回的精确模型 ID，
 包括模型前缀。模型必须同时位于 Key 授权列表和 Provider 模型目录中；此类拒绝发生在出站前，

@@ -43,7 +43,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       for await (const data of readChatFrames(incoming, call.signal, {
         frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
       })) {
-        if (data === "[DONE]") { call.observer.finish(true); call.capture?.done(); await call.emit(undefined, true); return; }
+        if (data === "[DONE]") { call.observer.finish(true); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await call.emit(undefined, true); return; }
         const value: unknown = parseChatJson(data, call.capture);
         call.capture?.value(value, true);
         const error = chatStreamError(value);
@@ -66,7 +66,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     if (error) throw error;
     directChatJson(value, call.observer);
     if (call.observer.hasContent) call.content();
-    call.capture?.done();
+    call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
     await call.emit(value as Record<string, unknown>, true);
   });
 }
