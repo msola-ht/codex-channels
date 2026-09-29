@@ -4,13 +4,13 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertPrivateFileAccessSync, securePrivateFileSync } from "../../runtime/private-file.mjs";
 import { acquireRequestMetricsDatabaseLock } from "./request-metrics-database.js";
-import { initialSchemaSql, metricStorageV20Columns, metricStorageColumns, modelRequestMetricsV21TableSql, modelRequestMetricsIndexesSql, modelRequestMetricsTableSql,
+import { initialSchemaSql, metricStorageV20Columns, metricStorageColumns, modelRequestMetricsV21TableSql, modelRequestMetricsV22TableSql, modelRequestMetricsIndexesSql, modelRequestMetricsTableSql,
   modelRequestMetricsV20IndexesSql, modelRequestMetricsV20TableSql, relayMetricColumnDefinitions, relayMetricIndexesSql,
   requireCurrentModelRequestMetricsSchema, schemaMetadataSql } from "./sqlite-request-metrics-schema.js";
 
 export interface MetricsUpgradeResult {
-  from: 20 | 21;
-  to: 22;
+  from: 20 | 21 | 22;
+  to: 23;
   changed: boolean;
   databasePath: string;
   backupPath: string | null;
@@ -27,7 +27,7 @@ function hasRetainedCosts(database: DatabaseSync): boolean {
 }
 
 /** Explicit offline operation. Runtime startup never invokes this function. */
-export function upgradeRequestMetricsDatabase(path: string, apply = false, expectedFrom?: 20 | 21): MetricsUpgradeResult {
+export function upgradeRequestMetricsDatabase(path: string, apply = false, expectedFrom?: 20 | 21 | 22): MetricsUpgradeResult {
   const databasePath = resolve(path);
   assertPrivateFileAccessSync(databasePath);
   const lock = apply ? acquireRequestMetricsDatabaseLock(databasePath) : undefined;
@@ -36,9 +36,9 @@ export function upgradeRequestMetricsDatabase(path: string, apply = false, expec
   try {
     database = new DatabaseSync(databasePath, { readOnly: !apply });
     const from = database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value;
-    if ((from !== 20 && from !== 21) || (expectedFrom !== undefined && from !== expectedFrom)) throw new Error("仅支持完整 v20/v21 指标库升级至 v22");
+    if ((from !== 20 && from !== 21 && from !== 22) || (expectedFrom !== undefined && from !== expectedFrom)) throw new Error("仅支持完整 v20/v21/v22 指标库升级至 v23");
     requirePreviousSchema(database, from); integrity(database);
-    const result: MetricsUpgradeResult = { from, to: 22, changed: false, databasePath, backupPath: null, backupSha256: null };
+    const result: MetricsUpgradeResult = { from, to: 23, changed: false, databasePath, backupPath: null, backupSha256: null };
     if (!apply) return result;
     requireSnapshotSpace(databasePath);
     const original = logicalFingerprint(database);
@@ -66,7 +66,7 @@ export function upgradeRequestMetricsDatabase(path: string, apply = false, expec
         }
       }
       if (logicalFingerprint(database, from === 20) !== original) throw new Error("指标升级改变了历史数据");
-      database.exec("UPDATE schema_metadata SET value = 22 WHERE name = 'schema_version'");
+      database.exec("UPDATE schema_metadata SET value = 23 WHERE name = 'schema_version'");
       requireCurrentModelRequestMetricsSchema(database); integrity(database);
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
@@ -78,8 +78,8 @@ export function upgradeRequestMetricsDatabase(path: string, apply = false, expec
   } finally { database?.close(); lock?.release(); }
 }
 
-/** Archive v22 before restoring a verified previous snapshot; never silently discard new history. */
-export function restoreRequestMetricsDatabase(path: string, backupPath: string, expectedSha256: string, to: 20 | 21): { archivedPath: string; archivedSha256: string } {
+/** Archive v23 before restoring a verified previous snapshot; never silently discard new history. */
+export function restoreRequestMetricsDatabase(path: string, backupPath: string, expectedSha256: string, to: 20 | 21 | 22): { archivedPath: string; archivedSha256: string } {
   const databasePath = resolve(path); const source = resolve(backupPath);
   if (databasePath === source || !/^[a-f0-9]{64}$/u.test(expectedSha256)) throw new Error("指标回滚备份参数无效");
   assertPrivateFileAccessSync(databasePath); assertPrivateFileAccessSync(source);
@@ -93,7 +93,7 @@ export function restoreRequestMetricsDatabase(path: string, backupPath: string, 
     try { requirePreviousSchema(backup, to); integrity(backup); } finally { backup.close(); }
     database = new DatabaseSync(databasePath);
     requireCurrentModelRequestMetricsSchema(database); integrity(database);
-    const archive = snapshotDatabase(database, databasePath, "v22-rollback");
+    const archive = snapshotDatabase(database, databasePath, "v23-rollback");
     const check = new DatabaseSync(archive.path, { readOnly: true });
     try { requireCurrentModelRequestMetricsSchema(check); integrity(check); } finally { check.close(); }
     const checkpoint = database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
@@ -128,11 +128,11 @@ function integrity(database: DatabaseSync): void {
   const rows = database.prepare("PRAGMA integrity_check").all();
   if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") throw new Error("指标数据库完整性检查失败");
 }
-function requirePreviousSchema(database: DatabaseSync, version: 20 | 21): void {
+function requirePreviousSchema(database: DatabaseSync, version: 20 | 21 | 22): void {
   const expected = new DatabaseSync(":memory:");
   try {
-    expected.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, version === 20 ? modelRequestMetricsV20TableSql : modelRequestMetricsV21TableSql)
-      .replace(modelRequestMetricsIndexesSql, version === 20 ? modelRequestMetricsV20IndexesSql : modelRequestMetricsIndexesSql).replace("'schema_version', 22", `'schema_version', ${version}`));
+    expected.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, version === 20 ? modelRequestMetricsV20TableSql : version === 21 ? modelRequestMetricsV21TableSql : modelRequestMetricsV22TableSql)
+      .replace(modelRequestMetricsIndexesSql, version === 20 ? modelRequestMetricsV20IndexesSql : modelRequestMetricsIndexesSql).replace("'schema_version', 23", `'schema_version', ${version}`));
     if (hasRetainedCosts(database)) expected.exec(retainedCostsSql);
     const schema = (db: DatabaseSync): string => JSON.stringify(db.prepare(
       "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",

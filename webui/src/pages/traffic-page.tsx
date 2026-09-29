@@ -62,7 +62,7 @@ export function TrafficPage() {
     && query.offset + listData.exchanges.length < listData.total
     && query.offset + listData.exchanges.length >= listData.maximumOffset
   // 完整说明带可翻译前缀，配置键本身原样保留并保持 code 展示。
-  const dumpKey = query.label === "relay.chat" ? "[model_relay].traffic_dump" : "[debug].model_traffic_dump"
+  const dumpKey = "[debug].model_traffic_dump"
   const dumpNotice = t("traffic.dumpDisabledDescription").split("{configKey}")
   // 分页上限说明同理：只翻译说明文字，命令本身原样保留并保持 code 展示。
   const limitNotice = t("traffic.limitDescription", { offset: listData?.maximumOffset.toLocaleString("zh-CN") ?? "" }).split("{command}")
@@ -210,7 +210,7 @@ export function TrafficPage() {
       ) : null}
       {listData !== null ? (
         <p className="text-xs text-muted-foreground">
-          {t(query.label === "relay.chat" ? "traffic.relayRetentionNote" : "traffic.retentionNote", { value: listData.retentionDays === 0 ? t("traffic.retentionOff") : t("traffic.retentionDays", { count: listData.retentionDays }) })}
+          {t(["relay.chat", "relay.responses"].includes(query.label ?? "") ? "traffic.relayRetentionNote" : "traffic.retentionNote", { value: listData.retentionDays === 0 ? t("traffic.retentionOff") : t("traffic.retentionDays", { count: listData.retentionDays }) })}
         </p>
       ) : null}
 

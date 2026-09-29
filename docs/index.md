@@ -153,6 +153,7 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 | DeepSeek Codex 接入 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex) | Responses Provider、配置字段、官方脚本和当前支持模型 |
 | DeepSeek Responses 指南 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/guides/responses_api) | 无状态会话、流式事件、原生图片输入、工具兼容性、缓存及用量字段 |
 | DeepSeek 图像理解 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/guides/vision) | 视觉模型、图片输入格式、Token 计量与限制 |
+| DeepSeek Chat 接口 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/) | Relay 原生 Chat 的消息、思考控制、JSON/SSE；实现见 `model-api` 和 `provider-proxy` 公共接口，验证 `model-relay-server.test.ts` |
 | DeepSeek 创建响应接口 | [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/api/create-response) | `POST /responses` 请求字段、响应结构与 SSE 终止事件 |
 | DeepSeek 账户余额 | [DeepSeek 官方余额接口](https://api-docs.deepseek.com/zh-cn/api/get-user-balance/) | `GET /user/balance` 的可用状态、币种与余额字段；不提供 Codex 周限或历史 Token 汇总 |
 | OpenCode Go | [OpenCode Go 官方文档](https://opencode.ai/docs/go/) | Provider 基础地址、模型端点与账户用量接口 |

@@ -58,7 +58,7 @@ export function TrafficDetail({
       <Card size="sm" aria-label={t("traffic.overviewAria")}>
         <CardHeader>
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
-            <TrafficModel provider={provider === "relay.chat" ? detail.account : provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
+            <TrafficModel provider={["relay.chat", "relay.responses"].includes(provider) ? detail.account : provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
             <Badge variant="outline">{detail.category === "models" ? t("traffic.categoryModels") : detail.category === "prewarm" ? t("traffic.categoryPrewarm") : t("traffic.categoryRequest")}</Badge>
           </CardTitle>
           <CardDescription className="flex min-w-0 flex-wrap items-center gap-2">
@@ -82,7 +82,7 @@ export function TrafficDetail({
             <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
           </CardHeader>
             <CardContent className="flex flex-col gap-3">
-            {detail.response.capture === "redacted_upstream_chat" ? <Alert>
+            {["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") ? <Alert>
               <AlertTitle>{t("traffic.relayCapture")}</AlertTitle>
               <AlertDescription>{t("traffic.relayCaptureHint")} · {detail.response.deliveryStatus === "finished"
                 ? t("filters.deliveryFinished") : detail.response.deliveryStatus === "disconnected"
@@ -106,7 +106,7 @@ export function TrafficDetail({
                 {detail.response.responseId === undefined ? null : (
                   <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.responseId", { id: detail.response.responseId })}</p>
                 )}
-                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined || detail.response.capture === "redacted_upstream_chat" ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
+                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined || ["redacted_upstream_chat", "redacted_upstream_responses"].includes(detail.response.capture ?? "") ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
                 <HeaderTable title={t("traffic.responseHeadersTitle")} headers={detail.response.headers} truncated={detail.response.headersTruncated} />
                 <TrafficContent title={t("traffic.responseBodyRawTitle")} text={detail.response.body} json truncated={detail.response.bodyTruncated} />
               </div>

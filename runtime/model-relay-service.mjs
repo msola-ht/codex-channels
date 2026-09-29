@@ -56,14 +56,14 @@ export async function startModelRelayService(configPath, environment = process.e
     dump.setRetentionDays(next.debug.model_traffic_retention_days);
     if (next.debug.model_traffic_dump) void dump.prepare();
     snapshot = next;
-    relay ??= new ModelRelayServer({ capture: async (provider, signal) => {
+    relay ??= new ModelRelayServer({ capture: async (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
       await dump.prepare(signal);
       signal.throwIfAborted();
       // Initialization may outlive a configuration refresh; use the latest global settings.
       if (closed || !snapshot?.debug.model_traffic_dump) return undefined;
       const debug = snapshot.debug;
-      return dump.begin(provider, debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0);
+      return dump.begin(provider, debug.model_traffic_input_items === 0 && debug.model_traffic_item_max_bytes === 0, protocol);
     }, policy: relayPolicyFromConfig(next.config), enqueueMetric: sample => sender.enqueue(sample),
       prepare: async (provider, signal) => {
         await refreshCurrent(); signal.throwIfAborted();
@@ -85,8 +85,8 @@ export async function startModelRelayService(configPath, environment = process.e
           }
           agent = agents.get(proxyUrl);
         }
-        return { models: material.models, target: { host: target.hostname, port: target.port ? Number(target.port) : 443,
-          protocol: "https", basePath: target.pathname, authorization: `Bearer ${material.apiKey}`, ...(agent ? { agent } : {}) },
+        return { models: material.models, protocols: material.protocols, target: { host: target.hostname, port: target.port ? Number(target.port) : target.protocol === "http:" ? 80 : 443,
+          protocol: target.protocol === "http:" ? "http" : "https", basePath: target.pathname, authorization: `Bearer ${material.apiKey}`, ...(agent ? { agent } : {}) },
           recheck: () => {
             signal.throwIfAborted();
             if (closed || !snapshot?.config.enabled || selector !== currentSelector || currentSelector.revision !== networkRevision

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "smol-toml";
 import { applyClinePassConfiguration, clinePassSetupPaths, removeClinePassConfiguration, createClinePassCatalog, runClinePassSetup } from "../scripts/cline-pass-setup.mjs";
-import { loadManagedModelProviderSettings, loadManagedModelWindow, writeManagedModelWindowGlobal, loadConfiguredChatProviderMaterial } from "../runtime/model-provider-runtime.mjs";
+import { loadManagedModelProviderSettings, loadManagedModelWindow, writeManagedModelWindowGlobal, loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
 const roots: string[] = [];
@@ -36,7 +36,7 @@ it("isolates switching credentials and restores exclusive configuration on remov
   expect(JSON.parse(readFileSync(paths.catalog, "utf8"))).toMatchObject({ models: [{ input_modalities: ["text", "image"], default_reasoning_level: "high", apply_patch_tool_type: "freeform", supports_search_tool: true, model_messages: { instructions_template: "DS fixture prompt" }, supported_reasoning_levels: ["none", "low", "high", "max"].map(effort => ({ effort })) }] });
   expect(parse(readFileSync(paths.profile, "utf8")).model_reasoning_effort).toBe("high");
   expect(loadManagedModelProviderSettings(environment)).toContainEqual(expect.objectContaining({ provider: "clp-test", mode: "switching" }));
-  const switchingMaterial = loadConfiguredChatProviderMaterial("clp-test", environment);
+  const switchingMaterial = loadConfiguredRelayProviderMaterial("clp-test", environment);
   expect(switchingMaterial).toMatchObject({ provider: "clp-test", apiKey: input.apiKey, models: ["cline-pass/deepseek-v4.1-flash"] });
   expect(switchingMaterial.paths).toContain(paths.profile);
   if (process.platform !== "win32") expect(statSync(paths.profile).mode & 0o777).toBe(0o600);
@@ -45,7 +45,7 @@ it("isolates switching credentials and restores exclusive configuration on remov
   expect(parse(readFileSync(paths.config, "utf8")).model_provider).toBe("clp-test");
   expect(parse(readFileSync(paths.config, "utf8"))).not.toHaveProperty("model_reasoning_effort");
   expect(existsSync(paths.profile)).toBe(false);
-  const fixedMaterial = loadConfiguredChatProviderMaterial("clp-test", environment);
+  const fixedMaterial = loadConfiguredRelayProviderMaterial("clp-test", environment);
   expect(fixedMaterial.apiKey).toBe(input.apiKey);
   expect(fixedMaterial.paths).toContain(paths.config);
   expect(fixedMaterial.revision).not.toBe(switchingMaterial.revision);
@@ -53,7 +53,7 @@ it("isolates switching credentials and restores exclusive configuration on remov
   expect(parse(readFileSync(paths.config, "utf8"))).toEqual(parse(original));
   expect(existsSync(paths.marker)).toBe(false);
   expect(existsSync(paths.backup)).toBe(true);
-  expect(() => loadConfiguredChatProviderMaterial("clp-test", environment)).toThrow();
+  expect(() => loadConfiguredRelayProviderMaterial("clp-test", environment)).toThrow();
 });
 it("rejects invalid keys and preserves existing configuration", async () => {
   const { environment, paths } = fixture();

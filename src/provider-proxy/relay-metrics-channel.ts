@@ -88,14 +88,14 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
     const sample = record(value);
     if (Buffer.byteLength(JSON.stringify(sample)) > 16 * 1024 || Object.keys(sample).some(key => !sampleKeys.includes(key))) return false;
     if (sample.source !== "relay" || sample.threadId !== null || sample.turnId !== null || sample.relayRequestId !== requestId
-      || typeof provider !== "string" || !/^clp-[a-z0-9_-]{1,32}$/u.test(provider) || sample.provider !== provider
+      || typeof provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(provider) || sample.provider !== provider
       || typeof sample.callerId !== "string" || !identity.test(sample.callerId) || typeof sample.keyId !== "string" || !identity.test(sample.keyId)
       || !Number.isSafeInteger(sample.credentialGeneration) || Number(sample.credentialGeneration) < 1
       || !["json", "sse"].includes(String(sample.responseFormat)) || !["completed", "failed", "incomplete"].includes(String(sample.status))
       || !["finished", "disconnected", "failed"].includes(String(sample.deliveryStatus))) return false;
     if (sample.traffic !== undefined) {
       const traffic = record(sample.traffic);
-      if (Object.keys(traffic).some(key => !["label", "session", "interaction"].includes(key)) || traffic.label !== "relay.chat"
+      if (Object.keys(traffic).some(key => !["label", "session", "interaction"].includes(key)) || !["relay.chat", "relay.responses"].includes(String(traffic.label))
         || typeof traffic.session !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-[1-9][0-9]*)?$/u.test(traffic.session)
         || !Number.isSafeInteger(traffic.interaction) || Number(traffic.interaction) < 1) return false;
     }

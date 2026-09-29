@@ -25,6 +25,8 @@ import { once } from "node:events";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "../src/bootstrap/relay-metrics-composition.js";
 import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import type { RelayMetric } from "../src/provider-proxy/index.js";
+import { loadConfiguredRelayProviderMaterial, writeCustomPrimaryProviderSwitchingProfile } from "../runtime/model-provider-runtime.mjs";
+import { writeResponsesModelCatalog, finishResponsesModelCatalogWrite } from "../runtime/model-provider-responses-catalog.mjs";
 
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
 // Replace only the TLS proxy transport. The selected proxy is an isolated HTTP fixture;
@@ -57,6 +59,78 @@ async function fixture() {
   await applyClinePassConfiguration({ accountId: "test", apiKey: "sk_fixture-key" }, { environment });
   return { configPath, environment };
 }
+
+it("uses registered custom Responses material through runtime, captures, authorizes metrics and rolls back only selected references", async () => {
+  const f = await fixture();
+  const provider = "rs-LocalTest";
+  const upstream = createHttpServer((request, response) => {
+    expect(request.url).toBe("/v1/responses"); expect(request.headers.authorization).toBe("Bearer fixture-custom-secret");
+    response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ id: "resp_fixture", object: "response", status: "completed", model: "fixture/model", output: [], usage: { input_tokens: 1, output_tokens: 2 } }));
+  });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
+  const up = upstream.address(); if (!up || typeof up === "string") throw new Error("fixture");
+  const catalog = writeResponsesModelCatalog(f.environment, provider, [{ id: "fixture/model", name: "Fixture", contextWindow: 64000,
+    reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: true }], "fixture/model");
+  finishResponsesModelCatalogWrite(catalog);
+  writeCustomPrimaryProviderSwitchingProfile({ provider, model: "fixture/model", baseUrl: `http://127.0.0.1:${up.port}/v1`,
+    apiKey: "fixture-custom-secret", catalogSource: { kind: "custom", reasoningEffort: null } }, f.environment);
+  expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ protocols: ["responses"], models: ["fixture/model"] });
+  expect(readRelayManagement(f.environment).providers).toEqual(expect.arrayContaining([expect.objectContaining({ id: provider, protocols: ["responses"], available: true })]));
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--provider", provider, "--model", "fixture/model"]), f.environment);
+  const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
+  const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  const document = parse(readFileSync(f.configPath, "utf8")); Object.assign(document.model_relay!, { port: address.port, enabled: true });
+  document.debug = { model_traffic_dump: true };
+  writePrivateFileAtomicSync(f.configPath, stringify(document));
+  const store = new SqliteModelRequestMetricsStore(join(f.environment.CODEX_CONNECT_HOME, "responses-fixture.sqlite3"));
+  const writer = new BufferedModelRequestMetricsWriter(store); cleanups.push(() => writer.close());
+  const receiver = new RelayMetricsComposition({ path: modelRelayPaths(f.configPath).metrics, writer,
+    authorize: createRelayMetricAuthorization(f.configPath, f.environment) });
+  await receiver.apply(true); cleanups.push(() => receiver.close());
+  const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
+  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" }, body: JSON.stringify({ model: "fixture/model", input: "fixture" }) });
+  expect(await (await request()).json()).toMatchObject({ id: "resp_fixture", status: "completed" });
+  await vi.waitFor(() => expect(store.count()).toBe(1));
+  expect(store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", limit: 10 }).records[0]).toMatchObject({ provider,
+    callerId: "custom", status: "completed", traffic: { label: "relay.responses" }, inputTokens: 1, outputTokens: 2 });
+  const authorize = createRelayMetricAuthorization(f.configPath, f.environment);
+  try { expect(await authorize({ provider, callerId: "custom", keyId: "custom", credentialGeneration: 1,
+    source: "relay", threadId: null, turnId: null, relayRequestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98",
+    requestModel: "fixture/model", responseFormat: "json", status: "completed", deliveryStatus: "finished",
+    requestStartedAtMs: 1, responseCompletedAtMs: 2, totalDurationMs: 1 })).toBeUndefined(); }
+  finally { await authorize.close(); }
+  const before = readFileSync(f.configPath, "utf8");
+  await expect(manageModelRelay(parseModelRelayCommand(["rollback-providers", "--provider", provider]), f.environment)).rejects.toThrow("停止");
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  await manageModelRelay(parseModelRelayCommand(["disable", "--caller", "custom"]), f.environment);
+  expect((await request()).status).toBe(401);
+  await service.close();
+  // Disabled identities may outlive their account reference; rollback must not strand them.
+  const orphaned = parse(readFileSync(f.configPath, "utf8"));
+  Object.assign(orphaned.model_relay!, { accounts: [] });
+  writePrivateFileAtomicSync(f.configPath, stringify(orphaned));
+  const current = readFileSync(f.configPath, "utf8");
+  const result = await manageModelRelay(parseModelRelayCommand(["rollback-providers", "--provider", provider]), f.environment);
+  expect(readFileSync(String(result.backupPath), "utf8")).toBe(current);
+  expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay?.callers).toEqual([]);
+  expect(loadConfiguredRelayProviderMaterial(provider, f.environment).apiKey).toBe("fixture-custom-secret");
+});
+
+it("reads an independent custom primary API credential but never substitutes an OAuth login", async () => {
+  const f = await fixture(); const provider = "rs-primary";
+  const transaction = writeResponsesModelCatalog(f.environment, provider, [{ id: "fixture/model", name: "Fixture", contextWindow: 64000,
+    reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }], "fixture/model");
+  finishResponsesModelCatalogWrite(transaction);
+  const config = { model_provider: provider, model: "fixture/model", model_catalog_json: transaction.path,
+    model_providers: { [provider]: { name: "Fixture", base_url: "https://example.test/v1", wire_api: "responses", experimental_bearer_token: "fixture-secret" } } };
+  const path = join(f.environment.CODEX_HOME, "config.toml");
+  writePrivateFileAtomicSync(path, stringify(config));
+  expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ apiKey: "fixture-secret", protocols: ["responses"] });
+  writePrivateFileAtomicSync(path, stringify({ ...config, model_providers: { [provider]: { ...config.model_providers[provider], requires_openai_auth: true } } }));
+  expect(() => loadConfiguredRelayProviderMaterial(provider, f.environment)).toThrow("independent API credentials");
+});
 it("issues and rotates secrets once, preserves tombstones and configuration backups", async () => {
   const f = await fixture();
   const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);

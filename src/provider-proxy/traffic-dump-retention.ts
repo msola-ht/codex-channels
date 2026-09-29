@@ -18,6 +18,8 @@ export interface PruneModelTrafficDumpOptions {
   directory: string;
   /** 只清理指定 Provider；省略时清理自有 V2 Provider；Relay 由独立 owner 显式清理。 */
   label?: string;
+  /** Explicit labels share one total budget, used by the Relay owner. */
+  labels?: readonly string[];
   /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
   retentionDays: number;
   maximumBytes?: number;
@@ -37,10 +39,10 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
     if (!entry.isDirectory()) continue;
     const path = join(options.directory, entry.name);
     const manifest = readManifest(path);
-    if (manifest?.version !== 2 || (options.label === undefined && manifest.label === "relay.chat") || (options.label !== undefined && manifest.label !== options.label)) {
+    if (manifest?.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label)) || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) {
       continue;
     }
-    const sessions = byLabel.get(manifest.label) ?? [];
+    const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
     const stats = directoryStats(path);
     sessions.push({
       createdAtMs: manifest.createdAtMs,
@@ -48,7 +50,7 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
       path,
       size: stats.size,
     });
-    byLabel.set(manifest.label, sessions);
+    byLabel.set(options.labels ? "combined" : manifest.label, sessions);
   }
   const result = planRetention(options, byLabel);
   for (const session of result.remove) rmSync(session.path, { force: true, recursive: true });
@@ -70,12 +72,12 @@ export async function pruneModelTrafficDumpSessionsAsync(options: PruneModelTraf
     if (!entry.isDirectory()) continue;
     const path = join(options.directory, entry.name);
     const manifest = await fs.readFile(join(path, "manifest.json"), "utf8").then(parseManifest, () => undefined);
-    if (manifest?.version !== 2 || (options.label === undefined && manifest.label === "relay.chat")
-      || (options.label !== undefined && manifest.label !== options.label)) continue;
+    if (manifest?.version !== 2 || (!options.label && !options.labels && ["relay.chat", "relay.responses"].includes(manifest.label))
+      || (options.label !== undefined && manifest.label !== options.label) || (options.labels !== undefined && !options.labels.includes(manifest.label))) continue;
     const stats = await directoryStatsAsync(path, signal);
-    const sessions = byLabel.get(manifest.label) ?? [];
+    const sessions = byLabel.get(options.labels ? "combined" : manifest.label) ?? [];
     sessions.push({ path, createdAtMs: manifest.createdAtMs, lastActivityAtMs: Math.max(manifest.createdAtMs, stats.lastModifiedAtMs), size: stats.size });
-    byLabel.set(manifest.label, sessions);
+    byLabel.set(options.labels ? "combined" : manifest.label, sessions);
   }
   const result = planRetention(options, byLabel);
   for (const session of result.remove) {

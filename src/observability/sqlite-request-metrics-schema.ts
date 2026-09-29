@@ -98,10 +98,11 @@ const relayIdentityV21Check = `
     AND delivery_status IS NOT NULL AND delivery_status IN ('finished', 'disconnected', 'failed')
     AND traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
 `;
-const relayIdentityCheck = relayIdentityV21Check.replace(
+const relayIdentityV22Check = relayIdentityV21Check.replace(
   "AND traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL",
   "AND (traffic_label IS NULL OR traffic_label = 'relay.chat')",
 );
+const relayIdentityCheck = relayIdentityV22Check.replace("traffic_label = 'relay.chat'", "traffic_label IN ('relay.chat', 'relay.responses')");
 export const relayMetricColumnDefinitions = [
   "source TEXT NOT NULL DEFAULT 'owned' CHECK (source IN ('owned', 'relay'))",
   "caller_id TEXT", "key_id TEXT", "credential_generation INTEGER", "relay_request_id TEXT",
@@ -110,6 +111,7 @@ export const relayMetricColumnDefinitions = [
 export const modelRequestMetricsTableSql = modelRequestMetricsV20TableSql.replace(
   "    CHECK (", `    ${relayMetricColumnDefinitions.join(",\n    ")},\n    CHECK (`,
 );
+export const modelRequestMetricsV22TableSql = modelRequestMetricsTableSql.replace(relayIdentityCheck, relayIdentityV22Check);
 export const modelRequestMetricsV21TableSql = modelRequestMetricsTableSql.replace(relayIdentityCheck, relayIdentityV21Check);
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
@@ -189,7 +191,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = actualVersion === 20 || actualVersion === 21 ? `codexc metrics upgrade --from ${actualVersion} --to 22 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 ? `codexc metrics upgrade --from ${actualVersion} --to 23 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,

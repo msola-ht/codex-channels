@@ -189,6 +189,23 @@ export function customPrimaryProviderProfilePath(environment = process.env, prov
   );
 }
 
+/** Independent API material only; never read Codex OAuth/auth.json for Relay. */
+export function loadConfiguredCustomPrimaryRelayProfile(providerId, environment = process.env) {
+  const primary = loadConfiguredCustomPrimaryModelProvider(environment);
+  if (primary?.id !== providerId) throw new Error("Relay Provider is not the configured custom primary");
+  const document = record(parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))));
+  const provider = record(record(document.model_providers)[providerId]);
+  if (provider.requires_openai_auth === true || provider.env_key !== undefined && provider.experimental_bearer_token !== undefined) {
+    throw new Error("Relay requires unambiguous independent API credentials");
+  }
+  const apiKey = provider.env_key === undefined ? provider.experimental_bearer_token
+    : typeof provider.env_key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(provider.env_key) ? environment[provider.env_key] : undefined;
+  if (typeof apiKey !== "string" || !apiKey.length || apiKey.length > 4096 || /\p{Cc}/u.test(apiKey)) {
+    throw new Error("Relay Provider has no usable independent API credentials");
+  }
+  return { ...primary, apiKey };
+}
+
 export function customSwitchingProviderRegistryPath(environment = process.env) {
   return join(providerStorageRoot(environment), "custom", "providers.json");
 }

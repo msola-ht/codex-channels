@@ -93,7 +93,7 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [CLP（Cline Pass）](docs/cline-pass.md)
-- [Provider 模型 API 转发：回环监听、CLP Chat Completions、调用方密钥与指标升级](docs/provider-api-relay-development.md)
+- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标升级](docs/provider-api-relay-development.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

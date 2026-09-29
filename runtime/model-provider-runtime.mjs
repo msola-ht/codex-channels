@@ -5,7 +5,6 @@ export {
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
   loadManagedModelProviderSettings,
-  loadConfiguredChatProviderMaterial,
   loadManagedModelWindow,
   readCodexConfigModelOverride,
   writeManagedModelProviderProfileDefault,
@@ -57,3 +56,5 @@ export {
   withOfficialModelCatalog,
   writeCustomOfficialModelCatalog,
 } from "./model-provider-official-catalog.mjs";
+
+export { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "./model-provider-relay-material.mjs";

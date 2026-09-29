@@ -22,9 +22,9 @@ import {
   isManagedProviderApiKeyValid,
   loadManagedModelProviderDefinitions,
 } from "./model-provider-definitions.mjs";
-import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
-import { deepseekAccountMarkerPath } from "./deepseek-accounts.mjs";
-import { ccgAccountMarkerPath } from "./ccg-accounts.mjs";
+import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./opencode-go-accounts.mjs";
+import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
+import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
@@ -506,17 +506,19 @@ function configuredProfilePath(codexHome, descriptor, mode) {
   return join(codexHome, mode === "exclusive" ? "config.toml" : descriptor.profileName);
 }
 
-/** Narrow read-only Chat material snapshot. All paths and credential parsing remain in the managed provider owner. */
-export function loadConfiguredChatProviderMaterial(provider, environment = process.env) {
+/** Narrow read-only native model material snapshot. All paths and credential parsing remain in the managed provider owner. */
+export function loadConfiguredManagedProviderMaterial(provider, environment = process.env) {
   assertResponsesContextSyncComplete(environment);
   const definition = findManagedProviderDefinition(environment, provider);
-  if (!definition || !isClinePassAccountProvider(provider) || definition.upstreamWireApi !== "chat_completions") {
-    throw new Error("Relay 只支持已配置的精确 CLP 账户");
+  if (!definition) {
+    throw new Error("Relay Provider 尚未注册");
   }
   const marker = readManagedMarker(environment, definition);
   if (!marker) throw new Error("Relay Provider 管理标记不存在");
   const directory = managedProviderDirectory(environment, definition);
-  const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition),
+  const registry = { clp: clinePassAccountsFilePath, deepseek: deepseekAccountsFilePath, "opencode-go": opencodeGoAccountsFilePath, ccg: ccgAccountsFilePath }[definition.storageId ?? definition.id];
+  if (!registry) throw new Error("Relay Provider 注册材料不受支持");
+  const paths = [registry(environment), managedProviderMarkerPath(environment, definition),
     configuredProfilePath(codexHomePath(environment), providerDescriptor(definition), marker.mode),
     join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
   const fingerprint = () => {
@@ -525,7 +527,7 @@ export function loadConfiguredChatProviderMaterial(provider, environment = proce
     return hash.digest("hex");
   };
   const before = fingerprint();
-  if (!clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
+  if (isClinePassAccountProvider(provider) && !clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (!profile) throw new Error("Relay Provider 已撤销");
   const models = loadModelCatalogSettings(profile.catalogPath, definition).map(model => model.model);
@@ -534,7 +536,9 @@ export function loadConfiguredChatProviderMaterial(provider, environment = proce
     throw new Error("Relay Provider 账户或模式读取期间发生变化");
   }
   assertResponsesContextSyncComplete(environment);
-  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models,
+  const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
+    : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, protocols,
     paths: [...paths, responsesContextSyncPath(environment)], revision: before };
 }
 

@@ -26,6 +26,7 @@ import {
 } from "../runtime/model-provider-runtime.mjs";
 import { JsonRpcClient, StdioTransport } from "../src/codex-client/index.js";
 import { applyDeepseekAccountConfiguration, deepseekAccountPaths, previewLegacyDeepseekRemoval, removeLegacyDeepseekAccount, removeDeepseekAccount, setDeepseekDefaultAccount } from "../scripts/deepseek-account-management.mjs";
+import { loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 
 const homes: string[] = [];
 afterEach(() => { failure.path = ""; for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true }); });
@@ -49,6 +50,15 @@ function fixture() {
   return { environment, paths, catalog, downloadCatalog };
 }
 const input = { accountId: "personal", apiKey: "sk-personal" };
+
+it("exposes both native Relay protocols from existing DS credentials and rejects missing accounts", async () => {
+  const options = fixture();
+  await applyDeepseekAccountConfiguration(input, options);
+  const material = loadConfiguredRelayProviderMaterial("ds-personal", options.environment);
+  expect(material).toMatchObject({ provider: "ds-personal", apiKey: "sk-personal", protocols: ["chat", "responses"], models: ["deepseek-flash", "deepseek-v4-pro"] });
+  expect(material.paths).toContain(options.paths.profile);
+  expect(() => loadConfiguredRelayProviderMaterial("ds-missing", options.environment)).toThrow();
+});
 
 async function legacyFixture(mode: "switching" | "exclusive", oldest = false) {
   const options = fixture();

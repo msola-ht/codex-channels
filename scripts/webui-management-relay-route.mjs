@@ -7,7 +7,7 @@ import { fingerprintManagementValue } from "./management-security.mjs";
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 const fields = { name: relayDisplayNameSchema.optional(), models: z.array(z.string().min(1).max(200)).min(1).max(64), reasoning: z.enum(["passthrough", "off"]) };
 const mutation = z.discriminatedUnion("command", [
-  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, provider: z.string().regex(/^clp-[a-z0-9_-]{1,32}$/u), ...fields }),
+  z.strictObject({ command: z.literal("issue"), caller: identity, key: identity, provider: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u), ...fields }),
   z.strictObject({ command: z.literal("edit"), caller: identity, ...fields }),
   z.strictObject({ command: z.literal("rotate"), caller: identity }),
   z.strictObject({ command: z.literal("disable"), caller: identity }),

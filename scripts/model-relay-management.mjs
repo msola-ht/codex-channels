@@ -2,19 +2,18 @@ import { createHash, randomBytes } from "node:crypto";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock } from "../runtime/gateway-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync } from "../runtime/private-file.mjs";
 import { modelRelayConfigDigest, modelRelayConfigSchema, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
-import { loadConfiguredChatProviderMaterial } from "../runtime/model-provider-runtime.mjs";
+import { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "../runtime/model-provider-runtime.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { saveConfigWithBackup } from "./config-backup.mjs";
 import { locateUserConfig } from "./runtime-config.mjs";
 
-import { loadClinePassAccounts } from "../runtime/cline-pass-accounts.mjs";
 import { supportsChatReasoningOff } from "../runtime/chat-reasoning.mjs";
 import { ConfigManagementError } from "./config-management-error.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 
-const commands = ["status", "providers", "callers", "issue", "edit", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names"];
+const commands = ["status", "providers", "callers", "issue", "edit", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names", "rollback-providers"];
 const invalid = message => new ConfigManagementError("relay_invalid", "relay", message);
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
@@ -25,13 +24,12 @@ export function readRelayManagement(environment = process.env) {
   const document = validateGatewayConfigDocument(parseGatewayConfig(content));
   const config = document.model_relay ?? modelRelayConfigSchema.parse({});
   const materialRevisions = [];
-  const providers = loadClinePassAccounts(environment).map(account => {
-    const id = `clp-${account.id}`;
+  const providers = listRelayProviderIds(environment).map(id => {
     try {
-      const material = loadConfiguredChatProviderMaterial(id, environment);
+      const material = loadConfiguredRelayProviderMaterial(id, environment);
       materialRevisions.push([id, material.revision]);
-      return { id, available: true, models: material.models.map(idModel => ({ id: idModel, reasoningOff: supportsChatReasoningOff(id, idModel) })) };
-    } catch { return { id, available: false, models: [] }; }
+      return { id, available: true, protocols: material.protocols, models: material.models.map(idModel => ({ id: idModel, reasoningOff: supportsChatReasoningOff(id, idModel) })) };
+    } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
   return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
     enabled: config.enabled, providers, callers: safeCallers(config.callers) };
@@ -107,9 +105,9 @@ async function executeModelRelay(input, environment, options) {
     validateGatewayConfigDocument(document);
     return { result: "upgraded", backupPath: saveConfigWithBackup(configPath, content, document, "relay") };
   });
-  if (["rollback-reasoning", "rollback-names"].includes(input.command)) {
+  if (["rollback-reasoning", "rollback-names", "rollback-providers"].includes(input.command)) {
     if (await gatewayOwnerIsActive(configPath) || (await queryModelRelayControl(endpoint, "status")).result !== "not_running") {
-      throw invalid("回退前须停止 Gateway、Relay 和 WebUI（含前台实例）；对应名称或思考策略将移除");
+      throw invalid("回退前须停止 Gateway、Relay 和 WebUI（含前台实例）；将按命令移除对应名称、策略或提供商引用");
     }
   }
   let secret;
@@ -119,18 +117,27 @@ async function executeModelRelay(input, environment, options) {
     const content = readPrivateFileSync(configPath, 1024 * 1024);
     const document = parseGatewayConfig(content);
     const validated = validateGatewayConfigDocument(document);
-    if (["rollback-reasoning", "rollback-names"].includes(input.command) && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
+    if (["rollback-reasoning", "rollback-names", "rollback-providers"].includes(input.command) && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
     const config = structuredClone(validated.model_relay ?? modelRelayConfigSchema.parse({}));
     const previous = modelRelayConfigDigest(config);
     if (input.command === "issue") {
       if (config.callers.some(caller => caller.caller_id === input.caller || caller.key_id === input.key)) throw invalid("Relay 身份已存在，包含停用记录；不能重复使用");
-      const material = loadConfiguredChatProviderMaterial(input.provider, environment);
+      const material = loadConfiguredRelayProviderMaterial(input.provider, environment);
       if (input.models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
       if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider });
       const bytes = options.preview ? Buffer.alloc(32) : randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
         ...(input.name === undefined ? {} : { display_name: input.name }),
         secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models, ...(input.reasoning === "off" ? { reasoning: "off" } : {}) });
+    } else if (input.command === "rollback-providers") {
+      const selected = new Set(input.providers);
+      const nonClp = value => !/^clp-[a-z0-9_-]{1,32}$/u.test(value.provider);
+      if (!selected.size || [...selected].some(id => ![...config.accounts, ...config.callers].some(value => value.provider === id && nonClp(value)))
+        || [...config.accounts, ...config.callers].some(value => nonClp(value) && !selected.has(value.provider))) {
+        throw invalid("必须明确列出全部非 CLP Relay 账户；不允许删除 CLP 账户或隐式移除其他引用");
+      }
+      config.accounts = config.accounts.filter(value => !selected.has(value.provider));
+      config.callers = config.callers.filter(value => !selected.has(value.provider));
     } else if (["rollback-reasoning", "rollback-names"].includes(input.command)) {
       for (const caller of config.callers) {
         if (input.command === "rollback-names") delete caller.display_name;
@@ -143,7 +150,7 @@ async function executeModelRelay(input, environment, options) {
       const policyChanged = models.length !== caller.models.length || models.some(model => !caller.models.includes(model))
         || input.reasoning !== undefined && input.reasoning !== (caller.reasoning ?? "passthrough");
       if (policyChanged) {
-        const material = loadConfiguredChatProviderMaterial(caller.provider, environment);
+        const material = loadConfiguredRelayProviderMaterial(caller.provider, environment);
         if (models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
       }
       caller.models = models;

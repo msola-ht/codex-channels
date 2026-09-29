@@ -917,7 +917,7 @@ export interface TrafficDebugStage {
 }
 
 export interface TrafficExchangeDetail {
-  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped"> }
+  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped"> }
 
   chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
@@ -966,7 +966,7 @@ export interface TrafficExchangeDetail {
     }
   }
   response: {
-    capture?: "redacted_upstream_chat"
+    capture?: "redacted_upstream_chat" | "redacted_upstream_responses"
     deliveryStatus?: "finished" | "disconnected" | "failed"
     state: "completed" | "failed" | "incomplete"
     status: number | null
@@ -1029,7 +1029,7 @@ export interface RelayManagedCaller {
 }
 export interface RelayManagementSnapshot {
   revision: string; enabled: boolean; callers: RelayManagedCaller[];
-  providers: Array<{ id: string; available: boolean; models: Array<{ id: string; reasoningOff: boolean }> }>;
+  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean }> }>;
 }
 export type RelayManagementInput =
   | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }

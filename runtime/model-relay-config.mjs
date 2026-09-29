@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 export const relayDisplayNameSchema = z.string().refine(value => value.trim() === value && [...value].length >= 1 && [...value].length <= 64 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value), "用途名称须为 1–64 个字符，不含控制字符或首尾空白");
-const provider = z.string().regex(/^clp-[a-z0-9_-]{1,32}$/u);
+const provider = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
 const limits = (concurrency, burst) => ({
   max_concurrency: z.number().int().min(1).max(32).default(concurrency),
   requests_per_minute: z.number().int().min(0).max(600).default(0),

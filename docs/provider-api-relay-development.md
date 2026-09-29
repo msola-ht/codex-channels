@@ -1,6 +1,8 @@
 # Provider 模型 API 转发重规划
 
-状态：2026-09-28，P0 合同与 P1/P2 代码已落实并完成已有隔离验证；第 14.7 节四类问题及第 14.8 节再次审查确认的三类问题均已修复并完成针对性回归。P3 的真实账户、隧道和多平台实机验收尚未完成。不得据此标记首版可上线。
+当前状态（2026-09-29）：第 15.14 节已实施原生 Chat/Responses 与公共提供商接入，指标 Schema 为 v23；完成隔离验证及用户部署后的成功调用只读核查。真实失败、撤销、过载及多平台验收边界见该节。此前章节为首版历史基线，被后续明确修订的范围以第 15.14 节为准；当前操作以用户指南为准。
+
+首版状态：2026-09-28，P0 合同与 P1/P2 代码已落实并完成已有隔离验证；第 14.7 节四类问题及第 14.8 节再次审查确认的三类问题均已修复并完成针对性回归。P3 的真实账户、隧道和多平台实机验收尚未完成。不得据此标记首版可上线。
 实施基于 main `9007e6e2`，功能分支 `feat/provider-api-relay`；已核对指标 Schema 为 v20。
 
 ## 1. 目标与首版范围
@@ -1327,3 +1329,63 @@ WebUI 只有独立 `/relay` 页面的一张 Key 表：用途（现有 callerId�
 调用列表和详情按记录中的账户识别 CLP，沿用既有模型显示规则；relay.chat 仍为转储定位标签，不作为提供商身份。请求/响应原始模型名保留在模型证据中，不把前缀差异当成实际路由变更。
 
 采集复用 ChatDiagnostics 的受控字段与容量上限，覆盖标准 JSON、CLP 成功包装 JSON 和 SSE；终态将明确的 routing.finalProvider 写入既有 V2 响应索引 upstreamProvider，并以同一 interaction 保存既有 chat_diagnostics trace。请求指标页通过已有 traffic 引用只读关联，不新增数据库字段、配置或持久格式。缺失、仅备用提供商或非法值不推断最终路由，旧记录不回填。
+
+### 15.14 原生双协议与提供商公共接入
+
+本节是后续实施基线，修订首版仅 CLP/Chat 的范围，不代表当前运行版本已经支持 Responses。用户要求 Chat、Responses 两种原生协议，不做互转，并明确不能限定 Cline。继续遵守 3.3 的复杂度约束：一套服务、一套准入和队列、一套指标结算与转储预算；只在请求边界和响应观察处区分协议，不引入通用插件框架或第二套账户管理。
+
+#### 链路审查及修订依据
+
+| 现有边界 | 已核实的问题 | 调整 |
+| --- | --- | --- |
+| 配置、管理 API、指标 IPC | provider 校验写死 clp 前缀 | 共享 Provider ID 语法，并分别复核实际注册、账户材料和 Key 授权；合法字符串不等于有权出站 |
+| 管理列表、材料 Worker、指标授权 | 只枚举 Cline 账户 | 复用现有受管及自定义 Provider 注册和凭据读取；不新增凭据副本或自行读取 Codex 登录凭据 |
+| 材料读取 | 路径摘要固定使用 Cline 注册文件 | 由现有 Provider 材料能力提供依赖文件、目录及 revision；全部协议保留异步读取后和出站前复核 |
+| HTTP 路由 | 只有 Chat；请求与响应类型耦合 | 新增 POST /v1/responses；同协议转发，不调用现有 Codex Responses→Chat 适配器 |
+| Chat 响应 | 现有归约重建内容，不能称为完整透明转发 | 审查 reasoning_content、工具及扩展字段保留；观察状态与交付数据分离，保留资源上限和确定终态要求 |
+| Responses 响应 | 不能沿用 Chat choices、finish_reason、DONE | 复用现有 Responses 指标观察函数；保留 JSON 与 SSE 事件，分别识别 completed/failed/incomplete，不伪造成功 |
+| 转储 | label 与容量维护固定 relay.chat | 增加 relay.responses，两协议共用同一个总预算、写入队列和保留清理；按同一次调用关联 |
+| SQLite | v22 的 Relay CHECK 仅允许 relay.chat | 显式升级 v23，仅扩大标签约束；不新增调用详情表或重复指标 |
+
+#### 协议、提供商和管理合同
+
+客户端通过路径选择协议，Key 不新增 protocol 字段。同一 Key 可使用其 Provider 已声明的原生协议，但模型仍须同时属于 Key 白名单和账户模型目录。CLP 的实际上游为 Chat，不能因其 Codex Profile 的 wire_api=responses 就声明原生 Responses。DeepSeek、OpenCode Go、CommandCode Go 和自定义 Responses Provider 均纳入公共发现及材料审查；能力来自已有接入合同和已核实官方资料，不按名称猜测另一协议。DeepSeek 的 Chat 能力另按官方 Chat 合同补充。没有可独立取得的 API 凭据或模型目录时，展示明确不可用原因，不从 App Server 代理实例借用登录态。不把官方 Codex OAuth 自动视作可转发 API Key。
+
+CLI/WebUI 共用提供商列表、模型目录和协议能力；不新增协议配置门户。关闭思考按 Provider、模型和协议的明确能力执行；不能把 CLP 的 reasoning.effort 参数盲目套给全部 Chat 提供商，未知能力仅允许透传。提供商删除、模型目录或网络材料变化仍取消相关租约；名称显示不得改变鉴权身份。
+
+Responses 首批只支持同步 POST 创建响应及其 JSON/SSE 交付，GET /v1/models 继续返回受限模型列表。input 接受字符串或对象数组，也允许仅有 instructions；工具、图片和扩展参数作为上游数据保留，不执行工具。model/stream/输入外形及容量是本地边界。store 缺省显式置 false；拒绝 store=true、background=true、非空 previous_response_id/conversation，不提供响应读取、取消端点或服务端会话生命周期。入站与出站差异在调试转储中可见，不暗中转换历史或模型。错误不得包含未经约束的上游正文。
+
+SSE 保持事件名称与数据字段；终态之前断流为失败，incomplete 不能记为 completed。上游完成与客户端交付完成分别记录；取消之后的异步迟到结果不得出站。背压、上传/首包/总时限、并发及队列容量共用现有机制。每次实际出站仅一次指标结算，Thread/Turn 保持空值。
+
+资料依据：项目索引中的 [DeepSeek 接入边界](deepseek.md#responses-兼容性边界)、[DeepSeek Chat API](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)、[Responses 流式指南](https://developers.openai.com/api/docs/guides/streaming-responses)。本轮已通过官方英文 [Responses API](https://api-docs.deepseek.com/api/create-response/) 核实无 DONE 的三种终态及 input/instructions 至少一项，未核实的新供应商语义不得标记验收通过。官方合同、隔离测试与真实上游验收分别记录。
+
+#### 精确持久变更与授权边界
+
+配置仅扩展 model_relay.accounts[].provider 与 callers[].provider 的值域为 1–64 位 ASCII 字母、数字、下划线、连字符，与现有自定义 Provider ID 语法一致；继续严格拒绝未知字段。运行时和保存时通过公共注册与材料接口确认实际提供商，不能只靠正则授权。不新增秘密、protocol 或调用方字段；原 CLP 配置无需转换。首次保存非 CLP 引用前须更新所有配置读取进程。沿用 Provider 事务锁、配置锁、revision、私有备份字节校验和原子替换，失败保留原配置。回退旧程序前显式处理非 CLP 引用：在停止写入后备份当前配置，按明确列出的账户及调用方 ID 移除不受旧版本支持的 Relay 引用，验证旧 Schema 后原子保存；不修改提供商自身账户，不恢复历史凭据。被移除的 Relay Key 失效，重新接入须重新签发，禁止从归档自动复活。失败保持当前配置，禁止启动不兼容旧程序。
+
+指标库 v22→v23 不增删列、索引或历史记录，仅把 Relay CHECK 中 traffic_label 的允许值由 NULL/relay.chat 扩展为 NULL/relay.chat/relay.responses；保留三元组完整性、真实调用方、空 Thread/Turn 和请求 UUID 去重约束。显式升级支持完整 v20/v21/v22，运行时只接受 v23。升级先停写并取得数据库所有权锁，检查精确源 Schema、空间与 integrity_check，做 SQLite 一致性备份，校验 SHA-256、备份 Schema、完整性和逻辑数据摘要，再 BEGIN IMMEDIATE 重建表并复制全部列及 ID，恢复 sqlite_sequence 和原索引。核对历史摘要后设置版本并提交；事务失败回滚且保留备份，提交后校验失败仍报告未完成、服务保持停止。已有辅助成本数据按现有合同原样保留。
+
+回滚复用显式指标恢复入口：校验指定源备份的版本和 SHA-256，先一致性归档并校验当前 v23 数据库，再通过受控临时文件恢复选定 v20/v21/v22 备份。v23 新请求留在归档，不伪装为已迁入旧库；失败保留当前库及所有备份。V2 转储不转换、不删除；旧程序可能无法关联 Responses 标签，升级后仍可读取。配置回退与数据库回退分别执行，数据库恢复不得恢复任何配置或旧凭据。
+
+隔离验证覆盖各类 Provider 发现及撤销、大小写 ID 保真、无效注册拒绝、配置备份/写入失败、回退不复活 Key；v20/v21/v22 升级、v23 三标签约束与去重、备份损坏、空间不足、迁移失败、回滚归档、历史摘要及序列保留。用户在本节精确方案后明确要求“继续。做完去”，已授权本次持久变更实现与隔离验证。不操作实际配置、数据库、服务或真实上游。
+
+#### 分批进度
+
+| 阶段 | 完成条件 | 当前状态 |
+| --- | --- | --- |
+| P0 | 公共接入、协议字段/错误/终态、配置/IPC/数据库升级定稿 | 已落实本节合同并取得持久变更实现与隔离验证授权；原生能力按提供商合同列出 |
+| P1 | 纯请求边界、共享传输与观察、原生双协议隔离用例 | 已实现原生 Responses 路由、JSON/SSE 观察与交付；Chat 保留原始扩展字段，两者共享 HTTP 生命周期，针对性用例通过 |
+| P2 | 账户/配置→准入→准备复核→交付→指标/转储→管理贯通 | 已贯通公共 Provider 材料、双协议交付、私有 IPC、v23 指标与转储关联；CLI/WebUI 使用同一提供商能力列表 |
+| P3 | 撤销、取消、背压、关闭、升级/回滚关联审查 | 关联审查及隔离回归通过；真实账户、隧道与多平台实机验收未执行，不等同生产验收通过 |
+
+实施与审查证据（2026-09-29）：Responses 保留输入、工具、扩展参数及原生 SSE 事件，校验响应身份和 completed/failed/incomplete 终态，终态前断流不算成功；上游失败原因采用受控诊断。Chat 保留 reasoning_content、工具增量和供应商扩展，不再重建为另一份响应。DS 按原生协议分别应用关闭思考参数，CLP 仅保留已核实模型的专用策略。两协议共用准入、队列、撤销、超时、关闭、HTTP 出口、指标结算及转储总预算。
+
+公共材料验证覆盖 CLP、DS、CCG、OpenCode Go、自定义主 Provider 和切换 Provider；无独立 API 凭据的 OAuth 配置明确拒绝。隔离 HTTP→私有 IPC→SQLite 用例验证大小写 Provider ID、Responses 转储关联和 Key 撤销。新增 `relay rollback-providers` 显式回退入口，审查补齐账户已移除但停用调用方仍保留引用的清理边界；备份保留，Provider 自身凭据不变。指标显式升级支持 v20/v21/v22→v23，保留历史 ID、序列及辅助成本数据，回滚归档新库后恢复已验证备份，不恢复旧凭据。
+
+验证分批记录（存在重叠，不相加）：关联回归 32 文件 412 项通过、6 项跳过；最后的 Server/Runtime/WebUI/请求边界回归 4 文件 122 项通过；升级、安装和管理 API 批次 5 文件 77 项通过；转储与指标相关批次 6 文件 147 项通过。真实 Codex 隔离合同 13 项通过，仅启动临时 App Server 与本地假上游；首次执行中嵌套沙盒阻止临时文件写入的两项，在获准于沙盒外重跑后通过。类型与运行时检查、ESLint、WebUI 构建与 Lint、561 项翻译键检查、76 个文档索引/链接检查通过。跳过项包含另行启用的真实 Codex合同和 root 环境不适用的文件权限场景，不作为通过项计算。
+
+后续关联审查修复：Responses 采集完成接口传递真实 completed/failed/incomplete 终态，不再把收到终态一律记为成功；客户端交付状态仍独立。详情读取复用有界 SSE 解析器消费 relay.responses 正文，从终态提取输出、用量和模型证据，并保留读取截断提示。已部署版本生成的 V2 文件无需重写，打开详情时可以用保存的明确终态纠正原 completed 状态；历史列表仍按原索引记录展示，不在列表查询时扫描全部正文。新记录的列表与详情状态一致。JSON/SSE 三种终态、旧记录只读解析及共享转储回归 2 文件 126 项通过；基于本轮构建的 CLI/WebUI 转储回归 3 文件 84 项通过，类型、针对性 ESLint 和文档检查通过。
+
+部署与验收边界：用户自行部署、重启并执行 update；实际数据库与既有成功调用已按下段只读核验。上述转储修复沿用 v23 与现有 V2 格式，无需再次升级 Schema；尚未升级的部署仍须先完成显式升级。开发代理未修改实际配置、数据库或服务状态，也未主动发送真实上游请求；真实失败、撤销、过载及多平台验收仍未完成。
+
+部署后只读审查（2026-09-29，后续证据）：用户自行部署重启后，已核对 App Server、Gateway、Relay 均运行；6 个关键部署文件与工作区构建/脚本摘要一致，实际指标库为 v23。Relay 本次启动时间为 14:15:46 UTC，审查时其后 4 条实际调用（指标 ID 5812、5813、5816、5817）覆盖 DS Responses SSE、CLP Chat SSE 及两条 Chat JSON；全部 HTTP 200、completed/finished，指标和转储的 Provider、请求/响应模型、状态、用量一致，输出可读且未截断，Thread/Turn 为空，每次调用唯一落盘。当前进程 accepted=4，rejected/unconfirmed/local_dropped=0，等待队列为空；另从 SQLite 核实落盘，不以 accepted 替代持久化证据。重启前的 DS Responses JSON 记录 5801 亦可正常解析。调试阶段核实 DS 仅默认 store=false，两条 Chat JSON 按当前 Key 策略设置 reasoning.effort=none 并默认 stream=false。审查仅读取已发生调用，未主动发送真实请求、回写历史数据或操作服务。真实 failed/incomplete、撤销中断、过载和关闭竞态仍仅有隔离证据，不扩大为全部生产场景验收通过。

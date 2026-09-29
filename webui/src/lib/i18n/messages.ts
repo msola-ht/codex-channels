@@ -48,6 +48,7 @@ const zh = {
     "formHint": "先选择提供商和模型，再设置当前 Key 的思考策略。",
     "purposeHint": "支持中文，1–64 个字符；名称可修改，不影响密钥和调用记录。",
     "chooseProvider": "选择提供商账户",
+    "protocols": "原生协议：{value}",
     "unavailable": "不可用",
     "offHint": "仅此 Key 强制发送关闭参数，不影响同一账户的其他 Key。",
     "unsupported": "当前模型组合不支持强制关闭，请使用跟随客户端或调整模型。",
@@ -399,7 +400,7 @@ const zh = {
     debugHeadersTruncated: "部分请求头或响应头超过记录上限，已省略。",
     debugChanges: "实际处理记录",
     debugState: { finished: "交付完成", disconnected: "客户端断开", failed: "交付失败", not_started: "尚未开始交付" },
-    debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", json_unwrapped: "已解包 CLP JSON 响应" },
+    debugChange: { headers_filtered: "已过滤跳级头、客户端凭据或保留身份头", headers_overridden: "已设置上游凭据与传输头", stream_defaulted: "客户端未指定 stream，已补入 false", store_defaulted: "客户端未指定 store，已补入 false", json_unwrapped: "已解包 CLP JSON 响应" },
 
     "relayRetentionNote": "Relay 自动保留：{value}；新采集时清理过期非活动批次。",
     "relayCapture": "Relay 上游报文（已脱敏）",
@@ -644,6 +645,7 @@ const en: Messages = {
     "formHint": "Choose a provider and models, then set the reasoning policy for this key.",
     "purposeHint": "Use 1–64 characters, including Chinese. Renaming keeps the key and call records unchanged.",
     "chooseProvider": "Choose a provider account",
+    "protocols": "Native protocols: {value}",
     "unavailable": "Unavailable",
     "offHint": "Only this key sends the forced-off parameter. Other keys using this account are unaffected.",
     "unsupported": "This model selection does not support force off. Follow the client or change the models.",
@@ -995,7 +997,7 @@ const en: Messages = {
     debugHeadersTruncated: "Some request or response headers exceeded the capture limit and were omitted.",
     debugChanges: "Applied transformations",
     debugState: { finished: "Delivery finished", disconnected: "Client disconnected", failed: "Delivery failed", not_started: "Delivery not started" },
-    debugChange: { headers_filtered: "Filtered hop-by-hop, client credential or reserved identity headers", headers_overridden: "Set upstream credentials and transport headers", stream_defaulted: "Defaulted missing stream to false", json_unwrapped: "Unwrapped CLP JSON response" },
+    debugChange: { headers_filtered: "Filtered hop-by-hop, client credential or reserved identity headers", headers_overridden: "Set upstream credentials and transport headers", stream_defaulted: "Defaulted missing stream to false", store_defaulted: "Defaulted missing store to false", json_unwrapped: "Unwrapped CLP JSON response" },
 
     "relayRetentionNote": "Relay retention: {value}; expired inactive sessions are removed when new captures begin.",
     "relayCapture": "Relay upstream payload (redacted)",

@@ -198,15 +198,25 @@ export async function describeDumpExchange(
   const chatOutput = Array.isArray(chat?.choices) ? chat.choices.flatMap(choice => choice?.message && typeof choice.message === "object" && !Array.isArray(choice.message)
     ? [{ type: "message", ...choice.message }] : []) : undefined;
   let streamFacts;
+  const nativeResponses = interaction.response?.capture === "redacted_upstream_responses";
+  let terminalResponse = nativeResponses && ["completed", "failed", "incomplete"].includes(responseBody?.status) ? responseBody : undefined;
   const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output ?? chatOutput, value => {
     models.event(value);
     if (interaction.response?.capture === "redacted_upstream_chat" && Array.isArray(value?.choices) && value.usage != null) streamFacts = responseFacts(value);
+    if (nativeResponses && ["response.completed", "response.failed", "response.incomplete"].includes(value?.type)
+      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output)) {
+      terminalResponse = value.response; streamFacts = responseFacts(value);
+    }
   });
-  if (interaction.response?.capture === "redacted_upstream_chat") {
+  if (interaction.response?.capture === "redacted_upstream_chat" || nativeResponses && responseBody === undefined) {
     output.consume({ kind: "response_body", encoding: "utf8", text: responsePayload.text });
   }
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   const collected = output.result();
+  // Read existing V2 dumps using their explicit terminal payload; never rewrite archived data.
+  if (terminalResponse && interaction.response.state === "completed") {
+    interaction.response = { ...interaction.response, state: terminalResponse.status };
+  }
   return {
     ...summaryOf(interaction, requestBody),
     ...debugDetail(interaction, maxSectionBytes),
@@ -246,6 +256,7 @@ export async function describeDumpExchange(
       storedBytes: interaction.response.payload?.bytes,
       ...(streamFacts ?? facts),
       ...collected,
+      ...(nativeResponses && responsePayload.truncated ? { outputTruncated: true } : {}),
     },
     trace: trace.items,
     tracePage: trace.page,
@@ -411,7 +422,7 @@ function compareInteraction(left, right, newestFirst) {
 function summaryOf(interaction, body) {
   const request = interaction.request;
   const response = interaction.response;
-  const relay = labelOf(interaction.directory) === "relay.chat";
+  const relay = ["relay.chat", "relay.responses"].includes(labelOf(interaction.directory));
   const metadata = relay ? {} : requestMetadata(body);
   const requestKind = relay ? undefined : metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
@@ -577,6 +588,6 @@ function debugDetail(interaction, limit) {
   };
   if (!Array.isArray(request.transformations) || response !== undefined && !Array.isArray(response.transformations)) throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试处理标记损坏");
   const transformations = [...request.transformations, ...(response?.transformations ?? [])];
-  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
+  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "store_defaulted", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
   return { debug: { inbound: stage(request.inbound), delivered: response ? stage(response.delivered) : null, transformations } };
 }

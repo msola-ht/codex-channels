@@ -1,6 +1,5 @@
 import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
-import type { DirectChatRequest } from "../model-api/index.js";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { relayDebugHeaders } from "./relay-debug-headers.js";
 import { ChatDiagnostics } from "./chat-diagnostics.js";
@@ -18,19 +17,19 @@ function headersOf(headers: IncomingHttpHeaders | OutgoingHttpHeaders): Record<s
 export interface DirectChatCapture {
   inbound?(value: unknown, headers: IncomingHttpHeaders): void;
   delivered?(value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders): void;
-  transformed?(operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped"): void;
-  submitted(request: DirectChatRequest, headers: IncomingHttpHeaders | OutgoingHttpHeaders, path: string): void;
+  transformed?(operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped"): void;
+  submitted(request: Record<string, unknown> & { model: string; stream: boolean }, headers: IncomingHttpHeaders | OutgoingHttpHeaders, path: string): void;
   head(status: number, headers: IncomingHttpHeaders | OutgoingHttpHeaders): void;
   value(value: unknown, stream: boolean): void;
   invalid(bytes: number): void;
-  done(): void;
+  done(status?: "completed" | "failed" | "incomplete"): void;
   finish(delivery: "finished" | "disconnected" | "failed", errorCode?: string, firstTokenMs?: number, responseModel?: string): ProviderProxyMetrics["traffic"];
 }
 
 /** One Relay owner, all accounts share the same V2 disk and pending-write budgets. */
 export class RelayTrafficDump {
-  private readonly sessions = new Set<TrafficDumpSession>();
-  private readonly streams = new Set<WriteStream>();
+  private readonly sessionGroups: Set<TrafficDumpSession>[] = [];
+  private get sessions(): TrafficDumpSession[] { return this.sessionGroups.flatMap(group => [...group]); }
   private queue = Promise.resolve();
   // Includes accepted writes that have not reached disk yet.
   private retained = 0;
@@ -45,14 +44,20 @@ export class RelayTrafficDump {
   private closed = false;
   private failed = false;
   private readonly reported = new Set<string>();
-  private readonly storage: TrafficDumpStorage;
+  private readonly storage: Record<"chat" | "responses", TrafficDumpStorage>;
   constructor(private readonly options: { directory: string; onError(error: Error): void }) {
-    this.storage = new TrafficDumpStorage({ ...options, label: "relay.chat", retentionDays: this.retentionDays,
-      retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, rotateAfterPayloadBytes: 8 * MiB,
-      onBytesAccepted: bytes => { this.retained += bytes; }, onError: () => this.fail() }, {
-      sessions: this.sessions, streams: this.streams, getWriteQueue: () => this.queue, setWriteQueue: queue => { this.queue = queue; },
-    });
+    const pendingBudget = { bytes: 0 };
+    const create = (protocol: "chat" | "responses"): TrafficDumpStorage => {
+      const sessions = new Set<TrafficDumpSession>(); this.sessionGroups.push(sessions);
+      return new TrafficDumpStorage({ ...options, label: `relay.${protocol}`, retentionDays: this.retentionDays,
+        retentionManagedExternally: true, maximumPendingBytes: 14 * MiB, pendingBudget, rotateAfterPayloadBytes: 8 * MiB,
+        onBytesAccepted: bytes => { this.retained += bytes; }, onError: () => this.fail() }, {
+        sessions, streams: new Set<WriteStream>(), getWriteQueue: () => this.queue, setWriteQueue: queue => { this.queue = queue; },
+      });
+    };
+    this.storage = { chat: create("chat"), responses: create("responses") };
   }
+
   setRetentionDays(days: number): void { this.retentionDays = days; }
   /** Initialize before enabling capture; never waits for model traffic. */
   async prepare(signal?: AbortSignal): Promise<void> {
@@ -75,7 +80,7 @@ export class RelayTrafficDump {
     const protectedSessionDirectories = [...this.sessions].flatMap(session => session.sessionDirectory ? [session.sessionDirectory] : []);
     this.protectedDuringMaintenance = protectedSessionDirectories;
     this.maintenance = (async () => {
-      const retained = await pruneModelTrafficDumpSessionsAsync({ directory: this.options.directory, label: "relay.chat", retentionDays: this.retentionDays,
+      const retained = await pruneModelTrafficDumpSessionsAsync({ directory: this.options.directory, labels: ["relay.chat", "relay.responses"], retentionDays: this.retentionDays,
         maximumBytes: 512 * MiB - reservationBytes - 128 * 1024,
         protectedSessionDirectories,
         onRemoved: bytes => { if (!initializing) this.retained -= bytes; } }, this.maintenanceAbort.signal);
@@ -86,7 +91,8 @@ export class RelayTrafficDump {
     });
     return this.maintenance;
   }
-  begin(provider: string, debug = false): DirectChatCapture | undefined {
+  begin(provider: string, debug = false, protocol: "chat" | "responses" = "chat"): DirectChatCapture | undefined {
+    const storage = this.storage[protocol];
     if (this.closed || this.failed || this.active >= 32) return undefined;
     const reservation = reservationBytes + (debug ? 128 * 1024 : 0);
     const full = this.retained + this.reserved + reservation > 512 * MiB;
@@ -100,9 +106,9 @@ export class RelayTrafficDump {
       let finished = false;
       const startedAtMs = Date.now();
       let submittedAt = performance.now();
-      const session = this.storage.beginLogicalInteraction(startedAtMs);
-      const id = this.storage.nextInteractionId(session);
-      const reference = this.storage.reference(session, id);
+      const session = storage.beginLogicalInteraction(startedAtMs);
+      const id = storage.nextInteractionId(session);
+      const reference = storage.reference(session, id);
       if (session.sessionDirectory && this.protectedDuringMaintenance && !this.protectedDuringMaintenance.includes(session.sessionDirectory)) {
         this.protectedDuringMaintenance.push(session.sessionDirectory);
       }
@@ -110,10 +116,11 @@ export class RelayTrafficDump {
       let status: number | undefined;
       let responseHeaders: Record<string, unknown> = {};
       let complete = false;
+      let modelStatus: "completed" | "failed" | "incomplete" = "incomplete";
       let completedAt: number | undefined;
       let streaming = false;
-      const upstream = new RelayDumpPayload(this.storage, session, (debug ? 4 : 8) * MiB);
-      const delivered = debug ? new RelayDumpPayload(this.storage, session, 4 * MiB) : undefined;
+      const upstream = new RelayDumpPayload(storage, session, (debug ? 4 : 8) * MiB);
+      const delivered = debug ? new RelayDumpPayload(storage, session, 4 * MiB) : undefined;
       let inbound: { headers: Record<string, string | string[]>; headersTruncated: boolean; payload: ReturnType<RelayDumpPayload["finish"]> } | undefined;
       let inboundBody: unknown;
       let inboundHead: ReturnType<typeof relayDebugHeaders> | undefined;
@@ -133,22 +140,22 @@ export class RelayTrafficDump {
           delivered: (value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders) => safe(() => {
             deliveredStatus = status; deliveredHeaders = relayDebugHeaders(headers); delivered!.value(value, stream);
           }),
-          transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "json_unwrapped") => safe(() => {
+          transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped") => safe(() => {
             (operation === "json_unwrapped" ? responseChanges : requestChanges).add(operation);
           }),
         } : {}),
         submitted: (request, headers, path) => safe(() => {
           submittedAt = performance.now(); streaming = request.stream;
           if (debug && inboundHead) {
-            const content = new RelayDumpPayload(this.storage, session, MiB / 2); content.value(inboundBody, false);
+            const content = new RelayDumpPayload(storage, session, MiB / 2); content.value(inboundBody, false);
             inbound = { headers: inboundHead.headers, headersTruncated: inboundHead.truncated, payload: content.finish() };
             inboundBody = undefined; inboundHead = undefined;
           }
           const content = Buffer.from(redactRelayValue(request));
           const omitted = content.length > (debug ? MiB / 2 : MiB);
-          const part = omitted ? undefined : this.storage.writePayload(session, content, "utf8");
+          const part = omitted ? undefined : storage.writePayload(session, content, "utf8");
           const head = debug ? relayDebugHeaders(headers) : undefined;
-          this.storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
+          storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
             method: "POST", path, headers: head?.headers ?? headersOf(headers),
             ...(debug ? { headersTruncated: head!.truncated, debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
             bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
@@ -161,7 +168,7 @@ export class RelayTrafficDump {
           diagnostics.push(!stream && envelope?.success === true && !Object.hasOwn(envelope, "choices") ? envelope.data : value);
         }),
         invalid: count => safe(() => { upstream.invalid(count); }),
-        done: () => safe(() => { complete = true; completedAt = performance.now(); if (streaming) upstream.value(undefined, true); }),
+        done: (status = "completed") => safe(() => { complete = true; modelStatus = status; completedAt = performance.now(); if (streaming && protocol === "chat") upstream.value(undefined, true); }),
         finish: (delivery, errorCode, firstTokenMs, responseModel) => {
           if (finished) return undefined;
           safe(() => {
@@ -169,21 +176,21 @@ export class RelayTrafficDump {
             const payload = upstream.finish();
             const snapshot = diagnostics.snapshot();
             const finalProvider = snapshot.fields["routing.finalProvider"];
-            this.storage.writeTrace(session, { kind: "chat_diagnostics", interaction: id, ...snapshot });
-            this.storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders,
+            if (protocol === "chat") storage.writeTrace(session, { kind: "chat_diagnostics", interaction: id, ...snapshot });
+            storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders,
               ...(typeof finalProvider === "string" && finalProvider !== "" ? { upstreamProvider: finalProvider } : {}),
               ...(debug ? { headersTruncated: upstreamHeadersTruncated, debug: { version: 1,
                 delivered: { status: deliveredStatus, headers: deliveredHeaders.headers, headersTruncated: deliveredHeaders.truncated,
                   payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
               responseModels: responseModel === undefined ? [] : [responseModel],
-              state: complete ? "completed" : "incomplete", deliveryStatus: delivery, error: errorCode,
+              state: modelStatus, deliveryStatus: delivery, error: errorCode,
               errorScope: complete ? undefined : "upstream_response", bytes: upstream.bytes,
               payload,
-              capture: "redacted_upstream_chat", firstTokenMs, callTiming: { clock: "monotonic", basis: "submitted", endMs: (completedAt ?? performance.now()) - submittedAt } });
+              capture: protocol === "chat" ? "redacted_upstream_chat" : "redacted_upstream_responses", firstTokenMs, callTiming: { clock: "monotonic", basis: "submitted", endMs: (completedAt ?? performance.now()) - submittedAt } });
           });
           finished = true; inboundBody = undefined; inboundHead = undefined;
           upstream.discard(); delivered?.discard(); this.active--; this.reserved -= reservation;
-          this.storage.completeLogicalInteraction(session);
+          storage.completeLogicalInteraction(session);
           return requestSaved && !this.failed ? reference : undefined;
         },
       };
@@ -192,8 +199,8 @@ export class RelayTrafficDump {
   async close(): Promise<void> {
     this.closed = true; this.maintenanceAbort.abort();
     let timer: NodeJS.Timeout | undefined;
-    try { await Promise.race([Promise.all([this.storage.close(), this.maintenance]), new Promise<void>(resolve => {
-      timer = setTimeout(() => { this.storage.abort(); resolve(); }, 5000);
+    try { await Promise.race([Promise.all([...Object.values(this.storage).map(storage => storage.close()), this.maintenance]), new Promise<void>(resolve => {
+      timer = setTimeout(() => { for (const storage of Object.values(this.storage)) storage.abort(); resolve(); }, 5000);
     })]); } finally { clearTimeout(timer); }
   }
   private notice(message: string): void { if (this.reported.has(message)) return; this.reported.add(message); try { this.options.onError(new Error(message)); } catch { /* Capture is a side channel. */ } }

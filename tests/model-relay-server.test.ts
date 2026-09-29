@@ -28,6 +28,113 @@ const body = { model: "fixture/model", messages: [{ role: "user", content: "hell
 const answer = { id: "reply-1", model: "fixture/model", choices: [{ index: 0, message: { role: "assistant", content: "hello" }, finish_reason: "stop" }],
   usage: { prompt_tokens: 3, completion_tokens: 2 } };
 const frame = (value: unknown): string => `data: ${JSON.stringify(value)}\n\n`;
+
+describe("native Responses relay", () => {
+  const input = { model: "fixture/model", input: "hello", tools: [{ type: "vendor_tool", name: "fixture" }] };
+  const responseValue = (status = "completed") => ({ id: "resp_fixture", object: "response", model: "fixture/model", status,
+    output: [{ type: "message", content: [{ type: "output_text", text: "hello" }] }],
+    usage: { input_tokens: 8, output_tokens: 3, input_tokens_details: { cached_tokens: 4 }, total_tokens: 11 }, vendor_extension: true });
+  const post = (relay: ModelRelayServer, value: unknown) => fetch(`${relay.address()}/v1/responses`, {
+    method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(value),
+  });
+  it("preserves native DS Chat reasoning and response extensions", async () => {
+    const policy = config(); policy.accounts = [{ provider: "ds-a" }]; policy.callers[0]!.provider = "ds-a";
+    const raw = { ...answer, vendor_extension: { route: "fixture" }, choices: [{ ...answer.choices[0],
+      message: { role: "assistant", content: "hello", reasoning_content: "reasoning", vendor_extension: 7 } }] };
+    const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify(raw)); }, undefined, undefined, undefined, false, policy);
+    expect(await (await f.post()).json()).toEqual(raw);
+    expect(f.metrics[0]).toMatchObject({ provider: "ds-a", status: "completed" });
+  });
+  it.each(["completed", "incomplete", "failed"])("delivers native JSON %s and settles exactly once", async status => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-responses-json-"));
+    const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+    cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      expect(request.url).toBe("/v1/responses");
+      const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => { received = JSON.parse(Buffer.concat(chunks).toString()); response.setHeader("content-type", "application/json"); response.end(JSON.stringify(responseValue(status))); });
+    }, undefined, undefined, dump);
+    const result = await post(f.relay, input);
+    expect(result.status).toBe(200); expect(await result.json()).toEqual(responseValue(status));
+    expect(received).toEqual({ ...input, stream: false, store: false });
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ status, deliveryStatus: "finished", inputTokens: 8, cachedInputTokens: 4, outputTokens: 3, threadId: null, turnId: null });
+    await dump.close();
+    const reference = f.metrics[0]!.traffic!;
+    const detail = await describeDumpExchange([join(directory, `${reference.label}-${reference.session}`)], reference.interaction);
+    expect(detail.state).toBe(status); expect(detail.response.deliveryStatus).toBe("finished");
+  });
+  it.each(["completed", "failed", "incomplete"])("preserves SSE %s, output, usage and exact dump linkage without Chat DONE", async status => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-responses-"));
+    const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+    cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+    const events = [{ type: "response.created", response: { id: "resp_fixture", status: "in_progress" } },
+      { type: "response.output_text.delta", delta: "hello", vendor_extension: "preserve" },
+      { type: `response.${status}`, response: responseValue(status) }];
+    const wire = events.map(event => `event: ${event.type}\nid: fixture\ndata: ${JSON.stringify(event)}\n\n`).join("");
+    const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "text/event-stream" }); response.end(wire); }, undefined, undefined, dump, true);
+    const result = await post(f.relay, { ...input, stream: true });
+    expect(await result.text()).toBe(wire);
+    expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status, responseFormat: "sse", traffic: { label: "relay.responses" } });
+    await dump.close();
+    const traffic = f.metrics[0]!.traffic!;
+    const paths = readdirSync(directory).filter(name => name.startsWith("relay.responses-")).map(name => join(directory, name));
+    const detail = await describeDumpExchange(paths, traffic.interaction);
+    expect(detail.requestModel).toBe("fixture/model"); expect(detail.responseModels).toEqual(["fixture/model"]);
+    expect(detail.state).toBe(status); expect(detail.hasError).toBe(status !== "completed");
+    expect(detail.response.usage).toMatchObject({ inputTokens: 8, outputTokens: 3, cachedTokens: 4 });
+    expect(detail.response.output).toHaveLength(1);
+    expect(JSON.stringify(detail.response.output)).toContain("hello");
+    // Existing deployed V2 records used completed for every observed terminal.
+    const recordsPath = join(paths[0]!, "interactions.jsonl");
+    const oldRecords = readFileSync(recordsPath, "utf8").split("\n").filter(Boolean).map(line => {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      if (record.kind === "response") record.state = "completed";
+      return JSON.stringify(record);
+    }).join("\n") + "\n";
+    writeFileSync(recordsPath, oldRecords);
+    const existing = await describeDumpExchange(paths, traffic.interaction);
+    expect(existing.state).toBe(status); expect(existing.response.usage.inputTokens).toBe(8);
+    expect(readFileSync(recordsPath, "utf8")).toBe(oldRecords);
+  });
+  it("rejects protocol mismatch before upstream submission", async () => {
+    const f = await fixture((_request, response) => response.end(), async prepared => ({ ...prepared, protocols: ["chat"] }));
+    const result = await post(f.relay, input);
+    expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ error: { code: "protocol_not_supported", upstream_attempted: false } });
+    expect(f.metrics).toHaveLength(0);
+  });
+  it("does not complete or fabricate usage on a truncated stream", async () => {
+    const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "text/event-stream" }); response.end(frame({ type: "response.output_text.delta", delta: "partial" })); });
+    const result = await post(f.relay, { ...input, stream: true }); const text = await result.text();
+    expect(text).toContain("event: error"); expect(text).not.toContain("[DONE]");
+    expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed" });
+    expect(f.metrics[0]?.inputTokens).toBeUndefined();
+  });
+  it("reports failed SSE terminal state without disclosing arbitrary upstream error text", async () => {
+    const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(frame({ type: "response.failed", response: { ...responseValue("failed"), error: { code: "unknown", message: "PRIVATE upstream credentials" } } })); });
+    const result = await post(f.relay, { ...input, stream: true }); const text = await result.text();
+    expect(text).toContain("event: response.failed"); expect(text).not.toContain("PRIVATE"); expect(text).not.toContain("[DONE]");
+    expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "finished", errorCode: "upstream_response_failed" });
+  });
+  it("keeps one retention budget across both protocols and excludes owned dumps", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-shared-retention-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    for (const [index, label] of ["relay.chat", "relay.responses", "openai"].entries()) {
+      const path = join(directory, `${label}-fixture`); mkdirSync(path);
+      writeFileSync(join(path, "manifest.json"), JSON.stringify({ version: 2, label, session: "fixture", createdAtMs: index + 1 }));
+      writeFileSync(join(path, "payload"), "x".repeat(1024));
+      utimesSync(join(path, "payload"), index + 1, index + 1);
+      utimesSync(join(path, "manifest.json"), index + 1, index + 1);
+    }
+    const retained = await retention.pruneModelTrafficDumpSessionsAsync({ directory, labels: ["relay.chat", "relay.responses"], retentionDays: 0, maximumBytes: 1800 }, new AbortController().signal);
+    expect(retained).toBeLessThanOrEqual(1800);
+    expect(readdirSync(directory).sort()).toEqual(["openai-fixture", "relay.responses-fixture"]);
+    pruneModelTrafficDumpSessions({ directory, retentionDays: 0, maximumBytes: 0 });
+    expect(readdirSync(directory)).toEqual(["relay.responses-fixture"]);
+  });
+});
 async function fixture(reply: (request: IncomingMessage, response: ServerResponse) => void,
   prepareOverride?: (prepared: PreparedRelayProvider) => Promise<PreparedRelayProvider>, sink?: (sample: RelayMetric) => void, dump?: RelayTrafficDump, debug = false, policy: RelayPolicy = config()) {
   let calls = 0; let preparedCount = 0;
@@ -36,11 +143,11 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
   cleanups.push(async () => { backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve())); });
   const address = backend.address(); if (!address || typeof address === "string") throw new Error("fixture");
   const metrics: RelayMetric[] = [];
-  const relay = new ModelRelayServer({ ...(dump ? { capture: (provider, signal) => dump.open(provider, signal, debug) } : {}), policy, enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
+  const relay = new ModelRelayServer({ ...(dump ? { capture: async (provider, signal, protocol) => { await dump.prepare(signal); return dump.begin(provider, debug, protocol); } } : {}), policy, enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
     prepare: async () => {
       preparedCount++;
       const prepared: PreparedRelayProvider = { target: { host: "127.0.0.1", port: address.port, protocol: "http", basePath: "/v1", authorization: "Bearer UPSTREAM-SECRET" },
-        models: ["fixture/model", "hidden/model"], recheck: () => {} };
+        models: ["fixture/model", "hidden/model"], protocols: ["chat", "responses"], recheck: () => {} };
       return prepareOverride ? prepareOverride(prepared) : prepared;
     } });
   await relay.start(0); cleanups.push(() => relay.close());
@@ -798,7 +905,7 @@ describe("isolated Relay vertical request chain", () => {
     expect((await f.post({ ...body, model: "hidden/model" })).status).toBe(403); expect(f.preparedCount()).toBe(0);
     expect((await f.post()).status).toBe(503); expect(f.calls()).toBe(0); expect(f.metrics).toEqual([]);
   });
-  it("streams text, holds tools until validated completion, and retains trailing usage", async () => {
+  it("streams original text and tool deltas, validates completion, and retains trailing usage", async () => {
     const f = await fixture((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.end(frame({ choices: [{ index: 0, delta: { content: "你好", tool_calls: [{ index: 0, id: "call-a", type: "function", function: { name: "lookup", arguments: "{" } }] } }] })
@@ -806,11 +913,11 @@ describe("isolated Relay vertical request chain", () => {
         + frame({ choices: [], usage: { prompt_tokens: 5, completion_tokens: 3 } }) + "data: [DONE]\n\n");
     });
     const response = await f.post({ ...body, stream: true }); const text = await response.text();
-    expect(text).toContain("你好"); expect(text).toContain('"arguments":"{}"'); expect(text).not.toContain('"arguments":"{"');
+    expect(text).toContain("你好"); expect(text).toContain('"arguments":"}"'); expect(text).toContain('"arguments":"{"');
     expect(text).toContain("data: [DONE]"); expect(f.metrics).toHaveLength(1);
     expect(f.metrics[0]).toMatchObject({ status: "completed", inputTokens: 5, outputTokens: 3 });
   });
-  it("bounds the assembled downstream tool frame while preserving completed-model versus failed-delivery status", async () => {
+  it("forwards bounded tool deltas without constructing an oversized combined delivery frame", async () => {
     const args = JSON.stringify({ value: "\\".repeat(350_000) });
     const f = await fixture((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -819,8 +926,8 @@ describe("isolated Relay vertical request chain", () => {
       response.end(frame({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }) + "data: [DONE]\n\n");
     });
     const response = await f.post({ ...body, stream: true });
-    expect(response.status).toBe(502); expect(await response.text()).not.toContain("data: [DONE]");
-    expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "failed" });
+    expect(response.status).toBe(200); expect(await response.text()).toContain("data: [DONE]");
+    expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "finished" });
   });
   it.each(["missing_done", "truncated_tool", "upstream_error"])("does not invent success for %s", async mode => {
     const f = await fixture((_request, response) => {

@@ -90,7 +90,7 @@ export class DirectChatResponse {
       if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) fail();
       const output: Record<string, unknown> = {};
       if (message.role !== undefined) output.role = "assistant";
-      for (const key of ["content", "reasoning"] as const) {
+      for (const key of ["content", "reasoning", "reasoning_content"] as const) {
         if (message[key] != null) {
           const text = string(message[key]);
           this.contentBytes += Buffer.byteLength(text);

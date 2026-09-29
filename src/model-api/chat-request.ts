@@ -56,7 +56,9 @@ export function applyChatReasoningPolicy(request: DirectChatRequest, provider: s
       if (Object.hasOwn(nested, field)) throw new DirectChatRequestError(`${container}.${field}`, "Conflicts with this key's reasoning-off policy");
     }
   }
-  const result: DirectChatRequest = { ...request, reasoning: { effort: "none" } };
-  for (const field of controls.slice(1)) delete result[field];
+  const result: DirectChatRequest = { ...request };
+  for (const field of controls) delete result[field];
+  if (provider.startsWith("ds-")) result.reasoning_effort = "none";
+  else result.reasoning = { effort: "none" };
   return result;
 }

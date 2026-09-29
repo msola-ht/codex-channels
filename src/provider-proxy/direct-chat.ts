@@ -1,16 +1,12 @@
-import { once } from "node:events";
-import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
-import { request as httpsRequest } from "node:https";
+import type { IncomingHttpHeaders } from "node:http";
 import { directChatJson, DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import { readChatBody, readChatFrames } from "./chat-io.js";
-import type { ProviderProxyUpstream } from "./proxy.js";
-import { effectiveUpstreamUserAgent } from "./response-metrics-observer.js";
-import { endToEndHeaders } from "./request-routing.js";
+import { withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
-export interface DirectChatTarget extends ProviderProxyUpstream { authorization: string }
+export type DirectChatTarget = DirectModelTarget;
 export interface DirectChatCall {
   request: DirectChatRequest;
   capture?: DirectChatCapture;
@@ -18,48 +14,26 @@ export interface DirectChatCall {
   target: DirectChatTarget;
   signal: AbortSignal;
   observer: DirectChatResponse;
+  unwrapClpEnvelope: boolean;
   recheck(): void;
   submitted(userAgent: string | null): void;
   headers(status: number): void;
   content(): void;
-  emit(value: Record<string, unknown>, terminal: boolean): Promise<void>;
+  emit(value: Record<string, unknown> | undefined, terminal: boolean): Promise<void>;
 }
 
 /** One direct Chat exchange. No retries, redirects, caller identity or metric submission. */
 export async function sendDirectChat(call: DirectChatCall): Promise<void> {
-  const payload = JSON.stringify(call.request);
-  const forwarded = endToEndHeaders(call.clientHeaders ?? {});
-  const originalHeaderNames = Object.keys(call.clientHeaders ?? {});
-  for (const name of Object.keys(forwarded)) {
-    if (["authorization", "cookie", "host", "content-length", "content-type", "content-encoding", "accept", "accept-encoding", "expect",
-      "forwarded", "x-real-ip", "x-api-key", "api-key", "x-provider"].includes(name)
-      || name.startsWith("x-forwarded-") || name.startsWith("x-codex-") || name.startsWith("x-relay-")) delete forwarded[name];
-  }
-  const headers = { ...forwarded, authorization: call.target.authorization, "content-type": "application/json",
-    "accept-encoding": "identity",
-    accept: call.request.stream ? "text/event-stream" : "application/json", "content-length": String(Buffer.byteLength(payload)) };
-  if (originalHeaderNames.some(name => !Object.hasOwn(forwarded, name))) call.capture?.transformed?.("headers_filtered");
-  call.capture?.transformed?.("headers_overridden");
-  call.signal.throwIfAborted();
-  call.recheck();
-  // No asynchronous boundary is permitted between recheck and request creation.
-  const request = (call.target.protocol === "http" ? httpRequest : httpsRequest)({
-    hostname: call.target.host, port: call.target.port, agent: call.target.agent,
-    path: `${call.target.basePath?.replace(/\/$/u, "") ?? ""}/chat/completions`, method: "POST", headers, signal: call.signal,
-  });
-  let timeoutError: ReturnType<typeof chatUpstreamError> | undefined;
-  const timeout = (): void => { timeoutError = chatUpstreamError({ code: "upstream_timeout" }); request.destroy(timeoutError); };
-  const timer = setTimeout(timeout, 60_000);
-  request.setTimeout(60_000, timeout);
-  try {
-    const ready = once(request, "response");
-    const ua = request.getHeader("user-agent");
-    const observedUa = effectiveUpstreamUserAgent({ "user-agent": typeof ua === "string" ? ua : undefined }, undefined);
-    call.submitted(observedUa !== null && [...observedUa].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? null : observedUa);
-    call.capture?.submitted(call.request, request.getHeaders(), request.path);
-    request.end(payload);
-    const [incoming] = await ready as [IncomingMessage];
-    clearTimeout(timer);
+  await withDirectModelResponse({
+    body: call.request, path: "/chat/completions", target: call.target,
+    ...(call.clientHeaders ? { clientHeaders: call.clientHeaders } : {}),
+    signal: call.signal, recheck: () => call.recheck(),
+    transformed: operation => call.capture?.transformed?.(operation),
+    submitted: (userAgent, headers, path) => {
+      call.submitted(userAgent);
+      call.capture?.submitted(call.request, headers, path);
+    },
+  }, async incoming => {
     call.headers(incoming.statusCode ?? 502);
     call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
     if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, call.capture);
@@ -69,14 +43,14 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       for await (const data of readChatFrames(incoming, call.signal, {
         frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
       })) {
-        if (data === "[DONE]") { const terminal = call.observer.finish(true); call.capture?.done(); await call.emit(terminal, true); return; }
+        if (data === "[DONE]") { call.observer.finish(true); call.capture?.done(); await call.emit(undefined, true); return; }
         const value: unknown = parseChatJson(data, call.capture);
         call.capture?.value(value, true);
         const error = chatStreamError(value);
         if (error) throw error;
-        const output = call.observer.push(value, true);
+        call.observer.push(value, true);
         if (call.observer.hasContent) call.content();
-        if (output) await call.emit(output, false);
+        await call.emit(value as Record<string, unknown>, false);
       }
       throw new ModelConversionError("Chat stream disconnected before DONE");
     }
@@ -86,16 +60,15 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     call.capture?.value(parsed, false);
     const envelopeError = chatStreamError(parsed);
     if (envelopeError) throw envelopeError;
-    const value = directChatJsonPayload(parsed);
+    const value = call.unwrapClpEnvelope ? directChatJsonPayload(parsed) : parsed;
     if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
     const error = chatStreamError(value);
     if (error) throw error;
-    const output = directChatJson(value, call.observer);
+    directChatJson(value, call.observer);
     if (call.observer.hasContent) call.content();
     call.capture?.done();
-    await call.emit(output, true);
-  } catch (error) { throw timeoutError ?? error; }
-  finally { clearTimeout(timer); request.destroy(); }
+    await call.emit(value as Record<string, unknown>, true);
+  });
 }
 
 function parseChatJson(text: string, capture?: DirectChatCapture): unknown {

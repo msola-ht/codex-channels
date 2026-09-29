@@ -207,6 +207,11 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
       && Number.isSafeInteger(value.output_index) && value.output_index >= 0) {
       add(value.output_index, value.item);
     }
+    if (!hasTerminalOutput && ["response.completed", "response.failed", "response.incomplete"].includes(value?.type)
+      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output)) {
+      items.clear(); bytes = 0;
+      value.response.output.forEach((item, index) => add(index, item));
+    }
   }
 
   function sseBlock(block) {

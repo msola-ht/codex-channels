@@ -42,19 +42,21 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       globalThis.fixture.actionError = 'stale';
       globalThis.fixture.actionErrorCode = 'stale-revision';
       const editorError = render('en');
-      globalThis.editingFixture = { caller_id: 'translation', display_name: '中文用途', provider: 'clp-main', models: ['cline-pass/deepseek-v4.1-flash'], reasoning: 'off' };
+      globalThis.editingFixture = { caller_id: 'translation', key_id: 'translation-key', display_name: '中文用途', provider: 'clp-main', models: ['cline-pass/deepseek-v4.1-flash'], reasoning: 'off' };
       globalThis.fixture.actionError = null;
       globalThis.fixture.data.callers = [globalThis.editingFixture];
       globalThis.fixture.data.revision = 'new-revision';
       const staleEditor = render('en');
       globalThis.draftRevisionFixture = 'new-revision';
       const unavailableEditor = render('en');
-      console.log(JSON.stringify({ zh, en, empty, failed, editorError, staleEditor, unavailableEditor }));
+      globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true }] }];
+      const availableEditor = render('en');
+      console.log(JSON.stringify({ zh, en, empty, failed, editorError, staleEditor, unavailableEditor, availableEditor }));
     } finally { await server.close(); }
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string };
+  })) as { zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string };
   expect(result.zh).toContain("沉浸式翻译"); expect(result.zh).toContain("强制关闭"); expect(result.zh).toContain("跟随客户端");
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");
   expect(result.en).toContain("Force off"); expect(result.en).toContain("Follow client");
@@ -73,4 +75,5 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.unavailableEditor).not.toContain('This model selection does not support force off');
   expect(result.unavailableEditor).not.toContain('data-invalid="true"');
   expect(result.unavailableEditor).toMatch(/<button(?![^>]* disabled=)[^>]*>Preview change<\/button>/u);
+  expect(result.availableEditor).toContain('Native protocols: Chat Completions');
 });

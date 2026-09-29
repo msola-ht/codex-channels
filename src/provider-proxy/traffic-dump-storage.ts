@@ -59,6 +59,7 @@ interface TrafficDumpStorageOptions {
   onError: (error: Error) => void;
   retentionDays: number;
   maximumPendingBytes?: number;
+  pendingBudget?: { bytes: number };
   rotateAfterPayloadBytes?: number;
   retentionManagedExternally?: boolean;
   /** Count accepted writes (including queued data) for an external disk budget. */
@@ -81,7 +82,9 @@ export class TrafficDumpStorage {
   private currentSession: TrafficDumpSession | undefined;
   private closed = false;
   private failed = false;
-  private queuedBytes = 0;
+  private localQueuedBytes = 0;
+  private get queuedBytes(): number { return this.options.pendingBudget?.bytes ?? this.localQueuedBytes; }
+  private set queuedBytes(value: number) { if (this.options.pendingBudget) this.options.pendingBudget.bytes = value; else this.localQueuedBytes = value; }
 
   constructor(
     private readonly options: TrafficDumpStorageOptions,

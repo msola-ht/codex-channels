@@ -53,7 +53,7 @@ describe("Relay strict configuration", () => {
     { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, credential_generation: Number.MAX_SAFE_INTEGER + 1 }] },
     { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, secret_sha256: "SECRET" }] },
     { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, models: ["same", "same"] }] },
-    { accounts: [{ provider: "openai" }] },
+    { accounts: [{ provider: "invalid/provider" }] },
   ])("rejects unsupported or unsafe configuration", value => {
     expect(modelRelayConfigSchema.safeParse(value).success).toBe(false);
   });

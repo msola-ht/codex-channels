@@ -77,9 +77,9 @@ export function TrafficTable({
                   }}
                 >{formatTime(exchange.startedAtMs)}</Button>
               </TableCell>
-              <TableCell><Badge variant="outline">{exchange.label === "relay.chat" ? exchange.account ?? exchange.label : exchange.label}</Badge></TableCell>
+              <TableCell><Badge variant="outline">{["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account ?? exchange.label : exchange.label}</Badge></TableCell>
               <TableCell>
-                <TrafficModel provider={exchange.label === "relay.chat" ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
+                <TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
               </TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}

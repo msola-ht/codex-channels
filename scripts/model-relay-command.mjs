@@ -7,8 +7,9 @@ export const modelRelayUsage = `用法：codexc relay <命令>
   upgrade-limits                 显式备份并移除账户/Key 限流字段，不重启服务
   providers                      列出可用上游、模型和关闭思考能力
   callers                        列出调用方（不显示秘密或哈希）
-  issue --caller ID --key ID --provider clp-ID --model ID [--model ID] [--reasoning passthrough|off] [--name 名称]
+  issue --caller ID --key ID --provider ID --model ID [--model ID] [--reasoning passthrough|off] [--name 名称]
   edit --caller ID [--model ID ...] [--reasoning passthrough|off] [--name 名称]
+  rollback-providers --provider ID [--provider ID ...]  停服后备份并移除指定非 CLP 引用及其 Key，禁止恢复旧凭据
   rollback-names                 停服后备份并移除用途名称，保留当前凭据
   rollback-reasoning             停服后备份并移除思考策略，保留当前凭据
   rotate --caller ID             轮换并启用新秘密，保留身份
@@ -18,23 +19,26 @@ export const modelRelayUsage = `用法：codexc relay <命令>
 
 export function parseModelRelayCommand(args) {
   const [command, ...rest] = args;
-  const commands = ["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names"];
+  const commands = ["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names", "rollback-providers"];
   if (!commands.includes(command)) throw new Error(modelRelayUsage);
   const allowed = command === "issue" ? ["--caller", "--key", "--provider", "--model", "--reasoning", "--name"]
     : command === "edit" ? ["--caller", "--model", "--reasoning", "--name"]
+    : command === "rollback-providers" ? ["--provider"]
     : ["rotate", "disable"].includes(command) ? ["--caller"] : [];
   const options = { models: [] };
   for (let index = 0; index < rest.length; index += 2) {
     const flag = rest[index], value = rest[index + 1];
     if (!allowed.includes(flag) || !value || value.startsWith("--")) throw new Error(modelRelayUsage);
-    if (flag === "--model") options.models.push(value);
+    if (command === "rollback-providers" && flag === "--provider") (options.providers ??= []).push(value);
+    else if (flag === "--model") options.models.push(value);
     else {
       const key = flag.slice(2);
       if (options[key] !== undefined) throw new Error("Relay 参数不能重复");
       options[key] = value;
     }
   }
-  if (command === "issue" && (!options.caller || !options.key || !options.provider || !options.models.length)
+  if (command === "rollback-providers" && !options.providers?.length
+    || command === "issue" && (!options.caller || !options.key || !options.provider || !options.models.length)
     || ["rotate", "edit"].includes(command) && !options.caller
     || command === "edit" && !options.models.length && options.reasoning === undefined && options.name === undefined
     || options.reasoning !== undefined && !["passthrough", "off"].includes(options.reasoning)) throw new Error(modelRelayUsage);
@@ -42,7 +46,7 @@ export function parseModelRelayCommand(args) {
 }
 
 export async function runModelRelayCommand(args) {
-  if (!args.length || isCommandHelp(args, [[], ...["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
+  if (!args.length || isCommandHelp(args, [[], ...["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names", "rollback-providers"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
   const input = parseModelRelayCommand(args);
   console.log(JSON.stringify(await manageModelRelay(input), null, 2));
 }
