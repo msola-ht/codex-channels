@@ -33,6 +33,33 @@ async function fixture(reply: string | ((request: unknown) => string), status = 
 }
 const body = { model: "fixture", stream: true, input: [{ role: "user", content: "hello" }] };
 const frame = (delta: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`;
+it.each([200, 400])("lets upstream accept or reject preserved hosted declarations (%s)", async status => {
+  const { bridge, received } = await fixture(status === 200 ? frame({ content: "ok" }, "stop") + "data: [DONE]\n\n" : "private-upstream-error", status);
+  const tools = [{ type: "web_search", external_web_access: false }];
+  const tool_choice = { type: "web_search" };
+  const response = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify({ ...body, tools, tool_choice }) });
+  expect(response.status).toBe(status);
+  expect(received()).toMatchObject({ tools, tool_choice });
+  const output = await response.text();
+  expect(output).not.toContain("private-upstream-error");
+  expect(output).not.toContain("web_search_call");
+  if (status === 200) expect(output).toContain("response.completed");
+  else expect(output).not.toContain("response.completed");
+});
+it("sends a forced custom choice as a Chat function and restores its result", async () => {
+  const { bridge, received } = await fixture(frame({ tool_calls: [{ index: 0, id: "fixture-call", type: "function", function: { name: "files__patch", arguments: '{"input":"fixture patch"}' } }] }, "tool_calls") + "data: [DONE]\n\n");
+  const response = await fetch(`http://${bridge.address()}/responses`, { method: "POST", body: JSON.stringify({ ...body,
+    tools: [{ type: "namespace", name: "files", tools: [{ type: "custom", name: "patch", description: "Fixture", format: { type: "text" } }] }],
+    tool_choice: { type: "custom", namespace: "files", name: "patch" },
+  }) });
+  expect(response.status).toBe(200);
+  expect(received()).toMatchObject({ tools: [{ type: "function", function: { name: "files__patch" } }], tool_choice: { type: "function", function: { name: "files__patch" } } });
+  const output = await response.text();
+  expect(output).toContain('"type":"custom_tool_call"');
+  expect(output).toContain('"namespace":"files"');
+  expect(output).toContain('"input":"fixture patch"');
+  expect(output).toContain("response.completed");
+});
 it("converts split UTF-8 streams and lets the existing proxy measure cached usage", async () => {
   const { bridge, received } = await fixture(frame({ content: "你好" }, "stop") + 'data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":4,"prompt_tokens_details":{"cached_tokens":12}}}\n\ndata: [DONE]\n\n');
   const url = new URL(`http://${bridge.address()}`);

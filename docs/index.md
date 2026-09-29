@@ -502,6 +502,7 @@ Config 文案说明：协议索引中的“Codex 用户设置”“一键配置�
 ### CLP Chat 转换
 
 CLP 复用现有 `thread/start.modelProvider`、`model/list` 和 Provider 路由，不增加 RPC。
+未映射的顶层工具声明及其 `tool_choice` 原样交给 CLP，不注册本地执行身份；不宣称支持托管工具的执行或回程。声明形态依据锁定源码 `tools/src/tool_spec.rs`、`tool_spec_tests.rs` 和 `core/tests/suite/web_search.rs`；真实 App Server 合同覆盖显式启用搜索时的声明保留及客户端函数续跑，使用本地假上游，不替代 CLP 线上验收。
 账户用量由 [`cline-pass-account-adapter.ts`](../src/bootstrap/cline-pass-account-adapter.ts) 查询 Cline 官方套餐额度接口，复用账户快照和窗口展示；验证见 [`cline-pass-account-adapter.test.ts`](../tests/cline-pass-account-adapter.test.ts)。
 [`cline-pass-setup.mjs`](../scripts/cline-pass-setup.mjs) 按账户创建受管 Profile，注册表和默认账户复用共享校验与路由，模型目录和 Chat 代理在账户间共享；
 [`model-api`](../src/model-api/README.md) 独立转换模型消息（含 `text.format` 的 `json_schema` 到 Chat `response_format` 映射），

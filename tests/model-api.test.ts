@@ -96,7 +96,7 @@ describe("Responses / Chat conversion", () => {
     { ...request([]), previous_response_id: "secret" },
     request([{ type: "function_call_output", call_id: "unknown", output: "secret" }]),
     request([{ type: "reasoning", summary: [], encrypted_content: "secret" }]),
-    { ...request([]), tools: [{ type: "web_search", external_web_access: false }] },
+    { ...request([]), tools: [{ type: 42 }] },
     request([{ role: "user", content: [{ type: "input_image", image_url: "secret" }] }]),
   ])("rejects unsupported semantics without echoing content", body => {
     expect(() => responsesToChat(body)).toThrow();
@@ -111,6 +111,52 @@ describe("Responses / Chat conversion", () => {
     limited.push(chunk({ content: "partial" }, "length"));
     expect(limited.finish().at(-1)).toMatchObject({ type: "response.incomplete" });
   });
+});
+
+it.each([
+  { type: "web_search", external_web_access: false, filters: { allowed_domains: ["example.com"] } },
+  { type: "file_search", vector_store_ids: ["fixture"] },
+  { type: "tool_search", execution: "server" },
+  { type: "unknown_hosted_tool", options: { value: null } },
+])("preserves unmapped declarations and choices without granting execution identity: $type", tool => {
+  const fn = { type: "function", name: "local_tool", parameters: { type: "object" } };
+  const source = { ...request([]), tools: [tool, fn], tool_choice: { type: tool.type } };
+  const before = structuredClone(source);
+  const converted = responsesToChat(source);
+  expect(converted.request.tools).toEqual([tool, { type: "function", function: { name: "local_tool", parameters: { type: "object" } } }]);
+  expect(converted.request.tool_choice).toEqual(source.tool_choice);
+  expect([...converted.toolNames.keys()]).toEqual(["local_tool"]);
+  expect(source).toEqual(before);
+  for (const tool_choice of ["auto", "required", "none", { type: tool.type }]) {
+    const onlyHosted = responsesToChat({ ...request([]), tools: [tool], tool_choice });
+    expect(onlyHosted.request.tools).toEqual([tool]);
+    expect(onlyHosted.request.tool_choice).toEqual(tool_choice);
+    expect(onlyHosted.toolNames.size).toBe(0);
+    const response = new ChatToResponses("r", "fixture", onlyHosted.toolNames);
+    response.push(chunk({ tool_calls: [{ index: 0, id: "c", type: "function", function: { name: tool.type, arguments: "{}" } }] }, "tool_calls"));
+    expect(() => response.finish()).toThrow("Unknown Chat tool name");
+  }
+});
+
+it.each([undefined, "files", "namespace_".repeat(10)])("maps forced custom choice to its declared Chat identity (%s)", namespace => {
+  const tool = { type: "custom", name: "apply_patch", description: "Edit files", format: { type: "text" } };
+  const source = { ...request([]), tools: namespace ? [{ type: "namespace", name: namespace, tools: [tool] }] : [tool], tool_choice: { type: "custom", name: tool.name, ...(namespace ? { namespace } : {}) } };
+  const before = structuredClone(source);
+  const converted = responsesToChat(source);
+  const name = [...converted.toolNames.keys()][0]!;
+  expect(converted.request.tools).toMatchObject([{ type: "function", function: { name } }]);
+  expect(converted.request.tool_choice).toEqual({ type: "function", function: { name } });
+  const response = new ChatToResponses("r", "fixture", converted.toolNames);
+  response.push(chunk({ tool_calls: [{ index: 0, id: "c", type: "function", function: { name, arguments: '{"input":"patch"}' } }] }, "tool_calls"));
+  expect(response.finish().find(event => event.type === "response.output_item.done")?.item).toMatchObject({ type: "custom_tool_call", name: tool.name, input: "patch", ...(namespace ? { namespace } : {}) });
+  expect(source).toEqual(before);
+});
+
+it("maps forced client tool search while leaving server search choices upstream", () => {
+  for (const execution of ["client", "server"]) {
+    const converted = responsesToChat({ ...request([]), tools: [{ type: "tool_search", execution, description: "Find tools", parameters: { type: "object" } }], tool_choice: { type: "tool_search" } });
+    expect(converted.request.tool_choice).toEqual(execution === "client" ? { type: "function", function: { name: "tool_search" } } : { type: "tool_search" });
+  }
 });
 
 it("restores function namespaces and rejects ambiguous flattened names", () => {
@@ -227,7 +273,6 @@ it("uses the Codex default for null tool search limits in both directions", () =
 });
 
 it.each([
-  { ...request([]), tools: [{ type: "tool_search", execution: "server", description: "", parameters: {} }] },
   { ...request([]), tools: [{ type: "namespace", name: "files", tools: [{ type: "tool_search", execution: "client", description: "", parameters: {} }] }] },
   { ...request([]), tools: [{ type: "custom", name: "patch", description: "", format: { type: "grammar", syntax: "lark" } }] },
   request([{ type: "tool_search_call", call_id: "s", execution: "server", arguments: { query: "x" } }]),

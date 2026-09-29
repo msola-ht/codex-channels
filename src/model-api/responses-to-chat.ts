@@ -206,6 +206,9 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   const tools: JsonObject[] = [];
   if (source.tools !== undefined) tools.push(...array(source.tools).flatMap(raw => {
     const tool = object(raw);
+    // Unmapped top-level declarations belong to the upstream. They do not
+    // acquire a local execution identity or become client-side functions.
+    if (!["function", "custom", "namespace"].includes(string(tool.type)) && !(tool.type === "tool_search" && tool.execution === "client")) return [tool];
     return tool.type === "namespace"
       ? array(tool.tools).map(nested => convertTool(nested, string(tool.name)))
       : [convertTool(tool)];
@@ -241,8 +244,14 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     if (typeof source.tool_choice === "string" && ["auto", "none", "required"].includes(source.tool_choice)) result.tool_choice = source.tool_choice;
     else {
       const choice = object(source.tool_choice);
-      if (choice.type !== "function") throw new ModelConversionError("Unsupported tool choice");
-      result.tool_choice = { type: "function", function: { name: chatToolName(string(choice.name), choice.namespace == null ? undefined : string(choice.namespace)) } };
+      const type = string(choice.type);
+      if (type === "function" || type === "custom") {
+        result.tool_choice = { type: "function", function: { name: chatToolName(string(choice.name), choice.namespace == null ? undefined : string(choice.namespace)) } };
+      } else if (type === "tool_search" && toolNames.get(toolSearchName)?.kind === "tool_search") {
+        result.tool_choice = { type: "function", function: { name: toolSearchName } };
+      } else {
+        result.tool_choice = choice;
+      }
     }
   }
   if (source.parallel_tool_calls !== undefined) {

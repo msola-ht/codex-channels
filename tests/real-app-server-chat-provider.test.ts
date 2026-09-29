@@ -23,11 +23,12 @@ contract.each([
   { emptyOpening: false, effort: "low", useDefault: false },
   { emptyOpening: false, effort: "max", useDefault: false },
   { emptyOpening: false, effort: "high", useDefault: true, fullReasoning: true },
-])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError, full reasoning: $fullReasoning)", async ({ emptyOpening, effort, useDefault, incomplete, streamError, fullReasoning }) => {
+  { emptyOpening: false, effort: "high", useDefault: true, hostedSearch: true },
+])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError, full reasoning: $fullReasoning, hosted search: $hostedSearch)", async ({ emptyOpening, effort, useDefault, incomplete, streamError, fullReasoning, hostedSearch }) => {
   const root = mkdtempSync(join(tmpdir(), "chat-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
   const reasoningField = fullReasoning ? "reasoning_content" : "reasoning";
-  const bodies: Array<{ tools: Array<{ function: { name: string } }>; messages: Array<{ role: string; content?: string; tool_call_id?: string }> }> = [];
+  const bodies: Array<{ tools: Array<{ type: string; function?: { name: string } }>; messages: Array<{ role: string; content?: string; tool_call_id?: string }> }> = [];
   const backend = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -35,7 +36,7 @@ contract.each([
       expect(request.url).toBe("/v1/chat/completions");
       bodies.push(JSON.parse(Buffer.concat(chunks).toString()) as typeof bodies[number]);
       const first = bodies.length === 1;
-      const delta = first ? { tool_calls: [{ index: 0, id: "fixture-call", type: "function", function: { name: bodies.at(-1)!.tools.find(tool => tool.function.name.endsWith("schedule_task"))!.function.name, arguments: JSON.stringify({ action: "list" }) } }] } : { content: "Chat tool round trip complete" };
+      const delta = first ? { tool_calls: [{ index: 0, id: "fixture-call", type: "function", function: { name: bodies.at(-1)!.tools.find(tool => tool.function?.name.endsWith("schedule_task"))!.function!.name, arguments: JSON.stringify({ action: "list" }) } }] } : { content: "Chat tool round trip complete" };
       response.writeHead(200, { "content-type": "text/event-stream" });
       const send = (delta: unknown, finish_reason: string | null = null, usage?: unknown) => response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) })}\n\n`);
       if (emptyOpening) send({ role: "assistant", content: "" });
@@ -86,13 +87,14 @@ contract.each([
       return { contentItems: [{ type: "inputText", text: "Gateway scheduled tasks: empty" }], success: true };
     });
     await rpc.connect();
-    const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "clp-test", sandbox: "read-only", approvalPolicy: "never", ephemeral: true, dynamicTools: [{ type: "function", name: "schedule_task", description: "List fixture tasks", inputSchema: { type: "object", properties: { action: { type: "string" } }, required: ["action"], additionalProperties: false } }] } });
+    const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "clp-test", sandbox: "read-only", approvalPolicy: "never", ephemeral: true, ...(hostedSearch ? { config: { web_search: "live" } } : {}), dynamicTools: [{ type: "function", name: "schedule_task", description: "List fixture tasks", inputSchema: { type: "object", properties: { action: { type: "string" } }, required: ["action"], additionalProperties: false } }] } });
     const { turn } = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, ...(!useDefault ? { effort } : {}), input: [{ type: "text", text: "List scheduled tasks", text_elements: [] }, { type: "image", url: imageUrl }] } });
     await waitFor(() => turns.some(entry => entry.id === turn.id), 15000);
     expect(turns).toContainEqual(expect.objectContaining({ id: turn.id, status: incomplete || streamError ? "failed" : "completed" }));
     expect(bodies).toHaveLength(2);
     for (const body of bodies) {
       expect(body).toMatchObject({ reasoning: { effort } });
+      expect(body.tools.filter(tool => tool.type !== "function")).toEqual(hostedSearch ? [{ type: "web_search", external_web_access: true }] : []);
       expect(body.messages).toContainEqual(expect.objectContaining({ role: "user", content: expect.arrayContaining([
         { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
       ]) }));
