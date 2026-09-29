@@ -15,6 +15,7 @@ export class DeliveryReceipt {
   private confirmationRequired = false;
   private confirmed = false;
   private failure: unknown;
+  private failed = false;
   private contentIncomplete = false;
   private completeContentConfirmed = false;
   private resolve!: () => void;
@@ -26,8 +27,7 @@ export class DeliveryReceipt {
     readonly transient = false) {
     void this.done.catch(() => {});
     const abort = (): void => {
-      this.failure ??= new Error("输出投递已取消");
-      this.controller.abort();
+      this.fail(new Error("输出投递已取消"));
       if (!this.transient) this.reject(this.failure);
     };
     if (signal.aborted) abort();
@@ -49,7 +49,10 @@ export class DeliveryReceipt {
   /** Only a confirmed artifact containing the original full result can satisfy this. */
   confirmCompleteContent(): void { this.completeContentConfirmed = true; }
   needsCompleteContent(): boolean { return this.contentIncomplete && !this.completeContentConfirmed; }
-  fail(error: unknown): void { this.failure ??= error; this.controller.abort(); }
+  fail(error: unknown): void {
+    if (!this.failed) { this.failed = true; this.failure = error; }
+    this.controller.abort();
+  }
   async record(value: DeliveryCheckpoint): Promise<void> {
     try {
       await this.checkpoint(value);
@@ -59,7 +62,7 @@ export class DeliveryReceipt {
   }
   release(): void {
     if (--this.pending !== 0) return;
-    if (this.failure) this.reject(this.failure);
+    if (this.failed) this.reject(this.failure);
     else if (!this.transient && this.needsCompleteContent()) this.reject(new Error("可靠结果内容未完整确认"));
     else if (this.confirmationRequired && !this.confirmed) this.reject(new Error("可靠正文没有平台送达确认"));
     else if (!this.retained && !this.transient) this.reject(new Error("可靠输出未产生投递操作"));

@@ -87,6 +87,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - 首次连接设置有限超时；失败和超时只暴露稳定、脱敏的本地错误。
 - 重连状态留在平台边界；停止操作幂等，并能终止尚未完成的启动。
 - SDK 原始日志不进入项目 Logger，避免平台凭据、URL 或响应正文泄漏。
+- 消息 API 诊断仅补充校验后的 `httpStatus`、`platformCode` 和 `platformRequestId`；SDK 返回非零业务码时按失败记录，即使附带消息 ID 也不能确认送达。未返回的 HTTP 状态不推断为 200，追踪 ID 仅接受有界十六进制标识，不记录原始响应或请求头。
 - Surface 只向项目 Logger 记录连接中、就绪、重连、恢复和停止等稳定状态，不附带 SDK 错误正文。
 - 消息路径注册 `im.message.receive_v1`，机器人菜单注册 `application.bot.menu_v6`；回调只同步
   完成裁剪与有界分流，不能在 SDK Reader 中等待业务或平台网络请求。

@@ -66,3 +66,27 @@ it("cancels a blocked approval safely and prevents the old deadline from cancell
     expect(native.resolved).toHaveBeenCalledOnce();
   } finally { port.cancelAll(); vi.useRealTimers(); }
 });
+
+it("does not present an approval after an idle storage Worker exits", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "delivery-idle-failure-"));
+  const fault = vi.fn();
+  const output = new PersistentSurfaceOutput({ directory,
+    workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
+    owner: () => "owner", authorized: () => true, accounts: () => [], deliver: async () => {}, fault,
+  });
+  const native = { request: vi.fn(async () => ({ type: "approval" as const, approved: true as const, scope: "once" as const })) };
+  const port = new PersistentInteractionPort(native, (conversation, signal) => output.waitForIdle(conversation, signal));
+  try {
+    await output.start();
+    const journal = Reflect.get(output, "journal") as import("../src/delivery/index.js").DeliveryJournal;
+    const worker = Reflect.get(journal, "worker") as import("node:worker_threads").Worker;
+    await worker.terminate();
+    expect(fault).toHaveBeenCalledExactlyOnceWith("storage");
+    await expect(port.request(target, { ...request, expiresInMs: 25 })).resolves.toEqual({ type: "approval", approved: false });
+    expect(native.request).not.toHaveBeenCalled();
+    expect(Reflect.get(output, "idleWaiters").size).toBe(0);
+  } finally {
+    port.cancelAll(); await output.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

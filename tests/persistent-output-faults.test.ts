@@ -235,7 +235,7 @@ it("bounds persistent backlog under sustained new conversations and a stalled pl
       }
     }
     const missingRejected = !coordinator.hasOutstanding('chat-8191');
-    const paused = !coordinator.acceptsExecution('a0', 'c0');
+    const paused = !coordinator.acceptsExecution('a0');
     const closeStart = performance.now();
     await coordinator.close();
     clearInterval(timer);

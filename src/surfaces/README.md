@@ -5,7 +5,7 @@
 `index.ts` 是 Gateway 装配各 Surface 的主公开入口。
 
 `delivery-diagnostics/index.ts` 是离线投递诊断的窄公开入口，仅复用载荷解码和屏障分类，不加载平台 SDK 或数据库实现。
-`persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，限定未知辅助通知可解除顺序屏障，并将必要图片纳入同一有界快照；
+`persistent-output.ts` 分类可恢复的终态输出与独立生命周期通知，限定未知辅助通知及白名单内成功过程通知可解除顺序屏障，失败、被拒绝和媒体结果仍保留屏障，并将必要图片纳入同一有界快照；
 `delivery-receipt.ts` 关联一次可靠投递生成的排队操作和平台检查点。`SurfaceOutputPort.deliver`
 等待实际操作结算，Bootstrap 才能确认持久记录；TG/飞书可靠正文还要求存在平台成功检查点，排队终态持有正文引用，独立于断线清理的临时流缓存；正文截断会要求完整原文附件的确认，缺少完整性依据则拒绝确认。`snapshot-delivery.ts` 将状态展示的失效信号与排队操作关联；`SurfaceOutputPort.deliverSnapshot`
 允许按展示规则不产生消息，等待实际状态操作结束，并在平台调用前复核归属。普通 `handle` 继续用于中间输出。
@@ -110,7 +110,7 @@ Telegram 和飞书在交互消息创建成功或失败时
 实现位于 `conversation-delivery-queue.ts`，并通过本目录 `index.ts` 公开。`enqueue` 可关联取消信号；已接受任务通过 `settled` 在移出队列或实际执行结束时结算一次，调用方据此释放上游载荷预算。取消在途任务不会提前结算。
 `diagnostics.ts` 提供 Surface 内部共用的脱敏阶段计时与异步关联上下文，只携带账号、会话、
 Thread/Turn/Item、事件类型及输入/投递标识；输出队列、输入处理和平台调用复用该上下文，
-不保留事件正文。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
+不保留事件正文。公开的 `withPersistentDeliveryDiagnostics` 供组合根注入持久记录 ID，各层通过 `persistentDeliveryId` 关联同一记录，单次操作的 `deliveryId` 独立保留。终态相关任务在 `info` 留痕，任务成功与正文投递成功分别记录，慢操作与失败在 `warn` 留痕；阶段明细、合并与取消
 使用 `debug`。诊断不修改平台调用、重试或排队顺序，日志口径与排障步骤见
 [`渠道展示与调试模式`](../../docs/display.md#调试模式)。
 `surface-input-coalescer.ts` 是已授权 Surface 输入门面；`surface-input-batcher.ts` 只合并 Surface

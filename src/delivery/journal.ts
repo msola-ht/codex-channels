@@ -11,7 +11,10 @@ export class DeliveryJournal {
   private closePromise: Promise<void> | undefined;
   readonly ready: Promise<void>;
 
-  constructor(directory: string, options: { limits?: DeliveryLimits; workerUrl?: URL } = {}) {
+  /** Liveness only; callers must still await ready before accepting work. */
+  get available(): boolean { return !this.failed && !this.closing; }
+
+  constructor(directory: string, private readonly options: { limits?: DeliveryLimits; workerUrl?: URL; onFailure?(): void } = {}) {
     this.worker = new Worker(options.workerUrl ?? new URL("./worker.js", import.meta.url), { workerData: { directory, limits: options.limits } });
     this.ready = new Promise<void>((resolve, reject) => {
       this.pending.set(0, { resolve: () => resolve(), reject, bytes: 0, timer: this.deadline() });
@@ -85,6 +88,7 @@ export class DeliveryJournal {
   }
 
   private fail(): void {
+    const notify = !this.failed && !this.closing;
     this.failed = true;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
@@ -92,6 +96,7 @@ export class DeliveryJournal {
     }
     this.pending.clear();
     this.bytes = 0;
+    if (notify) this.options.onFailure?.();
   }
 
   private deadline(): NodeJS.Timeout {

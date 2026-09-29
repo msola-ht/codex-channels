@@ -63,6 +63,16 @@ import {
 import { parseSlashCommand } from "../src/surfaces/slash-command.js";
 
 describe("shared surface copy contract", () => {
+  it("distinguishes delivery capacity and availability without blaming old message failures", () => {
+    for (const surface of ["Telegram", "飞书", "微信"] as const) {
+      for (const [reason, expected] of [["global-capacity", "全局容量"], ["account-capacity", "渠道账号"], ["unavailable", "存储尚未就绪"]] as const) {
+        const text = formatSurfaceUserFacingError(new UserFacingError("delivery.overloaded", "PRIVATE ERROR", { reason }), surface);
+        expect(text).toContain(expected);
+        expect(text).not.toContain("PRIVATE");
+        expect(text).not.toContain("当前会话投递受阻");
+      }
+    }
+  });
   it("explains occupied and automatically recovered Threads without exposing upstream errors", () => {
     expect(formatThreadAvailability("occupied", "thread-1234567890"))
       .toBe(

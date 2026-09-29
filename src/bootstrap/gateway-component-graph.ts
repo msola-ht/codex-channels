@@ -577,9 +577,8 @@ export abstract class GatewayComponentGraph {
     });
     const execution = withOutputExecutionAdmission(this.codex, (threadId) => {
       const target = this.bindings.getByThread(threadId)?.target;
-      if (!target || !this.surfaceManager.acceptsExecution(target)) throw new UserFacingError(
-        "delivery.overloaded", "当前会话投递受阻、投递箱接近容量上限或不可用，已暂停新执行；请先处理未确认投递",
-      );
+      const reason = target ? this.surfaceManager.executionBlockReason(target) : "unavailable";
+      if (reason) throw new UserFacingError("delivery.overloaded", "投递存储容量不足或不可用，已暂停新执行", { reason });
     });
     const service = new ConversationService(
       execution,
@@ -895,8 +894,8 @@ export abstract class GatewayComponentGraph {
           workerUrl: new URL(import.meta.url.endsWith(".ts") ? "../../dist/delivery/worker.js" : "../delivery/worker.js", import.meta.url),
           owner: (event) => this.outputOwner(event),
           authorized: (event, owner) => this.outputAuthorized(event, owner),
-          fault: (code, account) => {
-            logger.error({ code, account }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
+          fault: (code, account, persistentDeliveryId) => {
+            logger.error({ code, account, persistentDeliveryId }, "可靠输出未确认或无法持久接收；已接收结果保留，请检查投递箱");
             if (code === "delivery-uncertain" || code === "authorization-changed") return;
             if (account && code !== "storage" && code !== "capacity" && code !== "mailbox-full") this.surfaceManager.suspendPersistentAccount(account);
             else void this.requestStop().catch(() => logger.error("可靠投递故障后的 Gateway 清理失败"));

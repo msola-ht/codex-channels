@@ -23,7 +23,8 @@ import {
 } from "./message-content.js";
 import { extractFeishuQuotedText } from "./inbound-content.js";
 import type { FeishuMessagePort } from "./outbox-message-port.js";
-import { FeishuMessageError } from "./message-error.js";
+import { FeishuMessageError, feishuApiDiagnostics } from "./message-error.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 export { FeishuMessageError, type FeishuMessageErrorCode } from "./message-error.js";
 import {
   abortableSleep,
@@ -275,10 +276,17 @@ export class FeishuMessageClient implements
     return withSurfaceDiagnosticContext({ ...surfaceDiagnosticContext(), component: "Feishu" },
       () => observeSurfaceStage(this.diagnosticLogger, {
         stage: "api", operation,
+        errorMetadata: (error) => ({ ...surfaceErrorMetadata(error), ...feishuApiDiagnostics(error) }),
         ...(signal === undefined ? {} : { signal }),
-      }, () => {
+      }, async () => {
         if (signal?.aborted) throw createAbortError();
-        return withTimeout(request(), timeoutMs, timeoutError, signal);
+        const response = await withTimeout(request(), timeoutMs, timeoutError, signal);
+        if (response !== null && typeof response === "object" && "code" in response
+          && typeof response.code === "number" && response.code !== 0) {
+          throw new FeishuMessageError(isFeishuRateLimitCode(response.code) ? "rate-limited" : "invalid-response",
+            "飞书 API 返回业务错误", feishuApiDiagnostics({ response: { data: response } }));
+        }
+        return response;
       }));
   }
 
@@ -617,7 +625,7 @@ export class FeishuMessageClient implements
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const response = await this.observeRequest("patchMessage",
+      await this.observeRequest("patchMessage",
         () => this.sdkClient.patchMessage({
           path: {
             message_id: messageId,
@@ -632,12 +640,6 @@ export class FeishuMessageClient implements
           "飞书消息更新超时",
         ), signal,
       );
-      if (response.code !== undefined && response.code !== 0) {
-        throw new FeishuMessageError(
-          "invalid-response",
-          "飞书消息更新响应无效",
-        );
-      }
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
@@ -665,7 +667,7 @@ export class FeishuMessageClient implements
     signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const response = await this.observeRequest(operationName,
+      await this.observeRequest(operationName,
         operation,
         this.sendTimeoutMs,
         new FeishuMessageError(
@@ -673,18 +675,6 @@ export class FeishuMessageClient implements
           `${label}超时`,
         ), signal,
       );
-      if (response.code !== undefined && response.code !== 0) {
-        if (isFeishuRateLimitCode(response.code)) {
-          throw new FeishuMessageError(
-            "rate-limited",
-            `${label}请求受限`,
-          );
-        }
-        throw new FeishuMessageError(
-          "invalid-response",
-          `${label}响应无效`,
-        );
-      }
     } catch (error) {
       if (isAbortError(error)) {
         throw error;
@@ -839,12 +829,6 @@ export class FeishuMessageClient implements
           "飞书引用消息读取超时",
         ),
       );
-      if (response.code !== undefined && response.code !== 0) {
-        throw new FeishuMessageError(
-          "invalid-response",
-          "飞书引用消息响应无效",
-        );
-      }
       const items = response.data?.items;
       if (!Array.isArray(items) || items.length === 0) {
         return undefined;
@@ -933,8 +917,7 @@ export class FeishuMessageClient implements
       );
       const candidate = response.data?.card_id;
       if (
-        (response.code !== undefined && response.code !== 0)
-        || typeof candidate !== "string"
+        typeof candidate !== "string"
         || candidate.length === 0
         || candidate.length > 20
       ) {
@@ -988,8 +971,7 @@ export class FeishuMessageClient implements
       );
       const candidate = response.data?.card_id;
       if (
-        (response.code !== undefined && response.code !== 0)
-        || typeof candidate !== "string"
+        typeof candidate !== "string"
         || candidate.length === 0
         || candidate.length > 20
       ) {
@@ -1072,6 +1054,7 @@ export class FeishuMessageClient implements
       throw new FeishuMessageError(
         "send-failed",
         "飞书回复消息发送失败",
+        feishuApiDiagnostics(error),
       );
     }
   }
@@ -1126,6 +1109,7 @@ export class FeishuMessageClient implements
       throw new FeishuMessageError(
         "send-failed",
         "飞书消息发送失败",
+        feishuApiDiagnostics(error),
       );
     }
   }

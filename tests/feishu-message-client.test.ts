@@ -1,3 +1,5 @@
+import pino from "pino";
+import { feishuApiDiagnostics } from "../src/surfaces/feishu/message-error.js";
 import { Readable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +17,43 @@ afterEach(() => {
 });
 
 describe("FeishuMessageClient", () => {
+  it.each(["http", "business"])("logs safe %s diagnostics without retaining SDK bodies or secrets", async (kind) => {
+    const logs: Array<Record<string, unknown>> = [];
+    const logger = pino({ level: "warn" }, { write(line) { logs.push(JSON.parse(line)); } });
+    const logId = "20260928210111ABCDEF0123456789AB";
+    const body = { code: 230001, msg: "PRIVATE RESPONSE", error: { log_id: logId },
+      data: { message_id: "must-not-confirm" } };
+    const createMessage = vi.fn(async () => {
+      if (kind === "business") return body;
+      throw Object.assign(new Error("PRIVATE ERROR"), { code: "ERR_BAD_REQUEST",
+        config: { headers: { Authorization: "SECRET TOKEN" } },
+        response: { status: 400, data: body, headers: { "set-cookie": "SECRET COOKIE" } } });
+    });
+    const client = new FeishuMessageClient(
+      { appId: "cli_0123456789abcdef", appSecret: "secret", logger },
+      { sendTimeoutMs: 1000, createSdkClient: () => ({ createMessage,
+        patchMessage: successfulPatch, downloadResource: successfulDownload }) },
+    );
+    await expect(client.sendText("oc_chat", "PRIVATE INPUT")).rejects.toMatchObject({
+      code: kind === "http" ? "send-failed" : "invalid-response",
+      diagnostics: { platformCode: 230001, platformRequestId: logId },
+    });
+    expect(createMessage).toHaveBeenCalledTimes(1);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ stage: "api", operation: "createMessage", outcome: "failed",
+      platformCode: 230001, platformRequestId: logId, ...(kind === "http" ? { httpStatus: 400 } : {}) });
+    if (kind === "business") expect(logs[0]).not.toHaveProperty("httpStatus");
+    expect(JSON.stringify(logs)).not.toMatch(/PRIVATE|SECRET|must-not-confirm/);
+  });
+
+  it("rejects malformed diagnostics and does not infer a platform rejection from a network code", () => {
+    expect(feishuApiDiagnostics({ code: "ERR_BAD_REQUEST" })).toEqual({});
+    expect(feishuApiDiagnostics({ response: { status: "400", data: { code: "230001", error: { log_id: "Bearer secret" } } } })).toEqual({});
+    expect(feishuApiDiagnostics({ response: { status: 503, data: { code: -1 }, headers: {
+      "x-tt-logid": "20260928210111ABCDEF0123456789AB", "authorization": "secret" } } })).toEqual({
+      httpStatus: 503, platformRequestId: "20260928210111ABCDEF0123456789AB" });
+  });
+
   it.each(["before", "between"])("checks cancellation %s the resource and message requests", async (stage) => {
     const controller = new AbortController();
     const createMessage = vi.fn(async () => ({ data: { message_id: "om_card" } }));
@@ -751,7 +790,8 @@ describe("FeishuMessageClient", () => {
       client.updateStreamingCard("7355372766134157313", "正文", 1),
     ).rejects.toEqual(new FeishuMessageError(
       "invalid-response",
-      "飞书流式卡片更新响应无效",
+      "飞书 API 返回业务错误",
+      { platformCode: 99999 },
     ));
   });
 
@@ -782,7 +822,8 @@ describe("FeishuMessageClient", () => {
       client.updateStreamingCard("7355372766134157313", "正文", 1),
     ).rejects.toEqual(new FeishuMessageError(
       "rate-limited",
-      "飞书流式卡片更新请求受限",
+      "飞书 API 返回业务错误",
+      { platformCode: 99991400 },
     ));
   });
 
@@ -938,7 +979,8 @@ describe("FeishuMessageClient", () => {
       client.updateCard("om_status", approvalCard()),
     ).rejects.toEqual(new FeishuMessageError(
       "invalid-response",
-      "飞书消息更新响应无效",
+      "飞书 API 返回业务错误",
+      { platformCode: 999 },
     ));
     expect(patchMessage).toHaveBeenCalledOnce();
   });

@@ -5,6 +5,7 @@ import {
   type OutputEvent,
 } from "../src/conversation-core/index.js";
 import {
+  mayReleaseUncertainOutputBarrier,
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
@@ -369,5 +370,28 @@ it.each(["feishu", "telegram", "weixin"] as const)("protects compaction start an
     expect(resolveSurfaceDelivery(surface, event)).toEqual({ disposition: "deliver", critical: true });
     expect(isCriticalOutputEvent(event)).toBe(true);
     expect(isSheddableBacklogEvent(event)).toBe(false);
+  }
+});
+
+it("releases only successful process notices and keeps errors, media and unknown operations fenced", () => {
+  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice", globalIdle: true })).toBe(true);
+  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice" })).toBe(false);
+  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice", globalIdle: true }, true)).toBe(false);
+  for (const kind of ["command", "fileChange", "mcpTool", "dynamicTool", "webSearch", "imageView", "sleep", "plan"] as const) {
+    for (const status of ["completed", "failed", "declined", "running"] as const) {
+      const event: OutputEvent = { type: "operation.updated", target, threadId: "t", turnId: "u", operation: { itemId: "i", kind, status } };
+      expect(mayReleaseUncertainOutputBarrier(event)).toBe(status === "completed");
+      expect(mayReleaseUncertainOutputBarrier(event, true)).toBe(false);
+      expect(mayReleaseUncertainOutputBarrier({ ...event, operation: { ...event.operation, imagePath: "/private/result.png" } })).toBe(false);
+    }
+  }
+  expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
+    operation: { itemId: "i", kind: "command", status: "completed", exitCode: 1 } })).toBe(false);
+  for (const kind of ["imageGeneration", "subagent", "reviewMode", "contextCompaction"] as const) {
+    expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
+      operation: { itemId: "i", kind, status: "completed" } })).toBe(false);
+  }
+  for (const type of ["text.completed", "turn.completed", "subagent.completed", "mcp.oauth.completed"] as const) {
+    expect(mayReleaseUncertainOutputBarrier(eventsByType[type])).toBe(false);
   }
 });

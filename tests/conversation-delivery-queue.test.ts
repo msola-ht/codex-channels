@@ -473,3 +473,25 @@ it("replaces a waiting key even at the shared hard limit without admitting anoth
     expect(calls).toEqual(["latest"]);
   } finally { release(); await delivery.close(); }
 });
+
+it("settles an ordered waiter when its owning receipt is cancelled before execution", async () => {
+  const { DeliveryReceipt } = await import("../src/surfaces/delivery-receipt.js");
+  const queue = new ConversationDeliveryQueue(logger, { component: "fixture" });
+  const controller = new AbortController();
+  const receipt = new DeliveryReceipt(async () => {}, controller.signal);
+  let release!: () => void;
+  queue.enqueue("chat", () => new Promise<void>((resolve) => { release = resolve; }), true);
+  await settle();
+  const send = vi.fn(async () => {});
+  const ordered = receipt.run(() => queue.runOrdered("chat", send));
+  const settled = vi.fn();
+  void ordered.then(() => settled("success"), () => settled("cancelled"));
+  receipt.release();
+  try {
+    controller.abort();
+    release();
+    await queue.waitForIdle();
+    expect(send).not.toHaveBeenCalled();
+    expect(settled).toHaveBeenCalledWith("cancelled");
+  } finally { release(); await queue.close(); }
+});

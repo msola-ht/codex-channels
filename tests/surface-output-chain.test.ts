@@ -9,6 +9,8 @@ import { conversationTargetKey, surfaceAccountKey, type OutputEvent, type Conver
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
 import type { DeliveryRecord } from "../src/delivery/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
+import { withOutputExecutionAdmission } from "../src/bootstrap/output-execution-admission.js";
+import type { TurnExecutionPort, ThreadQueuePort } from "../src/application/index.js";
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
 import { GatewayComponentGraph } from "../src/bootstrap/gateway-component-graph.js";
 import { FeishuOutbox } from "../src/surfaces/feishu/outbox.js";
@@ -625,7 +627,11 @@ it("does not let a failed initial plan suppress a later live plan update", async
   } finally { await f.close(); }
 });
 
+const successfulProcessKinds = ["command", "fileChange", "mcpTool", "dynamicTool", "webSearch", "imageView", "sleep", "plan"] as const;
 const auxiliaryNotices: OutputEvent[] = [
+  ...successfulProcessKinds.map((kind): OutputEvent => ({ ...base, type: "operation.updated",
+    operation: { itemId: "process", kind, status: "completed" } })),
+  { target, type: "warning", message: "idle notice", globalIdle: true },
   { ...base, type: "connection.lost", message: "lost" },
   { ...base, type: "connection.restored", message: "restored" },
   { ...base, type: "turn.started" },
@@ -671,33 +677,36 @@ it.each(auxiliaryNotices.flatMap((event) => (["telegram", "feishu"] as const).ma
   finally { retained.close(); }
 });
 
-it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
+it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compaction-completed", "compaction-failed", "command-completed", "command-failed", "command-declined", "image-completed", "command-image"] as const)("rebuilds only eligible connection barriers after an interrupted %s send", async (kind) => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-recovered-barrier-"));
   directories.push(directory);
   const store = new SqliteDeliveryJournal(directory);
   const event: OutputEvent = kind === "turn-completed" ? { ...base, type: "turn.completed", status: "completed" }
     : kind === "compaction-completed" || kind === "compaction-failed"
     ? { ...base, type: "operation.updated", operation: { itemId: "compact", kind: "contextCompaction", status: kind === "compaction-failed" ? "failed" : "completed" } }
+    : kind.startsWith("command-") || kind === "image-completed"
+    ? { ...base, type: "operation.updated", operation: { itemId: "process", kind: kind === "image-completed" ? "imageGeneration" : "command",
+      status: kind === "command-failed" ? "failed" : kind === "command-declined" ? "declined" : "completed" } }
     : kind === "answer" ? answer : kind === "warning"
     ? { target, type: "warning", message: "warning" }
     : { target, threadId: "thread", type: "connection.lost", message: "lost" };
   try {
     for (const [id, value] of [["first", event], ["next", answer]] as const) {
       store.execute({ type: "submit", value: { id, account: surfaceAccountKey(target.surface, target.accountId),
-        conversation: conversationTargetKey(target), payload: JSON.stringify({ version: 1, owner: "actor", event: value }) } });
+        conversation: conversationTargetKey(target), payload: JSON.stringify({ version: 1, owner: "actor", event: value, ...(kind === "command-image" && id === "first" ? { image: { base64: "AA==", format: "png" } } : {}) }) } });
     }
     store.execute({ type: "state", id: "first", from: "pending", to: kind === "blocked" ? "blocked" : "sending" });
     if (kind !== "blocked") store.execute({ type: "checkpoint", id: "first", value: { operation: "send", state: "started" } });
   } finally { store.close(); }
   const f = await fixture(false, "telegram", false, false, directory);
   try {
-    if (kind === "connection") {
+    if (kind === "connection" || kind === "blocked" || kind === "command-completed") {
       await f.manager.waitForPersistentOutput(target, AbortSignal.timeout(3000));
       expect(f.sent).toEqual(["full answer"]);
     } else {
       await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
       expect(f.sent).toEqual([]);
-      expect(f.manager.acceptsExecution(target)).toBe(false);
+      expect(f.manager.acceptsExecution(target)).toBe(true);
       const other = { ...target, conversationId: "other-chat" };
       expect(f.manager.acceptsExecution(other)).toBe(true);
       f.output.publish({ ...answer, target: other });
@@ -706,12 +715,12 @@ it.each(["connection", "answer", "warning", "blocked", "turn-completed", "compac
     }
   } finally { await f.close(); }
   const retained = new SqliteDeliveryJournal(directory);
-  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: kind === "connection" ? 1 : 2 }); }
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: kind === "connection" || kind === "blocked" || kind === "command-completed" ? 1 : 2 }); }
   finally { retained.close(); }
 });
 
 
-it.each(["unknown", "authorization"] as const)("immediately closes only the affected conversation admission on a live %s failure", async (failure) => {
+it.each(["unknown", "authorization"] as const)("keeps execution available while preserving delivery barriers on a live %s failure", async (failure) => {
   const f = await fixture(true, "telegram", false, failure === "unknown");
   try {
     f.output.publish({ ...base, type: "turn.started" });
@@ -720,13 +729,22 @@ it.each(["unknown", "authorization"] as const)("immediately closes only the affe
     expect(f.manager.acceptsExecution(target)).toBe(true); // Normal pending/sending is allowed.
     if (failure === "authorization") f.revoke();
     f.release();
-    await vi.waitFor(() => expect(f.manager.acceptsExecution(target)).toBe(false));
+    await vi.waitFor(() => expect(f.faults).toContain(failure === "unknown" ? "delivery-uncertain" : "authorization-changed"));
+    expect(f.manager.acceptsExecution(target)).toBe(true);
     expect(f.manager.acceptsExecution({ ...target, conversationId: "other" })).toBe(true);
-    expect(f.faults).toContain(failure === "unknown" ? "delivery-uncertain" : "authorization-changed");
+    const start = vi.fn(async () => ({ turnId: "next" }));
+    const enqueue = vi.fn(async () => undefined);
+    const port = withOutputExecutionAdmission({ startTurn: start, addQueueItem: enqueue } as unknown as TurnExecutionPort & ThreadQueuePort,
+      () => { if (!f.manager.acceptsExecution(target)) throw new Error("capacity unavailable"); });
+    await port.startTurn("thread", [], "new-input", "/workspace");
+    await port.addQueueItem("thread", "next-input", "new-message");
+    expect(start).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledOnce();
+    await expect(f.manager.waitForPersistentOutput(target, AbortSignal.timeout(100))).rejects.toThrow();
   } finally { await f.close(); }
 });
 
-it("reopens execution only after every manual barrier is resolved offline and recovery succeeds", async () => {
+it("keeps execution available before and after offline delivery recovery", async () => {
   const directory = mkdtempSync(join(tmpdir(), "codexc-admission-recovery-"));
   directories.push(directory);
   let store = new SqliteDeliveryJournal(directory);
@@ -739,7 +757,7 @@ it("reopens execution only after every manual barrier is resolved offline and re
     store.execute({ type: "resolve", id: "first", action: "confirm" });
   } finally { store.close(); }
   const blocked = await fixture(false, "telegram", false, false, directory);
-  try { expect(blocked.manager.acceptsExecution(target)).toBe(false); }
+  try { expect(blocked.manager.acceptsExecution(target)).toBe(true); }
   finally { await blocked.close(); }
   store = new SqliteDeliveryJournal(directory);
   try { expect(store.execute({ type: "resolve", id: "second", action: "retry" })).toBe(true); }

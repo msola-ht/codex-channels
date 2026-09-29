@@ -275,3 +275,15 @@ it("settles replaced and cancelled snapshots and immediately returns their share
     expect(send).toHaveBeenCalledOnce();
   } finally { release(); await queue.close(); }
 });
+
+it.each([undefined, null, false, 0, ""])("never acknowledges a falsy thrown failure (%s)", async (failure) => {
+  const queue = new ConversationDeliveryQueue(logger, { component: "fixture" });
+  try {
+    const result = captureDelivery(() => {
+      queue.enqueue("chat", async () => {
+        await checkpointDelivery("send", async () => { throw failure; });
+      }, true);
+    }, new AbortController().signal, async () => {});
+    await expect(result.then(() => "acknowledged", () => "failed")).resolves.toBe("failed");
+  } finally { await queue.close(); }
+});

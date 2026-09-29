@@ -121,7 +121,7 @@ export class SqliteDeliveryJournal {
         const released = JSON.stringify([...this.releasedBarriers]);
         const next = this.database.prepare(`SELECT d.* FROM deliveries d WHERE d.state='pending' AND d.sequence>?
           AND NOT EXISTS(SELECT 1 FROM deliveries p WHERE p.conversation=d.conversation AND p.sequence<d.sequence
-            AND NOT (p.state='uncertain' AND p.id IN (SELECT value FROM json_each(?))))
+            AND NOT (p.state IN ('uncertain','blocked') AND p.id IN (SELECT value FROM json_each(?))))
           ORDER BY d.sequence LIMIT 1`);
         let sequence = 0;
         for (let raw = next.get(sequence, released); raw; raw = next.get(sequence, released)) {
@@ -136,7 +136,8 @@ export class SqliteDeliveryJournal {
         return row ? this.decode(row as unknown as Row) : null;
       }
       case "releaseBarrier": {
-        if (this.database.prepare("SELECT state FROM deliveries WHERE id=?").get(command.id)?.state !== "uncertain") return false;
+        const state = this.database.prepare("SELECT state FROM deliveries WHERE id=?").get(command.id)?.state;
+        if (state !== "uncertain" && state !== "blocked") return false;
         this.releasedBarriers.add(command.id);
         return true;
       }
