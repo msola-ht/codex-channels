@@ -60,11 +60,13 @@ export class DeliveryCoordinator {
     this.wake();
   }
 
-  /** Ordering barriers only; retained nonblocking records still count toward storage admission. */
-  hasOutstanding(conversation: string): boolean { return !this.started || this.outstanding.has(conversation); }
+  /** An unavailable store cannot prove earlier output settled, even for an empty conversation. */
+  hasOutstanding(conversation: string): boolean {
+    return !this.started || this.stopped || !this.journal.available || this.outstanding.has(conversation);
+  }
 
   executionBlockReason(account: string): "unavailable" | "global-capacity" | "account-capacity" | undefined {
-    if (!this.started || this.stopped) return "unavailable";
+    if (!this.started || this.stopped || !this.journal.available) return "unavailable";
     if (this.total.paused) return "global-capacity";
     if (this.usage.get(account)?.paused) return "account-capacity";
     return undefined;
@@ -79,9 +81,12 @@ export class DeliveryCoordinator {
     const bytes = Buffer.byteLength(value.payload) + 64 * 1024;
     this.updateUsage(value.account, bytes, 1);
     const task = this.journal.submit(value).then(() => { this.wake(); return true; }, (error: unknown) => {
+      const code = error instanceof DeliveryError ? error.code : "storage";
+      const storageFailure = code === "storage" || code === "closed" || code === "conflict";
+      if (storageFailure) this.storageFailed(value.account, value.id);
       this.release(value.conversation);
       this.updateUsage(value.account, -bytes, -1);
-      this.options.fault(error instanceof DeliveryError ? error.code : "storage", value.account);
+      if (!storageFailure) this.options.fault(code, value.account, value.id);
       return false;
     });
     this.submissions.add(task);

@@ -27,7 +27,10 @@ export class PersistentSurfaceOutput {
   private readonly idleWaiters = new Set<() => void>();
 
   constructor(private readonly options: PersistentSurfaceOutputOptions) {
-    this.journal = new DeliveryJournal(options.directory, options.workerUrl ? { workerUrl: options.workerUrl } : {});
+    this.journal = new DeliveryJournal(options.directory, {
+      ...(options.workerUrl ? { workerUrl: options.workerUrl } : {}),
+      onFailure: () => options.fault("storage"),
+    });
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
       mayReleaseUncertainBarrier: (record) => {

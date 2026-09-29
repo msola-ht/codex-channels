@@ -840,3 +840,35 @@ it.each(["transition", "acknowledge"] as const)("stops scheduling on local %s fa
       uncertain: operation === "acknowledge" ? 1 : 0 });
   } finally { retained.close(); }
 });
+
+it("fences execution and output waiters when an idle journal Worker exits", async () => {
+  const journal = new DeliveryJournal(fixture(), { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, deliver: async () => {}, fault: vi.fn(),
+  });
+  try {
+    await coordinator.start();
+    expect(coordinator.acceptsExecution("account")).toBe(true);
+    const worker = Reflect.get(journal, "worker") as import("node:worker_threads").Worker;
+    await worker.terminate();
+    await vi.waitFor(() => expect(coordinator.executionBlockReason("account")).toBe("unavailable"));
+    expect(coordinator.hasOutstanding("empty-chat")).toBe(true);
+  } finally { await coordinator.close(); }
+});
+
+it("fences intake and output waiters immediately on a failed journal submission", async () => {
+  const journal = new DeliveryJournal(fixture(), { workerUrl });
+  const fault = vi.fn();
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, deliver: async () => {}, fault,
+  });
+  try {
+    await coordinator.start();
+    vi.spyOn(journal, "submit").mockRejectedValueOnce(new Error("PRIVATE STORAGE FAILURE"));
+    expect(await coordinator.submit(submission("lost"))).toBe(false);
+    expect(coordinator.executionBlockReason("account")).toBe("unavailable");
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(fault).toHaveBeenCalledWith("storage", "account", "lost");
+    expect(await journal.summary()).toMatchObject({ records: 0 });
+  } finally { await coordinator.close(); }
+});
