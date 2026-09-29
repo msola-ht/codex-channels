@@ -78,7 +78,9 @@ it("lists safe metadata and rejects concurrent maintenance", () => {
   try {
     const conflict = run("delivery", "status");
     expect(conflict.status).toBe(1);
-    expect(conflict.stderr).toContain("conflict");
+    expect(conflict.stderr).toContain("投递箱正被其他进程占用");
+    expect(conflict.stderr).toContain("codexc service stop gateway");
+    expect(store.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 });
   } finally { store.close(); }
   const listed = run("delivery", "list");
   expect(listed.status, listed.stderr).toBe(0);
@@ -86,7 +88,7 @@ it("lists safe metadata and rejects concurrent maintenance", () => {
   expect(listed.stdout).toContain("test-result");
   expect(listed.stdout).not.toContain("PRIVATE BODY");
   expect(listed.stdout).not.toContain("PRIVATE OWNER");
-  expect(JSON.parse(listed.stdout)).toMatchObject({ eventType: "text.completed", threadId: "thread", turnId: "turn", blocksFollowing: true, blocksExecution: true });
+  expect(JSON.parse(listed.stdout)).toMatchObject({ eventType: "text.completed", threadId: "thread", turnId: "turn", blocksFollowing: true, blocksExecution: false });
 });
 
 it("requires explicit retry and preserves the result as pending", () => {
@@ -112,15 +114,17 @@ it("distinguishes retained notices, queued output and manual barriers without le
   expect(run("init").status).toBe(0);
   const store = new SqliteDeliveryJournal(join(home, "data", "delivery-outbox"));
   try {
-    for (const [id, type, status, state] of [
+    for (const [id, type, status, state, kind = "contextCompaction"] of [
       ["notice", "thread.name", null, "uncertain"],
       ["compact-start", "operation.updated", "running", "uncertain"],
       ["compact-end", "operation.updated", "completed", "uncertain"],
+      ["command-end", "operation.updated", "completed", "uncertain", "command"],
+      ["command-error", "operation.updated", "failed", "uncertain", "command"],
       ["queued", "thread.name", null, "pending"],
       ["revoked", "thread.name", null, "blocked"],
     ] as const) {
       const event = { type, threadId: "thread", turnId: "turn", name: "PRIVATE NAME", target: { surface: "feishu", accountId: "a", conversationId: "c" },
-        ...(status ? { operation: { kind: "contextCompaction", itemId: "compact", status } } : {}) };
+        ...(status ? { operation: { kind, itemId: "compact", status } } : {}) };
       store.execute({ type: "submit", value: { id, account: "a", conversation: "c", payload: JSON.stringify({ version: 1, owner: "PRIVATE OWNER", event }) } });
       if (state !== "pending") store.execute({ type: "state", id, from: "pending", to: state });
     }
@@ -132,10 +136,12 @@ it("distinguishes retained notices, queued output and manual barriers without le
   expect(rows.map(({ id, blocksFollowing, blocksExecution }) => ({ id, blocksFollowing, blocksExecution }))).toEqual([
     { id: "notice", blocksFollowing: false, blocksExecution: false },
     { id: "compact-start", blocksFollowing: false, blocksExecution: false },
-    { id: "compact-end", blocksFollowing: true, blocksExecution: true },
+    { id: "compact-end", blocksFollowing: true, blocksExecution: false },
+    { id: "command-end", blocksFollowing: false, blocksExecution: false },
+    { id: "command-error", blocksFollowing: true, blocksExecution: false },
     { id: "queued", blocksFollowing: true, blocksExecution: false },
-    { id: "revoked", blocksFollowing: true, blocksExecution: true },
+    { id: "revoked", blocksFollowing: false, blocksExecution: false },
   ]);
   expect(rows[1]).toMatchObject({ operationKind: "contextCompaction", operationStatus: "running", threadId: "thread", turnId: "turn" });
-  expect(JSON.parse(run("delivery", "status").stdout)).toMatchObject({ records: 5, uncertain: 3, pending: 1, blocked: 1, retainedNotices: 2, blockingRecords: 3, blockedConversations: 1 });
+  expect(JSON.parse(run("delivery", "status").stdout)).toMatchObject({ records: 7, uncertain: 5, pending: 1, blocked: 1, retainedNotices: 4, blockingRecords: 3, blockedConversations: 1 });
 });

@@ -24,7 +24,9 @@ export function formatSurfaceUserFacingError(
     case "conversation.busy":
       return "当前任务运行中，请先使用 /stop 停止当前任务";
     case "delivery.overloaded":
-      return "当前会话投递受阻、投递箱接近容量上限或不可用，已暂停新执行；请先在本机使用 codexc delivery 核对未确认投递";
+      if (error.details.reason === "global-capacity") return "投递箱全局容量达到暂停阈值，暂不能保存更多执行结果；请使用 codexc delivery status 核对占用并处理积压";
+      if (error.details.reason === "account-capacity") return "当前渠道账号的投递容量达到暂停阈值，暂不能保存更多执行结果；请使用 codexc delivery status 核对占用并处理积压";
+      return "投递存储尚未就绪、不可用或正在关闭，已暂停新执行；请检查 Gateway 状态和投递错误日志";
     case "conversation.background-limit":
       return error.message;
     case "conversation.background-queued":

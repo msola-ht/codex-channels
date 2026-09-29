@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
 import { conversationTargetKey, surfaceAccountKey } from "../conversation-core/index.js";
-import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, type DeliveryCheckpoint } from "../surfaces/index.js";
+import { mayReleaseUncertainOutputBarrier, decodePersistentOutput, snapshotPersistentOutput, withPersistentOutputImage, withPersistentDeliveryDiagnostics, type DeliveryCheckpoint } from "../surfaces/index.js";
 
 export interface PersistentSurfaceOutputOptions {
   directory: string;
@@ -10,7 +10,7 @@ export interface PersistentSurfaceOutputOptions {
   authorized(event: OutputEvent, owner: string): boolean;
   accounts(): string[];
   deliver(event: OutputEvent, signal: AbortSignal, checkpoint: (value: DeliveryCheckpoint) => Promise<void>, authorized: () => boolean, liveOrder?: number): Promise<void>;
-  fault(code: string, account?: string): void;
+  fault(code: string, account?: string, persistentDeliveryId?: string): void;
   changed?(): void;
   workerUrl?: URL;
 }
@@ -30,7 +30,10 @@ export class PersistentSurfaceOutput {
     this.journal = new DeliveryJournal(options.directory, options.workerUrl ? { workerUrl: options.workerUrl } : {});
     this.coordinator = new DeliveryCoordinator(this.journal, {
       accounts: () => options.accounts(),
-      mayReleaseUncertainBarrier: (record) => mayReleaseUncertainOutputBarrier(decodePersistentOutput(record.payload).event),
+      mayReleaseUncertainBarrier: (record) => {
+        const payload = decodePersistentOutput(record.payload);
+        return mayReleaseUncertainOutputBarrier(payload.event, payload.image !== undefined);
+      },
       authorized: (record) => {
         const payload = decodePersistentOutput(record.payload);
         return options.authorized(payload.event, payload.owner);
@@ -40,15 +43,15 @@ export class PersistentSurfaceOutput {
         this.liveOrders.delete(record.id);
         const payload = decodePersistentOutput(record.payload);
         if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
-        await withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
+        await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
           if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
           if (checkpoint.state === "started") {
             signal.throwIfAborted();
             if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
           }
-        }, () => options.authorized(payload.event, payload.owner), liveOrder));
+        }, () => options.authorized(payload.event, payload.owner), liveOrder)));
       },
-      fault: (code, account) => options.fault(code, account),
+      fault: (code, account, id) => options.fault(code, account, id),
       changed: () => this.notifyIdleWaiters(),
     });
   }
@@ -56,7 +59,10 @@ export class PersistentSurfaceOutput {
   start(): Promise<void> { return this.coordinator.start(); }
   wake(): void { this.coordinator.wake(); }
   acceptsExecution(target: ConversationTarget): boolean {
-    return this.coordinator.acceptsExecution(surfaceAccountKey(target.surface, target.accountId), conversationTargetKey(target));
+    return this.executionBlockReason(target) === undefined;
+  }
+  executionBlockReason(target: ConversationTarget): "unavailable" | "global-capacity" | "account-capacity" | undefined {
+    return this.coordinator.executionBlockReason(surfaceAccountKey(target.surface, target.accountId));
   }
   waitForIdle(target: ConversationTarget, signal: AbortSignal): Promise<void> {
     const key = conversationTargetKey(target);

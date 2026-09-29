@@ -75,6 +75,7 @@ error 调整为 warn；生成 API、WebSocket、CardKit、媒体及依赖范围�
 | 卡片更新错误 | [错误码 230001：消息不是卡片](https://open.feishu.cn/document/faq/trouble-shooting/how-to-resolve-error-230001?lang=zh-CN) | 明确 `im.v1.message.patch` 只更新卡片；普通文本或富文本必须使用对应的编辑消息能力 |
 | 消息资源下载 | [获取消息中的资源文件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message-resource/get) | 核对用户消息资源使用 `message_id + file_key + type` 下载、机器人与消息同会话及 100 MiB 平台上限 |
 | 获取指定消息内容 | [获取指定消息内容](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/get) | 按回复事件的 `parent_id` 读取文本、富文本或 CardKit 中受支持的可见文字；请求固定使用 `open_id + raw_card_content`，忽略按钮、输入值和未知消息类型 |
+| API 错误追踪 | [官方错误响应示例](https://www.feishu.cn/content/137710114294)、[官方 LogID 获取说明](https://www.feishu.cn/content/870362885679)；锁定 SDK `http/index.ts` | HTTP 异常读取 `response.status`、`response.data.code`、`response.data.error.log_id` 或 `x-tt-logid`；普通业务响应读取非零 `code`，只保留有界机器字段，不记录错误正文 |
 | 消息常见问题 | [消息常见问题](https://open.feishu.cn/document/server-docs/im-v1/faq) | 核对用户发送资源可由同会话机器人下载，以及 `230020`、`99991400` 等官方消息频控信号；项目另收紧为 PNG/JPEG/WebP/非动画 GIF 与 10 MiB |
 | 机器人自定义菜单配置 | [机器人自定义菜单](https://open.larksuite.com/document/uAjLw4CM/ukTMukTMukTM/bot-v3/bot-customized-menu) | 核对菜单层级与数量限制；项目只要求一个 `codexc_home` 事件菜单，功能分类留在命令中心卡片内，避免 Owner 重复配置平台菜单 |
 | 机器人自定义菜单事件 | [机器人菜单事件](https://open.feishu.cn/document/client-docs/bot-v3/events/menu) | 核对 `application.bot.menu_v6` 只负责事件类型菜单点击后的事件投递，不负责创建或启用菜单；事件只提供操作者与事件 Key、不提供 Chat ID，项目只路由唯一已授权私聊 |

@@ -133,6 +133,8 @@ export class ConversationDeliveryQueue {
     run: (signal: AbortSignal) => Promise<T>,
     requestSignal?: AbortSignal,
   ): Promise<T> {
+    const receiptSignal = DeliveryReceipt.current()?.controller.signal;
+    if (receiptSignal) requestSignal = requestSignal ? AbortSignal.any([requestSignal, receiptSignal]) : receiptSignal;
     if (requestSignal?.aborted) {
       return Promise.reject(new Error(`${this.options.component} Conversation 输出操作已取消`));
     }

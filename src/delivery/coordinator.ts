@@ -5,18 +5,17 @@ export interface DeliveryCoordinatorOptions {
   accounts(): string[];
   authorized(record: DeliveryRecord): boolean | Promise<boolean>;
   deliver(record: DeliveryRecord, signal: AbortSignal): Promise<void>;
-  fault(code: string, account?: string): void;
+  fault(code: string, account?: string, persistentDeliveryId?: string): void;
   concurrency?: number;
   timeoutMs?: number;
   changed?(): void;
-  /** Explicit opt-in: retain an uncertain record without fencing subsequent output. */
+  /** Explicit opt-in for uncertain or authorization-blocked auxiliary records; never grants delivery permission. */
   mayReleaseUncertainBarrier?(record: DeliveryRecord): boolean;
 }
 
 /** Owns scheduling only. Payloads and platform semantics belong to the caller. */
 export class DeliveryCoordinator {
   private readonly active = new Map<string, { controller: AbortController; task: Promise<void> }>();
-  private readonly blockedConversations = new Set<string>();
   private readonly outstanding = new Map<string, number>();
   private readonly submissions = new Set<Promise<boolean>>();
   private started = false;
@@ -43,11 +42,10 @@ export class DeliveryCoordinator {
       for (const row of page) {
         this.updateUsage(row.account, row.bytes, 1);
         this.outstanding.set(row.conversation, (this.outstanding.get(row.conversation) ?? 0) + 1);
-        if (row.state === "blocked") this.blockedConversations.add(row.conversation);
-        if (row.state === "uncertain") {
+        if (row.state === "uncertain" || row.state === "blocked") {
           const record = await this.journal.read(row.id);
           if (!record) throw new DeliveryError("conflict");
-          await this.releaseUncertainBarrier(record, false);
+          await this.releaseRetainedBarrier(record, false);
         }
         after = row.sequence;
       }
@@ -65,10 +63,14 @@ export class DeliveryCoordinator {
   /** Ordering barriers only; retained nonblocking records still count toward storage admission. */
   hasOutstanding(conversation: string): boolean { return !this.started || this.outstanding.has(conversation); }
 
-  acceptsExecution(account: string, conversation: string): boolean {
-    return this.started && !this.stopped && !this.total.paused && !this.usage.get(account)?.paused
-      && !this.blockedConversations.has(conversation);
+  executionBlockReason(account: string): "unavailable" | "global-capacity" | "account-capacity" | undefined {
+    if (!this.started || this.stopped) return "unavailable";
+    if (this.total.paused) return "global-capacity";
+    if (this.usage.get(account)?.paused) return "account-capacity";
+    return undefined;
   }
+
+  acceptsExecution(account: string): boolean { return this.executionBlockReason(account) === undefined; }
 
   submit(value: DeliverySubmission): Promise<boolean> {
     if (this.stopped || !this.started) { this.options.fault("closed", value.account); return Promise.resolve(false); }
@@ -92,7 +94,7 @@ export class DeliveryCoordinator {
     if (!this.started || this.stopped || this.pumping) return;
     this.pumping = true;
     void this.pump().catch(() => {
-      if (!this.stopped) { this.stopped = true; this.options.fault("storage"); }
+      this.storageFailed();
     }).finally(() => {
       this.pumping = false;
       if (this.dirty && !this.stopped) this.wake();
@@ -128,8 +130,8 @@ export class DeliveryCoordinator {
     try {
       if (!(await Promise.race([this.options.authorized(record), cancelled]))) {
         if (!(await this.journal.transition(record.id, "pending", "blocked"))) throw new DeliveryError("conflict");
-        this.blockedConversations.add(record.conversation);
-        this.options.fault("authorization-changed", record.account);
+        await this.releaseRetainedBarrier({ ...record, state: "blocked" });
+        this.options.fault("authorization-changed", record.account, record.id);
         return;
       }
       if (this.stopped) return;
@@ -141,23 +143,31 @@ export class DeliveryCoordinator {
           cancelled,
         ]);
         controller.signal.throwIfAborted();
-        if (!(await this.journal.acknowledge(record.id))) throw new DeliveryError("conflict");
-        this.release(record.conversation);
-        this.updateUsage(record.account, -record.bytes, -1);
       } catch {
         if (!(await this.journal.transition(record.id, "sending", "uncertain"))) throw new DeliveryError("conflict");
-        await this.releaseUncertainBarrier({ ...record, state: "uncertain" });
-        this.options.fault("delivery-uncertain", record.account);
+        await this.releaseRetainedBarrier({ ...record, state: "uncertain" });
+        this.options.fault("delivery-uncertain", record.account, record.id);
+        return;
       }
-    } catch { if (!this.stopped) this.options.fault("storage", record.account); }
+      // Platform confirmation and local acknowledgement are different failure domains.
+      // A failed ACK must stop scheduling, not masquerade as a platform failure.
+      if (!(await this.journal.acknowledge(record.id))) throw new DeliveryError("conflict");
+      this.release(record.conversation);
+      this.updateUsage(record.account, -record.bytes, -1);
+    } catch { this.storageFailed(record.account, record.id); }
     finally { clearTimeout(timer); controller.signal.removeEventListener("abort", cancel); }
   }
 
-  private async releaseUncertainBarrier(record: DeliveryRecord, notify = true): Promise<void> {
-    if (!this.options.mayReleaseUncertainBarrier?.(record)) {
-      this.blockedConversations.add(record.conversation);
-      return;
-    }
+  private storageFailed(account?: string, id?: string): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    for (const { controller } of this.active.values()) controller.abort();
+    this.options.changed?.();
+    this.options.fault("storage", account, id);
+  }
+
+  private async releaseRetainedBarrier(record: DeliveryRecord, notify = true): Promise<void> {
+    if (!this.options.mayReleaseUncertainBarrier?.(record)) return;
     if (!(await this.journal.releaseBarrier(record.id))) throw new DeliveryError("conflict");
     // Keep storage accounting; only the ordering/interaction barrier is released.
     this.release(record.conversation, notify);

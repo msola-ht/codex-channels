@@ -45,7 +45,7 @@ describe("encrypted delivery journal", () => {
     } finally { store.close(); }
   });
 
-  it("releases only uncertain scheduling barriers without changing storage, quota or offline retry semantics", () => {
+  it("releases only retained scheduling barriers without changing storage, quota or offline retry semantics", () => {
     const store = new SqliteDeliveryJournal(fixture(), { ...defaultDeliveryLimits, records: 2 });
     try {
       store.execute({ type: "submit", value: submission("notice") });
@@ -63,8 +63,9 @@ describe("encrypted delivery journal", () => {
       store.execute({ type: "resolve", id: "notice", action: "retry" });
       expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "notice" });
       store.execute({ type: "state", id: "notice", from: "pending", to: "blocked" });
-      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(false);
       expect(store.execute({ type: "next", excluded: [] })).toBeNull();
+      expect(store.execute({ type: "releaseBarrier", id: "notice" })).toBe(true);
+      expect(store.execute({ type: "next", excluded: [] })).toMatchObject({ id: "answer" });
     } finally { store.close(); }
   });
 
@@ -257,6 +258,7 @@ it("reports durable admission separately from rejected submissions", async () =>
     accounts: () => [], authorized: () => true, deliver: async () => {}, fault: (code) => { faults.push(code); },
   });
   try {
+    expect(coordinator.executionBlockReason("account")).toBe("unavailable");
     expect(await coordinator.submit(submission("before-start"))).toBe(false);
     await coordinator.start();
     expect(await coordinator.submit(submission("retained"))).toBe(true);
@@ -265,6 +267,7 @@ it("reports durable admission separately from rejected submissions", async () =>
     expect(await journal.summary()).toMatchObject({ records: 1, pending: 1 });
   } finally { await coordinator.close(); }
   expect(await coordinator.submit(submission("after-close"))).toBe(false);
+  expect(coordinator.executionBlockReason("account")).toBe("unavailable");
   expect(faults).toEqual(["closed", "capacity", "closed"]);
 });
 
@@ -289,6 +292,8 @@ it("fences an ambiguous send and revoked ownership without blocking another Conv
     coordinator.submit(submission("independent", "other-chat"));
     await vi.waitFor(async () => expect(await journal.summary()).toMatchObject({ uncertain: 1, blocked: 1, pending: 1, sending: 0 }));
     expect(delivered).toEqual(["ambiguous", "independent"]);
+    expect(coordinator.acceptsExecution("account")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
     expect(faults).toEqual(expect.arrayContaining(["delivery-uncertain", "authorization-changed"]));
     expect(await journal.list()).toEqual(expect.arrayContaining([expect.objectContaining({ id: "ambiguous", progress: [{ operation: "send", state: "started" }] })]));
   } finally { await coordinator.close(); }
@@ -311,17 +316,18 @@ it("holds execution admission between the 80% and 60% account watermarks while o
   });
   try {
     await coordinator.start();
-    expect(coordinator.acceptsExecution("account", "chat")).toBe(false);
-    expect(coordinator.acceptsExecution("other", "other-chat")).toBe(true);
+    expect(coordinator.acceptsExecution("account")).toBe(false);
+    expect(coordinator.executionBlockReason("account")).toBe("account-capacity");
+    expect(coordinator.acceptsExecution("other")).toBe(true);
     enabled = true;
     coordinator.wake();
     for (let drained = 1; drained <= 5; drained++) {
       await vi.waitFor(() => expect(attempts).toBe(drained));
       release!();
       await vi.waitFor(async () => expect((await journal.summary()).records).toBe(14 - drained));
-      if (drained === 3) expect(coordinator.acceptsExecution("account", "chat")).toBe(false);
+      if (drained === 3) expect(coordinator.acceptsExecution("account")).toBe(false);
     }
-    expect(coordinator.acceptsExecution("account", "chat")).toBe(true);
+    expect(coordinator.acceptsExecution("account")).toBe(true);
   } finally { enabled = false; release?.(); await coordinator.close(); }
 }, 15_000);
 
@@ -713,7 +719,7 @@ it("keeps recovery fenced until every journal page has been classified and count
   } finally { await coordinator.close(); }
 });
 
-it("keeps Weixin auxiliary failure durable while allowing the complete answer through its real Outbox", async () => {
+it.each(["turn-started", "global-idle"] as const)("keeps Weixin %s failure durable while allowing the complete answer through its real Outbox", async (notice) => {
   const directory = fixture();
   const target = { surface: "weixin" as const, accountId: "fixture@im.bot", conversationId: "fixture@im.wechat" };
   const sent: string[] = [];
@@ -729,7 +735,8 @@ it("keeps Weixin auxiliary failure durable while allowing the complete answer th
   });
   try {
     await output.start();
-    output.accept({ type: "turn.started", target, threadId: "thread", turnId: "turn" });
+    output.accept(notice === "global-idle" ? { type: "warning", target, message: "idle notice", globalIdle: true }
+      : { type: "turn.started", target, threadId: "thread", turnId: "turn" });
     output.accept({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", phase: "final_answer", text: "complete answer" });
     await output.waitForIdle(target, AbortSignal.timeout(3000));
     expect(sent).toHaveLength(2);
@@ -740,4 +747,96 @@ it("keeps Weixin auxiliary failure durable while allowing the complete answer th
   const retained = new SqliteDeliveryJournal(directory);
   try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1, uncertain: 1 }); }
   finally { retained.close(); }
+});
+
+
+it.each([false, true])("releases unauthorized auxiliary barriers without sending them (recovered=%s)", async (recovered) => {
+  const directory = fixture();
+  const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
+  const notice: OutputEvent = { type: "warning", target, message: "old idle", globalIdle: true };
+  if (recovered) {
+    const store = new SqliteDeliveryJournal(directory);
+    try {
+      store.execute({ type: "submit", value: { ...submission("old-notice", JSON.stringify([target.surface, target.accountId, target.conversationId])),
+        account: JSON.stringify([target.surface, target.accountId]), payload: JSON.stringify({ version: 1, event: notice, owner: "old" }) } });
+      store.execute({ type: "state", id: "old-notice", from: "pending", to: "blocked" });
+    } finally { store.close(); }
+  }
+  const sent: string[] = [];
+  const output = new PersistentSurfaceOutput({ directory, workerUrl,
+    owner: () => "current", authorized: (event) => event.type !== "warning",
+    accounts: () => [JSON.stringify([target.surface, target.accountId])], fault: () => {},
+    deliver: async (event) => { sent.push(event.type); },
+  });
+  try {
+    await output.start();
+    if (!recovered) output.accept(notice);
+    output.accept({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "answer", text: "answer" });
+    await output.waitForIdle(target, AbortSignal.timeout(3000));
+    expect(sent).toEqual(["text.completed"]);
+  } finally { await output.close(); }
+  const retained = new SqliteDeliveryJournal(directory);
+  try { expect(retained.execute({ type: "summary" })).toMatchObject({ records: 1, blocked: 1, pending: 0 }); }
+  finally { retained.close(); }
+});
+
+it("links a retained record to safe platform diagnostics through its durable ID", async () => {
+  const directory = fixture();
+  const records: Array<Record<string, unknown>> = [];
+  const diagnosticLogger = pino({ level: "debug" }, { write(line) { records.push(JSON.parse(line)); } });
+  const target = { surface: "telegram" as const, accountId: "default", conversationId: "chat" };
+  const outbox = new TelegramOutbox({ sendMessage: async () => { throw new Error("PRIVATE UPSTREAM BODY"); } } as unknown as Api, diagnosticLogger);
+  const faults: Array<{ code: string; id: string | undefined }> = [];
+  const output = new PersistentSurfaceOutput({ directory, workerUrl,
+    owner: () => "actor", authorized: () => true, accounts: () => [JSON.stringify([target.surface, target.accountId])],
+    deliver: (event, signal, checkpoint) => outbox.deliver(event, signal, checkpoint),
+    fault: (code, _account, id) => { faults.push({ code, id }); },
+  });
+  try {
+    await output.start();
+    output.accept({ type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "item", text: "PRIVATE INPUT", phase: "final_answer" });
+    await vi.waitFor(() => expect(faults).toHaveLength(1));
+    expect(faults[0]).toMatchObject({ code: "delivery-uncertain", id: expect.any(String) });
+    const failures = records.filter((entry) => entry.outcome === "failed");
+    expect(failures.length).toBeGreaterThan(0);
+    expect(failures.every((entry) => entry.persistentDeliveryId === faults[0]!.id)).toBe(true);
+    expect(JSON.stringify(records)).not.toContain("PRIVATE");
+  } finally { await output.close(); await outbox.close(); }
+  const retained = new SqliteDeliveryJournal(directory);
+  try {
+    expect(retained.execute({ type: "list", after: 0, limit: 100 })).toEqual([
+      expect.objectContaining({ id: faults[0]!.id, state: "uncertain" }),
+    ]);
+  } finally { retained.close(); }
+});
+
+it.each(["transition", "acknowledge"] as const)("stops scheduling on local %s failure without reporting a platform failure", async (operation) => {
+  const directory = fixture();
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  await journal.ready;
+  await journal.submit(submission("first"));
+  await journal.submit(submission("next"));
+  const fault = vi.fn();
+  const deliver = vi.fn(async () => {});
+  const failure = vi.spyOn(journal, operation).mockRejectedValueOnce(new Error("PRIVATE STORAGE FAILURE"));
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => ["account"], authorized: () => true, concurrency: 1, deliver, fault,
+  });
+  try {
+    await coordinator.start();
+    await vi.waitFor(() => expect(fault).toHaveBeenCalledWith("storage", "account", "first"));
+    expect(coordinator.executionBlockReason("account")).toBe("unavailable");
+    coordinator.wake();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(failure).toHaveBeenCalledOnce();
+    expect(deliver).toHaveBeenCalledTimes(operation === "acknowledge" ? 1 : 0);
+    expect(fault).toHaveBeenCalledOnce();
+    expect(await journal.summary()).toMatchObject({ records: 2, uncertain: 0,
+      pending: operation === "acknowledge" ? 1 : 2 });
+  } finally { await coordinator.close(); }
+  const retained = new SqliteDeliveryJournal(directory);
+  try {
+    expect(retained.execute({ type: "summary" })).toMatchObject({ records: 2,
+      uncertain: operation === "acknowledge" ? 1 : 0 });
+  } finally { retained.close(); }
 });
