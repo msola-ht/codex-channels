@@ -6,7 +6,7 @@ import { upgradeTrafficCapture, parseTrafficUpgradeArgs } from "../scripts/traff
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
-import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpServer, globalAgent } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
@@ -97,7 +97,7 @@ it("uses the configured proxy concurrency and republishes only changed policy", 
   expect(apply).toHaveBeenCalledTimes(2);
 }, 20_000);
 
-it("uses registered custom Responses material through runtime, captures, authorizes metrics and rolls back only selected references", async () => {
+it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s through runtime, captures, authorizes metrics and rolls back only selected references", async host => {
   const f = await fixture();
   const provider = "rs-LocalTest";
   const upstream = createHttpServer((request, response) => {
@@ -107,13 +107,26 @@ it("uses registered custom Responses material through runtime, captures, authori
   await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
   const up = upstream.address(); if (!up || typeof up === "string") throw new Error("fixture");
+  if (host === "[::1]") {
+    // Verify the actual HTTP socket target, then use IPv4 for hosts without IPv6 loopback.
+    const original = globalAgent.createConnection;
+    const connection = vi.spyOn(globalAgent, "createConnection").mockImplementation((options, callback) => {
+      expect(options.host).toBe("::1");
+      return original.call(globalAgent, { ...options, host: "127.0.0.1" }, callback);
+    });
+    cleanups.push(() => connection.mockRestore());
+  }
   const catalog = writeResponsesModelCatalog(f.environment, provider, [{ id: "fixture/model", name: "Fixture", contextWindow: 64000,
     reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: true }], "fixture/model");
   finishResponsesModelCatalogWrite(catalog);
-  writeCustomPrimaryProviderSwitchingProfile({ provider, model: "fixture/model", baseUrl: `http://127.0.0.1:${up.port}/v1`,
+  writeCustomPrimaryProviderSwitchingProfile({ provider, model: "fixture/model", baseUrl: `http://${host}:${up.port}/v1`,
     apiKey: "fixture-custom-secret", catalogSource: { kind: "custom", reasoningEffort: null } }, f.environment);
   expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ protocols: ["responses"], models: ["fixture/model"], modelInputs: { "fixture/model": ["text", "image"] } });
   expect(readRelayManagement(f.environment).providers).toEqual(expect.arrayContaining([expect.objectContaining({ id: provider, protocols: ["responses"], available: true })]));
+  const beforeIssue = readFileSync(f.configPath, "utf8");
+  await expect(manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--provider", provider,
+    "--model", "fixture/model", "--reasoning", "off"]), f.environment)).rejects.toThrow("所选提供商和模型不支持强制关闭思考");
+  expect(readFileSync(f.configPath, "utf8")).toBe(beforeIssue);
   const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--provider", provider, "--model", "fixture/model"]), f.environment);
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
   const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
@@ -502,6 +515,18 @@ it("shares read-only previews and revision-checked policy edits, preserving cred
   expect(rolled.credential_generation).toBe(off.credential_generation);
   await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "translation", "--reasoning", "off"]), f.environment);
   expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!.enabled).toBe(false);
+});
+
+it.each([
+  { extra: ["--name", " 名称"], message: "用途名称须为 1–64 个字符" },
+  { extra: ["--model", "cline-pass/deepseek-v4.1-flash"], message: "Relay 身份、模型或配置限制无效" },
+])("reports controlled management validation errors without changing configuration: $message", async ({ extra, message }) => {
+  const f = await fixture();
+  const before = readFileSync(f.configPath, "utf8");
+  const input = parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash", ...extra]);
+  await expect(sharedManage(input, f.environment, { preview: true })).rejects.toThrow(message);
+  await expect(manageModelRelay(input, f.environment)).rejects.toThrow(message);
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
 });
 
 it("returns the saved one-time key even if activation probing throws", async () => {

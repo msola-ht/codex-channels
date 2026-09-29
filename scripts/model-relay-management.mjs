@@ -172,7 +172,12 @@ async function executeModelRelay(input, environment, options) {
       }
     } else config.enabled = input.command === "enable";
     const parsed = modelRelayConfigSchema.safeParse(config);
-    if (!parsed.success) throw invalid("Relay 身份、用途名称、模型或思考策略无效；强制关闭仅支持 CLP 的 cline-pass/deepseek-v4.1-flash");
+    if (!parsed.success) {
+      const fields = new Set(parsed.error.issues.map(issue => issue.path.at(-1)));
+      if (fields.has("reasoning")) throw invalid("所选提供商和模型不支持强制关闭思考；请查询 codexc relay providers 或选择跟随请求");
+      if (fields.has("display_name")) throw invalid("用途名称须为 1–64 个字符，不含控制字符或首尾空白");
+      throw invalid("Relay 身份、模型或配置限制无效；请核对身份格式、模型列表及账户/Key 数量限制");
+    }
     document.model_relay = parsed.data;
     validateGatewayConfigDocument(document);
     const digest = modelRelayConfigDigest(modelRelayConfigSchema.parse(document.model_relay ?? {}));
