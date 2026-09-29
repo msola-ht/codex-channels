@@ -3,7 +3,7 @@ import type { ZodType } from "zod";
 /** requests_per_minute=0 disables rate/burst checks; max_concurrency remains enforced. */
 export interface ModelRelayLimitConfig { max_concurrency: number; requests_per_minute: number; burst: number }
 export interface ModelRelayCallerConfig {
-  caller_id: string; key_id: string; credential_generation: number; secret_sha256: string;
+  caller_id: string; display_name?: string; key_id: string; credential_generation: number; secret_sha256: string;
   enabled: boolean; provider: string; models: string[]; reasoning?: "passthrough" | "off";
 }
 export interface ModelRelayConfig extends ModelRelayLimitConfig {
@@ -22,3 +22,4 @@ export function relayPolicyFromConfig(config: ModelRelayConfig): {
 
 export function upgradeModelRelayLimits(value: unknown): ModelRelayConfig;
 export function removeLegacyRelayCapture(value: unknown): Record<string, unknown>;
+export const relayDisplayNameSchema: ZodType<string>;

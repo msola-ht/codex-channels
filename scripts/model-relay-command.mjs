@@ -7,8 +7,9 @@ export const modelRelayUsage = `用法：codexc relay <命令>
   upgrade-limits                 显式备份并移除账户/Key 限流字段，不重启服务
   providers                      列出可用上游、模型和关闭思考能力
   callers                        列出调用方（不显示秘密或哈希）
-  issue --caller ID --key ID --provider clp-ID --model ID [--model ID] [--reasoning passthrough|off]
-  edit --caller ID [--model ID ...] [--reasoning passthrough|off]
+  issue --caller ID --key ID --provider clp-ID --model ID [--model ID] [--reasoning passthrough|off] [--name 名称]
+  edit --caller ID [--model ID ...] [--reasoning passthrough|off] [--name 名称]
+  rollback-names                 停服后备份并移除用途名称，保留当前凭据
   rollback-reasoning             停服后备份并移除思考策略，保留当前凭据
   rotate --caller ID             轮换并启用新秘密，保留身份
   disable [--caller ID]           禁用调用方；省略 caller 则禁用服务
@@ -17,10 +18,10 @@ export const modelRelayUsage = `用法：codexc relay <命令>
 
 export function parseModelRelayCommand(args) {
   const [command, ...rest] = args;
-  const commands = ["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning"];
+  const commands = ["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names"];
   if (!commands.includes(command)) throw new Error(modelRelayUsage);
-  const allowed = command === "issue" ? ["--caller", "--key", "--provider", "--model", "--reasoning"]
-    : command === "edit" ? ["--caller", "--model", "--reasoning"]
+  const allowed = command === "issue" ? ["--caller", "--key", "--provider", "--model", "--reasoning", "--name"]
+    : command === "edit" ? ["--caller", "--model", "--reasoning", "--name"]
     : ["rotate", "disable"].includes(command) ? ["--caller"] : [];
   const options = { models: [] };
   for (let index = 0; index < rest.length; index += 2) {
@@ -35,13 +36,13 @@ export function parseModelRelayCommand(args) {
   }
   if (command === "issue" && (!options.caller || !options.key || !options.provider || !options.models.length)
     || ["rotate", "edit"].includes(command) && !options.caller
-    || command === "edit" && !options.models.length && options.reasoning === undefined
+    || command === "edit" && !options.models.length && options.reasoning === undefined && options.name === undefined
     || options.reasoning !== undefined && !["passthrough", "off"].includes(options.reasoning)) throw new Error(modelRelayUsage);
   return { command, ...options };
 }
 
 export async function runModelRelayCommand(args) {
-  if (!args.length || isCommandHelp(args, [[], ...["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
+  if (!args.length || isCommandHelp(args, [[], ...["status", "providers", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "edit", "rollback-reasoning", "rollback-names"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
   const input = parseModelRelayCommand(args);
   console.log(JSON.stringify(await manageModelRelay(input), null, 2));
 }

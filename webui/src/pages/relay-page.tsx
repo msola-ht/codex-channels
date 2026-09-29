@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Link } from "react-router"
 import { useRelayManagement } from "@/hooks/use-relay-management"
 import { useTranslation } from "@/hooks/use-translation"
@@ -7,16 +7,27 @@ import { translateApiError } from "@/lib/i18n/translate"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel, FieldDescription, FieldError, FieldSet, FieldLegend } from "@/components/ui/field"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
+import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 
 export function RelayPage() {
   const { t } = useTranslation()
   const management = useRelayManagement()
   const [editing, setEditing] = useState<"new" | RelayManagedCaller | null>(null)
+  const [draftRevision, setDraftRevision] = useState<string | null>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const pageHeading = useRef<HTMLHeadingElement | null>(null)
+  const [name, setName] = useState("")
   const [caller, setCaller] = useState("")
   const [provider, setProvider] = useState("")
   const [models, setModels] = useState<string[]>([])
@@ -25,22 +36,34 @@ export function RelayPage() {
   const data = management.data
   const refreshingBlocked = management.busy || management.loading || management.pendingPreview !== null
   const blocked = refreshingBlocked || management.error !== null
+  const nameInvalid = [...name].length < 1 || [...name].length > 64 || name.trim() !== name || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(name)
   const selected = data?.providers.find(value => value.id === provider)
+  const capabilityUnavailable = provider !== "" && selected?.available !== true
+  const draftStale = editing !== null && data !== null && draftRevision !== data.revision
+  const latestCaller = editing && editing !== "new" ? data?.callers.find(value => value.caller_id === editing.caller_id) : undefined
   const supportsOff = models.length > 0 && models.every(model => selected?.models.some(value => value.id === model && value.reasoningOff))
-  const openEditor = (value: "new" | RelayManagedCaller) => {
+  const policyChanged = editing === "new" || editing === null || reasoning !== editing.reasoning
+    || models.length !== editing.models.length || models.some(model => !editing.models.includes(model))
+  const openEditor = (value: "new" | RelayManagedCaller, discardDraft = false) => {
+    if (!data || blocked) return
+    if (!discardDraft) returnFocus.current = document.activeElement as HTMLElement
+    setDraftRevision(data.revision)
+    management.clearError()
     setEditing(value)
-    setCaller(value === "new" ? "" : value.caller_id)
+    setName(value === "new" ? "" : value.display_name ?? value.caller_id)
+    setCaller(value === "new" ? `client-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")}` : value.caller_id)
     setProvider(value === "new" ? "" : value.provider)
     setModels(value === "new" ? [] : value.models)
     setReasoning(value === "new" ? "passthrough" : value.reasoning)
     setResult(null)
   }
-  const mutate = (input: RelayManagementInput) => {
-    if (data) void management.mutate({ revision: data.revision, input })
+  const mutate = (input: RelayManagementInput, revision = data?.revision) => {
+    if (revision) void management.mutate({ revision, input })
   }
   const submit = () => {
-    if (editing === "new") mutate({ command: "issue", caller, key: `key-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")}`, provider, models, reasoning })
-    else mutate({ command: "edit", caller, models, reasoning })
+    if (blocked || draftStale || !draftRevision || editing === null) return
+    if (editing === "new") mutate({ command: "issue", caller, name, key: `key-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")}`, provider, models, reasoning }, draftRevision)
+    else mutate({ command: "edit", caller, name, models, reasoning }, draftRevision)
   }
   const confirm = async () => {
     const saved = await management.confirm()
@@ -48,54 +71,75 @@ export function RelayPage() {
   }
   const preview = management.pendingPreview?.preview
   const previewCaller = preview?.callers[0]
-  return <div className="flex flex-col gap-4">
+  const restoreFocus = (event: Event) => {
+    event.preventDefault()
+    if (editing === null && preview === undefined && result === null) {
+      const target = returnFocus.current
+      if (target?.isConnected && !target.matches(":disabled")) target.focus()
+      else pageHeading.current?.focus()
+    }
+  }
+  const startAction = (input: RelayManagementInput) => {
+    returnFocus.current = document.activeElement as HTMLElement
+    mutate(input)
+  }
+  return <div className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><h1 className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
+      <div><h1 ref={pageHeading} tabIndex={-1} className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
       <div className="flex gap-2"><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
     {data && <p className="text-sm text-muted-foreground">{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></p>}
-    {management.loading && <p>{t("common.loading")}</p>}
-    {data && <Table><TableHeader><TableRow>
+    {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
+    {data && !management.loading && !management.error && <Table><TableHeader><TableRow>
       {(["purpose", "provider", "models", "reasoning", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
     </TableRow></TableHeader><TableBody>
       {data.callers.map(entry => <TableRow key={entry.key_id}>
-        <TableCell><div>{entry.caller_id}</div><div className="text-xs text-muted-foreground">{entry.key_id} · {t("relay.generation", { value: entry.credential_generation })}</div></TableCell>
-        <TableCell>{entry.provider}</TableCell><TableCell className="max-w-72 break-all">{entry.models.join(", ")}</TableCell>
-        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</TableCell>
+        <TableCell><div className="max-w-60 whitespace-normal break-words">{entry.display_name ?? entry.caller_id}</div><div className="text-xs text-muted-foreground">{entry.caller_id}</div><div className="text-xs text-muted-foreground">{entry.key_id} · {t("relay.generation", { value: entry.credential_generation })}</div></TableCell>
+        <TableCell>{entry.provider}</TableCell><TableCell className="max-w-72 whitespace-normal break-all">{entry.models.join(", ")}</TableCell>
+        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
         <TableCell><div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
-          <Button size="sm" variant="outline" disabled={blocked} onClick={() => mutate({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
-          <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => mutate({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
+          <Button size="sm" variant="outline" disabled={blocked} onClick={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
+          <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
           <Button size="sm" variant="ghost" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
         </div></TableCell>
       </TableRow>)}
-      {!data.callers.length && <TableRow><TableCell colSpan={6}>{t("relay.empty")}</TableCell></TableRow>}
+      {!data.callers.length && <TableRow><TableCell colSpan={6}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}
     </TableBody></Table>}
-    <Sheet open={editing !== null && !preview} onOpenChange={open => { if (!open && !management.busy) setEditing(null) }}>
-      <SheetContent className="sm:max-w-xl" closeLabel={t("relay.close")}><SheetHeader><SheetTitle>{t(editing === "new" ? "relay.create" : "relay.edit")}</SheetTitle><SheetDescription>{t("relay.formHint")}</SheetDescription></SheetHeader>
-        <FieldGroup className="overflow-y-auto px-4">
+    <Dialog open={editing !== null && !preview} onOpenChange={open => { if (!open && !management.busy) setEditing(null) }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} onCloseAutoFocus={restoreFocus} showCloseButton={!management.busy} onEscapeKeyDown={event => { if (management.busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}><DialogHeader className="pr-8"><DialogTitle>{t(editing === "new" ? "relay.create" : "relay.edit")}</DialogTitle><DialogDescription>{t("relay.formHint")}</DialogDescription></DialogHeader>
+        <FieldGroup className="min-h-0 overflow-y-auto px-1 py-1">
           <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
           <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
           {(management.error || management.actionError) && <Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button>}
-          <Field><FieldLabel htmlFor="relay-caller">{t("relay.purpose")}</FieldLabel><Input id="relay-caller" value={caller} disabled={editing !== "new" || management.busy} onChange={event => setCaller(event.target.value)} maxLength={64} /><FieldDescription>{t("relay.purposeHint")}</FieldDescription></Field>
-          <Field><FieldLabel htmlFor="relay-provider">{t("relay.provider")}</FieldLabel><Select value={provider} disabled={editing !== "new" || management.busy} onValueChange={value => { setProvider(value); setModels([]) }}><SelectTrigger id="relay-provider"><SelectValue placeholder={t("relay.chooseProvider")} /></SelectTrigger><SelectContent><SelectGroup>{data?.providers.map(value => <SelectItem key={value.id} value={value.id} disabled={!value.available}>{value.id}{value.available ? "" : ` (${t("relay.unavailable")})`}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
-          <Field><FieldLabel>{t("relay.models")}</FieldLabel><div className="flex max-h-48 flex-col gap-2 overflow-y-auto">{[...new Set([...(selected?.models.map(value => value.id) ?? []), ...models])].map(model => <Field key={model} orientation="horizontal"><Checkbox id={`model-${model}`} checked={models.includes(model)} disabled={management.busy} onCheckedChange={checked => setModels(values => checked ? [...values, model] : values.filter(value => value !== model))} /><FieldLabel htmlFor={`model-${model}`}>{model}</FieldLabel></Field>)}</div></Field>
-          <Field><FieldLabel htmlFor="relay-reasoning">{t("relay.reasoning")}</FieldLabel><Select value={reasoning} disabled={management.busy} onValueChange={value => setReasoning(value as RelayReasoning)}><SelectTrigger id="relay-reasoning"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="passthrough">{t("relay.passthrough")}</SelectItem><SelectItem value="off" disabled={!supportsOff}>{t("relay.off")}</SelectItem></SelectGroup></SelectContent></Select><FieldDescription>{t(supportsOff ? "relay.offHint" : "relay.unsupported")}</FieldDescription></Field>
+          {draftStale && !management.loading && !management.error && <Alert><AlertDescription>{t(editing !== "new" && !latestCaller ? "relay.callerRemoved" : "relay.draftStale")}</AlertDescription></Alert>}
+          {draftStale && (editing === "new" || latestCaller) && <Button variant="outline" disabled={blocked} onClick={() => { if (editing === "new") openEditor("new", true); else if (latestCaller) openEditor(latestCaller, true) }}>{t("relay.reloadDraft")}</Button>}
+          <Field data-invalid={name.length > 0 && nameInvalid} data-disabled={management.busy}><FieldLabel htmlFor="relay-name">{t("relay.purpose")}</FieldLabel><Input id="relay-name" value={name} disabled={management.busy} onChange={event => setName(event.target.value)} aria-invalid={name.length > 0 && nameInvalid} aria-describedby={name.length > 0 && nameInvalid ? "relay-name-hint relay-name-error" : "relay-name-hint"} /><FieldDescription id="relay-name-hint">{t("relay.purposeHint")}</FieldDescription>{name.length > 0 && nameInvalid && <FieldError id="relay-name-error">{t("relay.nameInvalid")}</FieldError>}{editing !== "new" && <FieldDescription>{t("relay.callerId")}: {caller}</FieldDescription>}</Field>
+          <Field data-disabled={editing !== "new" || management.busy}><FieldLabel htmlFor="relay-provider">{t("relay.provider")}</FieldLabel><Select value={provider} disabled={editing !== "new" || management.busy} onValueChange={value => { setProvider(value); setModels([]) }}><SelectTrigger id="relay-provider"><SelectValue placeholder={t("relay.chooseProvider")} /></SelectTrigger><SelectContent><SelectGroup>{data?.providers.map(value => <SelectItem key={value.id} value={value.id} disabled={!value.available}>{value.id}{value.available ? "" : ` (${t("relay.unavailable")})`}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
+          <FieldSet disabled={management.busy || capabilityUnavailable}><FieldLegend>{t("relay.models")}</FieldLegend><div className="flex max-h-48 flex-col gap-2 overflow-y-auto">{[...new Set([...(selected?.models.map(value => value.id) ?? []), ...models])].map(model => <Field key={model} orientation="horizontal"><Checkbox id={`model-${model}`} checked={models.includes(model)} disabled={management.busy || capabilityUnavailable} onCheckedChange={checked => setModels(values => checked ? [...values, model] : values.filter(value => value !== model))} /><FieldLabel className="min-w-0 break-all" htmlFor={`model-${model}`}>{model}</FieldLabel></Field>)}</div>{!selected?.models.length && !capabilityUnavailable && <FieldDescription>{t("relay.selectModelsHint")}</FieldDescription>}</FieldSet>
+          <Field data-disabled={management.busy || capabilityUnavailable} data-invalid={!capabilityUnavailable && reasoning === "off" && !supportsOff}><FieldLabel id="relay-reasoning-label">{t("relay.reasoning")}</FieldLabel><ToggleGroup type="single" variant="outline" value={reasoning} disabled={management.busy || capabilityUnavailable} aria-labelledby="relay-reasoning-label" aria-describedby="relay-reasoning-hint" onValueChange={value => { if (value === "passthrough" || value === "off") setReasoning(value) }}><ToggleGroupItem value="passthrough">{t("relay.passthrough")}</ToggleGroupItem><ToggleGroupItem value="off" disabled={!supportsOff}>{t("relay.off")}</ToggleGroupItem></ToggleGroup><FieldDescription id="relay-reasoning-hint">{t(capabilityUnavailable ? "relay.capabilityUnavailable" : !provider || !models.length ? "relay.selectModelsHint" : supportsOff ? "relay.offHint" : "relay.unsupported")}</FieldDescription></Field>
         </FieldGroup>
-        <SheetFooter><Button variant="outline" disabled={management.busy} onClick={() => setEditing(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(caller) || !selected?.available || !models.length || reasoning === "off" && !supportsOff} onClick={submit}>{t("relay.preview")}</Button></SheetFooter>
-      </SheetContent>
-    </Sheet>
-    <Sheet open={preview !== undefined} onOpenChange={open => { if (!open) management.cancel() }}><SheetContent className="sm:max-w-xl" closeLabel={t("relay.close")}><SheetHeader><SheetTitle>{t("relay.confirm")}</SheetTitle><SheetDescription>{t("relay.confirmHint")}</SheetDescription></SheetHeader>
-      {preview && <div className="flex flex-col gap-2"><p>{t(`relay.operation.${preview.command}`)} · {preview.caller}</p>{previewCaller && <><p>{previewCaller.provider} · {previewCaller.models.join(", ")}</p><p>{t(previewCaller.reasoning === "off" ? "relay.off" : "relay.passthrough")}</p></>}</div>}
-      <SheetFooter><Button variant="outline" disabled={management.busy} onClick={management.cancel}>{t("relay.cancel")}</Button><Button disabled={management.busy} onClick={() => void confirm()}>{t("relay.confirm")}</Button></SheetFooter>
-    </SheetContent></Sheet>
-    <Sheet open={result !== null} onOpenChange={open => { if (!open) setResult(null) }}><SheetContent className="sm:max-w-xl" closeLabel={t("relay.close")}><SheetHeader><SheetTitle>{t("relay.saved")}</SheetTitle><SheetDescription>{result ? t(`relay.${result.activation}`) : ""}</SheetDescription></SheetHeader>
+        <DialogFooter><Button variant="outline" disabled={management.busy} onClick={() => setEditing(null)}>{t("relay.cancel")}</Button><Button disabled={blocked || draftStale || nameInvalid || policyChanged && (!selected?.available || !models.length || reasoning === "off" && !supportsOff)} onClick={submit}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.preview")}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <AlertDialog open={preview !== undefined} onOpenChange={open => { if (!open) management.cancel() }}>
+      <AlertDialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-lg" onCloseAutoFocus={restoreFocus}>
+        <AlertDialogHeader><AlertDialogTitle>{preview ? t(`relay.operation.${preview.command}`) : t("relay.confirm")}</AlertDialogTitle><AlertDialogDescription>{preview ? t(`relay.confirmHints.${preview.command}`) : ""}</AlertDialogDescription></AlertDialogHeader>
+        <div className="min-h-0 overflow-y-auto">
+          {preview && <dl className="grid min-w-0 gap-3"><div><dt className="text-muted-foreground">{t("relay.purpose")}</dt><dd className="break-words">{previewCaller?.display_name ?? preview.caller}</dd></div><div><dt className="text-muted-foreground">{t("relay.callerId")}</dt><dd className="break-all">{preview.caller}</dd></div>{previewCaller && <><div><dt className="text-muted-foreground">{t("relay.provider")}</dt><dd className="break-all">{previewCaller.provider}</dd></div><div><dt className="text-muted-foreground">{t("relay.models")}</dt><dd className="break-all">{previewCaller.models.join(", ")}</dd></div><div><dt className="text-muted-foreground">{t("relay.reasoning")}</dt><dd>{t(previewCaller.reasoning === "off" ? "relay.off" : "relay.passthrough")}</dd></div></>}</dl>}
+        </div>
+        <AlertDialogFooter><AlertDialogCancel disabled={management.busy}>{t("relay.cancel")}</AlertDialogCancel><AlertDialogAction variant={preview?.command === "disable" ? "destructive" : "default"} disabled={management.busy} onClick={event => { event.preventDefault(); void confirm() }}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.confirm")}</AlertDialogAction></AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <Dialog open={result !== null} onOpenChange={open => { if (!open) setResult(null) }}><DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} onCloseAutoFocus={restoreFocus} showCloseButton={!management.busy} onEscapeKeyDown={event => { if (management.busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}><DialogHeader className="pr-8"><DialogTitle>{t("relay.saved")}</DialogTitle><DialogDescription>{result ? t(`relay.${result.activation}`) : ""}</DialogDescription></DialogHeader>
+      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
       {result?.key && <Field><FieldLabel htmlFor="relay-secret">{t("relay.secret")}</FieldLabel><Input id="relay-secret" readOnly value={result.key} onFocus={event => event.target.select()} /><FieldDescription>{t("relay.secretHint")}</FieldDescription></Field>}
-      {result?.cleanupStatus === "failed" && <p role="alert">{t("relay.cleanupFailed")}</p>}
-      {result?.auditStatus === "failed" && <p role="alert">{t("relay.auditFailed")}</p>}
-      <SheetFooter><Button onClick={() => setResult(null)}>{t("relay.close")}</Button></SheetFooter>
-    </SheetContent></Sheet>
+      {result?.cleanupStatus === "failed" && <Alert><AlertDescription>{t("relay.cleanupFailed")}</AlertDescription></Alert>}
+      {result?.auditStatus === "failed" && <Alert><AlertDescription>{t("relay.auditFailed")}</AlertDescription></Alert>}
+      </div>
+      <DialogFooter><Button onClick={() => setResult(null)}>{t("relay.close")}</Button></DialogFooter>
+    </DialogContent></Dialog>
   </div>
 }

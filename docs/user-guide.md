@@ -590,20 +590,22 @@ Relay 默认禁用、只允许回环监听；异机客户端使用自己管理�
 完整配置、字段支持范围与回滚步骤见[实施方案](provider-api-relay-development.md#143-精确配置与命令已授权实现与隔离验证)。
 WebUI 请求页面可按来源与真实调用方筛选；接收确认不代表指标已落盘，交付完成不证明客户端已收到。
 
-WebUI 侧栏「API 转发」提供独立 Key 管理页。每个用途对应一把 Key，先选择已配置的 CLP
+WebUI 侧栏「API 转发」提供独立 Key 管理页。每个用途对应一把 Key，名称支持中文，内部调用方 ID 在新建时自动生成并保持不变。先选择已配置的 CLP
 账户和允许模型，再选择「跟随客户端」或「强制关闭」。多把 Key 可以使用同一账户，策略互不影响。
-账户凭据仍在原有提供商设置中维护；Relay 页不复制上游秘密。新建、编辑、轮换、停用先预览再确认，
+账户凭据仍在原有提供商设置中维护；Relay 页不复制上游秘密。新建、编辑、轮换、停用使用居中弹窗，先预览再确认，
 完整新 Key 只显示一次，关闭后无法再次查看；响应丢失时先刷新确认记录，不能自动重复签发。
-若返回 `cleanupStatus: "failed"` 或页面提示管理锁清理失败，修改已经保存；先保存新 Key，再检查数据目录权限和磁盘，不要重复签发。读取失败可直接刷新；编辑时错误及刷新入口显示在抽屉内，草稿保留，刷新后重新预览确认。
+若返回 `cleanupStatus: "failed"` 或页面提示管理锁清理失败，修改已经保存；先保存新 Key，再检查数据目录权限和磁盘，不要重复签发。读取失败可直接刷新；编辑时错误及刷新入口显示在弹窗内。刷新保留草稿，但检测到版本变化会禁止保存，须明确选择“重新加载并丢弃草稿”再编辑、预览，避免覆盖其他端修改。上游能力暂不可读取时保留现有策略，只允许改名；不会把未知状态当作模型不支持。
 「查看调用」进入现有请求列表并精确筛选用途。停用后重新使用须轮换生成新秘密。
 
 CLI 使用同一管理逻辑，例如：
 
 ```bash
 codexc relay providers
-codexc relay issue --caller translation --key translation-key --provider clp-main --model cline-pass/deepseek-v4.1-flash --reasoning off
+codexc relay issue --caller translation --key translation-key --provider clp-main --model cline-pass/deepseek-v4.1-flash --reasoning off --name "沉浸式翻译"
 codexc relay edit --caller translation --reasoning passthrough
 ```
+
+`issue` / `edit` 可通过 `--name "中文名称"` 设置 1–64 字符的用途名称，不含控制字符或首尾空白。名称可重复、可修改，身份仍以 caller_id 区分；改名不会取消请求或更改历史指标。旧记录未设名称时显示调用方 ID。
 
 `edit --model ID`（可重复）替换允许模型列表；省略则保持原列表。缺省思考策略为透传。
 强制关闭目前只支持 CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，同一 Key 的全部允许模型必须支持。
@@ -611,10 +613,11 @@ codexc relay edit --caller translation --reasoning passthrough
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
 修改模型或策略会取消该 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
 
-新增可选字段 `model_relay.callers[].reasoning` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
+新增可选字段 `model_relay.callers[].reasoning` 和 `display_name` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
 Relay、WebUI（包括前台实例），更新全部程序后再启动，避免旧程序读取新字段失败。
 回退旧程序前停止这些进程，用新版本执行 `codexc relay rollback-reasoning`，备份后仅移除策略字段，
 保留当前身份、哈希、代次和停用状态；此操作会使强制关闭失效。命令检查 Gateway 所有权和 Relay 控制端点，
+回退到不支持中文名称的版本前，用新版本执行 `codexc relay rollback-names`，仅移除 `display_name` 并保留当前凭据；若目标版本也不支持思考策略，再执行 `rollback-reasoning`。
 WebUI 及其他手工写入者须自行保持停止。失败保留原配置，不应恢复整份历史配置以免复活旧凭据。
 
 

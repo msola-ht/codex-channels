@@ -1024,7 +1024,7 @@ export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "excha
 
 export type RelayReasoning = "passthrough" | "off";
 export interface RelayManagedCaller {
-  caller_id: string; key_id: string; credential_generation: number; enabled: boolean;
+  caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
   provider: string; models: string[]; reasoning: RelayReasoning;
 }
 export interface RelayManagementSnapshot {
@@ -1032,8 +1032,8 @@ export interface RelayManagementSnapshot {
   providers: Array<{ id: string; available: boolean; models: Array<{ id: string; reasoningOff: boolean }> }>;
 }
 export type RelayManagementInput =
-  | { command: "issue"; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "edit"; caller: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "edit"; name?: string; caller: string; models: string[]; reasoning: RelayReasoning }
   | { command: "rotate" | "disable"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
 export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }

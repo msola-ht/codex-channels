@@ -121,8 +121,8 @@ it("accepts help only for exact public paths and rejects unknown options", async
   try {
     await runModelRelayCommand(["upgrade-limits", "-h"]);
     await runModelRelayCommand(["upgrade-limits", "--help"]);
-    for (const command of ["status", "providers", "issue", "callers", "rotate", "disable", "enable", "edit", "rollback-reasoning", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
-    expect(log).toHaveBeenCalledTimes(22);
+    for (const command of ["status", "providers", "issue", "callers", "rotate", "disable", "enable", "edit", "rollback-reasoning", "rollback-names", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    expect(log).toHaveBeenCalledTimes(24);
   } finally { log.mockRestore(); }
   expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
@@ -420,4 +420,30 @@ it.each([".management-transaction.lock", "config.toml.lock"])("preserves the com
     expect(callers).toHaveLength(1);
     expect(callers[0]!.secret_sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
   } finally { unlink.mockRestore(); syncBuiltinESMExports(); }
+});
+
+it("renames and rolls back display names without restoring old credentials", async () => {
+  const f = await fixture();
+  await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash", "--name", "沉浸式翻译"]), f.environment);
+  const read = () => gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
+  const initial = read();
+  const revision = readRelayManagement(f.environment).revision;
+  const edit = parseModelRelayCommand(["edit", "--caller", "client", "--name", "网页翻译"]);
+  await sharedManage(edit, f.environment, { preview: true, expectedRevision: revision });
+  expect(read()).toEqual(initial);
+  await sharedManage(edit, f.environment, { expectedRevision: revision });
+  expect(read()).toEqual({ ...initial, display_name: "网页翻译" });
+  await expect(sharedManage(edit, f.environment, { expectedRevision: revision })).rejects.toThrow("已变化");
+  await sharedManage(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment);
+  await sharedManage(parseModelRelayCommand(["disable", "--caller", "client"]), f.environment);
+  const current = read(), before = readFileSync(f.configPath, "utf8");
+  const failed = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("name rollback failed"); });
+  try { await expect(sharedManage(parseModelRelayCommand(["rollback-names"]), f.environment)).rejects.toThrow("name rollback failed"); }
+  finally { failed.mockRestore(); }
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  const result = await sharedManage(parseModelRelayCommand(["rollback-names"]), f.environment);
+  expect(readFileSync(String(result.backupPath), "utf8")).toBe(before);
+  const { display_name: removed, ...identity } = current;
+  expect(removed).toBe("网页翻译");
+  expect(read()).toEqual(identity);
 });

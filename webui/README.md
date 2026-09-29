@@ -21,7 +21,7 @@ src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时与页面可见性，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG、Cline Pass 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
   hooks/       数据 hook（useApi 统一 loading/error/refetch，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay Key 管理 use-relay-management（复用确认 Hook），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
   components/  layout（Sidebar）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，account-id-field 共用新增账户预设与自定义输入）
-  pages/       概览、会话、会话详情、请求、错误、调用详情、API 转发（独立 Key 管理）、设置（只负责组合设置域组件）
+  pages/       概览、会话、会话详情、请求、错误、调用详情、API 转发（独立 Key 管理，中文用途名称及居中弹窗）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
 
@@ -63,3 +63,5 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/metrics/service-tier.tsx` 为请求明细、错误记录和调用详情提供 Fast 标签；前两者使用请求层级，调用详情区分请求与响应来源。
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
+
+`components/ui/dialog.tsx`：沿用 Radix/shadcn 的居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件，确认操作使用已有 AlertDialog。

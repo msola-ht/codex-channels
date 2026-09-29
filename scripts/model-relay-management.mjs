@@ -14,7 +14,7 @@ import { ConfigManagementError } from "./config-management-error.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 
-const commands = ["status", "providers", "callers", "issue", "edit", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning"];
+const commands = ["status", "providers", "callers", "issue", "edit", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names"];
 const invalid = message => new ConfigManagementError("relay_invalid", "relay", message);
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
@@ -38,8 +38,8 @@ export function readRelayManagement(environment = process.env) {
 }
 
 function safeCallers(callers) {
-  return callers.map(({ caller_id, key_id, credential_generation, enabled, provider, models, reasoning }) =>
-    ({ caller_id, key_id, credential_generation, enabled, provider, models, reasoning: reasoning ?? "passthrough" }));
+  return callers.map(({ caller_id, key_id, credential_generation, enabled, provider, models, reasoning, display_name }) =>
+    ({ caller_id, key_id, credential_generation, enabled, provider, models, ...(display_name === undefined ? {} : { display_name }), reasoning: reasoning ?? "passthrough" }));
 }
 
 // Only recover a completed mutation result: failures before callback completion still fail closed.
@@ -107,9 +107,9 @@ async function executeModelRelay(input, environment, options) {
     validateGatewayConfigDocument(document);
     return { result: "upgraded", backupPath: saveConfigWithBackup(configPath, content, document, "relay") };
   });
-  if (input.command === "rollback-reasoning") {
+  if (["rollback-reasoning", "rollback-names"].includes(input.command)) {
     if (await gatewayOwnerIsActive(configPath) || (await queryModelRelayControl(endpoint, "status")).result !== "not_running") {
-      throw invalid("回退前须停止 Gateway、Relay 和 WebUI（含前台实例）；关闭策略将失效");
+      throw invalid("回退前须停止 Gateway、Relay 和 WebUI（含前台实例）；对应名称或思考策略将移除");
     }
   }
   let secret;
@@ -119,7 +119,7 @@ async function executeModelRelay(input, environment, options) {
     const content = readPrivateFileSync(configPath, 1024 * 1024);
     const document = parseGatewayConfig(content);
     const validated = validateGatewayConfigDocument(document);
-    if (input.command === "rollback-reasoning" && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
+    if (["rollback-reasoning", "rollback-names"].includes(input.command) && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
     const config = structuredClone(validated.model_relay ?? modelRelayConfigSchema.parse({}));
     const previous = modelRelayConfigDigest(config);
     if (input.command === "issue") {
@@ -129,16 +129,25 @@ async function executeModelRelay(input, environment, options) {
       if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider });
       const bytes = options.preview ? Buffer.alloc(32) : randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
+        ...(input.name === undefined ? {} : { display_name: input.name }),
         secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models, ...(input.reasoning === "off" ? { reasoning: "off" } : {}) });
-    } else if (input.command === "rollback-reasoning") {
-      for (const caller of config.callers) delete caller.reasoning;
+    } else if (["rollback-reasoning", "rollback-names"].includes(input.command)) {
+      for (const caller of config.callers) {
+        if (input.command === "rollback-names") delete caller.display_name;
+        else delete caller.reasoning;
+      }
     } else if (input.command === "edit") {
       const caller = config.callers.find(value => value.caller_id === input.caller);
       if (!caller) throw invalid("Relay 调用方不存在");
-      const material = loadConfiguredChatProviderMaterial(caller.provider, environment);
       const models = input.models?.length ? input.models : caller.models;
-      if (models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
+      const policyChanged = models.length !== caller.models.length || models.some(model => !caller.models.includes(model))
+        || input.reasoning !== undefined && input.reasoning !== (caller.reasoning ?? "passthrough");
+      if (policyChanged) {
+        const material = loadConfiguredChatProviderMaterial(caller.provider, environment);
+        if (models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");
+      }
       caller.models = models;
+      if (input.name !== undefined) caller.display_name = input.name;
       if (input.reasoning === "off") caller.reasoning = "off";
       else if (input.reasoning === "passthrough") delete caller.reasoning;
     } else if (input.command === "rotate" || input.command === "disable" && input.caller) {
@@ -152,7 +161,7 @@ async function executeModelRelay(input, environment, options) {
       }
     } else config.enabled = input.command === "enable";
     const parsed = modelRelayConfigSchema.safeParse(config);
-    if (!parsed.success) throw invalid("Relay 身份、模型或思考策略无效；强制关闭仅支持 CLP 的 cline-pass/deepseek-v4.1-flash");
+    if (!parsed.success) throw invalid("Relay 身份、用途名称、模型或思考策略无效；强制关闭仅支持 CLP 的 cline-pass/deepseek-v4.1-flash");
     document.model_relay = parsed.data;
     validateGatewayConfigDocument(document);
     const digest = modelRelayConfigDigest(modelRelayConfigSchema.parse(document.model_relay ?? {}));

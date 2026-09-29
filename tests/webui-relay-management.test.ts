@@ -27,7 +27,7 @@ async function fixture() {
   const post = (path: string, value: unknown) => fetch(`${url}/${path}`, { method: "POST", headers, body: JSON.stringify(value) });
   return { ...f, url, headers, snapshot, post };
 }
-const input: RelayManagementInput = { command: "issue", caller: "translation", key: "translation-key", provider: "clp-test",
+const input: RelayManagementInput = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
   models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
 it("requires auth/origin and confirmation; previews do not sign keys, and writes return a secret only once", async () => {
   const f = await fixture();
@@ -53,6 +53,7 @@ it("requires auth/origin and confirmation; previews do not sign keys, and writes
   expect(saved.key).toMatch(/^cr1.translation-key\./u);
   const after = await f.snapshot();
   expect(after.callers[0]?.reasoning).toBe("off");
+  expect(after.callers[0]?.display_name).toBe("沉浸式翻译");
   expect(JSON.stringify(after)).not.toContain(saved.key!);
   expect(JSON.stringify(after)).not.toContain("secret_sha256");
   expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(409);

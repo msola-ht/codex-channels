@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
+export const relayDisplayNameSchema = z.string().refine(value => value.trim() === value && [...value].length >= 1 && [...value].length <= 64 && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(value), "用途名称须为 1–64 个字符，不含控制字符或首尾空白");
 const provider = z.string().regex(/^clp-[a-z0-9_-]{1,32}$/u);
 const limits = (concurrency, burst) => ({
   max_concurrency: z.number().int().min(1).max(32).default(concurrency),
@@ -23,6 +24,7 @@ function schema(legacy, legacyCapture = false) {
     accounts: z.array(z.strictObject({ provider, ...(legacy ? limits(10, 10) : {}) })).max(128).default([]),
     callers: z.array(z.strictObject({
       caller_id: identity,
+      display_name: relayDisplayNameSchema.optional(),
       key_id: identity,
       credential_generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
       secret_sha256: z.string().regex(/^[a-f0-9]{64}$/u),

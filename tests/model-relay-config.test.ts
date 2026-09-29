@@ -68,3 +68,15 @@ it("supports optional reasoning only for exact known provider/model pairs", () =
   expect(modelRelayConfigSchema.safeParse({ ...value, callers: [{ ...value.callers[0], models: ["unknown"] }] }).success).toBe(false);
   expect(modelRelayConfigSchema.safeParse({ ...value, callers: [{ ...value.callers[0], reasoning: "auto" }] }).success).toBe(false);
 });
+
+it("accepts Unicode display names without changing authorization policy and rejects unsafe names", () => {
+  const base = modelRelayConfigSchema.parse({ accounts: [{ provider: caller.provider }], callers: [caller] });
+  for (const name of ["沉浸式翻译", "翻".repeat(64), "Reader 2"]) {
+    const named = modelRelayConfigSchema.parse({ ...base, callers: [{ ...caller, display_name: name }] });
+    expect(named.callers[0]?.display_name).toBe(name);
+    expect(relayPolicyFromConfig(named)).toEqual(relayPolicyFromConfig(base));
+  }
+  for (const name of ["", " ", " 名称", "名称 ", "翻".repeat(65), "a\nb", "a\u202eb"]) {
+    expect(modelRelayConfigSchema.safeParse({ ...base, callers: [{ ...caller, display_name: name }] }).success).toBe(false);
+  }
+});
