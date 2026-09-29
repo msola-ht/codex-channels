@@ -1,4 +1,5 @@
 export type {
+  RelayReasoning, RelayManagedCaller, RelayManagementSnapshot, RelayManagementInput, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   Aggregate,
   CacheUsage,
   ServerTimeResponse,

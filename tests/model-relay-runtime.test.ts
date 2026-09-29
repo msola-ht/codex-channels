@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { readRelayManagement, manageModelRelay as sharedManage } from "../scripts/model-relay-management.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { upgradeTrafficCapture, parseTrafficUpgradeArgs } from "../scripts/traffic-upgrade.mjs";
 import { createHash } from "node:crypto";
@@ -11,6 +14,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { startModelRelayService } from "../runtime/model-relay-service.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
+import * as relayControl from "../runtime/model-relay-control.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-setup.mjs";
@@ -117,8 +121,8 @@ it("accepts help only for exact public paths and rejects unknown options", async
   try {
     await runModelRelayCommand(["upgrade-limits", "-h"]);
     await runModelRelayCommand(["upgrade-limits", "--help"]);
-    for (const command of ["status", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
-    expect(log).toHaveBeenCalledTimes(6);
+    for (const command of ["status", "providers", "issue", "callers", "rotate", "disable", "enable", "edit", "rollback-reasoning", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    expect(log).toHaveBeenCalledTimes(22);
   } finally { log.mockRestore(); }
   expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
@@ -206,6 +210,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   } finally { releasePreparation(); preparation.mockRestore(); }
   await upgradeTrafficCapture({ enabled: true, mode: "debug" }, f.environment);
   await service.refresh();
+  await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "client", "--reasoning", "off"]), f.environment);
   let key = issued.key;
   for (const stream of [false, true]) {
     if (stream) key = (await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment)).key;
@@ -219,6 +224,9 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
     headers: { authorization: `Bearer ${String(other.key)}`, "content-type": "application/json" },
     body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }) });
   expect(otherResponse.status).toBe(200); await otherResponse.text();
+  expect(received[1]).toMatchObject({ reasoning: { effort: "none" } });
+  expect(received[2]).toMatchObject({ reasoning: { effort: "none" } });
+  expect(received[3]).not.toHaveProperty("reasoning");
   // Default rate limits are disabled: further requests need no refill wait.
   const pending = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(key)}`, "content-type": "application/json" },
@@ -347,4 +355,69 @@ it("refuses traffic upgrade before any write while a Gateway owner is active, in
   }
   await owner.close();
   expect(await upgradeTrafficCapture({ enabled: false, mode: "production" }, f.environment)).toMatchObject({ result: "upgraded" });
+});
+
+it("shares read-only previews and revision-checked policy edits, preserving credentials on rollback", async () => {
+  const f = await fixture();
+  const snapshot = readRelayManagement(f.environment);
+  expect(snapshot.providers).toContainEqual(expect.objectContaining({ id: "clp-test", available: true }));
+  const input = parseModelRelayCommand(["issue", "--caller", "translation", "--key", "translation", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash", "--reasoning", "off"]);
+  const before = readFileSync(f.configPath, "utf8");
+  const preview = await sharedManage(input, f.environment, { preview: true, expectedRevision: snapshot.revision });
+  expect(JSON.stringify(preview)).not.toContain("secret_sha256");
+  expect(preview).not.toHaveProperty("key");
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  const saved = await sharedManage(input, f.environment, { expectedRevision: snapshot.revision });
+  expect(saved.key).toMatch(/^cr1.translation\./u);
+  await expect(sharedManage(input, f.environment, { expectedRevision: snapshot.revision })).rejects.toThrow("已变化");
+  const off = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
+  expect(off.reasoning).toBe("off");
+  await manageModelRelay(parseModelRelayCommand(["disable", "--caller", "translation"]), f.environment);
+  const disabledContent = readFileSync(f.configPath, "utf8");
+  const owner = new GatewayOwner(f.configPath); await owner.start();
+  try { await expect(manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment)).rejects.toThrow("停止 Gateway"); }
+  finally { await owner.close(); }
+  expect(readFileSync(f.configPath, "utf8")).toBe(disabledContent);
+  const failedSave = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementationOnce(() => { throw new Error("rollback save failure"); });
+  try { await expect(manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment)).rejects.toThrow("rollback save failure"); }
+  finally { failedSave.mockRestore(); }
+  expect(readFileSync(f.configPath, "utf8")).toBe(disabledContent);
+  const rollback = await manageModelRelay(parseModelRelayCommand(["rollback-reasoning"]), f.environment);
+  expect(readFileSync(String(rollback.backupPath), "utf8")).toBe(disabledContent);
+  const rolled = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!;
+  expect(rolled.reasoning).toBeUndefined();
+  expect(rolled.enabled).toBe(false);
+  expect(rolled.secret_sha256).toBe(off.secret_sha256);
+  expect(rolled.credential_generation).toBe(off.credential_generation);
+  await manageModelRelay(parseModelRelayCommand(["edit", "--caller", "translation", "--reasoning", "off"]), f.environment);
+  expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers[0]!.enabled).toBe(false);
+});
+
+it("returns the saved one-time key even if activation probing throws", async () => {
+  const f = await fixture();
+  const failedProbe = vi.spyOn(relayControl, "queryModelRelayControl").mockRejectedValueOnce(new Error("private endpoint unavailable"));
+  try {
+    const result = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+    expect(result.activation).toBe("saved_unconfirmed"); expect(result.key).toMatch(/^cr1.key\./u);
+    expect(gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers).toHaveLength(1);
+  } finally { failedProbe.mockRestore(); }
+});
+
+it.each([".management-transaction.lock", "config.toml.lock"])("preserves the committed key when releasing %s fails", async suffix => {
+  const f = await fixture();
+  const original = fs.unlinkSync;
+  const unlink = vi.spyOn(fs, "unlinkSync").mockImplementation(path => {
+    if (String(path).endsWith(suffix)) throw new Error("fixture release failure");
+    return original(path);
+  });
+  syncBuiltinESMExports();
+  try {
+    const saved = await sharedManage(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+    expect(saved.cleanupStatus).toBe("failed");
+    expect(saved.key).toMatch(/^cr1.key\./u);
+    const bytes = Buffer.from(String(saved.key).split(".")[2]!, "base64url");
+    const callers = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.readGatewayConfig(f.configPath)).model_relay!.callers;
+    expect(callers).toHaveLength(1);
+    expect(callers[0]!.secret_sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+  } finally { unlink.mockRestore(); syncBuiltinESMExports(); }
 });

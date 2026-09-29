@@ -1,3 +1,4 @@
+import { supportsChatReasoningOff } from "../../runtime/chat-reasoning.mjs";
 import { ModelConversionError } from "./validation.js";
 
 /** Model parameters stay opaque to the relay; only local routing/delivery fields are typed. */
@@ -42,4 +43,20 @@ export function validateDirectChatRequest(value: unknown): DirectChatRequest {
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Explicit per-key policy, after authentication; passthrough keeps all client parameters. */
+export function applyChatReasoningPolicy(request: DirectChatRequest, provider: string, mode: "passthrough" | "off"): DirectChatRequest {
+  if (mode === "passthrough") return request;
+  if (!supportsChatReasoningOff(provider, request.model)) throw new DirectChatRequestError("model", "Reasoning off is not supported for this provider and model");
+  const controls = ["reasoning", "thinking", "reasoning_effort", "enable_thinking"];
+  for (const container of ["extra_body", "extraBody"]) {
+    const nested = request[container];
+    if (record(nested)) for (const field of controls) {
+      if (Object.hasOwn(nested, field)) throw new DirectChatRequestError(`${container}.${field}`, "Conflicts with this key's reasoning-off policy");
+    }
+  }
+  const result: DirectChatRequest = { ...request, reasoning: { effort: "none" } };
+  for (const field of controls.slice(1)) delete result[field];
+  return result;
 }

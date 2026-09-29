@@ -237,3 +237,19 @@ it("honors reduced global concurrency and an expired deadline even before its ti
   now = 30_001; b.release(); await rejected;
   expect(admission.active).toBe(0); expect(admission.queue.pending).toBe(0); admission.close();
 });
+
+it("revokes only the key whose reasoning policy changed, including waiting leases", async () => {
+  const initial = policy();
+  const admission = new RelayAdmission({ ...initial, maxConcurrency: 1 });
+  const active = admission.acquire(token());
+  const sibling = admission.reserve(token("key-b"));
+  const queued = admission.reserve(token());
+  const waiting = admission.wait(queued, "fixture/model", 10, queued.signal);
+  const rejected = expect(waiting).rejects.toThrow("request_revoked");
+  admission.apply({ ...initial, maxConcurrency: 1, callers: initial.callers.map(caller => caller.keyId === "key-a" ? { ...caller, reasoning: "off" } : caller) });
+  await rejected;
+  expect(active.signal.aborted).toBe(true);
+  expect(sibling.signal.aborted).toBe(false);
+  expect(() => active.check()).toThrow("request_revoked");
+  active.release(); sibling.release(); admission.close();
+});

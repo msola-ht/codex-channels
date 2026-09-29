@@ -29,14 +29,14 @@ const answer = { id: "reply-1", model: "fixture/model", choices: [{ index: 0, me
   usage: { prompt_tokens: 3, completion_tokens: 2 } };
 const frame = (value: unknown): string => `data: ${JSON.stringify(value)}\n\n`;
 async function fixture(reply: (request: IncomingMessage, response: ServerResponse) => void,
-  prepareOverride?: (prepared: PreparedRelayProvider) => Promise<PreparedRelayProvider>, sink?: (sample: RelayMetric) => void, dump?: RelayTrafficDump, debug = false) {
+  prepareOverride?: (prepared: PreparedRelayProvider) => Promise<PreparedRelayProvider>, sink?: (sample: RelayMetric) => void, dump?: RelayTrafficDump, debug = false, policy: RelayPolicy = config()) {
   let calls = 0; let preparedCount = 0;
   const backend = createServer((request, response) => { calls++; reply(request, response); });
   await new Promise<void>(resolve => backend.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve())); });
   const address = backend.address(); if (!address || typeof address === "string") throw new Error("fixture");
   const metrics: RelayMetric[] = [];
-  const relay = new ModelRelayServer({ ...(dump ? { capture: (provider, signal) => dump.open(provider, signal, debug) } : {}), policy: config(), enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
+  const relay = new ModelRelayServer({ ...(dump ? { capture: (provider, signal) => dump.open(provider, signal, debug) } : {}), policy, enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
     prepare: async () => {
       preparedCount++;
       const prepared: PreparedRelayProvider = { target: { host: "127.0.0.1", port: address.port, protocol: "http", basePath: "/v1", authorization: "Bearer UPSTREAM-SECRET" },
@@ -753,13 +753,13 @@ describe("isolated Relay vertical request chain", () => {
     expect(await response.json()).toEqual({ object: "list", data: [{ id: "fixture/model", object: "model", owned_by: "relay" }] });
     expect(f.calls()).toBe(0); expect(f.metrics).toEqual([]);
   });
-  it("cancels pending preparation and ignores its late result after rotation", async () => {
+  it.each(["rotation", "reasoning"])("cancels pending preparation and ignores its late result after %s", async change => {
     let release!: () => void; let preparing!: () => void;
     const ready = new Promise<void>(resolve => { preparing = resolve; });
     const pending = new Promise<void>(resolve => { release = resolve; });
     const f = await fixture(() => { throw new Error("late send"); }, async prepared => { preparing(); await pending; return prepared; });
     const result = f.post(); await ready;
-    const policy = config(); f.relay.admission.apply({ ...policy, callers: policy.callers.map(caller => ({ ...caller, credentialGeneration: 2 })) });
+    const policy = config(); f.relay.admission.apply({ ...policy, callers: policy.callers.map(caller => change === "rotation" ? ({ ...caller, credentialGeneration: 2 }) : ({ ...caller, reasoning: "off" })) });
     const response = await result; expect(response.status).toBe(503); await response.text();
     release(); await new Promise(resolve => setImmediate(resolve));
     expect(f.calls()).toBe(0); expect(f.metrics).toEqual([]); expect(f.relay.diagnostics().active).toBe(0);
@@ -809,4 +809,37 @@ describe("isolated Relay vertical request chain", () => {
     const response = await f.post(); expect(response.status).toBe(502);
     expect(response.headers.get("location")).toBeNull(); expect(f.calls()).toBe(1); expect(f.metrics).toHaveLength(1);
   });
+});
+
+it.each([false, true])("forces reasoning off on the outbound copy for JSON/SSE (%s), preserving other parameters", async stream => {
+  const directory = mkdtempSync(join(tmpdir(), "relay-reasoning-debug-"));
+  cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+  const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+  const model = "cline-pass/deepseek-v4.1-flash";
+  const policy = config();
+  policy.callers = policy.callers.map(caller => ({ ...caller, models: [model], reasoning: "off" }));
+  let outbound: Record<string, unknown> | undefined;
+  const f = await fixture((request, response) => {
+    let text = ""; request.setEncoding("utf8"); request.on("data", chunk => { text += chunk; });
+    request.on("end", () => {
+      outbound = JSON.parse(text) as Record<string, unknown>;
+      if (stream) response.writeHead(200, { "content-type": "text/event-stream" }).end(frame({ id: "a", model, choices: [{ index: 0, delta: { content: "OK" }, finish_reason: "stop" }] }) + "data: [DONE]\n\n");
+      else response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ...answer, model }));
+    });
+  }, async prepared => ({ ...prepared, models: [model] }), undefined, dump, true, policy);
+  const input = { model, stream, temperature: 0, reasoning: { effort: "high" }, thinking: { type: "enabled" }, reasoning_effort: "high", enable_thinking: true,
+    messages: [{ role: "assistant", content: "history", reasoning: "keep history" }, { role: "user", content: "test" }] };
+  const response = await f.post(input);
+  expect(response.status).toBe(200); await response.text();
+  expect(outbound).toEqual({ model, stream, temperature: 0, reasoning: { effort: "none" }, messages: input.messages });
+  expect(input.reasoning.effort).toBe("high");
+  await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+  await dump.close();
+  const ref = f.metrics[0]!.traffic!;
+  const detail = await describeDumpExchange([join(directory, `relay.chat-${ref.session}`)], ref.interaction);
+  expect(JSON.parse(detail.debug.inbound.body)).toEqual(input);
+  expect(JSON.parse(detail.request.body)).toEqual(outbound);
+  const denied = await f.post({ ...input, extra_body: { thinking: true } });
+  expect(denied.status).toBe(400); expect(await denied.text()).toContain("extra_body.thinking");
+  expect(f.calls()).toBe(1);
 });

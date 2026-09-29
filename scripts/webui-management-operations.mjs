@@ -17,7 +17,8 @@ export function codexManagementError(error) {
 }
 
 export function isHighRiskManagementPath(path) {
-  return path.startsWith("/provider-settings")
+  return path.startsWith("/relay/")
+    || path.startsWith("/provider-settings")
     || path.startsWith("/account-settings")
     || path.startsWith("/tasks");
 }

@@ -61,3 +61,10 @@ describe("Relay strict configuration", () => {
     expect(modelRelayConfigSchema.parse({ callers: [{ ...caller, enabled: false }] }).callers).toHaveLength(1);
   });
 });
+
+it("supports optional reasoning only for exact known provider/model pairs", () => {
+  const value = { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, reasoning: "off", models: ["cline-pass/deepseek-v4.1-flash"] }] };
+  expect(relayPolicyFromConfig(modelRelayConfigSchema.parse(value)).callers[0]?.reasoning).toBe("off");
+  expect(modelRelayConfigSchema.safeParse({ ...value, callers: [{ ...value.callers[0], models: ["unknown"] }] }).success).toBe(false);
+  expect(modelRelayConfigSchema.safeParse({ ...value, callers: [{ ...value.callers[0], reasoning: "auto" }] }).success).toBe(false);
+});

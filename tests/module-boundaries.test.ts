@@ -276,6 +276,9 @@ function runtimeImportViolations(): string[] {
       }
       const target = resolve(dirname(file), specifier);
       if (isInside(runtimeRoot, target)) {
+        // Pure Chat capability metadata is shared with strict config and CLI/WebUI management.
+        if (file === resolve(sourceRoot, "model-api/chat-request.ts")
+          && target === resolve(runtimeRoot, "chat-reasoning.mjs")) continue;
         // Transport and service supervision share the same platform socket validation.
         if (file === resolve(sourceRoot, "codex-client/unix-websocket-transport.ts")
           && target === resolve(runtimeRoot, "app-server-unix-socket.mjs")) continue;

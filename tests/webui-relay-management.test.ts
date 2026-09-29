@@ -1,0 +1,105 @@
+import * as fileLock from "../runtime/private-file-lock.mjs";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanupWebuiTestFixtures, createWebuiTestFixture, startWebuiTestServer, type WebuiTestServer } from "./webui-server-test-fixture.js";
+import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
+import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
+import type { RelayManagementSnapshot, RelayManagementResult, RelayManagementInput } from "../scripts/webui-api.js";
+
+vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
+const directories: string[] = [], servers: WebuiTestServer[] = [];
+afterEach(async () => cleanupWebuiTestFixtures(servers, directories));
+async function fixture() {
+  const f = createWebuiTestFixture(directories);
+  writePrivateFileAtomicSync(join(f.home, "config.toml"), 'version = 1\ndefault_workspace = "main"\n[codex]\n[telegram]\nbot_token="fixture"\nallowed_user_ids=[1]\n[[workspaces]]\nid="main"\nname="Main"\ncwd="/tmp"\n');
+  writePrivateFileAtomicSync(join(f.home, "providers/deepseek/models.json"), JSON.stringify({ models: [{
+    slug: "deepseek-flash", display_name: "Fixture", visibility: "list", supported_in_api: true,
+    context_window: 64000, max_context_window: 128000, input_modalities: ["text"], default_reasoning_level: "high",
+    supported_reasoning_levels: [{ effort: "high", description: "High" }], model_messages: { instructions_template: "fixture" },
+  }] }));
+  await applyClinePassConfiguration({ accountId: "test", apiKey: "UPSTREAM-SECRET" }, { environment: f.environment });
+  const managementOrigin = "http://127.0.0.1:0";
+  const { origin } = await startWebuiTestServer(servers, f.environment, undefined, { managementOrigin, token: "admin-secret" });
+  const headers = { origin: managementOrigin, authorization: "Bearer admin-secret", "content-type": "application/json" };
+  const url = `${origin}/api/v1/management/relay`;
+  const snapshot = async () => await (await fetch(url, { headers })).json() as RelayManagementSnapshot;
+  const post = (path: string, value: unknown) => fetch(`${url}/${path}`, { method: "POST", headers, body: JSON.stringify(value) });
+  return { ...f, url, headers, snapshot, post };
+}
+const input: RelayManagementInput = { command: "issue", caller: "translation", key: "translation-key", provider: "clp-test",
+  models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
+it("requires auth/origin and confirmation; previews do not sign keys, and writes return a secret only once", async () => {
+  const f = await fixture();
+  expect((await fetch(f.url)).status).toBe(401);
+  const badOrigin = await fetch(`${f.url}/preview`, { method: "POST", headers: { ...f.headers, origin: "https://evil.invalid" }, body: "{}" });
+  expect(badOrigin.status).toBe(403);
+  const snapshot = await f.snapshot();
+  expect(snapshot.providers[0]?.models).toContainEqual({ id: "cline-pass/deepseek-v4.1-flash", reasoningOff: true });
+  expect(JSON.stringify(snapshot)).not.toContain("UPSTREAM-SECRET");
+  const body = { input, revision: snapshot.revision };
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const previewResponse = await f.post("preview", body);
+  expect(previewResponse.status).toBe(200);
+  expect(previewResponse.headers.get("cache-control")).toBe("no-store");
+  const preview = await previewResponse.json() as { confirmationToken: string };
+  expect(JSON.stringify(preview)).not.toContain("cr1.");
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  expect((await f.post("apply", body)).status).toBe(409);
+  const applied = await f.post("apply", { ...body, confirmationToken: preview.confirmationToken });
+  expect(applied.status).toBe(200);
+  const saved = await applied.json() as RelayManagementResult;
+  expect(saved).toMatchObject({ activation: "saved_not_running", auditStatus: "recorded" });
+  expect(saved.key).toMatch(/^cr1.translation-key\./u);
+  const after = await f.snapshot();
+  expect(after.callers[0]?.reasoning).toBe("off");
+  expect(JSON.stringify(after)).not.toContain(saved.key!);
+  expect(JSON.stringify(after)).not.toContain("secret_sha256");
+  expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(409);
+});
+it("rejects unknown operations and stale configuration before mutation", async () => {
+  const f = await fixture();
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  expect((await f.post("preview", { revision: "0".repeat(64), input })).status).toBe(409);
+  const current = await f.snapshot();
+  expect((await f.post("preview", { revision: current.revision, input: { command: "enable" } })).status).toBe(400);
+  expect((await f.post("preview", { revision: current.revision, input: { ...input, secret_sha256: "unsafe" } })).status).toBe(400);
+  expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+});
+
+it("returns the saved key after transaction cleanup fails and does not send twice", async () => {
+  const f = await fixture();
+  const body = { input, revision: (await f.snapshot()).revision };
+  const preview = await (await f.post("preview", body)).json() as { confirmationToken: string };
+  const original = fileLock.withPrivateFileLock;
+  const lock = vi.spyOn(fileLock, "withPrivateFileLock").mockImplementation(async (...args) => {
+    await original(...args);
+    throw new Error("fixture lock cleanup failure");
+  });
+  try {
+    const response = await f.post("apply", { ...body, confirmationToken: preview.confirmationToken });
+    expect(response.status).toBe(200);
+    const saved = await response.json() as RelayManagementResult;
+    expect(saved.cleanupStatus).toBe("failed");
+    expect(saved.key).toMatch(/^cr1.translation-key\./u);
+    expect((await f.snapshot()).callers).toHaveLength(1);
+  } finally { lock.mockRestore(); }
+});
+it("does not return confirmation or write config when preview cleanup fails", async () => {
+  const f = await fixture();
+  const body = { input, revision: (await f.snapshot()).revision };
+  const before = readFileSync(join(f.home, "config.toml"), "utf8");
+  const original = fileLock.withPrivateFileLock;
+  const lock = vi.spyOn(fileLock, "withPrivateFileLock").mockImplementation(async (...args) => {
+    await original(...args);
+    throw new Error("fixture private cleanup failure");
+  });
+  try {
+    const response = await f.post("preview", body);
+    expect(response.status).toBe(500);
+    const error = await response.text();
+    expect(error).not.toContain("confirmationToken");
+    expect(error).not.toContain("fixture private cleanup failure");
+    expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
+  } finally { lock.mockRestore(); }
+});

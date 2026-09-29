@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, validateDirectChatRequest } from "../model-api/index.js";
+import { DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
 import { ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
@@ -135,6 +135,7 @@ export class ModelRelayServer {
           if (!hadStream) delete (inbound as Record<string, unknown>).stream;
         } finally { clearTimeout(uploadTimer); }
         lease.check(body.model); requestModel = body.model; stream = body.stream;
+        body = applyChatReasoningPolicy(body, lease.caller.provider, lease.caller.reasoning ?? "passthrough");
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
         throw new RelayAdmissionError(400, "invalid_request");
       }

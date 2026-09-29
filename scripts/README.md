@@ -542,7 +542,9 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
 
-- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 队列状态与脱敏调用方查询、签发、轮换、停用及启用、显式旧限流字段升级；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑/轮换/停用、显式旧限流升级与策略回退。
+- `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
+- `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 路由，复用管理鉴权、确认、Provider 事务和脱敏审计。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
 `metrics-database.mjs` 的 `upgrade --from 21 --to 22` 默认只预检，`--apply` 才持锁备份迁移；

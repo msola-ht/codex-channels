@@ -68,6 +68,7 @@ import {
 } from "./webui-account-settings-management.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { routeCodexSettingsManagement } from "./webui-management-codex-route.mjs";
+import { routeRelayManagement } from "./webui-management-relay-route.mjs";
 import { routeGatewaySettingsManagement } from "./webui-management-gateway-route.mjs";
 import {
   routeProviderManagement,
@@ -370,6 +371,7 @@ async function routeManagement(environment, url, request, response, state, token
     ...routeContext,
     gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
   })) return;
+  if (await routeRelayManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
   if (await routeStatusManagement({
     ...routeContext,

@@ -2,5 +2,5 @@ export { responsesToChat } from "./responses-to-chat.js";
 export type { ChatRequest, ChatMessage, ChatUserContentPart, ChatToolIdentity } from "./responses-to-chat.js";
 export { ChatToResponses } from "./chat-to-responses.js";
 export { ModelConversionError } from "./validation.js";
-export { DirectChatRequestError, validateDirectChatRequest, type DirectChatRequest } from "./chat-request.js";
+export { DirectChatRequestError, validateDirectChatRequest, applyChatReasoningPolicy, type DirectChatRequest } from "./chat-request.js";
 export { DirectChatResponseError, DirectChatResponse, directChatJson, type DirectChatUsage } from "./chat-response.js";

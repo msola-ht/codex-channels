@@ -4,7 +4,7 @@ import type { ZodType } from "zod";
 export interface ModelRelayLimitConfig { max_concurrency: number; requests_per_minute: number; burst: number }
 export interface ModelRelayCallerConfig {
   caller_id: string; key_id: string; credential_generation: number; secret_sha256: string;
-  enabled: boolean; provider: string; models: string[];
+  enabled: boolean; provider: string; models: string[]; reasoning?: "passthrough" | "off";
 }
 export interface ModelRelayConfig extends ModelRelayLimitConfig {
   enabled: boolean; host: "127.0.0.1" | "::1"; port: number;
@@ -17,7 +17,7 @@ export function relayPolicyFromConfig(config: ModelRelayConfig): {
   enabled: boolean; maxConcurrency: number; requestsPerMinute: number; burst: number;
   accounts: Array<{ provider: string }>;
   callers: Array<{ callerId: string; keyId: string; credentialGeneration: number; secretSha256: string;
-    enabled: boolean; provider: string; models: string[] }>;
+    enabled: boolean; provider: string; models: string[]; reasoning: "passthrough" | "off" }>;
 };
 
 export function upgradeModelRelayLimits(value: unknown): ModelRelayConfig;

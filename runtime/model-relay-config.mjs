@@ -1,3 +1,4 @@
+import { supportsChatReasoningOff } from "./chat-reasoning.mjs";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 
@@ -26,6 +27,7 @@ function schema(legacy, legacyCapture = false) {
       credential_generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
       secret_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       enabled: z.boolean(),
+      reasoning: z.enum(["passthrough", "off"]).optional(),
       provider,
       models: z.array(z.string().min(1).max(200).refine(value => ![...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))).min(1).max(64)
         .refine(values => new Set(values).size === values.length),
@@ -43,6 +45,9 @@ function schema(legacy, legacyCapture = false) {
       }
     }
     for (const [index, caller] of value.callers.entries()) {
+      if (caller.reasoning === "off" && !caller.models.every(model => supportsChatReasoningOff(caller.provider, model))) {
+        context.addIssue({ code: "custom", path: ["callers", index, "reasoning"], message: "所选提供商和模型不支持强制关闭思考" });
+      }
       if (caller.enabled && !value.accounts.some(account => account.provider === caller.provider)) {
         context.addIssue({ code: "custom", path: ["callers", index, "provider"], message: "Relay 调用方必须引用已声明账户" });
       }
@@ -67,7 +72,7 @@ export function relayPolicyFromConfig(config) {
     accounts: config.accounts.map(account => ({ provider: account.provider })),
     callers: config.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id,
       credentialGeneration: caller.credential_generation, secretSha256: caller.secret_sha256,
-      enabled: caller.enabled, provider: caller.provider, models: [...caller.models] })) };
+      enabled: caller.enabled, provider: caller.provider, models: [...caller.models], reasoning: caller.reasoning ?? "passthrough" })) };
 }
 
 export function modelRelayConfigDigest(config) {

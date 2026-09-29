@@ -10,6 +10,7 @@ export interface RelayCaller {
   enabled: boolean;
   provider: string;
   models: readonly string[];
+  reasoning?: "passthrough" | "off";
 }
 export interface RelayPolicy extends RelayLimit {
   enabled: boolean;
@@ -252,7 +253,7 @@ function refill(bucket: Bucket, now: number): void {
 }
 function privilege(caller: RelayCaller): string {
   return JSON.stringify([caller.callerId, caller.keyId, caller.credentialGeneration, caller.secretSha256,
-    caller.provider, [...caller.models].sort(), caller.enabled]);
+    caller.provider, [...caller.models].sort(), caller.enabled, caller.reasoning ?? "passthrough"]);
 }
 function freezePolicy(policy: RelayPolicy): RelayPolicy {
   return Object.freeze({ ...policy,

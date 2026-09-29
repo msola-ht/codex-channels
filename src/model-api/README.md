@@ -1,13 +1,13 @@
 # 模型 API 转换
 
-独立的纯 TypeScript 转换模块，不依赖 Provider、HTTP、App Server RPC、配置或存储。
+独立的纯转换模块，不依赖 Provider 账户材料、HTTP、App Server RPC、配置读写或存储。Chat 思考策略仅引用共享的无 I/O 能力元数据。
 每个请求必须携带完整输入，转换状态只存活于单次流式响应，不缓存会话历史。
 
 - `index.ts`：公开 `responsesToChat`、`ChatToResponses` 与安全错误类型。
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用和文本结果映射为 Chat 请求。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误。
-- `chat-request.ts`：独立 Relay 直接 Chat 请求保留：仅校验本地 model/messages/stream/n 边界，其他字段和值交给上游处理；提供安全字段路径错误，不经过 Responses 转换。
+- `chat-request.ts`：独立 Relay 直接 Chat 请求保留：仅校验本地 model/messages/stream/n 边界，其他字段和值交给上游处理；提供安全字段路径错误及显式每 Key 关闭思考的出站副本投影，不经过 Responses 转换。
 - `chat-response.ts`：直接 Chat JSON/SSE 的单选择响应裁剪、工具参数完整性、终态与 Usage 归约；公开不含报文的响应校验错误类别。
 
 以下限制针对 Responses 与 Chat 的转换链路；独立 Relay 的直接 Chat 请求使用上述保留合同。
