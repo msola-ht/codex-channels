@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders } from "node:http";
-import { directChatJson, DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
+import { DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import { readChatBody, readChatFrames } from "./chat-io.js";
 import { withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
@@ -43,7 +43,7 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       for await (const data of readChatFrames(incoming, call.signal, {
         frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
       })) {
-        if (data === "[DONE]") { call.observer.finish(true); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await call.emit(undefined, true); return; }
+        if (data === "[DONE]") { call.observer.finish(); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await call.emit(undefined, true); return; }
         const value: unknown = parseChatJson(data, call.capture);
         call.capture?.value(value, true);
         const error = chatStreamError(value);
@@ -64,7 +64,8 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     if (value !== parsed) call.capture?.transformed?.("json_unwrapped");
     const error = chatStreamError(value);
     if (error) throw error;
-    directChatJson(value, call.observer);
+    call.observer.push(value, false);
+    call.observer.finish();
     if (call.observer.hasContent) call.content();
     call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
     await call.emit(value as Record<string, unknown>, true);

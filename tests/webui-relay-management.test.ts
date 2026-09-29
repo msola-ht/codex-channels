@@ -1,3 +1,4 @@
+import * as relayControl from "../runtime/model-relay-control.mjs";
 import * as fileLock from "../runtime/private-file-lock.mjs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
@@ -27,6 +28,20 @@ async function fixture() {
   const post = (path: string, value: unknown) => fetch(`${url}/${path}`, { method: "POST", headers, body: JSON.stringify(value) });
   return { ...f, url, headers, snapshot, post };
 }
+it("exposes bounded runtime status separately from configured concurrency", async () => {
+  const f = await fixture();
+  expect(await f.snapshot()).toMatchObject({ maxConcurrency: 10, runtime: { state: "stopped" } });
+  const query = vi.spyOn(relayControl, "queryModelRelayControl");
+  try {
+    query.mockResolvedValueOnce({ result: "status", listening: true, configurationValid: true, active: 4, queue: { pending: 3, waiting: 2, bytes: 100 }, metrics: {}, secret: "DO-NOT-EXPOSE" });
+    const running = await f.snapshot();
+    expect(running.runtime).toEqual({ state: "running", listening: true, configurationValid: true, active: 4, waiting: 2, uploading: 1 });
+    expect(JSON.stringify(running)).not.toContain("DO-NOT-EXPOSE");
+    query.mockResolvedValueOnce({ result: "unconfirmed" });
+    expect((await f.snapshot()).runtime).toEqual({ state: "unknown" });
+  } finally { query.mockRestore(); }
+});
+
 const input: RelayManagementInput = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
   models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
 it("requires auth/origin and confirmation; previews do not sign keys, and writes return a secret only once", async () => {

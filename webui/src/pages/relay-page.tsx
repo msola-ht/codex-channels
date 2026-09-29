@@ -34,6 +34,7 @@ export function RelayPage() {
   const [reasoning, setReasoning] = useState<RelayReasoning>("passthrough")
   const [result, setResult] = useState<RelayManagementResult | null>(null)
   const data = management.data
+  const snapshotCurrent = !management.loading && management.error === null
   const refreshingBlocked = management.busy || management.loading || management.pendingPreview !== null
   const blocked = refreshingBlocked || management.error !== null
   const nameInvalid = [...name].length < 1 || [...name].length > 64 || name.trim() !== name || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(name)
@@ -90,7 +91,16 @@ export function RelayPage() {
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
-    {data && <p className="text-sm text-muted-foreground">{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></p>}
+    {data && snapshotCurrent && <p className="text-sm text-muted-foreground">{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></p>}
+    {data && <div className="flex flex-wrap gap-2" role="status" aria-label={t("relay.runtimeLabel")}>
+      {snapshotCurrent && <Badge variant="outline">{t("relay.configuredConcurrency", { count: data.maxConcurrency })}</Badge>}
+      {!snapshotCurrent ? <Badge variant="outline">{t(management.loading ? "relay.refreshing" : "relay.runtimeUnknown")}</Badge> : data.runtime?.state === "running" ? <>
+        <Badge variant={data.runtime.listening && data.runtime.configurationValid ? "secondary" : "outline"}>{t(data.runtime.listening && data.runtime.configurationValid ? "relay.listening" : "relay.notListening")}</Badge>
+        <Badge variant="outline">{t("relay.activeCount", { count: data.runtime.active })}</Badge>
+        <Badge variant="outline">{t("relay.waitingCount", { count: data.runtime.waiting })}</Badge>
+        <Badge variant="outline">{t("relay.uploadingCount", { count: data.runtime.uploading })}</Badge>
+      </> : <Badge variant="outline">{t(data.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
+    </div>}
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
     {data && !management.loading && !management.error && <Table><TableHeader><TableRow>
       {(["purpose", "provider", "models", "reasoning", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}

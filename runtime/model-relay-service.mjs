@@ -55,6 +55,7 @@ export async function startModelRelayService(configPath, environment = process.e
     }
     dump.setRetentionDays(next.debug.model_traffic_retention_days);
     if (next.debug.model_traffic_dump) void dump.prepare();
+    const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
     relay ??= new ModelRelayServer({ capture: async (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
@@ -81,7 +82,7 @@ export async function startModelRelayService(configPath, environment = process.e
         if (proxyUrl) {
           if (!agents.has(proxyUrl)) {
             if (agents.size >= 8) throw new Error("Relay network route capacity exceeded");
-            agents.set(proxyUrl, new HttpsProxyAgent(proxyUrl, { maxSockets: 8, maxFreeSockets: 2 }));
+            agents.set(proxyUrl, new HttpsProxyAgent(proxyUrl, { maxSockets: snapshot.config.max_concurrency, maxFreeSockets: 2 }));
           }
           agent = agents.get(proxyUrl);
         }
@@ -93,7 +94,8 @@ export async function startModelRelayService(configPath, environment = process.e
               || snapshot.materials.find(value => value.provider === provider)?.revision !== material.revision) throw new Error("Relay material revoked");
           } };
       } });
-    relay.admission.apply(relayPolicyFromConfig(next.config));
+    if (policyChanged) relay.admission.apply(relayPolicyFromConfig(next.config));
+    for (const agent of agents.values()) agent.maxSockets = next.config.max_concurrency;
     for (const provider of next.unavailable) relay.admission.invalidateProvider(provider);
     for (const material of next.materials) relay.admission.restoreProvider(material.provider);
     const address = next.config.enabled ? `${next.config.host}:${next.config.port}` : undefined;

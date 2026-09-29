@@ -32,7 +32,7 @@ export function readRelayManagement(environment = process.env) {
     } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
   return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
-    enabled: config.enabled, providers, callers: safeCallers(config.callers) };
+    enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
 }
 
 function safeCallers(callers) {

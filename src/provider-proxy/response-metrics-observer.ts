@@ -534,6 +534,24 @@ function startsFirstToken(type: string, event: Record<string, unknown> | undefin
   return field !== undefined && typeof event[field] === "string" && event[field].length > 0;
 }
 
+/** Native JSON has no deltas: inspect only recognized output content, never status or usage. */
+export function hasResponseOutputContent(value: Record<string, unknown>): boolean {
+  const nonempty = (text: unknown): boolean => typeof text === "string" && text.length > 0;
+  return Array.isArray(value.output) && value.output.some((entry: unknown) => {
+    const item = asRecord(entry);
+    if (!item) return false;
+    if (item.type === "function_call") return nonempty(item.arguments);
+    if (item.type === "custom_tool_call") return nonempty(item.input);
+    const parts = item.type === "message" ? item.content
+      : item.type === "reasoning" ? [...(Array.isArray(item.content) ? item.content as unknown[] : []), ...(Array.isArray(item.summary) ? item.summary as unknown[] : [])] : [];
+    return Array.isArray(parts) && parts.some((value: unknown) => {
+      const part = asRecord(value);
+      return part !== undefined && (["output_text", "reasoning_text", "summary_text"].includes(String(part.type))
+        ? nonempty(part.text) : part.type === "refusal" && nonempty(part.refusal));
+    });
+  });
+}
+
 // HTTP 与 WebSocket 共享同一内容白名单；不把状态、空条目或 usage 当作输出。
 const firstTokenEventFields: Readonly<Record<string, string>> = {
   "response.output_text.delta": "delta",

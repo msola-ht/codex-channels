@@ -35,7 +35,7 @@ vi.mock("https-proxy-agent", async () => {
   const { Agent } = await import("node:https"); const { connect } = await import("node:net");
   return { HttpsProxyAgent: class extends Agent {
     private readonly proxy: URL;
-    constructor(proxy: string) { super(); this.proxy = new URL(proxy); }
+    constructor(proxy: string, options: import("node:https").AgentOptions) { super(options); this.proxy = new URL(proxy); }
     override createConnection() { return connect({ host: "127.0.0.1", port: Number(this.proxy.port) }); }
   } };
 });
@@ -59,6 +59,43 @@ async function fixture() {
   await applyClinePassConfiguration({ accountId: "test", apiKey: "sk_fixture-key" }, { environment });
   return { configPath, environment };
 }
+
+it("uses the configured proxy concurrency and republishes only changed policy", async () => {
+  const f = await fixture();
+  const held: import("node:http").ServerResponse[] = [];
+  const upstream = createHttpServer((request, response) => { request.resume(); request.on("end", () => held.push(response)); });
+  await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
+  cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
+  const up = upstream.address(); if (!up || typeof up === "string") throw new Error("fixture");
+  writePrivateFileAtomicSync(join(f.environment.CODEX_HOME, ".env"), `HTTPS_PROXY=http://127.0.0.1:${up.port}\nNO_PROXY=\n`);
+  const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "batch", "--key", "batch", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+  const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));
+  const address = probe.address(); if (!address || typeof address === "string") throw new Error("fixture");
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  const document = parse(readFileSync(f.configPath, "utf8")); Object.assign(document.model_relay!, { enabled: true, port: address.port, max_concurrency: 10 });
+  writePrivateFileAtomicSync(f.configPath, stringify(document));
+  const { RelayAdmission } = await import("../dist/model-relay/index.js");
+  const apply = vi.spyOn(RelayAdmission.prototype, "apply");
+  cleanups.push(() => apply.mockRestore());
+  const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
+  apply.mockClear();
+  await service.refresh(); await service.refresh(); expect(apply).not.toHaveBeenCalled();
+  for (const count of [10, 12, 3]) {
+    Object.assign(document.model_relay!, { max_concurrency: count });
+    writePrivateFileAtomicSync(f.configPath, stringify(document)); await service.refresh();
+    held.length = 0;
+    const pending = Array.from({ length: count }, () => fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, {
+      method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }] }),
+    }).then(async response => { expect(response.status).toBe(200); await response.text(); }));
+    await vi.waitFor(() => expect(held).toHaveLength(count), { timeout: 5000 });
+    for (const response of held) response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+      choices: [{ message: { content: "OK" }, finish_reason: "stop" }],
+    }));
+    await Promise.all(pending);
+  }
+  expect(apply).toHaveBeenCalledTimes(2);
+}, 20_000);
 
 it("uses registered custom Responses material through runtime, captures, authorizes metrics and rolls back only selected references", async () => {
   const f = await fixture();

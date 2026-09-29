@@ -37,6 +37,31 @@ describe("native Responses relay", () => {
   const post = (relay: ModelRelayServer, value: unknown) => fetch(`${relay.address()}/v1/responses`, {
     method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(value),
   });
+  it.each([
+    { output: [], content: false },
+    { output: [{ type: "message", content: [{ type: "output_text", text: "" }] }], content: false },
+    { output: [{ type: "message", content: [{ type: "output_text", text: "OK" }] }], content: true },
+    { output: [{ type: "message", content: [{ type: "refusal", refusal: "No" }] }], content: true },
+    { output: [{ type: "reasoning", summary: [{ type: "summary_text", text: "Thinking" }] }], content: true },
+    { output: [{ type: "function_call", arguments: "{}" }], content: true },
+    { output: [{ type: "custom_tool_call", input: "code" }], content: true },
+    { output: [{ type: "unknown", content: [{ type: "output_text", text: "Not recognized" }] }], content: false },
+  ])("observes nonempty native JSON content without treating status/usage as output (%j)", async ({ output, content }) => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-json-timing-"));
+    const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+    cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+    const value = { ...responseValue(), output };
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(value)), undefined, undefined, dump);
+    expect(await (await post(f.relay, input)).json()).toEqual(value);
+    expect(f.metrics).toHaveLength(1);
+    const metric = f.metrics[0]!;
+    if (content) { expect(metric.firstTokenMs).toBeGreaterThanOrEqual(0); expect(metric.firstTokenMs).toBeLessThanOrEqual(metric.totalDurationMs); }
+    else expect(metric.firstTokenMs).toBeUndefined();
+    await dump.close();
+    const ref = metric.traffic!;
+    const records = readFileSync(join(directory, `${ref.label}-${ref.session}`, "interactions.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { kind: string; firstTokenMs?: number });
+    expect(records.find(record => record.kind === "response")?.firstTokenMs).toBe(metric.firstTokenMs);
+  });
   it("preserves native DS Chat reasoning and response extensions", async () => {
     const policy = config(); policy.accounts = [{ provider: "ds-a" }]; policy.callers[0]!.provider = "ds-a";
     const raw = { ...answer, vendor_extension: { route: "fixture" }, choices: [{ ...answer.choices[0],

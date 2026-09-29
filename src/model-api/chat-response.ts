@@ -48,7 +48,7 @@ export class DirectChatResponse {
     return this.reason === "stop" || this.reason === "tool_calls" ? "completed" : "incomplete";
   }
 
-  push(value: unknown, stream: boolean): Record<string, unknown> | undefined {
+  push(value: unknown, stream: boolean): void {
     let part: ResponsePart = "metadata";
     try {
       if (this.done) fail();
@@ -76,7 +76,7 @@ export class DirectChatResponse {
       if (chunk.choices.length > 1) throw new DirectChatResponseError("choices", "multiple_choices");
       if (chunk.choices.length === 0) {
         if (!stream || chunk.usage == null) throw new DirectChatResponseError("choices", "empty_choices");
-        return undefined;
+        return;
       }
       if (chunk.choices[0] === null || typeof chunk.choices[0] !== "object" || Array.isArray(chunk.choices[0])) {
         throw new DirectChatResponseError("choices", "expected_choice_object");
@@ -88,14 +88,11 @@ export class DirectChatResponse {
       const message = object(stream ? choice.delta ?? {} : choice.message);
       if (message.role !== undefined && message.role !== "assistant") fail();
       if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) fail();
-      const output: Record<string, unknown> = {};
-      if (message.role !== undefined) output.role = "assistant";
       for (const key of ["content", "reasoning", "reasoning_content"] as const) {
         if (message[key] != null) {
           const text = string(message[key]);
           this.contentBytes += Buffer.byteLength(text);
           if (this.contentBytes > 32 * 1024 * 1024) fail();
-          output[key] = text;
           if (text.length) this.contentObserved = true;
         }
       }
@@ -111,8 +108,6 @@ export class DirectChatResponse {
         this.reason = choice.finish_reason as FinishReason;
       }
       if (!stream && !this.reason) fail();
-      if (!Object.keys(output).length) return undefined;
-      return this.envelope([{ index: 0, [stream ? "delta" : "message"]: output, finish_reason: null }], stream);
     } catch (error) {
       if (error instanceof DirectChatResponseError) throw error;
       if (error instanceof ModelConversionError) throw new DirectChatResponseError(part);
@@ -121,27 +116,18 @@ export class DirectChatResponse {
   }
 
   /** Called only after DONE (SSE) or complete validated JSON. */
-  finish(stream: boolean): Record<string, unknown> {
+  finish(): void {
     if (this.done || !this.reason) throw new DirectChatResponseError("finish");
-    let tools: unknown[] | undefined;
     try {
-      tools = this.reason === "tool_calls" ? this.completeCalls() : undefined;
+      if (this.reason === "tool_calls") this.completeCalls();
       if (this.reason === "stop" && this.calls.size > 0) fail();
     } catch (error) {
       if (error instanceof ModelConversionError) throw new DirectChatResponseError("tools");
       throw error;
     }
     this.done = true;
-    const body = tools ? { tool_calls: tools } : {};
-    return { ...this.envelope([{ index: 0, [stream ? "delta" : "message"]: body, finish_reason: this.reason }], stream),
-      ...(Object.keys(this.usage).length ? { usage: usageJson(this.usage) } : {}) };
   }
 
-  private envelope(choices: unknown[], stream: boolean): Record<string, unknown> {
-    return { ...(this.id === undefined ? {} : { id: this.id }), object: stream ? "chat.completion.chunk" : "chat.completion",
-      ...(this.created === undefined ? {} : { created: this.created }),
-      ...(this.model === undefined ? {} : { model: this.model }), choices };
-  }
   private readCall(value: unknown, position: number | undefined): void {
     const call = object(value);
     const index = position ?? call.index;
@@ -162,13 +148,12 @@ export class DirectChatResponse {
     this.calls.set(Number(index), previous);
     if ([...this.calls.values()].reduce((sum, item) => sum + Buffer.byteLength(item.arguments ?? ""), 0) > 1024 * 1024) fail();
   }
-  private completeCalls(): unknown[] {
+  private completeCalls(): void {
     if (this.calls.size === 0) fail();
     const ids = new Set<string>();
-    return [...this.calls.entries()].sort(([a], [b]) => a - b).map(([index, call], expected) => {
+    [...this.calls.entries()].sort(([a], [b]) => a - b).forEach(([index, call], expected) => {
       if (index !== expected || !call.id || !/^[A-Za-z0-9_-]{1,128}$/u.test(call.name) || call.arguments === undefined || ids.has(call.id)) fail();
       ids.add(call.id); // Arguments remain opaque; the client validates before executing tools.
-      return { index, id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } };
     });
   }
   private readUsage(value: unknown): void {
@@ -187,27 +172,6 @@ export class DirectChatResponse {
   }
 }
 
-export function directChatJson(value: unknown, observer: DirectChatResponse): Record<string, unknown> {
-  const content = observer.push(value, false);
-  const terminal = observer.finish(false);
-  const finalChoice = (terminal.choices as Array<Record<string, unknown>>)[0]!;
-  const initialChoice = (content?.choices as Array<Record<string, unknown>> | undefined)?.[0];
-  const message: Record<string, unknown> = { role: "assistant", ...object(initialChoice?.message ?? {}), ...object(finalChoice.message) };
-  if (Array.isArray(message.tool_calls)) {
-    message.tool_calls = message.tool_calls.map(value => {
-      const call = object(value);
-      return { id: call.id, type: call.type, function: call.function };
-    });
-  }
-  return { ...terminal, choices: [{ ...finalChoice, message }] };
-}
-function usageJson(usage: DirectChatUsage): Record<string, unknown> {
-  return { ...(usage.inputTokens === undefined ? {} : { prompt_tokens: usage.inputTokens }),
-    ...(usage.outputTokens === undefined ? {} : { completion_tokens: usage.outputTokens }),
-    ...(usage.totalTokens === undefined ? {} : { total_tokens: usage.totalTokens }),
-    ...(usage.cachedInputTokens === undefined ? {} : { prompt_tokens_details: { cached_tokens: usage.cachedInputTokens } }),
-    ...(usage.reasoningOutputTokens === undefined ? {} : { completion_tokens_details: { reasoning_tokens: usage.reasoningOutputTokens } }) };
-}
 function boundedString(value: unknown, max: number): string {
   const text = string(value);
   if (!text || text.length > max || [...text].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) fail();

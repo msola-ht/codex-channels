@@ -3,16 +3,17 @@ import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage
 import { withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 import { readChatBody, readModelFrames } from "./chat-io.js";
 import { ChatUpstreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
-import { createMetricsState, observeJsonResponse, observeResponseEvent } from "./response-metrics-observer.js";
+import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent } from "./response-metrics-observer.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
 /** Uses the same Responses usage reducer as owned model traffic, without App Server state. */
 export class DirectResponsesObserver {
   private readonly metrics = createMetricsState({ threadId: null, turnId: null, operation: "response" }, Date.now(), "http", "response", null, performance.now());
+  private jsonContent = false;
   private responseId: string | undefined;
   get status(): "completed" | "failed" | "incomplete" | "unknown" { return this.metrics.status; }
   get responseModel(): string | undefined { return this.metrics.responseModel ?? undefined; }
-  get hasContent(): boolean { return this.metrics.firstTokenMs !== undefined; }
+  get hasContent(): boolean { return this.jsonContent || this.metrics.firstTokenMs !== undefined; }
   get usage(): DirectChatUsage {
     return Object.fromEntries(["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]
       .flatMap(key => { const value = this.metrics[key as keyof typeof this.metrics]; return typeof value === "number" ? [[key, value]] : []; }));
@@ -34,7 +35,9 @@ export class DirectResponsesObserver {
       }
     }
     if (stream) return observeResponseEvent(this.metrics, String(type), value, Date.now(), performance.now());
-    return observeJsonResponse(this.metrics, value, Date.now());
+    const terminalObserved = observeJsonResponse(this.metrics, value, Date.now());
+    this.jsonContent = terminalObserved && hasResponseOutputContent(value);
+    return terminalObserved;
   }
 }
 
@@ -68,6 +71,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
       const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
       call.capture?.value(value, false);
       if (!call.observer.observe(value, false)) throw new ModelConversionError("Responses JSON has no terminal state");
+      if (call.observer.hasContent) call.content();
       call.capture?.done(call.observer.status === "unknown" ? "incomplete" : call.observer.status); await call.emit(deliverable(value, false), true); return;
     }
     for await (const frame of readModelFrames(incoming, call.signal, { frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024 })) {

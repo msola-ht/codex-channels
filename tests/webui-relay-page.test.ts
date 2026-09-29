@@ -26,7 +26,7 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const { LanguageContext } = await server.ssrLoadModule('/src/hooks/language-context.ts');
       const noop = () => {};
       globalThis.fixture = { busy: false, loading: false, error: null, actionError: null, pendingPreview: null, refetch: noop,
-        data: { enabled: true, revision: 'r', providers: [], callers: [
+        data: { enabled: true, maxConcurrency: 10, runtime: { state: 'running', listening: true, configurationValid: true, active: 4, waiting: 2, uploading: 1 }, revision: 'r', providers: [], callers: [
           { caller_id: 'translation', display_name: '沉浸式翻译', key_id: 'key-a', credential_generation: 2, enabled: true, provider: 'clp-main', models: ['cline-pass/deepseek-v4.1-flash'], reasoning: 'off' },
           { caller_id: 'kelivo', key_id: 'key-b', credential_generation: 1, enabled: false, provider: 'clp-main', models: ['cline-pass/deepseek-v4.1-flash'], reasoning: 'passthrough' }
         ] }
@@ -35,10 +35,19 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const zh = render('zh'), en = render('en');
       globalThis.fixture.data.callers = [];
       const empty = render('en');
+      globalThis.fixture.data.runtime = { state: 'unknown' };
+      const unknown = render('en');
+      globalThis.fixture.data.runtime = { state: 'stopped' };
+      const stopped = render('zh');
+      globalThis.fixture.data.runtime = { state: 'running', listening: true, configurationValid: true, active: 4, waiting: 2, uploading: 1 };
+      globalThis.fixture.loading = true;
+      const refreshing = render('en');
+      globalThis.fixture.loading = false;
       globalThis.fixture.error = "load failed";
       const failed = render("en");
       globalThis.editingFixture = 'new';
       globalThis.fixture.error = null;
+      const recovered = render("en");
       globalThis.fixture.actionError = 'stale';
       globalThis.fixture.actionErrorCode = 'stale-revision';
       const editorError = render('en');
@@ -51,12 +60,23 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const unavailableEditor = render('en');
       globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true }] }];
       const availableEditor = render('en');
-      console.log(JSON.stringify({ zh, en, empty, failed, editorError, staleEditor, unavailableEditor, availableEditor }));
+      console.log(JSON.stringify({ zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor }));
     } finally { await server.close(); }
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string };
+  })) as { refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string };
+  expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toContain("处理中 4");
+  expect(result.en).toContain("Waiting 2"); expect(result.en).toContain("Receiving 1");
+  expect(result.unknown).toContain("Runtime status unconfirmed"); expect(result.unknown).not.toContain("Waiting 0");
+  expect(result.stopped).toContain("服务未运行");
+  expect(result.refreshing).toContain("Refreshing runtime status");
+  expect(result.failed).toContain("Runtime status unconfirmed");
+  for (const stale of [result.refreshing, result.failed]) {
+    for (const text of [">Listening<", "Processing 4", "Waiting 2", "Receiving 1", "Configured concurrency limit 10", "Relay configuration is enabled."]) expect(stale).not.toContain(text);
+  }
+  expect(result.recovered).toContain(">Listening<"); expect(result.recovered).toContain("Processing 4");
+
   expect(result.zh).toContain("沉浸式翻译"); expect(result.zh).toContain("强制关闭"); expect(result.zh).toContain("跟随客户端");
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");
   expect(result.en).toContain("Force off"); expect(result.en).toContain("Follow client");

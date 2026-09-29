@@ -6,6 +6,16 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   relay: {
+    "refreshing": "正在刷新运行状态…",
+    "runtimeLabel": "运行状态（点击刷新更新）",
+    "configuredConcurrency": "配置并发上限 {count}",
+    "listening": "正在监听",
+    "notListening": "进程运行，入口不可用",
+    "activeCount": "处理中 {count}",
+    "waitingCount": "等待执行 {count}",
+    "uploadingCount": "接收请求 {count}",
+    "stopped": "服务未运行",
+    "runtimeUnknown": "运行状态无法确认",
     "invalid": "参数无效。检查用途名称、模型授权和思考策略；强制关闭目前仅支持 CLP 的 cline-pass/deepseek-v4.1-flash。",
     "stale": "配置或确认已过期，请刷新后重新预览。",
     "draftStale": "配置或上游目录已变化。草稿尚未保存；请重新加载最新内容再编辑，以免覆盖其他修改。",
@@ -19,7 +29,7 @@ const zh = {
     "refresh": "刷新",
     "create": "新建 Key",
     "providers": "管理提供商账户",
-    "configEnabled": "Relay 配置已启用；运行状态请使用 relay status 查询。",
+    "configEnabled": "Relay 配置已启用；点击刷新更新运行状态。",
     "configDisabled": "Relay 配置未启用；签发 Key 不会启动服务。",
     "purpose": "用途名称",
     "purposePresetsLabel": "常用用途，选择后仍可修改",
@@ -603,6 +613,16 @@ export type Messages = typeof zh
 
 const en: Messages = {
   relay: {
+    "refreshing": "Refreshing runtime status…",
+    "runtimeLabel": "Runtime status (use Refresh to update)",
+    "configuredConcurrency": "Configured concurrency limit {count}",
+    "listening": "Listening",
+    "notListening": "Process running, endpoint unavailable",
+    "activeCount": "Processing {count}",
+    "waitingCount": "Waiting {count}",
+    "uploadingCount": "Receiving {count}",
+    "stopped": "Service stopped",
+    "runtimeUnknown": "Runtime status unconfirmed",
     "invalid": "Invalid input. Check the purpose name, allowed models and reasoning policy. Force off currently supports only CLP cline-pass/deepseek-v4.1-flash.",
     "stale": "Configuration or confirmation is stale. Refresh and preview again.",
     "draftStale": "Configuration or the upstream catalog has changed. Your draft is unsaved. Reload the latest values before editing to avoid overwriting other changes.",
@@ -616,7 +636,7 @@ const en: Messages = {
     "refresh": "Refresh",
     "create": "Create key",
     "providers": "Manage provider accounts",
-    "configEnabled": "Relay configuration is enabled. Use relay status to check the running service.",
+    "configEnabled": "Relay configuration is enabled. Use Refresh to update runtime status.",
     "configDisabled": "Relay configuration is disabled. Issuing a key does not start the service.",
     "purpose": "Purpose",
     "purposePresetsLabel": "Common purposes, editable after selection",

@@ -1030,7 +1030,9 @@ export interface RelayManagedCaller {
   provider: string; models: string[]; reasoning: RelayReasoning;
 }
 export interface RelayManagementSnapshot {
-  revision: string; enabled: boolean; callers: RelayManagedCaller[];
+  revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
+  runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number }
+    | { state: "stopped" | "unknown" };
   providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean }> }>;
 }
 export type RelayManagementInput =

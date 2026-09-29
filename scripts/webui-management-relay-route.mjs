@@ -16,7 +16,13 @@ const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^
 
 export async function routeRelayManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {
   if (path === "/relay" && request.method === "GET") {
-    sendManagementJson(response, 200, readRelayManagement(environment)); return true;
+    const snapshot = readRelayManagement(environment);
+    const status = await manageModelRelay({ command: "status" }, environment);
+    const runtime = status.result === "status" ? {
+      state: "running", listening: status.listening, configurationValid: status.configurationValid,
+      active: status.active, waiting: status.queue.waiting, uploading: status.queue.pending - status.queue.waiting,
+    } : { state: status.result === "not_running" ? "stopped" : "unknown" };
+    sendManagementJson(response, 200, { ...snapshot, runtime }); return true;
   }
   if (!["/relay/preview", "/relay/apply"].includes(path) || request.method !== "POST") return false;
   const parsed = envelope.safeParse(await readJsonBody(request, maximumBodyBytes));
