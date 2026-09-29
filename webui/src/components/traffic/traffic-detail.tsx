@@ -42,7 +42,7 @@ export function TrafficDetail({
   onRetry: () => void
 }) {
   const { t } = useTranslation()
-  const finalProvider = detail.chatDiagnostics?.fields["routing.finalProvider"]
+  const finalProvider = detail.upstreamProvider ?? detail.chatDiagnostics?.fields["routing.finalProvider"]
   const [copyState, setCopyState] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const copyReference = async () => {
     setCopyState("pending")
@@ -58,7 +58,7 @@ export function TrafficDetail({
       <Card size="sm" aria-label={t("traffic.overviewAria")}>
         <CardHeader>
           <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
-            <TrafficModel provider={provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
+            <TrafficModel provider={provider === "relay.chat" ? detail.account : provider} request={detail.requestModel} responses={detail.responseModels} upstream={typeof finalProvider === "string" ? finalProvider : undefined} />
             <Badge variant="outline">{detail.category === "models" ? t("traffic.categoryModels") : detail.category === "prewarm" ? t("traffic.categoryPrewarm") : t("traffic.categoryRequest")}</Badge>
           </CardTitle>
           <CardDescription className="flex min-w-0 flex-wrap items-center gap-2">

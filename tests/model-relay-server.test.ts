@@ -10,7 +10,7 @@ import { ModelRelayServer, type PreparedRelayProvider, type RelayMetric, type Re
 import { RelayMetricsSender } from "../src/model-relay/index.js";
 import { sendRelayMetrics, RelayTrafficDump, pruneModelTrafficDumpSessions } from "../src/provider-proxy/index.js";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, readDumpResponseProviders } from "../scripts/traffic-dump-reader.mjs";
 import * as retention from "../src/provider-proxy/traffic-dump-retention.js";
 import { relayDebugHeaders } from "../src/provider-proxy/relay-debug-headers.js";
 import { RelayMetricsComposition } from "../src/bootstrap/relay-metrics-composition.js";
@@ -50,6 +50,35 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+
+  it.each(["json", "wrapped", "sse"])("associates bounded final routing with the exact Relay call (%s)", async format => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-routing-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
+    let count = 0;
+    const f = await fixture((_request, response) => {
+      const finalProvider = ["deepseek", undefined, "invalid provider PRIVATE"][count++];
+      const message = { role: "assistant", content: "hello", provider_metadata: { gateway: { routing: { finalProvider, fallbacksAvailable: ["deepseek"], secret: "PRIVATE" } } } };
+      const value = { ...answer, choices: [{ index: 0, ...(format === "sse" ? { delta: message } : { message }), finish_reason: "stop" }] };
+      response.writeHead(200, { "content-type": format === "sse" ? "text/event-stream" : "application/json" });
+      response.end(format === "sse" ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(format === "wrapped" ? { success: true, data: value } : value));
+    }, undefined, undefined, dump);
+    for (let i = 0; i < 3; i++) { const response = await f.post({ ...body, stream: format === "sse" }); expect(response.status).toBe(200); await response.text(); }
+    await vi.waitFor(() => expect(f.metrics).toHaveLength(3));
+    await dump.close();
+    for (const [index, metric] of f.metrics.entries()) {
+      const ref = metric.traffic!;
+      const paths = [join(directory, `relay.chat-${ref.session}`)];
+      const detail = await describeDumpExchange(paths, ref.interaction);
+      expect(detail.account).toBe("clp-a");
+      expect(detail.upstreamProvider).toBe(index === 0 ? "deepseek" : undefined);
+      expect(detail.chatDiagnostics.fields["routing.finalProvider"]).toBe(detail.upstreamProvider);
+      expect(JSON.stringify(detail.chatDiagnostics)).not.toContain("PRIVATE");
+      const providers = await readDumpResponseProviders(paths, [ref.interaction]);
+      expect(providers.get(ref.interaction)).toBe(detail.upstreamProvider);
+      expect([...providers.keys()]).toEqual(index === 0 ? [ref.interaction] : []);
+    }
+  });
 
   it("prepares bounded debug headers without exposing credentials or URL details", () => {
     const result = relayDebugHeaders({

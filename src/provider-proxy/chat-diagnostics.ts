@@ -33,7 +33,9 @@ export class ChatDiagnostics {
     }
     for (const choice of Array.isArray(chunk.choices) ? chunk.choices.slice(0, 1) : []) {
       this.put("finishReason", record(choice).finish_reason);
-      const metadata = record(record(record(choice).delta).provider_metadata);
+      // JSON completions use message; streaming chunks use delta.
+      const entry = record(choice);
+      const metadata = record(record(entry.delta ?? entry.message).provider_metadata);
       const gateway = record(metadata.gateway);
       for (const key of costs) this.put(`gateway.${key}`, gateway[key], true);
       this.put("gateway.generationId", gateway.generationId);

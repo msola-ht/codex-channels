@@ -125,6 +125,9 @@ describe("WebUI metrics table presentation", () => {
           requests: render(RequestsTable, requestProps),
           requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
           trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficRelayClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficRelayUnknown: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: undefined, requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"] }], onOpen: noop }),
+          detailRelayClp: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           trafficClpNoUpstream: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"] }], onOpen: noop }),
           requestsMatch: render(RequestsTable, { ...requestProps, records: [{ ...record, responseModel: "model-test" }] }),
           requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
@@ -440,6 +443,17 @@ describe("WebUI metrics table presentation", () => {
       expect(markup[table + "Model-clp-main"]).not.toContain("cline-pass/");
       expect(markup[table + "Model-openai"]).toContain(">cline-pass/deepseek-v4.1-flash</span>");
     }
+  });
+
+  it("uses the recorded Relay account for model display and the same upstream index in list and detail", () => {
+    for (const key of ["trafficRelayClp", "detailRelayClp"]) {
+      expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(markup[key]).not.toContain('响应模型：deepseek/deepseek-v4.1-flash（名称不一致）');
+      expect(markup[key]).toContain('clp-main');
+    }
+    expect(markup.trafficRelayUnknown).toContain('响应模型：deepseek/deepseek-v4.1-flash（名称不一致）');
+    expect(markup.trafficRelayUnknown).not.toContain('title="routing.finalProvider"');
   });
 
   it("shows only actual upstream badges for CLP account and dump identities", () => {

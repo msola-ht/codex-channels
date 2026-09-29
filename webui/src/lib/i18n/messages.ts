@@ -22,6 +22,14 @@ const zh = {
     "configEnabled": "Relay 配置已启用；运行状态请使用 relay status 查询。",
     "configDisabled": "Relay 配置未启用；签发 Key 不会启动服务。",
     "purpose": "用途名称",
+    "purposePresetsLabel": "常用用途，选择后仍可修改",
+    "purposePresets": {
+      "translation": "沉浸式翻译",
+      "coding": "编程助手",
+      "chat": "日常对话",
+      "writing": "文案写作",
+      "testing": "测试调试"
+    },
     "provider": "提供商账户",
     "models": "允许模型",
     "reasoning": "思考策略",
@@ -610,6 +618,14 @@ const en: Messages = {
     "configEnabled": "Relay configuration is enabled. Use relay status to check the running service.",
     "configDisabled": "Relay configuration is disabled. Issuing a key does not start the service.",
     "purpose": "Purpose",
+    "purposePresetsLabel": "Common purposes, editable after selection",
+    "purposePresets": {
+      "translation": "Immersive Translate",
+      "coding": "Coding assistant",
+      "chat": "Everyday chat",
+      "writing": "Writing",
+      "testing": "Testing and debugging"
+    },
     "provider": "Provider account",
     "models": "Allowed models",
     "reasoning": "Reasoning policy",

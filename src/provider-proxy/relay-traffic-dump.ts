@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import type { DirectChatRequest } from "../model-api/index.js";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { relayDebugHeaders } from "./relay-debug-headers.js";
+import { ChatDiagnostics } from "./chat-diagnostics.js";
 import { waitForChatOperation } from "./chat-io.js";
 import { pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
 import { TrafficDumpStorage, type TrafficDumpSession } from "./traffic-dump-storage.js";
@@ -119,6 +120,7 @@ export class RelayTrafficDump {
       let deliveredStatus: number | undefined;
       let deliveredHeaders: ReturnType<typeof relayDebugHeaders> = { headers: {}, truncated: false };
       let upstreamHeadersTruncated = false;
+      const diagnostics = new ChatDiagnostics();
       const requestChanges = new Set<string>();
       const responseChanges = new Set<string>();
       const safe = (operation: () => void): void => { if (!this.failed && !finished) try { operation(); } catch { this.fail(); } };
@@ -152,8 +154,12 @@ export class RelayTrafficDump {
             bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
           requestSaved = true;
         }),
-        head: (code, headers) => safe(() => { status = code; const head = debug ? relayDebugHeaders(headers) : undefined; responseHeaders = head?.headers ?? headersOf(headers); upstreamHeadersTruncated = head?.truncated ?? false; }),
-        value: (value, stream) => safe(() => { upstream.value(value, stream); }),
+        head: (code, headers) => safe(() => { status = code; diagnostics.responseStatus(code); diagnostics.header(headers["x-request-id"]); const head = debug ? relayDebugHeaders(headers) : undefined; responseHeaders = head?.headers ?? headersOf(headers); upstreamHeadersTruncated = head?.truncated ?? false; }),
+        value: (value, stream) => safe(() => {
+          upstream.value(value, stream);
+          const envelope = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+          diagnostics.push(!stream && envelope?.success === true && !Object.hasOwn(envelope, "choices") ? envelope.data : value);
+        }),
         invalid: count => safe(() => { upstream.invalid(count); }),
         done: () => safe(() => { complete = true; completedAt = performance.now(); if (streaming) upstream.value(undefined, true); }),
         finish: (delivery, errorCode, firstTokenMs, responseModel) => {
@@ -161,7 +167,11 @@ export class RelayTrafficDump {
           safe(() => {
             if (!requestSaved) return;
             const payload = upstream.finish();
+            const snapshot = diagnostics.snapshot();
+            const finalProvider = snapshot.fields["routing.finalProvider"];
+            this.storage.writeTrace(session, { kind: "chat_diagnostics", interaction: id, ...snapshot });
             this.storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders,
+              ...(typeof finalProvider === "string" && finalProvider !== "" ? { upstreamProvider: finalProvider } : {}),
               ...(debug ? { headersTruncated: upstreamHeadersTruncated, debug: { version: 1,
                 delivered: { status: deliveredStatus, headers: deliveredHeaders.headers, headersTruncated: deliveredHeaders.truncated,
                   payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
