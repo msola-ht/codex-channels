@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { afterEach, expect, it, vi } from "vitest";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
@@ -12,6 +12,7 @@ import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-setup.mjs";
+import * as privateFile from "../runtime/private-file.mjs";
 import * as gatewayConfig from "../runtime/gateway-config.mjs";
 import { createPrivateIpcConnection } from "../runtime/private-ipc.mjs";
 import { once } from "node:events";
@@ -59,8 +60,8 @@ it("issues and rotates secrets once, preserves tombstones and configuration back
   const saved = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.parseGatewayConfig(content)).model_relay;
   const defaultLimits = { max_concurrency: 10, requests_per_minute: 0, burst: 10 };
   expect(saved).toMatchObject(defaultLimits);
-  expect(saved?.accounts[0]).toMatchObject(defaultLimits);
-  expect(saved?.callers[0]).toMatchObject(defaultLimits);
+  expect(saved?.accounts[0]).toEqual({ provider: "clp-test" });
+  expect(saved?.callers[0]).not.toHaveProperty("max_concurrency");
   expect(content).not.toContain(token);
   expect(content).toContain(createHash("sha256").update(Buffer.from(token.split(".")[2]!, "base64url")).digest("hex"));
   expect(readFileSync(String(issued.backupPath), "utf8")).not.toContain("model_relay");
@@ -91,7 +92,7 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   malformed.on("error", () => {}); await once(malformed, "connect");
   malformed.write('{"version":1,"operation":"status","requestId":{"toString":null}}\n');
   await once(malformed, "close");
-  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ configurationValid: true });
+  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 2, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
   await expect(startModelRelayService(f.configPath, f.environment)).rejects.toThrow();
   expect(await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   const models = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${String(issued.key)}` } });
@@ -110,6 +111,13 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   expect(readFileSync(clinePassSetupPaths(f.environment, "test").profile, "utf8")).toContain("sk_fixture-key");
 });
 it("accepts help only for exact public paths and rejects unknown options", async () => {
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    await runModelRelayCommand(["upgrade-limits", "-h"]);
+    await runModelRelayCommand(["upgrade-limits", "--help"]);
+    expect(log).toHaveBeenCalledTimes(2);
+  } finally { log.mockRestore(); }
+  expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
   expect(() => parseModelRelayCommand(["rotate", "--caller", "a", "--caller", "b"])).toThrow("重复");
   expect(() => parseModelRelayCommand(["enable", "--host", "0.0.0.0"])).toThrow("用法");
@@ -198,3 +206,43 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   expect(completed.map(row => row.inputTokens).sort()).toEqual([2, 3]);
   expect(rows.records.find(row => row.status === "failed")).toMatchObject({ credentialGeneration: 2 });
 }, 15_000);
+
+it("explicitly backs up and upgrades only legacy limits, preserving credentials and refusing malformed input", async () => {
+  const f = await fixture();
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+  const document = parse(readFileSync(f.configPath, "utf8"));
+  const current = gatewayConfig.validateGatewayConfigDocument(document).model_relay!;
+  const legacy = { ...current, max_concurrency: 7, requests_per_minute: 40, burst: 3,
+    accounts: current.accounts.map(value => ({ ...value, max_concurrency: 4, requests_per_minute: 20, burst: 2 })),
+    callers: current.callers.map(value => ({ ...value, credential_generation: 9, enabled: false, max_concurrency: 2, requests_per_minute: 10, burst: 1 })) };
+  const original = stringify({ ...document, model_relay: legacy });
+  writePrivateFileAtomicSync(f.configPath, original);
+  const command = parseModelRelayCommand(["upgrade-limits"]);
+  const readPrivate = privateFile.readPrivateFileSync;
+  const failedBackup = vi.spyOn(privateFile, "readPrivateFileSync").mockImplementation((path, maxBytes) =>
+    String(path).endsWith(".bak") ? "fixture mismatched backup" : readPrivate(path, maxBytes));
+  try {
+    await expect(manageModelRelay(command, f.environment)).rejects.toThrow("备份校验失败");
+    expect(readFileSync(f.configPath, "utf8")).toBe(original);
+  } finally { failedBackup.mockRestore(); }
+  const failedWrite = vi.spyOn(gatewayConfig, "writeGatewayConfig").mockImplementation(() => { throw new Error("fixture write failure"); });
+  try {
+    await expect(manageModelRelay(command, f.environment)).rejects.toThrow("fixture write failure");
+    expect(readFileSync(f.configPath, "utf8")).toBe(original);
+    const backups = readdirSync(dirname(f.configPath)).filter(name => name.includes(".relay-") && name.endsWith(".bak"));
+    expect(backups.some(name => readFileSync(join(dirname(f.configPath), name), "utf8") === original)).toBe(true);
+  } finally { failedWrite.mockRestore(); }
+  const upgraded = await manageModelRelay(command, f.environment);
+  expect(upgraded.result).toBe("upgraded"); expect(readFileSync(String(upgraded.backupPath), "utf8")).toBe(original);
+  if (process.platform !== "win32") expect(statSync(String(upgraded.backupPath)).mode & 0o777).toBe(0o600);
+  const saved = gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay!;
+  expect(saved).toEqual({ ...current, max_concurrency: 7, requests_per_minute: 40, burst: 3,
+    callers: current.callers.map(value => ({ ...value, credential_generation: 9, enabled: false })) });
+  const after = readFileSync(f.configPath, "utf8");
+  expect(await manageModelRelay(command, f.environment)).toEqual({ result: "unchanged", backupPath: null });
+  expect(readFileSync(f.configPath, "utf8")).toBe(after);
+  const malformed = stringify({ ...document, model_relay: { ...legacy, accounts: [{ provider: "clp-test", max_concurrency: 0 }] } });
+  writePrivateFileAtomicSync(f.configPath, malformed);
+  await expect(manageModelRelay(command, f.environment)).rejects.toThrow();
+  expect(readFileSync(f.configPath, "utf8")).toBe(malformed);
+});

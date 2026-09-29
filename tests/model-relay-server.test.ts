@@ -17,9 +17,9 @@ afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(
 const secret = Buffer.alloc(32, 3);
 const authorization = `Bearer cr1.key-a.${secret.toString("base64url")}`;
 const config = (): RelayPolicy => ({ enabled: true, maxConcurrency: 8, burst: 8, requestsPerMinute: 60,
-  accounts: [{ provider: "clp-a", maxConcurrency: 4, burst: 4, requestsPerMinute: 30 }],
+  accounts: [{ provider: "clp-a" }],
   callers: [{ callerId: "caller-a", keyId: "key-a", credentialGeneration: 1, secretSha256: createHash("sha256").update(secret).digest("hex"),
-    enabled: true, provider: "clp-a", models: ["fixture/model"], maxConcurrency: 2, burst: 2, requestsPerMinute: 10 }] });
+    enabled: true, provider: "clp-a", models: ["fixture/model"] }] });
 const body = { model: "fixture/model", messages: [{ role: "user", content: "hello" }] };
 const answer = { id: "reply-1", model: "fixture/model", choices: [{ index: 0, message: { role: "assistant", content: "hello" }, finish_reason: "stop" }],
   usage: { prompt_tokens: 3, completion_tokens: 2 } };
@@ -46,6 +46,55 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it("queues behind ten executing requests and delivers JSON/SSE exactly once after release", async () => {
+    const replies: ServerResponse[] = [];
+    const f = await fixture((_request, response) => { replies.push(response); });
+    const base = config();
+    f.relay.admission.apply({ ...base, maxConcurrency: 10, requestsPerMinute: 0,
+      accounts: base.accounts, callers: base.callers });
+    const running = Array.from({ length: 10 }, () => f.post());
+    await vi.waitFor(() => expect(f.calls()).toBe(10));
+    const queuedJson = f.post(); const queuedStream = f.post({ ...body, stream: true });
+    await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(2));
+    expect(f.preparedCount()).toBe(10); expect(f.relay.diagnostics().active).toBe(10);
+    replies[0]!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
+    await vi.waitFor(() => expect(f.calls()).toBe(11));
+    replies[10]!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
+    expect((await queuedJson).status).toBe(200);
+    await vi.waitFor(() => expect(f.calls()).toBe(12));
+    replies[11]!.writeHead(200, { "content-type": "text/event-stream" }).end(frame({
+      id: "reply-1", model: "fixture/model", choices: [{ index: 0, delta: { content: "hello" }, finish_reason: "stop" }], usage: answer.usage,
+    }) + "data: [DONE]\n\n");
+    expect(await (await queuedStream).text()).toContain("data: [DONE]");
+    for (const response of replies.slice(1, 10)) response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
+    await Promise.all((await Promise.all(running)).map(response => response.text()));
+    await vi.waitFor(() => expect(f.metrics).toHaveLength(12));
+    expect(new Set(f.metrics.map(metric => metric.relayRequestId)).size).toBe(12);
+    expect(f.metrics.every(metric => metric.status === "completed")).toBe(true);
+    expect(f.relay.diagnostics()).toMatchObject({ active: 0, queue: { pending: 0, waiting: 0, bytes: 0 } });
+  });
+  it("drops disconnected waiters and cancels the rest immediately on shutdown", async () => {
+    let upstream: ServerResponse | undefined;
+    const f = await fixture((_request, response) => { upstream = response; });
+    const base = config();
+    f.relay.admission.apply({ ...base, maxConcurrency: 1, requestsPerMinute: 0,
+      accounts: base.accounts, callers: base.callers });
+    const active = f.post(); await vi.waitFor(() => expect(f.calls()).toBe(1));
+    const controller = new AbortController();
+    const cancelled = fetch(`${f.relay.address()}/v1/chat/completions`, { method: "POST", signal: controller.signal,
+      headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => undefined);
+    await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(1));
+    controller.abort(); await cancelled;
+    await vi.waitFor(() => expect(f.relay.diagnostics().queue.pending).toBe(0));
+    const waiting = f.post(); await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(1));
+    const close = f.relay.close();
+    const rejected = await waiting; expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toMatchObject({ error: { phase: "queue", upstream_attempted: false } });
+    expect(f.calls()).toBe(1); expect(f.metrics).toHaveLength(0);
+    upstream!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
+    await (await active).text(); await close;
+    expect(f.metrics).toHaveLength(1); expect(f.relay.diagnostics().queue.bytes).toBe(0);
+  });
   it("unwraps CLP's successful JSON envelope before delivery and usage settlement", async () => {
     const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" })
       .end(JSON.stringify({ success: true, data: answer })));

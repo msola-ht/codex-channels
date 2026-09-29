@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelRelayConfigSchema, relayPolicyFromConfig } from "../runtime/model-relay-config.mjs";
+import { modelRelayConfigSchema, relayPolicyFromConfig, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
 
 const caller = { caller_id: "client", key_id: "key", credential_generation: 1, secret_sha256: "a".repeat(64),
   enabled: true, provider: "clp-example", models: ["fixture/model"] };
@@ -11,23 +11,29 @@ describe("Relay strict configuration", () => {
   });
   it("projects already validated stable identities and exact account bindings", () => {
     const config = modelRelayConfigSchema.parse({ accounts: [{ provider: "clp-example" }], callers: [caller] });
-    expect(config.accounts[0]).toMatchObject({ max_concurrency: 10, requests_per_minute: 0, burst: 10 });
-    expect(config.callers[0]).toMatchObject({ max_concurrency: 10, requests_per_minute: 0, burst: 10 });
-    expect(relayPolicyFromConfig(config).callers[0]).toMatchObject({ requestsPerMinute: 0, callerId: "client", keyId: "key", credentialGeneration: 1, provider: "clp-example" });
+    expect(config.accounts[0]).toEqual({ provider: "clp-example" });
+    expect(config.callers[0]).toEqual(caller);
+    expect(relayPolicyFromConfig(config).callers[0]).toMatchObject({ callerId: "client", keyId: "key", credentialGeneration: 1, provider: "clp-example" });
   });
-  it("accepts translation limits above defaults and preserves all three scopes", () => {
-    const config = modelRelayConfigSchema.parse({ enabled: true, max_concurrency: 32, requests_per_minute: 600, burst: 32,
-      accounts: [{ provider: "clp-example", max_concurrency: 16, requests_per_minute: 300, burst: 16 }],
-      callers: [{ ...caller, max_concurrency: 8, requests_per_minute: 120, burst: 8 }] });
-    expect(relayPolicyFromConfig(config)).toMatchObject({ maxConcurrency: 32, requestsPerMinute: 600, burst: 32,
-      accounts: [{ maxConcurrency: 16, requestsPerMinute: 300, burst: 16 }],
-      callers: [{ maxConcurrency: 8, requestsPerMinute: 120, burst: 8 }] });
+  it("accepts only global limits and explicitly upgrades the old per-account/key fields", () => {
+    const legacy = { enabled: true, max_concurrency: 16, requests_per_minute: 80, burst: 12,
+      accounts: [{ provider: "clp-example", max_concurrency: 8, requests_per_minute: 30, burst: 4 }],
+      callers: [{ ...caller, max_concurrency: 2, requests_per_minute: 10, burst: 2 }] };
+    expect(modelRelayConfigSchema.safeParse(legacy).success).toBe(false);
+    const upgraded = upgradeModelRelayLimits(legacy);
+    expect(upgraded).toMatchObject({ max_concurrency: 16, requests_per_minute: 80, burst: 12 });
+    expect(upgraded.accounts).toEqual([{ provider: "clp-example" }]); expect(upgraded.callers).toEqual([caller]);
+    expect(relayPolicyFromConfig(upgraded).callers[0]).not.toHaveProperty("maxConcurrency");
+    expect(() => upgradeModelRelayLimits({ ...legacy, callers: [{ ...legacy.callers[0], unknown: 1 }] })).toThrow();
+    expect(() => upgradeModelRelayLimits({ ...legacy, accounts: [{ provider: "clp-example", max_concurrency: 0 }] })).toThrow();
   });
-  it.each(["global", "account", "caller"])("enforces bounded configurable limits at %s scope", scope => {
+  it("bounds global limits and rejects removed fields even at their former defaults", () => {
     for (const limits of [{ max_concurrency: 33 }, { requests_per_minute: -1 }, { requests_per_minute: 0.5 }, { requests_per_minute: 601 }, { burst: 33 }]) {
-      const input = scope === "global" ? limits : scope === "account" ? { accounts: [{ provider: "clp-example", ...limits }] }
-        : { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, ...limits }] };
-      expect(modelRelayConfigSchema.safeParse(input).success).toBe(false);
+      expect(modelRelayConfigSchema.safeParse(limits).success).toBe(false);
+    }
+    for (const field of ["max_concurrency", "requests_per_minute", "burst"]) {
+      expect(modelRelayConfigSchema.safeParse({ accounts: [{ provider: "clp-example", [field]: 10 }] }).success).toBe(false);
+      expect(modelRelayConfigSchema.safeParse({ accounts: [{ provider: "clp-example" }], callers: [{ ...caller, [field]: 10 }] }).success).toBe(false);
     }
   });
   it.each([

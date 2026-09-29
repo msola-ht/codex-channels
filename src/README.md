@@ -14,7 +14,7 @@
 - [`delivery/`](delivery/README.md)：有界持久投递、确认与恢复调度。
 - [`event-bus/`](event-bus/README.md)：有界异步队列和消费者隔离。
 - [`model-api/`](model-api/README.md)：独立 Responses 与 Chat 消息及流式事件转换。
-- [`model-relay/`](model-relay/README.md)：独立模型 API 的身份、准入与撤销（隔离开发中）。
+- [`model-relay/`](model-relay/README.md)：独立模型 API 的身份、全局准入、有界等待队列与撤销。
 - [`observability/`](observability/README.md)：结构化日志与脱敏模型请求指标库。
 - [`policy/`](policy/README.md)：Surface Actor 与 Workspace 授权边界。
 - [`provider-proxy/`](provider-proxy/README.md)：模型 Provider 本地回环转发代理与脱敏流式指标。

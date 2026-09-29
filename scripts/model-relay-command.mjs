@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, openSync, writeFileSync } from "node:fs";
 import { parseGatewayConfig, validateGatewayConfigDocument, withGatewayConfigLock, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { assertPrivateConfigAccessSync, readPrivateFileSync, securePrivateFileSync } from "../runtime/private-file.mjs";
-import { modelRelayConfigDigest, modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
+import { modelRelayConfigDigest, modelRelayConfigSchema, upgradeModelRelayLimits } from "../runtime/model-relay-config.mjs";
 import { loadConfiguredChatProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
@@ -10,7 +10,8 @@ import { locateUserConfig } from "./runtime-config.mjs";
 import { isCommandHelp } from "./cli-help.mjs";
 
 export const modelRelayUsage = `用法：codexc relay <命令>
-  status                         查询进程、监听与指标确认状态
+  status                         查询进程、监听、请求队列与指标确认状态
+  upgrade-limits                 显式备份并移除账户/Key 限流字段，不重启服务
   callers                        列出调用方（不显示秘密或哈希）
   issue --caller ID --key ID --provider clp-ID --model ID [--model ID]
   rotate --caller ID             轮换并启用新秘密，保留身份
@@ -20,7 +21,7 @@ export const modelRelayUsage = `用法：codexc relay <命令>
 
 export function parseModelRelayCommand(args) {
   const [command, ...rest] = args;
-  const commands = ["status", "callers", "issue", "rotate", "disable", "enable"];
+  const commands = ["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"];
   if (!commands.includes(command)) throw new Error(modelRelayUsage);
   const allowed = command === "issue" ? ["--caller", "--key", "--provider", "--model"]
     : ["rotate", "disable"].includes(command) ? ["--caller"] : [];
@@ -42,7 +43,7 @@ export function parseModelRelayCommand(args) {
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env) {
-  if (!["status", "callers", "issue", "rotate", "disable", "enable"].includes(input.command)) throw new Error(modelRelayUsage);
+  if (!["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"].includes(input.command)) throw new Error(modelRelayUsage);
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
   if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status"),
@@ -53,6 +54,21 @@ export async function manageModelRelay(input, environment = process.env) {
     return { callers: (document.model_relay?.callers ?? []).map(({ caller_id, key_id, credential_generation, enabled, provider, models }) =>
       ({ caller_id, key_id, credential_generation, enabled, provider, models })) };
   }
+  if (input.command === "upgrade-limits") return withGatewayConfigLock(configPath, () => {
+    assertPrivateConfigAccessSync(configPath);
+    const content = readPrivateFileSync(configPath, 1024 * 1024);
+    const document = parseGatewayConfig(content);
+    if (document.model_relay === undefined) {
+      validateGatewayConfigDocument(document); return { result: "unchanged", backupPath: null };
+    }
+    const upgraded = upgradeModelRelayLimits(document.model_relay);
+    const entries = [...(document.model_relay.accounts ?? []), ...(document.model_relay.callers ?? [])];
+    const changed = entries.some(entry => ["max_concurrency", "requests_per_minute", "burst"].some(key => Object.hasOwn(entry, key)));
+    if (!changed) { validateGatewayConfigDocument(document); return { result: "unchanged", backupPath: null }; }
+    document.model_relay = upgraded;
+    validateGatewayConfigDocument(document);
+    return { result: "upgraded", backupPath: saveWithBackup(configPath, content, document) };
+  });
   let secret;
   const result = withGatewayConfigLock(configPath, () => {
     assertPrivateConfigAccessSync(configPath);
@@ -65,11 +81,10 @@ export async function manageModelRelay(input, environment = process.env) {
       if (config.callers.some(caller => caller.caller_id === input.caller || caller.key_id === input.key)) throw new Error("Relay 身份已存在，包含停用记录；不能重复使用");
       const material = loadConfiguredChatProviderMaterial(input.provider, environment);
       if (input.models.some(model => !material.models.includes(model))) throw new Error("Relay 模型不在账户目录中");
-      if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider, max_concurrency: 10, requests_per_minute: 0, burst: 10 });
+      if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider });
       const bytes = randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
-        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models,
-        max_concurrency: 10, requests_per_minute: 0, burst: 10 });
+        secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models });
     } else if (input.command === "rotate" || input.command === "disable" && input.caller) {
       const caller = config.callers.find(value => value.caller_id === input.caller);
       if (!caller) throw new Error("Relay 调用方不存在");
@@ -85,12 +100,7 @@ export async function manageModelRelay(input, environment = process.env) {
     const digest = modelRelayConfigDigest(document.model_relay);
     let backupPath = null;
     if (previous !== digest || validated.model_relay === undefined) {
-      backupPath = `${configPath}.relay-${randomUUID()}.bak`;
-      const descriptor = openSync(backupPath, "wx", 0o600);
-      try { securePrivateFileSync(backupPath); writeFileSync(descriptor, content); fsyncSync(descriptor); }
-      finally { closeSync(descriptor); }
-      if (readPrivateFileSync(backupPath, 1024 * 1024) !== content) throw new Error("Relay 配置备份校验失败");
-      writeGatewayConfig(configPath, document);
+      backupPath = saveWithBackup(configPath, content, document);
     }
     return { digest, backupPath };
   });
@@ -101,7 +111,17 @@ export async function manageModelRelay(input, environment = process.env) {
 }
 
 export async function runModelRelayCommand(args) {
-  if (!args.length || isCommandHelp(args, [[], ...["status", "callers", "issue", "rotate", "disable", "enable"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
+  if (!args.length || isCommandHelp(args, [[], ...["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
   const input = parseModelRelayCommand(args);
   console.log(JSON.stringify(await manageModelRelay(input), null, 2));
+}
+
+function saveWithBackup(configPath, content, document) {
+  const backupPath = `${configPath}.relay-${randomUUID()}.bak`;
+  const descriptor = openSync(backupPath, "wx", 0o600);
+  try { securePrivateFileSync(backupPath); writeFileSync(descriptor, content); fsyncSync(descriptor); }
+  finally { closeSync(descriptor); }
+  if (readPrivateFileSync(backupPath, 1024 * 1024) !== content) throw new Error("Relay 配置备份校验失败");
+  writeGatewayConfig(configPath, document);
+  return backupPath;
 }

@@ -134,6 +134,11 @@ codexc update
 更新会显示当前与远程 `main` 提交、候选源码克隆、构建预检和切换结果。依赖安装与构建成功时只显示
 阶段摘要；失败时输出对应工具的完整错误。源码切换后会重新打包并刷新 npm 全局命令。
 
+Relay 旧配置若在 accounts/callers 下含有限流字段，先使用已构建目标源码的
+`node bin/codexc.mjs relay upgrade-limits` 显式备份并转换，再进行常规更新；新 Schema 不会
+静默忽略旧字段。该命令不重启服务，不改数据库或身份。控制 IPC 已升级到 v2，切换期间不能
+混用新 CLI 与旧 Relay 的确认结果。配置转换及回滚边界见[用户指南](user-guide.md)。
+
 指标 Schema v20→v21 由目标版本的显式数据库升级入口处理：预检严格旧结构（允许实施方案中精确定义的可选历史费用附加表并原样保留），停写后获取独占锁，创建并校验 SQLite 一致性备份，再事务迁移并复查；失败保留库与备份，不恢复不兼容服务。也可先使用 `codexc metrics upgrade --from 20 --to 21` 单独预检。回滚步骤见[Provider API 转发方案](provider-api-relay-development.md)。
 
 ## 卸载

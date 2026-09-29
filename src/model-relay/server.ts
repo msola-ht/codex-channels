@@ -55,8 +55,8 @@ export class ModelRelayServer {
     if (!address || typeof address === "string") throw new Error("Relay is not listening");
     return `http://${address.family === "IPv6" ? `[${address.address}]` : address.address}:${address.port}`;
   }
-  diagnostics(): { active: number; metricFailures: number } {
-    return { active: this.admission.active, metricFailures: this.metricFailures };
+  diagnostics(): { active: number; metricFailures: number; queue: { pending: number; waiting: number; bytes: number } } {
+    return { active: this.admission.active, queue: this.admission.queue, metricFailures: this.metricFailures };
   }
   /** Disable the endpoint without forgetting the process's rate history. */
   async stopListening(): Promise<void> {
@@ -69,6 +69,7 @@ export class ModelRelayServer {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.stopping = true;
+    this.admission.stopWaiting();
     this.closing = (async () => {
       const closed = new Promise<void>(resolve => this.server.close(() => resolve()));
       const timer = setTimeout(() => {
@@ -99,7 +100,7 @@ export class ModelRelayServer {
     let errorCode: string | undefined;
     let requestModel = "";
     let stream = false;
-    let phase: "input" | "prepare" | "upstream" | "delivery" = "input";
+    let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const observer = new DirectChatResponse();
     const relayRequestId = randomUUID();
     response.setHeader("x-relay-request-id", relayRequestId);
@@ -113,7 +114,7 @@ export class ModelRelayServer {
         // Invalid header shapes share the bounded authentication-failure bucket.
         this.admission.acquire(undefined);
       }
-      lease = this.admission.acquire(request.headers.authorization);
+      lease = models ? this.admission.acquire(request.headers.authorization) : this.admission.reserve(request.headers.authorization);
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
       let body: ReturnType<typeof validateDirectChatRequest> | undefined;
@@ -128,6 +129,11 @@ export class ModelRelayServer {
         lease.check(body.model); requestModel = body.model; stream = body.stream;
       } else if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] ?? 0) !== 0) {
         throw new RelayAdmissionError(400, "invalid_request");
+      }
+      if (body) {
+        phase = "queue";
+        await this.admission.wait(lease, body.model, Buffer.byteLength(JSON.stringify(body)), signal);
+        signal.throwIfAborted();
       }
       phase = "prepare";
       const prepared = await waitForChatOperation(this.options.prepare(lease.caller.provider, signal), signal);
@@ -174,7 +180,9 @@ export class ModelRelayServer {
           || failure instanceof ChatUpstreamError || failure instanceof DirectChatResponseError
           ? failure.message : errorCode === "model_not_allowed"
             ? "Requested model is not allowed by this Relay key or is unavailable in its provider catalog. Use an exact model ID returned by GET /v1/models."
-            : "Model request could not be completed.";
+            : errorCode === "relay_queue_full" ? "Relay waiting queue is full. Retry later."
+              : errorCode === "relay_queue_timeout" ? "Relay request waited more than 30 seconds for an execution slot."
+                : "Model request could not be completed.";
         const detail = { error: { type: "relay_error", code: errorCode,
           message: failure instanceof DirectChatRequestError && phase === "input" ? message
             : `${message} [${errorCode}; phase=${phase}${httpStatus === undefined ? "" : `; upstream_http=${httpStatus}`}; request_id=${relayRequestId}]`,
