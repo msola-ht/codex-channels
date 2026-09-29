@@ -65,11 +65,11 @@ export async function manageModelRelay(input, environment = process.env) {
       if (config.callers.some(caller => caller.caller_id === input.caller || caller.key_id === input.key)) throw new Error("Relay 身份已存在，包含停用记录；不能重复使用");
       const material = loadConfiguredChatProviderMaterial(input.provider, environment);
       if (input.models.some(model => !material.models.includes(model))) throw new Error("Relay 模型不在账户目录中");
-      if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider, max_concurrency: 4, requests_per_minute: 30, burst: 4 });
+      if (!config.accounts.some(account => account.provider === input.provider)) config.accounts.push({ provider: input.provider, max_concurrency: 10, requests_per_minute: 0, burst: 10 });
       const bytes = randomBytes(32); secret = `cr1.${input.key}.${bytes.toString("base64url")}`;
       config.callers.push({ caller_id: input.caller, key_id: input.key, credential_generation: 1,
         secret_sha256: createHash("sha256").update(bytes).digest("hex"), enabled: true, provider: input.provider, models: input.models,
-        max_concurrency: 2, requests_per_minute: 10, burst: 2 });
+        max_concurrency: 10, requests_per_minute: 0, burst: 10 });
     } else if (input.command === "rotate" || input.command === "disable" && input.caller) {
       const caller = config.callers.find(value => value.caller_id === input.caller);
       if (!caller) throw new Error("Relay 调用方不存在");

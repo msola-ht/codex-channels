@@ -13,7 +13,7 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 
 ## 当前锁定基线
 
-| 用途 | 本地目录 | 官方仓库 | 当前基线 |
+| 用途 | 本地目录 | 来源仓库 | 当前基线 |
 | --- | --- | --- | --- |
 | Codex CLI、Core 与 App Server 协议行为 | `upstream/openai-codex` | `openai/codex` | `rust-v0.156.1`，提交 `b412ff32c417f855c2b2d1581b77058eed87c84b` |
 | 微信 ClawBot HTTP、消息和媒体合同 | `upstream/openclaw-weixin` | `Tencent/openclaw-weixin` | `v2.4.9`，提交 `43675b66551d12d6853155a7869a50fb12a18a1e` |
@@ -23,6 +23,19 @@ Codex 协议、微信和飞书开发优先使用项目内已经固定版本的�
 飞书协议和 API 字段以官方 Node SDK及飞书开放平台为主要事实来源；OpenClaw 插件只用于参考渠道
 编排、授权、卡片、媒体和错误处理，不替代官方 SDK。微信未发布独立 SDK，固定版本官方插件的
 源码、类型和测试是协议研究基线，真实合同仍以本项目的脱敏探针结果为准。
+
+## 模型转发实现参考
+
+经用户授权保留 `upstream/CLIProxyAPI`，来源为 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，
+固定提交 `d33f63f8e3d98428440ebca5a5b6a981a61ff71e`，许可证 MIT。该第三方实现不是 CLP 官方合同，
+不导入运行时代码、不运行安装脚本，不自动更新；目录沿用 `upstream/` 忽略规则。
+重点参考 `sdk/api/handlers/openai/openai_handlers.go`、
+`internal/translator/openai/openai/chat-completions/openai_openai_request.go` 及其测试、
+`internal/runtime/executor/helps/openai_compat_max_tokens.go` 及其测试。
+Chat→Chat 转换保留请求字段；长度字段归一化由模型配置显式控制，不据此推断 CLP 支持全部字段。
+
+首次准备可执行 `git clone https://github.com/router-for-me/CLIProxyAPI.git upstream/CLIProxyAPI`，
+随后 `git -C upstream/CLIProxyAPI checkout d33f63f8e3d98428440ebca5a5b6a981a61ff71e`。
 
 ## 查阅顺序
 

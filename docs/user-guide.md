@@ -589,3 +589,31 @@ Relay 默认禁用、只允许回环监听；异机客户端使用自己管理�
 受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
 完整配置、字段支持范围与回滚步骤见[实施方案](provider-api-relay-development.md#143-精确配置与命令已授权实现与隔离验证)。
 WebUI 请求页面可按来源与真实调用方筛选；接收确认不代表指标已落盘，交付完成不证明客户端已收到。
+
+Relay 的 Chat 请求保留模型参数、消息内容和扩展字段，由 CLP 判断是否支持；远程图片 URL
+也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息数量、stream 布尔、单选择
+n=1 和请求大小等边界由 Relay 校验；省略 stream 时默认 JSON。请求参数不能改变本机账户、
+凭据或上游地址。参数透传不代表当前模型支持所有能力，响应仍遵循已记录的单选择 JSON/SSE 合同。
+
+Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给 CLP。
+上游 Authorization 和传输头由 Relay 控制；Cookie、代理凭据、转发来源与内部身份头剔除。
+
+Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响应提供 `code`、`phase`、
+`request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。
+`X-Relay-Request-Id` 可与指标记录关联。`invalid_upstream_*` 表示上游响应类型或字段校验失败；
+例如上游 HTTP 200 配合 `invalid_upstream_tools` 表示工具响应字段校验未通过，并非上游返回了 502。
+WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
+
+Relay 返回 403 `model_not_allowed` 时，请使用当前 Key 的 `GET /v1/models` 返回的精确模型 ID，
+包括模型前缀。模型必须同时位于 Key 授权列表和 Provider 模型目录中；此类拒绝发生在出站前，
+不会新增上游调用指标，也不表示 CLP 返回了 403。
+
+Relay 的 JSON 非流式响应同时接受标准 Chat 对象和 CLP 的 `{success:true,data:...}` 包装；
+客户端收到的仍是标准 Chat 响应。包装失败或内部响应不合法时返回明确错误，不当作成功生成。
+
+Relay 的三级限流相互叠加，仅统计进入 Relay 的请求，不与本机 App Server 的代理共用计数。
+各层 `max_concurrency` 可设为 1–32，`requests_per_minute` 为 0–600，`burst` 为 1–32。
+全局、账户、Key 默认并发均为 10；三级每分钟速率均默认 0，表示不启用该层速率及突发
+检查，仍执行并发限制。速率设为正数后，该层每分钟与突发限制重新生效。鉴权失败保护始终保留。
+已有配置中的显式正数不会自动改为 0。旧版不接受 0 且上限较小，必须先更新程序再修改实际配置；
+回滚旧程序前先把限流字段恢复到旧版支持的正数范围。

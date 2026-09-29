@@ -97,7 +97,7 @@
   `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
-- `direct-chat.ts`：单次直接 Chat JSON/SSE 网络交换，提交发送前同步复核，不做身份管理、重试、转储或指标发送。
+- `direct-chat.ts`：单次直接 Chat JSON/SSE 网络交换，保留普通应用请求头并复用跳级头清理，覆盖上游凭据与传输头、剔除 Cookie/伪造身份；识别 CLP 显式成功的单层 JSON 包装后复用响应校验；提交发送前同步复核，不做身份管理、重试、转储或指标发送。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到

@@ -13,6 +13,43 @@ const policy = (): RelayPolicy => ({ enabled: true, maxConcurrency: 8, requestsP
 });
 
 describe("Relay admission and revocation", () => {
+  it("allows sustained requests without rate debits while enforcing ten concurrent global leases", () => {
+    const base = policy();
+    const config: RelayPolicy = { ...base, maxConcurrency: 10, requestsPerMinute: 0, burst: 1,
+      accounts: base.accounts.map(value => ({ ...value, maxConcurrency: 32, requestsPerMinute: 0, burst: 1 })),
+      callers: base.callers.map(value => ({ ...value, maxConcurrency: 32, requestsPerMinute: 0, burst: 1 })) };
+    const admission = new RelayAdmission(config, () => 0);
+    for (let i = 0; i < 100; i++) admission.acquire(token()).release();
+    const leases = Array.from({ length: 10 }, () => admission.acquire(token()));
+    expect(() => admission.acquire(token())).toThrow("relay_rate_limited");
+    leases.pop()!.release();
+    const replacement = admission.acquire(token());
+    [...leases, replacement].forEach(lease => lease.release());
+    expect(admission.active).toBe(0);
+  });
+  it.each(["global", "account", "key"])("can enable, disable and restore the %s rate limit without resetting spent credits", scope => {
+    const base = policy();
+    const unlimited: RelayPolicy = { ...base, requestsPerMinute: 0, burst: 1,
+      accounts: base.accounts.map(value => ({ ...value, requestsPerMinute: 0, burst: 1 })),
+      callers: base.callers.map(value => ({ ...value, requestsPerMinute: 0, burst: 1 })) };
+    const limited = structuredClone(unlimited);
+    if (scope === "global") limited.requestsPerMinute = 60;
+    else if (scope === "account") limited.accounts[0]!.requestsPerMinute = 60;
+    else limited.callers[0]!.requestsPerMinute = 60;
+    let now = 0;
+    const admission = new RelayAdmission(unlimited, () => now);
+    for (let i = 0; i < 5; i++) admission.acquire(token()).release();
+    admission.apply(limited);
+    admission.acquire(token()).release();
+    expect(() => admission.acquire(token())).toThrow("relay_rate_limited");
+    admission.apply(unlimited);
+    for (let i = 0; i < 5; i++) admission.acquire(token()).release();
+    now = 10_000;
+    admission.apply(limited);
+    expect(() => admission.acquire(token())).toThrow("relay_rate_limited");
+    now += 1000;
+    admission.acquire(token()).release();
+  });
   it("authenticates canonical secrets and enforces model permissions", () => {
     const admission = new RelayAdmission(policy());
     expect(() => admission.acquire(token().replace("Bearer", "Basic"))).toThrow("invalid_api_key");

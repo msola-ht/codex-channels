@@ -134,7 +134,7 @@ codexc update
 更新会显示当前与远程 `main` 提交、候选源码克隆、构建预检和切换结果。依赖安装与构建成功时只显示
 阶段摘要；失败时输出对应工具的完整错误。源码切换后会重新打包并刷新 npm 全局命令。
 
-指标 Schema v20→v21 由目标版本的显式数据库升级入口处理：预检严格旧结构，停写后获取独占锁，创建并校验 SQLite 一致性备份，再事务迁移并复查；失败保留库与备份，不恢复不兼容服务。也可先使用 `codexc metrics upgrade --from 20 --to 21` 单独预检。回滚步骤见[Provider API 转发方案](provider-api-relay-development.md)。
+指标 Schema v20→v21 由目标版本的显式数据库升级入口处理：预检严格旧结构（允许实施方案中精确定义的可选历史费用附加表并原样保留），停写后获取独占锁，创建并校验 SQLite 一致性备份，再事务迁移并复查；失败保留库与备份，不恢复不兼容服务。也可先使用 `codexc metrics upgrade --from 20 --to 21` 单独预检。回滚步骤见[Provider API 转发方案](provider-api-relay-development.md)。
 
 ## 卸载
 

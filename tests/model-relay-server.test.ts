@@ -46,6 +46,151 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it("unwraps CLP's successful JSON envelope before delivery and usage settlement", async () => {
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ success: true, data: answer })));
+    const response = await f.post();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject(answer);
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ status: "completed", deliveryStatus: "finished", httpStatus: 200,
+      responseFormat: "json", responseModel: answer.model, inputTokens: 3, outputTokens: 2 });
+    expect(f.metrics[0]?.errorCode).toBeUndefined();
+  });
+  it.each([
+    { success: false, data: answer },
+    { success: "true", data: answer },
+    { success: true, data: null },
+    { success: true, data: { success: true, data: answer } },
+    { success: true, data: { error: { code: "server_error", message: "PRIVATE" } } },
+    { success: true, data: answer, error: { message: "PRIVATE" } },
+    { success: true, data: answer, choices: null },
+    { ...answer, success: true, data: answer },
+    { ...answer, success: false, data: answer },
+  ])("rejects unsuccessful, invalid or ambiguous CLP envelopes (%j)", async payload => {
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify(payload)));
+    const response = await f.post(); const text = await response.text();
+    expect(response.status).toBe(502); expect(text).not.toContain("PRIVATE");
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed", httpStatus: 200 });
+    expect(f.metrics[0]?.inputTokens).toBeUndefined();
+  });
+  it.each([
+    [undefined, "choices is missing or is not an array"],
+    [[], "choices is empty"],
+    [[{}, {}], "choices contains more than one"],
+    [["PRIVATE"], "choices[0] is not an object"],
+    [[{ index: "PRIVATE" }], "choices[0].index must be absent or zero"],
+  ])("distinguishes invalid choices without exposing their values (%j)", async (choices, reason) => {
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ ...answer, choices })));
+    const response = await f.post(); const text = await response.text();
+    expect(response.status).toBe(502); expect(text).not.toContain("PRIVATE");
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "invalid_upstream_choices", message: expect.stringContaining(reason as string) } });
+    expect(f.metrics).toHaveLength(1);
+  });
+  it.each(["key", "catalog"])("explains model authorization rejection at the %s boundary without sending upstream", async boundary => {
+    const f = await fixture((_request, response) => response.end("unexpected"),
+      boundary === "catalog" ? async prepared => ({ ...prepared, models: [] }) : undefined);
+    const response = await f.post({ ...body, model: boundary === "key" ? "PRIVATE-model" : body.model });
+    const text = await response.text();
+    expect(response.status).toBe(403); expect(text).not.toContain("PRIVATE-model");
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "model_not_allowed", upstream_attempted: false,
+      phase: boundary === "key" ? "input" : "prepare", message: expect.stringContaining("GET /v1/models") } });
+    expect(text).toContain("[model_not_allowed;");
+    expect(f.calls()).toBe(0); expect(f.metrics).toHaveLength(0);
+    expect(f.preparedCount()).toBe(boundary === "key" ? 0 : 1);
+  });
+  it.each([
+    ["content_type", "text/event-stream", "data: PRIVATE\n\n"],
+    ["json", "application/json", "PRIVATE not JSON"],
+    ["metadata", "application/json", { ...answer, created: "PRIVATE" }],
+    ["choices", "application/json", { ...answer, choices: "PRIVATE" }],
+    ["message", "application/json", { ...answer, choices: [{ message: { content: { secret: "PRIVATE" } }, finish_reason: "stop" }] }],
+    ["tools", "application/json", { ...answer, choices: [{ message: { tool_calls: "PRIVATE" }, finish_reason: "stop" }] }],
+    ["finish", "application/json", { ...answer, choices: [{ message: { content: "PRIVATE" }, finish_reason: "unsupported" }] }],
+    ["usage", "application/json", { ...answer, usage: { prompt_tokens: "PRIVATE" } }],
+  ])("reports safe JSON response diagnostics for %s and correlates the metric", async (part, contentType, payload) => {
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": contentType as string })
+      .end(typeof payload === "string" ? payload : JSON.stringify(payload)));
+    const response = await f.post();
+    expect(response.status).toBe(502);
+    const text = await response.text();
+    expect(text).not.toContain("PRIVATE");
+    const result = JSON.parse(text) as { error: { message: string; request_id: string } };
+    expect(result).toMatchObject({ error: { code: `invalid_upstream_${String(part)}`, phase: "upstream", upstream_status: 200, upstream_attempted: true } });
+    expect(result.error.message).toContain(`invalid_upstream_${String(part)}`);
+    expect(result.error.message).toContain("upstream_http=200");
+    expect(result.error.request_id).toBe(response.headers.get("x-relay-request-id"));
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ relayRequestId: result.error.request_id, errorCode: `invalid_upstream_${String(part)}`, httpStatus: 200, deliveryStatus: "failed" });
+  });
+  it("exposes a safe upstream rejection reason without its free text", async () => {
+    const f = await fixture((_request, response) => response.writeHead(400, { "content-type": "application/json" })
+      .end(JSON.stringify({ error: { message: "PRIVATE request and credentials" } })));
+    const response = await f.post(); const text = await response.text();
+    expect(response.status).toBe(502); expect(text).not.toContain("PRIVATE");
+    expect(JSON.parse(text)).toMatchObject({ error: { code: "invalid_request_error", upstream_status: 400, message: expect.stringContaining("上游拒绝请求") } });
+  });
+  it("delivers expanded Chat inputs to the upstream and reports safe parameter errors before preparation", async () => {
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = []; request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => { received = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
+        expect(request.headers.authorization).toBe("Bearer UPSTREAM-SECRET");
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)); });
+    });
+    const invalid = await f.post({ ...body, n: 2 });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({ error: { param: "n", message: "n: Relay supports only one choice (n=1)", upstream_attempted: false } });
+    expect(f.preparedCount()).toBe(0);
+    const input = { ...body, max_tokens: 100, top_p: 0.8, stream_options: { include_usage: true },
+      reasoning: { effort: "none" }, tools: [], vendor_extension: { value: null },
+      provider: "forged", url: "http://127.0.0.1:1", authorization: "FORGED", model_base_url: "http://127.0.0.1:1",
+      messages: [{ role: "developer", content: "instructions" }, { role: "user", content: [
+        { type: "text", text: "hello" }, { type: "image_url", image_url: { url: "http://127.0.0.1:1/image" } }] }] };
+    const response = await f.post(input); expect(response.status).toBe(200); await response.text();
+    expect(received).toEqual({ ...input, stream: false }); expect(f.metrics).toHaveLength(1);
+  });
+  it("keeps HTTP delivery successful while Gateway metrics IPC is absent, without retrying after recovery", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-missing-gateway-"));
+    cleanups.push(async () => { rmSync(directory, { recursive: true, force: true }); });
+    const path = join(directory, "metrics.sock");
+    const send = vi.fn((envelope: Parameters<typeof sendRelayMetrics>[1], signal: AbortSignal) => sendRelayMetrics(path, envelope, signal));
+    const sender = new RelayMetricsSender(send); cleanups.push(() => sender.close());
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)),
+      undefined, sample => sender.enqueue(sample));
+    const response = await f.post();
+    expect(response.status).toBe(200); expect(await response.json()).toMatchObject(answer);
+    await vi.waitFor(() => expect(sender.diagnostics().unconfirmed).toBe(1));
+    expect(sender.diagnostics()).toMatchObject({ accepted: 0, rejected: 0, local_dropped: 0, pending: 0, active: 0 });
+    const store = new SqliteModelRequestMetricsStore(join(directory, "metrics.sqlite3"));
+    const writer = new BufferedModelRequestMetricsWriter(store); cleanups.push(() => writer.close());
+    const receiver = new RelayMetricsComposition({ path, writer, authorize: () => undefined });
+    await receiver.apply(true); cleanups.push(() => receiver.close());
+    await sender.close(); await writer.waitForCurrentWrites();
+    expect(send).toHaveBeenCalledTimes(1); expect(store.count()).toBe(0);
+    expect(f.metrics).toHaveLength(1); expect(f.relay.diagnostics().active).toBe(0);
+  });
+  it("enforces the total deadline despite upstream heartbeats and settles only once", async () => {
+    const timeout = globalThis.setTimeout;
+    const clock = vi.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => timeout(callback, delay === 300_000 ? 150 : delay, ...args));
+    try {
+      let closed = false;
+      const f = await fixture((_request, response) => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(frame({ choices: [{ delta: { content: "partial" } }] }));
+        const heartbeat = setInterval(() => response.write(": heartbeat\n\n"), 10);
+        response.once("close", () => { closed = true; clearInterval(heartbeat); });
+      });
+      const response = await f.post({ ...body, stream: true }); const text = await response.text();
+      expect(response.status).toBe(200); expect(text).toContain("request_timeout"); expect(text).not.toContain("[DONE]");
+      await vi.waitFor(() => expect(closed).toBe(true));
+      expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status: "failed", errorCode: "request_timeout", httpStatus: 200 });
+      expect(f.relay.diagnostics().active).toBe(0);
+    } finally { clock.mockRestore(); }
+  });
   it.each([false, true])("preserves idle timeout after upstream headers (stream=%s)", async stream => {
     const original = ClientRequest.prototype.setTimeout;
     const timeout = vi.spyOn(ClientRequest.prototype, "setTimeout").mockImplementation(function (this: ClientRequest, milliseconds, callback) {
@@ -169,12 +314,21 @@ describe("isolated Relay vertical request chain", () => {
       request.on("end", () => { incoming = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
         response.writeHead(200, { "content-type": "application/json", "set-cookie": "PRIVATE" }).end(JSON.stringify({ ...answer, metadata: "PRIVATE" })); });
     });
-    const response = await f.post(body, { cookie: "PRIVATE", "x-codex-turn-metadata": "FORGED", "x-provider": "other" });
-    expect(response.status).toBe(200); expect(response.headers.get("set-cookie")).toBeNull();
-    expect(await response.json()).toMatchObject(answer);
+    const client = httpRequest(`${f.relay.address()}/v1/chat/completions`, { method: "POST", headers: { authorization, "content-type": "application/json", cookie: "PRIVATE", "x-codex-turn-metadata": "FORGED", "x-provider": "other",
+      "user-agent": "fixture-client/1", "http-referer": "https://client.example", "x-title": "Fixture",
+      "x-client-option": "preserve", "proxy-authorization": "PRIVATE", "x-api-key": "PRIVATE",
+      "x-forwarded-for": "1.2.3.4", connection: "close, x-hop", "x-hop": "PRIVATE" } });
+    const ready = once(client, "response"); client.end(JSON.stringify(body));
+    const [response] = await ready as [IncomingMessage];
+    const received: Buffer[] = []; for await (const chunk of response) received.push(Buffer.from(chunk as Buffer));
+    expect(response.statusCode).toBe(200); expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(JSON.parse(Buffer.concat(received).toString()) as unknown).toMatchObject(answer);
     expect(incoming).toEqual({ ...body, stream: false });
     expect(headers?.authorization).toBe("Bearer UPSTREAM-SECRET");
     expect(headers?.cookie).toBeUndefined(); expect(headers?.["x-codex-turn-metadata"]).toBeUndefined();
+    expect(headers).toMatchObject({ "user-agent": "fixture-client/1", "http-referer": "https://client.example",
+      "x-title": "Fixture", "x-client-option": "preserve", "accept-encoding": "identity" });
+    for (const key of ["proxy-authorization", "x-api-key", "x-forwarded-for", "x-hop", "x-provider"]) expect(headers?.[key], key).toBeUndefined();
     expect(f.metrics).toHaveLength(1);
     expect(f.metrics[0]).toMatchObject({ callerId: "caller-a", keyId: "key-a", credentialGeneration: 1, source: "relay", threadId: null, turnId: null,
       status: "completed", deliveryStatus: "finished", inputTokens: 3, outputTokens: 2 });

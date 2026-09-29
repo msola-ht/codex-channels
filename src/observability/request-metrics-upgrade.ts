@@ -17,6 +17,15 @@ export interface MetricsUpgradeResult {
   backupSha256: string | null;
 }
 
+// Observed v20 auxiliary data: preserve exactly, without making it a runtime feature.
+const retainedCostsSql = `CREATE TABLE model_request_costs (
+    metric_id INTEGER PRIMARY KEY,
+    cost_usd_micros INTEGER NOT NULL CHECK (cost_usd_micros >= 0)
+  )`;
+function hasRetainedCosts(database: DatabaseSync): boolean {
+  return database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_request_costs'").get() !== undefined;
+}
+
 /** Explicit offline operation. Runtime startup never invokes this function. */
 export function upgradeRequestMetricsDatabase(path: string, apply = false): MetricsUpgradeResult {
   const databasePath = resolve(path);
@@ -109,6 +118,7 @@ function requireV20Schema(database: DatabaseSync): void {
   try {
     expected.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, modelRequestMetricsV20TableSql)
       .replace(modelRequestMetricsIndexesSql, modelRequestMetricsV20IndexesSql).replace("'schema_version', 21", "'schema_version', 20"));
+    if (hasRetainedCosts(database)) expected.exec(retainedCostsSql);
     const schema = (db: DatabaseSync): string => JSON.stringify(db.prepare(
       "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",
     ).all().map(row => ({ ...row, sql: typeof row.sql === "string" ? row.sql.replace(/\s+/gu, " ").trim() : row.sql })));
@@ -120,7 +130,9 @@ function requireV20Schema(database: DatabaseSync): void {
 }
 function logicalFingerprint(database: DatabaseSync, migrated = false): string {
   const hash = createHash("sha256");
-  for (const name of ["schema_metadata", "account_sources", "account_snapshots", "subagent_threads", "subagent_turns", "model_request_metrics", "sqlite_sequence"]) {
+  const tables = ["schema_metadata", "account_sources", "account_snapshots", "subagent_threads", "subagent_turns", "model_request_metrics", "sqlite_sequence"];
+  if (hasRetainedCosts(database)) tables.push("model_request_costs");
+  for (const name of tables) {
     hash.update(name);
     const columns = migrated && name === "model_request_metrics" ? `id, ${metricStorageV20Columns.join(", ")}` : "*";
     const statement = database.prepare(`SELECT ${columns} FROM ${name} ORDER BY 1, 2`);

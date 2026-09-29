@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
+/** requestsPerMinute=0 disables only rate/burst admission, never concurrency. */
 export interface RelayLimit { maxConcurrency: number; requestsPerMinute: number; burst: number }
 export interface RelayCaller extends RelayLimit {
   callerId: string;
@@ -69,9 +70,9 @@ export class RelayAdmission {
     const scopes = ["global", `account:${caller.provider}`, `key:${caller.keyId}`].map(key => this.buckets.get(key)!);
     for (const bucket of scopes) {
       refill(bucket, this.now());
-      if (bucket.active >= bucket.limit.maxConcurrency || bucket.tokens < 1) throw new RelayAdmissionError(429, "relay_rate_limited");
+      if (bucket.active >= bucket.limit.maxConcurrency || bucket.limit.requestsPerMinute > 0 && bucket.tokens < 1) throw new RelayAdmissionError(429, "relay_rate_limited");
     }
-    for (const bucket of scopes) { bucket.tokens -= 1; bucket.active += 1; }
+    for (const bucket of scopes) { if (bucket.limit.requestsPerMinute > 0) bucket.tokens -= 1; bucket.active += 1; }
     const controller = new AbortController();
     const identity = privilege(caller);
     let released = false;

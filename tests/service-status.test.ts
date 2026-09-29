@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   inspectManagedServiceStatus,
@@ -12,10 +12,17 @@ import {
 } from "../scripts/service-status.mjs";
 
 describe("managed service JSON status", () => {
+  let serviceConfigDirectory: string;
+  beforeEach(() => {
+    serviceConfigDirectory = mkdtempSync(join(tmpdir(), "codexc-service-status-"));
+  });
+  afterEach(() => {
+    rmSync(serviceConfigDirectory, { recursive: true, force: true });
+  });
   it("supports asynchronous supervisor queries for WebUI callers", async () => {
     const calls: string[][] = [];
     const status = await inspectManagedServiceStatusAsync({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       run: async (_executable, args) => {
         calls.push([...args]);
@@ -51,7 +58,7 @@ describe("managed service JSON status", () => {
     };
 
     expect(inspectManagedServiceStatus({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       run,
       target: "all",
@@ -95,7 +102,7 @@ describe("managed service JSON status", () => {
     };
 
     expect(inspectManagedServiceStatus({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "darwin",
       run,
       target: "all",
@@ -131,7 +138,7 @@ describe("managed service JSON status", () => {
     const run = () => ({ status: 1, stdout: "", stderr: "permission denied\nsecret detail" });
 
     expect(() => inspectManagedServiceStatus({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "darwin",
       run,
       target: "gateway",
@@ -172,7 +179,7 @@ describe("managed service JSON status", () => {
 
   it("accepts only explicit systemd not-found output after a failed query", () => {
     expect(inspectManagedServiceStatus({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       run: () => ({
         status: 4,
@@ -186,7 +193,7 @@ describe("managed service JSON status", () => {
     });
 
     expect(() => inspectManagedServiceStatus({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       run: () => ({
         status: 1,
@@ -224,7 +231,7 @@ describe("managed service JSON status", () => {
   it("reads Linux journald errors through the fixed service unit", async () => {
     const calls: string[][] = [];
     const error = await readManagedServiceErrorAsync({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       target: "gateway",
       run: async (_executable, args) => {
@@ -248,7 +255,7 @@ describe("managed service JSON status", () => {
 
   it("treats an empty Linux journald result as no recent error", async () => {
     const error = await readManagedServiceErrorAsync({
-      environment: {},
+      environment: { HOME: serviceConfigDirectory, XDG_CONFIG_HOME: serviceConfigDirectory },
       platform: "linux",
       target: "gateway",
       run: async () => ({ status: 0, stdout: "-- No entries --\n", stderr: "" }),

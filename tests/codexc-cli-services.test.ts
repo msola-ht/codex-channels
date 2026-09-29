@@ -200,6 +200,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     chmodSync(fakeSystemctl, 0o755);
     const environment = {
       ...process.env,
+      XDG_CONFIG_HOME: join(root, "config"),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
       SYSTEMCTL_BINARY: fakeSystemctl,

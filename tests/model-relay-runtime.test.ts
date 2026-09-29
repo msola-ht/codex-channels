@@ -56,6 +56,11 @@ it("issues and rotates secrets once, preserves tombstones and configuration back
   expect(issued.activation).toBe("saved_not_running");
   const token = String(issued.key);
   const content = readFileSync(f.configPath, "utf8");
+  const saved = gatewayConfig.validateGatewayConfigDocument(gatewayConfig.parseGatewayConfig(content)).model_relay;
+  const defaultLimits = { max_concurrency: 10, requests_per_minute: 0, burst: 10 };
+  expect(saved).toMatchObject(defaultLimits);
+  expect(saved?.accounts[0]).toMatchObject(defaultLimits);
+  expect(saved?.callers[0]).toMatchObject(defaultLimits);
   expect(content).not.toContain(token);
   expect(content).toContain(createHash("sha256").update(Buffer.from(token.split(".")[2]!, "base64url")).digest("hex"));
   expect(readFileSync(String(issued.backupPath), "utf8")).not.toContain("model_relay");
@@ -174,9 +179,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
       body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "fixture" }], stream }) });
     expect(response.status).toBe(200); expect(await response.text()).toContain("fixture");
   }
-  // Rotation must not reset the existing two-token burst. Refill just enough
-  // for one more request without modifying policy or resetting the service.
-  await new Promise(resolve => setTimeout(resolve, 6100));
+  // Default rate limits are disabled: further requests need no refill wait.
   const pending = fetch(`http://127.0.0.1:${address.port}/v1/chat/completions`, { method: "POST",
     headers: { authorization: `Bearer ${String(key)}`, "content-type": "application/json" },
     body: JSON.stringify({ model: "cline-pass/deepseek-v4.1-flash", messages: [{ role: "user", content: "pending" }] }) })

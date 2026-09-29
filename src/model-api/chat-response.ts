@@ -1,5 +1,24 @@
 import { ModelConversionError, object, string, toolArguments } from "./validation.js";
 
+type ResponsePart = "metadata" | "choices" | "message" | "tools" | "finish" | "usage";
+type ChoicesIssue = "expected_array" | "empty_choices" | "multiple_choices" | "expected_choice_object" | "invalid_choice_index" | "choice_error";
+const choicesDescriptions: Record<ChoicesIssue, string> = {
+  expected_array: "choices is missing or is not an array",
+  empty_choices: "choices is empty where a completion is required",
+  multiple_choices: "choices contains more than one completion",
+  expected_choice_object: "choices[0] is not an object",
+  invalid_choice_index: "choices[0].index must be absent or zero",
+  choice_error: "choices[0] contains an error",
+};
+/** Fixed diagnostic categories; never include upstream values or payloads. */
+export class DirectChatResponseError extends ModelConversionError {
+  readonly code: string;
+  constructor(part: ResponsePart, issue?: ChoicesIssue) {
+    super(`Upstream Chat response has invalid ${part}.${issue === undefined ? "" : ` ${choicesDescriptions[issue]}.`}`);
+    this.code = `invalid_upstream_${part}`;
+  }
+}
+
 export interface DirectChatUsage {
   inputTokens?: number;
   cachedInputTokens?: number;
@@ -30,65 +49,88 @@ export class DirectChatResponse {
   }
 
   push(value: unknown, stream: boolean): Record<string, unknown> | undefined {
-    if (this.done) fail();
-    const chunk = object(value);
-    if (chunk.error != null) fail();
-    if (chunk.created !== undefined) {
-      if (!Number.isSafeInteger(chunk.created) || Number(chunk.created) < 0
-        || this.created !== undefined && this.created !== chunk.created) fail();
-      this.created = Number(chunk.created);
-    }
-    if (chunk.id !== undefined) {
-      const id = boundedString(chunk.id, 200);
-      if (this.id !== undefined && this.id !== id) fail();
-      this.id = id;
-    }
-    if (chunk.model !== undefined) {
-      const model = boundedString(chunk.model, 200);
-      if (this.model !== undefined && this.model !== model) fail();
-      this.model = model;
-    }
-    if (chunk.usage != null) this.readUsage(chunk.usage);
-    if (!Array.isArray(chunk.choices) || chunk.choices.length > 1) fail();
-    if (chunk.choices.length === 0) {
-      if (!stream || chunk.usage == null) fail();
-      return undefined;
-    }
-    const choice = object(chunk.choices[0]);
-    if ((choice.index !== undefined && choice.index !== 0) || choice.error != null) fail();
-    const message = object(stream ? choice.delta ?? {} : choice.message);
-    if (message.role !== undefined && message.role !== "assistant") fail();
-    if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) fail();
-    const output: Record<string, unknown> = {};
-    if (message.role !== undefined) output.role = "assistant";
-    for (const key of ["content", "reasoning"] as const) {
-      if (message[key] != null) {
-        const text = string(message[key]);
-        this.contentBytes += Buffer.byteLength(text);
-        if (this.contentBytes > 32 * 1024 * 1024) fail();
-        output[key] = text;
-        if (text.length) this.contentObserved = true;
+    let part: ResponsePart = "metadata";
+    try {
+      if (this.done) fail();
+      const chunk = object(value);
+      if (chunk.error != null) fail();
+      if (chunk.created !== undefined) {
+        if (!Number.isSafeInteger(chunk.created) || Number(chunk.created) < 0
+          || this.created !== undefined && this.created !== chunk.created) fail();
+        this.created = Number(chunk.created);
       }
+      if (chunk.id !== undefined) {
+        const id = boundedString(chunk.id, 200);
+        if (this.id !== undefined && this.id !== id) fail();
+        this.id = id;
+      }
+      if (chunk.model !== undefined) {
+        const model = boundedString(chunk.model, 200);
+        if (this.model !== undefined && this.model !== model) fail();
+        this.model = model;
+      }
+      part = "usage";
+      if (chunk.usage != null) this.readUsage(chunk.usage);
+      part = "choices";
+      if (!Array.isArray(chunk.choices)) throw new DirectChatResponseError("choices", "expected_array");
+      if (chunk.choices.length > 1) throw new DirectChatResponseError("choices", "multiple_choices");
+      if (chunk.choices.length === 0) {
+        if (!stream || chunk.usage == null) throw new DirectChatResponseError("choices", "empty_choices");
+        return undefined;
+      }
+      if (chunk.choices[0] === null || typeof chunk.choices[0] !== "object" || Array.isArray(chunk.choices[0])) {
+        throw new DirectChatResponseError("choices", "expected_choice_object");
+      }
+      const choice = object(chunk.choices[0]);
+      if (choice.index !== undefined && choice.index !== 0) throw new DirectChatResponseError("choices", "invalid_choice_index");
+      if (choice.error != null) throw new DirectChatResponseError("choices", "choice_error");
+      part = "message";
+      const message = object(stream ? choice.delta ?? {} : choice.message);
+      if (message.role !== undefined && message.role !== "assistant") fail();
+      if (this.reason !== undefined && (choice.finish_reason != null || Object.keys(message).length > 0)) fail();
+      const output: Record<string, unknown> = {};
+      if (message.role !== undefined) output.role = "assistant";
+      for (const key of ["content", "reasoning"] as const) {
+        if (message[key] != null) {
+          const text = string(message[key]);
+          this.contentBytes += Buffer.byteLength(text);
+          if (this.contentBytes > 32 * 1024 * 1024) fail();
+          output[key] = text;
+          if (text.length) this.contentObserved = true;
+        }
+      }
+      part = "tools";
+      if (message.tool_calls !== undefined) {
+        if (!Array.isArray(message.tool_calls) || message.tool_calls.length > 64) fail();
+        for (const [position, entry] of message.tool_calls.entries()) this.readCall(entry, stream ? undefined : position);
+        if (message.tool_calls.length) this.contentObserved = true;
+      }
+      part = "finish";
+      if (choice.finish_reason != null) {
+        if (typeof choice.finish_reason !== "string" || !["stop", "tool_calls", "length", "content_filter"].includes(choice.finish_reason)) fail();
+        this.reason = choice.finish_reason as FinishReason;
+      }
+      if (!stream && !this.reason) fail();
+      if (!Object.keys(output).length) return undefined;
+      return this.envelope([{ index: 0, [stream ? "delta" : "message"]: output, finish_reason: null }], stream);
+    } catch (error) {
+      if (error instanceof DirectChatResponseError) throw error;
+      if (error instanceof ModelConversionError) throw new DirectChatResponseError(part);
+      throw error;
     }
-    if (message.tool_calls !== undefined) {
-      if (!Array.isArray(message.tool_calls) || message.tool_calls.length > 64) fail();
-      for (const [position, entry] of message.tool_calls.entries()) this.readCall(entry, stream ? undefined : position);
-      if (message.tool_calls.length) this.contentObserved = true;
-    }
-    if (choice.finish_reason != null) {
-      if (typeof choice.finish_reason !== "string" || !["stop", "tool_calls", "length", "content_filter"].includes(choice.finish_reason)) fail();
-      this.reason = choice.finish_reason as FinishReason;
-    }
-    if (!stream && !this.reason) fail();
-    if (!Object.keys(output).length) return undefined;
-    return this.envelope([{ index: 0, [stream ? "delta" : "message"]: output, finish_reason: null }], stream);
   }
 
   /** Called only after DONE (SSE) or complete validated JSON. */
   finish(stream: boolean): Record<string, unknown> {
-    if (this.done || !this.reason) fail();
-    const tools = this.reason === "tool_calls" ? this.completeCalls() : undefined;
-    if (this.reason === "stop" && this.calls.size > 0) fail();
+    if (this.done || !this.reason) throw new DirectChatResponseError("finish");
+    let tools: unknown[] | undefined;
+    try {
+      tools = this.reason === "tool_calls" ? this.completeCalls() : undefined;
+      if (this.reason === "stop" && this.calls.size > 0) fail();
+    } catch (error) {
+      if (error instanceof ModelConversionError) throw new DirectChatResponseError("tools");
+      throw error;
+    }
     this.done = true;
     const body = tools ? { tool_calls: tools } : {};
     return { ...this.envelope([{ index: 0, [stream ? "delta" : "message"]: body, finish_reason: this.reason }], stream),

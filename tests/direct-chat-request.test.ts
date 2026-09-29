@@ -1,39 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { ModelConversionError, validateDirectChatRequest } from "../src/model-api/index.js";
+import { DirectChatRequestError, validateDirectChatRequest } from "../src/model-api/index.js";
 
 const textRequest = { model: "fixture/model", messages: [{ role: "user", content: "hello" }] };
 describe("direct Chat request boundary", () => {
-  it("sets explicit JSON mode and copies only supported request fields", () => {
+  it("preserves parameters, nulls, message extensions and remote URLs as opaque upstream data", () => {
+    const value = { ...textRequest, stream: true, n: 1, temperature: null, top_p: 0.9, max_tokens: 4096,
+      max_completion_tokens: null, stop: ["stop"], seed: 7, stream_options: { include_usage: true },
+      tools: [], tool_choice: "auto", parallel_tool_calls: true, response_format: { type: "json_object" },
+      metadata: { trace: "a" }, user: "client", vendor_extension: { nested: [null, true] },
+      messages: [{ role: "developer", content: "instructions", name: "app" },
+        { role: "user", content: [{ type: "image_url", image_url: { url: "https://images.example/p.png", detail: "auto" } }] },
+        { role: "assistant", content: null, reasoning_content: "thought", tool_calls: [] }] };
+    expect(validateDirectChatRequest(value)).toEqual(value);
+  });
+  it("leaves model parameter validity to the upstream without coercing or dropping values", () => {
+    const value = { ...textRequest, temperature: 99, max_tokens: 0, reasoning: { vendor_mode: "custom" },
+      messages: [{ role: "tool", tool_call_id: "upstream-validates-history", content: "result" }] };
+    expect(validateDirectChatRequest(value)).toEqual({ ...value, stream: false });
+  });
+  it("sets explicit JSON mode without mutating input or sharing nested references", () => {
     const result = validateDirectChatRequest(textRequest);
     expect(result).toEqual({ ...textRequest, stream: false });
     result.messages[0]!.content = "changed";
     expect(textRequest.messages[0]!.content).toBe("hello");
   });
-  it("accepts text and complete client-side function history without transforming it", () => {
-    const value = { ...textRequest, stream: true, temperature: 0, tools: [{ type: "function", function: {
-      name: "weather", parameters: { type: "object", properties: { location: { type: "string" } } },
-    } }], messages: [
-      { role: "system", content: "instructions" }, ...textRequest.messages,
-      { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "weather", arguments: "{}" } }] },
-      { role: "tool", tool_call_id: "call_1", content: "result" },
-    ] };
-    expect(validateDirectChatRequest(value)).toEqual(value);
-  });
-  it.each(["metadata", "user", "provider", "threadId", "url", "n", "reasoning", "stream_options", "max_tokens"])("rejects unsupported %s instead of forwarding it", key => {
-    expect(() => validateDirectChatRequest({ ...textRequest, [key]: "secret" })).toThrow(ModelConversionError);
-  });
   it.each([
-    { model: "", messages: textRequest.messages },
-    { ...textRequest, temperature: NaN },
-    { ...textRequest, temperature: 2.1 },
-    { ...textRequest, stream: "false" },
-    { ...textRequest, messages: [] },
-    { ...textRequest, messages: Array.from({ length: 257 }, () => textRequest.messages[0]) },
-    { ...textRequest, messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "file:///private" } }] }] },
-    { ...textRequest, messages: [{ role: "tool", tool_call_id: "missing", content: "result" }] },
-    { ...textRequest, messages: [{ role: "assistant", tool_calls: [{ id: "a", type: "function", function: { name: "f", arguments: "{" } }] }] },
-    { ...textRequest, messages: [{ role: "assistant", tool_calls: [{ id: "a", type: "function", function: { name: "f", arguments: "{}" } }] }] },
-  ])("rejects invalid shapes, incomplete history and unsafe semantics", value => {
-    expect(() => validateDirectChatRequest(value)).toThrow(ModelConversionError);
+    [null, "body"], [[], "body"],
+    [{ ...textRequest, model: "" }, "model"],
+    [{ ...textRequest, model: "private\nmodel" }, "model"],
+    [{ ...textRequest, stream: "PRIVATE" }, "stream"],
+    [{ ...textRequest, n: 2 }, "n"],
+    [{ ...textRequest, messages: [] }, "messages"],
+    [{ ...textRequest, messages: [null] }, "messages[0]"],
+    [{ ...textRequest, messages: Array.from({ length: 257 }, () => textRequest.messages[0]) }, "messages"],
+  ])("rejects local routing/delivery boundary violations with safe paths", (value, param) => {
+    try { validateDirectChatRequest(value); expect.fail("must reject"); }
+    catch (error) { expect(error).toBeInstanceOf(DirectChatRequestError); expect(error).toMatchObject({ param }); expect(String(error)).not.toContain("PRIVATE"); }
   });
 });

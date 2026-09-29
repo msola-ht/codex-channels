@@ -3,17 +3,17 @@ import { createHash } from "node:crypto";
 
 const identity = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/u);
 const provider = z.string().regex(/^clp-[a-z0-9_-]{1,32}$/u);
-const limits = (concurrency, rate, burst) => ({
-  max_concurrency: z.number().int().min(1).max(concurrency).default(concurrency),
-  requests_per_minute: z.number().int().min(1).max(rate).default(rate),
-  burst: z.number().int().min(1).max(burst).default(burst),
+const limits = (concurrency, burst) => ({
+  max_concurrency: z.number().int().min(1).max(32).default(concurrency),
+  requests_per_minute: z.number().int().min(0).max(600).default(0),
+  burst: z.number().int().min(1).max(32).default(burst),
 });
 export const modelRelayConfigSchema = z.strictObject({
   enabled: z.boolean().default(false),
   host: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
   port: z.number().int().min(1024).max(65535).default(4119),
-  ...limits(8, 60, 8),
-  accounts: z.array(z.strictObject({ provider, ...limits(4, 30, 4) })).max(128).default([]),
+  ...limits(10, 10),
+  accounts: z.array(z.strictObject({ provider, ...limits(10, 10) })).max(128).default([]),
   callers: z.array(z.strictObject({
     caller_id: identity,
     key_id: identity,
@@ -23,7 +23,7 @@ export const modelRelayConfigSchema = z.strictObject({
     provider,
     models: z.array(z.string().min(1).max(200).refine(value => ![...value].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))).min(1).max(64)
       .refine(values => new Set(values).size === values.length),
-    ...limits(2, 10, 2),
+    ...limits(10, 10),
   })).max(128).default([]),
 }).superRefine((value, context) => {
   for (const [values, key, path] of [[value.accounts, "provider", "accounts"],

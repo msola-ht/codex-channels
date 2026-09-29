@@ -27,6 +27,36 @@ function fixture() {
   return { path, root, row };
 }
 describe("explicit Relay metrics upgrade", () => {
+  it("preserves the exact observed v20 costs table through backup, upgrade and rollback", () => {
+    const { path } = fixture();
+    const database = new DatabaseSync(path);
+    database.exec(`CREATE TABLE model_request_costs (
+    metric_id INTEGER PRIMARY KEY,
+    cost_usd_micros INTEGER NOT NULL CHECK (cost_usd_micros >= 0)
+  ); INSERT INTO model_request_costs VALUES (1, 123456)`);
+    database.close();
+    const readCosts = (file: string) => {
+      const db = new DatabaseSync(file, { readOnly: true });
+      try { return db.prepare("SELECT * FROM model_request_costs").all(); } finally { db.close(); }
+    };
+    const before = readCosts(path);
+    expect(upgradeRequestMetricsDatabase(path).changed).toBe(false);
+    const result = upgradeRequestMetricsDatabase(path, true);
+    expect(readCosts(path)).toEqual(before); expect(readCosts(result.backupPath!)).toEqual(before);
+    const store = new SqliteModelRequestMetricsStore(path); store.record(relay()); store.close();
+    const restored = restoreRequestMetricsV20(path, result.backupPath!, result.backupSha256!);
+    expect(readCosts(restored.archivedPath)).toEqual(before); expect(readCosts(path)).toEqual(before);
+  });
+  it.each([
+    "CREATE TABLE unrelated (id INTEGER)",
+    "CREATE TABLE model_request_costs (metric_id INTEGER PRIMARY KEY, cost_usd_micros INTEGER NOT NULL)",
+    `CREATE TABLE model_request_costs (metric_id INTEGER PRIMARY KEY, cost_usd_micros INTEGER NOT NULL CHECK (cost_usd_micros >= 0));
+     CREATE TRIGGER costs_trigger AFTER INSERT ON model_request_costs BEGIN DELETE FROM model_request_metrics; END`,
+  ])("rejects unsupported auxiliary structures: %s", sql => {
+    const { path, root } = fixture(); const db = new DatabaseSync(path); db.exec(sql); db.close();
+    expect(() => upgradeRequestMetricsDatabase(path, true)).toThrow("完整 v20");
+    expect(readdirSync(root).filter(name => name.endsWith(".bak"))).toEqual([]);
+  });
   it("previews without changing bytes, preserves historical columns and makes a readable private backup", () => {
     const { path, row } = fixture(); const bytes = readFileSync(path);
     expect(upgradeRequestMetricsDatabase(path)).toMatchObject({ changed: false, from: 20, to: 21, backupPath: null });
@@ -75,6 +105,9 @@ describe("explicit Relay metrics upgrade", () => {
     const backups = readdirSync(root).filter(name => name.endsWith(".bak")); expect(backups).toHaveLength(1);
     const backup = new DatabaseSync(join(root, backups[0]!), { readOnly: true });
     expect(backup.prepare("SELECT * FROM model_request_metrics").get()).toEqual(row); backup.close();
+    expect(upgradeRequestMetricsDatabase(path, true).changed).toBe(true);
+    const reopened = new SqliteModelRequestMetricsStore(path);
+    try { expect(reopened.count()).toBe(1); } finally { reopened.close(); }
   });
   it("preserves the upgraded archive and restores only the verified v20 snapshot", () => {
     const { path, row } = fixture(); const result = upgradeRequestMetricsDatabase(path, true);

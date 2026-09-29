@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
-import { DirectChatResponse, ModelConversionError, validateDirectChatRequest } from "../model-api/index.js";
+import { DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, validateDirectChatRequest } from "../model-api/index.js";
 import { ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
@@ -102,6 +102,7 @@ export class ModelRelayServer {
     let phase: "input" | "prepare" | "upstream" | "delivery" = "input";
     const observer = new DirectChatResponse();
     const relayRequestId = randomUUID();
+    response.setHeader("x-relay-request-id", relayRequestId);
     let deliveryStatus: RelayMetric["deliveryStatus"] = "failed";
     try {
       if (this.stopping) throw new RelayAdmissionError(503, "relay_unavailable");
@@ -138,7 +139,7 @@ export class ModelRelayServer {
       }
       if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
       phase = "upstream";
-      await sendDirectChat({ request: body!, target: prepared.target, signal, observer,
+      await sendDirectChat({ request: body!, clientHeaders: request.headers, target: prepared.target, signal, observer,
         recheck: () => { lease!.check(body!.model); prepared.recheck(); },
         submitted: () => { started = performance.now(); submittedAt = Date.now(); },
         headers: status => { httpStatus = status; },
@@ -163,13 +164,23 @@ export class ModelRelayServer {
         : failure instanceof ChatUpstreamError && failure.code === "rate_limit" ? 429
           : failure instanceof ChatUpstreamError && failure.code === "upstream_timeout" ? 504
             : phase === "input" ? 400 : phase === "prepare" ? 503 : 502;
-      errorCode = failure instanceof RelayAdmissionError || failure instanceof ChatUpstreamError ? failure.code
+      errorCode = failure instanceof RelayAdmissionError || failure instanceof ChatUpstreamError || failure instanceof DirectChatResponseError ? failure.code
         : phase === "input" && failure instanceof ChatBodyTooLargeError ? "request_too_large"
         : error instanceof ModelConversionError ? phase === "input" ? "invalid_request" : "invalid_upstream_response"
           : phase === "input" ? "invalid_request" : "upstream_error";
       deliveryStatus = response.destroyed || status === 499 ? "disconnected" : "failed";
       if (!response.destroyed) {
-        const detail = { error: { type: "relay_error", code: errorCode, message: "Model request could not be completed.", upstream_attempted: started !== undefined } };
+        const message = phase === "input" && failure instanceof DirectChatRequestError
+          || failure instanceof ChatUpstreamError || failure instanceof DirectChatResponseError
+          ? failure.message : errorCode === "model_not_allowed"
+            ? "Requested model is not allowed by this Relay key or is unavailable in its provider catalog. Use an exact model ID returned by GET /v1/models."
+            : "Model request could not be completed.";
+        const detail = { error: { type: "relay_error", code: errorCode,
+          message: failure instanceof DirectChatRequestError && phase === "input" ? message
+            : `${message} [${errorCode}; phase=${phase}${httpStatus === undefined ? "" : `; upstream_http=${httpStatus}`}; request_id=${relayRequestId}]`,
+          ...(phase === "input" && failure instanceof DirectChatRequestError ? { param: failure.param } : {}),
+          phase, request_id: relayRequestId, ...(httpStatus === undefined ? {} : { upstream_status: httpStatus }),
+          upstream_attempted: started !== undefined } };
         if (!request.complete) response.once("finish", () => request.destroy());
         // Error delivery has a separate short bound, even if the model request was cancelled.
         try {
