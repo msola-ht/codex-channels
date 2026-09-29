@@ -20,6 +20,7 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
+import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
   RequestMetricsQueryService,
   parseRequestMetricsFilters,
@@ -628,10 +629,22 @@ async function handleRequests(environment, url, response) {
       sortDirection: sort.direction,
       ...filters,
     });
+    const records = await attachUpstreamProviders(environment, page.records);
+    if (records.some(record => record.source === "relay")) {
+      const config = readGatewayConfig(resolveGatewayConfigPath(environment));
+      const relay = modelRelayConfigSchema.parse(config.model_relay ?? {});
+      const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
+      for (const record of records) {
+        const caller = callers.get(record.callerId);
+        if (record.source === "relay" && caller?.key_id === record.keyId && caller.provider === record.provider && caller.display_name) {
+          record.callerDisplayName = caller.display_name;
+        }
+      }
+    }
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      records: await attachUpstreamProviders(environment, page.records),
+      records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
       aggregate: page.aggregate,

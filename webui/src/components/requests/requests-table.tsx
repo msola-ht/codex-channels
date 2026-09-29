@@ -100,7 +100,9 @@ export function RequestsTable({
     },
     {
       id: "caller", enableSorting: false, header: t("filters.caller"),
-      cell: ({ row }) => <TruncatedText text={row.original.callerId ?? "—"} className="max-w-40" />,
+      cell: ({ row }) => row.original.callerDisplayName ? <TableHint hint={`${row.original.callerDisplayName}\n${row.original.callerId}`}>
+        <span className="block max-w-40 truncate">{row.original.callerDisplayName}</span>
+      </TableHint> : <TruncatedText text={row.original.callerId ?? "—"} className="max-w-40" />,
     },
     {
       id: "delivery", enableSorting: false, header: t("filters.delivery"),

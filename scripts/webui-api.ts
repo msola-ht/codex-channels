@@ -215,6 +215,8 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 export interface RequestRecord {
   source?: "owned" | "relay"
   callerId?: string | null
+  /** 当前配置中的用途名称；仅用于展示，不改变历史调用身份或筛选。 */
+  callerDisplayName?: string
   keyId?: string | null
   credentialGeneration?: number | null
   relayRequestId?: string | null

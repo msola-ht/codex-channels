@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -80,6 +80,23 @@ describe("webui server data API", () => {
     const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
     expect(await owned.json()).toMatchObject({ records: [] });
     expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
+    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\nmodels = ["fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
+    const named = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
+    expect(named.status).toBe(200);
+    expect(await named.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
+    const configPath = join(fixture.home, "config.toml");
+    const configuration = readFileSync(configPath, "utf8");
+    writeFileSync(configPath, configuration.replace('display_name = "沉浸式翻译"', 'display_name = "网页翻译"'));
+    const renamed = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+    expect(await renamed.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "网页翻译" }] });
+    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replaceAll('provider = "clp-test"', 'provider = "clp-other"')]) {
+      writeFileSync(configPath, changed);
+      const mismatched = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+      expect(mismatched.status).toBe(200);
+      const result = await mismatched.json() as { records: Array<{ callerId: string; callerDisplayName?: string }> };
+      expect(result.records[0]?.callerId).toBe("client");
+      expect(result.records[0]).not.toHaveProperty("callerDisplayName");
+    }
   });
   it("returns the server time zone before a metrics database exists", async () => {
     const fixture = createFixture();
