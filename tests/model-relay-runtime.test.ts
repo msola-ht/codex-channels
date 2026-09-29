@@ -112,7 +112,7 @@ it("uses registered custom Responses material through runtime, captures, authori
   finishResponsesModelCatalogWrite(catalog);
   writeCustomPrimaryProviderSwitchingProfile({ provider, model: "fixture/model", baseUrl: `http://127.0.0.1:${up.port}/v1`,
     apiKey: "fixture-custom-secret", catalogSource: { kind: "custom", reasoningEffort: null } }, f.environment);
-  expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ protocols: ["responses"], models: ["fixture/model"] });
+  expect(loadConfiguredRelayProviderMaterial(provider, f.environment)).toMatchObject({ protocols: ["responses"], models: ["fixture/model"], modelInputs: { "fixture/model": ["text", "image"] } });
   expect(readRelayManagement(f.environment).providers).toEqual(expect.arrayContaining([expect.objectContaining({ id: provider, protocols: ["responses"], available: true })]));
   const issued = await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "custom", "--key", "custom", "--provider", provider, "--model", "fixture/model"]), f.environment);
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, "127.0.0.1", resolve));

@@ -64,7 +64,7 @@
   取消信号，快照随请求指标写入指标库供账户用量按周期归属本地 Token。
 - `model-provider-runtime.mjs` / `model-provider-runtime.d.mts`：保留受控模型 Provider 运行时的稳定
   导出门面与 TypeScript 接口；`readManagedMarker` 提供单个 Provider 管理标记的只读查询，不读取其他账户注册表。门面不承载具体读取、写入或启动逻辑。
-- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
+- `model-provider-relay-material.mjs`：公共 Relay 提供商发现与材料快照，复用受管及自定义 Provider 的注册、私有凭据和模型目录读取；提供原生协议集合、目录输入能力、依赖路径和修订摘要，不读取 OAuth 或创建 App Server。
 - `model-provider-managed-runtime.mjs`：通过受控 Provider 描述读取 Setup 管理标记和私有 Profile；
   管理每个受管 Provider 的独立模型目录，按模型读取或写入当前上下文、最大上下文与默认思考等级。
   自动压缩阈值保持上游原值，不参与上下文窗口换算；受管 Profile 必须
@@ -210,3 +210,5 @@
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。
 - `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置，取消或关闭后的迟到结果不得通过。
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
+
+公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay` 标识显示为 `relay`；平台服务标识和已有定义文件保持稳定。

@@ -58,14 +58,19 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const staleEditor = render('en');
       globalThis.draftRevisionFixture = 'new-revision';
       const unavailableEditor = render('en');
-      globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true }] }];
+      globalThis.fixture.data.providers = [{ id: 'clp-main', available: true, protocols: ['chat'], models: [{ id: 'cline-pass/deepseek-v4.1-flash', reasoningOff: true, inputModalities: ['text', 'image', 'audio'] }] }];
       const availableEditor = render('en');
-      console.log(JSON.stringify({ zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor }));
+      const availableZh = render('zh');
+      globalThis.fixture.data.providers[0].protocols = ['chat', 'responses'];
+      const dual = render('en');
+      globalThis.fixture.data.providers[0].models[0].inputModalities = [];
+      const unknownInputs = render('en');
+      console.log(JSON.stringify({ zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs }));
     } finally { await server.close(); }
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string };
+  })) as { refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
   expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toContain("处理中 4");
   expect(result.en).toContain("Waiting 2"); expect(result.en).toContain("Receiving 1");
   expect(result.unknown).toContain("Runtime status unconfirmed"); expect(result.unknown).not.toContain("Waiting 0");
@@ -96,4 +101,9 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.unavailableEditor).not.toContain('data-invalid="true"');
   expect(result.unavailableEditor).toMatch(/<button(?![^>]* disabled=)[^>]*>Preview change<\/button>/u);
   expect(result.availableEditor).toContain('Native protocols: Chat Completions');
+  for (const label of ['Protocol', '>Chat<', '>Text<', '>Image<', '>Audio<']) expect(result.availableEditor).toContain(label);
+  for (const label of ['模型转发', '>文本<', '>图片<', '>音频<']) expect(result.availableZh).toContain(label);
+  expect(result.dual).toContain('>Responses<');
+  expect(result.unknownInputs).toContain('>Not declared<');
+  expect(result.unavailableEditor).toContain('>Not declared<');
 });

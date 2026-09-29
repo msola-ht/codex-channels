@@ -84,3 +84,8 @@ export function serviceIdentifiers(platform, target = "all", order = "start") {
   }
   return serviceDefinitionsForTarget(target, order).map((definition) => definition[platform]);
 }
+
+/** Public CLI spelling; installed service identifiers remain stable. */
+export function serviceCommandTarget(target) {
+  return target === "model-relay" ? "relay" : target;
+}

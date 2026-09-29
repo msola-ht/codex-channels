@@ -81,7 +81,7 @@ try {
     || !serviceHelp.includes("install")
     || !serviceHelp.includes("reload")
     || !serviceHelp.includes("logs")
-    || !serviceTargetHelp.includes("gateway|app-server|webui|model-relay|all")
+    || !serviceTargetHelp.includes("gateway|app-server|webui|relay|all")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }

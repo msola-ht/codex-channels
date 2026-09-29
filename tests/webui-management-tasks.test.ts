@@ -28,6 +28,7 @@ describe("WebUI management tasks", () => {
       operation: "service",
       requiresConfirmation: true,
     });
+    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc service stop relay"] });
     expect(runner.preview({ operation: "service", action: "reload" })).toMatchObject({
       effects: ["执行 codexc service reload"],
       target: null,

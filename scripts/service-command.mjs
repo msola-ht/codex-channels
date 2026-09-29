@@ -8,9 +8,9 @@ import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
-  parseServiceTarget,
   serviceTargetIncludes,
-  serviceTargetUsage,
+  serviceCommandTarget,
+  serviceTargetUsage as internalServiceTargetUsage,
 } from "../runtime/service-targets.mjs";
 import { applyTerminalIdentityFromEnvironment } from "./config-management.mjs";
 import { packageDir } from "./package-path.mjs";
@@ -33,6 +33,14 @@ export const serviceCommandActions = Object.freeze([
   "status",
   "logs",
 ]);
+
+// Public spelling is independent of installed service identifiers and file names.
+const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceCommandTarget).join("|");
+function parseServiceTarget(value) {
+  if (value === "relay") return "model-relay";
+  if (value !== "model-relay" && internalServiceTargetUsage.split("|").includes(value)) return value;
+  throw new Error(`服务目标必须是 ${serviceTargetUsage.replaceAll("|", "、")}：${value}`);
+}
 
 export const serviceCommandUsage = Object.freeze({
   install: "用法：codexc service install",
@@ -103,7 +111,11 @@ export async function runServiceCommand(args) {
   if (!serviceCommandActions.includes(action)) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
-  const serviceArgs = parseServiceArguments(action, rest);
+  // Updaters already running before the rename use this exact invocation after
+  // switching source. Keep the documented start-only handoff, not a general alias.
+  const upgradeHandoff = action === "start" && rest.length === 1 && rest[0] === "model-relay";
+  const serviceArgs = parseServiceArguments(action, upgradeHandoff ? ["relay"] : rest);
+  if (upgradeHandoff) printCliMessage("note", "正在使用兼容旧版更新器的 Relay 启动入口；日常操作请使用 codexc service start relay。");
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "status" && serviceArgs[1] === "--json") {
     runNodeScript(

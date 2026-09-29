@@ -1,3 +1,4 @@
+import { serviceCommandTarget } from "../runtime/service-targets.mjs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 
@@ -28,7 +29,7 @@ export class WebuiManagementTaskRunner {
   preview(input) {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
-      ? `codexc service ${normalized.action}${normalized.target ? ` ${normalized.target}` : ""}`
+      ? `codexc service ${normalized.action}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
       : normalized.operation === "update"
         ? "codexc update"
         : normalized.operation === "traffic"
@@ -140,7 +141,7 @@ export class WebuiManagementTaskRunner {
     task.state = "running";
     task.updatedAt = new Date(this.#now()).toISOString();
     const args = normalized.operation === "service"
-      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])]
+      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
       : normalized.operation === "update"
         ? ["update"]
         : normalized.operation === "traffic"

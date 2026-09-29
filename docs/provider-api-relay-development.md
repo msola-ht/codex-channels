@@ -45,7 +45,7 @@
 
 ### 3.1 独立服务进程
 
-推荐新增可选 `model-relay` 服务目标，由 `codexc service` 管理，拥有自己的进程、监听端口、
+推荐新增可选 `relay` 服务目标，由 `codexc service` 管理，拥有自己的进程、监听端口、
 连接池、取消域和所有权锁。它与 Gateway、App Server 服务并列，不装配进两者的进程。
 复用代码和账户定义，不复用现有 App Server 服务中的代理对象或引用计数。
 
@@ -355,7 +355,7 @@ Relay 不产生 OutputEvent，但仍共享 Gateway 写入资源，不能宣称�
 
 ## 10. 服务与上线合同
 
-拟增加 `model-relay` 服务目标；服务配置、帮助、平台模板、安装打包与更新器一起适配。
+拟增加 `relay` 服务目标；服务配置、帮助、平台模板、安装打包与更新器一起适配。
 既有 `app-server`/`gateway` 目标含义不变。`all start/restart` 只启动已启用并安装的 Relay；
 `all stop/status` 必须涵盖已安装实例，即使配置已禁用或损坏仍能停止和诊断。禁用会关闭已有监听，
 不能只跳过下次启动。未启用时不创建端口。卸载不删除调用方配置、凭据或历史指标。
@@ -557,7 +557,7 @@ Key 格式 `cr1.<key_id>.<43字符base64url随机秘密>`，秘密取 32 随机�
 - `codexc relay disable --caller <id>`：保留 tombstone；重复禁用幂等。
 - `codexc traffic upgrade --enabled true|false --mode production|debug`：第 15.9 节显式统一全局采集并移除旧 Relay 字段，日常设置复用全局菜单/WebUI。
 - `codexc relay enable`、`codexc relay disable`：服务整体配置开关；禁用需确认当前进程关闭监听。
-- `codexc service start|stop|restart|status|logs model-relay`：沿用服务入口；安装/卸载复用既有平台命令结构。
+- `codexc service start|stop|restart|status|logs relay`：沿用服务入口；安装/卸载复用既有平台命令结构。
 - `codexc metrics upgrade --from 21 --to 22`（v20 起点使用 `--from 20`）：显式保留数据升级，默认只预检并输出计划；实际执行需 `--apply`。
 - `codexc metrics rollback --from 22 --to 21 --backup PATH --sha256 HASH --apply`（v20 备份使用 `--to 20`）：停止进程并禁用 Relay 后，先归档新库，再恢复经摘要验证的 v20；配置和程序恢复由操作者单独执行。
 
@@ -1420,3 +1420,17 @@ WebUI 现有 GET /management/relay 在同一管理鉴权下复用 CLI 的私有�
 关联审查修复：WebUI 共享加载 Hook 在刷新失败时保留旧数据；Relay 状态摘要现按加载/错误状态隐藏旧监听、队列及配置摘要，刷新期间显示正在刷新，失败显示无法确认，成功后恢复当前快照。页面回归覆盖已有成功数据后的刷新、失败及恢复，不再仅验证服务端返回 unknown。
 
 用户部署后的只读核验：安装产物与工作区对应的 Chat 观察器、Responses 发送器、Relay Runtime、管理路由及 WebUI 入口哈希一致；最近 6 条 Relay Chat JSON 请求（指标 ID 6047–6052）均完成并交付、HTTP 200，具有转储关联。私有 IPC 状态显示配置有效且正在监听；指标接收确认不等同于落盘。此批真实记录不包含 Responses JSON，不能作为该路径的实际调用验收。当前终端无法连接 systemd 用户总线，未据此判断服务停止，未执行额外真实请求。
+
+### 15.17 名称、能力标签与服务命令
+
+WebUI 页面统一称“模型转发”，指标来源使用“Codex / 转发”；底层 owned/relay 来源值不变。Key 列表显示所属提供商的原生 Chat/Responses 协议集合，多协议提供商同时显示，不把 Key 误标成固定单协议。模型选择显示现有目录声明的文本、图片、音频输入能力；缺失或未知声明显示未声明，不从模型名称推断，也不新增转发参数拦截。客户端通过已有 GET /v1/models 查询当前 Key 与提供商目录交集，不新增全量模型查询接口。
+
+公开服务目标改为 relay：codexc service start/stop/restart/status/logs relay。仅 CLI 边界映射到既有内部服务 ID，旧 model-relay 拼写仅在 service start 的升级启动入口接受并提示迁移，其他操作明确拒绝；内部 service-model-relay 入口、系统服务名、Windows 定义和日志路径不变，不要求重装服务，无持久格式或凭据迁移。
+
+关联审查同步交互菜单、WebUI 服务任务的预览与执行、清理失败提示和安装包帮助断言。内部状态与管理任务仍以原服务 ID 关联，日常调用 CLI 时统一转换；源码更新恢复保留下面明确记录的稳定启动入口。验证：首批页面/管理/Runtime/CLI/CLP 5 文件 38 项通过；补充能力未知、多协议与服务安装/模型列表回归 6 文件 150 项通过；菜单/服务任务/CLI/源码更新关联回归 4 文件 59 项通过（批次重叠，不相加）。类型检查、针对性 ESLint、WebUI 构建与 Lint、577 项双语键及文档检查通过。未进行浏览器视觉验收或真实服务操作。
+
+安装包 tarball 冒烟通过。首次执行因沙箱内 npm 缓存只读失败，获得环境权限后在临时目录重跑通过；开发验证未全局安装、部署或重启，完整提交验证由正常提交钩子执行。
+
+升级交接修复：旧更新器在内存中保留旧恢复逻辑，源码切换后仍调用 service start model-relay，不能仅修改新版生成的参数。因旧调用没有交接标记，保留并明确记录此单一启动入口，输出新命令提示；不根据父进程、进程名或隐藏环境变量猜测来源，不扩展至 stop/restart/status/logs。更新器继续使用稳定启动入口，日常帮助与交互菜单仍只使用 relay；配置校验、平台控制及私有 IPC 就绪检查全部沿用正常路径，不因升级入口跳过。无持久格式变化。
+
+交接修复验证：CLI 与源码更新 2 文件 49 项通过。新回归以旧更新器的精确启动参数执行实际新版 CLI，使用临时配置、替身 systemd 与真实隔离 Relay 私有 IPC；覆盖新旧启动参数指向同一系统服务、迁移提示、就绪成功，以及 IPC 关闭后的启动失败。其他旧名称操作继续拒绝，帮助只显示 relay。类型/运行时边界、针对性 ESLint、文档与 diff 检查通过；未操作实际服务或账户。

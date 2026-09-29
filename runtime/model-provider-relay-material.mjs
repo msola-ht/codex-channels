@@ -50,6 +50,7 @@ export function loadConfiguredRelayProviderMaterial(provider, environment = proc
   }
   if (fingerprint() !== revision) throw new Error("Relay Provider material changed during read");
   assertResponsesContextSyncComplete(environment);
-  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, protocols: ["responses"],
+  const modelInputs = Object.fromEntries(catalog.models.map(value => [value.slug, Array.isArray(value.input_modalities) ? value.input_modalities : []]));
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols: ["responses"],
     paths: [...paths, responsesContextSyncPath(environment)], revision };
 }

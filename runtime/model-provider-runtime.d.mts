@@ -9,7 +9,7 @@ export interface ManagedModelProviderRuntime {
   provider: ManagedModelProviderId;
 }
 export function loadConfiguredRelayProviderMaterial(provider: string, environment?: NodeJS.ProcessEnv): {
-  provider: string; baseUrl: string; apiKey: string; models: string[]; protocols: ("chat" | "responses")[]; paths: string[]; revision: string;
+  provider: string; baseUrl: string; apiKey: string; models: string[]; modelInputs: Record<string, unknown[]>; protocols: ("chat" | "responses")[]; paths: string[]; revision: string;
 };
 
 export function loadManagedModelProvider(

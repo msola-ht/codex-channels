@@ -191,7 +191,8 @@ Surface -> Application/Core <- Codex Client
 - Escalation grants execution permission, not user authorization. Commits, pushes, dependency changes and other external writes still follow their corresponding rules here.
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
   `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
-- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `model-relay` and `all`.
+- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `relay` and `all`.
+  `service start model-relay` is the documented upgrade handoff for already-running older updaters; it emits a migration notice and retains normal validation/readiness checks. Other public actions reject the old target spelling.
   Start, stop and status default to `all`; restart and logs default to `gateway`.
   `all` starts Relay only when installed and enabled, and stops installed Relay before Gateway. WebUI remains separately managed.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,

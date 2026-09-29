@@ -82,12 +82,12 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
           { value: "gateway", label: "Gateway" },
           { value: "app-server", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },
-          { value: "model-relay", label: "Model Relay" },
+          { value: "relay", label: "Model Relay" },
           { value: "back", label: "返回" },
         ],
       });
       if (prompts.isCancel(target) || target === "back") continue;
-      if (!["all", "gateway", "app-server", "webui", "model-relay"].includes(target)) throw new Error("未知服务目标");
+      if (!["all", "gateway", "app-server", "webui", "relay"].includes(target)) throw new Error("未知服务目标");
       args.push(target);
       if (action === "logs") args.push("--lines", "100");
     }

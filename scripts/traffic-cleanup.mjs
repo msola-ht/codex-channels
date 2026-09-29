@@ -81,7 +81,7 @@ export async function assertConfiguredAppServersStopped(environment, directory) 
     );
   }
   const relay = await queryModelRelayControl(modelRelayPaths(located.configPath).control, "status");
-  if (relay.result !== "not_running") throw new Error("清理转储前必须停止 Relay 并确认进程退出：codexc service stop model-relay");
+  if (relay.result !== "not_running") throw new Error("清理转储前必须停止 Relay 并确认进程退出：codexc service stop relay");
   const managed = inspectManagedServiceStatus({ environment, target: "model-relay" });
   if (managed.services.some(service => service.running || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
     throw new Error("Relay 服务仍在运行或状态未确认；请先停止 Relay 再清理转储");

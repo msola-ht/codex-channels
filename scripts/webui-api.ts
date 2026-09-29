@@ -1033,7 +1033,7 @@ export interface RelayManagementSnapshot {
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
   runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number }
     | { state: "stopped" | "unknown" };
-  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean }> }>;
+  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio"> }> }>;
 }
 export type RelayManagementInput =
   | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }

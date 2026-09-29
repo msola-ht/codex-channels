@@ -28,7 +28,11 @@ export function readRelayManagement(environment = process.env) {
     try {
       const material = loadConfiguredRelayProviderMaterial(id, environment);
       materialRevisions.push([id, material.revision]);
-      return { id, available: true, protocols: material.protocols, models: material.models.map(idModel => ({ id: idModel, reasoningOff: supportsChatReasoningOff(id, idModel) })) };
+      return { id, available: true, protocols: material.protocols, models: material.models.map(idModel => {
+        const inputs = material.modelInputs[idModel];
+        const inputModalities = inputs?.length && inputs.every(value => ["text", "image", "audio"].includes(value)) ? [...new Set(inputs)] : [];
+        return { id: idModel, reasoningOff: supportsChatReasoningOff(id, idModel), inputModalities };
+      }) };
     } catch { return { id, available: false, protocols: [], reason: "provider_material_unavailable", models: [] }; }
   });
   return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
@@ -186,5 +190,5 @@ async function executeModelRelay(input, environment, options) {
   catch { response = { result: "unconfirmed" }; }
   const activation = response.result === "applied" ? "saved_and_applied" : response.result === "not_running" ? "saved_not_running" : "saved_unconfirmed";
   return { activation, backupPath: result.backupPath, ...(result.cleanupStatus ? { cleanupStatus: result.cleanupStatus } : {}), ...(secret === undefined ? {} : { key: secret }),
-    ...(activation === "saved_unconfirmed" ? { recovery: "生效未确认；需要立即停止入口时执行 codexc service stop model-relay。不会撤销已保存的禁用。" } : {}) };
+    ...(activation === "saved_unconfirmed" ? { recovery: "生效未确认；需要立即停止入口时执行 codexc service stop relay。不会撤销已保存的禁用。" } : {}) };
 }

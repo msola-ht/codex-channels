@@ -1,3 +1,4 @@
+import * as providerRuntime from "../runtime/model-provider-runtime.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
 import * as fileLock from "../runtime/private-file-lock.mjs";
 import { join } from "node:path";
@@ -42,6 +43,27 @@ it("exposes bounded runtime status separately from configured concurrency", asyn
   } finally { query.mockRestore(); }
 });
 
+it("shows only declared input formats and keeps unknown capabilities explicit", async () => {
+  const f = await fixture();
+  const original = providerRuntime.loadConfiguredRelayProviderMaterial;
+  const read = vi.spyOn(providerRuntime, "loadConfiguredRelayProviderMaterial");
+  try {
+    for (const [inputs, expected] of [
+      [["text", "image", "audio", "text"], ["text", "image", "audio"]],
+      [[], []], [["text", "unrecognized"], []], [[{ secret: "DO-NOT-EXPOSE" }], []],
+    ]) {
+      read.mockImplementation((...args) => {
+        const material = original(...args);
+        return { ...material, modelInputs: Object.fromEntries(material.models.map(model => [model, inputs!])) };
+      });
+      const snapshot = await f.snapshot();
+      expect(snapshot.providers[0]?.available).toBe(true);
+      expect(snapshot.providers[0]?.models[0]?.inputModalities).toEqual(expected);
+      expect(JSON.stringify(snapshot)).not.toContain("DO-NOT-EXPOSE");
+    }
+  } finally { read.mockRestore(); }
+});
+
 const input: RelayManagementInput = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
   models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
 it("requires auth/origin and confirmation; previews do not sign keys, and writes return a secret only once", async () => {
@@ -50,7 +72,7 @@ it("requires auth/origin and confirmation; previews do not sign keys, and writes
   const badOrigin = await fetch(`${f.url}/preview`, { method: "POST", headers: { ...f.headers, origin: "https://evil.invalid" }, body: "{}" });
   expect(badOrigin.status).toBe(403);
   const snapshot = await f.snapshot();
-  expect(snapshot.providers[0]?.models).toContainEqual({ id: "cline-pass/deepseek-v4.1-flash", reasoningOff: true });
+  expect(snapshot.providers[0]?.models).toContainEqual({ id: "cline-pass/deepseek-v4.1-flash", reasoningOff: true, inputModalities: ["text"] });
   expect(JSON.stringify(snapshot)).not.toContain("UPSTREAM-SECRET");
   const body = { input, revision: snapshot.revision };
   const before = readFileSync(join(f.home, "config.toml"), "utf8");

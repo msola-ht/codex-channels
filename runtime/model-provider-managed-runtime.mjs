@@ -530,7 +530,9 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   if (isClinePassAccountProvider(provider) && !clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
   const profile = loadConfiguredProviderProfile(environment, definition);
   if (!profile) throw new Error("Relay Provider 已撤销");
-  const models = loadModelCatalogSettings(profile.catalogPath, definition).map(model => model.model);
+  const settings = loadModelCatalogSettings(profile.catalogPath, definition);
+  const models = settings.map(model => model.model);
+  const modelInputs = Object.fromEntries(settings.map(model => [model.model, model.inputModalities]));
   if (fingerprint() !== before) throw new Error("Relay Provider 材料读取期间发生变化");
   if (!findManagedProviderDefinition(environment, provider) || readManagedMarker(environment, definition)?.mode !== marker.mode) {
     throw new Error("Relay Provider 账户或模式读取期间发生变化");
@@ -538,7 +540,7 @@ export function loadConfiguredManagedProviderMaterial(provider, environment = pr
   assertResponsesContextSyncComplete(environment);
   const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
     : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
-  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, protocols,
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
     paths: [...paths, responsesContextSyncPath(environment)], revision: before };
 }
 
@@ -779,6 +781,7 @@ function modelCatalogSetting(content, definition, model) {
     : maxContextWindow;
   return {
     model,
+    inputModalities: Array.isArray(document.input_modalities) ? document.input_modalities : [],
     displayName: typeof document.display_name === "string" ? document.display_name : model,
     contextWindow,
     maxContextWindow: windowBase,
