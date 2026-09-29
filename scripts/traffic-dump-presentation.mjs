@@ -21,7 +21,7 @@ export function requestParameters(body) {
 
 /** 仅投影已保存的输入；裁剪标记、非文本内容和未知条目保留为 JSON。 */
 export function requestContent(body) {
-  const input = body?.input;
+  const input = body?.input ?? body?.messages;
   return {
     instructions: body?.instructions == null ? null : displayText(body.instructions),
     input: input == null ? null : (Array.isArray(input) ? input : [input]).map((item) => {
@@ -42,10 +42,10 @@ export function requestContent(body) {
 }
 
 export function parameterComparison(request, body) {
-  const response = body?.response ?? body;
+  const response = body?.response ?? (body?.success === true && body?.data ? body.data : body);
   const fields = ["reasoning.effort", "reasoning.summary", "text.verbosity", "text.format",
     "tool_choice", "parallel_tool_calls", "temperature", "top_p", "frequency_penalty",
-    "presence_penalty", "max_output_tokens", "service_tier"];
+    "presence_penalty", "max_output_tokens", "max_tokens", "max_completion_tokens", "stream", "reasoning_effort", "service_tier"];
   return fields.map((field) => {
     const read = (value) => field.split(".").reduce((part, key) => part?.[key], value);
     const sent = read(request);
@@ -60,16 +60,16 @@ function displayText(value) {
 }
 
 export function responseFacts(body) {
-  const response = body?.response ?? body;
+  const response = body?.response ?? (body?.success === true && body?.data ? body.data : body);
   const usage = response?.usage;
   return {
     responseId: stringValue(response?.id),
     serviceTier: stringValue(response?.service_tier),
     usage: usage == null ? null : {
-      inputTokens: tokenCount(usage.input_tokens),
-      cachedTokens: tokenCount(usage.input_tokens_details?.cached_tokens),
-      outputTokens: tokenCount(usage.output_tokens),
-      reasoningTokens: tokenCount(usage.output_tokens_details?.reasoning_tokens),
+      inputTokens: tokenCount(usage.input_tokens ?? usage.prompt_tokens),
+      cachedTokens: tokenCount(usage.input_tokens_details?.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens),
+      outputTokens: tokenCount(usage.output_tokens ?? usage.completion_tokens),
+      reasoningTokens: tokenCount(usage.output_tokens_details?.reasoning_tokens ?? usage.completion_tokens_details?.reasoning_tokens),
       totalTokens: tokenCount(usage.total_tokens),
     },
     failure: response?.error == null && response?.incomplete_details == null
@@ -195,6 +195,13 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   function event(text) {
     const value = parseObject(text);
     observeModelEvent?.(value);
+    if (Array.isArray(value?.choices)) for (const choice of value.choices) {
+      const index = choice?.index ?? (value.choices.length === 1 ? 0 : undefined);
+      if (!Number.isSafeInteger(index) || index < 0 || index > 128) continue;
+      const previous = items.get(index)?.item?.content ?? "";
+      const delta = choice?.delta?.content;
+      if (typeof delta === "string") add(index, { type: "message", content: previous + delta });
+    }
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
     if (!hasTerminalOutput && value?.type === "response.output_item.done"
       && Number.isSafeInteger(value.output_index) && value.output_index >= 0) {

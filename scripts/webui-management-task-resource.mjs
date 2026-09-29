@@ -61,10 +61,12 @@ export async function managementTaskResourceState(normalized, environment, servi
         join(located?.dataDir ?? userDataDir(environment), "traffic"),
       )
       const statuses = await loadServiceStatusSummary(environment, serviceStatusCache)
+      const modelRelay = statuses.find(({ entry }) => entry.target === "model-relay")?.entry
       const appServer = statuses.find(({ entry }) => entry.target === "app-server")?.entry
       return {
         operation: normalized.operation,
         action: normalized.action,
+        modelRelay: modelRelay === undefined ? null : { loaded: modelRelay.loaded, running: modelRelay.running, state: modelRelay.state },
         appServer: appServer === undefined
           ? null
           : {

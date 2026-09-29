@@ -6,7 +6,7 @@ const caller = { caller_id: "client", key_id: "key", credential_generation: 1, s
 describe("Relay strict configuration", () => {
   it("defaults to disabled loopback and bounded limits without materializing identities", () => {
     const config = modelRelayConfigSchema.parse({});
-    expect(config).toEqual({ enabled: false, host: "127.0.0.1", port: 4119, max_concurrency: 10, requests_per_minute: 0, burst: 10, callers: [], accounts: [] });
+    expect(config).toEqual({ enabled: false, traffic_dump: false, host: "127.0.0.1", port: 4119, max_concurrency: 10, requests_per_minute: 0, burst: 10, callers: [], accounts: [] });
     expect(relayPolicyFromConfig(config).callers).toEqual([]);
   });
   it("projects already validated stable identities and exact account bindings", () => {

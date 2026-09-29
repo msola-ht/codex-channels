@@ -253,6 +253,10 @@ export interface RequestRecord {
   recordedAtMs: number
 }
 
+export interface RequestDetailResponse {
+  record: RequestRecord & { requestStartedAtMs: number; responseCompletedAtMs: number }
+}
+
 export type RequestSortKey =
   | "totalDuration"
   | "time"
@@ -953,6 +957,8 @@ export interface TrafficExchangeDetail {
     }
   }
   response: {
+    capture?: "redacted_upstream_chat"
+    deliveryStatus?: "finished" | "disconnected" | "failed"
     state: "completed" | "failed" | "incomplete"
     status: number | null
     headers: Record<string, TrafficHeaderValue>

@@ -62,6 +62,32 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("looks up an exact persisted relay request independently of list windows", async () => {
+    const fixture = createFixture();
+    const sample = { ...metricSample(), source: "relay" as const, callerId: "translator", keyId: "key",
+      credentialGeneration: 2, relayRequestId: "8a13f205-1387-48a9-8cec-efce153a8210",
+      deliveryStatus: "failed" as const, provider: "clp-test", threadId: null, turnId: null, traffic: null,
+      httpStatus: 200, responseFormat: "json" as const, errorCode: "invalid_upstream_choices" };
+    recordSample(fixture.databasePath, sample);
+    recordSample(fixture.databasePath, metricSample());
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/requests/1`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ record: { id: 1, source: "relay", callerId: "translator",
+      keyId: "key", credentialGeneration: 2, relayRequestId: sample.relayRequestId,
+      requestStartedAtMs: sample.requestStartedAtMs, responseCompletedAtMs: sample.responseCompletedAtMs,
+      httpStatus: 200, deliveryStatus: "failed", responseFormat: "json", errorCode: "invalid_upstream_choices",
+      traffic: null, threadId: null, turnId: null } });
+    const missing = await fetch(`${origin}/api/v1/requests/9999`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: "request_not_found" } });
+    for (const id of ["0", "-1", "01", "1.5", "9007199254740992", "1%20OR%201=1"]) {
+      expect((await fetch(`${origin}/api/v1/requests/${id}`)).status).toBe(400);
+    }
+    expect((await fetch(`${origin}/api/v1/requests/1?range=all`)).status).toBe(400);
+    expect((await fetch(`${origin}/api/v1/requests/1`, { method: "POST" })).status).toBe(405);
+  });
+
   it("filters relay requests by real caller with null Thread/Turn and separate delivery", async () => {
     const fixture = createFixture();
     recordSample(fixture.databasePath, { ...metricSample(), source: "relay", callerId: "client", keyId: "key",
@@ -748,7 +774,7 @@ describe("webui server data API", () => {
     const body = await response.json();
     expect(body).toMatchObject({ error: {
       code: "metrics_database_incompatible",
-      message: "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset",
+      message: "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库",
     } });
     expect(JSON.stringify(body)).not.toContain(fixture.databasePath);
   });

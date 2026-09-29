@@ -5,6 +5,42 @@ import type { DisplayLanguage } from "@/lib/format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  requestDetail: {
+    "title": "调用详情",
+    "view": "查看请求",
+    "back": "返回请求列表",
+    "missing": "未记录",
+    "notFound": "请求记录不存在或已清理，请返回列表重新查询。",
+    "identity": "请求与调用方",
+    "identityHint": "使用记录中的身份和模型信息；缺失字段不作推断。",
+    "recordId": "记录 ID",
+    "requestId": "Relay 请求 ID",
+    "keyId": "Key ID",
+    "generation": "凭据代次",
+    "requestModel": "请求模型",
+    "responseModel": "响应模型",
+    "userAgent": "出站 User-Agent",
+    "result": "模型结果与交付",
+    "resultHint": "HTTP 为上游状态；模型完成不代表客户端已成功接收。",
+    "modelStatus": "模型状态",
+    "upstreamHttp": "上游 HTTP 状态",
+    "responseFormat": "响应格式",
+    "errorCode": "错误码",
+    "errorType": "错误分类",
+    "started": "提交发送时间",
+    "completed": "模型终态或结束时间",
+    "recorded": "记录时间",
+    "usage": "用量与耗时",
+    "usageHint": "耗时从提交上游开始，不包含排队和准备；未记录用量不等于零。",
+    "cached": "缓存输入 Token",
+    "associations": "关联记录",
+    "relayScope": "Relay 没有会话或轮次。无报文关联表示采集未开启或未成功，无法仅凭指标确定原因；历史正文不会补录。",
+    "ownedScope": "仅展示已记录的关联；报文转储可能未启用或已清理。",
+    "threadId": "会话 ID",
+    "turnId": "轮次 ID",
+    "traffic": "报文转储",
+    "viewTraffic": "查看调用详情"
+},
   filters: {
     "source": "来源",
     "caller": "调用方",
@@ -320,6 +356,9 @@ const zh = {
     "listSeparator": "、"
   },
   traffic: {
+    "relayRetentionNote": "Relay 自动保留：{value}；新采集时清理过期非活动批次。",
+    "relayCapture": "Relay 上游报文（已脱敏）",
+    "relayCaptureHint": "这里保存上游响应，客户端交付结果单独记录。结构化凭据字段已遮蔽，自由文本仍可能包含敏感内容。",
     "detailIntro": "查看本次请求的结果、用量与诊断信息",
     "backToList": "返回列表",
     "listIntro": "记录的模型请求与响应字段；默认汇总全部提供商、全部保留批次，按请求时间倒序展示",
@@ -480,10 +519,10 @@ const zh = {
     "cleanupPrecondition": "前置条件：{condition}",
     "cleanupRecovery": "失败处理：{recovery}",
     "cleanupEffect": "执行 {command}",
-    "cleanupStoppedRequired": "全部 App Server 必须已停止",
+    "cleanupStoppedRequired": "全部 App Server 与 Relay 必须已停止",
     "cleanupIrreversible": "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理",
-    "cleanupResourceRunning": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 当前仍在运行。",
-    "cleanupResourceStopped": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 当前未运行。"
+    "cleanupResourceRunning": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 或 Relay 当前仍在运行。",
+    "cleanupResourceStopped": "将删除 {sessions} 个 V2 批次、{files} 个旧版文件，合计 {size}；受管 App Server 与 Relay 当前未运行，执行时还会复核。"
   },
   shell: {
     navigation: "导航",
@@ -517,6 +556,42 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  requestDetail: {
+    "title": "Call details",
+    "view": "View request",
+    "back": "Back to requests",
+    "missing": "Not recorded",
+    "notFound": "This request does not exist or has been removed. Return to the list to query again.",
+    "identity": "Request and caller",
+    "identityHint": "Identity and model information as recorded. Missing fields are not inferred.",
+    "recordId": "Record ID",
+    "requestId": "Relay request ID",
+    "keyId": "Key ID",
+    "generation": "Credential generation",
+    "requestModel": "Requested model",
+    "responseModel": "Response model",
+    "userAgent": "Outbound User-Agent",
+    "result": "Model result and delivery",
+    "resultHint": "HTTP refers to the upstream status. Model completion does not guarantee delivery to the client.",
+    "modelStatus": "Model status",
+    "upstreamHttp": "Upstream HTTP status",
+    "responseFormat": "Response format",
+    "errorCode": "Error code",
+    "errorType": "Error category",
+    "started": "Submitted at",
+    "completed": "Model terminal or end time",
+    "recorded": "Recorded at",
+    "usage": "Usage and timing",
+    "usageHint": "Timing starts at upstream submission and excludes queuing and preparation. Missing usage does not mean zero.",
+    "cached": "Cached input tokens",
+    "associations": "Related records",
+    "relayScope": "Relay has no Thread or Turn. A missing dump reference means capture was disabled or unsuccessful; metrics cannot distinguish the cause. Historical bodies are not backfilled.",
+    "ownedScope": "Only recorded associations are shown. Traffic dumps may be disabled or already removed.",
+    "threadId": "Thread ID",
+    "turnId": "Turn ID",
+    "traffic": "Traffic dump",
+    "viewTraffic": "View call details"
+},
   filters: {
     "source": "Source",
     "caller": "Caller",
@@ -832,6 +907,9 @@ const en: Messages = {
     "listSeparator": ", "
   },
   traffic: {
+    "relayRetentionNote": "Relay retention: {value}; expired inactive sessions are removed when new captures begin.",
+    "relayCapture": "Relay upstream payload (redacted)",
+    "relayCaptureHint": "This is the upstream response; client delivery is recorded separately. Structured credential fields are redacted, but free text may contain sensitive content.",
     "detailIntro": "View the result, usage and diagnostics for this request",
     "backToList": "Back to list",
     "listIntro": "Recorded model request and response fields; by default aggregates all providers and retained sessions, newest request first",
@@ -992,10 +1070,10 @@ const en: Messages = {
     "cleanupPrecondition": "Precondition: {condition}",
     "cleanupRecovery": "Failure handling: {recovery}",
     "cleanupEffect": "Run {command}",
-    "cleanupStoppedRequired": "All App Servers must be stopped",
+    "cleanupStoppedRequired": "All App Servers and Relay must be stopped",
     "cleanupIrreversible": "Permanently deletes all recognized traffic records. This cannot be undone; unknown files and directories are left untouched.",
-    "cleanupResourceRunning": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; the managed App Server is still running.",
-    "cleanupResourceStopped": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; the managed App Server is stopped."
+    "cleanupResourceRunning": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; a managed App Server or Relay is still running.",
+    "cleanupResourceStopped": "Will delete {sessions} V2 batches and {files} legacy files, totaling {size}; managed App Servers and Relay are stopped; checked again at execution."
   },
   shell: {
     navigation: "Navigation",

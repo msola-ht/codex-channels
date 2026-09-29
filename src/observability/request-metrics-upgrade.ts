@@ -4,13 +4,13 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { assertPrivateFileAccessSync, securePrivateFileSync } from "../../runtime/private-file.mjs";
 import { acquireRequestMetricsDatabaseLock } from "./request-metrics-database.js";
-import { initialSchemaSql, metricStorageV20Columns, modelRequestMetricsIndexesSql, modelRequestMetricsTableSql,
+import { initialSchemaSql, metricStorageV20Columns, metricStorageColumns, modelRequestMetricsV21TableSql, modelRequestMetricsIndexesSql, modelRequestMetricsTableSql,
   modelRequestMetricsV20IndexesSql, modelRequestMetricsV20TableSql, relayMetricColumnDefinitions, relayMetricIndexesSql,
   requireCurrentModelRequestMetricsSchema, schemaMetadataSql } from "./sqlite-request-metrics-schema.js";
 
 export interface MetricsUpgradeResult {
-  from: 20;
-  to: 21;
+  from: 20 | 21;
+  to: 22;
   changed: boolean;
   databasePath: string;
   backupPath: string | null;
@@ -27,7 +27,7 @@ function hasRetainedCosts(database: DatabaseSync): boolean {
 }
 
 /** Explicit offline operation. Runtime startup never invokes this function. */
-export function upgradeRequestMetricsDatabase(path: string, apply = false): MetricsUpgradeResult {
+export function upgradeRequestMetricsDatabase(path: string, apply = false, expectedFrom?: 20 | 21): MetricsUpgradeResult {
   const databasePath = resolve(path);
   assertPrivateFileAccessSync(databasePath);
   const lock = apply ? acquireRequestMetricsDatabaseLock(databasePath) : undefined;
@@ -35,23 +35,38 @@ export function upgradeRequestMetricsDatabase(path: string, apply = false): Metr
   let backup: { path: string; sha256: string } | undefined;
   try {
     database = new DatabaseSync(databasePath, { readOnly: !apply });
-    requireV20Schema(database); integrity(database);
-    const result: MetricsUpgradeResult = { from: 20, to: 21, changed: false, databasePath, backupPath: null, backupSha256: null };
+    const from = database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value;
+    if ((from !== 20 && from !== 21) || (expectedFrom !== undefined && from !== expectedFrom)) throw new Error("仅支持完整 v20/v21 指标库升级至 v22");
+    requirePreviousSchema(database, from); integrity(database);
+    const result: MetricsUpgradeResult = { from, to: 22, changed: false, databasePath, backupPath: null, backupSha256: null };
     if (!apply) return result;
     requireSnapshotSpace(databasePath);
     const original = logicalFingerprint(database);
-    backup = snapshotDatabase(database, databasePath, "v20");
+    backup = snapshotDatabase(database, databasePath, `v${from}`);
     const preserved = new DatabaseSync(backup.path, { readOnly: true });
     try {
-      requireV20Schema(preserved); integrity(preserved);
+      requirePreviousSchema(preserved, from); integrity(preserved);
       if (logicalFingerprint(preserved) !== original) throw new Error("指标备份数据校验失败");
     } finally { preserved.close(); }
     database.exec("BEGIN IMMEDIATE");
     try {
-      for (const column of relayMetricColumnDefinitions) database.exec(`ALTER TABLE model_request_metrics ADD COLUMN ${column}`);
-      database.exec(relayMetricIndexesSql);
-      if (logicalFingerprint(database, true) !== original) throw new Error("指标升级改变了历史数据");
-      database.exec("UPDATE schema_metadata SET value = 21 WHERE name = 'schema_version'");
+      if (from === 20) {
+        for (const column of relayMetricColumnDefinitions) database.exec(`ALTER TABLE model_request_metrics ADD COLUMN ${column}`);
+        database.exec(relayMetricIndexesSql);
+      } else {
+        const sequence = database.prepare("SELECT seq FROM sqlite_sequence WHERE name='model_request_metrics'").get()?.seq;
+        database.exec("ALTER TABLE model_request_metrics RENAME TO model_request_metrics_previous");
+        database.exec(modelRequestMetricsTableSql);
+        database.exec(`INSERT INTO model_request_metrics(id, ${metricStorageColumns.join(",")}) SELECT id, ${metricStorageColumns.join(",")} FROM model_request_metrics_previous`);
+        database.exec("DROP TABLE model_request_metrics_previous");
+        database.exec(modelRequestMetricsIndexesSql);
+        database.prepare("DELETE FROM sqlite_sequence WHERE name='model_request_metrics'").run();
+        if (sequence !== undefined) {
+          database.prepare("INSERT INTO sqlite_sequence(name,seq) VALUES('model_request_metrics',?)").run(sequence);
+        }
+      }
+      if (logicalFingerprint(database, from === 20) !== original) throw new Error("指标升级改变了历史数据");
+      database.exec("UPDATE schema_metadata SET value = 22 WHERE name = 'schema_version'");
       requireCurrentModelRequestMetricsSchema(database); integrity(database);
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
@@ -63,8 +78,8 @@ export function upgradeRequestMetricsDatabase(path: string, apply = false): Metr
   } finally { database?.close(); lock?.release(); }
 }
 
-/** Archive v21 before restoring a verified v20 snapshot; never silently discard new history. */
-export function restoreRequestMetricsV20(path: string, backupPath: string, expectedSha256: string): { archivedPath: string; archivedSha256: string } {
+/** Archive v22 before restoring a verified previous snapshot; never silently discard new history. */
+export function restoreRequestMetricsDatabase(path: string, backupPath: string, expectedSha256: string, to: 20 | 21): { archivedPath: string; archivedSha256: string } {
   const databasePath = resolve(path); const source = resolve(backupPath);
   if (databasePath === source || !/^[a-f0-9]{64}$/u.test(expectedSha256)) throw new Error("指标回滚备份参数无效");
   assertPrivateFileAccessSync(databasePath); assertPrivateFileAccessSync(source);
@@ -75,10 +90,10 @@ export function restoreRequestMetricsV20(path: string, backupPath: string, expec
   try {
     requireSnapshotSpace(databasePath, statSync(source).size);
     const backup = new DatabaseSync(source, { readOnly: true });
-    try { requireV20Schema(backup); integrity(backup); } finally { backup.close(); }
+    try { requirePreviousSchema(backup, to); integrity(backup); } finally { backup.close(); }
     database = new DatabaseSync(databasePath);
     requireCurrentModelRequestMetricsSchema(database); integrity(database);
-    const archive = snapshotDatabase(database, databasePath, "v21-rollback");
+    const archive = snapshotDatabase(database, databasePath, "v22-rollback");
     const check = new DatabaseSync(archive.path, { readOnly: true });
     try { requireCurrentModelRequestMetricsSchema(check); integrity(check); } finally { check.close(); }
     const checkpoint = database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
@@ -113,18 +128,18 @@ function integrity(database: DatabaseSync): void {
   const rows = database.prepare("PRAGMA integrity_check").all();
   if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") throw new Error("指标数据库完整性检查失败");
 }
-function requireV20Schema(database: DatabaseSync): void {
+function requirePreviousSchema(database: DatabaseSync, version: 20 | 21): void {
   const expected = new DatabaseSync(":memory:");
   try {
-    expected.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, modelRequestMetricsV20TableSql)
-      .replace(modelRequestMetricsIndexesSql, modelRequestMetricsV20IndexesSql).replace("'schema_version', 21", "'schema_version', 20"));
+    expected.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, version === 20 ? modelRequestMetricsV20TableSql : modelRequestMetricsV21TableSql)
+      .replace(modelRequestMetricsIndexesSql, version === 20 ? modelRequestMetricsV20IndexesSql : modelRequestMetricsIndexesSql).replace("'schema_version', 22", `'schema_version', ${version}`));
     if (hasRetainedCosts(database)) expected.exec(retainedCostsSql);
     const schema = (db: DatabaseSync): string => JSON.stringify(db.prepare(
       "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name",
     ).all().map(row => ({ ...row, sql: typeof row.sql === "string" ? row.sql.replace(/\s+/gu, " ").trim() : row.sql })));
     if (schema(database) !== schema(expected)
-      || database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value !== 20) {
-      throw new Error("仅支持完整 v20 指标库的显式升级或恢复");
+      || database.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value !== version) {
+      throw new Error(`仅支持完整 v${version} 指标库的显式升级或恢复`);
     }
   } finally { expected.close(); }
 }

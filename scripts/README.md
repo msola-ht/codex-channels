@@ -107,7 +107,7 @@
   只接受固定动作，任务由独立 `codexc` 子进程执行，状态按已验证的 WebUI 令牌或回环 Origin 隔离，输出不回传且支持取消。
   默认回环监听并托管 `webui/dist` 静态前端；提供 `/api/v1/time`（服务端时区与当前时间）、
   `/api/v1/overview`、`/api/v1/daily`、`/api/v1/threads`、
-  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
+  `/api/v1/threads/:id/run|turns`、`/api/v1/requests`、`/api/v1/requests/:id`、`/api/v1/errors`、`/api/v1/providers` 只读 JSON 接口；
   Providers 返回指标库完整去重名单，指标查询支持重复 `provider` 参数形成多选范围；
   Overview 在同一读快照和截止时间下返回汇总、趋势与热力图；Daily 按 `range` 返回系统本地日聚合。
   Threads 返回指标库首个请求开始时间，
@@ -540,9 +540,9 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
 
-- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 队列状态与脱敏调用方查询、签发、轮换、停用及启用、显式旧限流字段升级；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 队列状态与脱敏调用方查询、签发、轮换、停用及启用、显式旧限流字段升级、报文采集开关与仅删除该开关的回滚；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
-`metrics-database.mjs` 的 `upgrade --from 20 --to 21` 默认只预检，`--apply` 才持锁备份迁移；
-`rollback --from 21 --to 20 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
+`metrics-database.mjs` 的 `upgrade --from 21 --to 22` 默认只预检，`--apply` 才持锁备份迁移；
+`rollback --from 22 --to 21 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
 两者不自动操作服务，回滚不恢复旧配置/凭据。查询与导出支持 `--source owned|relay`、`--caller ID`。

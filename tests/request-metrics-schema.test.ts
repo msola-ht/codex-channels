@@ -28,7 +28,7 @@ describe("request metrics schema", () => {
     database.close();
 
     expect(() => new SqliteModelRequestMetricsStore(path)).toThrow(
-      /codexc metrics reset/u,
+      /核对数据库版本及备份，勿删除数据库/u,
     );
     const preserved = new DatabaseSync(path, { readOnly: true });
     expect(preserved.prepare("SELECT value FROM schema_metadata WHERE name = 'schema_version'").get()?.value).toBe(version);

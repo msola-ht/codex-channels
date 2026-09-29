@@ -387,6 +387,7 @@ export interface StoredProviderTokenMetric {
 }
 
 export interface ModelRequestMetricsRequestQueryStore {
+  requestById(id: number): StoredModelRequestMetric | null;
   requestRowsAfter(afterLocalId: number, limit: number): StoredModelRequestMetric[];
   recent(limit: number): StoredModelRequestMetric[];
   page(query: ModelRequestMetricsPageQuery): StoredModelRequestMetricsPage;

@@ -44,7 +44,7 @@ describe("WebUI management tasks", () => {
     });
     expect(runner.preview({ operation: "traffic", action: "cleanup" })).toMatchObject({
       effects: ["执行 codexc traffic cleanup --confirm"],
-      preconditions: ["全部 App Server 必须已停止"],
+      preconditions: ["全部 App Server 与 Relay 必须已停止"],
       recovery: expect.stringContaining("无法恢复"),
     });
   });

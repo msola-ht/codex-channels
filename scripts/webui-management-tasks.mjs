@@ -43,7 +43,7 @@ export class WebuiManagementTaskRunner {
       target: normalized.target ?? null,
       effects: [service || metrics || traffic ? `执行 ${command}` : "执行 codexc update（独立更新子进程）"],
       preconditions: traffic
-        ? ["全部 App Server 必须已停止"]
+        ? ["全部 App Server 与 Relay 必须已停止"]
         : metrics && metricsRequireStoppedGateway.has(normalized.action)
           ? ["Gateway 必须已停止，且指标 Socket 不可用"]
           : [],

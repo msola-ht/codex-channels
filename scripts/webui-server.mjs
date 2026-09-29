@@ -461,6 +461,11 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     handleRequestsExport(environment, url, response);
     return;
   }
+  const requestMatch = apiPath.match(/^\/requests\/([^/]+)$/u);
+  if (requestMatch) {
+    handleRequestDetail(environment, requestMatch[1], url, response);
+    return;
+  }
   if (apiPath === "/errors") {
     await handleErrors(environment, url, response);
     return;
@@ -487,7 +492,7 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
     if (error instanceof MetricsDatabaseAccessError) {
       throw new ApiError(503, error.code, error.code === "metrics_database_unavailable"
         ? "指标数据库尚未创建，请先运行 Gateway 收集模型请求"
-        : "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset");
+        : "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库");
     }
     throw error;
   }
@@ -596,6 +601,19 @@ function handleThreadDetail(environment, rawThreadId, view, url, response) {
   } finally {
     store.close();
   }
+}
+
+function handleRequestDetail(environment, id, url, response) {
+  if (!/^[1-9][0-9]*$/u.test(id) || !Number.isSafeInteger(Number(id))) {
+    throw new ApiError(400, "invalid_parameter", "请求记录 ID 无效");
+  }
+  if (url.searchParams.size > 0) throw new ApiError(400, "unsupported_parameter", "单条请求查询不接受筛选参数");
+  const store = openMetricsStore(environment);
+  try {
+    const record = new RequestMetricsQueryService(store).requestById(Number(id));
+    if (record === null) throw new ApiError(404, "request_not_found", "请求记录不存在或已清理");
+    sendJson(response, 200, { record });
+  } finally { store.close(); }
 }
 
 async function handleRequests(environment, url, response) {

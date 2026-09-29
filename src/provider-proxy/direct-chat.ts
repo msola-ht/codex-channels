@@ -5,23 +5,27 @@ import { directChatJson, DirectChatResponse, ModelConversionError, type DirectCh
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import { readChatBody, readChatFrames } from "./chat-io.js";
 import type { ProviderProxyUpstream } from "./proxy.js";
+import { effectiveUpstreamUserAgent } from "./response-metrics-observer.js";
 import { endToEndHeaders } from "./request-routing.js";
+
+import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
 export interface DirectChatTarget extends ProviderProxyUpstream { authorization: string }
 export interface DirectChatCall {
   request: DirectChatRequest;
+  capture?: DirectChatCapture;
   clientHeaders?: IncomingHttpHeaders;
   target: DirectChatTarget;
   signal: AbortSignal;
   observer: DirectChatResponse;
   recheck(): void;
-  submitted(): void;
+  submitted(userAgent: string | null): void;
   headers(status: number): void;
   content(): void;
   emit(value: Record<string, unknown>, terminal: boolean): Promise<void>;
 }
 
-/** One direct Chat exchange. No retries, redirects, caller identity, dump or metric submission. */
+/** One direct Chat exchange. No retries, redirects, caller identity or metric submission. */
 export async function sendDirectChat(call: DirectChatCall): Promise<void> {
   const payload = JSON.stringify(call.request);
   const forwarded = endToEndHeaders(call.clientHeaders ?? {});
@@ -46,19 +50,25 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
   request.setTimeout(60_000, timeout);
   try {
     const ready = once(request, "response");
-    call.submitted(); request.end(payload);
+    const ua = request.getHeader("user-agent");
+    const observedUa = effectiveUpstreamUserAgent({ "user-agent": typeof ua === "string" ? ua : undefined }, undefined);
+    call.submitted(observedUa !== null && [...observedUa].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? null : observedUa);
+    call.capture?.submitted(call.request, request.getHeaders(), request.path);
+    request.end(payload);
     const [incoming] = await ready as [IncomingMessage];
     clearTimeout(timer);
     call.headers(incoming.statusCode ?? 502);
-    if (incoming.statusCode !== 200) throw await readChatHttpError(incoming);
+    call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
+    if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, call.capture);
     const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
     if (call.request.stream) {
       if (contentType !== "text/event-stream") throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
       for await (const data of readChatFrames(incoming, call.signal, {
         frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
       })) {
-        if (data === "[DONE]") { await call.emit(call.observer.finish(true), true); return; }
-        const value: unknown = parseChatJson(data);
+        if (data === "[DONE]") { const terminal = call.observer.finish(true); call.capture?.done(); await call.emit(terminal, true); return; }
+        const value: unknown = parseChatJson(data, call.capture);
+        call.capture?.value(value, true);
         const error = chatStreamError(value);
         if (error) throw error;
         const output = call.observer.push(value, true);
@@ -69,7 +79,8 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     }
     if (contentType !== "application/json") throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
     const body = await readChatBody(incoming, call.signal, 8 * 1024 * 1024);
-    const parsed: unknown = parseChatJson(body);
+    const parsed: unknown = parseChatJson(body, call.capture);
+    call.capture?.value(parsed, false);
     const envelopeError = chatStreamError(parsed);
     if (envelopeError) throw envelopeError;
     const value = directChatJsonPayload(parsed);
@@ -77,14 +88,15 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     if (error) throw error;
     const output = directChatJson(value, call.observer);
     if (call.observer.hasContent) call.content();
+    call.capture?.done();
     await call.emit(output, true);
   } catch (error) { throw timeoutError ?? error; }
   finally { clearTimeout(timer); request.destroy(); }
 }
 
-function parseChatJson(text: string): unknown {
+function parseChatJson(text: string, capture?: DirectChatCapture): unknown {
   try { return JSON.parse(text) as unknown; }
-  catch { throw new ChatUpstreamError("invalid_upstream_json", "Upstream response contains invalid JSON.", false); }
+  catch { capture?.invalid(Buffer.byteLength(text)); throw new ChatUpstreamError("invalid_upstream_json", "Upstream response contains invalid JSON.", false); }
 }
 
 /** CLP's observed non-streaming envelope; unwrap once, never guess arbitrary wrappers. */

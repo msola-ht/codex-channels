@@ -33,6 +33,8 @@ const ErrorsPage = lazy(() =>
   import("@/pages/errors-page").then((module) => ({ default: module.ErrorsPage })))
 const RequestsPage = lazy(() =>
   import("@/pages/requests-page").then((module) => ({ default: module.RequestsPage })))
+const RequestDetailPage = lazy(() =>
+  import("@/pages/request-detail-page").then((module) => ({ default: module.RequestDetailPage })))
 const ThreadDetailPage = lazy(() =>
   import("@/pages/thread-detail-page").then((module) => ({ default: module.ThreadDetailPage })))
 const ThreadsPage = lazy(() =>
@@ -45,6 +47,7 @@ const TrafficPage = lazy(() =>
 function pageTitle(pathname: string, t: Translate): string {
   if (pathname.startsWith("/threads/")) return t("pages.threadDetail")
   if (pathname === "/threads") return t("pages.threads")
+  if (pathname.startsWith("/requests/")) return t("requestDetail.title")
   if (pathname === "/requests") return t("pages.requests")
   if (pathname === "/traffic") return t("pages.traffic")
   if (pathname === "/errors") return t("pages.errors")
@@ -62,6 +65,13 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
       <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/traffic", search: params.toString() }}>{t("pages.traffic")}</Link></BreadcrumbLink></BreadcrumbItem>
       <BreadcrumbSeparator className="hidden md:block" />
       <BreadcrumbItem><BreadcrumbPage>{t("pages.trafficDetail")}</BreadcrumbPage></BreadcrumbItem>
+    </>
+  }
+  if (pathname.startsWith("/requests/")) {
+    return <>
+      <BreadcrumbItem className="hidden md:block"><BreadcrumbLink asChild><Link to={{ pathname: "/requests", search }}>{t("pages.requests")}</Link></BreadcrumbLink></BreadcrumbItem>
+      <BreadcrumbSeparator className="hidden md:block" />
+      <BreadcrumbItem><BreadcrumbPage>{t("requestDetail.title")}</BreadcrumbPage></BreadcrumbItem>
     </>
   }
   if (pathname.startsWith("/threads/")) {
@@ -148,6 +158,7 @@ function Layout() {
                 <Route path="/threads" element={<ThreadsPage />} />
                 <Route path="/threads/:id" element={<ThreadDetailPage />} />
                 <Route path="/requests" element={<RequestsPage />} />
+                <Route path="/requests/:id" element={<RequestDetailPage />} />
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

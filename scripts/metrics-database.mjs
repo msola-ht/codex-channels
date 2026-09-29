@@ -23,7 +23,7 @@ import { serviceIdentifiers } from "../runtime/service-targets.mjs";
 import {
   acquireRequestMetricsDatabaseLock,
   upgradeRequestMetricsDatabase,
-  restoreRequestMetricsV20,
+  restoreRequestMetricsDatabase,
 } from "../dist/observability/index.js";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
@@ -85,8 +85,8 @@ export async function maintainMetricsSchema(command, args, environment = process
     if (relay.result !== "not_running") throw new Error("Relay 进程仍存在或状态未确认；请停止后重试");
     if (command === "rollback" && document.model_relay?.enabled === true) throw new Error("回滚前必须禁用 Relay；保留当前凭据代次及停用记录，禁止恢复旧配置备份");
   }
-  return command === "upgrade" ? upgradeRequestMetricsDatabase(databasePath, options.apply)
-    : restoreRequestMetricsV20(databasePath, options.backup, options.sha256);
+  return command === "upgrade" ? upgradeRequestMetricsDatabase(databasePath, options.apply, Number(options.from))
+    : restoreRequestMetricsDatabase(databasePath, options.backup, options.sha256, Number(options.to));
 }
 export {
   inspectMetricsDatabase,

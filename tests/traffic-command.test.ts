@@ -1,3 +1,5 @@
+import { ModelRelayControl } from "../runtime/model-relay-control.mjs";
+import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   appendFileSync,
@@ -151,6 +153,16 @@ describe("traffic cleanup", () => {
     expect(readFileSync(unknown, "utf8")).toBe("keep\n");
   });
 
+  it("refuses cleanup while a Relay control endpoint exists, even with listening disabled", async () => {
+    const home = temporaryDirectory(); const configPath = join(home, "config.toml");
+    writeFileSync(configPath, "version = 1\n", { mode: 0o600 });
+    const control = new ModelRelayControl(modelRelayPaths(configPath).control, async () => ({ result: "status",
+      configurationValid: true, enabled: false, listening: false, active: 0, queue: { pending: 0, waiting: 0, bytes: 0 }, unavailableAccounts: 0,
+      metrics: { local_dropped: 0, accepted: 0, rejected: 0, unconfirmed: 0, pending: 0, active: 0, bytes: 0 } }));
+    await control.start();
+    try { await expect(assertConfiguredAppServersStopped({ CODEX_CONNECT_HOME: home }, join(home, "traffic"))).rejects.toThrow("停止 Relay"); }
+    finally { await control.close(); }
+  });
   it("rejects confirmed cleanup outside the current configured traffic directory", async () => {
     const home = temporaryDirectory();
     const other = temporaryDirectory();

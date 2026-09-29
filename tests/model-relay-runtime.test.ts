@@ -115,7 +115,8 @@ it("accepts help only for exact public paths and rejects unknown options", async
   try {
     await runModelRelayCommand(["upgrade-limits", "-h"]);
     await runModelRelayCommand(["upgrade-limits", "--help"]);
-    expect(log).toHaveBeenCalledTimes(2);
+    for (const command of ["dump", "rollback-dump"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    expect(log).toHaveBeenCalledTimes(6);
   } finally { log.mockRestore(); }
   expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
@@ -179,6 +180,8 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   writePrivateFileAtomicSync(f.configPath, stringify(document));
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
   await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment);
+  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay?.traffic_dump).toBe(false);
+  expect(await manageModelRelay(parseModelRelayCommand(["dump", "--enabled", "true"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   let key = issued.key;
   for (const stream of [false, true]) {
     if (stream) key = (await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment)).key;
@@ -198,7 +201,7 @@ it("runs private CLP credentials through direct Chat JSON/SSE and Gateway IPC in
   await service.close(); await writer.waitForCurrentWrites();
   const rows = store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", callerId: "client", limit: 10 });
   expect(rows.records).toHaveLength(3); expect(received).toHaveLength(3);
-  for (const row of rows.records) expect(row).toMatchObject({ callerId: "client", keyId: "key", threadId: null, turnId: null });
+  for (const row of rows.records) expect(row).toMatchObject({ traffic: { label: "relay.chat" }, callerId: "client", keyId: "key", threadId: null, turnId: null });
   const completed = rows.records.filter(row => row.status === "completed");
   expect(completed).toHaveLength(2);
   for (const row of completed) expect(row).toMatchObject({ deliveryStatus: "finished", responseModel: "vendor/model@2026" });
@@ -245,4 +248,19 @@ it("explicitly backs up and upgrades only legacy limits, preserving credentials 
   writePrivateFileAtomicSync(f.configPath, malformed);
   await expect(manageModelRelay(command, f.environment)).rejects.toThrow();
   expect(readFileSync(f.configPath, "utf8")).toBe(malformed);
+});
+
+it("removes only the dump setting on rollback and preserves rotated credentials", async () => {
+  const f = await fixture();
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+  await manageModelRelay(parseModelRelayCommand(["dump", "--enabled", "true"]), f.environment);
+  await manageModelRelay(parseModelRelayCommand(["rotate", "--caller", "client"]), f.environment);
+  const before = parse(readFileSync(f.configPath, "utf8"));
+  await manageModelRelay(parseModelRelayCommand(["rollback-dump"]), f.environment);
+  const after = parse(readFileSync(f.configPath, "utf8"));
+  expect(gatewayConfig.validateGatewayConfigDocument(after).model_relay?.callers).toEqual(gatewayConfig.validateGatewayConfigDocument(before).model_relay?.callers);
+  expect(after.model_relay).not.toHaveProperty("traffic_dump");
+  const { traffic_dump: removed, ...preserved } = before.model_relay as Record<string, unknown>;
+  expect(removed).toBe(true); expect(after.model_relay).toEqual(preserved);
+  expect(() => parseModelRelayCommand(["dump", "--enabled", "yes"])).toThrow();
 });

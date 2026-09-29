@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { routeTrafficApi } from "../scripts/webui-traffic-route.mjs";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
@@ -23,6 +23,17 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("reports the independent Relay capture switch and retention for its label", async () => {
+    const fixture = createFixture(); const configPath = fixture.environment.CODEX_CONNECT_CONFIG_FILE;
+    const document = readGatewayConfig(configPath);
+    document.debug = { model_traffic_dump: false }; document.model_relay = { traffic_dump: true };
+    writeGatewayConfig(configPath, document);
+    writeSession(fixture.trafficDir, "relay.chat", "2026-09-29T00-00-00-000Z", [httpInteraction(1)]);
+    const server = await startServer(fixture.environment);
+    const result = await getJson<{ enabled: boolean; retentionDays: number }>(`${server.origin}/api/v1/traffic?label=relay.chat`);
+    expect(result.status).toBe(200); expect(result.body).toMatchObject({ enabled: true, retentionDays: 7 });
+  });
+
   it("does not infer new stages from legacy wall-clock records or invalid offsets", async () => {
     const fixture = createFixture();
     const legacy = httpInteraction(1);

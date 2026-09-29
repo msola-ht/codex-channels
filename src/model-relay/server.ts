@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, validateDirectChatRequest } from "../model-api/index.js";
-import { ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
+import { ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
 export interface PreparedRelayProvider {
@@ -15,6 +15,7 @@ export interface PreparedRelayProvider {
 export type { RelayMetric } from "../provider-proxy/index.js";
 export interface ModelRelayOptions {
   policy: RelayPolicy;
+  capture?(provider: string): DirectChatCapture | undefined;
   prepare(provider: string, signal: AbortSignal): Promise<PreparedRelayProvider>;
   enqueueMetric(metric: RelayMetric): void;
 }
@@ -92,11 +93,13 @@ export class ModelRelayServer {
     const disconnected = (): void => { if (!response.writableFinished) controller.abort(new RelayAdmissionError(499, "client_disconnected")); };
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
+    let capture: DirectChatCapture | undefined;
     let started: number | undefined;
     let submittedAt: number | undefined;
     let completedAt: number | undefined;
     let firstTokenMs: number | undefined;
     let httpStatus: number | undefined;
+    let userAgent: string | null = null;
     let errorCode: string | undefined;
     let requestModel = "";
     let stream = false;
@@ -145,9 +148,10 @@ export class ModelRelayServer {
       }
       if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
       phase = "upstream";
-      await sendDirectChat({ request: body!, clientHeaders: request.headers, target: prepared.target, signal, observer,
+      capture = this.options.capture?.(lease.caller.provider);
+      await sendDirectChat({ ...(capture ? { capture } : {}), request: body!, clientHeaders: request.headers, target: prepared.target, signal, observer,
         recheck: () => { lease!.check(body!.model); prepared.recheck(); },
-        submitted: () => { started = performance.now(); submittedAt = Date.now(); },
+        submitted: ua => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
         headers: status => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value, terminal) => {
@@ -198,11 +202,13 @@ export class ModelRelayServer {
       }
     } finally {
       clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
+      const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
         const metric: RelayMetric = { source: "relay", threadId: null, turnId: null, relayRequestId,
+          ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
-          provider: lease.caller.provider, requestModel, responseFormat: stream ? "sse" : "json",
+          provider: lease.caller.provider, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",
           status: observer.status === "unknown" ? "failed" : observer.status, deliveryStatus,
           requestStartedAtMs: submittedAt!, responseCompletedAtMs: submittedAt! + (ended - started), totalDurationMs: ended - started,
           ...observer.usage, ...(firstTokenMs === undefined ? {} : { firstTokenMs }),

@@ -82,6 +82,12 @@ export function TrafficDetail({
             <CardDescription>{[detail.response.status === null ? null : `HTTP ${detail.response.status}`, detail.response.eventType].filter(Boolean).join(" · ") || t("traffic.savedResponse")}</CardDescription>
           </CardHeader>
             <CardContent className="flex flex-col gap-3">
+            {detail.response.capture === "redacted_upstream_chat" ? <Alert>
+              <AlertTitle>{t("traffic.relayCapture")}</AlertTitle>
+              <AlertDescription>{t("traffic.relayCaptureHint")} · {detail.response.deliveryStatus === "finished"
+                ? t("filters.deliveryFinished") : detail.response.deliveryStatus === "disconnected"
+                  ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}</AlertDescription>
+            </Alert> : null}
             <ResponseFailure response={detail.response} />
             {detail.response.output.map((item, index) => (
               <TrafficContent key={index} title={outputLabel(t, item)} text={item.text} />
@@ -100,7 +106,7 @@ export function TrafficDetail({
                 {detail.response.responseId === undefined ? null : (
                   <p className="break-all font-mono text-xs text-muted-foreground">{t("traffic.responseId", { id: detail.response.responseId })}</p>
                 )}
-                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
+                {detail.response.bytes === undefined && detail.response.storedBytes === undefined ? null : <p className="text-xs text-muted-foreground">{[detail.response.bytes === undefined || detail.response.capture === "redacted_upstream_chat" ? null : t("traffic.transferred", { size: formatBytes(detail.response.bytes) }), detail.response.storedBytes === undefined ? null : t("traffic.stored", { size: formatBytes(detail.response.storedBytes) })].filter(Boolean).join(" · ")}</p>}
                 <HeaderTable title={t("traffic.responseHeadersTitle")} headers={detail.response.headers} />
                 <TrafficContent title={t("traffic.responseBodyRawTitle")} text={detail.response.body} json truncated={detail.response.bodyTruncated} />
               </div>

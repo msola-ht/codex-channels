@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link } from "react-router"
+import { Link, useLocation } from "react-router"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { trafficDetailPath } from "@/lib/traffic-state"
@@ -72,6 +72,7 @@ export function RequestsTable({
   total: number
 }) {
   const { t, language } = useTranslation()
+  const { search } = useLocation()
   const columnLabels: Record<string, string> = {
     source: t("filters.source"),
     caller: t("filters.caller"),
@@ -90,7 +91,7 @@ export function RequestsTable({
     reasoningOutput: t("requests.reasoningColumn"),
     firstContent: t("requests.firstColumn"),
     totalDuration: t("requests.durationColumn"),
-    traffic: t("requests.detailColumn"),
+    traffic: t("requestDetail.title"),
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
@@ -265,16 +266,12 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "traffic",
-      header: t("requests.detailColumn"),
-      enableSorting: false,
-      cell: ({ row }) => row.original.traffic === null ? (
-        <span className="text-muted-foreground">{t("requests.noTraffic")}</span>
-      ) : (
-        <Button variant="link" size="sm" asChild>
-          <Link to={trafficDetailPath(row.original.traffic)}>{t("requests.viewTraffic")}</Link>
-        </Button>
-      ),
+      id: "traffic", header: t("requestDetail.title"), enableSorting: false,
+      cell: ({ row }) => <Button variant="link" size="sm" asChild>
+        <Link to={row.original.traffic === null
+          ? { pathname: `/requests/${row.original.id}`, search }
+          : trafficDetailPath(row.original.traffic)}>{t("requestDetail.viewTraffic")}</Link>
+      </Button>,
     },
     {
       id: "ua",
@@ -355,7 +352,7 @@ export function RequestsTable({
         </span>
       ),
     },
-  ], [t, language])
+  ], [t, language, search])
 
   return (
     <DataTable

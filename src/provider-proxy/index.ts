@@ -16,3 +16,5 @@ export { ChatBodyTooLargeError, readChatBody, waitForChatOperation, writeChatDat
 export { ChatUpstreamError } from "./chat-errors.js";
 export type { RelayMetric } from "./relay-metric.js";
 export { RelayMetricsServer, sendRelayMetrics, type RelayMetricEnvelope, type RelayMetricRejection } from "./relay-metrics-channel.js";
+
+export { RelayTrafficDump, type DirectChatCapture } from "./relay-traffic-dump.js";

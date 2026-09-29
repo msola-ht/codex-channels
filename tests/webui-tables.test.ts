@@ -4,13 +4,25 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("renders request details without confusing missing usage, upstream success and delivery failure", () => {
+    expect(markup.relayDetail).toContain("relay-uuid");
+    expect(markup.relayDetail).toContain("translator");
+    expect(markup.relayDetail).toContain("key-2");
+    expect(markup.relayDetail).toContain("200");
+    expect(markup.relayDetail).toContain("JSON");
+    expect(markup.relayDetail).toContain("&lt;script&gt;unsafe&lt;/script&gt;");
+    expect(markup.relayDetail).not.toContain("<script>");
+    expect(markup.relayDetail).not.toContain('href="/traffic');
+    expect(markup.relayDetail).toContain("1970-01-01");
+    expect(markup.relayDetail).toContain(">0</dd>");
+  });
   beforeAll(() => {
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
       import { createServer } from "vite";
       import { createElement as h } from "react";
       import { renderToStaticMarkup } from "react-dom/server";
-      import { MemoryRouter } from "react-router";
+      import { MemoryRouter, Routes, Route } from "react-router";
       const server = await createServer({ server: { middlewareMode: true }, appType: "custom", logLevel: "silent",
         plugins: [{ name: "fixture-api-state", enforce: "pre", transform(_code, id) {
           if (id.endsWith("/src/components/traffic/traffic-content.tsx")) return _code.replace("useState(false)", "useState(globalThis.fixtureDisclosureOpen ?? false)");
@@ -22,6 +34,8 @@ describe("WebUI metrics table presentation", () => {
       });
       try {
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
+        const { RequestDetailPage } = await server.ssrLoadModule("/src/pages/request-detail-page.tsx");
+        const { RequestDetail } = await server.ssrLoadModule("/src/components/requests/request-detail.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
@@ -54,10 +68,10 @@ describe("WebUI metrics table presentation", () => {
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
           firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
-        const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
-          h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null,
+        const render = (component, props, language = "zh", entry = "/") => renderToStaticMarkup(h(MemoryRouter, { initialEntries: [entry] },
+          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
-        const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
+        const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
         const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
@@ -73,6 +87,7 @@ describe("WebUI metrics table presentation", () => {
         const rollingWindow = quotaWindow("rolling", "5小时", 10);
         const fiveHourWindow = quotaWindow("five-hour", "5小时", 10);
         const result = {
+          relayDetail: render(RequestDetail, { record: { ...record, id: 42, source: "relay", callerId: "translator", keyId: "key-2", credentialGeneration: 2, relayRequestId: "relay-uuid", deliveryStatus: "failed", status: "completed", httpStatus: 200, responseFormat: "json", requestStartedAtMs: 1000, responseCompletedAtMs: 2000, inputTokens: 0, totalTokens: null, userAgent: "<script>unsafe</script>" } }),
           ocgQuotaOrder: render(OpencodeGoUsageCard, { accounts: [{ ...quotaAccount, displayName: "OpenCode Go main",
             windows: [monthlyWindow, weeklyWindow, rollingWindow] }], refreshControls: {}, onAccountsChanged: noop }),
           clineQuotaOrder: render(ClinePassUsageCard, { account: { ...quotaAccount, displayName: "Cline Pass main",
@@ -266,12 +281,14 @@ describe("WebUI metrics table presentation", () => {
         const { QueryFilters } = await server.ssrLoadModule("/src/components/metrics/query-filters.tsx?actual");
         result.filters = render(QueryFilters, { query: { range: "all" }, onChange: noop });
         result.activeFilters = render(QueryFilters, { query: { range: "7d", provider: ["openai"], model: "test" }, onChange: noop });
-        const { useRequests } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
+        const { useRequests, useRequestDetail } = await server.ssrLoadModule("/src/hooks/use-requests.ts");
         const { useThreads } = await server.ssrLoadModule("/src/hooks/use-threads.ts");
         const { useErrors } = await server.ssrLoadModule("/src/hooks/use-errors.ts");
         const { useThreadTurns } = await server.ssrLoadModule("/src/hooks/use-thread-detail.ts");
         const query = { range: "all", offset: 0, limit: 10 };
         const nextQuery = { ...query, offset: 10 };
+        globalThis.fixtureApiState = { data: { id: "42", data: { record: { id: 42 } } }, loading: false, error: null };
+        result.requestDetailStates = JSON.stringify({ current: useRequestDetail("42"), changed: useRequestDetail("43") });
         result.queryStates = JSON.stringify([
           [useRequests, JSON.stringify(query)],
           [useThreads, JSON.stringify(query)],
@@ -290,6 +307,12 @@ describe("WebUI metrics table presentation", () => {
           const initial = hook(query);
           return { ready, changed, returned, pending, failed, initial };
         }));
+        const relayRecord = { ...record, id: 42, source: "relay", callerId: "translator", relayRequestId: "relay-uuid", status: "completed", deliveryStatus: "failed", responseFormat: "json", requestStartedAtMs: 1000, responseCompletedAtMs: 2000, totalTokens: null };
+        const detailRoute = { children: h(Route, { path: "/requests/:id", element: h(RequestDetailPage) }) };
+        globalThis.fixtureApiState = { data: { id: "42", data: { record: relayRecord } }, loading: false, error: null };
+        result.requestDetailPage = render(Routes, detailRoute, "en", "/requests/42?source=relay&offset=10");
+        globalThis.fixtureApiState = { data: null, loading: false, error: "raw internal error", errorCode: "request_not_found" };
+        result.requestDetailMissing = render(Routes, detailRoute, "en", "/requests/99");
         console.log(JSON.stringify(result));
       } finally { await server.close(); }
     `;
@@ -298,6 +321,23 @@ describe("WebUI metrics table presentation", () => {
       encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
     })) as Record<string, string>;
   }, 35_000);
+
+  it("hides a previous request when navigating to a different record", () => {
+    expect(JSON.parse(markup.requestDetailStates!)).toMatchObject({
+      current: { data: { record: { id: 42 } }, loading: false },
+      changed: { data: null, loading: true },
+    });
+  });
+
+  it("opens detail routes with a stable back link and localized missing-record errors", () => {
+    expect(markup.requestDetailPage).toContain("relay-uuid");
+    expect(markup.requestDetailPage).toContain("Call details");
+    expect(markup.requestDetailPage).toContain('href="/requests?source=relay&amp;offset=10"');
+    expect(markup.requestDetailPage).toContain("Model completion does not guarantee delivery");
+    expect(markup.requestDetailMissing).toContain("This request does not exist or has been removed");
+    expect(markup.requestDetailMissing).not.toContain("raw internal error");
+    expect(markup.requestDetailMissing).not.toContain("relay-uuid");
+  });
 
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
@@ -512,6 +552,7 @@ describe("WebUI metrics table presentation", () => {
       "来源", "调用方", "交付", "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
+    expect(markup.requests).toContain('href="/requests/42"');
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
     expect(markup.requests).toContain("名称不一致");

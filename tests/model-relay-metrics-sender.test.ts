@@ -28,6 +28,13 @@ describe("Relay metric confirmation semantics", () => {
       expect(JSON.parse(await exchange({ ...envelope, providerId: "clp-other" })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, responseModel: "unsafe\nmodel" } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, errorCode: "unsafe@error" } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      for (const userAgent of ["", "x".repeat(513), "client\nsecret", ["client"], 42]) {
+        expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, userAgent } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      }
+      for (const traffic of [null, {}, { label: "openai", session: "2026-09-29T00-00-00-000Z", interaction: 1 },
+        { label: "relay.chat", session: "../escape", interaction: 1 }, { label: "relay.chat", session: "2026-09-29T00-00-00-000Z", interaction: 0 }]) {
+        expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, traffic } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      }
       expect(await exchange({ ...envelope, padding: "x".repeat(33 * 1024) })).toBe("");
       const started = Date.now();
       await new Promise<void>((resolve, reject) => {

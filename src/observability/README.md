@@ -16,7 +16,7 @@
   新采集指标以请求归属、模型、状态、Token、错误分类与额度快照为主，不包含价格快照或请求/响应正文；
   `firstTokenMs` 保留代理单请求首 Token 延迟，`upstreamTtftMs` 独立保留 OpenAI 轮次首 Token 统计，
   `requestModel` 与 `responseModel` 分别保留请求和响应回显名称；可空 `traffic` 只保存转储标签、实际批次与调用编号，不包含正文或文件路径。
-- `request-metrics-query-service.ts`：在只读 Store 之上统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
+- `request-metrics-query-service.ts`：在只读 Store 之上提供 `requestById` 精确单条查询，并统一滚动时间范围、本地今天/昨天、自定义日期、请求筛选、聚合维度以及
   会话、请求、异常、趋势和额度查询；Bootstrap、`codexc metrics` 与 WebUI 复用同一查询语义，
   各自只负责授权、参数边界和结果呈现。
 - `request-metrics-writer.ts`：提供 10,000 条上限的有界延迟写入队列；指标 Socket 只负责入队，
@@ -32,7 +32,7 @@
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v21 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v22 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，不隐式升级旧库。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
@@ -41,7 +41,7 @@
   普通响应样本，不合计或平均。Schema v16 曾增加可空 `first_content_ms`、`request_model`、`response_model`。
   Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
   Schema v18 引入可空 `total_duration_ms`，v20 统一为提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
-  数据库使用严格 Schema v21、Unix `0600` / Windows 当前 SID 私有文件权限，
+  数据库使用严格 Schema v22、Unix `0600` / Windows 当前 SID 私有文件权限，
   v19 的可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
@@ -106,11 +106,11 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v21；v20 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v22；v20/v21 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
 
-- `request-metrics-upgrade.ts`：显式 v20→v21 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v21，再恢复摘要验证的 v20，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
+- `request-metrics-upgrade.ts`：显式 v20/v21→v22 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v22，再恢复摘要验证的 v20/v21，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
 
-v21 增加真实 source/caller/key/代次/请求 UUID 与交付字段，Relay 的 Thread/Turn/转储定位必须为空，
+v21 增加真实 source/caller/key/代次/请求 UUID 与交付字段，v22 允许 Relay 关联 label=relay.chat 的完整转储定位，Thread/Turn 必须为空，
 唯一索引去重同一次调用。写入队列保留自有流量空间，Relay 至多占 256 个待写位置；IPC 接收确认只代表入队。

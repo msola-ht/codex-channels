@@ -1,5 +1,5 @@
 import { watch } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { createRefreshableHttpProxySelector } from "./network-proxy.mjs";
 import { ModelRelayMaterialReader } from "./model-relay-material-reader.mjs";
@@ -10,9 +10,11 @@ import { relayPolicyFromConfig } from "./model-relay-config.mjs";
 /** Independent service owner. Never starts, stops or connects to App Server. */
 export async function startModelRelayService(configPath, environment = process.env) {
   const { ModelRelayServer, RelayMetricsSender } = await import("../dist/model-relay/index.js");
-  const { sendRelayMetrics } = await import("../dist/provider-proxy/index.js");
+  const { sendRelayMetrics, RelayTrafficDump } = await import("../dist/provider-proxy/index.js");
   const paths = modelRelayPaths(configPath);
   const reader = new ModelRelayMaterialReader(configPath, environment);
+  const dump = new RelayTrafficDump({ directory: join(dirname(configPath), "traffic"),
+    onError: () => console.error("Relay traffic dump capture unavailable; model forwarding continues.") });
   let snapshot;
   let relay;
   let selector;
@@ -52,7 +54,7 @@ export async function startModelRelayService(configPath, environment = process.e
       if (next.materials.find(value => value.provider === old.provider)?.revision !== old.revision) relay?.admission.invalidateProvider(old.provider);
     }
     snapshot = next;
-    relay ??= new ModelRelayServer({ policy: relayPolicyFromConfig(next.config), enqueueMetric: sample => sender.enqueue(sample),
+    relay ??= new ModelRelayServer({ capture: provider => snapshot?.config.traffic_dump ? dump.begin(provider) : undefined, policy: relayPolicyFromConfig(next.config), enqueueMetric: sample => sender.enqueue(sample),
       prepare: async (provider, signal) => {
         await refreshCurrent(); signal.throwIfAborted();
         const initial = snapshot?.materials.find(value => value.provider === provider);
@@ -122,7 +124,7 @@ export async function startModelRelayService(configPath, environment = process.e
     closeTask = (async () => {
       await control.close(); await reader.close();
       await refreshTask?.catch(() => {});
-      await relay?.close(); await sender.close(); await selector?.close();
+      await relay?.close(); await dump.close(); await sender.close(); await selector?.close();
       for (const agent of agents.values()) agent.destroy(); agents.clear();
     })();
     return closeTask;

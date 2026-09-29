@@ -15,10 +15,11 @@ const millisecondsPerDay = 24 * 60 * 60 * 1_000;
 export interface PruneModelTrafficDumpOptions {
   /** 转储根目录。 */
   directory: string;
-  /** 只清理指定 Provider；省略时清理目录中的全部 V2 Provider。 */
+  /** 只清理指定 Provider；省略时清理自有 V2 Provider；Relay 由独立 owner 显式清理。 */
   label?: string;
   /** 历史 session 的最长保留天数；`0` 关闭按时间清理。 */
   retentionDays: number;
+  maximumBytes?: number;
   /** 当前写入目录；清理时始终保留。 */
   currentSessionDirectory?: string;
   /** 仍有调用或文件流归属的目录；清理时始终保留。 */
@@ -26,8 +27,8 @@ export interface PruneModelTrafficDumpOptions {
 }
 
 /** 清理可识别的 V2 历史 session；未知目录与旧版文件保持不变。 */
-export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOptions): void {
-  if (!existsSync(options.directory)) return;
+export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOptions): number {
+  if (!existsSync(options.directory)) return 0;
   const protectedDirectories = new Set(options.protectedSessionDirectories ?? []);
   if (options.currentSessionDirectory !== undefined) {
     protectedDirectories.add(options.currentSessionDirectory);
@@ -42,7 +43,7 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
     if (!entry.isDirectory()) continue;
     const path = join(options.directory, entry.name);
     const manifest = readManifest(path);
-    if (manifest?.version !== 2 || (options.label !== undefined && manifest.label !== options.label)) {
+    if (manifest?.version !== 2 || (options.label === undefined && manifest.label === "relay.chat") || (options.label !== undefined && manifest.label !== options.label)) {
       continue;
     }
     const sessions = byLabel.get(manifest.label) ?? [];
@@ -58,6 +59,7 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
   const oldestRetainedAtMs = options.retentionDays === 0
     ? null
     : Date.now() - options.retentionDays * millisecondsPerDay;
+  let totalRetained = 0;
   for (const sessions of byLabel.values()) {
     sessions.sort((left, right) => right.lastActivityAtMs - left.lastActivityAtMs
       || right.createdAtMs - left.createdAtMs);
@@ -73,10 +75,11 @@ export function pruneModelTrafficDumpSessions(options: PruneModelTrafficDumpOpti
         continue;
       }
       retained += session.size;
-      if (protectedSession || retained <= retainedBytesPerLabel) continue;
+      if (protectedSession || retained <= (options.maximumBytes ?? retainedBytesPerLabel)) { totalRetained += session.size; continue; }
       rmSync(session.path, { force: true, recursive: true });
     }
   }
+  return totalRetained;
 }
 
 function readManifest(directory: string): {

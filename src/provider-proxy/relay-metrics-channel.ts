@@ -6,7 +6,7 @@ export interface RelayMetricEnvelope { version: 1; providerId: string; relayRequ
 export type RelayMetricRejection = "invalid_sample" | "unknown_provider" | "queue_full" | "closing" | "unsupported_version";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const identity = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
-const sampleKeys = ["source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel",
+const sampleKeys = ["traffic", "source", "threadId", "turnId", "relayRequestId", "callerId", "keyId", "credentialGeneration", "provider", "requestModel", "userAgent",
   "responseModel", "responseFormat", "status", "deliveryStatus", "requestStartedAtMs", "responseCompletedAtMs", "totalDurationMs", "firstTokenMs",
   "httpStatus", "errorCode", "inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
 
@@ -93,6 +93,14 @@ function validSample(value: unknown, provider: unknown, requestId: unknown): val
       || !Number.isSafeInteger(sample.credentialGeneration) || Number(sample.credentialGeneration) < 1
       || !["json", "sse"].includes(String(sample.responseFormat)) || !["completed", "failed", "incomplete"].includes(String(sample.status))
       || !["finished", "disconnected", "failed"].includes(String(sample.deliveryStatus))) return false;
+    if (sample.traffic !== undefined) {
+      const traffic = record(sample.traffic);
+      if (Object.keys(traffic).some(key => !["label", "session", "interaction"].includes(key)) || traffic.label !== "relay.chat"
+        || typeof traffic.session !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-[1-9][0-9]*)?$/u.test(traffic.session)
+        || !Number.isSafeInteger(traffic.interaction) || Number(traffic.interaction) < 1) return false;
+    }
+    if (sample.userAgent !== undefined && (typeof sample.userAgent !== "string" || sample.userAgent.length < 1
+      || sample.userAgent.length > 512 || [...sample.userAgent].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))) return false;
     for (const key of ["requestModel", "responseModel", "errorCode"]) {
       const text = sample[key];
       if (text === undefined && key !== "requestModel") continue;

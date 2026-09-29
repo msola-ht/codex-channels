@@ -17,14 +17,16 @@ export const modelRelayUsage = `用法：codexc relay <命令>
   rotate --caller ID             轮换并启用新秘密，保留身份
   disable [--caller ID]           禁用调用方；省略 caller 则禁用服务
   enable                         启用服务配置（安装与启动通过 service）
+  rollback-dump                  备份后仅移除采集开关，保留当前身份/代次与已有文件
+  dump --enabled true|false      备份后设置报文采集；默认关闭，正文含用户输入和回答
 所有命令支持 -h/--help；新秘密仅在成功保存后输出一次。`;
 
 export function parseModelRelayCommand(args) {
   const [command, ...rest] = args;
-  const commands = ["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"];
+  const commands = ["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "dump", "rollback-dump"];
   if (!commands.includes(command)) throw new Error(modelRelayUsage);
   const allowed = command === "issue" ? ["--caller", "--key", "--provider", "--model"]
-    : ["rotate", "disable"].includes(command) ? ["--caller"] : [];
+    : command === "dump" ? ["--enabled"] : ["rotate", "disable"].includes(command) ? ["--caller"] : [];
   const options = { models: [] };
   for (let index = 0; index < rest.length; index += 2) {
     const flag = rest[index], value = rest[index + 1];
@@ -38,12 +40,13 @@ export function parseModelRelayCommand(args) {
   }
   if (command === "issue" && (!options.caller || !options.key || !options.provider || !options.models.length)
     || command === "rotate" && !options.caller) throw new Error(modelRelayUsage);
+  if (command === "dump" && !["true", "false"].includes(options.enabled)) throw new Error(modelRelayUsage);
   return { command, ...options };
 }
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env) {
-  if (!["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"].includes(input.command)) throw new Error(modelRelayUsage);
+  if (!["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "dump", "rollback-dump"].includes(input.command)) throw new Error(modelRelayUsage);
   const { configPath } = locateUserConfig(environment);
   const endpoint = modelRelayPaths(configPath).control;
   if (input.command === "status") return { ...await queryModelRelayControl(endpoint, "status"),
@@ -94,12 +97,17 @@ export async function manageModelRelay(input, environment = process.env) {
         const bytes = randomBytes(32); secret = `cr1.${caller.key_id}.${bytes.toString("base64url")}`;
         caller.secret_sha256 = createHash("sha256").update(bytes).digest("hex"); caller.credential_generation++; caller.enabled = true;
       }
-    } else config.enabled = input.command === "enable";
-    document.model_relay = modelRelayConfigSchema.parse(config);
+    } else if (input.command === "dump") {
+      if (!["true", "false"].includes(input.enabled)) throw new Error(modelRelayUsage);
+      config.traffic_dump = input.enabled === "true";
+    } else if (input.command !== "rollback-dump") config.enabled = input.command === "enable";
+    const removingDump = input.command === "rollback-dump" && Object.hasOwn(document.model_relay ?? {}, "traffic_dump");
+    if (input.command !== "rollback-dump") document.model_relay = modelRelayConfigSchema.parse(config);
+    else if (removingDump) delete document.model_relay.traffic_dump;
     validateGatewayConfigDocument(document);
-    const digest = modelRelayConfigDigest(document.model_relay);
+    const digest = modelRelayConfigDigest(modelRelayConfigSchema.parse(document.model_relay ?? {}));
     let backupPath = null;
-    if (previous !== digest || validated.model_relay === undefined) {
+    if (removingDump || previous !== digest || input.command !== "rollback-dump" && validated.model_relay === undefined) {
       backupPath = saveWithBackup(configPath, content, document);
     }
     return { digest, backupPath };
@@ -111,7 +119,7 @@ export async function manageModelRelay(input, environment = process.env) {
 }
 
 export async function runModelRelayCommand(args) {
-  if (!args.length || isCommandHelp(args, [[], ...["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
+  if (!args.length || isCommandHelp(args, [[], ...["status", "callers", "issue", "rotate", "disable", "enable", "upgrade-limits", "dump", "rollback-dump"].map(command => [command])], modelRelayUsage)) { console.log(modelRelayUsage); return; }
   const input = parseModelRelayCommand(args);
   console.log(JSON.stringify(await manageModelRelay(input), null, 2));
 }

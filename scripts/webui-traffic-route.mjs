@@ -113,10 +113,10 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(
       503,
       "traffic_unavailable",
-      "还没有调用记录文件：在 config.toml 的 [debug] 开启 model_traffic_dump 后重启 App Server 服务",
+      "还没有调用记录文件：自有调用需开启 [debug].model_traffic_dump；Relay 调用需通过 codexc relay dump --enabled true 开启独立采集",
     );
   }
-  const dump = dumpSettings(environment);
+  const dump = dumpSettings(environment, url.searchParams.get("label") === "relay.chat");
   if (apiPath === "/traffic") {
     assertParameters(url, ["label", "limit", "offset", "session"]);
     const label = url.searchParams.has("label") ? readLabel(url, labels) : null;
@@ -203,13 +203,15 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
   return true;
 }
 
-function dumpSettings(environment) {
+function dumpSettings(environment, relay) {
   const explicitConfigFile = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const configPath = explicitConfigFile
     ? explicitConfigFile
     : join(userDataDir(environment), "config.toml");
   try {
-    const debug = validateDebugConfigDocument(readGatewayConfig(configPath).debug ?? {});
+    const document = readGatewayConfig(configPath);
+    if (relay) return { enabled: document.model_relay?.traffic_dump === true, retentionDays: 7 };
+    const debug = validateDebugConfigDocument(document.debug ?? {});
     return {
       enabled: debug.model_traffic_dump,
       retentionDays: debug.model_traffic_retention_days,

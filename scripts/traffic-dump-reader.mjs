@@ -194,7 +194,17 @@ export async function describeDumpExchange(
   const models = createModelEvidenceCollector();
   models.headers(interaction.response?.headers, "http.headers");
   models.event(responseBody);
-  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, models.event);
+  const chat = responseBody?.success === true ? responseBody.data : responseBody;
+  const chatOutput = Array.isArray(chat?.choices) ? chat.choices.flatMap(choice => choice?.message && typeof choice.message === "object" && !Array.isArray(choice.message)
+    ? [{ type: "message", ...choice.message }] : []) : undefined;
+  let streamFacts;
+  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output ?? chatOutput, value => {
+    models.event(value);
+    if (interaction.response?.capture === "redacted_upstream_chat" && Array.isArray(value?.choices) && value.usage != null) streamFacts = responseFacts(value);
+  });
+  if (interaction.response?.capture === "redacted_upstream_chat") {
+    output.consume({ kind: "response_body", encoding: "utf8", text: responsePayload.text });
+  }
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   const collected = output.result();
   return {
@@ -228,8 +238,10 @@ export async function describeDumpExchange(
       errorScope: interaction.response.errorScope,
       failureStage: failureStage(interaction.response, responseBody),
       error: interaction.response.error,
+      capture: interaction.response.capture,
+      deliveryStatus: interaction.response.deliveryStatus,
       storedBytes: interaction.response.payload?.bytes,
-      ...facts,
+      ...(streamFacts ?? facts),
       ...collected,
     },
     trace: trace.items,
@@ -396,8 +408,9 @@ function compareInteraction(left, right, newestFirst) {
 function summaryOf(interaction, body) {
   const request = interaction.request;
   const response = interaction.response;
-  const metadata = requestMetadata(body);
-  const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
+  const relay = labelOf(interaction.directory) === "relay.chat";
+  const metadata = relay ? {} : requestMetadata(body);
+  const requestKind = relay ? undefined : metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
   return {
     id: request.id,
@@ -444,7 +457,7 @@ function readPayload(directory, payload, maxBytes) {
   if (payload === undefined || !Array.isArray(payload.parts)) return { text: "", truncated: false };
   const buffers = [];
   let remaining = maxBytes;
-  let truncated = false;
+  let truncated = payload.truncated === true;
   for (const part of payload.parts) {
     if (remaining <= 0) {
       truncated = true;

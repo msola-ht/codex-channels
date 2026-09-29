@@ -117,6 +117,13 @@ interface MetricsQueryReader {
 export class SqliteRequestMetricsQueries {
   constructor(private readonly reader: MetricsQueryReader) {}
 
+  requestById(id: number): StoredModelRequestMetric | null {
+    this.reader.requireOpen();
+    if (!Number.isSafeInteger(id) || id < 1) throw new Error("模型请求记录 ID 必须为正安全整数");
+    const row = this.reader.prepare("SELECT * FROM model_request_metrics WHERE id = ?").get(id) as MetricRow | undefined;
+    return row === undefined ? null : toStoredMetric(row);
+  }
+
   recent(limit: number): StoredModelRequestMetric[] {
     this.reader.requireOpen();
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {

@@ -46,7 +46,7 @@ export function chatStreamError(value: unknown): ChatUpstreamError | undefined {
   }
   return undefined;
 }
-export async function readChatHttpError(incoming: IncomingMessage): Promise<ChatUpstreamError> {
+export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }): Promise<ChatUpstreamError> {
   const parts: Buffer[] = [];
   let size = 0;
   try {
@@ -56,7 +56,12 @@ export async function readChatHttpError(incoming: IncomingMessage): Promise<Chat
       if (size > 64 * 1024) { incoming.destroy(); break; }
       parts.push(part);
     }
-    if (size <= 64 * 1024) return chatUpstreamError(object(JSON.parse(Buffer.concat(parts).toString("utf8"))).error, incoming.statusCode);
+    if (size <= 64 * 1024) {
+      const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
+      capture?.value(value, false);
+      return chatUpstreamError(object(value).error, incoming.statusCode);
+    }
   } catch { /* Non-JSON or interrupted bodies retain the HTTP classification. */ }
+  capture?.invalid(size);
   return chatUpstreamError(undefined, incoming.statusCode);
 }

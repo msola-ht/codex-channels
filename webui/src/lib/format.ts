@@ -86,6 +86,14 @@ export function formatTime(value: number | null | undefined, timeZone = getServe
   return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
+/** Detail timestamps retain seconds and milliseconds in the server time zone. */
+export function formatTimestamp(value: number, timeZone = getServerTimeZone()): string {
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23",
+  }).format(value)
+  return `${formatCalendarDay(value, timeZone)} ${time}`
+}
+
 const errorTypeNames: Record<string, { zh: string; en: string }> = {
   usage_limit_reached: { zh: "用量上限", en: "Usage limit" },
   rate_limit_reached: { zh: "速率限制", en: "Rate limit" },

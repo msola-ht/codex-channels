@@ -300,7 +300,7 @@ codexc doctor
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20→v21 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21→v22 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -319,7 +319,7 @@ codexc cleanup
 | 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 保留数据升级指标库 | `codexc metrics upgrade --from 20 --to 21` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
+| 保留数据升级指标库 | `codexc metrics upgrade --from 21 --to 22` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并返回清理菜单。
@@ -502,7 +502,7 @@ codexc traffic --all --grep deepseek-flash     # 只显示匹配关键字的逻�
 codexc traffic --exchange 12 --max-bytes 2000  # 限制每段正文的显示长度
 codexc traffic --follow                        # 从现有文件末尾开始持续输出新写入的记录，按 Ctrl-C 停止
 codexc traffic cleanup                         # 预览全部可清理转储，不删除
-codexc traffic cleanup --confirm               # 停止全部 App Server 后永久删除预览范围
+codexc traffic cleanup --confirm               # 停止全部 App Server 与 Relay 后永久删除预览范围
 ```
 
 摘要行包含调用编号、时间、请求路径或 WebSocket URL、线程、轮次、模型和终态；详情固定分为“请求”
@@ -597,6 +597,14 @@ n=1 和请求大小等边界由 Relay 校验；省略 stream 时默认 JSON。�
 
 Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给 CLP。
 上游 Authorization 和传输头由 Relay 控制；Cookie、代理凭据、转发来源与内部身份头剔除。
+
+在 WebUI“请求明细”点击唯一的“查看调用详情”：已采集报文直接打开现有转储视图；未关联时显示指标摘要与缺失说明。Relay 没有 Codex 会话或轮次，HTTP 200 不等于客户端交付成功。出站 User-Agent 只记录新调用实际发送的值，缺失时不推断客户端类型。
+
+Relay 正文采集默认关闭，与自有代理的 debug 开关独立。完成 v22 指标库升级并安装匹配的 Gateway/Relay 后，执行 `codexc relay dump --enabled true` 开启，`codexc relay dump --enabled false` 关闭；命令先备份再原子保存并核验运行进程的配置摘要，不自动启动服务。仅采集随后实际出站的调用，不补录历史。
+
+转储保存脱敏后的出站 Chat 参数、消息和上游 JSON/SSE，交付状态另行显示。结构化凭据字段遮蔽，头只留 content-type、accept、user-agent；翻译原文、回答及自由文本内的秘密仍会保存。每次请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘、7 天保留和 16 MiB 待写预算。容量不足先清理最旧非活动批次，仍不足跳过采集并记服务日志，不中断转发；超限、解析失败和展示截断会明确标记。停止采集后已有文件继续保留；自动清理在后续 Relay 采集时执行。写入或待写内存故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
+
+回退旧程序前，先用 `codexc relay disable` 禁用入口配置，再停止相关服务，使用 `codexc relay rollback-dump` 备份并仅移除新增开关，保留当前调用方身份、哈希和凭据代次；已有转储文件不删除。指标库按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 22 --to 21 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。不要恢复旧配置备份覆盖已轮换凭据。
 
 Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响应提供 `code`、`phase`、
 `request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。

@@ -11,6 +11,7 @@ const limits = (concurrency, burst) => ({
 function schema(legacy) {
   return z.strictObject({
     enabled: z.boolean().default(false),
+    traffic_dump: z.boolean().default(false),
     host: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
     port: z.number().int().min(1024).max(65535).default(4119),
     ...limits(10, 10),
