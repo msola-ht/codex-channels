@@ -164,6 +164,8 @@ function assertWindowsPrivatePathSync(path, kind, operation = "verify") {
       input: JSON.stringify({ operation, kind, path }),
       encoding: "utf8",
       maxBuffer: 1_048_576,
+      timeout: 2000,
+      killSignal: "SIGKILL",
       windowsHide: true,
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     },

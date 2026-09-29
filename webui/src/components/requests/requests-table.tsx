@@ -73,6 +73,9 @@ export function RequestsTable({
 }) {
   const { t, language } = useTranslation()
   const columnLabels: Record<string, string> = {
+    source: t("filters.source"),
+    caller: t("filters.caller"),
+    delivery: t("filters.delivery"),
     time: t("metrics.time"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
@@ -91,6 +94,20 @@ export function RequestsTable({
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "source", enableSorting: false, header: t("filters.source"),
+      cell: ({ row }) => row.original.source === "relay" ? t("filters.relay") : t("filters.owned"),
+    },
+    {
+      id: "caller", enableSorting: false, header: t("filters.caller"),
+      cell: ({ row }) => <TruncatedText text={row.original.callerId ?? "—"} className="max-w-40" />,
+    },
+    {
+      id: "delivery", enableSorting: false, header: t("filters.delivery"),
+      cell: ({ row }) => row.original.deliveryStatus === "finished" ? t("filters.deliveryFinished")
+        : row.original.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected")
+          : row.original.deliveryStatus === "failed" ? t("filters.deliveryFailed") : "—",
+    },
     {
       id: "time",
       accessorFn: (record) => record.recordedAtMs,

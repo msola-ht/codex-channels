@@ -120,7 +120,7 @@ describe("systemd installer", () => {
       .split("\n")
       .filter((line) => line.includes("service-target-query.mjs"));
     expect(queries).toHaveLength(1);
-    expect(queries[0]).toContain("systemd gateway start");
+    expect(queries[0]).toContain("systemd gateway status");
   });
 
   linuxIt("returns the systemctl status failure to callers", () => {

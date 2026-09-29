@@ -8,6 +8,7 @@ import { normalizeTaskInput, WebuiManagementTaskRunner } from "../scripts/webui-
 describe("WebUI management tasks", () => {
   it("accepts only the documented service and maintenance actions", () => {
     expect(normalizeTaskInput({ operation: "service", action: "restart", target: "gateway" })).toEqual({ operation: "service", action: "restart", target: "gateway" });
+    expect(normalizeTaskInput({ operation: "service", action: "stop", target: "model-relay" })).toEqual({ operation: "service", action: "stop", target: "model-relay" });
     expect(normalizeTaskInput({ operation: "service", action: "reload" })).toEqual({ operation: "service", action: "reload", target: undefined });
     expect(normalizeTaskInput({ operation: "metrics", action: "cleanup" })).toEqual({ operation: "metrics", action: "cleanup" });
     expect(normalizeTaskInput({ operation: "metrics", action: "prune", target: "deepseek" })).toEqual({ operation: "metrics", action: "prune", target: "deepseek" });

@@ -62,6 +62,19 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("filters relay requests by real caller with null Thread/Turn and separate delivery", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, { ...metricSample(), source: "relay", callerId: "client", keyId: "key",
+      credentialGeneration: 2, relayRequestId: "8a13f205-1387-48a9-8cec-efce153a8210", deliveryStatus: "disconnected",
+      provider: "clp-test", transport: "http", operation: "response", threadId: null, turnId: null, traffic: null });
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ records: [{ source: "relay", callerId: "client", threadId: null, turnId: null, deliveryStatus: "disconnected" }] });
+    const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
+    expect(await owned.json()).toMatchObject({ records: [] });
+    expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
+  });
   it("returns the server time zone before a metrics database exists", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);

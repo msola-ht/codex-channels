@@ -97,6 +97,8 @@
     "scripts/management-confirmations.mjs",
     "scripts/management-security.mjs",
     "scripts/metrics-command-options.mjs",
+    "scripts/model-relay-command.mjs",
+    "scripts/service-selection.mjs",
     "scripts/delivery-command.mjs",
     "scripts/metrics-config-menu.mjs",
     "scripts/metrics-database-access.mjs",

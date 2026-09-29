@@ -62,6 +62,7 @@ try {
     "remote",
     "work",
     "metrics",
+    "relay",
     "channel",
     "webui",
     "start",
@@ -80,7 +81,7 @@ try {
     || !serviceHelp.includes("install")
     || !serviceHelp.includes("reload")
     || !serviceHelp.includes("logs")
-    || !serviceTargetHelp.includes("gateway|app-server|webui|all")
+    || !serviceTargetHelp.includes("gateway|app-server|webui|model-relay|all")
   ) {
     throw new Error("CLI 分级帮助不完整");
   }
@@ -93,6 +94,13 @@ try {
     if (typeof setup.runSetup !== "function") throw new Error("Installed Setup entry point is missing");
   `, installedPackage], temporaryDirectory, environment, true);
   for (const requiredFile of [
+    "runtime/model-relay-service.mjs",
+    "runtime/model-relay-material-worker.mjs",
+    "runtime/model-relay-metrics-authorization.mjs",
+    "runtime/model-relay-metrics-authorization.d.mts",
+    "scripts/model-relay-command.mjs",
+    "scripts/service-selection.mjs",
+    "dist/model-relay/index.js",
     "runtime/app-server-runtime.mjs",
     "runtime/app-server-supervisor.mjs",
     "runtime/cli-presentation.mjs",

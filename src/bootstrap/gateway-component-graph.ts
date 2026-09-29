@@ -8,6 +8,8 @@ import { accountQueryFailureMetadata } from "./account-query.js";
 import { StartupNetworkRecovery } from "./startup-network-recovery.js";
 import { withOutputExecutionAdmission } from "./output-execution-admission.js";
 import { PersistentInteractionPort } from "./persistent-interaction-port.js";
+import { RelayMetricsComposition, createRelayMetricAuthorization } from "./relay-metrics-composition.js";
+import { modelRelayPaths } from "../../runtime/model-relay-paths.mjs";
 
 import { assertAppServerSocketPathSupported } from "../../runtime/app-server-runtime.mjs";
 import {
@@ -167,6 +169,7 @@ export abstract class GatewayComponentGraph {
   private readonly conversations: ConversationService;
   readonly refreshProviderModels: () => void;
   private readonly providerMetrics: ProviderMetricsComposition;
+  private readonly relayMetrics: RelayMetricsComposition | undefined;
   private readonly providerIdleReleaser: ProviderIdleReleaser;
   private readonly conversationIdleReleaser?: ConversationIdleReleaser;
   private readonly providerAccounts?: ProviderAccountService;
@@ -364,6 +367,11 @@ export abstract class GatewayComponentGraph {
       metricsStore,
       (error) => logger.warn({ err: error }, "模型请求指标后台写入失败"),
     );
+    this.relayMetrics = configPath === undefined ? undefined : new RelayMetricsComposition({
+      path: modelRelayPaths(configPath).metrics,
+      writer: metricsWriter,
+      authorize: createRelayMetricAuthorization(configPath),
+    });
     const recordTurnErrorMetric = (
       provider: string,
       model: string | null,
@@ -1194,6 +1202,9 @@ export abstract class GatewayComponentGraph {
       await this.surfaceManager.preparePersistence();
       this.requireRunning();
       await this.providerMetrics.start();
+      // IPC lifetime follows the writer, not the HTTP admission switch. It must
+      // already exist for first enablement and drain terminal metrics on disable.
+      await this.relayMetrics?.apply(true);
       this.requireRunning();
       this.removeRpcNotification = this.codex.onNotification((notification) => {
         this.inbound.publish(notification, isCriticalNotification(notification.method));
@@ -1423,6 +1434,7 @@ export abstract class GatewayComponentGraph {
           this.logger.warn("账户快照预热取消等待超时，迟到结果不会写入快照");
         }
       }],
+      ["Relay Metrics", () => this.relayMetrics?.close()],
       ["Provider Proxy Metrics", () => this.providerMetrics.close()],
       ["Output Event Bus", () => this.output.close()],
       ["Codex Client", () => this.codex.close()],

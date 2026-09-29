@@ -49,11 +49,13 @@ describe("asynchronous system proxy discovery", () => {
     const pending = selector.select("https://example.test");
     selector.invalidate();
     complete({ https_proxy: "http://127.0.0.1:7890" });
-    await pending;
+    await vi.waitFor(() => expect(readSystemProxy).toHaveBeenCalledTimes(2));
     const next = selector.select("https://example.test");
     expect(readSystemProxy).toHaveBeenCalledTimes(2);
     complete({ https_proxy: "http://127.0.0.1:7891" });
+    await expect(pending).resolves.toBe("http://127.0.0.1:7891/");
     await expect(next).resolves.toBe("http://127.0.0.1:7891/");
+    await selector.close();
   });
 
   it("releases a failed discovery so a later request can recover", async () => {

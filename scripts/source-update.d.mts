@@ -111,10 +111,12 @@ export interface SourceUpdateOptions {
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
   ) => Promise<void> | void;
+  inspectRelayRunning?: (environment: NodeJS.ProcessEnv) => Promise<boolean> | boolean;
   startServices?: (
     checkout: string,
     environment: NodeJS.ProcessEnv,
     options: SourceUpdateOptions,
+    relayWasRunning: boolean,
   ) => Promise<void> | void;
   installGlobalPackage?: (
     checkout: string,

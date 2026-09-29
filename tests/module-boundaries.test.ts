@@ -46,6 +46,7 @@ const allowedModuleDependencies: Record<string, readonly string[]> = {
   "event-bus": [],
   delivery: [],
   "model-api": [],
+  "model-relay": ["model-api", "provider-proxy"],
   "provider-proxy": ["model-api"],
   observability: ["config"],
   policy: ["conversation-core"],

@@ -32,6 +32,11 @@ export const serviceDefinitions = Object.freeze([
     startOrder: 0,
     stopOrder: 0,
   }),
+  Object.freeze({
+    target: "model-relay", displayName: "Model Relay",
+    systemd: "codex-connect-model-relay.service", launchd: "com.hegenai.codex-model-relay",
+    windows: "Codex Connect Model Relay", core: false, helpOrder: 3, startOrder: 2, stopOrder: -1,
+  }),
 ]);
 
 export const serviceTargetUsage = [

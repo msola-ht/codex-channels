@@ -8,6 +8,7 @@ export interface ServiceInstallContext {
   runtimeDir: string;
   socketPath: string;
   workdir: string;
+  relayEnabled: boolean;
 }
 
 export function resolveServiceInstallContext(

@@ -6,6 +6,14 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   filters: {
+    "source": "来源",
+    "caller": "调用方",
+    "owned": "自有调用",
+    "relay": "API 转发",
+    "delivery": "交付",
+    "deliveryFinished": "已交付",
+    "deliveryDisconnected": "客户端断开",
+    "deliveryFailed": "交付失败",
     "range": "时间范围",
     "rangeLabel": "时间范围：{range}",
     "from": "开始日期",
@@ -510,6 +518,14 @@ export type Messages = typeof zh
 
 const en: Messages = {
   filters: {
+    "source": "Source",
+    "caller": "Caller",
+    "owned": "Owned",
+    "relay": "API relay",
+    "delivery": "Delivery",
+    "deliveryFinished": "Delivered",
+    "deliveryDisconnected": "Client disconnected",
+    "deliveryFailed": "Delivery failed",
     "range": "Time range",
     "rangeLabel": "Time range: {range}",
     "from": "Start date",

@@ -1,6 +1,7 @@
-import { clinePassAccountMarkerPath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
-import { assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
+import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import {
   closeSync,
   constants,
@@ -489,9 +490,7 @@ export function loadConfiguredProviderProfile(
     managedProviderDirectory(environment, definition),
     definition.catalogFileName,
   );
-  const profilePath = marker.mode === "exclusive"
-    ? join(codexHome, "config.toml")
-    : join(codexHome, descriptor.profileName);
+  const profilePath = configuredProfilePath(codexHome, descriptor, marker.mode);
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
@@ -501,6 +500,42 @@ export function loadConfiguredProviderProfile(
     validateModelCatalog(profile.catalogPath, definition, profile.model);
   }
   return { ...profile, mode: marker.mode };
+}
+
+function configuredProfilePath(codexHome, descriptor, mode) {
+  return join(codexHome, mode === "exclusive" ? "config.toml" : descriptor.profileName);
+}
+
+/** Narrow read-only Chat material snapshot. All paths and credential parsing remain in the managed provider owner. */
+export function loadConfiguredChatProviderMaterial(provider, environment = process.env) {
+  assertResponsesContextSyncComplete(environment);
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition || !isClinePassAccountProvider(provider) || definition.upstreamWireApi !== "chat_completions") {
+    throw new Error("Relay 只支持已配置的精确 CLP 账户");
+  }
+  const marker = readManagedMarker(environment, definition);
+  if (!marker) throw new Error("Relay Provider 管理标记不存在");
+  const directory = managedProviderDirectory(environment, definition);
+  const paths = [clinePassAccountsFilePath(environment), managedProviderMarkerPath(environment, definition),
+    configuredProfilePath(codexHomePath(environment), providerDescriptor(definition), marker.mode),
+    join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
+  const fingerprint = () => {
+    const hash = createHash("sha256");
+    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumCatalogBytes)]));
+    return hash.digest("hex");
+  };
+  const before = fingerprint();
+  if (!clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error("Relay Provider 已撤销");
+  const models = loadModelCatalogSettings(profile.catalogPath, definition).map(model => model.model);
+  if (fingerprint() !== before) throw new Error("Relay Provider 材料读取期间发生变化");
+  if (!findManagedProviderDefinition(environment, provider) || readManagedMarker(environment, definition)?.mode !== marker.mode) {
+    throw new Error("Relay Provider 账户或模式读取期间发生变化");
+  }
+  assertResponsesContextSyncComplete(environment);
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models,
+    paths: [...paths, responsesContextSyncPath(environment)], revision: before };
 }
 
 export function readProviderProfile(

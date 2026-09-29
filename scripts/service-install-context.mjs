@@ -53,6 +53,7 @@ export function resolveServiceInstallContext(
     runtimeDir,
     socketPath,
     workdir: defaultWorkspace.cwd,
+    relayEnabled: document.model_relay?.enabled === true,
   };
 }
 

@@ -133,6 +133,7 @@ function configChangeLabel(code: ConfigChangeCode): string {
     "experimental.plugin-api": "开发中 Plugin API",
     "scheduled-tasks.enabled": "Gateway 计划任务",
     "metrics.storage": "指标保留策略",
+    "model-relay.policy": "模型 API 转发策略",
     "observability.log-level": "日志级别",
     "workspace.default": "默认 Workspace",
     "workspace.registry": "Workspace",

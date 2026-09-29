@@ -27,7 +27,7 @@
   自身退出时只释放租约和 Proxy，不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
-- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
+- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；停止前记录 Relay 运行状态，成功及失败恢复都只启动原本运行且仍启用的 Relay。失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -539,3 +539,10 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
+
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay 状态与脱敏调用方查询、签发、轮换、停用及启用；配置锁、私有备份和原子保存后核验 IPC 摘要，只输出一次新秘密。
+- `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
+
+`metrics-database.mjs` 的 `upgrade --from 20 --to 21` 默认只预检，`--apply` 才持锁备份迁移；
+`rollback --from 21 --to 20 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
+两者不自动操作服务，回滚不恢复旧配置/凭据。查询与导出支持 `--source owned|relay`、`--caller ID`。

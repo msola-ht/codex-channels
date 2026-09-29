@@ -7,6 +7,8 @@
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用和文本结果映射为 Chat 请求。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误。
+- `chat-request.ts`：独立 Relay 直接 Chat 请求的严格文本/函数白名单验证，不经过 Responses 转换。
+- `chat-response.ts`：直接 Chat JSON/SSE 的单选择响应裁剪、工具参数完整性、终态与 Usage 归约。
 
 当前支持文本、用户内联 Base64 图片与三类工具。Responses `function` 保持函数调用，含显式命名空间映射、调用还原和名称冲突检查，超长名称使用稳定摘要短名并在输出中还原原始身份。自由格式 `custom` 工具在 Chat 侧以单字段 `input` 的 JSON 函数下发，语法声明只作说明、不参与校验，回程把该字段还原为 `custom_tool_call`。执行位置为 `client` 的 `tool_search` 以下发时的参数原样声明，回程还原为 `tool_search_call`；其结果带回的工具会在同一请求里补充声明，已检索工具的 `defer_loading: true` 在 Chat 声明中移除；仅原始名称、命名空间和工具类型完全相同才去重，转换名冲突明确拒绝，因为 Chat 上游没有“上游自动补工具”的等价机制。托管工具（如 `web_search`）与执行位置为服务端的 `tool_search` 在 Chat 协议下没有等价形态，按失败关闭拒绝。同样拒绝图片文件引用、远程图片 URL、工具图片结果、加密推理、服务端会话引用和
 其他未支持语义。Responses `text.format` 的 `json_schema` 按原样映射为 Chat `response_format`（名称、严格标记和 schema 逐字段校验）。`text.verbosity` 取值校验后忽略，因为 Chat 上游没有等价字段；其他文本控制明确拒绝。显式推理等级 `none/low/high/max` 映射为 Chat `reasoning.effort`，`none` 关闭思考，缺失时不生成控制参数；其他等级、预算和摘要控制明确拒绝（`summary: none` 可省略）。

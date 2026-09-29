@@ -9,6 +9,8 @@ export interface Range<Name extends string = RangeName> {
 }
 
 export interface MetricsQuery {
+  source?: "owned" | "relay"
+  callerId?: string
   range?: RangeName
   from?: string
   to?: string
@@ -211,6 +213,12 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  source?: "owned" | "relay"
+  callerId?: string | null
+  keyId?: string | null
+  credentialGeneration?: number | null
+  relayRequestId?: string | null
+  deliveryStatus?: "finished" | "disconnected" | "failed" | null
   /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
   upstreamProvider?: string
   totalDurationMs: number | null
@@ -327,7 +335,7 @@ export interface SettingsSummaryResponse {
 }
 
 export interface ManagementServiceEntry {
-  target: "gateway" | "app-server" | "webui"
+  target: "gateway" | "app-server" | "webui" | "model-relay"
   name: string
   identifier: string | null
   loaded: boolean
@@ -476,7 +484,7 @@ export type ManagementTaskInput =
   | { operation: "update"; action?: "source" }
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
-  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
+  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "model-relay" | "all" }
   | { operation: "metrics"; action: "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
   | { operation: "traffic"; action: "cleanup" }

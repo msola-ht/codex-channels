@@ -300,7 +300,7 @@ codexc doctor
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。当前数据库基线只校验、不写库；后续 Schema 变化随版本提供具体迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20→v21 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -319,6 +319,7 @@ codexc cleanup
 | 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
+| 保留数据升级指标库 | `codexc metrics upgrade --from 20 --to 21` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并返回清理菜单。
@@ -576,3 +577,15 @@ npm test
 协议升级必须先查阅 [`docs/index.md`](index.md)、官方固定 Tag 和 [`上游源码维护规则`](upstream-sources.md)，不得把生成类型存在误认为 Gateway 已支持。完整项目文档索引见 [`index.md`](../index.md)。
 
 项目命令规则预授权只读 Git 状态、差异、日志、声明的验证入口和绑定渠道图片发送；`git branch`、`git remote` 不整体预授权，按当前执行权限处理。
+
+## 可选模型 API 转发
+
+`codexc relay` 管理独立 Relay 的调用方和访问密钥；`status`、`callers` 只读，
+`issue` 签发、`rotate` 轮换、`disable --caller ID` 撤销。新秘密只在保存后显示一次。
+`enable`/`disable` 保存服务开关并确认当前进程生效；进程未运行时明确显示仅保存，
+通过 `codexc service start model-relay` 启动。首次启用前先完成指标库显式升级。
+
+Relay 默认禁用、只允许回环监听；异机客户端使用自己管理的隧道。只提供 Chat JSON/SSE 和
+受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
+完整配置、字段支持范围与回滚步骤见[实施方案](provider-api-relay-development.md#143-精确配置与命令已授权实现与隔离验证)。
+WebUI 请求页面可按来源与真实调用方筛选；接收确认不代表指标已落盘，交付完成不证明客户端已收到。

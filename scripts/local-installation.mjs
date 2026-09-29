@@ -8,7 +8,9 @@ import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { serviceDefinitionsForTarget } from "../runtime/service-targets.mjs";
 import { loadConfigDocument } from "../dist/config/index.js";
 import { sessionDisplayCacheSchemaVersion } from "../dist/storage/index.js";
-import { validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
+import { inspectMetricsDatabase, validateMetricsDatabaseStructure } from "./metrics-database-access.mjs";
+import { upgradeRequestMetricsDatabase } from "../dist/observability/index.js";
+import { maintainMetricsSchema } from "./metrics-database.mjs";
 import { inspectStateDatabaseUpgrade, upgradeStateDatabase } from "./state-database.mjs";
 import { requireUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
 
@@ -25,18 +27,25 @@ export function inspectGatewayConfiguration(environment = process.env) {
 
 export function inspectDatabaseUpdates(environment = process.env) {
   const state = inspectStateDatabaseUpgrade(environment);
-  const metrics = validateMetricsDatabaseStructure(environment);
+  const status = inspectMetricsDatabase(environment);
+  const metricsUpgrade = status.exists && status.schemaVersion === 20;
+  if (metricsUpgrade) upgradeRequestMetricsDatabase(status.databasePath);
+  const metrics = metricsUpgrade ? { ...status, targetSchemaVersion: 21 } : validateMetricsDatabaseStructure(environment);
   const sessionDisplayCache = inspectSessionDisplayCache(environment);
   if (!sessionDisplayCache.compatible) {
     throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
   }
-  return { required: state.exists && !state.compatible, state, metrics, sessionDisplayCache };
+  return { required: state.exists && !state.compatible || metricsUpgrade, state, metrics, sessionDisplayCache };
 }
 
 // Stable candidate-owned entry point, invoked by the updater after stopping services.
 export function applyDatabaseUpdates(environment = process.env) {
-  inspectDatabaseUpdates(environment);
-  return upgradeStateDatabase(environment);
+  const inspection = inspectDatabaseUpdates(environment);
+  const state = upgradeStateDatabase(environment);
+  if (inspection.metrics.exists && inspection.metrics.schemaVersion === 20) {
+    return Promise.resolve(state).then(() => maintainMetricsSchema("upgrade", ["--from", "20", "--to", "21", "--apply"], environment));
+  }
+  return state;
 }
 
 export function inspectSessionDisplayCache(environment = process.env) {

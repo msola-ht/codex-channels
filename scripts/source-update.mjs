@@ -24,6 +24,8 @@ import {
   recordManagedSourceMetadata,
 } from "./source-install-metadata.mjs";
 import { createPrompter } from "./terminal-prompter.mjs";
+import { serviceControlDefinitions } from "./service-selection.mjs";
+import { inspectManagedServiceStatus } from "./service-status.mjs";
 
 const officialRepository = "https://github.com/msola-ht/codex-channels.git";
 const releaseVersionPattern = /^\d+\.\d+\.\d+(?:-fix[1-9]\d*|-rc\.[1-9]\d*)?$/u;
@@ -171,6 +173,7 @@ export async function updateManagedSourceInstallation(
   let switched = false;
   let servicesMayNeedRestore = false;
   let servicesRestored = false;
+  let relayWasRunning = false;
   let backupPath;
   let databasesReady = true;
   const renamePath = options.renamePath ?? renameSync;
@@ -266,6 +269,7 @@ export async function updateManagedSourceInstallation(
       ),
     );
     if (inspection.services.installed) {
+      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
       servicesMayNeedRestore = true;
       await runStage(
         "stop-services",
@@ -321,7 +325,7 @@ export async function updateManagedSourceInstallation(
     databasesReady = true;
     if (inspection.services.installed) {
       await runStage("restore-services", () =>
-        (options.startServices ?? startCoreServices)(checkout, environment, options));
+        (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning));
       servicesMayNeedRestore = false;
     }
     await runStage("cleanup", () => {
@@ -357,7 +361,7 @@ export async function updateManagedSourceInstallation(
     }
     if (servicesMayNeedRestore) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options);
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
         servicesRestored = true;
       } catch (startError) {
         const combinedError = new AggregateError(
@@ -873,14 +877,23 @@ async function stopCoreServices(checkout, environment, options) {
   );
 }
 
-async function startCoreServices(checkout, environment, options) {
-  run(
-    process.execPath,
-    [join(checkout, "bin", "codexc.mjs"), "service", "start", "all"],
-    checkout,
-    environment,
-    options.runCommand,
-  );
+function inspectRelayRunning(environment) {
+  const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
+  if (!serviceControlDefinitions(platform, "all", "status", environment).some(service => service.target === "model-relay")) return false;
+  const service = inspectManagedServiceStatus({ environment, target: "model-relay" }).services[0];
+  if (service?.running) return true;
+  if (!service || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state)) {
+    throw new Error("无法确认更新前 Relay 运行状态；未停止服务");
+  }
+  return false;
+}
+
+async function startCoreServices(checkout, environment, options, relayWasRunning) {
+  const platform = process.platform === "linux" ? "systemd" : process.platform === "darwin" ? "launchd" : "windows";
+  const targets = ["app-server", "gateway"];
+  if (relayWasRunning && serviceControlDefinitions(platform, "all", "start", environment).some(service => service.target === "model-relay")) targets.push("model-relay");
+  for (const target of targets) run(process.execPath,
+    [join(checkout, "bin", "codexc.mjs"), "service", "start", target], checkout, environment, options.runCommand);
 }
 
 function packageVersion(checkout) {
@@ -986,6 +999,7 @@ export async function updateInstalledPackage(environment = process.env, options 
   let temporaryDirectory;
   let servicesStopped = false;
   let serviceStopCompleted = false;
+  let relayWasRunning = false;
   let databasesReady = !inspection.databaseUpdatesRequired;
   let packageStage = "install-codex-cli";
   try {
@@ -1003,6 +1017,7 @@ export async function updateInstalledPackage(environment = process.env, options 
       checkout, prepared.validationEnvironment, options,
     );
     if ((prepared.installRequired || inspection.databaseUpdatesRequired) && inspection.services.installed) {
+      relayWasRunning = await (options.inspectRelayRunning ?? inspectRelayRunning)(environment);
       servicesStopped = true;
       packageStage = "stop-services";
       await (options.stopServices ?? stopCoreServices)(checkout, environment, options);
@@ -1016,7 +1031,7 @@ export async function updateInstalledPackage(environment = process.env, options 
       databasesReady = true;
     }
     if (servicesStopped) {
-      await (options.startServices ?? startCoreServices)(checkout, environment, options);
+      await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
       servicesStopped = false;
     }
     writeMessageSafely(
@@ -1040,7 +1055,7 @@ export async function updateInstalledPackage(environment = process.env, options 
     }
     if (servicesStopped) {
       try {
-        await (options.startServices ?? startCoreServices)(checkout, environment, options);
+        await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
       } catch (restoreError) {
         throw new AggregateError([error, restoreError], "配套 CLI 更新失败，且核心服务恢复失败", { cause: restoreError });
       }

@@ -1,7 +1,7 @@
 # launchd 服务模板
 
 本目录保存 macOS 用户级 launchd 模板，用于把 Codex App Server、多 Surface Gateway 与 WebUI
-安装为三个独立进程。
+以及可选 Model Relay 安装为独立进程。
 
 ## 文件
 
@@ -19,7 +19,7 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 不得终止共享 App Server。
 
 日常管理统一使用 `codexc service`。启停、重启、状态和日志可选择 `gateway`、`app-server`、
-`webui` 或 `all`；WebUI 独立于 `all`，安装时只生成 plist 不自动
+`webui`、`model-relay` 或 `all`；WebUI 独立于 `all`，安装时只生成 plist 不自动
 启动。不写目标时，启停和状态默认 `all`，重启和日志默认 `gateway`。
 
 验证模板：
@@ -27,3 +27,8 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 ```bash
 plutil -lint launchd/*.plist.template
 ```
+
+- `com.hegenai.codex-model-relay.plist.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
+
+Relay 默认禁用；`all` 启动仅纳入已安装且启用的 Relay，停止先关闭 Relay，再关闭 Gateway。
+状态包含已安装 Relay；单独停止 Gateway 不主动结束 Relay，指标接收不可用时由 Relay 记录未确认。

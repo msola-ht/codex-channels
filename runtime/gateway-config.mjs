@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
+import { modelRelayConfigSchema } from "./model-relay-config.mjs";
 
 import {
   securePrivateDirectorySync,
@@ -214,6 +215,7 @@ const gatewayDocumentSchema = z.strictObject({
   weixin: weixinSetupSchema.optional(),
   codex: codexSchema,
   gateway: gatewaySchema.optional(),
+  model_relay: modelRelayConfigSchema.optional(),
   approval: z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(900),
   }).default({ timeout_seconds: 900 }),

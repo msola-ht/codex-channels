@@ -5,6 +5,7 @@ export {
   validateConfiguredModelProvider,
   validateConfiguredModelProviders,
   loadManagedModelProviderSettings,
+  loadConfiguredChatProviderMaterial,
   loadManagedModelWindow,
   readCodexConfigModelOverride,
   writeManagedModelProviderProfileDefault,

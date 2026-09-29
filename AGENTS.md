@@ -46,6 +46,7 @@
 ## Current Architecture
 
 - The repository contains one modular TypeScript Gateway. The official local entry point is `codexc`, installed from source through npm.
+- The optional Model Relay runs independently, exposes only the documented model API, and submits metrics through private IPC to Gateway's sole database writer. It does not expose or connect to App Server conversation capabilities.
 - Codex App Server runs independently. Default or fixed mode uses one primary instance; switching mode may add Provider-isolated instances supervised by the same service entry point.
   Native Codex TUI and Gateway connect to the corresponding Provider instance and share its Threads and live state.
 - App Server is the sole source of truth for Thread, Turn, Item, Goal and conversation history.
@@ -189,9 +190,10 @@ Surface -> Application/Core <- Codex Client
 - Escalation requests must explain the command's purpose and remain within this repository and task. They must not expand permission to modify, commit or write remotely.
 - Escalation grants execution permission, not user authorization. Commits, pushes, dependency changes and other external writes still follow their corresponding rules here.
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
-  `gateway` and `service-app-server` are internal service-template entry points, excluded from public help.
-- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server` and `all`.
+  `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
+- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `model-relay` and `all`.
   Start, stop and status default to `all`; restart and logs default to `gateway`.
+  `all` starts Relay only when installed and enabled, and stops installed Relay before Gateway. WebUI remains separately managed.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
   and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.
   Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.

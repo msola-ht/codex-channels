@@ -16,6 +16,7 @@ export type GlobalConfigChangeCode =
   | "experimental.plugin-api"
   | "scheduled-tasks.enabled"
   | "metrics.storage"
+  | "model-relay.policy"
   | "observability.log-level"
   | "workspace.default"
   | "workspace.registry"

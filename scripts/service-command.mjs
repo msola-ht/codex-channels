@@ -19,6 +19,7 @@ import {
   serviceControlEnvironment,
 } from "./runtime-environment.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
+import { waitForSelectedRelay } from "./service-selection.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -61,6 +62,19 @@ export async function runAppServerServiceCommand(args) {
     runtime,
     () => readWorkspaceConfig(runtime.document).defaultWorkspace,
   );
+}
+
+export async function runModelRelayServiceCommand(args) {
+  if (args.length > 0) throw new Error("内部服务入口不接受参数");
+  const { locateUserConfig } = await import("./runtime-config.mjs");
+  const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
+  const { configPath } = locateUserConfig(process.env);
+  let stop;
+  const stopped = new Promise(resolve => { stop = resolve; });
+  process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  let service;
+  try { service = await startModelRelayService(configPath, process.env); await stopped; }
+  finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); await service?.close(); }
 }
 
 /**
@@ -166,6 +180,7 @@ export async function runServiceCommand(args) {
     throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
+  if (action === "start" || action === "restart") await waitForSelectedRelay(serviceArgs[0], controlEnvironment);
   if (readinessTarget) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));

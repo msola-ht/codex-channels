@@ -509,7 +509,7 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
+      "来源", "调用方", "交付", "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
     expect(markup.requests).not.toContain('role="checkbox"');

@@ -35,6 +35,39 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
+  it.each([false, true])("restores only previously running Relay after package update (running=%s)", async running => {
+    const fixture = createInstalledFixture("relay-update-state-");
+    writePackageVersion(fixture.checkout, "0.148.0");
+    const config = join(fixture.installRoot, "config.toml");
+    writeFileSync(config, `version=1\ndefault_workspace="main"\n[codex]\n[telegram]\nbot_token="fixture"\nallowed_user_ids=[1]\n[[workspaces]]\nid="main"\nname="Main"\ncwd=${JSON.stringify(fixture.installRoot)}\n[model_relay]\nenabled=true\n`);
+    const directory = process.platform === "darwin" ? join(fixture.environment.HOME, "Library", "LaunchAgents") : join(fixture.environment.HOME, ".config", "systemd", "user");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, process.platform === "darwin" ? "com.hegenai.codex-model-relay.plist" : "codex-connect-model-relay.service"), "fixture");
+    const calls: string[][] = [];
+    await updateInstalledPackage({ ...fixture.environment, CODEX_CONNECT_CONFIG_FILE: config, XDG_CONFIG_HOME: join(fixture.environment.HOME, ".config") }, {
+      projectDir: fixture.checkout, inspectStaged: async () => ({ services: { installed: true }, databaseUpdatesRequired: false }),
+      inspectRelayRunning: () => running, confirmCodexCliInstall: () => true,
+      installCodexCliForValidation: version => writeFakeCodex(join(fixture.installRoot, "candidate"), version),
+      validateCodexContract: () => {}, installCodexCli: version => { writeFakeCodex(fixture.codex, version); },
+      runCommand: (_command, args) => { calls.push(args); },
+    });
+    expect(calls.filter(args => args[1] === "service").map(args => args.slice(2))).toEqual([
+      ["stop", "all"], ["start", "app-server"], ["start", "gateway"], ...(running ? [["start", "model-relay"]] : []),
+    ]);
+  });
+
+  it.each([false, true])("retains the captured Relay state on failed source update recovery (running=%s)", async running => {
+    const fixture = createInstalledFixture("relay-update-recovery-");
+    let captured = false; const restored: boolean[] = [];
+    await expect(updateManagedSourceInstallation(fixture.environment, {
+      projectDir: fixture.checkout, repository: fixture.repository, buildCheckout: () => {},
+      inspectStaged: async () => ({ services: { installed: true }, databaseUpdatesRequired: false }),
+      inspectRelayRunning: () => { captured = true; return running; }, validateCodexContract: () => {},
+      stopServices: () => { expect(captured).toBe(true); throw new Error("fixture stop failure"); },
+      startServices: (_checkout, _environment, _options, wasRunning) => { restored.push(wasRunning); throw new Error("fixture recovery failure"); },
+    })).rejects.toThrow("未能恢复");
+    expect(restored).toEqual([running]);
+  });
   it.each(["success", "migration-failure", "command-failure"])(
     "uses the candidate database contract and preserves stopped services on %s",
     async (scenario) => {

@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
-const targets = new Set(["gateway", "app-server", "webui", "all"]);
+const targets = new Set(["gateway", "app-server", "webui", "model-relay", "all"]);
 const serviceActions = new Set(["install", "uninstall", "start", "stop", "reload", "restart"]);
 const maintenanceActions = new Set(["cleanup", "prune", "reset"]);
 const metricsRequireStoppedGateway = new Set(["cleanup", "reset"]);

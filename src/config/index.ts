@@ -38,6 +38,7 @@ export {
 } from "./reload-classifier.js";
 
 export interface GatewayConfig {
+  modelRelay?: import("../../runtime/model-relay-config.mjs").ModelRelayConfig;
   telegramEnabled: boolean;
   telegramBotToken: string;
   telegramAllowedUserIds: ReadonlySet<number>;
@@ -294,6 +295,7 @@ function loadValidatedConfigDocument(
     reasoningEnabled: raw.display.reasoning,
     pluginApiEnabled: raw.experimental.plugin_api,
     scheduledTasksEnabled: raw.scheduled_tasks.enabled,
+    ...(raw.model_relay === undefined ? {} : { modelRelay: raw.model_relay }),
     credentialsDirectory: resolve(baseDirectory, "credentials"),
     stateDatabasePath: resolveConfiguredPath(raw.storage.database_path, baseDirectory),
     approvalTimeoutMs: raw.approval.timeout_seconds * 1000,

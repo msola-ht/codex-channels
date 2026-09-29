@@ -72,6 +72,8 @@ export function createRefreshableHttpProxySelector(
   let resolved;
   let inFlight;
   let generation = 0;
+  let revision = 0;
+  let published;
   const controller = new AbortController();
   const platform = options.platform ?? process.platform;
   const readSystemProxy = options.readSystemProxy ?? optionalSystemProxyAsync;
@@ -92,11 +94,17 @@ export function createRefreshableHttpProxySelector(
         const result = system === undefined ? explicit : resolveProxyEnvironment(
           configured, environment, { readSystemProxy: () => system },
         );
-        if (generation === currentGeneration) resolved = result;
+        if (generation === currentGeneration) {
+          if (published !== undefined && JSON.stringify(published) !== JSON.stringify(result)) revision += 1;
+          published = result; resolved = result;
+        }
         return result;
       })().finally(() => { inFlight = undefined; });
     }
-    return await inFlight;
+    const result = await inFlight;
+    // Explicit revocation during discovery must not return that late result to
+    // a new caller which already observed the newer revision.
+    return resolved === undefined ? resolve() : result;
   };
   const select = async (target, explicitProxy) => {
     const proxy = await resolve();
@@ -110,9 +118,17 @@ export function createRefreshableHttpProxySelector(
   };
   const invalidate = () => {
     generation += 1;
+    revision += 1;
     resolved = undefined;
   };
   return {
+    get revision() { return revision; },
+    async refresh() {
+      // A periodic read is not a revocation. Share an in-flight read instead of
+      // continually invalidating a slow but otherwise valid system query.
+      if (!inFlight) resolved = undefined;
+      await resolve();
+    },
     async validate(target, explicitProxy) {
       try {
         await select(target, explicitProxy);

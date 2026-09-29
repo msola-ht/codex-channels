@@ -45,6 +45,7 @@ export interface GatewayConfigDocument {
   };
   approval: { timeout_seconds: number };
   gateway?: { timezone?: string };
+  model_relay?: import("./model-relay-config.mjs").ModelRelayConfig;
   conversation: { idle_release_minutes: number };
   display: {
     operation_updates: "full" | "compact" | "hidden";

@@ -95,6 +95,7 @@ describe("webui server settings and task management", () => {
     expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
       "app-server",
       "gateway",
+      "model-relay",
       "webui",
     ]));
     expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");

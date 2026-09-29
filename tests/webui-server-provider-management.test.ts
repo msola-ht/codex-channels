@@ -298,9 +298,9 @@ describe("webui server Provider and account management", () => {
       available: boolean;
       entries: Array<{ target: string; version: string | null; recentError: { message: string } | null }>;
     };
-    expect(body.entries).toHaveLength(3);
+    expect(body.entries).toHaveLength(4);
     expect(body.entries.map((entry) => entry.target)).toEqual([
-      "app-server", "gateway", "webui",
+      "app-server", "gateway", "webui", "model-relay",
     ]);
     expect(body.entries.every((entry) => entry.version !== null)).toBe(true);
     expect(body.entries.find((entry) => entry.target === "gateway")?.version).toBe("0.156.1");

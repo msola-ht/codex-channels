@@ -14,6 +14,7 @@
   拒绝并发覆盖，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
+- `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置与内存策略投影；默认关闭、只允许回环、保留停用身份，不生成凭据。
 - `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。Codex `.env` 或环境变量提供任一 HTTP、HTTPS 或 ALL 代理地址时跳过系统读取，不补齐其他字段；
@@ -22,6 +23,8 @@
   或标准代理环境变量。渠道显式代理优先于共享代理和 `NO_PROXY`。App Server 服务持有的刷新选择器
   会在启动时先校验当前目标的代理 URL，再缓存一次选择；Provider 上游连接失败后使缓存失效，让
   下一次请求异步重新读取系统代理，并发请求共享在途查询；服务停止时取消查询，关闭后不再选择路由。
+  选择器的只读 revision 随显式失效或已解析代理设置变化递增，供 Relay 异步准备后的实际出站复核使用。
+  周期 `refresh()` 与在途查询合并，相同设置不撤销请求；显式失效期间返回的旧查询结果不能被新调用者使用。
   请求路径与持续观察复用异步 macOS/GNOME 查询，整轮截止时间为 2 秒。底层读取失败向调用方报告；
   观察器保留上次结果，选择器沿用启动发现的可选系统设置语义（如无 GNOME 的 Linux），但不吞掉关闭取消。
 - `codex-proxy-env.mjs` / `codex-proxy-env.d.mts`：共享代理文件的读取、字面值校验和原子更新，
@@ -180,7 +183,7 @@
   管理标记和可丢弃运行时缓存提供统一的新建 `0700` 父目录、`0600` 文件及随机临时
   文件原子替换；私有读取在同一描述符上使用 `O_NOFOLLOW`、`fstat` 校验普通文件、大小、权限与属主，
   避免路径校验后被符号链接替换；Windows 使用解析后的 PowerShell 7 `pwsh` 调用结构化 SID/ACL
-  适配器，原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
+  适配器，单次调用超过 2 秒即终止并拒绝操作；原子写入前同时收紧父目录，严格私有路径关闭继承，只允许当前 SID、SYSTEM 和
   Administrators 完全控制；状态库、任务库、指标库、媒体、渠道输出和受管备份复用同一合同；
   `~/.codex/config.toml` 的普通键级设置仍统一交给官方 `config/batchWrite`。
 - `windows-private-acl.ps1`：Windows 私有路径 ACL 适配器；只从 stdin 读取固定 JSON 请求，通过 .NET
@@ -199,3 +202,9 @@
   与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。
+
+- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的私有状态/配置摘要确认 IPC，有界连接、帧和等待，不传递秘密。
+- `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
+- `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。
+- `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置，取消或关闭后的迟到结果不得通过。
+- `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择；不复用 App Server 的代理实例。

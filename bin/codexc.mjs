@@ -63,6 +63,7 @@ import { configuredEnvironment, serviceControlEnvironment } from "../scripts/run
 import {
   runAppServerServiceCommand,
   runGatewayServiceCommand,
+  runModelRelayServiceCommand,
   runServiceCommand,
   serviceCommandActions,
   serviceCommandUsage,
@@ -70,6 +71,7 @@ import {
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
 import { runDeliveryCommand } from "../scripts/delivery-command.mjs";
+import { runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -101,6 +103,7 @@ const helpText = {
 
 指标与工具：
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
+  relay                        管理独立模型 API 的调用方与访问密钥
   delivery                     离线核对并处理未确认的渠道投递
   cleanup                      统一交互清理会话、转储和指标
   traffic                      查看模型请求与响应转储（列表、详情或持续跟随）
@@ -220,6 +223,8 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
   ${metricsCommandUsage.export.slice("用法：".length)}   请求明细导出
   ${metricsCommandUsage.quota.slice("用法：".length)}   历史额度周期
   codexc metrics status [--json]   指标数据库状态
+  ${metricsCommandUsage.upgrade.slice("用法：".length)}   保留数据升级
+  ${metricsCommandUsage.rollback.slice("用法：".length)}   归档新库并恢复旧库
   codexc metrics reset    备份并重建指标库（需 Gateway 停止）
   codexc metrics cleanup [--keep-days 天数] [--max-rows 行数]   按策略备份并清理旧指标
   codexc metrics prune <provider>   备份并清理指定提供商请求指标（按原服务状态恢复）`,
@@ -257,6 +262,8 @@ codexc service uninstall 和 npm uninstall -g @hegenai/codexc。`,
 
 按时间和组合条件列出指标库中有记录的会话及其期间轮数、请求数；默认全部保留历史，写入 ~/.codex-connect/output/<日期>/，
 加 --stdout 输出到标准输出。`,
+  "metrics.upgrade": `${metricsCommandUsage.upgrade}\n仅支持 v20→v21；显式应用前必须停止 Gateway 与 Relay，保留一致性备份。`,
+  "metrics.rollback": `${metricsCommandUsage.rollback}\n先归档 v21，再恢复经摘要验证的 v20；保留当前凭据代次与停用记录。`,
   "metrics.reset": `用法：codexc metrics reset
 
 要求 Gateway 已停止；先备份现有指标库，再让下次启动创建当前 Schema。`,
@@ -367,6 +374,12 @@ async function executeCommand(command, args) {
         break;
       }
       await runAppServerServiceCommand(args);
+      break;
+    case "service-model-relay":
+      await runModelRelayServiceCommand(args);
+      break;
+    case "relay":
+      await runModelRelayCommand(args);
       break;
     case "remote":
       if (showRequestedHelp(args, "remote")) {
@@ -805,6 +818,8 @@ async function metrics(args) {
     showSubcommandHelp(args, "turns", "metrics.turns") ||
     showSubcommandHelp(args, "threads", "metrics.threads") ||
     showSubcommandHelp(args, "status", "metrics.status") ||
+    showSubcommandHelp(args, "upgrade", "metrics.upgrade") ||
+    showSubcommandHelp(args, "rollback", "metrics.rollback") ||
     showSubcommandHelp(args, "reset", "metrics.reset") ||
     showSubcommandHelp(args, "cleanup", "metrics.cleanup") ||
     showSubcommandHelp(args, "prune", "metrics.prune") ||
@@ -819,6 +834,8 @@ async function metrics(args) {
       turns: "metrics.turns",
       threads: "metrics.threads",
       status: "metrics.status",
+      upgrade: "metrics.upgrade",
+      rollback: "metrics.rollback",
       reset: "metrics.reset",
       cleanup: "metrics.cleanup",
       prune: "metrics.prune",
@@ -853,7 +870,7 @@ async function metrics(args) {
     return;
   }
   if (
-    !new Set(["run", "turns", "threads", "status", "reset", "cleanup", "prune", "report", "export", "quota"])
+    !new Set(["run", "turns", "threads", "status", "upgrade", "rollback", "reset", "cleanup", "prune", "report", "export", "quota"])
       .has(subcommand)
   ) {
     throw new Error("用法：codexc metrics <run|turns|threads|status|reset|cleanup|prune|report|export|quota>");

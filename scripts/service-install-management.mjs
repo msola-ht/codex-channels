@@ -11,6 +11,7 @@ import {
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
 import { resolveExecutable } from "../runtime/executable.mjs";
 import { serviceDefinitions } from "../runtime/service-targets.mjs";
+import { waitForSelectedRelay } from "./service-selection.mjs";
 import { packageDir } from "./package-path.mjs";
 import {
   ensureServiceInstallRuntimeDirectory,
@@ -308,7 +309,7 @@ function publicPlan(plan) {
       displayName: service.displayName,
       identifier,
       destination,
-      startsOnInstall: service.core,
+      startsOnInstall: service.core || service.target === "model-relay" && plan.context.relayEnabled,
     })),
     steps: [...plan.steps],
     activation: "none",
@@ -371,7 +372,8 @@ function defaultActivateCore(plan, environment, options) {
 
 async function defaultWaitForCore(target, environment, options) {
   const { waitForCoreServiceTarget } = await import("./local-installation.mjs");
-  return waitForCoreServiceTarget(target, environment, options);
+  await waitForCoreServiceTarget(target, environment, options);
+  await waitForSelectedRelay(target, environment);
 }
 
 function runController(plan, action, environment, options) {
@@ -391,7 +393,7 @@ function runController(plan, action, environment, options) {
 }
 
 function renderWindowsDefinition(service, identifier, context, projectDir) {
-  const command = service.target === "app-server" ? "service-app-server" : service.target;
+  const command = ["app-server", "model-relay"].includes(service.target) ? `service-${service.target}` : service.target;
   const environment = {
     CODEX_CONNECT_HOME: context.runtime.dataDir,
     CODEX_CONNECT_CONFIG_FILE: context.runtime.configPath,
@@ -411,7 +413,7 @@ function renderWindowsDefinition(service, identifier, context, projectDir) {
   return `${JSON.stringify({
     version: 1,
     target: service.target,
-    autoStart: service.core,
+    autoStart: service.core || service.target === "model-relay" && context.relayEnabled,
     displayName: service.displayName,
     description: `${service.displayName} background service for Codex Connect`,
     taskName: identifier,

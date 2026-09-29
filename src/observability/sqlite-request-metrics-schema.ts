@@ -4,7 +4,7 @@ import { modelRequestMetricsSchemaVersion } from "./request-metrics-database.js"
 
 const schemaVersion = modelRequestMetricsSchemaVersion;
 
-export const metricStorageColumns = [
+export const metricStorageV20Columns = [
   "provider", "transport", "response_format", "operation", "thread_id", "turn_id",
   "model", "service_tier", "reasoning_effort", "status", "http_status", "error_type",
   "error_code", "error_message", "incomplete_reason", "input_tokens",
@@ -18,9 +18,12 @@ export const metricStorageColumns = [
   "request_service_tier",
 ] as const;
 
+export const metricStorageColumns = [...metricStorageV20Columns,
+  "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
+] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
-export const modelRequestMetricsTableSql = `
+export const modelRequestMetricsV20TableSql = `
   CREATE TABLE model_request_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider TEXT NOT NULL,
@@ -79,7 +82,38 @@ export const modelRequestMetricsTableSql = `
   );
 `;
 
-export const modelRequestMetricsIndexesSql = `
+const relayIdentityCheck = `
+  (source = 'owned' AND caller_id IS NULL AND key_id IS NULL
+    AND credential_generation IS NULL AND relay_request_id IS NULL AND delivery_status IS NULL)
+  OR
+  (source = 'relay' AND thread_id IS NULL AND turn_id IS NULL
+    AND transport = 'http' AND operation = 'response'
+    AND caller_id IS NOT NULL AND length(caller_id) BETWEEN 1 AND 64
+    AND caller_id NOT GLOB '*[^a-z0-9_-]*' AND substr(caller_id,1,1) GLOB '[a-z0-9]'
+    AND key_id IS NOT NULL AND length(key_id) BETWEEN 1 AND 64
+    AND key_id NOT GLOB '*[^a-z0-9_-]*' AND substr(key_id,1,1) GLOB '[a-z0-9]'
+    AND credential_generation IS NOT NULL AND typeof(credential_generation) = 'integer'
+    AND credential_generation BETWEEN 1 AND 9007199254740991
+    AND relay_request_id IS NOT NULL AND length(relay_request_id) = 36
+    AND delivery_status IS NOT NULL AND delivery_status IN ('finished', 'disconnected', 'failed')
+    AND traffic_label IS NULL AND traffic_session IS NULL AND traffic_interaction IS NULL)
+`;
+export const relayMetricColumnDefinitions = [
+  "source TEXT NOT NULL DEFAULT 'owned' CHECK (source IN ('owned', 'relay'))",
+  "caller_id TEXT", "key_id TEXT", "credential_generation INTEGER", "relay_request_id TEXT",
+  `delivery_status TEXT CHECK (${relayIdentityCheck})`,
+] as const;
+export const modelRequestMetricsTableSql = modelRequestMetricsV20TableSql.replace(
+  "    CHECK (", `    ${relayMetricColumnDefinitions.join(",\n    ")},\n    CHECK (`,
+);
+export const relayMetricIndexesSql = `
+  CREATE UNIQUE INDEX model_request_metrics_relay_request
+    ON model_request_metrics(relay_request_id) WHERE source = 'relay';
+  CREATE INDEX model_request_metrics_source_caller
+    ON model_request_metrics(source, caller_id, recorded_at_ms);
+`;
+
+export const modelRequestMetricsV20IndexesSql = `
   CREATE INDEX model_request_metrics_recorded_at
     ON model_request_metrics (recorded_at_ms);
   CREATE INDEX model_request_metrics_thread_turn
@@ -88,14 +122,16 @@ export const modelRequestMetricsIndexesSql = `
     ON model_request_metrics (provider, model, id);
 `;
 
-const schemaMetadataSql = `
+export const modelRequestMetricsIndexesSql = modelRequestMetricsV20IndexesSql + relayMetricIndexesSql;
+
+export const schemaMetadataSql = `
   CREATE TABLE IF NOT EXISTS schema_metadata (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
   );
 `;
 
-const initialSchemaSql = `
+export const initialSchemaSql = `
   CREATE TABLE account_sources (
     source_id TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
@@ -148,7 +184,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = "codexc metrics reset 重建指标库";
+    const remedy = actualVersion === 20 ? "codexc metrics upgrade --from 20 --to 21 --apply 保留数据升级指标库" : "codexc metrics reset 重建指标库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,
@@ -214,6 +250,17 @@ export function requireCurrentModelRequestMetricsSchema(database: DatabaseSync):
       SELECT snapshot_id, source_id, observed_at_ms, available, usage_json, limits_json
       FROM account_snapshots LIMIT 0
     `).all();
+    const tableSql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_request_metrics'").get()?.sql;
+    const normalize = (text: string): string => text.replace(/\s+/gu, " ").trim();
+    if (typeof tableSql !== "string" || !normalize(tableSql).includes(normalize(relayIdentityCheck))) {
+      throw new Error("Relay 指标身份约束缺失");
+    }
+    const relayIndex = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'model_request_metrics_relay_request'").get()?.sql;
+    if (typeof relayIndex !== "string" || normalize(relayIndex) !== normalize(relayMetricIndexesSql.split(";")[0]!)) {
+      throw new Error("Relay 指标唯一索引缺失");
+    }
+    const callerIndex = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'model_request_metrics_source_caller'").get()?.sql;
+    if (typeof callerIndex !== "string" || normalize(callerIndex) !== normalize(relayMetricIndexesSql.split(";")[1]!)) throw new Error("Relay 调用方索引缺失");
     const legacyView = database.prepare(`
       SELECT 1 FROM sqlite_master
       WHERE type = 'view' AND name = 'model_request_metrics_enriched'

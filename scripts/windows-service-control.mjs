@@ -25,6 +25,7 @@ import {
   serviceDefinitionsForTarget,
 } from "../runtime/service-targets.mjs";
 import { packageDir } from "./package-path.mjs";
+import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
 
 const definitionLimitBytes = 64 * 1024;
 const hostStartTimeoutMs = 15_000;
@@ -144,7 +145,7 @@ export async function inspectWindowsServiceStatus({
 } = {}) {
   const parsedTarget = parseServiceTarget(target);
   const services = [];
-  for (const service of serviceDefinitionsForTarget(parsedTarget)) {
+  for (const service of serviceControlDefinitions("windows", parsedTarget, "status", environment, definitionsDirectory)) {
     const task = queryTask(service.windows, environment);
     const file = definitionPath(definitionsDirectory, service.target);
     let host;
@@ -168,14 +169,14 @@ export async function inspectWindowsServiceStatus({
   return {
     platform: "windows",
     target: parsedTarget,
-    healthy: services.every((service) => service.running),
+    healthy: serviceSnapshotHealthy(services, parsedTarget, environment),
     services,
   };
 }
 
 async function startDefinitions(target, definitionsDirectory, environment) {
   const failures = [];
-  for (const service of serviceDefinitionsForTarget(target, "start")) {
+  for (const service of serviceControlDefinitions("windows", target, "start", environment, definitionsDirectory)) {
     try {
       const definition = readDefinition(definitionPath(definitionsDirectory, service.target));
       const host = await inspectHost(definition.controlPath);
@@ -205,7 +206,7 @@ async function startDefinitions(target, definitionsDirectory, environment) {
 
 async function stopDefinitions(target, definitionsDirectory, environment) {
   const failures = [];
-  for (const definition of serviceDefinitionsForTarget(target, "stop")) {
+  for (const definition of serviceControlDefinitions("windows", target, "stop", environment, definitionsDirectory)) {
     try {
       await stopDefinition(definition, definitionsDirectory, environment);
     } catch (error) {

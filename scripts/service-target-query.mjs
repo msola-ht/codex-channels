@@ -1,4 +1,4 @@
-import { serviceIdentifiers } from "../runtime/service-targets.mjs";
+import { serviceControlDefinitions } from "./service-selection.mjs";
 
 const platform = process.argv[2];
 const target = process.argv[3];
@@ -8,10 +8,11 @@ if (
   || target === undefined
 ) {
   throw new Error(
-    "用法：service-target-query.mjs <systemd|launchd> <gateway|app-server|webui|all> [start|stop]",
+    "用法：service-target-query.mjs <systemd|launchd> <gateway|app-server|webui|model-relay|all> [start|stop|status]",
   );
 }
-const identifiers = serviceIdentifiers(platform, target, order);
+if (order !== undefined && !["start", "stop", "status"].includes(order)) throw new Error("服务选择必须是 start、stop 或 status");
+const identifiers = serviceControlDefinitions(platform, target, order).map(service => service[platform]);
 for (const identifier of identifiers) {
   console.log(identifier);
 }

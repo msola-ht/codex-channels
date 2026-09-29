@@ -830,7 +830,7 @@ function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params
   const params: Array<string | number> = [query.startAtMs, query.endAtMs];
   for (const [key, column] of [
     ["threadId", "thread_id"], ["turnId", "turn_id"],
-    ["model", "model"],
+    ["model", "model"], ["source", "source"], ["callerId", "caller_id"],
     ["operation", "operation"], ["status", `(${normalizedStatusSql})`],
   ] as const) {
     const value = query[key];
@@ -848,6 +848,7 @@ function metricsScopeSql(query: ModelRequestMetricsScope): { sql: string; params
   if (query.turnId !== undefined && query.threadId === undefined) throw new Error("查询 Turn 必须同时指定 Thread ID");
   if (query.operation !== undefined && !["response", "compact"].includes(query.operation)) throw new Error("operation 筛选值无效");
   if (query.status !== undefined && !["completed", "failed", "incomplete", "unknown"].includes(query.status)) throw new Error("status 筛选值无效");
+  if (query.source !== undefined && !["owned", "relay"].includes(query.source)) throw new Error("source 筛选值无效");
   if (query.onlyFailures) conditions.push(`NOT (${observableCompletionSql})`);
   const filter = query.filter?.trim() ?? "";
   if (filter.length > 128) throw new Error("模型请求指标筛选关键字最多 128 个字符");

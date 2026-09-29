@@ -78,15 +78,16 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
       const target = await prompts.select({
         message: "选择服务目标", showInstructions: false,
         options: [
-          { value: "all", label: "核心服务", hint: "App Server 与 Gateway，不含 WebUI" },
+          { value: "all", label: "核心服务", hint: "App Server、Gateway 及按启用状态选取的 Relay，不含 WebUI" },
           { value: "gateway", label: "Gateway" },
           { value: "app-server", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },
+          { value: "model-relay", label: "Model Relay" },
           { value: "back", label: "返回" },
         ],
       });
       if (prompts.isCancel(target) || target === "back") continue;
-      if (!["all", "gateway", "app-server", "webui"].includes(target)) throw new Error("未知服务目标");
+      if (!["all", "gateway", "app-server", "webui", "model-relay"].includes(target)) throw new Error("未知服务目标");
       args.push(target);
       if (action === "logs") args.push("--lines", "100");
     }

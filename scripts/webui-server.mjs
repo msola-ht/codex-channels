@@ -797,12 +797,12 @@ function parseRange(url, defaultRange = "90d", nowMs = Date.now()) {
 }
 
 function parseMetricsFilters(url, threadId) {
-  const allowed = new Set(["range", "from", "to", "threadId", "turnId", "provider", "model", "operation", "status", "filter", "offset", "limit", "sort", "direction"]);
+  const allowed = new Set(["range", "from", "to", "source", "callerId", "threadId", "turnId", "provider", "model", "operation", "status", "filter", "offset", "limit", "sort", "direction"]);
   for (const key of url.searchParams.keys()) {
     if (!allowed.has(key)) throw new ApiError(400, "unsupported_parameter", "包含不支持的指标查询参数");
     if (key !== "provider" && url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "除 provider 外的指标查询参数不能重复");
   }
-  const values = Object.fromEntries(["threadId", "turnId", "provider", "model", "operation", "status"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
+  const values = Object.fromEntries(["source", "callerId", "threadId", "turnId", "provider", "model", "operation", "status"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
   if (url.searchParams.has("provider")) values.provider = url.searchParams.getAll("provider");
   if (threadId !== undefined) {
     if (values.threadId !== undefined && values.threadId !== threadId) throw new ApiError(400, "invalid_filter", "Thread ID 与路径不一致");
