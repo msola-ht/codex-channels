@@ -97,7 +97,7 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     messages.push({ role: "tool", tool_call_id: callId, content });
   };
   const pushToolOutput = (callId: string, value: unknown): void => {
-    const result = toolResult(value);
+    const result = toolResult(callId, value);
     pushResult(callId, result.text);
     pendingImages.push(...result.images);
   };
@@ -320,14 +320,22 @@ function chatImagePart(part: JsonObject): ChatUserContentPart {
 }
 
 /** 工具结果只保留文本，图片交给紧随其后的 user 消息；Chat 的 tool 消息不能携带图片。 */
-function toolResult(value: unknown): { text: string; images: ChatUserContentPart[] } {
+function toolResult(callId: string, value: unknown): { text: string; images: ChatUserContentPart[] } {
   if (typeof value === "string") return { text: value, images: [] };
   const text: string[] = [];
   const images: ChatUserContentPart[] = [];
+  let imageIndex = 0;
   for (const raw of array(value)) {
     const part = object(raw);
     if (part.type === "input_text" || part.type === "output_text") { text.push(string(part.text)); continue; }
-    if (part.type === "input_image") { images.push(chatImagePart(part)); continue; }
+    if (part.type === "input_image") {
+      const image = chatImagePart(part);
+      // 在原文位置与图片前写入相同标记，保留并行调用归属和混合图文顺序。
+      const label = `[Tool output image: ${JSON.stringify({ call_id: callId, image: ++imageIndex })}]`;
+      text.push(`\n${label}\n`);
+      images.push({ type: "text", text: label }, image);
+      continue;
+    }
     throw new ModelConversionError("Unsupported tool result content");
   }
   return { text: text.join(""), images };
