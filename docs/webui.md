@@ -93,7 +93,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
-模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商凭据仍在设置页维护。操作与升级/回退说明见[用户指南](user-guide.md)。
+模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商凭据仍在设置页维护。转发服务的启动、停止、重启位于模型转发页的「转发服务」卡片，沿用管理任务的预览确认、串行执行和结果反馈，任务结束后刷新服务与转发运行状态；页头刷新同步查询服务、管理任务和转发快照，恢复页面可见时节流补查，确认或写入期间延后执行。其他管理任务阻塞操作时显示原因及设置页任务入口；设置页不再展示单独的转发服务行，全部服务安装、卸载等全局操作仍在设置页。操作与升级/回退说明见[用户指南](user-guide.md)。
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
 页面加载时先通过 `GET /api/v1/time` 获取服务端进程 IANA 时区与当前时间，缺省为系统时区，可用
@@ -420,7 +420,7 @@ Responses 调用详情优先展示非空终态输出；终态 `output` 为空时
 
 API Key 列表使用 Card 分区及 Table，“凭据轮换”独立成列，仅显示当前凭据代次数值（初始为 1，每次轮换递增），不混在用途/身份字段下；用途列只显示名称，未命名时回退调用方 ID，不再额外展示调用方 ID 与 Key ID；长名称和模型名换行，操作按钮在单元格内排列。队列侧栏使用请求卡片列表，固定刷新工具栏，正文独立滚动；加载、空列表及服务不可用分别使用 Skeleton、Empty 和 Alert。请求模型表示本次实际请求的模型，不表示该 Key 的完整允许模型清单。
 
-模型转发页的概览分为服务状态、请求队列、调用采集和指标交付卡片；宽屏统计区并排，小屏纵向排列。计数与含义分开显示，仍为手动刷新快照，刷新中或失败时隐藏旧统计，未知不显示为零。
+模型转发页将配置状态、监听状态、并发上限与服务启停操作合并为一张「转发服务」卡片，另展示请求队列、调用采集和指标交付卡片；宽屏统计区并排，小屏纵向排列。计数与含义分开显示，仍为手动刷新快照，刷新中或失败时隐藏旧统计，未知不显示为零。
 
 调用详情列表的“客户端”从已保存的 User-Agent 识别，存在 Relay 调试记录时只使用受支持版本的入站记录，缺失或未知时不回退猜测；无调试记录时使用出站记录；已有转储无需迁移。显示的是客户端自报的产品名，不是已验证身份；明确应用标识优先；浏览器 UA 显示 Chrome、Edge、Firefox、Safari 等名称及可识别的操作系统（如 Chrome / macOS），不据此猜测浏览器扩展；Node.js 或无法识别的值显示“—”。原始 User-Agent 可在调用详情请求头中核对。
 

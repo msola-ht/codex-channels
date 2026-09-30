@@ -1,5 +1,7 @@
 import { useRef, useState } from "react"
 import { Link } from "react-router"
+import { RelayServiceManagement } from "@/components/settings/relay-service-management"
+import { useRelayServiceManagement } from "@/hooks/use-relay-service-management"
 import { useRelayManagement } from "@/hooks/use-relay-management"
 import { useTranslation } from "@/hooks/use-translation"
 import type { RelayManagedCaller, RelayManagementInput, RelayManagementResult, RelayReasoning } from "@/lib/types"
@@ -39,6 +41,7 @@ export function RelayPage() {
   const data = management.data
   const snapshotCurrent = !management.loading && management.error === null
   const refreshingBlocked = management.busy || management.loading || management.pendingPreview !== null
+  const serviceManagement = useRelayServiceManagement(management.refetch, refreshingBlocked)
   const blocked = refreshingBlocked || management.error !== null
   const nameInvalid = [...name].length < 1 || [...name].length > 64 || name.trim() !== name || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(name)
   const selected = data?.providers.find(value => value.id === provider)
@@ -90,18 +93,11 @@ export function RelayPage() {
   return <div className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><h1 ref={pageHeading} tabIndex={-1} className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
-      <div className="flex flex-wrap gap-2"><RelayQueueSheet /><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
+      <div className="flex flex-wrap gap-2"><RelayQueueSheet /><Button variant="outline" disabled={serviceManagement.refreshBlocked} onClick={serviceManagement.refresh}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
-    {data && <Card size="sm" className="sm:flex-row sm:items-center sm:justify-between"><CardHeader className="min-w-0 sm:flex-1"><CardTitle>{t("relay.stats.service")}</CardTitle>
-      {snapshotCurrent && <CardDescription>{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></CardDescription>}
-    </CardHeader><CardContent className="shrink-0"><div className="flex flex-wrap gap-2" role="status" aria-label={t("relay.runtimeLabel")}>
-      {snapshotCurrent && <Badge variant="outline">{t("relay.configuredConcurrency", { count: data.maxConcurrency })}</Badge>}
-      {!snapshotCurrent ? <Badge variant="outline">{t(management.loading ? "relay.refreshing" : "relay.runtimeUnknown")}</Badge> : data.runtime?.state === "running" ? <>
-        <Badge variant={data.runtime.listening && data.runtime.configurationValid ? "secondary" : "outline"}>{t(data.runtime.listening && data.runtime.configurationValid ? "relay.listening" : "relay.notListening")}</Badge>
-      </> : <Badge variant="outline">{t(data.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
-    </div></CardContent></Card>}
+    <RelayServiceManagement controller={serviceManagement} snapshot={data} loading={management.loading} current={snapshotCurrent} />
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
     {snapshotCurrent && data?.runtime?.state === "running" && <RelayRuntimeStatus runtime={data.runtime} />}
     {data && !management.loading && !management.error && <Card><CardHeader><CardTitle>{t("relay.keysTitle")}</CardTitle><CardDescription>{t("relay.keysHint")}</CardDescription></CardHeader><CardContent className="min-w-0"><Table><TableHeader><TableRow>
@@ -131,7 +127,7 @@ export function RelayPage() {
         <FieldGroup className="min-h-0 overflow-y-auto px-1 py-1">
           <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
           <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
-          {(management.error || management.actionError) && <Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button>}
+          {(management.error || management.actionError) && <Button variant="outline" disabled={serviceManagement.refreshBlocked} onClick={serviceManagement.refresh}>{t("relay.refresh")}</Button>}
           {draftStale && !management.loading && !management.error && <Alert><AlertDescription>{t(editing !== "new" && !latestCaller ? "relay.callerRemoved" : "relay.draftStale")}</AlertDescription></Alert>}
           {draftStale && (editing === "new" || latestCaller) && <Button variant="outline" disabled={blocked} onClick={() => { if (editing === "new") openEditor("new", true); else if (latestCaller) openEditor(latestCaller, true) }}>{t("relay.reloadDraft")}</Button>}
           <Field data-invalid={name.length > 0 && nameInvalid} data-disabled={management.busy}><FieldLabel htmlFor="relay-name">{t("relay.purpose")}</FieldLabel>{editing === "new" && <ToggleGroup type="single" variant="outline" size="sm" className="max-w-full flex-wrap" value={name} disabled={management.busy} aria-label={t("relay.purposePresetsLabel")} onValueChange={value => { if (value) setName(value) }}>
