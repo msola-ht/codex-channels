@@ -286,8 +286,9 @@ describe("Gateway Config management", () => {
       activationResult: {
         target: "app-server-gateway-webui",
         commands: [
+          "codexc service stop gateway",
           "codexc service restart app-server",
-          "codexc service restart gateway",
+          "codexc service start gateway",
           "codexc service restart webui",
         ],
       },

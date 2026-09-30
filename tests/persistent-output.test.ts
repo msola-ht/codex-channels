@@ -7,7 +7,7 @@ import type { Api, InputFile } from "grammy";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
-import { DeliveryCoordinator, DeliveryJournal, defaultDeliveryLimits } from "../src/delivery/index.js";
+import { DeliveryCoordinator, DeliveryJournal, DeliveryError, defaultDeliveryLimits } from "../src/delivery/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { PersistentSurfaceOutput } from "../src/bootstrap/persistent-surface-output.js";
 import { EventBus } from "../src/event-bus/index.js";
@@ -479,6 +479,7 @@ it.each([false, true])("keeps the full durable Telegram result until its documen
 });
 
 
+// Real Worker/SQLite checkpoints may exceed the 1 s polling default on shared CI disks.
 it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const)("preserves complete Weixin results and Conversation ordering across restart (%s)", async (mode) => {
   const directory = fixture();
   const target = { surface: "weixin" as const, accountId: "account-fixture@im.bot", conversationId: "actor-fixture@im.wechat" };
@@ -522,7 +523,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
     await journal.submit(entry("independent", "other"));
     await coordinator.start();
     if (hasFile) {
-      await vi.waitFor(() => expect(fileText).toBe(text));
+      await vi.waitFor(() => expect(fileText).toBe(text), { timeout: 10_000 });
       expect(await journal.list()).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: "full-result", state: "sending" }),
         expect.objectContaining({ id: "same-conversation-next", state: "pending" }),
@@ -531,7 +532,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
       finishFile();
     }
     await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(success
-      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }), { timeout: 10_000 });
     expect(sent).toContain("independent");
     expect(sent.includes("same-conversation-next")).toBe(success);
     expect(faults).toEqual(success ? [] : ["delivery-uncertain"]);
@@ -550,9 +551,9 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
     await recovered.ready;
     await recovered.submit(entry("after-restart-independent", "other"));
     await recovery.start();
-    await vi.waitFor(() => expect(sent.slice(beforeRestart)).toEqual(["after-restart-independent"]));
+    await vi.waitFor(() => expect(sent.slice(beforeRestart)).toEqual(["after-restart-independent"]), { timeout: 10_000 });
     await vi.waitFor(async () => expect(await recovered.summary()).toMatchObject(success
-      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }), { timeout: 10_000 });
   } finally { await recovery.close(); await recoveredOutbox.close(); }
   if (!success) {
     const stored = new SqliteDeliveryJournal(directory);
@@ -562,7 +563,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
       expect(stored.execute({ type: "next", excluded: [] })).toMatchObject({ id: "full-result", payload });
     } finally { stored.close(); }
   }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "stream-unavailable", "static-commentary"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
   const directory = fixture();
@@ -603,11 +604,11 @@ it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "s
     await coordinator.start();
     await coordinator.submit({ ...submission("full-feishu"), payload: JSON.stringify(event) });
     if (!unavailable) {
-      await vi.waitFor(() => expect(fileText).toBe(text));
+      await vi.waitFor(() => expect(fileText).toBe(text), { timeout: 10_000 });
       expect(await journal.summary()).toMatchObject({ records: 1, sending: 1 });
       releaseFile();
     }
-    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }));
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }), { timeout: 10_000 });
     if (!unavailable) { expect(fileText).toBe(text); expect(sendFile).toHaveBeenCalledOnce(); }
     expect(previews.join("\n")).toContain(unavailable ? "内容过长，已截断" : "内容预览，完整回复见附件");
     if (unavailable) expect(previews.join("\n")).not.toContain("完整回复见附件");
@@ -621,7 +622,7 @@ it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "s
       expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
     }
   } finally { reopened.close(); }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["confirmed", "failed", "cancelled", "post-failed"] as const)("recovers a failed Feishu reply stream through bounded Posts and durable file confirmation (%s)", async (outcome) => {
   const directory = fixture();
@@ -717,7 +718,7 @@ it("keeps recovery fenced until every journal page has been classified and count
     expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(false);
     expect(await journal.summary()).toMatchObject({ records: 101, uncertain: 100, pending: 1 });
   } finally { await coordinator.close(); }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["turn-started", "global-idle"] as const)("keeps Weixin %s failure durable while allowing the complete answer through its real Outbox", async (notice) => {
   const directory = fixture();
@@ -871,4 +872,91 @@ it("fences intake and output waiters immediately on a failed journal submission"
     expect(fault).toHaveBeenCalledWith("storage", "account", "lost");
     expect(await journal.summary()).toMatchObject({ records: 0 });
   } finally { await coordinator.close(); }
+});
+
+it("restores released barriers on online retry and refuses mutation while that conversation is active", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  store.execute({ type: "submit", value: submission("notice") });
+  store.execute({ type: "state", id: "notice", from: "pending", to: "uncertain" });
+  store.close();
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  let accounts: string[] = [];
+  let finish!: () => void;
+  let delivering = false;
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => accounts, authorized: () => true, mayReleaseUncertainBarrier: () => true, fault: () => {},
+    deliver: async () => { delivering = true; await new Promise<void>(resolve => { finish = resolve; }); },
+  });
+  try {
+    await coordinator.start();
+    expect(coordinator.hasOutstanding("chat")).toBe(false);
+    const notice = (await journal.queueEntry("notice"))!;
+    expect(await coordinator.resolveBatch([{ id: notice.id, revision: "stale" }], "ignore")).toBe(false);
+    const saturated = vi.spyOn(journal, "resolveBatch").mockRejectedValueOnce(new DeliveryError("mailbox-full"));
+    await expect(coordinator.resolveBatch([notice], "retry")).rejects.toMatchObject({ code: "conflict" });
+    saturated.mockRestore();
+    expect(coordinator.acceptsExecution("account")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(false);
+    expect((await journal.queueEntry("notice"))?.state).toBe("uncertain");
+    expect(await coordinator.resolveBatch([notice], "retry")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    accounts = ["account"]; coordinator.wake();
+    await vi.waitFor(() => expect(delivering).toBe(true));
+    await expect(coordinator.resolveBatch([notice], "ignore")).rejects.toMatchObject({ code: "conflict" });
+    finish();
+    await vi.waitFor(() => expect(coordinator.hasOutstanding("chat")).toBe(false));
+    expect((await journal.summary()).records).toBe(0);
+  } finally { finish?.(); await coordinator.close(); }
+});
+
+it("ignores a released notice without clearing another record's conversation barrier", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  store.execute({ type: "submit", value: submission("notice") });
+  store.execute({ type: "state", id: "notice", from: "pending", to: "uncertain" });
+  store.execute({ type: "submit", value: submission("pending") }); store.close();
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, mayReleaseUncertainBarrier: () => true, fault: () => {}, deliver: async () => {},
+  });
+  try {
+    await coordinator.start();
+    const notice = (await journal.queueEntry("notice"))!;
+    expect(await coordinator.resolveBatch([notice], "ignore")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(await journal.summary()).toMatchObject({ records: 1, pending: 1, uncertain: 0 });
+    expect(await journal.read("notice")).toBeNull();
+  } finally { await coordinator.close(); }
+});
+
+it("keeps acknowledgement slots available when online management meets a saturated writer mailbox", async () => {
+  const source = `import {parentPort} from 'node:worker_threads';
+    parentPort.postMessage({id:0,ok:true,result:null});
+    parentPort.on('message',({id,command})=>{
+      const result=command.type==='list'?[]:command.type==='queueEntries'?command.ids.map(id=>({id,revision:'r',state:'uncertain',account:'a',conversation:'c',bytes:1})):true;
+      const reply=()=>parentPort.postMessage({id,ok:true,result});
+      if(command.type==='list')reply();else setTimeout(reply,200);
+    });`;
+  const journal = new DeliveryJournal(fixture(), { workerUrl: new URL(`data:text/javascript,${encodeURIComponent(source)}`) });
+  const faults: string[] = [];
+  const coordinator = new DeliveryCoordinator(journal, { accounts: () => [], authorized: () => true, deliver: async () => {}, fault: code => faults.push(code) });
+  try {
+    await coordinator.start();
+    const pending = Array.from({ length: 128 }, (_, i) => journal.submit(submission(String(i))));
+    const entries = Array.from({ length: 50 }, (_, i) => ({ id: `r${i}`, revision: "r" }));
+    await expect(coordinator.resolveBatch(entries, "ignore")).rejects.toMatchObject({ code: "conflict" });
+    await expect(journal.acknowledge("in-flight")).resolves.toBe(true);
+    await Promise.all(pending);
+    expect(faults).toEqual([]);
+    expect(coordinator.acceptsExecution("a")).toBe(true);
+    await expect(coordinator.resolveBatch(entries, "retry")).resolves.toBe(true);
+  } finally { await coordinator.close(); }
+});
+
+it("starts persistent delivery with a long data directory without exceeding Unix socket limits", async () => {
+  const directory = join(fixture(), "long-data-directory-".repeat(7), "outbox");
+  const output = new PersistentSurfaceOutput({ directory, workerUrl, accounts: () => [], owner: () => "owner", authorized: () => true, deliver: async () => {}, fault: () => {} });
+  try { await expect(output.start()).resolves.toBeUndefined(); }
+  finally { await output.close(); }
 });

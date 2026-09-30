@@ -1,16 +1,7 @@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { TableHint, TruncatedText } from "@/components/metrics/data-table"
+import { DataTable, TableHint, TruncatedText, type DataTableColumn, type DataTableProps } from "@/components/metrics/data-table"
 import { TrafficModel } from "@/components/traffic/traffic-model"
-import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { formatTime, formatElapsedDuration } from "@/lib/format"
 import type { TrafficExchangeSummary } from "@/lib/types"
 import type { Translate } from "@/lib/i18n/messages"
@@ -24,50 +15,21 @@ export function TrafficTable({
   loading = false,
   turnStates,
   turnStateErrors,
+  pagination,
+  description,
 }: {
   exchanges: TrafficExchangeSummary[]
   onOpen: (exchange: TrafficExchangeSummary) => void
+  pagination: DataTableProps<TrafficExchangeSummary>["pagination"]
+  description: string
   loading?: boolean
   turnStates?: Map<string, Array<{ source: string; characters: number }>>
   turnStateErrors?: Map<string, string>
 }) {
   const { t } = useTranslation()
-  return (
-    <div className="min-w-0">
-      <Table className="min-w-[1040px]">
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("metrics.time")}</TableHead>
-            <TableHead>{t("metrics.provider")}</TableHead>
-            <TableHead><TableHint hint={t("traffic.clientHint")}>{t("traffic.client")}</TableHint></TableHead>
-            <TableHead>{t("metrics.model")}</TableHead>
-            <TableHead>{t("traffic.protocol")}</TableHead>
-            <TableHead>{t("filters.status")}</TableHead>
-            <TableHead className="text-right whitespace-nowrap">
-              <TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint>
-            </TableHead>
-            <TableHead className="text-right">{t("requests.durationColumn")}</TableHead>
-            <TableHead className="text-right whitespace-nowrap">{t("traffic.turnStateColumn")}</TableHead>
-            <TableHead>{t("metrics.type")}</TableHead>
-            <TableHead>{t("metrics.requests")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 11 }, (_, column) => (
-              <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
-            ))}</TableRow>
-          )) : exchanges.map((exchange) => {
-            const lengths = turnStates?.get(trafficCallKey(exchange))
-            const turnStatesError = turnStateErrors?.get(trafficCallKey(exchange)) ?? null
-            return (
-            <TableRow
-              key={`${exchange.label}:${exchange.session}:${exchange.id}`}
-              className="cursor-pointer"
-              onClick={() => onOpen(exchange)}
-            >
-              <TableCell className="whitespace-nowrap tabular-nums">
-                <Button
+  const columns: DataTableColumn<TrafficExchangeSummary>[] = [
+    { id: "time", enableSorting: false, header: () => <>{t("metrics.time")}</>, cell: ({ row: { original: exchange } }) => {
+      return <><Button
                   type="button"
                   variant="link"
                   size="sm"
@@ -77,46 +39,51 @@ export function TrafficTable({
                     event.stopPropagation()
                     onOpen(exchange)
                   }}
-                >{formatTime(exchange.startedAtMs)}</Button>
-              </TableCell>
-              <TableCell><Badge variant="outline">{["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account ?? exchange.label : exchange.label}</Badge></TableCell>
-              <TableCell className="whitespace-nowrap">{exchange.clientName ?? "—"}</TableCell>
-              <TableCell>
-                <TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
-              </TableCell>
-              <TableCell>{exchange.protocol ? <Badge variant="outline">{exchange.protocol === "chat" ? "Chat" : "Responses"}</Badge> : "—"}</TableCell>
-              <TableCell className="whitespace-nowrap text-xs">
-                {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
+                >{formatTime(exchange.startedAtMs)}</Button></>
+    } },
+    { id: "provider", enableSorting: false, header: () => <>{t("metrics.provider")}</>, cell: ({ row: { original: exchange } }) => {
+      return <><Badge variant="outline">{["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account ?? exchange.label : exchange.label}</Badge></>
+    } },
+    { id: "client", enableSorting: false, header: () => <><TableHint hint={t("traffic.clientHint")}>{t("traffic.client")}</TableHint></>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.clientName ?? "—"}</>
+    } },
+    { id: "model", enableSorting: false, header: () => <>{t("metrics.model")}</>, cell: ({ row: { original: exchange } }) => {
+      return <><TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} /></>
+    } },
+    { id: "protocol", enableSorting: false, header: () => <>{t("traffic.protocol")}</>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.protocol ? <Badge variant="outline">{exchange.protocol === "chat" ? "Chat" : "Responses"}</Badge> : "—"}</>
+    } },
+    { id: "status", enableSorting: false, header: () => <>{t("filters.status")}</>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
                 {stateLabel(t, exchange.state)}
-                {exchange.hasError ? <Badge className="ml-2" variant="destructive">{t("traffic.hasError")}</Badge> : null}
-              </TableCell>
-              <TableCell className="text-right whitespace-nowrap tabular-nums">
-                {exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}
-              </TableCell>
-              <TableCell className="text-right whitespace-nowrap tabular-nums">
-                <TableHint hint={turnStatesError !== null ? translateApiErrorCode(t, turnStatesError) : (!lengths?.length ? null : lengths.map((entry) => t("traffic.turnStateHint", { count: entry.characters.toLocaleString("zh-CN"), source: entry.source })).join("；"))}>
+                {exchange.hasError ? <Badge className="ml-2" variant="destructive">{t("traffic.hasError")}</Badge> : null}</>
+    } },
+    { id: "first", enableSorting: false, header: () => <><TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint></>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.firstTokenMs == null ? "—" : formatElapsedDuration(exchange.firstTokenMs)}</>
+    } },
+    { id: "duration", enableSorting: false, header: () => <>{t("requests.durationColumn")}</>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.durationMs === undefined ? "—" : formatElapsedDuration(exchange.durationMs)}</>
+    } },
+    { id: "turnState", enableSorting: false, header: () => <>{t("traffic.turnStateColumn")}</>, cell: ({ row: { original: exchange } }) => {
+      const lengths = turnStates?.get(trafficCallKey(exchange))
+      const turnStatesError = turnStateErrors?.get(trafficCallKey(exchange)) ?? null
+      return <><TableHint hint={turnStatesError !== null ? translateApiErrorCode(t, turnStatesError) : (!lengths?.length ? null : lengths.map((entry) => t("traffic.turnStateHint", { count: entry.characters.toLocaleString("zh-CN"), source: entry.source })).join("；"))}>
                   <span className="block max-w-40 truncate">{turnStatesError !== null ? t("common.loadFailed") : lengths === undefined ? t("common.loading") : lengths.length === 0 ? "—" : [...new Set(lengths.map((entry) => entry.characters))].map((count) => count.toLocaleString("zh-CN")).join(" / ")}</span>
-                </TableHint>
-              </TableCell>
-              <TableCell className="text-xs">{exchange.category === "models" ? t("traffic.categoryModels")
-                : exchange.category === "prewarm" ? t("traffic.categoryPrewarm") : exchange.requestKind ?? t("traffic.categoryRequest")}</TableCell>
-              <TableCell><TruncatedText text={requestLabel(exchange)} className="max-w-72 font-mono text-xs" /></TableCell>
-            </TableRow>
-          )})}
-          {!loading && exchanges.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={11} className="h-16 text-center text-muted-foreground">
-                {t("traffic.empty")}
-              </TableCell>
-            </TableRow>
-          ) : null}
-        </TableBody>
-      </Table>
-    </div>
-  )
+                </TableHint></>
+    } },
+    { id: "type", enableSorting: false, header: () => <>{t("metrics.type")}</>, cell: ({ row: { original: exchange } }) => {
+      return <>{exchange.category === "models" ? t("traffic.categoryModels")
+                : exchange.category === "prewarm" ? t("traffic.categoryPrewarm") : exchange.requestKind ?? t("traffic.categoryRequest")}</>
+    } },
+    { id: "request", enableSorting: false, header: () => <>{t("metrics.requests")}</>, cell: ({ row: { original: exchange } }) => {
+      return <><TruncatedText text={requestLabel(exchange)} className="max-w-72 font-mono text-xs" /></>
+    } },
+  ]
+  return <DataTable title={t("traffic.listTitle", { count: pagination.mode === "server" ? pagination.serverTotal ?? exchanges.length : exchanges.length })}
+    description={() => description} data={exchanges} columns={columns} loading={loading}
+    storageKey="codex-webui:traffic-table-v1" getRowId={trafficCallKey} onRowClick={onOpen}
+    columnLabels={{time: t("metrics.time"), provider: t("metrics.provider"), client: t("traffic.client"), model: t("metrics.model"), protocol: t("traffic.protocol"), status: t("filters.status"), first: t("requests.firstColumn"), duration: t("requests.durationColumn"), turnState: t("traffic.turnStateColumn"), type: t("metrics.type"), request: t("metrics.requests")}}
+    numericColumnIds={["first", "duration", "turnState"]} emptyText={t("traffic.empty")} pagination={pagination} />
 }
 
 function stateLabel(t: Translate, state: TrafficExchangeSummary["state"]): string {

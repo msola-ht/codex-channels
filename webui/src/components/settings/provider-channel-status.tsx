@@ -1,3 +1,5 @@
+import { useTranslation } from "@/hooks/use-translation"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -43,26 +45,14 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
                 : "当前没有额外可切换的 Provider；主 Provider 见上方。"}
             </SettingsEmpty>
           ) : (
-            <div className="flex flex-col gap-3">
-              {state.providers.map((provider, index) => (
-                <div key={`${provider.kind}:${provider.id}:${provider.mode}`}>
-                  {index > 0 ? <Separator className="mb-3" /> : null}
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="font-medium">{provider.displayName}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {provider.id} · {providerModeLabel(provider.mode)}
-                        {provider.model === null ? "" : ` · ${provider.model}`}
-                        {provider.modelCount === null ? "" : ` · ${provider.modelCount} 个模型`}
-                      </span>
-                    </div>
-                    <Badge variant={provider.selected ? "secondary" : "outline"}>
-                      {provider.selected ? "当前" : providerStateLabel(provider.state)}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <Table><TableHeader><TableRow><TableHead>提供商</TableHead><TableHead>模式</TableHead><TableHead>模型</TableHead><TableHead>状态</TableHead></TableRow></TableHeader><TableBody>
+              {state.providers.map(provider => <TableRow key={`${provider.kind}:${provider.id}:${provider.mode}`}>
+                <TableCell><div className="flex flex-col gap-1"><span>{provider.displayName}</span><span className="text-xs text-muted-foreground">{provider.id}</span></div></TableCell>
+                <TableCell>{providerModeLabel(provider.mode)}</TableCell>
+                <TableCell>{provider.model ?? "—"}{provider.modelCount !== null && ` · ${provider.modelCount} 个模型`}</TableCell>
+                <TableCell><Badge variant={provider.selected ? "secondary" : "outline"}>{provider.selected ? "当前" : providerStateLabel(provider.state)}</Badge></TableCell>
+              </TableRow>)}
+            </TableBody></Table>
           )}
         </div>
       </CardContent>
@@ -71,29 +61,18 @@ export function ProviderStatusCard({ state }: { state: ManagementProvidersRespon
 }
 
 export function ChannelStatusCard({ channels }: { channels: Channel[] }) {
+  const { t } = useTranslation()
   return (
     <Card>
       <CardHeader>
-        <CardTitle>通讯渠道状态</CardTitle>
-        <CardDescription>来源为 Gateway 配置快照；渠道凭据、允许名单和运行连接不在 WebUI 展示。</CardDescription>
+        <CardTitle>{t("channelSettings.title")}</CardTitle>
+        <CardDescription>{t("channelSettings.description")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {channels.length === 0 ? (
-          <SettingsEmpty>当前没有已配置的通讯渠道。</SettingsEmpty>
-        ) : channels.map((channel, index) => (
-          <div key={channel.id}>
-            {index > 0 ? <Separator className="mb-3" /> : null}
-            <div className="flex items-center justify-between gap-4 text-sm">
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="font-medium">{channel.displayName}</span>
-                <span className="text-xs text-muted-foreground">Gateway 配置</span>
-              </div>
-              <Badge variant={channel.enabled ? "secondary" : "outline"}>
-                {channel.enabled ? "已启用" : "已配置，未启用"}
-              </Badge>
-            </div>
-          </div>
-        ))}
+          <SettingsEmpty>{t("channelSettings.empty")}</SettingsEmpty>
+        ) : <Table><TableHeader><TableRow><TableHead>{t("channelSettings.channel")}</TableHead><TableHead>{t("channelSettings.state")}</TableHead></TableRow></TableHeader><TableBody>{channels.map(channel => <TableRow key={channel.id}><TableCell>{channel.displayName}</TableCell><TableCell><Badge variant={channel.enabled ? "secondary" : "outline"}>{t(channel.enabled ? "channelSettings.enabled" : "channelSettings.disabled")}</Badge></TableCell></TableRow>)}</TableBody></Table>}
+
       </CardContent>
     </Card>
   )

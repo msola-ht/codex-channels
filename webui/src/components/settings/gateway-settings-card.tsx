@@ -12,9 +12,10 @@ import type { UseApiState } from "@/hooks/use-api"
 import type { GatewaySettingsController } from "@/lib/settings-management"
 import type { UpstreamUserAgentResponse } from "@/lib/types"
 
-export function GatewaySettingsCard({ management, upstreamAgent }: {
+export function GatewaySettingsCard({ management, upstreamAgent, section = "general" }: {
   management: GatewaySettingsController
-  upstreamAgent: UseApiState<UpstreamUserAgentResponse>
+  section?: "general" | "permissions" | "network" | "data" | "display"
+  upstreamAgent?: UseApiState<UpstreamUserAgentResponse>
 }) {
   const { t } = useTranslation()
   const managedSettings = management.managedSettings
@@ -34,23 +35,23 @@ export function GatewaySettingsCard({ management, upstreamAgent }: {
   if (managedSettings === null) return null
   const disabled = management.loading || management.error !== null || management.saving || management.pendingSetting !== null
   const identityDefaults = managedSettings.system.officialTuiIdentity.defaults
-  const effectiveUserAgent = upstreamAgent.data?.effectiveUserAgent ?? null
-  const recentRequestUserAgent = upstreamAgent.data?.recentRequestUserAgent ?? null
-  const upstreamAgentValue = upstreamAgent.error !== null
-    ? `读取失败：${upstreamAgent.error}`
-    : upstreamAgent.data === null
+  const effectiveUserAgent = upstreamAgent?.data?.effectiveUserAgent ?? null
+  const recentRequestUserAgent = upstreamAgent?.data?.recentRequestUserAgent ?? null
+  const upstreamAgentValue = upstreamAgent?.error != null
+    ? `读取失败：${upstreamAgent?.error}`
+    : upstreamAgent?.data == null
       ? "读取中…"
       : effectiveUserAgent ?? "不可用：App Server 未运行，且未配置覆盖"
-  const upstreamAgentSource = upstreamAgent.error !== null || upstreamAgent.data === null
+  const upstreamAgentSource = upstreamAgent?.error != null || upstreamAgent?.data == null
     ? null
-    : upstreamAgent.data.source === "override"
+    : upstreamAgent?.data.source === "override"
       ? "显式覆盖"
-      : upstreamAgent.data.source === "app-server" ? "App Server 生成" : null
+      : upstreamAgent?.data.source === "app-server" ? "App Server 生成" : null
   const upstreamAgentState = effectiveUserAgent === null || recentRequestUserAgent === null
     ? null
     : recentRequestUserAgent === effectiveUserAgent
       ? "已生效（与最近一次请求一致）"
-      : upstreamAgent.data?.source === "override"
+      : upstreamAgent?.data?.source === "override"
         ? "配置已保存，重启后生效"
         : "与最近一次请求不一致"
   const saveIdentity = () => {
@@ -66,28 +67,26 @@ export function GatewaySettingsCard({ management, upstreamAgent }: {
   }
 
   return <Card>
-    <CardHeader><CardTitle>Gateway 设置</CardTitle><CardDescription>Gateway 渠道、系统、显示、自动化和运行日志；当前值与修改入口在同一分区。</CardDescription></CardHeader>
+    <CardHeader><CardTitle>{t(section === "display" ? "navigation.channelDisplay" : section === "permissions" ? "navigation.gatewayPermissions" : section === "network" ? "navigation.gatewayNetwork" : section === "data" ? "navigation.gatewayData" : "navigation.gatewayGeneral")}</CardTitle><CardDescription>{t("navigation.configurationHint")}</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-5 text-sm">
       <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
-        <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.sandbox", value, "Sandbox")} />
-        <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.approval-timeout" ? management.lastAppliedSetting : null} label="审批超时（秒）" type="number" defaultValue={String(managedSettings.system.approvalTimeoutSeconds)} placeholder="30–3600" disabled={disabled} onBlur={(value) => void management.previewSetting("system.approval-timeout", Number(value), "审批超时")} />
-        <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label="空闲自动解除（分钟）" type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder="0–1440，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), "空闲自动解除")} />
-        <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.default-model" ? management.lastAppliedSetting : null} label="渠道新会话模型" defaultValue={managedSettings.system.defaultModel ?? ""} placeholder="留空跟随 Codex 全局默认" disabled={disabled} onBlur={(value) => void management.previewSetting("system.default-model", value === "" ? null : value, "渠道新会话模型")} />
-        <ManagedSelect label="记录调用详情" value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", "记录调用详情")} />
-        <ManagedSelect label={t("capture.mode")} value={managedSettings.system.modelTrafficMode} options={[["production", t("capture.production")], ["debug", t("capture.debug")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-mode", value, t("capture.mode"))} />
-        <FieldDescription>{t("capture.scope")}</FieldDescription>
-        <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.model-traffic-retention-days" ? management.lastAppliedSetting : null} label="调用记录保留天数" type="number" defaultValue={String(managedSettings.system.modelTrafficRetentionDays)} placeholder="0–36500，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.model-traffic-retention-days", Number(value), "调用记录保留天数")} />
-        <ManagedSelect label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={disabled || managedSettings.system.workspaces.length === 0} onChange={(value) => void management.previewSetting("system.default-workspace", value, "默认 Workspace")} />
-        <ManagedSelect label="Telegram 消息格式" value={managedSettings.telegram.messageFormat} options={[["html", "HTML"], ["rich", "富文本"]]} disabled={disabled || !managedSettings.telegram.configured} onChange={(value) => void management.previewSetting("telegram.message-format", value, "Telegram 消息格式")} />
-        <ManagedSelect label="操作详情" value={managedSettings.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.operation-updates", value, "操作详情")} />
-        <ManagedSelect label="计划更新" value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.plan-updates", value === "true", "计划更新")} />
-        <ManagedSelect label="思考状态" value={String(managedSettings.display.reasoningEnabled)} options={[["true", "已启用"], ["false", "未启用（默认）"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.reasoning", value === "true", "思考状态")} />
-        <ManagedSelect label="计划任务" value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("automation.scheduled-tasks", value === "true", "计划任务")} />
-        <ManagedSelect label="日志等级" value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.logging-level", value, "日志等级")} />
-        <ManagedSelect label="Plugin API" value={String(managedSettings.advanced.pluginApiEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.plugin-api", value === "true", "Plugin API")} />
-        <SettingsRow label="配置修订" value={managedSettings.revision.slice(0, 12)} code />
+        {section === "permissions" && <ManagedSelect label="Sandbox" value={managedSettings.system.sandbox} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.sandbox", value, "Sandbox")} />}
+        {section === "permissions" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.approval-timeout" ? management.lastAppliedSetting : null} label="审批超时（秒）" type="number" defaultValue={String(managedSettings.system.approvalTimeoutSeconds)} placeholder="30–3600" disabled={disabled} onBlur={(value) => void management.previewSetting("system.approval-timeout", Number(value), "审批超时")} />}
+        {section === "general" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.idle-release-minutes" ? management.lastAppliedSetting : null} label="空闲自动解除（分钟）" type="number" defaultValue={String(managedSettings.system.idleReleaseMinutes)} placeholder="0–1440，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.idle-release-minutes", Number(value), "空闲自动解除")} />}
+        {section === "data" && <ManagedSelect label="记录调用详情" value={String(managedSettings.system.modelTrafficDumpEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-dump", value === "true", "记录调用详情")} />}
+        {section === "data" && <ManagedSelect description={t("capture.scope")} label={t("capture.mode")} value={managedSettings.system.modelTrafficMode} options={[["production", t("capture.production")], ["debug", t("capture.debug")]]} disabled={disabled} onChange={(value) => void management.previewSetting("system.model-traffic-mode", value, t("capture.mode"))} />}
+        {section === "data" && <ManagedInputRow saved={management.lastAppliedSetting?.kind === "system.model-traffic-retention-days" ? management.lastAppliedSetting : null} label="调用记录保留天数" type="number" defaultValue={String(managedSettings.system.modelTrafficRetentionDays)} placeholder="0–36500，0 为关闭" disabled={disabled} onBlur={(value) => void management.previewSetting("system.model-traffic-retention-days", Number(value), "调用记录保留天数")} />}
+        {section === "permissions" && <ManagedSelect label="默认 Workspace" value={managedSettings.system.defaultWorkspace ?? ""} options={managedSettings.system.workspaces.map((workspace) => [workspace.id, workspace.name])} disabled={disabled || managedSettings.system.workspaces.length === 0} onChange={(value) => void management.previewSetting("system.default-workspace", value, "默认 Workspace")} />}
+        {section === "display" && <ManagedSelect label="Telegram 消息格式" value={managedSettings.telegram.messageFormat} options={[["html", "HTML"], ["rich", "富文本"]]} disabled={disabled || !managedSettings.telegram.configured} onChange={(value) => void management.previewSetting("telegram.message-format", value, "Telegram 消息格式")} />}
+        {section === "display" && <ManagedSelect label="操作详情" value={managedSettings.display.operationUpdates} options={[["full", "完整"], ["compact", "紧凑"], ["hidden", "隐藏"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.operation-updates", value, "操作详情")} />}
+        {section === "display" && <ManagedSelect label="计划更新" value={String(managedSettings.display.planUpdatesEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.plan-updates", value === "true", "计划更新")} />}
+        {section === "display" && <ManagedSelect label="思考状态" value={String(managedSettings.display.reasoningEnabled)} options={[["true", "已启用"], ["false", "未启用（默认）"]]} disabled={disabled} onChange={(value) => void management.previewSetting("display.reasoning", value === "true", "思考状态")} />}
+        {section === "general" && <ManagedSelect label="计划任务" value={String(managedSettings.automation.scheduledTasksEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("automation.scheduled-tasks", value === "true", "计划任务")} />}
+        {section === "data" && <ManagedSelect label="日志等级" value={managedSettings.advanced.loggingLevel} options={[["fatal", "fatal"], ["error", "error"], ["warn", "warn"], ["info", "info"], ["debug", "debug"], ["trace", "trace"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.logging-level", value, "日志等级")} />}
+        {section === "network" && <ManagedSelect label="Plugin API" value={String(managedSettings.advanced.pluginApiEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={disabled} onChange={(value) => void management.previewSetting("advanced.plugin-api", value === "true", "Plugin API")} />}
       </FieldGroup>
 
+      {section === "network" && <>
       <Separator />
       <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">官方 TUI 请求身份</h3><p className="text-xs text-muted-foreground">客户端身份、终端标识和上游 User-Agent 作为一组写入；全部留空使用默认官方 TUI 身份 {identityDefaults.name} / {identityDefaults.version} 并跟随 Codex CLI 升级，填写后写死为显式覆盖。</p></div>
@@ -112,6 +111,7 @@ export function GatewaySettingsCard({ management, upstreamAgent }: {
         />
         {upstreamAgentState === null ? null : <SettingsRow label="生效状态" value={upstreamAgentState} />}
       </section>
+      </>}
     </CardContent>
   </Card>
 }

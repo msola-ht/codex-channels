@@ -1,3 +1,7 @@
+import { openQueueStream } from "./webui-queue-events.mjs";
+import { watchRelayChanges } from "../runtime/model-relay-control.mjs";
+import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
+import { locateUserConfig } from "./runtime-config.mjs";
 import { relayDisplayNameSchema } from "../runtime/model-relay-config.mjs";
 import { z } from "zod";
 import { manageModelRelay, readRelayQueue, readRelayManagement, withRelayManagementTransaction } from "./model-relay-management.mjs";
@@ -16,6 +20,12 @@ const mutation = z.discriminatedUnion("command", [
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
 export async function routeRelayManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {
+  if (path === "/relay/queue/events" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_invalid", "Relay 管理参数无效");
+    const { configPath } = locateUserConfig(environment);
+    openQueueStream(state, response, (signal, receive) => watchRelayChanges(modelRelayPaths(configPath).control, signal, receive));
+    return true;
+  }
   if (path === "/relay/queue" && request.method === "GET") {
     sendManagementJson(response, 200, await readRelayQueue(environment)); return true;
   }

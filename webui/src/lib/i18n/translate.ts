@@ -25,6 +25,12 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  delivery_invalid: "delivery.invalid",
+  delivery_unavailable: "delivery.unavailable",
+  delivery_stale: "delivery.stale",
+  delivery_busy: "delivery.busy",
+  delivery_unconfirmed: "delivery.unconfirmed",
+  relay_queue_unconfirmed: "relay.runtimeUnknown",
   relay_invalid: "relay.invalid",
   "stale-revision": "relay.stale",
   "management.confirmation-invalid": "relay.stale",

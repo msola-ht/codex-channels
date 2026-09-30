@@ -5,8 +5,8 @@ import { DeliveryError, type DeliveryLimits, type WorkerReply, type WorkerReques
 const port = parentPort!;
 let store: SqliteDeliveryJournal;
 try {
-  const options = workerData as { directory: string; limits?: DeliveryLimits };
-  store = new SqliteDeliveryJournal(options.directory, options.limits);
+  const options = workerData as { directory: string; limits?: DeliveryLimits; mode?: "runtime" | "maintenance" };
+  store = new SqliteDeliveryJournal(options.directory, options.limits, options.mode);
   port.postMessage({ id: 0, ok: true, result: null } satisfies WorkerReply);
   port.on("message", ({ id, command }: WorkerRequest) => {
     try {

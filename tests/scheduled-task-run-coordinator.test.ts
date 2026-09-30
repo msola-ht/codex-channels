@@ -271,6 +271,7 @@ describe("ScheduledTaskRunCoordinator", () => {
     const { store, router, task, coordinator } = setup(history);
     const runningRunId = store.listRuns(task.taskId)[0]!.runId;
     let current = store.getTask(task.taskId)!;
+    // 201 real durable transactions exercise pagination, not a 5 s disk-throughput SLA.
     for (let index = 0; index < 201; index += 1) {
       store.claimDue(
         task.taskId,
@@ -288,7 +289,7 @@ describe("ScheduledTaskRunCoordinator", () => {
     expect(store.getRun(runningRunId)?.state).toBe("completed");
     expect(router.isBackgroundThread("thread-1")).toBe(false);
     store.close();
-  });
+  }, process.platform === "win32" ? 120_000 : 30_000);
 
   it("converges a running Run to uncertain when the exact Turn cannot be located", async () => {
     const history: ThreadHistoryPort = {

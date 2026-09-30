@@ -1,4 +1,5 @@
 export type {
+  DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayReasoning, RelayManagedCaller, RelayManagementSnapshot, RelayManagementInput, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   Aggregate,
   CacheUsage,
@@ -70,3 +71,5 @@ export type {
   TurnSummary,
   WeeklyQuota,
 } from "../../../scripts/webui-api"
+
+export type { QueueChangeEvent, DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult } from "../../../scripts/webui-api"

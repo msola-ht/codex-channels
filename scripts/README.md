@@ -499,11 +499,11 @@
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
-  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示。
+  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
   WebUI 独立不并入 `all`，
-  日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  普通启动不强制终止已运行的进程，日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台
@@ -545,7 +545,9 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用/历史身份摘要回退。
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
-- `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
+- `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 与队列 SSE 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
+- `webui-queue-events.mjs`：Relay 与渠道投递共用的鉴权后 SSE 转接、订阅总量限制及 WebUI 关闭清理；通知不携带队列内容。
+- `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
 `metrics-database.mjs` 的 `upgrade --from 22 --to 23` 默认只预检，`--apply` 才持锁备份迁移；

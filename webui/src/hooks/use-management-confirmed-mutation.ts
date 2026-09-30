@@ -13,12 +13,14 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
   load,
   preview,
   apply,
+  retainDataOnError = true,
 }: {
   load: (signal?: AbortSignal) => Promise<Snapshot>
   preview: (input: Input, signal?: AbortSignal) => Promise<{ preview: Preview; confirmationToken: string }>
   apply: (input: Input, confirmationToken: string, signal?: AbortSignal) => Promise<Result>
+  retainDataOnError?: boolean
 }) {
-  const request = useApi(load, [])
+  const request = useApi(load, [], { retainDataOnError })
   const { refetch } = request
   const operation = useRef<AbortController | null>(null)
   useEffect(() => () => operation.current?.abort(), [])

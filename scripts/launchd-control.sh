@@ -148,7 +148,11 @@ start_job() {
   local label="$1"
   local plist="$2"
   ensure_loaded "$label" "$plist" || return $?
-  launchctl kickstart -k "$user_domain/$label"
+  if [[ "${3:-start}" == "restart" ]]; then
+    launchctl kickstart -k "$user_domain/$label"
+  else
+    launchctl kickstart "$user_domain/$label"
+  fi
 }
 
 require_target() {
@@ -242,9 +246,18 @@ case "$action" in
     target="${2:-gateway}"
     require_target "$target"
     labels=$(service_ids "$target" start)
+    if [[ "$target" == "all" ]]; then
+      stopping_labels=$(service_ids all stop)
+      for stopping_label in ${(f)stopping_labels}; do
+        if ! stop_job "$stopping_label"; then
+          print_status failure "停止服务失败，已中止整体重启：$stopping_label。请运行 codexc service status。"
+          exit 1
+        fi
+      done
+    fi
     failed_labels=()
     for label in ${(f)labels}; do
-      if ! start_job "$label" "$agents_dir/$label.plist"; then
+      if ! start_job "$label" "$agents_dir/$label.plist" restart; then
         failed_labels+=("$label")
       fi
     done

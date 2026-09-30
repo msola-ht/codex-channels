@@ -22,7 +22,7 @@ describe("WebUI 状态与关联范围展示", () => {
         const zero=renderToStaticMarkup(h(ServerTimeContext.Provider,{value:{nowMs:1000,receivedAtMs:Date.now(),timeZone:"UTC"}},h(DeepseekBalanceCards,{accounts:[{provider:"ds-main",account:"main",displayName:"DeepSeek",default:true,available:false,observedAtMs:1000,balances:[{currency:"CNY",totalBalance:"0.00",grantedBalance:"0.00",toppedUpBalance:"0.00"}]}],refreshControls:{}})));
         const filter=renderToStaticMarkup(h(TooltipProvider,null,h(QueryFilters,{query:{range:"all",threadId:"scoped-thread",turnId:"scoped-turn"},onChange(){},showThreadFilters:false})));
         const settings={defaults:{},managedProviders:[],modelWindow:[],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}};
-        const stale=renderToStaticMarkup(h(ProviderSettingsManagement,{management:{settings,loading:false,error:"snapshot-load-failed",busy:false,pendingPreview:null,actionError:null,refetch(){},clearError(){}}}));
+        const stale=renderToStaticMarkup(h(ProviderSettingsManagement,{section:"providers",management:{settings,loading:false,error:"snapshot-load-failed",busy:false,pendingPreview:null,actionError:null,refetch(){},clearError(){}}}));
         const button=[...stale.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)].find(match=>match[0].includes("切回官方 OpenAI"))?.[0] ?? "";
         console.log(JSON.stringify({zero,filter,stale,button}));
       } finally { await server.close(); }

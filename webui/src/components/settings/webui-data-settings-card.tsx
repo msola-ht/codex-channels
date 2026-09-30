@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -17,7 +18,8 @@ const proxyFields = [
   ["no_proxy", "NO_PROXY", "127.0.0.1,localhost"],
 ] as const
 
-export function WebuiDataSettingsCard({ management }: { management: GatewaySettingsController }) {
+export function WebuiDataSettingsCard({ management, section = "network" }: { management: GatewaySettingsController; section?: "network" | "data" }) {
+  const { t } = useTranslation()
   const settings = management.managedSettings
   const [metrics, patchMetrics, resetMetrics] = useSettingsDraft({ retentionDays: settings ? String(settings.metrics.storage.retentionDays) : "", maxRows: settings ? String(settings.metrics.storage.maxRows) : "" })
   const [webui, patchWebui, resetWebui] = useSettingsDraft({ port: settings ? String(settings.webui.port) : "" })
@@ -76,18 +78,18 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
   }
 
   return <Card>
-    <CardHeader><CardTitle>WebUI、代理与指标存储</CardTitle><CardDescription>完整管理本地 WebUI、显式代理和指标保留策略；代理和令牌现有值不会回显。</CardDescription></CardHeader>
+    <CardHeader><CardTitle>{t(section === "data" ? "navigation.dataCard" : "navigation.networkCard")}</CardTitle><CardDescription>{t(section === "data" ? "navigation.metricsHint" : "navigation.networkHint")}</CardDescription></CardHeader>
     <CardContent className="flex flex-col gap-5 text-sm">
-      <section className="flex flex-col gap-3">
+      {section === "data" && <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">指标存储</h3><p className="text-xs text-muted-foreground">达到保留天数或最大行数任一上限后删除最旧记录。</p></div>
         <FieldGroup className="grid gap-3 md:grid-cols-2">
           <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-retention-days">保留天数</FieldLabel><Input id="metrics-retention-days" type="number" min={1} max={3650} value={retentionDays} disabled={disabled} onChange={(event) => patchMetrics({ retentionDays: event.target.value })} /></Field>
           <Field data-disabled={disabled}><FieldLabel htmlFor="metrics-max-rows">最大行数</FieldLabel><Input id="metrics-max-rows" type="number" min={1000} max={10000000} value={maxRows} disabled={disabled} onChange={(event) => patchMetrics({ maxRows: event.target.value })} /></Field>
         </FieldGroup>
         <Button className="self-start" variant="outline" disabled={disabled} onClick={saveMetrics}>保存指标存储</Button>
-      </section>
+      </section>}
 
-      <Separator />
+      {section === "network" && <>
       <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">WebUI 服务</h3><p className="text-xs text-muted-foreground">监听地址、端口或令牌变化后需要重启 WebUI。</p></div>
         <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
@@ -115,6 +117,7 @@ export function WebuiDataSettingsCard({ management }: { management: GatewaySetti
           })}
         </FieldGroup>
       </section>
+      </>}
 
       {localError !== null ? <Alert variant="destructive"><AlertDescription>{localError}</AlertDescription></Alert> : null}
     </CardContent>

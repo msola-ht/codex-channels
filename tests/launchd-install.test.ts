@@ -154,7 +154,8 @@ describe("launchd installer", () => {
       "    rm -f \"$LAUNCHCTL_STATE/$label\"",
       "    ;;",
       "  kickstart)",
-      "    label=${2##*/}",
+      "    if [ \"$1\" = \"-k\" ]; then shift; fi",
+      "    label=${1##*/}",
       "    test -f \"$LAUNCHCTL_STATE/$label\"",
       "    ;;",
       "  kill)",
@@ -228,7 +229,8 @@ describe("launchd installer", () => {
     expect(restarted).toContain("Gateway 重启操作已完成");
     expect(restarted).toContain("App Server 保持运行");
     expect(startCalls).toContain("bootstrap");
-    expect(startCalls).toContain("kickstart -k");
+    expect(startCalls).toContain("kickstart gui/");
+    expect(startCalls).not.toContain("kickstart -k");
     expect(stopCalls).toContain("bootout");
     expect(restartCalls).not.toContain("bootout");
     expect(restartCalls).not.toContain("bootstrap");
@@ -241,6 +243,14 @@ describe("launchd installer", () => {
     expect(allRestarted).toContain("Codex App Server 与 Gateway 重启操作已完成");
     expect(allRestartCalls).toContain("com.hegenai.codex-app-server");
     expect(allRestartCalls).toContain("com.hegenai.codex-gateway");
+    const restartOrder = allRestartCalls.split("\n").filter(line => /^(bootout|kickstart) /u.test(line))
+      .map(line => line.replace(/gui\/\d+\//u, "gui/UID/"));
+    expect(restartOrder).toEqual([
+      "bootout gui/UID/com.hegenai.codex-gateway",
+      "bootout gui/UID/com.hegenai.codex-app-server",
+      "kickstart -k gui/UID/com.hegenai.codex-app-server",
+      "kickstart -k gui/UID/com.hegenai.codex-gateway",
+    ]);
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("kill SIGHUP");
     expect(reloadCalls).toContain("com.hegenai.codex-gateway");

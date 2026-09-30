@@ -236,6 +236,9 @@ export interface DataTableProps<TData extends RowData> {
   emptyText?: string
   noMatchText?: string
   pagination: DataTablePagination
+  toolbar?: React.ReactNode
+  getRowId?: (row: TData) => string
+  onRowClick?: (row: TData) => void
 }
 
 export function DataTable<TData extends RowData>({
@@ -253,6 +256,9 @@ export function DataTable<TData extends RowData>({
   emptyText,
   noMatchText,
   pagination,
+  toolbar,
+  getRowId,
+  onRowClick,
 }: DataTableProps<TData>) {
   const { t } = useTranslation()
   const server = pagination.mode === "server"
@@ -288,6 +294,7 @@ export function DataTable<TData extends RowData>({
     : undefined
   const table = useTable({
     features: dataTableFeatures,
+    getRowId,
     columns,
     data,
     state: {
@@ -309,7 +316,7 @@ export function DataTable<TData extends RowData>({
           onSortingChange: (updater: SortingState | ((old: SortingState) => SortingState)) => {
             const next = typeof updater === "function" ? updater(sorting) : updater
             setClientSorting(
-              next.length === 0 ? DEFAULT_SORTING : next.slice(-1),
+              next.length === 0 ? pagination.defaultSorting ?? DEFAULT_SORTING : next.slice(-1),
             )
             setClientPage(0)
           },
@@ -375,6 +382,7 @@ export function DataTable<TData extends RowData>({
       </CardHeader>
       <CardContent className="grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(10rem,1fr)_auto] gap-4" inert={loading}>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+          {toolbar}
           {server && pagination.onFilterChange === undefined ? null : (
             <div className="flex items-center gap-2">
               <Label htmlFor={`${storageKey}-search`} className="sr-only">
@@ -429,7 +437,7 @@ export function DataTable<TData extends RowData>({
           className="min-h-0 min-w-0 overflow-y-auto [contain:size]"
           style={{ scrollbarWidth: "thin" }}
         >
-          <Table>
+          <Table aria-label={title}>
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
@@ -462,6 +470,8 @@ export function DataTable<TData extends RowData>({
                 pageRows.map((row) => (
                   <TableRow
                     key={row.id}
+                    className={onRowClick ? "cursor-pointer" : undefined}
+                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className={cn(numericColumnIds.includes(cell.column.id) && "text-right tabular-nums")}>

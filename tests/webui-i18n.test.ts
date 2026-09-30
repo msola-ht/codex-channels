@@ -123,11 +123,11 @@ describe("WebUI 界面文案语言切换", () => {
           typeof value === "string" ? [[prefix+key, value]] : Object.entries(flatten(value, prefix+key+"."))));
         const zh = flatten(messages.zh), en = flatten(messages.en);
         const render = (component, props, language) => renderToStaticMarkup(
-          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, props)))));
+          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null, h(TooltipProvider, null, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props)))));
         const clock = { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" };
         const renderWithClock = (component, props, language) => renderToStaticMarkup(
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(MemoryRouter, null,
-            h(TooltipProvider, null, h(ServerTimeContext.Provider, { value: clock }, h(component, props))))));
+            h(TooltipProvider, null, h(ServerTimeContext.Provider, { value: clock }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const renderConsole = (language, dashboard, accounts) => {
           globalThis.fixtureDashboard = dashboard;
           globalThis.fixtureAccounts = accounts;
@@ -549,7 +549,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.errorsPageEn).toContain("Page 1");
     expect(result.errorsPageEn).toContain("Previous page");
     expect(result.errorsPageEn).toContain("Next page");
-    expect(result.errorsPageLoadingEn).toContain("Loading failed request records…");
+    expect(result.errorsPageLoadingEn).toContain("Loading…");
     expect(result.errorsPageEmptyEn).toContain("No failed requests");
     expect(result.errorsPageErrorEn).toContain("The requested data was not found or has been removed.");
     for (const html of [result.errorsPageEn, result.errorsPageLoadingEn, result.errorsPageEmptyEn, result.errorsPageErrorEn]) {
