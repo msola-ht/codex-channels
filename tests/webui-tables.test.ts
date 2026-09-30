@@ -67,7 +67,7 @@ describe("WebUI metrics table presentation", () => {
           firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
         const render = (component, props, language = "zh", entry = "/") => renderToStaticMarkup(h(MemoryRouter, { initialEntries: [entry] },
           h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
-            h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
+            h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, component === TrafficTable ? { pagination: { mode: "server", pageNumber: 1, pageSize: 50, hasPrevious: false, hasNext: false, onPrevious: noop, onNext: noop, onPageSizeChange: noop, sorting: [], onSortingChange: noop }, description: "fixture", ...props } : props))))));
         const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
         const exchange = { protocol: "responses", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
@@ -528,13 +528,13 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.filters).not.toContain("筛选 ·");
   });
 
-  it("retains every error row and summary footprint while hiding stale loading values", () => {
+  it("uses shared table skeletons and hides stale error values while loading", () => {
     expect(headers(markup.errorsLoading!)).toEqual(headers(markup.errors!));
-    expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(51);
-    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(351);
-    expect([...markup.errorsLoading!.matchAll(/class="[^"]*invisible[^"]*" aria-hidden="true"/g)]).toHaveLength(351);
+    expect([...markup.errorsLoading!.matchAll(/<tr\b/g)]).toHaveLength(6);
+    expect([...markup.errorsLoading!.matchAll(/data-slot="skeleton"/g)]).toHaveLength(36);
+    expect(markup.errorsLoading).not.toContain("fixture failure");
     expect(markup.errorsLoading).toMatch(/data-slot="card-content"[^>]*inert=""/);
-    expect(markup.errorsLoading).toContain('role="status">正在加载错误记录…');
+    expect(markup.errorsLoading).toContain('data-slot="spinner"');
     expect(markup.errors).not.toContain('data-slot="skeleton"');
   });
 

@@ -1,4 +1,5 @@
 import type {
+  DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
   ErrorsResponse,
@@ -379,4 +380,27 @@ export function applyRelayManagement(input: RelayManagementMutation, confirmatio
 
 export function fetchRelayQueue(signal?: AbortSignal): Promise<RelayQueueSnapshot> {
   return getJson(`${API_PREFIX}/management/relay/queue`, signal)
+}
+
+export function fetchDeliveryQueue(before: number, state: string, signal?: AbortSignal): Promise<DeliveryQueueSnapshot> {
+  const params = new URLSearchParams({ before: String(before) })
+  if (state !== "all") params.set("state", state)
+  return getJson(`${API_PREFIX}/management/delivery/queue?${params}`, signal)
+}
+export function previewDeliveryRetry(input: DeliveryRetryInput, signal?: AbortSignal): Promise<{ preview: DeliveryQueueEntry; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/delivery/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function applyDeliveryRetry(input: DeliveryRetryInput, confirmationToken: string, signal?: AbortSignal): Promise<DeliveryRetryResult> {
+  return requestJson(`${API_PREFIX}/management/delivery/retry`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function previewDeliveryBatch(input: DeliveryBatchInput, signal?: AbortSignal): Promise<{ preview: DeliveryBatchPreview; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/delivery/batch-preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function applyDeliveryBatch(input: DeliveryBatchInput, confirmationToken: string, signal?: AbortSignal): Promise<DeliveryBatchResult> {
+  return requestJson(`${API_PREFIX}/management/delivery/batch-apply`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function fetchDeliveryContent(input: DeliveryRetryInput, signal?: AbortSignal): Promise<DeliveryContent> {
+  return requestJson(`${API_PREFIX}/management/delivery/content?${new URLSearchParams({ id: input.id, revision: input.revision })}`, undefined, signal)
 }

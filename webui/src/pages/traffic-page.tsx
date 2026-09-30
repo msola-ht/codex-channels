@@ -1,4 +1,4 @@
-import { ChevronLeftIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
+import { RefreshCwIcon } from "lucide-react"
 import { useId } from "react"
 
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -8,15 +8,7 @@ import { TrafficCleanupControls } from "@/components/traffic/traffic-cleanup-con
 import { TrafficTable } from "@/components/traffic/traffic-table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -37,7 +29,6 @@ export function TrafficPage() {
   const { t } = useTranslation()
   const labelSelectId = useId()
   const sessionSelectId = useId()
-  const pageSizeSelectId = useId()
   const { query, update } = useTrafficQuery()
   const tasks = useManagementTasks()
   const list = useTrafficExchanges(query.id === null ? {
@@ -107,7 +98,7 @@ export function TrafficPage() {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-6">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">{t("pages.traffic")}</h1>
@@ -215,16 +206,13 @@ export function TrafficPage() {
       ) : null}
 
       {list.error !== null ? null : listData === null ? <PageSkeleton rows={8} /> : (
-        <Card aria-busy={list.loading}>
-          <CardHeader>
-            <CardTitle>{list.loading ? t("traffic.listRefreshing") : t("traffic.listTitle", { count: listData.total })}</CardTitle>
-            <CardDescription className="break-all">
-              {listData.label ?? t("traffic.allProviders")} · {listData.session === null
-                ? t("traffic.allSessionsCount", { count: listData.sessions.length }) : t("traffic.sessionScope", { name: listData.session })}
-            </CardDescription>
-          </CardHeader>
-          <CardContent inert={list.loading}>
             <TrafficTable
+              description={`${listData.label ?? t("traffic.allProviders")} · ${listData.session === null ? t("traffic.allSessionsCount", { count: listData.sessions.length }) : t("traffic.sessionScope", { name: listData.session })}`}
+              pagination={{ mode: "server", pageNumber, pageSize: query.limit, pageSizeOptions: trafficPageSizeOptions, serverTotal: listData.total,
+                sorting: [], onSortingChange: () => {}, hasPrevious: query.offset > 0, hasNext: listData.nextOffset !== null,
+                onPageSizeChange: limit => update({ label: listData.label, session: listData.session, limit }, true),
+                onPrevious: () => update({ id: null, label: listData.label, session: listData.session, offset: Math.max(0, query.offset - query.limit) }),
+                onNext: () => { if (listData.nextOffset !== null) update({ id: null, label: listData.label, session: listData.session, offset: listData.nextOffset }) } }}
               loading={list.loading}
               exchanges={listData.exchanges}
               turnStates={list.turnStates}
@@ -236,70 +224,7 @@ export function TrafficPage() {
                 exchangeSession: exchange.session,
               })}
             />
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <Label htmlFor={pageSizeSelectId} className="text-sm">{t("common.perPage")}</Label>
-                <Select
-                  value={String(query.limit)}
-                  onValueChange={(value) => update({
-                    label: listData.label,
-                    session: listData.session,
-                    limit: Number(value),
-                  }, true)}
-                >
-                  <SelectTrigger id={pageSizeSelectId} size="sm" className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="top">
-                    <SelectGroup>
-                      {trafficPageSizeOptions.map((size) => (
-                        <SelectItem key={size} value={String(size)}>{size}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <span className="text-sm text-muted-foreground">{t("traffic.recordsTotal", { count: listData.total })}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label={t("common.previous")}
-                  disabled={query.offset === 0}
-                  onClick={() => update({
-                    id: null,
-                    label: listData.label,
-                    session: listData.session,
-                    offset: Math.max(0, query.offset - query.limit),
-                  })}
-                >
-                  <ChevronLeftIcon />
-                </Button>
-                <span className="min-w-14 text-center text-sm font-medium">{t("common.page", { page: pageNumber })}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label={t("common.next")}
-                  disabled={listData.nextOffset === null}
-                  onClick={() => {
-                    const next = listData.nextOffset
-                    if (next === null) return
-                    update({
-                      id: null,
-                      label: listData.label,
-                      session: listData.session,
-                      offset: next,
-                    })
-                  }}
-                >
-                  <ChevronRightIcon />
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+
       )}
     </div>
   )

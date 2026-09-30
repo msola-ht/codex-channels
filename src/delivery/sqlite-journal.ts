@@ -3,6 +3,7 @@ import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readd
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { readPrivateFileSync, securePrivateDirectorySync, securePrivateFileSync } from "../../runtime/private-file.mjs";
+import { readDeliveryQueueRows } from "./queue-reader.js";
 import { defaultDeliveryLimits, deliverySchemaVersion, DeliveryError, type DeliveryLimits, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult } from "./types.js";
 
 interface Row {
@@ -22,11 +23,13 @@ export class SqliteDeliveryJournal {
   // Process-local scheduling policy only; retained rows and quota stay unchanged.
   private readonly releasedBarriers = new Set<string>();
 
-  constructor(private readonly directory: string, private readonly limits: DeliveryLimits = { ...defaultDeliveryLimits }) {
+  constructor(private readonly directory: string, private readonly limits: DeliveryLimits = { ...defaultDeliveryLimits }, private readonly mode: "runtime" | "maintenance" = "runtime") {
+    if (mode !== "runtime" && mode !== "maintenance") throw new DeliveryError("storage");
+    if (mode === "maintenance" && (!existsSync(join(directory, "outbox.sqlite3")) || !existsSync(join(directory, "payload.key")))) throw new DeliveryError("storage");
     for (const value of Object.values(limits)) {
       if (!Number.isSafeInteger(value) || value <= 0) throw new DeliveryError("storage");
     }
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (mode === "runtime") mkdirSync(directory, { recursive: true, mode: 0o700 });
     const dir = lstatSync(directory);
     if (!dir.isDirectory() || dir.isSymbolicLink() || (process.getuid && dir.uid !== process.getuid())) throw new DeliveryError("storage");
     securePrivateDirectorySync(directory);
@@ -37,6 +40,7 @@ export class SqliteDeliveryJournal {
     let database: DatabaseSync | undefined;
     try {
       const fresh = !existsSync(path);
+      if (mode === "maintenance" && fresh) throw new DeliveryError("storage");
       if (!existsSync(keyPath)) {
         if (!fresh) throw new DeliveryError("storage");
         const descriptor = openSync(keyPath, "wx", 0o600);
@@ -93,9 +97,9 @@ export class SqliteDeliveryJournal {
         sequence = Number(row.sequence);
       }
       // A network request may have succeeded before the previous process lost its acknowledgement.
-      database.exec("UPDATE deliveries SET state='uncertain' WHERE state='sending'");
+      if (mode === "runtime") database.exec("UPDATE deliveries SET state='uncertain' WHERE state='sending'");
       // Only the single writer can clean interrupted, private render snapshots.
-      for (const name of readdirSync(directory)) {
+      for (const name of mode === "runtime" ? readdirSync(directory) : []) {
         if (!/^image-[A-Za-z0-9]{6}$/u.test(name)) continue;
         const temporary = join(directory, name);
         const metadata = lstatSync(temporary);
@@ -114,6 +118,7 @@ export class SqliteDeliveryJournal {
 
   execute(command: JournalCommand): JournalResult {
     if (this.closed) throw new DeliveryError("closed");
+    if (this.mode === "maintenance" && !["queueEntry", "resolve", "resolveBatch", "close"].includes(command.type)) throw new DeliveryError("conflict");
     switch (command.type) {
       case "submit": return this.submit(command.value);
       case "next": {
@@ -135,6 +140,7 @@ export class SqliteDeliveryJournal {
         const row = this.database.prepare("SELECT * FROM deliveries WHERE id=?").get(command.id);
         return row ? this.decode(row as unknown as Row) : null;
       }
+      case "queueEntry": return readDeliveryQueueRows(this.database, 0, null, command.id)[0] ?? null;
       case "releaseBarrier": {
         const state = this.database.prepare("SELECT state FROM deliveries WHERE id=?").get(command.id)?.state;
         if (state !== "uncertain" && state !== "blocked") return false;
@@ -145,6 +151,25 @@ export class SqliteDeliveryJournal {
         .run(command.to, command.to === "sending" ? 1 : 0, command.id, command.from).changes === 1;
       case "acknowledge": return this.database.prepare("DELETE FROM deliveries WHERE id=? AND state='sending'").run(command.id).changes === 1;
       case "summary": return this.summary();
+      case "resolveBatch": {
+        if (!command.entries.length || command.entries.length > 50 || new Set(command.entries.map(entry => entry.id)).size !== command.entries.length) throw new DeliveryError("conflict");
+        this.database.exec("BEGIN IMMEDIATE");
+        try {
+          for (const entry of command.entries) {
+            const row = readDeliveryQueueRows(this.database, 0, null, entry.id)[0];
+            if (!row || row.revision !== entry.revision || !["uncertain", "blocked"].includes(row.state)) {
+              this.database.exec("ROLLBACK");
+              return false;
+            }
+          }
+          for (const entry of command.entries) this.execute({ type: "resolve", id: entry.id, action: command.action });
+          this.database.exec("COMMIT");
+          return true;
+        } catch (error) {
+          try { this.database.exec("ROLLBACK"); } catch { /* Preserve the failure. */ }
+          throw error;
+        }
+      }
       case "resolve": {
         this.releasedBarriers.delete(command.id);
         // Offline operator acknowledgement only; never called by the scheduler.

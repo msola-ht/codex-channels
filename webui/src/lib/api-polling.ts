@@ -9,13 +9,14 @@ export function scheduleApiRefresh(
   loading: boolean,
   enabled: boolean,
   page: PageVisibility,
+  intervalMs = 2_000,
 ): () => void {
   if (loading || !enabled) return () => {}
   let timer: ReturnType<typeof setTimeout> | undefined
   const schedule = () => {
     clearTimeout(timer)
     timer = undefined
-    if (page.visibilityState === "visible") timer = setTimeout(refresh, 2_000)
+    if (page.visibilityState === "visible") timer = setTimeout(refresh, intervalMs)
   }
   page.addEventListener("visibilitychange", schedule)
   schedule()

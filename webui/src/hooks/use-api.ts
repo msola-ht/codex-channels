@@ -65,6 +65,6 @@ export function useApi<T>(
 }
 
 /** 自动刷新只在请求结束后计时，不取消正在执行的请求。 */
-export function useApiPolling(refetch: () => void, loading: boolean, enabled: boolean) {
-  useEffect(() => scheduleApiRefresh(refetch, loading, enabled, document), [refetch, loading, enabled])
+export function useApiPolling(refetch: () => void, loading: boolean, enabled: boolean, intervalMs = 2_000) {
+  useEffect(() => scheduleApiRefresh(refetch, loading, enabled, document, intervalMs), [refetch, loading, enabled, intervalMs])
 }

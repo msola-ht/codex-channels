@@ -44,6 +44,29 @@ export interface DeliverySummary {
   blocked: number;
 }
 
+/** Metadata only; never contains payloads, owners or platform message identifiers. */
+export interface DeliveryQueueEntry {
+  revision: string;
+  id: string;
+  sequence: number;
+  account: string;
+  conversation: string;
+  state: DeliveryState;
+  createdAt: number;
+  attempt: number;
+  bytes: number;
+  confirmed: number;
+  checkpoints: number;
+}
+
+export interface DeliveryQueueSnapshot {
+  state: "available" | "missing";
+  observedAt: number;
+  summary: DeliverySummary | null;
+  records: DeliveryQueueEntry[];
+  nextCursor: number | null;
+}
+
 export type DeliveryErrorCode = "capacity" | "account-capacity" | "record-too-large" | "storage" | "closed" | "mailbox-full" | "conflict";
 
 export class DeliveryError extends Error {
@@ -59,14 +82,16 @@ export type JournalCommand =
   | { type: "state"; id: string; from: DeliveryState; to: DeliveryState }
   | { type: "acknowledge"; id: string }
   | { type: "read"; id: string }
+  | { type: "queueEntry"; id: string }
   | { type: "releaseBarrier"; id: string }
   | { type: "summary" }
   | { type: "checkpoint"; id: string; value: DeliveryRecord["progress"][number] }
   | { type: "list"; after: number; limit: number }
   | { type: "resolve"; id: string; action: "retry" | "confirm" }
+  | { type: "resolveBatch"; entries: Array<{ id: string; revision: string }>; action: "retry" | "confirm" }
   | { type: "close" };
 
-export type JournalResult = number | boolean | DeliveryRecord | DeliverySummary | Array<Omit<DeliveryRecord, "payload">> | null;
+export type JournalResult = number | boolean | DeliveryRecord | DeliveryQueueEntry | DeliverySummary | Array<Omit<DeliveryRecord, "payload">> | null;
 
 export interface WorkerRequest { id: number; command: JournalCommand }
 export type WorkerReply =

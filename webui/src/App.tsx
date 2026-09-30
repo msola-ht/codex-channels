@@ -28,6 +28,7 @@ import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
 
 const RelayPage = lazy(() => import("@/pages/relay-page").then(module => ({ default: module.RelayPage })))
+const DeliveryPage = lazy(() => import("@/pages/delivery-page").then(module => ({ default: module.DeliveryPage })))
 
 const ConsolePage = lazy(() =>
   import("@/pages/console-page").then((module) => ({ default: module.ConsolePage })))
@@ -51,6 +52,7 @@ function pageTitle(pathname: string, t: Translate): string {
   if (pathname === "/traffic") return t("pages.traffic")
   if (pathname === "/errors") return t("pages.errors")
   if (pathname === "/relay") return t("relay.title")
+  if (pathname === "/delivery") return t("delivery.title")
   if (pathname === "/settings") return t("pages.settings")
   return t("pages.console")
 }
@@ -154,6 +156,7 @@ function Layout() {
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
+                <Route path="/delivery" element={<DeliveryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Suspense>

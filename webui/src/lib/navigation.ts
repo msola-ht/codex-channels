@@ -1,6 +1,7 @@
 import {
   Activity,
   KeyRound,
+  ListOrdered,
   Bug,
   LayoutDashboard,
   MessagesSquare,
@@ -24,5 +25,6 @@ export const navItems: NavItem[] = [
   { to: "/traffic", labelKey: "pages.traffic", icon: Bug },
   { to: "/errors", labelKey: "pages.errors", icon: TriangleAlert },
   { to: "/relay", labelKey: "relay.title", icon: KeyRound },
+  { to: "/delivery", labelKey: "delivery.title", icon: ListOrdered },
   { to: "/settings", labelKey: "pages.settings", icon: Settings },
 ]
