@@ -227,6 +227,7 @@ Surface -> Application/Core <- Codex Client
   Prepared-artifact checks must not implicitly rebuild source artifacts or reinstall source dependencies; lifecycle entry points must honor explicit script-disabling settings even when npm invokes them.
 - Unix socket test fixtures must fit the strictest supported platform path limit, including generated filenames and nested directories.
   On macOS, follow the existing short `/tmp` fixture convention instead of the long system temporary directory; keep directories private and clean them up.
+  Port-occupation fixtures must bind the same address family, address and port as the listener under test; do not assume wildcard and loopback bindings conflict on every platform.
   Do not change production socket paths or relax ownership/permission checks merely to make a fixture pass.
 - For failed CI, inspect each failed job and its first actionable error; compare runtime versions, platform, paths and lifecycle behavior before editing.
   Reproduce with isolated fixtures where possible and add focused regression coverage. Do not replace diagnosis with blind reruns, skipped tests or weaker checks.

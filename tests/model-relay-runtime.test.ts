@@ -237,7 +237,8 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   Object.assign(rebound.model_relay!, { host: "0.0.0.0" });
   expect(service.status().listening).toBe(true);
   expect((await fetch(`http://127.0.0.1:${address.port}/v1/models`)).status).toBe(401);
-  const occupied = createServer(); await new Promise<void>(resolve => occupied.listen(0, "127.0.0.1", resolve));
+  // Occupy the same wildcard address: wildcard/loopback coexistence differs across OSes.
+  const occupied = createServer(); await new Promise<void>(resolve => occupied.listen(0, "0.0.0.0", resolve));
   cleanups.push(() => new Promise<void>(resolve => occupied.close(() => resolve())));
   const busy = occupied.address(); if (!busy || typeof busy === "string") throw new Error("fixture");
   Object.assign(rebound.model_relay!, { port: busy.port });
