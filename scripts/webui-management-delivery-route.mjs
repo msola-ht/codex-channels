@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { DeliveryJournal, DeliveryError, readDeliveryQueue, readDeliveryPayload } from "../dist/delivery/index.js";
+import { DeliveryJournal, DeliveryError, readDeliveryQueue, readDeliveryPayload, readDeliveryEntries, readDeliveryPayloads } from "../dist/delivery/index.js";
 import { decodePersistentOutput } from "../dist/surfaces/delivery-diagnostics/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
@@ -21,6 +21,21 @@ function entryRevision(directory, row) { return fingerprintManagementValue({ dir
 function retryable(row) { return row && ["uncertain", "blocked"].includes(row.state); }
 
 export async function routeDeliveryManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {
+  if (path === "/delivery/content-batch" && request.method === "POST") {
+    const parsed = z.strictObject({ entries: batchMutation.shape.entries }).safeParse(await readJsonBody(request, maximumBodyBytes));
+    if (!parsed.success || new Set(parsed.data.entries.map(entry => entry.id)).size !== parsed.data.entries.length) throw new ApiError(400, "delivery_invalid", "投递参数无效");
+    try {
+      const directory = directoryFor(environment);
+      const entries = parsed.data.entries;
+      const revisions = new Map(entries.map(entry => [entry.id, entry.revision]));
+      const contents = await readDeliveryPayloads(directory, entries.map(entry => entry.id), (row, payload) => {
+        if (entryRevision(directory, row) !== revisions.get(row.id)) return null;
+        return displayContent(payload, 160);
+      });
+      sendManagementJson(response, 200, { records: entries.map((entry, index) => ({ ...entry, content: contents[index] })) });
+    } catch { throw new ApiError(503, "delivery_unavailable", "投递内容暂不可读取"); }
+    return true;
+  }
   if (path === "/delivery/content" && request.method === "GET") {
     const params = new URL(request.url, "http://localhost").searchParams;
     const parsed = mutation.omit({ confirmationToken: true }).safeParse(Object.fromEntries(params));
@@ -29,13 +44,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
       const directory = directoryFor(environment);
       const value = await readDeliveryPayload(directory, parsed.data.id);
       if (!value || entryRevision(directory, value.row) !== parsed.data.revision) throw new ApiError(409, "delivery_stale", "记录已变化，请刷新");
-      const { event, image } = decodePersistentOutput(value.payload);
-      // Explicit display fields only: never expose the owner, raw payload, tool inputs or credentials.
-      const text = event.type === "text.completed" ? event.text : event.type === "thread.name" ? event.name : null;
-      sendManagementJson(response, 200, { type: event.type, text: text?.slice(0, 20000) ?? null, truncated: (text?.length ?? 0) > 20000,
-        threadId: "threadId" in event ? event.threadId ?? null : null, turnId: "turnId" in event ? event.turnId : null,
-        status: "status" in event ? event.status : event.type === "operation.updated" ? event.operation.status : null,
-        imageFormat: image?.format ?? null });
+      sendManagementJson(response, 200, displayContent(value.payload, 20000));
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(503, "delivery_unavailable", "投递内容暂不可读取");
@@ -64,7 +73,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
   let directory, row;
   try {
     directory = directoryFor(environment);
-    row = (await readDeliveryQueue(directory, { id })).records[0];
+    row = (await readDeliveryEntries(directory, [id]))[0];
   } catch { throw new ApiError(503, "delivery_unavailable", "投递队列暂不可读取"); }
   if (!retryable(row) || entryRevision(directory, row) !== revision) throw new ApiError(409, "delivery_stale", "投递记录已变化，请刷新后重试");
   const binding = { sessionId: principalId, operation: "delivery.retry", inputFingerprint: fingerprintManagementValue({ id, revision }),
@@ -112,10 +121,10 @@ async function batchDelivery({ environment, maximumBodyBytes, path, principalId,
   if (!parsed.success || new Set(parsed.data.entries.map(entry => entry.id)).size !== parsed.data.entries.length) throw new ApiError(400, "delivery_invalid", "投递处理参数无效");
   const { action, entries, confirmationToken } = parsed.data;
   let directory;
-  const rows = [];
+  let rows;
   try {
     directory = directoryFor(environment);
-    for (const entry of entries) rows.push((await readDeliveryQueue(directory, { id: entry.id })).records[0]);
+    rows = await readDeliveryEntries(directory, entries.map(entry => entry.id));
   } catch { throw new ApiError(503, "delivery_unavailable", "投递队列暂不可读取"); }
   if (rows.some((row, index) => !retryable(row) || entryRevision(directory, row) !== entries[index].revision)) throw new ApiError(409, "delivery_stale", "记录已变化，请重新选择");
   const binding = { sessionId: principalId, operation: `delivery.batch.${action}`, inputFingerprint: fingerprintManagementValue({ action, entries }),
@@ -142,4 +151,13 @@ async function batchDelivery({ environment, maximumBodyBytes, path, principalId,
     inputFingerprint: binding.inputFingerprint, revision: binding.resourceRevision, phase: "completed", resultCode: action === "retry" ? "pending" : "ignored", recovery: "none" }); }
   catch { auditStatus = "failed"; }
   sendManagementJson(response, 200, { result: action === "retry" ? "pending" : "ignored", count: rows.length, auditStatus, cleanupStatus });
+}
+
+function displayContent(payload, limit) {
+  const { event, image } = decodePersistentOutput(payload);
+  const text = event.type === "text.completed" ? event.text : event.type === "thread.name" ? event.name : null;
+  return { type: event.type, text: text?.slice(0, limit) ?? null, truncated: (text?.length ?? 0) > limit,
+    threadId: "threadId" in event ? event.threadId ?? null : null, turnId: "turnId" in event ? event.turnId : null,
+    status: "status" in event ? event.status : event.type === "operation.updated" ? event.operation.status : null,
+    imageFormat: image?.format ?? null };
 }

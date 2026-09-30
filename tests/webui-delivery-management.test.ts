@@ -237,3 +237,42 @@ it("rejects duplicate batch entries and missing confirmations", async () => {
   expect((await f.post("batch-preview", { action: "ignore", entries: [entry, entry] })).status).toBe(400);
   expect((await f.post("batch-apply", { action: "ignore", entries: [entry] })).status).toBe(409);
 });
+
+it("reads three full pages of summaries without consuming write quotas or exhausting read limits", async () => {
+  const f = await fixture();
+  const writer = new SqliteDeliveryJournal(f.directory);
+  try {
+    for (let i = 0; i < 150; i++) writer.execute({ type: "submit", value: {
+      id: `summary-${i}`, account: "a", conversation: "c", payload: JSON.stringify({ version: 1, owner: "PRIVATE OWNER", event: {
+        type: "text.completed", target: { surface: "telegram", accountId: "a", conversationId: "c" }, threadId: "t", turnId: "u", itemId: "i", text: "x".repeat(500),
+      } }),
+    } });
+    let before = 0;
+    for (let page = 0; page < 3; page++) {
+      const snapshot = await (await fetch(`${f.url}/queue?before=${before}`, { headers: f.headers })).json() as DeliveryQueueSnapshot;
+      const entries = snapshot.records.map(({ id, revision }) => ({ id, revision }));
+      // Six reads also prove these do not consume the five-operation high-risk budget.
+      for (let repeat = 0; repeat < 2; repeat++) {
+        const response = await f.post("content-batch", { entries });
+        expect(response.status).toBe(200);
+        const body = await response.json() as { records: Array<{ content: { text: string; truncated: boolean } }> };
+        expect(body.records).toHaveLength(50);
+        expect(body.records.every(row => row.content.text.length === 160 && row.content.truncated)).toBe(true);
+        expect(JSON.stringify(body)).not.toContain("PRIVATE OWNER");
+      }
+      before = snapshot.nextCursor!;
+    }
+    const row = (await f.snapshot()).records[0]!;
+    const good = (await f.snapshot()).records[1]!;
+    const entries = [{ id: row.id, revision: row.revision }];
+    expect((await f.post("content-batch", { entries: [] })).status).toBe(400);
+    expect((await f.post("content-batch", { entries: [...entries, ...entries] })).status).toBe(400);
+    expect((await f.post("content-batch", { entries: Array.from({ length: 51 }, (_, i) => ({ id: String(i), revision: row.revision })) })).status).toBe(400);
+    expect((await fetch(`${f.url}/content-batch`, { method: "POST", headers: { ...f.headers, origin: "https://evil.invalid" }, body: JSON.stringify({ entries }) })).status).toBe(403);
+    expect((await fetch(`${f.url}/content-batch`, { method: "POST", headers: { origin: f.headers.origin, "content-type": "application/json" }, body: JSON.stringify({ entries }) })).status).toBe(401);
+    writer.execute({ type: "state", id: row.id, from: "pending", to: "blocked" });
+    const result = await (await f.post("content-batch", { entries: [...entries, { id: good.id, revision: good.revision }] })).json() as { records: Array<{ content: unknown }> };
+    expect(result.records[0]?.content).toBeNull();
+    expect(result.records[1]?.content).toMatchObject({ text: "x".repeat(160) });
+  } finally { writer.close(); }
+});

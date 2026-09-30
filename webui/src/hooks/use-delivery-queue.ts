@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
-import { ApiClientError, fetchDeliveryContent, fetchDeliveryQueue, previewDeliveryBatch, applyDeliveryBatch } from "@/lib/api"
+import { ApiClientError, fetchDeliveryContents, fetchDeliveryQueue, previewDeliveryBatch, applyDeliveryBatch } from "@/lib/api"
 import type { DeliveryBatchInput, DeliveryBatchResult, DeliveryContent, DeliveryQueueEntry } from "@/lib/types"
 
 async function applyRetry(input: DeliveryBatchInput, token: string, signal?: AbortSignal) {
@@ -30,37 +30,42 @@ export function useDeliveryQueue(before: number, filter: string) {
   return { ...state, mutate, confirm, result }
 }
 
-type ContentResult = { content: DeliveryContent | null; error: boolean }
+type ContentResult = { content: DeliveryContent | null; error: boolean; attempts: number; retryable: boolean; retryAt: number }
 
-/** Load only new revisions, at most three requests at once; discard cache when leaving the page. */
+/** One bounded request for new revisions; transient errors get at most two delayed retries. */
 export function useDeliveryContents(records: DeliveryQueueEntry[]) {
   const cache = useRef(new Map<string, ContentResult>())
   const key = JSON.stringify(records.map(({ id, revision }) => [id, revision]))
   const state = useApi(async signal => {
+    signal.throwIfAborted()
     const entries = JSON.parse(key) as Array<[string, string]>
-    const active = new Set(entries.map(([id, revision]) => JSON.stringify([id, revision])))
+    const active = new Set(entries.map(entry => JSON.stringify(entry)))
     for (const stored of cache.current.keys()) if (!active.has(stored)) cache.current.delete(stored)
-    let cursor = 0
-    await Promise.all(Array.from({ length: Math.min(3, entries.length) }, async () => {
-      while (cursor < entries.length) {
+    const missing = entries.filter(entry => {
+      const result = cache.current.get(JSON.stringify(entry))
+      return !result || (result.error && result.retryable && result.attempts < 3 && Date.now() >= result.retryAt)
+    })
+    if (missing.length) {
+      try {
+        const response = await fetchDeliveryContents(missing.map(([id, revision]) => ({ id, revision })), signal)
         signal.throwIfAborted()
-        const [id, revision] = entries[cursor++]!
-        const entryKey = JSON.stringify([id, revision])
-        if (cache.current.has(entryKey)) continue
-        let result: ContentResult
-        try {
-          const content = await fetchDeliveryContent({ id, revision }, signal)
-          result = { content: { ...content, text: content.text?.slice(0, 160) ?? null }, error: false }
-        } catch {
-          signal.throwIfAborted()
-          result = { content: null, error: true }
+        for (const { id, revision, content } of response.records) {
+          const entryKey = JSON.stringify([id, revision])
+          cache.current.set(entryKey, { content, error: content === null, attempts: 1, retryable: false, retryAt: 0 })
         }
+      } catch (error) {
         signal.throwIfAborted()
-        cache.current.set(entryKey, result)
+        const retryable = !(error instanceof ApiClientError) || error.status === 429 || error.status >= 500
+        for (const entry of missing) {
+          const entryKey = JSON.stringify(entry)
+          cache.current.set(entryKey, { content: null, error: true, retryable, retryAt: Date.now() + 60_000, attempts: (cache.current.get(entryKey)?.attempts ?? 0) + 1 })
+        }
       }
-    }))
+    }
     return new Map(cache.current)
   }, [key], { retainDataOnError: false })
+  const retryable = [...(state.data?.values() ?? [])].some(result => result.error && result.retryable && result.attempts < 3)
+  useApiPolling(state.refetch, state.loading, retryable, 60_000)
   return { ...state, refetch: () => {
     for (const [entryKey, result] of cache.current) if (result.error) cache.current.delete(entryKey)
     state.refetch()

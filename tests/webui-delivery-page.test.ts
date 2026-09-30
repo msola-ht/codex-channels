@@ -115,7 +115,7 @@ it("treats lost retry responses as unconfirmed while preserving definite server 
   expect(result).toEqual({ network: "delivery_unconfirmed", proxy: "delivery_unconfirmed", busy: "delivery_busy", audit: "management_audit_unavailable" });
 });
 
-it("bounds inline summary requests, reuses revisions and retains only a short text preview", () => {
+it("batches inline summaries, reuses revisions and bounds transient retries", () => {
   const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
@@ -134,16 +134,34 @@ it("bounds inline summary requests, reuses revisions and retains only a short te
       globalThis.fetch = async () => {
         calls++; active++; maximum=Math.max(maximum,active);
         await new Promise(resolve=>setTimeout(resolve,5)); active--;
-        return new Response(JSON.stringify({type:'text.completed',text:'x'.repeat(20000),status:null,truncated:false,threadId:null,turnId:null,imageFormat:null}));
+        return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'x'.repeat(160),status:null,truncated:true,threadId:null,turnId:null,imageFormat:null}}))}));
       };
       const signal = new AbortController().signal;
       const first=await globalThis.loadSummaries(signal);
-      assert.equal(first.size,8); assert.equal(calls,8); assert.equal(maximum,3);
+      assert.equal(first.size,8); assert.equal(calls,1); assert.equal(maximum,1);
       for(const value of first.values()) assert.equal(value.content.text.length,160);
-      await globalThis.loadSummaries(signal); assert.equal(calls,8);
+      await globalThis.loadSummaries(signal); assert.equal(calls,1);
       const cancelled=new AbortController(); cancelled.abort();
       await assert.rejects(globalThis.loadSummaries(cancelled.signal));
-      assert.equal(calls,8);
+      assert.equal(calls,1);
+      renderToStaticMarkup(h(Probe));
+      calls=0;
+      globalThis.fetch=async()=>{ calls++; return new Response(JSON.stringify({error:{code:'management.rate-limited',message:'limited'}}),{status:429}); };
+      const realNow=Date.now;
+      let now=realNow(); Date.now=()=>now;
+      await globalThis.loadSummaries(signal);
+      now+=59_999;
+      await globalThis.loadSummaries(signal); assert.equal(calls,1);
+      for(let i=0;i<5;i++) { now+=60_000; await globalThis.loadSummaries(signal); }
+      assert.equal(calls,3);
+      renderToStaticMarkup(h(Probe));
+      calls=0;
+      globalThis.fetch=async()=>{calls++;if(calls===1) throw new TypeError('offline');return new Response(JSON.stringify({records:Array.from({length:8},(_,i)=>({id:String(i),revision:'r',content:{type:'text.completed',text:'recovered'}}))}));};
+      await globalThis.loadSummaries(signal);
+      now+=60_000;
+      const recovered=await globalThis.loadSummaries(signal);
+      assert.equal(calls,2);assert.equal(recovered.get(JSON.stringify(['0','r'])).content.text,'recovered');
+      Date.now=realNow;
     } finally { await server.close(); }
   `;
   expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], {

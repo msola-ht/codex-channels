@@ -91,7 +91,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 模型转发 | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
 | 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
-| 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/content?id=&revision=`（按需内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
+| 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
 模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商凭据仍在设置页维护。操作与升级/回退说明见[用户指南](user-guide.md)。
 
@@ -329,13 +329,13 @@ Gateway 指标收集 ──> request-metrics.sqlite3（指标数据库）
 
 查询固定每页 50 条，`before` 是上一页最后一条的序号（初始 0，表示无上界），`state` 可省略或为 `pending`、`sending`、`uncertain`、`blocked`；返回 `nextCursor`，不接受未知或重复参数。列表按入箱序号倒序排列，最新入箱的记录在前；此排序不改变实际投递顺序，汇总始终表示全局。每次查询结束 10 秒后刷新，页面隐藏时暂停，离开队列页面取消请求；筛选或翻页不会混用旧页面数据。投递箱尚未创建、读取失败和当前筛选为空分别显示；读取失败隐藏旧记录。读事务不创建投递箱、不访问密钥、不执行恢复或修改发送状态，磁盘格式仍为 v1。
 
-列表通过 `GET /delivery/content?id=&revision=` 补充内容摘要，最多并发 3 个读取请求；同页按 ID 与修订复用结果，10 秒元数据轮询不会重复解密未变化记录。离开页面取消请求并释放缓存，手动刷新可重试读取失败的摘要。摘要展示本地化事件类型、状态、最多 160 个字符的两行文本，图片仅提示格式；不支持从列表展开全文或原始协议字段。读取失败显示“摘要暂不可用”，不妨碍核对投递元数据。
+列表通过 `POST /delivery/content-batch` 一次补充当前页最多 50 条内容摘要，请求体为 `entries: [{id, revision}]`，重复 ID、空批次和超限批次均拒绝；响应 `records` 保持输入顺序，每条包含 ID、修订及 `content`，缺失、修订失效或无法解码的记录返回 `content: null`，不影响其他记录。该接口虽使用 POST 承载有界批次，仍为只读操作，消耗管理读取配额，不消耗写入及高风险操作配额；Origin、鉴权、正文上限和 no-store 保持不变。同页按 ID 与修订复用结果，10 秒元数据轮询不会重复解密未变化记录。离开页面取消请求并释放缓存，临时网络错误、429 或 5xx 在页面可见时每隔 60 秒最多自动重试两次，成功摘要继续复用；记录失效或不可解码不自动重试。手动刷新可重新尝试失败摘要。摘要展示本地化事件类型、状态、最多 160 个字符的两行文本，图片仅提示格式；不支持从列表展开全文或原始协议字段。读取失败显示“摘要暂不可用”，不妨碍核对投递元数据。
 
-内容接口仍受管理鉴权、Origin 和读取限速约束，不缓存 HTTP 响应；认证解密单条载荷后仅返回限定展示字段，不输出 owner、密钥、工具输入、平台消息 ID 或图片二进制。文本以纯文本显示，不执行 HTML。
+内容接口仍受管理鉴权、Origin 和读取限速约束，不缓存 HTTP 响应；批量读取在同一只读事务内逐条认证解密并立即裁剪，不累计原始正文；仅返回限定展示字段，不输出 owner、密钥、工具输入、平台消息 ID 或图片二进制。文本以纯文本显示，不执行 HTML。
 
 `uncertain` 和 `blocked` 记录可勾选；表头只选择当前页可处理记录，筛选/翻页重置选择，修订变化使旧选择失效。点击“重试所选”或“忽略所选”后统一确认，最多 50 条。批量接口接收 `action: retry|ignore` 和 `entries: [{id, revision}]`，确认时另带一次性 `confirmationToken`；重复 ID、空批次和超限批次均拒绝。确认框显示数量、可滚动的所选会话/账号/记录 ID 摘要及动作风险，预览和提交期间显示处理中反馈，要求先在终端执行 `codexc service stop gateway`。重试会清除检查点并重新排队，可能重复已送达内容；忽略会永久移除所选记录、不再发送，不能撤销，也不表示已经送达。
 
-预览只读，记录修订覆盖展示字段、完整检查点和加密载荷身份。提交经同一管理鉴权、Origin、高风险限速与审计后，由 Journal 维护模式获取独占锁，在一个事务内重新校验全部记录并处理；任一记录变化则整批拒绝。维护模式不创建投递箱、不恢复其他 `sending`、不清理临时图片，也不自动启停服务。重试成功后运行 `codexc service start gateway` 恢复发送，仍复核当前授权。提交结果未知时刷新核对；审计和关闭失败分别报告，关闭未确认时先检查进程与队列。单条 `/delivery/preview`、`/delivery/retry` 接口仍仅支持重试。
+预览只读，记录修订覆盖展示字段、完整检查点和加密载荷身份。提交经同一管理鉴权、Origin、高风险限速与审计后，由 Journal 维护模式获取独占锁，在一个事务内重新校验全部记录并处理；预览及提交前按 ID 索引在一次读事务中读取所选元数据，不重复统计全局队列；任一记录变化则整批拒绝。维护模式不创建投递箱、不恢复其他 `sending`、不清理临时图片，也不自动启停服务。重试成功后运行 `codexc service start gateway` 恢复发送，仍复核当前授权。提交结果未知时刷新核对；审计和关闭失败分别报告，关闭未确认时先检查进程与队列。单条 `/delivery/preview`、`/delivery/retry` 接口仍仅支持重试。
 
 
 调用详情的调用列表、错误记录列表也复用上述公共表格，列显隐分别保存。调用列表保留提供商/批次筛选、每页条数、分页上限和点击行进入详情；错误列表保留查询筛选及会话/轮次跳转，并使用统一的每页条数与分页控件。三者维持服务端原有顺序，不提供仅对当前页生效的伪全局排序。

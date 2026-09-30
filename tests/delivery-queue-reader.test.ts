@@ -2,9 +2,9 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync }
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
-import { readDeliveryPayload, readDeliveryQueue } from "../src/delivery/queue-reader.js";
+import { readDeliveryEntries, readDeliveryPayloads, readDeliveryPayload, readDeliveryQueue } from "../src/delivery/queue-reader.js";
 
 const directories: string[] = [];
 afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -112,4 +112,27 @@ it("authenticates payload reads without state recovery and fails on a tampered a
   const db = new DatabaseSync(join(directory, "outbox.sqlite3"));
   db.prepare("UPDATE deliveries SET tag=? WHERE id='one'").run(Buffer.alloc(16)); db.close();
   expect(() => readDeliveryPayload(directory, "one")).toThrow();
+});
+
+it("uses indexed lookups and one read transaction for batch metadata without global aggregates", () => {
+  const directory = fixture();
+  const writer = new SqliteDeliveryJournal(directory);
+  writer.execute({ type: "submit", value: { id: "one", account: "a", conversation: "c", payload: "body" } });
+  const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
+  try {
+    expect(readDeliveryEntries(directory, ["one", "missing"]).map(row => row?.id ?? null)).toEqual(["one", null]);
+    const sql = prepare.mock.calls.map(([query]) => query);
+    expect(sql.some(query => query.includes("GROUP BY"))).toBe(false);
+    expect(sql.filter(query => query === "PRAGMA user_version")).toHaveLength(1);
+    const lookup = sql.find(query => query.includes("SELECT id,sequence"))!;
+    readDeliveryQueue(directory, { before: 10 });
+    const page = prepare.mock.calls.map(([query]) => query).find(query => query.includes("sequence<?"))!;
+    const db = new DatabaseSync(join(directory, "outbox.sqlite3"), { readOnly: true });
+    try {
+      expect(db.prepare(`EXPLAIN QUERY PLAN ${lookup}`).all("one").some(row => String(row.detail).includes("SEARCH deliveries USING INDEX"))).toBe(true);
+      expect(db.prepare(`EXPLAIN QUERY PLAN ${page}`).all(10).some(row => String(row.detail).includes("SEARCH deliveries USING INTEGER PRIMARY KEY"))).toBe(true);
+    } finally { db.close(); }
+    expect(readDeliveryPayloads(directory, ["one", "missing"], (_row, payload) => payload.length)).toEqual([4, null]);
+    expect(() => readDeliveryEntries(directory, ["one", "one"])).toThrow();
+  } finally { prepare.mockRestore(); writer.close(); }
 });

@@ -347,8 +347,8 @@ async function routeManagement(environment, url, request, response, state, token
     );
   }
   if (!managementLockHeld) {
-    state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
-    if (request.method !== "GET" && isHighRiskManagementPath(path)) {
+    state.limiter.consume({ principalId, category: request.method === "GET" || (request.method === "POST" && path === "/delivery/content-batch") ? "read" : "write" });
+    if (request.method !== "GET" && path !== "/delivery/content-batch" && isHighRiskManagementPath(path)) {
       state.limiter.consume({ principalId, category: "high-risk" });
     }
   }

@@ -1,5 +1,5 @@
 import type {
-  DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
+  DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
   ErrorsResponse,
@@ -403,4 +403,8 @@ export function applyDeliveryBatch(input: DeliveryBatchInput, confirmationToken:
 
 export function fetchDeliveryContent(input: DeliveryRetryInput, signal?: AbortSignal): Promise<DeliveryContent> {
   return requestJson(`${API_PREFIX}/management/delivery/content?${new URLSearchParams({ id: input.id, revision: input.revision })}`, undefined, signal)
+}
+
+export function fetchDeliveryContents(entries: DeliveryRetryInput[], signal?: AbortSignal): Promise<DeliveryContentsResponse> {
+  return requestJson(`${API_PREFIX}/management/delivery/content-batch`, { method: "POST", body: JSON.stringify({ entries }) }, signal)
 }

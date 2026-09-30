@@ -546,7 +546,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用/历史身份摘要回退。
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
-- `webui-management-delivery-route.mjs`：渠道投递箱只读分页查询、按需限定内容预览及离线单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，重试通过 Journal 维护模式的独占锁拒绝与 Gateway 并发，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览认证解密后仅返回显式展示字段，批量操作在同一事务中复核全部修订。
+- `webui-management-delivery-route.mjs`：渠道投递箱只读分页查询、按需限定内容预览及离线单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，重试通过 Journal 维护模式的独占锁拒绝与 Gateway 并发，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
 `metrics-database.mjs` 的 `upgrade --from 22 --to 23` 默认只预检，`--apply` 才持锁备份迁移；

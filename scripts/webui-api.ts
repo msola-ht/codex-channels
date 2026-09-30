@@ -1103,3 +1103,5 @@ export interface DeliveryBatchPreview { action: "retry" | "ignore"; count: numbe
 export interface DeliveryBatchResult { result: "pending" | "ignored"; count: number; auditStatus: "recorded" | "failed"; cleanupStatus: "closed" | "unconfirmed" }
 
 export interface DeliveryContent { type: string; text: string | null; truncated: boolean; threadId: string | null; turnId: string | null; status: string | null; imageFormat: "png" | "jpeg" | null }
+
+export interface DeliveryContentsResponse { records: Array<DeliveryRetryInput & { content: DeliveryContent | null }> }
