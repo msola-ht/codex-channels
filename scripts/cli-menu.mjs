@@ -82,7 +82,7 @@ export async function runServiceMenu({ prompts = clackPrompts, runCommand }) {
           { value: "gateway", label: "Gateway" },
           { value: "app-server", label: "App Server", hint: "包含受监管的 Provider 实例" },
           { value: "webui", label: "WebUI" },
-          { value: "relay", label: "Model Relay" },
+          { value: "relay", label: "模型转发", hint: "管理进程；监听开关在 Config → 模型转发监听" },
           { value: "back", label: "返回" },
         ],
       });

@@ -7,7 +7,7 @@ export interface ModelRelayCallerConfig {
   enabled: boolean; provider: string; models: string[]; reasoning?: "passthrough" | "off";
 }
 export interface ModelRelayConfig extends ModelRelayLimitConfig {
-  enabled: boolean; host: "127.0.0.1" | "::1"; port: number;
+  enabled: boolean; host: string; port: number;
   accounts: Array<{ provider: string }>;
   callers: ModelRelayCallerConfig[];
   retired_callers?: Array<Pick<ModelRelayCallerConfig, "caller_id" | "key_id" | "provider" | "credential_generation">>;

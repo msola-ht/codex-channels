@@ -1,3 +1,4 @@
+import { runRelayListenMenu } from "./model-relay-listen-menu.mjs";
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -77,6 +78,7 @@ export async function runConfig({
         { value: "scheduled_tasks", label: "计划任务", hint: "启用或关闭无人值守任务" },
         { value: "network", label: "网络代理", hint: "显式 HTTP、HTTPS、通用代理与直连规则" },
         { value: "advanced", label: "高级设置", hint: "日志等级与开发中功能" },
+        { value: "relay", label: "模型转发监听", hint: "关闭、仅本机或局域网；Key 管理使用 WebUI 或 codexc relay" },
         { value: "webui", label: "WebUI 设置", hint: "监听地址、端口与访问令牌" },
         { value: "metrics", label: "指标存储", hint: "本地保留天数与最大记录数" },
         { value: "paths", label: "查看配置路径", hint: "显示用户目录与配置文件位置" },
@@ -94,6 +96,7 @@ export async function runConfig({
       scheduled_tasks: runScheduledTasks,
       network: runNetworkSettings,
       advanced: runAdvancedSettings,
+      relay: runRelayListenMenu,
       webui: runWebuiSettings,
       metrics: runMetricsSettings,
     };

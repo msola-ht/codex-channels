@@ -94,16 +94,14 @@ export function RelayPage() {
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
-    {data && snapshotCurrent && <p className="text-sm text-muted-foreground">{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></p>}
-    {data && <div className="flex flex-wrap gap-2" role="status" aria-label={t("relay.runtimeLabel")}>
+    {data && <Card size="sm" className="sm:flex-row sm:items-center sm:justify-between"><CardHeader className="min-w-0 sm:flex-1"><CardTitle>{t("relay.stats.service")}</CardTitle>
+      {snapshotCurrent && <CardDescription>{t(data.enabled ? "relay.configEnabled" : "relay.configDisabled")} <Link to="/settings" className="underline">{t("relay.providers")}</Link></CardDescription>}
+    </CardHeader><CardContent className="shrink-0"><div className="flex flex-wrap gap-2" role="status" aria-label={t("relay.runtimeLabel")}>
       {snapshotCurrent && <Badge variant="outline">{t("relay.configuredConcurrency", { count: data.maxConcurrency })}</Badge>}
       {!snapshotCurrent ? <Badge variant="outline">{t(management.loading ? "relay.refreshing" : "relay.runtimeUnknown")}</Badge> : data.runtime?.state === "running" ? <>
         <Badge variant={data.runtime.listening && data.runtime.configurationValid ? "secondary" : "outline"}>{t(data.runtime.listening && data.runtime.configurationValid ? "relay.listening" : "relay.notListening")}</Badge>
-        <Badge variant="outline">{t("relay.activeCount", { count: data.runtime.active })}</Badge>
-        <Badge variant="outline">{t("relay.waitingCount", { count: data.runtime.waiting })}</Badge>
-        <Badge variant="outline">{t("relay.uploadingCount", { count: data.runtime.uploading })}</Badge>
       </> : <Badge variant="outline">{t(data.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
-    </div>}
+    </div></CardContent></Card>}
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
     {snapshotCurrent && data?.runtime?.state === "running" && <RelayRuntimeStatus runtime={data.runtime} />}
     {data && !management.loading && !management.error && <Card><CardHeader><CardTitle>{t("relay.keysTitle")}</CardTitle><CardDescription>{t("relay.keysHint")}</CardDescription></CardHeader><CardContent className="min-w-0"><Table><TableHeader><TableRow>
@@ -112,18 +110,18 @@ export function RelayPage() {
       {data.callers.map(entry => {
         const protocols = data.providers.find(value => value.id === entry.provider)?.protocols
         return <TableRow key={entry.key_id}>
-        <TableCell className="min-w-40 max-w-60 whitespace-normal"><div className="break-all">{entry.display_name ?? entry.caller_id}</div><div className="break-all text-xs text-muted-foreground">{entry.caller_id}</div><div className="break-all text-xs text-muted-foreground">{entry.key_id}</div></TableCell>
+        <TableCell className="min-w-40 max-w-60 whitespace-normal"><div className="break-all">{entry.display_name ?? entry.caller_id}</div></TableCell>
         <TableCell className="max-w-40 whitespace-normal break-all">{entry.provider}</TableCell>
         <TableCell><div className="flex flex-wrap gap-1">{protocols?.length
           ? protocols.map(protocol => <Badge key={protocol} variant="outline">{protocol === "chat" ? "Chat" : "Responses"}</Badge>)
           : <Badge variant="outline">{t("relay.capabilityUnknown")}</Badge>}</div></TableCell><TableCell className="max-w-72 whitespace-normal break-all"><ul className="flex flex-col gap-1">{entry.models.map(model => <li key={model}>{model}</li>)}</ul></TableCell>
-        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell className="tabular-nums">{t("relay.generation", { value: entry.credential_generation })}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
+        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell className="tabular-nums">{entry.credential_generation}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
         <TableCell className="min-w-40 max-w-64"><div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
           <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
           <Button size="sm" variant="destructive" disabled={blocked} onClick={() => startAction({ command: "delete", caller: entry.caller_id })}>{t("relay.delete")}</Button>
-          <Button size="sm" variant="ghost" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
+          <Button size="sm" variant="outline" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
         </div></TableCell>
       </TableRow>})}
       {!data.callers.length && <TableRow><TableCell colSpan={8}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}

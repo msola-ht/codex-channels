@@ -1094,3 +1094,51 @@ it.each([false, true])("forces reasoning off on the outbound copy for JSON/SSE (
   expect(denied.status).toBe(400); expect(await denied.text()).toContain("extra_body.thinking");
   expect(f.calls()).toBe(1);
 });
+
+it.each(["chat", "responses"].flatMap(protocol => [false, true].map(stream => ({ protocol, stream }))))(
+  "keeps authentication and native delivery on wildcard IPv4 ($protocol, $stream)", async ({ protocol, stream }) => {
+    const value = protocol === "chat" ? { ...answer, choices: [{ index: 0, ...(stream ? { delta: { content: "hello" } } : { message: { role: "assistant", content: "hello" } }), finish_reason: "stop" }] }
+      : { id: "resp_lan", object: "response", model: "fixture/model", status: "completed", output: [] };
+    const wire = !stream ? JSON.stringify(value) : protocol === "chat" ? frame(value) + "data: [DONE]\n\n"
+      : frame({ type: "response.completed", response: value });
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" }).end(wire));
+    await f.relay.stopListening();
+    await expect(f.relay.start(0, "localhost")).rejects.toThrow("Relay requires");
+    await expect(f.relay.start(0, "8.8.8.8")).rejects.toThrow("Relay requires");
+    f.relay.admission.apply(config());
+    await f.relay.start(0, "0.0.0.0");
+    const base = f.relay.address().replace("0.0.0.0", "127.0.0.1");
+    expect((await fetch(`${base}/v1/models`)).status).toBe(401);
+    expect(f.preparedCount()).toBe(0);
+    const models = await fetch(`${base}/v1/models`, { headers: { authorization } });
+    expect(await models.json()).toMatchObject({ data: [{ id: "fixture/model" }] });
+    const response = await fetch(`${base}/v1/${protocol === "chat" ? "chat/completions" : "responses"}`, {
+      method: "POST", headers: { authorization, "content-type": "application/json" },
+      body: JSON.stringify(protocol === "chat" ? { ...body, stream } : { model: "fixture/model", input: "hello", stream }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("fixture/model");
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ deliveryStatus: "finished", status: "completed" });
+    await f.relay.close();
+    expect(f.relay.queueSnapshot()).toEqual([]);
+    await expect(fetch(`${base}/v1/models`)).rejects.toThrow();
+  });
+
+it("cancels wildcard-listener requests on client disconnect and listener stop", async () => {
+  const f = await fixture(request => request.resume());
+  await f.relay.stopListening(); f.relay.admission.apply(config()); await f.relay.start(0, "0.0.0.0");
+  const url = f.relay.address().replace("0.0.0.0", "127.0.0.1") + "/v1/chat/completions";
+  const controller = new AbortController();
+  const send = (signal?: AbortSignal) => fetch(url, { method: "POST", headers: { authorization, "content-type": "application/json" },
+    body: JSON.stringify(body), signal: signal ?? null }).then(async response => { await response.text(); }).catch(() => undefined);
+  const first = send(controller.signal); await vi.waitFor(() => expect(f.calls()).toBe(1));
+  controller.abort(); await first;
+  await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+  expect(f.metrics[0]?.deliveryStatus).toBe("disconnected");
+  const second = send(); await vi.waitFor(() => expect(f.calls()).toBe(2));
+  await f.relay.stopListening(); await second;
+  expect(f.metrics).toHaveLength(2);
+  expect(f.relay.queueSnapshot()).toEqual([]);
+  expect(f.relay.admission.active).toBe(0);
+});

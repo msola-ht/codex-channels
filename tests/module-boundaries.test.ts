@@ -280,6 +280,9 @@ function runtimeImportViolations(): string[] {
         // Native protocol policies share only the same pure capability metadata, never runtime I/O.
         if (["model-api/chat-request.ts", "model-api/responses-request.ts"].some(path => file === resolve(sourceRoot, path))
           && target === resolve(runtimeRoot, "chat-reasoning.mjs")) continue;
+        // Listener and strict configuration share only a pure address predicate, without runtime I/O.
+        if (file === resolve(sourceRoot, "model-relay/server.ts")
+          && target === resolve(runtimeRoot, "model-relay-listen-host.mjs")) continue;
         // Transport and service supervision share the same platform socket validation.
         if (file === resolve(sourceRoot, "codex-client/unix-websocket-transport.ts")
           && target === resolve(runtimeRoot, "app-server-unix-socket.mjs")) continue;

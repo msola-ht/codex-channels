@@ -14,7 +14,7 @@ import { ConfigManagementError } from "./config-management-error.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { gatewayOwnerIsActive } from "../runtime/gateway-owner.mjs";
 
-const commands = ["status", "providers", "callers", "issue", "edit", "delete", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"];
+const commands = ["listen", "status", "providers", "callers", "issue", "edit", "delete", "rotate", "disable", "enable", "upgrade-limits", "rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"];
 const invalid = message => new ConfigManagementError("relay_invalid", "relay", message);
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
@@ -47,6 +47,16 @@ export function readRelayManagement(environment = process.env) {
   });
   return { revision: createHash("sha256").update(content).update(JSON.stringify([providers, materialRevisions])).digest("hex"),
     enabled: config.enabled, maxConcurrency: config.max_concurrency, providers, callers: safeCallers(config.callers) };
+}
+
+/** Listener settings do not depend on Provider catalog availability. */
+export function readRelayListener(environment = process.env) {
+  const { configPath } = locateUserConfig(environment);
+  assertPrivateConfigAccessSync(configPath);
+  const content = readPrivateFileSync(configPath, 1024 * 1024);
+  const config = validateGatewayConfigDocument(parseGatewayConfig(content)).model_relay ?? modelRelayConfigSchema.parse({});
+  return { enabled: config.enabled, host: config.host, port: config.port,
+    revision: createHash("sha256").update(content).digest("hex") };
 }
 
 function safeCallers(callers) {
@@ -85,7 +95,7 @@ function withRelayConfigLock(configPath, operation) {
 
 /** Explicit configuration transaction; service activation occurs only after atomic save. */
 export async function manageModelRelay(input, environment = process.env, options = {}) {
-  if (["issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
+  if (["listen", "issue", "edit", "delete", "rotate", "disable", "enable"].includes(input.command)) {
     return withRelayManagementTransaction(environment, () => executeModelRelay(input, environment, options));
   }
   return executeModelRelay(input, environment, options);
@@ -129,13 +139,17 @@ async function executeModelRelay(input, environment, options) {
     assertPrivateConfigAccessSync(configPath);
     if (options.expectedRevision !== undefined && readRelayManagement(environment).revision !== options.expectedRevision) throw conflict();
     const content = readPrivateFileSync(configPath, 1024 * 1024);
+    if (options.expectedConfigRevision !== undefined && createHash("sha256").update(content).digest("hex") !== options.expectedConfigRevision) throw conflict();
     const document = parseGatewayConfig(content);
     const validated = validateGatewayConfigDocument(document);
     if (["rollback-reasoning", "rollback-names", "rollback-providers", "rollback-retired"].includes(input.command) && validated.model_relay === undefined) return { result: "unchanged", backupPath: null };
     const config = structuredClone(validated.model_relay ?? modelRelayConfigSchema.parse({}));
     const previous = modelRelayConfigDigest(config);
     let removed;
-    if (input.command === "issue") {
+    if (input.command === "listen") {
+      if (typeof input.enabled !== "boolean" || typeof input.host !== "string") throw invalid("Relay 监听参数无效");
+      config.host = input.host; config.enabled = input.enabled;
+    } else if (input.command === "issue") {
       if ([...config.callers, ...(config.retired_callers ?? [])].some(caller => caller.caller_id === input.caller || caller.key_id === input.key)) throw invalid("Relay 身份已存在，包含停用或历史记录；不能重复使用");
       const material = loadConfiguredRelayProviderMaterial(input.provider, environment);
       if (input.models.some(model => !material.models.includes(model))) throw invalid("Relay 模型不在账户目录中");

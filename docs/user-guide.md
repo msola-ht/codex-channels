@@ -585,7 +585,7 @@ npm test
 `enable`/`disable` 保存服务开关并确认当前进程生效；进程未运行时明确显示仅保存，
 通过 `codexc service start relay` 启动；停止、重启、状态和日志也使用 `relay` 目标，日常命令统一使用新名称；仅保留 `codexc service start model-relay` 作为旧更新器的显式升级启动入口，执行时输出迁移提示，其他操作拒绝旧名称。内部系统服务名称保持不变，无需为名称变更重新安装服务。首次启用前先完成指标库显式升级。
 
-Relay 默认禁用、只允许回环监听；异机客户端使用自己管理的隧道。提供原生 Chat Completions 与 Responses JSON/SSE 和
+Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨不可信网络使用自己管理的加密隧道。提供原生 Chat Completions 与 Responses JSON/SSE 和
 受限模型列表，不提供 App Server 的 Agent、Thread、Turn、工具执行或文件访问。
 客户端使用 `/v1/chat/completions` 或 `/v1/responses` 选择原生协议；不会互转或自动重试另一协议。
 `codexc relay providers` 和管理页展示账户的实际协议能力：CLP 为 Chat，DS 为 Chat/Responses，其他已接入的 Responses 提供商为 Responses。
@@ -595,6 +595,14 @@ Responses 只提供同步无状态创建；不提供 `store=true`、`background=
 回退仅支持 CLP 的旧程序前，停止 Gateway、Relay 和 WebUI，使用 `codexc relay rollback-providers --provider ID`（可重复）明确列出所有非 CLP Relay 账户；
 命令备份后移除这些引用及其 Key，保持提供商自身配置和剩余凭据。重新接入须重新签发，不恢复备份中的旧秘密。
 完整双协议、提供商接入与升级回滚合同见[实施方案](provider-api-relay-development.md#1514-原生双协议与提供商公共接入)。
+局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
+
+手动设置：先备份当前实际使用的配置文件并校验备份，再在已有 `[model_relay]` 段设置 `host = "192.168.1.10"`（替换为服务器的内网地址），或 `host = "0.0.0.0"`。不要重复创建同名 TOML 段。保留现有 Key、并发及其他字段；默认端口为 4119。支持 10/8、172.16/12、192.168/16 的规范 IPv4 地址，IPv6 当前仅支持回环 `::1`。不接受域名、URL 或公网 IP 字面量。
+
+运行中的 Relay 会刷新监听配置；配置无效或绑定失败时停止接收请求，不自动换地址。初次启用使用 `codexc relay enable`，已安装的服务使用 `codexc service start relay`，通过 `codexc relay status` 确认 `configurationValid`、`enabled`、`listening` 均为 true。改变监听地址会取消旧请求，应在空闲时操作。客户端 Base URL 填 `http://192.168.1.10:4119/v1`，API Key 使用已签发的 Relay Key，模型选择该 Key 允许的 ID。
+
+`0.0.0.0` 监听所有 IPv4 网卡，不是客户端地址，也不保证仅内网可达；自行限制防火墙来源，不做公网端口映射。HTTP 中 Key 和正文未加密，跨不可信网络使用加密隧道。此设置不开放 App Server、控制 IPC 或指标 IPC，不改变 WebUI 的监听与管理授权。回退旧版本前停止 Relay，将 host 改回 `127.0.0.1` 或 `::1`，保留当前凭据，勿恢复整份旧配置。
+
 客户端可携带当前 Key 调用 `GET /v1/models` 查看获准且仍在提供商目录中的模型。WebUI 请求页面来源显示“Codex / 转发”，可按来源与真实调用方筛选；接收确认不代表指标已落盘，交付完成不证明客户端已收到。
 请求列表优先显示 Key 的当前中文用途名称，长名称省略显示，悬停或聚焦可查看完整名称与调用方 ID；未命名或已移除的调用方仍显示原 ID。名称仅用于展示，筛选和历史指标继续使用稳定 ID，不回写历史记录。
 

@@ -47,7 +47,7 @@ describe("Relay strict configuration", () => {
     }
   });
   it.each([
-    { host: "0.0.0.0" }, { host: "localhost" }, { port: 0 }, { allow_public: true }, { max_concurrency: 0 }, { burst: 33 },
+    { host: "localhost" }, { port: 0 }, { allow_public: true }, { max_concurrency: 0 }, { burst: 33 },
     { callers: [caller] }, { accounts: [{ provider: "clp-example" }, { provider: "clp-example" }] },
     { accounts: [{ provider: "clp-example" }], callers: [caller, caller] },
     { accounts: [{ provider: "clp-example" }], callers: [{ ...caller, credential_generation: Number.MAX_SAFE_INTEGER + 1 }] },
@@ -90,5 +90,15 @@ it("keeps retired settlement identities bounded, strict and outside admission po
     [{ ...retired, credential_generation: 0 }], [retired, { ...retired, key_id: "other", provider: "clp-other" }],
     Array.from({ length: 4097 }, (_, i) => ({ ...retired, caller_id: `c${i}`, key_id: `k${i}` }))]) {
     expect(modelRelayConfigSchema.safeParse({ retired_callers: values }).success).toBe(false);
+  }
+});
+
+
+it("allows explicit private IPv4 listeners and rejects noncanonical, public and DNS hosts", () => {
+  for (const host of ["127.0.0.1", "::1", "0.0.0.0", "10.0.0.1", "10.255.255.254", "172.16.0.1", "172.31.255.254", "192.168.1.10"]) {
+    expect(modelRelayConfigSchema.parse({ host }).host).toBe(host);
+  }
+  for (const host of ["172.15.0.1", "172.32.0.1", "192.169.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1", "::", "fd00::1", "::ffff:192.168.1.1", "localhost", "10.01.1.1", "10.1", "0", "0x0a000001", " 10.0.0.1", "http://192.168.1.1", "192.168.1.1:4119"]) {
+    expect(modelRelayConfigSchema.safeParse({ host }).success, host).toBe(false);
   }
 });

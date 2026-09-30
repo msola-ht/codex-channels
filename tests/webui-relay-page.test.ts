@@ -80,20 +80,20 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   })) as { captureFailed: string; captureDisabled: string; captureUnknown: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
   expect(result.captureFailed).toContain("采集故障"); expect(result.captureDisabled).toContain("采集未开启");
   expect(result.captureUnknown).toContain("采集状态未确认"); expect(result.captureUnknown).not.toContain("采集未开启");
-  expect(result.zh).toMatch(/<th[^>]*>凭据代次<\/th>/u);
-  expect(result.en).toContain("Credential generation");
-  expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toContain("处理中 4");
-  expect(result.en).toContain("Oldest wait 1.2 s"); expect(result.en).toContain("Capacity skips 1"); expect(result.en).toContain("Unconfirmed 2");
+  expect(result.zh).toMatch(/<th[^>]*>凭据轮换<\/th>/u);
+  expect(result.en).toContain("Credential rotation");
+  expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toMatch(/>处理中<\/dt><dd[^>]*>4<\/dd>/u);
+  expect(result.en).toContain("Oldest wait 1.2 s"); expect(result.en).toMatch(/>Capacity skips<\/dt><dd[^>]*>1<\/dd>/u); expect(result.en).toMatch(/>Unconfirmed<\/dt><dd[^>]*>2<\/dd>/u);
   expect(result.zh).toContain("采集已就绪"); expect(result.zh).toContain("排队超时 3 次");
-  expect(result.en).toContain("Waiting 2"); expect(result.en).toContain("Receiving 1");
+  expect(result.en).toMatch(/>Waiting<\/dt><dd[^>]*>2<\/dd>/u); expect(result.en).toMatch(/>Receiving<\/dt><dd[^>]*>1<\/dd>/u);
   expect(result.unknown).toContain("Runtime status unconfirmed"); expect(result.unknown).not.toContain("Waiting 0");
   expect(result.stopped).toContain("服务未运行");
   expect(result.refreshing).toContain("Refreshing runtime status");
   expect(result.failed).toContain("Runtime status unconfirmed");
   for (const stale of [result.refreshing, result.failed]) {
-    for (const text of ["Capture ready", "Capacity skips", "Oldest wait", ">Listening<", "Processing 4", "Waiting 2", "Receiving 1", "Configured concurrency limit 10", "Relay configuration is enabled."]) expect(stale).not.toContain(text);
+    for (const text of ["Capture ready", "Capacity skips", "Oldest wait", ">Listening<", ">Processing</dt>", ">Waiting</dt>", ">Receiving</dt>", "Configured concurrency limit 10", "Relay configuration is enabled."]) expect(stale).not.toContain(text);
   }
-  expect(result.recovered).toContain(">Listening<"); expect(result.recovered).toContain("Processing 4");
+  expect(result.recovered).toContain(">Listening<"); expect(result.recovered).toMatch(/>Processing<\/dt><dd[^>]*>4<\/dd>/u);
 
   expect(result.zh).toContain("沉浸式翻译"); expect(result.zh).toContain("强制关闭"); expect(result.zh).toContain("跟随客户端");
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");

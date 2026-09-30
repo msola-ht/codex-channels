@@ -1,3 +1,4 @@
+import { isRelayListenHost } from "./model-relay-listen-host.mjs";
 import { supportsChatReasoningOff } from "./chat-reasoning.mjs";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -18,7 +19,7 @@ function schema(legacy, legacyCapture = false) {
       traffic_dump_mode: z.enum(["production", "debug"]).default("production"),
       traffic_dump_debug: z.strictObject({ caller_id: identity, expires_at_ms: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).optional(),
     } : {}),
-    host: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
+    host: z.string().refine(isRelayListenHost, "Relay 监听地址须为回环、IPv4 内网地址或 0.0.0.0").default("127.0.0.1"),
     port: z.number().int().min(1024).max(65535).default(4119),
     ...limits(10, 10),
     accounts: z.array(z.strictObject({ provider, ...(legacy ? limits(10, 10) : {}) })).max(128).default([]),

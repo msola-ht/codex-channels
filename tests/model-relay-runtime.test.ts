@@ -1,3 +1,5 @@
+// @ts-expect-error JavaScript CLI menu intentionally has no declaration file.
+import { runRelayListenMenu } from "../scripts/model-relay-listen-menu.mjs";
 import fs from "node:fs";
 import { Worker } from "node:worker_threads";
 import { syncBuiltinESMExports } from "node:module";
@@ -230,6 +232,21 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: true, enabled: true, listening: true });
   const models = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${String(issued.key)}` } });
   expect(models.status).toBe(200); expect(await models.json()).toMatchObject({ data: [{ id: "cline-pass/deepseek-v4.1-flash" }] });
+  const rebound = parse(readFileSync(f.configPath, "utf8"));
+  expect(await manageModelRelay({ command: "listen", host: "0.0.0.0", enabled: true, models: [] }, f.environment)).toMatchObject({ activation: "saved_and_applied" });
+  Object.assign(rebound.model_relay!, { host: "0.0.0.0" });
+  expect(service.status().listening).toBe(true);
+  expect((await fetch(`http://127.0.0.1:${address.port}/v1/models`)).status).toBe(401);
+  const occupied = createServer(); await new Promise<void>(resolve => occupied.listen(0, "127.0.0.1", resolve));
+  cleanups.push(() => new Promise<void>(resolve => occupied.close(() => resolve())));
+  const busy = occupied.address(); if (!busy || typeof busy === "string") throw new Error("fixture");
+  Object.assign(rebound.model_relay!, { port: busy.port });
+  writePrivateFileAtomicSync(f.configPath, stringify(rebound));
+  await expect(service.refresh()).rejects.toThrow();
+  expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: false, listening: false });
+  Object.assign(rebound.model_relay!, { host: "127.0.0.1", port: address.port });
+  writePrivateFileAtomicSync(f.configPath, stringify(rebound)); await service.refresh();
+  expect(service.status().listening).toBe(true);
   expect(await manageModelRelay(parseModelRelayCommand(["disable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   expect(service.status().listening).toBe(false);
   await expect(fetch(`http://127.0.0.1:${address.port}/v1/models`)).rejects.toThrow();
@@ -250,8 +267,8 @@ it("accepts help only for exact public paths and rejects unknown options", async
   try {
     await runModelRelayCommand(["upgrade-limits", "-h"]);
     await runModelRelayCommand(["upgrade-limits", "--help"]);
-    for (const command of ["status", "providers", "issue", "callers", "rotate", "delete", "disable", "enable", "edit", "rollback-reasoning", "rollback-names", "rollback-retired", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
-    expect(log).toHaveBeenCalledTimes(28);
+    for (const command of ["listen", "status", "providers", "issue", "callers", "rotate", "delete", "disable", "enable", "edit", "rollback-reasoning", "rollback-names", "rollback-retired", "upgrade-limits"]) for (const flag of ["-h", "--help"]) await runModelRelayCommand([command, flag]);
+    expect(log).toHaveBeenCalledTimes(30);
   } finally { log.mockRestore(); }
   expect(parseModelRelayCommand(["edit", "--caller", "a", "--provider", "clp-other", "--model", "m"]).provider).toBe("clp-other");
   expect(parseModelRelayCommand(["delete", "--caller", "a"]).command).toBe("delete");
@@ -259,6 +276,8 @@ it("accepts help only for exact public paths and rejects unknown options", async
   expect(() => parseModelRelayCommand(["delete", "--caller", "a", "--provider", "clp-other"])).toThrow("用法");
   expect(() => parseModelRelayCommand(["upgrade-limits", "--force"])).toThrow("用法");
   await expect(runModelRelayCommand(["unknown", "--help"])).rejects.toThrow("用法");
+  await expect(runModelRelayCommand(["listen"])).rejects.toThrow("交互终端");
+  expect(() => parseModelRelayCommand(["listen", "--host", "0.0.0.0"])).toThrow("用法");
   expect(() => parseModelRelayCommand(["rotate", "--caller", "a", "--caller", "b"])).toThrow("重复");
   expect(() => parseModelRelayCommand(["enable", "--host", "0.0.0.0"])).toThrow("用法");
 });
@@ -829,4 +848,38 @@ it.each(["provider", "metrics"])("rereads only a changing config once for %s sna
       expect((await received)[0]).toMatchObject({ ok: mode === "once", reads: mode === "invalid" ? 1 : 4 });
     } finally { await worker.terminate(); }
   }
+});
+
+
+it("updates listener interactively with backup, cancellation and stale-config protection", async () => {
+  const f = await fixture();
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", "client", "--key", "key", "--provider", "clp-test", "--model", "cline-pass/deepseek-v4.1-flash"]), f.environment);
+  const before = readFileSync(f.configPath, "utf8");
+  const credentials = gatewayConfig.validateGatewayConfigDocument(parse(before)).model_relay!.callers;
+  let mode = "lan", confirm = false, address = "192.168.1.10", concurrent = false;
+  let text = "";
+  const options = { environment: f.environment, output: { write: (value: string) => { text += value; } }, prompts: {
+    select: async () => mode, text: async () => address, isCancel: (value: unknown) => value === null,
+    confirm: async () => { if (concurrent) writePrivateFileAtomicSync(f.configPath, readFileSync(f.configPath, "utf8") + "\n# external edit\n"); return confirm; },
+  } };
+  expect(await runRelayListenMenu(options)).toEqual({ action: "back" });
+  expect(readFileSync(f.configPath, "utf8")).toBe(before);
+  confirm = true;
+  const enabled = await runRelayListenMenu(options);
+  expect(enabled.activation).toBe("saved_not_running");
+  expect(readFileSync(enabled.backupPath as string, "utf8")).toBe(before);
+  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay).toMatchObject({ host: "0.0.0.0", enabled: true, callers: credentials });
+  expect(text).toContain("服务器内网IP:4119/v1"); expect(text).not.toContain("http://0.0.0.0");
+  mode = "custom"; concurrent = true;
+  await expect(runRelayListenMenu(options)).rejects.toThrow("已变化");
+  expect(readFileSync(f.configPath, "utf8")).toContain("# external edit");
+  concurrent = false; address = "8.8.8.8";
+  await expect(runRelayListenMenu(options)).rejects.toThrow("无效");
+  address = "192.168.1.10"; await runRelayListenMenu(options);
+  mode = "disabled"; await runRelayListenMenu(options);
+  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay).toMatchObject({ host: address, enabled: false, callers: credentials });
+  mode = "local"; await runRelayListenMenu(options);
+  expect(gatewayConfig.validateGatewayConfigDocument(parse(readFileSync(f.configPath, "utf8"))).model_relay).toMatchObject({ host: "127.0.0.1", enabled: true, callers: credentials });
+  text = ""; expect(await runRelayListenMenu(options)).toEqual({ action: "unchanged" });
+  expect(text).toContain("未变化");
 });

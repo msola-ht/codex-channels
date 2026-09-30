@@ -1,3 +1,4 @@
+import { isRelayListenHost } from "../../runtime/model-relay-listen-host.mjs";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -59,7 +60,7 @@ export class ModelRelayServer {
     });
   }
   async start(port: number, host = "127.0.0.1"): Promise<void> {
-    if (host !== "127.0.0.1" && host !== "::1") throw new Error("Relay requires a loopback address");
+    if (!isRelayListenHost(host)) throw new Error("Relay requires a loopback, private IPv4 or explicit wildcard address");
     if (this.stopping) throw new Error("Relay is closed");
     const ready = once(this.server, "listening"); this.server.listen(port, host); await ready;
   }

@@ -97,6 +97,7 @@
     "scripts/management-confirmations.mjs",
     "scripts/management-security.mjs",
     "scripts/metrics-command-options.mjs",
+    "scripts/model-relay-listen-menu.mjs",
     "scripts/model-relay-command.mjs",
     "scripts/model-relay-management.mjs",
     "scripts/webui-management-relay-route.mjs",
