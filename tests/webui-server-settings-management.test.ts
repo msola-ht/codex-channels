@@ -95,6 +95,7 @@ describe("webui server settings and task management", () => {
     expect(new Set(body.services.entries.map((entry) => entry.target))).toEqual(new Set([
       "app-server",
       "gateway",
+      "model-relay",
       "webui",
     ]));
     expect(body.cli.map((entry) => entry.command)).toContain("codexc service status all");
@@ -224,6 +225,24 @@ describe("webui server settings and task management", () => {
     });
     expect(update.status).toBe(200);
     expect(loadGatewaySettings(fixture.environment).display.reasoningEnabled).toBe(false);
+  });
+
+  it("sets the shared capture mode through the existing settings route", async () => {
+    const fixture = createFixture();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+    const current = await (await fetch(`${origin}/api/v1/management/settings`)).json() as { revision: string };
+    const response = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ revision: current.revision, setting: { kind: "system.model-traffic-mode", value: "debug" } }) });
+    expect(response.status).toBe(200);
+    const settings = loadGatewaySettings(fixture.environment);
+    expect(settings.system).toMatchObject({ modelTrafficMode: "debug", modelTrafficDumpEnabled: false });
+    const invalid = await fetch(`${origin}/api/v1/management/settings`, { method: "PATCH",
+      headers: { origin: managementOrigin, "content-type": "application/json" },
+      body: JSON.stringify({ revision: settings.revision, setting: { kind: "system.model-traffic-mode", value: "unknown" } }) });
+    expect(invalid.status).toBe(400);
+    expect(loadGatewaySettings(fixture.environment).system.modelTrafficMode).toBe("debug");
   });
 
   it("updates traffic retention through WebUI settings management", async () => {

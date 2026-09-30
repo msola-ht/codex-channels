@@ -51,6 +51,7 @@ import { loadCcgAccounts } from "../runtime/ccg-accounts.mjs";
 import { JsonRpcClient, loadManagedModelOptions, StdioTransport } from "../src/codex-client/index.js";
 import {
   loadManagedModelProviderSettings,
+  loadConfiguredRelayProviderMaterial,
   loadManagedProviderAppServers,
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
@@ -115,6 +116,7 @@ describe.skipIf(process.platform === "win32")("CCG file catalog setup", () => {
     expect(downloadCatalog).toHaveBeenCalledOnce();
     expect(select.mock.calls[1]![0].options).toHaveLength(3);
     expect(loadManagedModelProviderSettings(options.environment)[0]).toMatchObject({ model });
+    expect(loadConfiguredRelayProviderMaterial("ccg-main", options.environment)).toMatchObject({ protocols: ["responses"], apiKey: "cmd_test-key" });
   });
 
   it.each(["model", "reasoning"])("returns to the parent menu when cancelling %s selection", async (step) => {

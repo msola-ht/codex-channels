@@ -8,9 +8,9 @@ import { runGatewayService } from "../runtime/gateway-service-runtime.mjs";
 import { assertSynchronousChildSuccess } from "../runtime/process-lifecycle.mjs";
 import {
   defaultServiceTarget,
-  parseServiceTarget,
   serviceTargetIncludes,
-  serviceTargetUsage,
+  serviceCommandTarget,
+  serviceTargetUsage as internalServiceTargetUsage,
 } from "../runtime/service-targets.mjs";
 import { applyTerminalIdentityFromEnvironment } from "./config-management.mjs";
 import { packageDir } from "./package-path.mjs";
@@ -19,6 +19,7 @@ import {
   serviceControlEnvironment,
 } from "./runtime-environment.mjs";
 import { readWorkspaceConfig } from "./workspace-config.mjs";
+import { waitForSelectedRelay } from "./service-selection.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
@@ -32,6 +33,14 @@ export const serviceCommandActions = Object.freeze([
   "status",
   "logs",
 ]);
+
+// Public spelling is independent of installed service identifiers and file names.
+const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceCommandTarget).join("|");
+function parseServiceTarget(value) {
+  if (value === "relay") return "model-relay";
+  if (value !== "model-relay" && internalServiceTargetUsage.split("|").includes(value)) return value;
+  throw new Error(`服务目标必须是 ${serviceTargetUsage.replaceAll("|", "、")}：${value}`);
+}
 
 export const serviceCommandUsage = Object.freeze({
   install: "用法：codexc service install",
@@ -63,6 +72,19 @@ export async function runAppServerServiceCommand(args) {
   );
 }
 
+export async function runModelRelayServiceCommand(args) {
+  if (args.length > 0) throw new Error("内部服务入口不接受参数");
+  const { locateUserConfig } = await import("./runtime-config.mjs");
+  const { startModelRelayService } = await import("../runtime/model-relay-service.mjs");
+  const { configPath } = locateUserConfig(process.env);
+  let stop;
+  const stopped = new Promise(resolve => { stop = resolve; });
+  process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  let service;
+  try { service = await startModelRelayService(configPath, process.env); await stopped; }
+  finally { process.off("SIGINT", stop); process.off("SIGTERM", stop); await service?.close(); }
+}
+
 /**
  * 安装服务时按运行命令的终端补入缺失的 `[codex].terminal_identity`：App Server 由服务进程
  * 启动、自身没有终端，只有用户直接运行的安装命令能探测到其实际使用的终端。已配置或探测不到终端
@@ -89,7 +111,11 @@ export async function runServiceCommand(args) {
   if (!serviceCommandActions.includes(action)) {
     throw new Error("用法：codexc service <install|uninstall|start|stop|reload|restart|status|logs>");
   }
-  const serviceArgs = parseServiceArguments(action, rest);
+  // Updaters already running before the rename use this exact invocation after
+  // switching source. Keep the documented start-only handoff, not a general alias.
+  const upgradeHandoff = action === "start" && rest.length === 1 && rest[0] === "model-relay";
+  const serviceArgs = parseServiceArguments(action, upgradeHandoff ? ["relay"] : rest);
+  if (upgradeHandoff) printCliMessage("note", "正在使用兼容旧版更新器的 Relay 启动入口；日常操作请使用 codexc service start relay。");
   rejectUnsafeAppServerServiceAction(action, serviceArgs, process.env);
   if (action === "status" && serviceArgs[1] === "--json") {
     runNodeScript(
@@ -166,6 +192,7 @@ export async function runServiceCommand(args) {
     throw new Error("codexc service 当前支持 macOS launchd、Linux systemd 与 Windows 计划任务");
   }
   const readinessTarget = coreServiceReadinessTarget(action, serviceArgs);
+  if (action === "start" || action === "restart") await waitForSelectedRelay(serviceArgs[0], controlEnvironment);
   if (readinessTarget) {
     await waitForManagedServiceReadiness(readinessTarget);
     printCliMessage("success", coreServiceReadyMessage(readinessTarget));

@@ -12,6 +12,7 @@ import {
 } from "../runtime/gateway-config.mjs";
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import {
+  TrafficDumpDebugError,
   describeDumpExchange,
   describeDumpTrace,
   describeDumpTurnStates,
@@ -113,7 +114,7 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     throw new ApiError(
       503,
       "traffic_unavailable",
-      "还没有调用记录文件：在 config.toml 的 [debug] 开启 model_traffic_dump 后重启 App Server 服务",
+      "还没有调用记录文件：Codex 与 Relay 共用 [debug].model_traffic_dump，请开启全局“记录调用详情”",
     );
   }
   const dump = dumpSettings(environment);
@@ -184,6 +185,9 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
     traceOffset,
     maxTracePageSize: maximumTracePageSize,
     maxSectionBytes: maximumSectionBytes,
+  }).catch(error => {
+    if (error instanceof TrafficDumpDebugError) throw new ApiError(503, error.code, error.message);
+    throw error;
   });
   if (exchange === null) {
     throw new ApiError(404, "traffic_exchange_not_found", `没有找到关联模型调用 #${id}：记录可能尚未写入、写入失败或已被清理；不会匹配其他请求`);
@@ -209,7 +213,8 @@ function dumpSettings(environment) {
     ? explicitConfigFile
     : join(userDataDir(environment), "config.toml");
   try {
-    const debug = validateDebugConfigDocument(readGatewayConfig(configPath).debug ?? {});
+    const document = readGatewayConfig(configPath);
+    const debug = validateDebugConfigDocument(document.debug ?? {});
     return {
       enabled: debug.model_traffic_dump,
       retentionDays: debug.model_traffic_retention_days,

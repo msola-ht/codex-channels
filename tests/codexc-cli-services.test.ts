@@ -9,7 +9,8 @@ import { WebSocketServer } from "ws";
 
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { AppServerSupervisorOwner } from "../runtime/app-server-supervisor.mjs";
-import { readGatewayConfig } from "../runtime/gateway-config.mjs";
+import { startModelRelayService } from "../runtime/model-relay-service.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { cli, execFileAsync, mkdtempSync } from "./codexc-cli-test-fixture.js";
 
@@ -77,6 +78,68 @@ afterEach(() => {
 });
 
 describe("codexc CLI", { timeout: 15_000 }, () => {
+  it("documents relay and rejects retired spelling outside the start-only upgrade handoff", () => {
+    for (const action of ["start", "stop", "restart", "status", "logs"]) {
+      for (const flag of ["-h", "--help"]) {
+        const help = execFileSync(process.execPath, [cli, "service", action, flag], { encoding: "utf8" });
+        expect(help).toContain("gateway|app-server|webui|relay|all");
+        expect(help).not.toContain("model-relay");
+      }
+      if (action === "start") continue;
+      const old = spawnSync(process.execPath, [cli, "service", action, "model-relay"], { encoding: "utf8" });
+      expect(old.status).toBe(1);
+      expect(old.stderr).toContain("服务目标必须是 gateway、app-server、webui、relay、all");
+    }
+  });
+
+  linuxIt("accepts the old updater start invocation through the normal Relay readiness checks", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-relay-handoff-"));
+    temporaryDirectories.push(root);
+    const manager = join(root, "systemctl");
+    const log = join(root, "manager.log");
+    writeFileSync(manager, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SERVICE_TEST_LOG"\n');
+    chmodSync(manager, 0o755);
+    const configPath = join(root, "config.toml");
+    const environment = { ...process.env, HOME: root, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: root,
+      CODEX_CONNECT_CONFIG_FILE: configPath, SYSTEMCTL_BINARY: manager,
+      XDG_CONFIG_HOME: join(root, "config"), SERVICE_TEST_LOG: log };
+    execFileSync(process.execPath, [cli, "init"], { env: environment, cwd: root });
+    const config = readGatewayConfig(configPath);
+    config.telegram = { bot_token: "fixture", allowed_user_ids: [1] };
+    writeGatewayConfig(configPath, config);
+    // Disabled isolated Relay provides a real private IPC readiness acknowledgment.
+    const relay = await startModelRelayService(configPath, environment);
+    try {
+      for (const target of ["model-relay", "relay"]) {
+        // model-relay is the exact argv emitted by the pre-rename updater after source switch.
+        const { stdout } = await execFileAsync(process.execPath, [cli, "service", "start", target], { env: environment, cwd: root });
+        expect(stdout.includes("旧版更新器")).toBe(target === "model-relay");
+      }
+      expect(readFileSync(log, "utf8").match(/start codex-connect-model-relay.service/gu)).toHaveLength(2);
+    } finally { await relay.close(); }
+    await expect(execFileAsync(process.execPath, [cli, "service", "start", "model-relay"], { env: environment, cwd: root }))
+      .rejects.toThrow("Model Relay 未就绪");
+  });
+
+  linuxIt("maps public relay stop and status to the installed systemd unit", () => {
+    const root = mkdtempSync(join(tmpdir(), "codexc-relay-name-"));
+    temporaryDirectories.push(root);
+    const manager = join(root, "systemctl");
+    const log = join(root, "manager.log");
+    writeFileSync(manager, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SERVICE_TEST_LOG"\n');
+    chmodSync(manager, 0o755);
+    const environment = { ...process.env, HOME: root, CODEX_CONNECT_HOME: root,
+      CODEX_CONNECT_CONFIG_FILE: join(root, "missing.toml"), SYSTEMCTL_BINARY: manager,
+      XDG_CONFIG_HOME: join(root, "config"), SERVICE_TEST_LOG: log };
+    for (const action of ["stop", "status"]) {
+      execFileSync(process.execPath, [cli, "service", action, "relay"], { env: environment, encoding: "utf8" });
+    }
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("stop codex-connect-model-relay.service");
+    expect(calls).toContain("status codex-connect-model-relay.service");
+    expect(calls).not.toContain("codex-connect-relay.service");
+  });
+
   it("rejects invalid service log options before reading user configuration", () => {
     const invalidLines = spawnSync(process.execPath, [cli, "service", "logs", "--lines", "0"], {
       encoding: "utf8",
@@ -200,6 +263,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     chmodSync(fakeSystemctl, 0o755);
     const environment = {
       ...process.env,
+      XDG_CONFIG_HOME: join(root, "config"),
       CODEX_CONNECT_HOME: home,
       CODEX_CONNECT_CONFIG_FILE: "",
       SYSTEMCTL_BINARY: fakeSystemctl,

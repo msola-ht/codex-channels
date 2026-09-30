@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -17,6 +17,12 @@ afterEach(() => {
 });
 
 describe("Git hooks installation", () => {
+  it("does not prepare sources when npm explicitly disables lifecycle scripts", () => {
+    expect(execFileSync(process.execPath, [resolve("scripts/prepare-package.mjs")], {
+      encoding: "utf8", env: { ...process.env, PATH: "", npm_config_ignore_scripts: "true" },
+    })).toBe("");
+  });
+
   it("configures the tracked hooks directory idempotently", () => {
     const root = mkdtempSync(join(tmpdir(), "codexc-git-hooks-"));
     temporaryDirectories.push(root);

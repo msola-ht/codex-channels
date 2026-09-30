@@ -1,10 +1,11 @@
+import { serviceCommandTarget } from "../runtime/service-targets.mjs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 
 import { isPrunableMetricsProviderId } from "./metrics-command-options.mjs";
 import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 
-const targets = new Set(["gateway", "app-server", "webui", "all"]);
+const targets = new Set(["gateway", "app-server", "webui", "model-relay", "all"]);
 const serviceActions = new Set(["install", "uninstall", "start", "stop", "reload", "restart"]);
 const maintenanceActions = new Set(["cleanup", "prune", "reset"]);
 const metricsRequireStoppedGateway = new Set(["cleanup", "reset"]);
@@ -28,7 +29,7 @@ export class WebuiManagementTaskRunner {
   preview(input) {
     const normalized = normalizeTaskInput(input);
     const command = normalized.operation === "service"
-      ? `codexc service ${normalized.action}${normalized.target ? ` ${normalized.target}` : ""}`
+      ? `codexc service ${normalized.action}${normalized.target ? ` ${serviceCommandTarget(normalized.target)}` : ""}`
       : normalized.operation === "update"
         ? "codexc update"
         : normalized.operation === "traffic"
@@ -43,7 +44,7 @@ export class WebuiManagementTaskRunner {
       target: normalized.target ?? null,
       effects: [service || metrics || traffic ? `执行 ${command}` : "执行 codexc update（独立更新子进程）"],
       preconditions: traffic
-        ? ["全部 App Server 必须已停止"]
+        ? ["全部 App Server 与 Relay 必须已停止"]
         : metrics && metricsRequireStoppedGateway.has(normalized.action)
           ? ["Gateway 必须已停止，且指标 Socket 不可用"]
           : [],
@@ -140,7 +141,7 @@ export class WebuiManagementTaskRunner {
     task.state = "running";
     task.updatedAt = new Date(this.#now()).toISOString();
     const args = normalized.operation === "service"
-      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [normalized.target])]
+      ? ["service", normalized.action, ...(normalized.target === undefined ? [] : [serviceCommandTarget(normalized.target)])]
       : normalized.operation === "update"
         ? ["update"]
         : normalized.operation === "traffic"

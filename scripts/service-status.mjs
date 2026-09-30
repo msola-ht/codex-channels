@@ -9,7 +9,6 @@ import { resolvePrimaryAppServerSocketPath } from "../runtime/app-server-runtime
 import {
   parseServiceTarget,
   serviceDefinitions,
-  serviceDefinitionsForTarget,
 } from "../runtime/service-targets.mjs";
 import {
   appServerSocketAcceptsWebSocket,
@@ -19,6 +18,7 @@ import { gatewayOwnerIsReady } from "../runtime/gateway-owner.mjs";
 import { runtimeConfig } from "./runtime-config.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
 import { packageDir } from "./package-path.mjs";
+import { serviceControlDefinitions, serviceSnapshotHealthy } from "./service-selection.mjs";
 
 const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "gu");
 
@@ -30,7 +30,7 @@ export function inspectManagedServiceStatus({
   userId = typeof process.getuid === "function" ? process.getuid() : undefined,
 } = {}) {
   const resolvedTarget = parseServiceTarget(target);
-  const definitions = serviceDefinitionsForTarget(resolvedTarget);
+  const definitions = serviceControlDefinitions(platform === "linux" ? "systemd" : platform === "darwin" ? "launchd" : "windows", resolvedTarget, "status", environment);
   let services;
   let servicePlatform;
   if (platform === "linux") {
@@ -52,7 +52,7 @@ export function inspectManagedServiceStatus({
   return {
     platform: servicePlatform,
     target: resolvedTarget,
-    healthy: services.every((service) => service.running),
+    healthy: serviceSnapshotHealthy(services, resolvedTarget, environment),
     services,
   };
 }
@@ -65,7 +65,7 @@ export async function inspectManagedServiceStatusAsync({
   userId = typeof process.getuid === "function" ? process.getuid() : undefined,
 } = {}) {
   const resolvedTarget = parseServiceTarget(target);
-  const definitions = serviceDefinitionsForTarget(resolvedTarget);
+  const definitions = serviceControlDefinitions(platform === "linux" ? "systemd" : platform === "darwin" ? "launchd" : "windows", resolvedTarget, "status", environment);
   let services;
   let servicePlatform;
   if (platform === "linux") {
@@ -108,7 +108,7 @@ export async function inspectManagedServiceStatusAsync({
   return {
     platform: servicePlatform,
     target: resolvedTarget,
-    healthy: services.every((service) => service.running),
+    healthy: serviceSnapshotHealthy(services, resolvedTarget, environment),
     services,
   };
 }
@@ -126,7 +126,7 @@ export function readManagedServiceError({
   target,
   now = Date.now(),
 } = {}) {
-  if (target !== "gateway" && target !== "app-server" && target !== "webui") {
+  if (target !== "gateway" && target !== "app-server" && target !== "webui" && target !== "model-relay") {
     return null;
   }
   let dataDir;
@@ -451,7 +451,7 @@ function safeProcessError(result) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     if (process.argv.length !== 3) {
-      throw new Error("用法：codexc service status [gateway|app-server|webui|all] [--json]");
+      throw new Error("用法：codexc service status [gateway|app-server|webui|relay|all] [--json]");
     }
     const result = await inspectManagedServiceHealth({ target: process.argv[2] });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

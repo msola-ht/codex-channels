@@ -29,16 +29,23 @@ export class PrivateIpcServer {
   #logicalPath;
   #server;
   #socketIdentity;
+  #boundedSockets = new Set();
 
-  constructor(logicalPath, listener) {
+  constructor(logicalPath, listener, bounds) {
     this.#logicalPath = logicalPath;
     this.#server = createServer({ allowHalfOpen: true }, (socket) => {
+      if (bounds) {
+        this.#boundedSockets.add(socket);
+        const timer = setTimeout(() => socket.destroy(), bounds.connectionTimeoutMs);
+        socket.once("close", () => { clearTimeout(timer); this.#boundedSockets.delete(socket); });
+      }
       if (process.platform !== "win32") {
         listener(socket);
         return;
       }
       authenticateWindowsConnection(socket, this.#descriptor.token, listener);
     });
+    if (bounds) this.#server.maxConnections = bounds.maximumConnections;
   }
 
   get listening() {
@@ -111,6 +118,7 @@ export class PrivateIpcServer {
   }
 
   async close() {
+    for (const socket of this.#boundedSockets) socket.destroy();
     await closeServer(this.#server);
     if (process.platform === "win32") {
       unlinkOwnedWindowsDescriptor(

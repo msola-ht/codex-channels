@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -194,16 +194,38 @@ export async function describeDumpExchange(
   const models = createModelEvidenceCollector();
   models.headers(interaction.response?.headers, "http.headers");
   models.event(responseBody);
-  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output, models.event);
+  const chat = responseBody?.success === true ? responseBody.data : responseBody;
+  const chatOutput = Array.isArray(chat?.choices) ? chat.choices.flatMap(choice => choice?.message && typeof choice.message === "object" && !Array.isArray(choice.message)
+    ? [{ type: "message", ...choice.message }] : []) : undefined;
+  let streamFacts;
+  const nativeResponses = interaction.response?.capture === "redacted_upstream_responses";
+  let terminalResponse = nativeResponses && ["completed", "failed", "incomplete"].includes(responseBody?.status) ? responseBody : undefined;
+  const output = createOutputCollector(maxSectionBytes, (responseBody?.response ?? responseBody)?.output ?? chatOutput, value => {
+    models.event(value);
+    if (interaction.response?.capture === "redacted_upstream_chat" && Array.isArray(value?.choices) && value.usage != null) streamFacts = responseFacts(value);
+    if (nativeResponses && ["response.completed", "response.failed", "response.incomplete"].includes(value?.type)
+      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output)) {
+      terminalResponse = value.response; streamFacts = responseFacts(value);
+    }
+  });
+  if (interaction.response?.capture === "redacted_upstream_chat" || nativeResponses && responseBody === undefined) {
+    output.consume({ kind: "response_body", encoding: "utf8", text: responsePayload.text });
+  }
   const trace = await readTrace(directory, id, traceOffset, maxTracePageSize, maxSectionBytes, output);
   const collected = output.result();
+  // Read existing V2 dumps using their explicit terminal payload; never rewrite archived data.
+  if (terminalResponse && interaction.response.state === "completed") {
+    interaction.response = { ...interaction.response, state: terminalResponse.status };
+  }
   return {
     ...summaryOf(interaction, requestBody),
+    ...debugDetail(interaction, maxSectionBytes),
     modelEvidence: models.result(),
     chatDiagnostics: trace.chatDiagnostics,
     parameterComparison: parameterComparison(requestBody, responseBody),
     request: {
       headers: interaction.request.headers ?? {},
+      headersTruncated: interaction.request.headersTruncated === true,
       method: interaction.request.method,
       path: interaction.request.path,
       url: interaction.request.url,
@@ -218,6 +240,7 @@ export async function describeDumpExchange(
       state: interaction.response.state,
       status: interaction.response.status ?? null,
       headers: interaction.response.headers ?? {},
+      headersTruncated: interaction.response.headersTruncated === true,
       body: responsePayload.text,
       bodyTruncated: responsePayload.truncated,
       bytes: interaction.response.bytes ?? interaction.response.payload?.bytes,
@@ -228,9 +251,12 @@ export async function describeDumpExchange(
       errorScope: interaction.response.errorScope,
       failureStage: failureStage(interaction.response, responseBody),
       error: interaction.response.error,
+      capture: interaction.response.capture,
+      deliveryStatus: interaction.response.deliveryStatus,
       storedBytes: interaction.response.payload?.bytes,
-      ...facts,
+      ...(streamFacts ?? facts),
       ...collected,
+      ...(nativeResponses && responsePayload.truncated ? { outputTruncated: true } : {}),
     },
     trace: trace.items,
     tracePage: trace.page,
@@ -396,11 +422,16 @@ function compareInteraction(left, right, newestFirst) {
 function summaryOf(interaction, body) {
   const request = interaction.request;
   const response = interaction.response;
-  const metadata = requestMetadata(body);
-  const requestKind = metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
+  const relay = ["relay.chat", "relay.responses"].includes(labelOf(interaction.directory));
+  const metadata = relay ? {} : requestMetadata(body);
+  const requestKind = relay ? undefined : metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
+  const clientName = requestClientName(request);
+  const protocol = requestProtocol(request);
   return {
     id: request.id,
+    ...(clientName === undefined ? {} : { clientName }),
+    ...(protocol === undefined ? {} : { protocol }),
     label: labelOf(interaction.directory),
     session: interaction.session,
     startedAtMs: request.startedAtMs,
@@ -444,7 +475,7 @@ function readPayload(directory, payload, maxBytes) {
   if (payload === undefined || !Array.isArray(payload.parts)) return { text: "", truncated: false };
   const buffers = [];
   let remaining = maxBytes;
-  let truncated = false;
+  let truncated = payload.truncated === true;
   for (const part of payload.parts) {
     if (remaining <= 0) {
       truncated = true;
@@ -537,4 +568,30 @@ async function readTrace(directory, id, offset, limit, maxBytes, output) {
 
 function numericSuffix(name) {
   return Number(/-([1-9][0-9]*)\.jsonl$/u.exec(name)?.[1] ?? 0);
+}
+
+export class TrafficDumpDebugError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+
+function debugDetail(interaction, limit) {
+  const request = interaction.request.debug;
+  const response = interaction.response?.debug;
+  if (request === undefined && response === undefined) return {};
+  if (request?.version !== 1 || response !== undefined && response?.version !== 1) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试转储版本");
+  const stage = value => {
+    if (!value || !value.headers || typeof value.headers !== "object" || Array.isArray(value.headers) || !value.payload
+      || typeof value.headersTruncated !== "boolean"
+      || Object.values(value.headers).some(header => typeof header !== "string" && (!Array.isArray(header) || header.some(item => typeof item !== "string")))
+      || value.state !== undefined && !["finished", "disconnected", "failed", "not_started"].includes(value.state)) {
+      throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试阶段记录不完整或损坏");
+    }
+    const body = readPayload(interaction.directory, value.payload, limit);
+    return { headers: value.headers, headersTruncated: value.headersTruncated, body: body.text, bodyTruncated: body.truncated,
+      ...(value.status === undefined ? {} : { status: value.status }), ...(value.state === undefined ? {} : { state: value.state }) };
+  };
+  if (!Array.isArray(request.transformations) || response !== undefined && !Array.isArray(response.transformations)) throw new TrafficDumpDebugError("traffic_unavailable", "Relay 调试处理标记损坏");
+  const transformations = [...request.transformations, ...(response?.transformations ?? [])];
+  if (!transformations.every(value => ["headers_filtered", "headers_overridden", "stream_defaulted", "store_defaulted", "json_unwrapped"].includes(value))) throw new TrafficDumpDebugError("traffic_unsupported_version", "不支持的 Relay 调试处理标记");
+  return { debug: { inbound: stage(request.inbound), delivered: response ? stage(response.delivered) : null, transformations } };
 }

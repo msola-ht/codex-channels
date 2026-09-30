@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -62,6 +62,42 @@ function writeCallIndex(
 }
 
 describe("webui server data API", () => {
+  it("does not expose a separate metrics-only detail endpoint", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+    expect((await fetch(`${origin}/api/v1/requests/1`)).status).toBe(404);
+  });
+
+  it("filters relay requests by real caller with null Thread/Turn and separate delivery", async () => {
+    const fixture = createFixture();
+    recordSample(fixture.databasePath, { ...metricSample(), source: "relay", callerId: "client", keyId: "key",
+      credentialGeneration: 2, relayRequestId: "8a13f205-1387-48a9-8cec-efce153a8210", deliveryStatus: "disconnected",
+      provider: "clp-test", transport: "http", operation: "response", threadId: null, turnId: null, traffic: null });
+    const { origin } = await startServer(fixture.environment);
+    const response = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ records: [{ source: "relay", callerId: "client", threadId: null, turnId: null, deliveryStatus: "disconnected" }] });
+    const owned = await fetch(`${origin}/api/v1/requests?range=all&source=owned`);
+    expect(await owned.json()).toMatchObject({ records: [] });
+    expect((await fetch(`${origin}/api/v1/requests?source=other`)).status).toBe(400);
+    appendFileSync(join(fixture.home, "config.toml"), `\n[[model_relay.accounts]]\nprovider = "clp-test"\n[[model_relay.callers]]\ncaller_id = "client"\nkey_id = "key"\nprovider = "clp-test"\nmodels = ["fixture"]\ncredential_generation = 2\nsecret_sha256 = "${"a".repeat(64)}"\nenabled = false\ndisplay_name = "沉浸式翻译"\n`);
+    const named = await fetch(`${origin}/api/v1/requests?range=all&source=relay&callerId=client`);
+    expect(named.status).toBe(200);
+    expect(await named.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "沉浸式翻译" }] });
+    const configPath = join(fixture.home, "config.toml");
+    const configuration = readFileSync(configPath, "utf8");
+    writeFileSync(configPath, configuration.replace('display_name = "沉浸式翻译"', 'display_name = "网页翻译"'));
+    const renamed = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+    expect(await renamed.json()).toMatchObject({ records: [{ callerId: "client", callerDisplayName: "网页翻译" }] });
+    for (const changed of [configuration.replace('key_id = "key"', 'key_id = "other-key"'), configuration.replaceAll('provider = "clp-test"', 'provider = "clp-other"')]) {
+      writeFileSync(configPath, changed);
+      const mismatched = await fetch(`${origin}/api/v1/requests?range=all&source=relay`);
+      expect(mismatched.status).toBe(200);
+      const result = await mismatched.json() as { records: Array<{ callerId: string; callerDisplayName?: string }> };
+      expect(result.records[0]?.callerId).toBe("client");
+      expect(result.records[0]).not.toHaveProperty("callerDisplayName");
+    }
+  });
   it("returns the server time zone before a metrics database exists", async () => {
     const fixture = createFixture();
     const { origin } = await startServer(fixture.environment);
@@ -735,7 +771,7 @@ describe("webui server data API", () => {
     const body = await response.json();
     expect(body).toMatchObject({ error: {
       code: "metrics_database_incompatible",
-      message: "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset",
+      message: "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库",
     } });
     expect(JSON.stringify(body)).not.toContain(fixture.databasePath);
   });

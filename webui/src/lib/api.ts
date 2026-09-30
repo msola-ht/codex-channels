@@ -1,4 +1,5 @@
 import type {
+  RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
@@ -364,4 +365,18 @@ export function refreshOfficialAccountSnapshot(
     method: "POST",
     body: JSON.stringify({ provider }),
   }, signal)
+}
+
+export function fetchRelayManagement(signal?: AbortSignal): Promise<RelayManagementSnapshot> {
+  return getJson(`${API_PREFIX}/management/relay`, signal)
+}
+export function previewRelayManagement(input: RelayManagementMutation, signal?: AbortSignal): Promise<{ preview: RelayManagementPreview; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/relay/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function applyRelayManagement(input: RelayManagementMutation, confirmationToken: string, signal?: AbortSignal): Promise<RelayManagementResult> {
+  return requestJson(`${API_PREFIX}/management/relay/apply`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function fetchRelayQueue(signal?: AbortSignal): Promise<RelayQueueSnapshot> {
+  return getJson(`${API_PREFIX}/management/relay/queue`, signal)
 }

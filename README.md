@@ -49,9 +49,10 @@ codexc timezone              # App Server 与 WebUI 时区；--gateway 设置网
 codexc work                  # 新建或注册已有工作区、管理权限
 codexc service               # 交互选择服务操作和目标
 codexc service status        # 查看服务状态
-codexc service restart all   # 重启 Gateway 与全部 App Server
+codexc service restart all   # 重启 Gateway、全部 App Server 及已安装且启用的 Relay
 codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
+codexc relay status          # 查询可选模型 API 转发进程
 codexc traffic               # 查看模型请求与响应转储
 codexc webui                 # 启动本地指标与设置 WebUI
 codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
@@ -92,6 +93,7 @@ DS、OCG、CCG、CLP 支持多账户，在 `codexc setup → 模型与提供商`
 - [OpenCode Go](docs/opencode-go.md)
 - [CCG（CommandCode）](docs/ccg.md)
 - [CLP（Cline Pass）](docs/cline-pass.md)
+- [Provider 模型 API 转发：原生 Chat/Responses、提供商接入、调用方密钥与指标升级](docs/provider-api-relay-development.md)
 - [Provider 接入指南](docs/provider-integration-guide.md)
 - [官方协议与源码索引](docs/index.md)
 - [Codex Desktop App 共享 App Server 实施方案](docs/codex-desktop-app-development.md)

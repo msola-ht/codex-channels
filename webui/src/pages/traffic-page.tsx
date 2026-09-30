@@ -62,6 +62,7 @@ export function TrafficPage() {
     && query.offset + listData.exchanges.length < listData.total
     && query.offset + listData.exchanges.length >= listData.maximumOffset
   // 完整说明带可翻译前缀，配置键本身原样保留并保持 code 展示。
+  const dumpKey = "[debug].model_traffic_dump"
   const dumpNotice = t("traffic.dumpDisabledDescription").split("{configKey}")
   // 分页上限说明同理：只翻译说明文字，命令本身原样保留并保持 code 展示。
   const limitNotice = t("traffic.limitDescription", { offset: listData?.maximumOffset.toLocaleString("zh-CN") ?? "" }).split("{command}")
@@ -111,7 +112,7 @@ export function TrafficPage() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">{t("pages.traffic")}</h1>
           <p className="text-sm text-muted-foreground">
-            <code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{" "}
+            <code className="rounded bg-muted px-1 text-xs">{dumpKey}</code>{" "}
             {t("traffic.listIntro")}
           </p>
         </div>
@@ -195,7 +196,7 @@ export function TrafficPage() {
         <Alert>
           <AlertTitle>{t("traffic.dumpDisabledTitle")}</AlertTitle>
           <AlertDescription>
-            {dumpNotice[0]}<code className="rounded bg-muted px-1 text-xs">[debug].model_traffic_dump</code>{dumpNotice[1]}
+            {dumpNotice[0]}<code className="rounded bg-muted px-1 text-xs">{dumpKey}</code>{dumpNotice[1]}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -209,7 +210,7 @@ export function TrafficPage() {
       ) : null}
       {listData !== null ? (
         <p className="text-xs text-muted-foreground">
-          {t("traffic.retentionNote", { value: listData.retentionDays === 0 ? t("traffic.retentionOff") : t("traffic.retentionDays", { count: listData.retentionDays }) })}
+          {t(["relay.chat", "relay.responses"].includes(query.label ?? "") ? "traffic.relayRetentionNote" : "traffic.retentionNote", { value: listData.retentionDays === 0 ? t("traffic.retentionOff") : t("traffic.retentionDays", { count: listData.retentionDays }) })}
         </p>
       ) : null}
 

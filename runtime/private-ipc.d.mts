@@ -1,7 +1,7 @@
 import type { Socket } from "node:net";
 
 export class PrivateIpcServer {
-  constructor(logicalPath: string, listener: (socket: Socket) => void);
+  constructor(logicalPath: string, listener: (socket: Socket) => void, bounds?: { maximumConnections: number; connectionTimeoutMs: number });
   get listening(): boolean;
   start(occupiedMessage: string): Promise<void>;
   close(): Promise<void>;

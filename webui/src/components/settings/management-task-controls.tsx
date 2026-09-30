@@ -74,7 +74,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const previewText = (value: string) => {
     if (!isTraffic) return value
     if (value === "执行 codexc traffic cleanup --confirm") return t("traffic.cleanupEffect", { command: "codexc traffic cleanup --confirm" })
-    if (value === "全部 App Server 必须已停止") return t("traffic.cleanupStoppedRequired")
+    if (value === "全部 App Server 与 Relay 必须已停止") return t("traffic.cleanupStoppedRequired")
     if (value === "永久删除全部可识别调用记录，无法恢复；未知文件与目录不处理") return t("traffic.cleanupIrreversible")
     return value
   }
@@ -91,10 +91,10 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
   const traffic = pending.input.operation === "traffic"
     ? trafficCleanupResource(pending.preview.resource)
     : null
-  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title={isTraffic ? t("traffic.cleanupConfirmTitle") : "确认执行管理任务"} description={isTraffic ? t("traffic.cleanupConfirmDescription") : "确认后提交后台任务，任务将在服务端串行执行。"} confirmLabel={isTraffic ? t("traffic.cleanupConfirmAction") : "确认执行"} confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.appServerRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
+  return <ManagementConfirmationDialog open saving={tasks.saving} loading={tasks.loading} title={isTraffic ? t("traffic.cleanupConfirmTitle") : "确认执行管理任务"} description={isTraffic ? t("traffic.cleanupConfirmDescription") : "确认后提交后台任务，任务将在服务端串行执行。"} confirmLabel={isTraffic ? t("traffic.cleanupConfirmAction") : "确认执行"} confirmVariant={destructive ? "destructive" : "default"} confirmDisabled={traffic?.writersRunning === true} onConfirm={() => void tasks.confirm()} onCancel={tasks.cancelPending}>
     <p className="whitespace-pre-line">{description.join("\n") || pending.input.operation}</p>
     {traffic === null ? null : <p className="mt-2 text-muted-foreground">
-      {t(traffic.appServerRunning ? "traffic.cleanupResourceRunning" : "traffic.cleanupResourceStopped", {
+      {t(traffic.writersRunning ? "traffic.cleanupResourceRunning" : "traffic.cleanupResourceStopped", {
         sessions: traffic.v2Sessions, files: traffic.legacyFiles, size: formatBytes(traffic.bytes),
       })}
     </p>}
@@ -102,7 +102,7 @@ export function ManagementTaskConfirmationDialog({ tasks }: { tasks: ManagementT
 }
 
 function trafficCleanupResource(value: unknown): {
-  appServerRunning: boolean
+  writersRunning: boolean
   bytes: number
   legacyFiles: number
   v2Sessions: number
@@ -115,11 +115,9 @@ function trafficCleanupResource(value: unknown): {
   const v2Sessions = "v2Sessions" in dumps ? dumps.v2Sessions : undefined
   if (typeof bytes !== "number" || typeof legacyFiles !== "number" || typeof v2Sessions !== "number") return null
   const appServer = "appServer" in value ? value.appServer : null
+  const relay = "modelRelay" in value ? value.modelRelay : null
   return {
-    appServerRunning: appServer !== null
-      && typeof appServer === "object"
-      && "running" in appServer
-      && appServer.running === true,
+    writersRunning: [appServer, relay].some(service => service !== null && typeof service === "object" && "running" in service && service.running === true),
     bytes,
     legacyFiles,
     v2Sessions,

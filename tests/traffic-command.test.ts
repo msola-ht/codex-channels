@@ -1,3 +1,5 @@
+import { ModelRelayControl } from "../runtime/model-relay-control.mjs";
+import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   appendFileSync,
@@ -42,6 +44,15 @@ afterEach(async () => {
 });
 
 describe("traffic command options", () => {
+  it("exposes upgrade help through both public help flags without loading user configuration", () => {
+    for (const flag of ["-h", "--help"]) {
+      const result = spawnSync(process.execPath, [resolve("bin/codexc.mjs"), "traffic", "upgrade", flag], {
+        encoding: "utf8", env: { ...process.env, CODEX_CONNECT_CONFIG_FILE: "/nonexistent/fixture-config.toml" },
+      });
+      expect(result.status).toBe(0); expect(result.stdout).toContain("--enabled true|false --mode production|debug");
+    }
+  });
+
   it("defaults to listing the newest V2 session", () => {
     expect(parseTrafficCommandArgs([])).toEqual({
       all: false,
@@ -151,6 +162,17 @@ describe("traffic cleanup", () => {
     expect(readFileSync(unknown, "utf8")).toBe("keep\n");
   });
 
+  it("refuses cleanup while a Relay control endpoint exists, even with listening disabled", async () => {
+    const home = temporaryDirectory(); const configPath = join(home, "config.toml");
+    writeFileSync(configPath, "version = 1\n", { mode: 0o600 });
+    const control = new ModelRelayControl(modelRelayPaths(configPath).control, async () => ({ result: "status",
+      configurationValid: true, enabled: false, listening: false, active: 0, queue: { pending: 0, waiting: 0, bytes: 0, oldestWaitMs: 0, timedOut: 0 }, unavailableAccounts: 0,
+      capture: { enabled: false, state: "initializing", active: 0, skippedCapacity: 0 },
+      metrics: { local_dropped: 0, accepted: 0, rejected: 0, unconfirmed: 0, pending: 0, active: 0, bytes: 0 } }));
+    await control.start();
+    try { await expect(assertConfiguredAppServersStopped({ CODEX_CONNECT_HOME: home }, join(home, "traffic"))).rejects.toThrow("停止 Relay"); }
+    finally { await control.close(); }
+  });
   it("rejects confirmed cleanup outside the current configured traffic directory", async () => {
     const home = temporaryDirectory();
     const other = temporaryDirectory();
@@ -366,7 +388,7 @@ describe("traffic command V2 rendering", () => {
 });
 
 function temporaryDirectory() {
-  const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-cli-v2-"));
+  const directory = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "codexc-traffic-cli-v2-"));
   temporaryDirectories.push(directory);
   return directory;
 }

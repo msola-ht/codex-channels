@@ -25,6 +25,11 @@ export function translate(
 }
 
 const apiErrorKeys: Record<string, MessageKey> = {
+  relay_invalid: "relay.invalid",
+  "stale-revision": "relay.stale",
+  "management.confirmation-invalid": "relay.stale",
+  "management.rate-limited": "relay.rateLimited",
+  management_audit_unavailable: "relay.auditUnavailable",
   unauthorized: "errors.unauthorized",
   forbidden: "errors.forbidden",
   not_found: "errors.notFound",

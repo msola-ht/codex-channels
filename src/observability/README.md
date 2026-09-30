@@ -32,7 +32,7 @@
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
 - `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
-- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v20 建库 SQL、存储列定义、版本错误和
+- `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v23 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，不隐式升级旧库。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、
   逐请求上游 `User-Agent` 和额度快照写入独立 `request-metrics.sqlite3`。新采集请求不解析上游时间戳；
@@ -41,7 +41,7 @@
   普通响应样本，不合计或平均。Schema v16 曾增加可空 `first_content_ms`、`request_model`、`response_model`。
   Schema v17 增加可空 `traffic_label`、`traffic_session`、`traffic_interaction`，三字段全部为空或共同定位一次转储调用。
   Schema v18 引入可空 `total_duration_ms`，v20 统一为提交发送至首次模型终态或结束/失败的单调时钟耗时，支持明细排序与导出，不聚合为 Turn 耗时。
-  数据库使用严格 Schema v20、Unix `0600` / Windows 当前 SID 私有文件权限，
+  数据库使用严格 Schema v23、Unix `0600` / Windows 当前 SID 私有文件权限，
   v19 的可空 `request_service_tier` 独立保留出站请求层级。
   只接受当前 Schema；首次初始化在单一事务内完成；使用 WAL
   允许后续只读查询与采集并行，锁等待限制为
@@ -106,6 +106,11 @@ WebUI 还通过同一只读 Store 的 `daily()` / `hourly()` 按系统本地日�
 查询服务 `trend()` 为今天、昨天和自定义单日返回补零的小时统计，其他范围返回日统计。
 热力图固定展示含今天的最近 90 天，趋势图跟随控制台汇总范围；
 `report` 与 `export` 同时输出未过期的最后 OpenAI 周额度区间；`codexc webui` 的服务端通过只读
-HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v20，不提供历史迁移；可在停止 Gateway 后使用 `codexc metrics reset` 归档并重建旧库。
+HTTP API 复用相同查询，不向本模块写入状态。只接受当前 Schema v23；v20/v21/v22 使用显式 upgrade 保留数据升级，其他历史版本不隐式迁移。
 指标采集始终开启，不受全局调试模式影响；`debug` / `trace` 只增加脱敏的关联诊断，写入失败仍按
 `warn` 输出，避免关闭调试后形成历史数据断档或隐藏采集故障。
+
+- `request-metrics-upgrade.ts`：显式 v20/v21/v22→v23 升级预检、一致性备份、逐列保留与事务迁移；回滚先归档 v23，再恢复摘要验证的 v20/v21/v22，复用数据库独占锁。对已确认精确结构的可选 `model_request_costs` 附加表原样保留并纳入历史数据摘要，不提供费用运行时功能。
+
+v21 增加真实 source/caller/key/代次/请求 UUID 与交付字段，v22 允许 Relay 关联 label=relay.chat 的完整转储定位，v23 增加 relay.responses，Thread/Turn 必须为空，
+唯一索引去重同一次调用。写入队列保留自有流量空间，Relay 至多占 256 个待写位置；IPC 接收确认只代表入队。

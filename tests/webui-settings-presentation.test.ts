@@ -65,8 +65,8 @@ describe("WebUI 状态与关联范围展示", () => {
         ];
         const {WebuiManagementTaskRunner}=await import("../scripts/webui-management-tasks.mjs");
         const preview=new WebuiManagementTaskRunner({now:()=>1000}).preview({operation:"traffic",action:"cleanup"});
-        for(const running of [true,false]) {
-          const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
+        for(const [running,relayRunning] of [[true,false],[false,false],[false,true]]) {
+          const tasks={saving:false,loading:false,pendingPreview:{input:{operation:"traffic",action:"cleanup"},preview:{...preview,resource:{dumps:{bytes:1024,v2Sessions:2,legacyFiles:3},appServer:{running},modelRelay:{running:relayRunning}}}},confirm(){throw Error("must not confirm during render")},cancelPending(){throw Error("must not cancel during render")}};
           html.push(renderMarkup(h(LanguageContext.Provider,{value:{language:"en",setLanguage(){}}},h(ManagementTaskConfirmationDialog,{tasks}))));
         }
         console.log(JSON.stringify(html));
@@ -80,9 +80,9 @@ describe("WebUI 状态与关联范围展示", () => {
     expect(html[1]).toContain('<button disabled="">取消</button>');
     expect(html[1]).toContain("处理中…");
     expect(html[2]).toContain('<button>确认写入</button>');
-    for (const index of [6, 7]) {
+    for (const index of [6, 7, 8]) {
       expect(html[index]).not.toMatch(/[\u4e00-\u9fff]/u);
-      expect(html[index]).toContain("All App Servers must be stopped");
+      expect(html[index]).toContain("All App Servers and Relay must be stopped");
       expect(html[index]).toContain("This cannot be undone");
       expect(html[index]).toContain("codexc traffic cleanup --confirm");
       expect(html[index]).toContain("2 V2 batches and 3 legacy files");
@@ -90,6 +90,7 @@ describe("WebUI 状态与关联范围展示", () => {
     }
     expect(html[6]).toContain('<button disabled="">Confirm execution</button>');
     expect(html[7]).toContain('<button>Confirm execution</button>');
+    expect(html[8]).toContain('<button disabled="">Confirm execution</button>');
   }, 30_000);
 
   it("localizes the console account removal confirmation and preserves busy guards", () => {

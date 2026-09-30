@@ -13,6 +13,7 @@ export interface UseApiState<T> {
 export function useApi<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
+  { retainDataOnError = true }: { retainDataOnError?: boolean } = {},
 ): UseApiState<T> & { refetch: () => void; replaceData: (data: T) => void } {
   const [state, setState] = useState<UseApiState<T>>({
     data: null,
@@ -37,7 +38,7 @@ export function useApi<T>(
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
           setState((previous) => ({
-            data: previous.data,
+            data: retainDataOnError ? previous.data : null,
             loading: false,
             errorCode: error instanceof ApiClientError ? error.code
               : error instanceof Error && error.name === "TimeoutError" ? "request_timeout"
@@ -49,7 +50,7 @@ export function useApi<T>(
     return () => controller.abort()
     // loader 由调用方按 deps 稳定；这里只追踪数据依赖与手动刷新。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, reloadKey])
+  }, [...deps, reloadKey, retainDataOnError])
 
   const refetch = useCallback(() => {
     activeRequest.current?.abort()

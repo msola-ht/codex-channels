@@ -8,6 +8,7 @@ import { normalizeTaskInput, WebuiManagementTaskRunner } from "../scripts/webui-
 describe("WebUI management tasks", () => {
   it("accepts only the documented service and maintenance actions", () => {
     expect(normalizeTaskInput({ operation: "service", action: "restart", target: "gateway" })).toEqual({ operation: "service", action: "restart", target: "gateway" });
+    expect(normalizeTaskInput({ operation: "service", action: "stop", target: "model-relay" })).toEqual({ operation: "service", action: "stop", target: "model-relay" });
     expect(normalizeTaskInput({ operation: "service", action: "reload" })).toEqual({ operation: "service", action: "reload", target: undefined });
     expect(normalizeTaskInput({ operation: "metrics", action: "cleanup" })).toEqual({ operation: "metrics", action: "cleanup" });
     expect(normalizeTaskInput({ operation: "metrics", action: "prune", target: "deepseek" })).toEqual({ operation: "metrics", action: "prune", target: "deepseek" });
@@ -27,6 +28,7 @@ describe("WebUI management tasks", () => {
       operation: "service",
       requiresConfirmation: true,
     });
+    expect(runner.preview({ operation: "service", action: "stop", target: "model-relay" })).toMatchObject({ effects: ["执行 codexc service stop relay"] });
     expect(runner.preview({ operation: "service", action: "reload" })).toMatchObject({
       effects: ["执行 codexc service reload"],
       target: null,
@@ -43,7 +45,7 @@ describe("WebUI management tasks", () => {
     });
     expect(runner.preview({ operation: "traffic", action: "cleanup" })).toMatchObject({
       effects: ["执行 codexc traffic cleanup --confirm"],
-      preconditions: ["全部 App Server 必须已停止"],
+      preconditions: ["全部 App Server 与 Relay 必须已停止"],
       recovery: expect.stringContaining("无法恢复"),
     });
   });

@@ -9,6 +9,12 @@ import type {
 } from "./request-metrics.js";
 
 export interface MetricRow {
+  source: "owned" | "relay";
+  caller_id: string | null;
+  key_id: string | null;
+  credential_generation: number | null;
+  relay_request_id: string | null;
+  delivery_status: "finished" | "disconnected" | "failed" | null;
   id: number;
   provider: string;
   transport: "http" | "websocket";
@@ -126,6 +132,9 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     && row.total_tokens === null;
   return {
     id: row.id,
+    source: row.source, callerId: row.caller_id, keyId: row.key_id,
+    credentialGeneration: row.credential_generation, relayRequestId: row.relay_request_id,
+    deliveryStatus: row.delivery_status,
     provider: row.provider,
     transport: row.transport,
     responseFormat: row.response_format,

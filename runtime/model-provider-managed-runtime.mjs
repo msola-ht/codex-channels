@@ -1,6 +1,7 @@
-import { clinePassAccountMarkerPath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { clinePassAccountMarkerPath, clinePassAccountsFilePath, isClinePassAccountProvider } from "./cline-pass-accounts.mjs";
+import { createHash } from "node:crypto";
 import { writeResponsesContextFollowers, clinePassFollowsDeepseekContext } from "./responses-context-sync.mjs";
-import { assertResponsesContextSyncComplete } from "./model-provider-responses-catalog.mjs";
+import { assertResponsesContextSyncComplete, responsesContextSyncPath } from "./model-provider-responses-catalog.mjs";
 import {
   closeSync,
   constants,
@@ -21,9 +22,9 @@ import {
   isManagedProviderApiKeyValid,
   loadManagedModelProviderDefinitions,
 } from "./model-provider-definitions.mjs";
-import { opencodeGoAccountMarkerPath } from "./opencode-go-accounts.mjs";
-import { deepseekAccountMarkerPath } from "./deepseek-accounts.mjs";
-import { ccgAccountMarkerPath } from "./ccg-accounts.mjs";
+import { opencodeGoAccountMarkerPath, opencodeGoAccountsFilePath } from "./opencode-go-accounts.mjs";
+import { deepseekAccountMarkerPath, deepseekAccountsFilePath } from "./deepseek-accounts.mjs";
+import { ccgAccountMarkerPath, ccgAccountsFilePath } from "./ccg-accounts.mjs";
 import { readPrivateFileSync, writePrivateFileAtomicSync } from "./private-file.mjs";
 
 const maximumConfigBytes = 1_048_576;
@@ -489,9 +490,7 @@ export function loadConfiguredProviderProfile(
     managedProviderDirectory(environment, definition),
     definition.catalogFileName,
   );
-  const profilePath = marker.mode === "exclusive"
-    ? join(codexHome, "config.toml")
-    : join(codexHome, descriptor.profileName);
+  const profilePath = configuredProfilePath(codexHome, descriptor, marker.mode);
   const profile = readProviderProfile(profilePath, descriptor, {
     expectedCatalogPath,
     reasoningEffortPolicy: marker.mode === "switching" ? "mirror" : "absent",
@@ -501,6 +500,48 @@ export function loadConfiguredProviderProfile(
     validateModelCatalog(profile.catalogPath, definition, profile.model);
   }
   return { ...profile, mode: marker.mode };
+}
+
+function configuredProfilePath(codexHome, descriptor, mode) {
+  return join(codexHome, mode === "exclusive" ? "config.toml" : descriptor.profileName);
+}
+
+/** Narrow read-only native model material snapshot. All paths and credential parsing remain in the managed provider owner. */
+export function loadConfiguredManagedProviderMaterial(provider, environment = process.env) {
+  assertResponsesContextSyncComplete(environment);
+  const definition = findManagedProviderDefinition(environment, provider);
+  if (!definition) {
+    throw new Error("Relay Provider 尚未注册");
+  }
+  const marker = readManagedMarker(environment, definition);
+  if (!marker) throw new Error("Relay Provider 管理标记不存在");
+  const directory = managedProviderDirectory(environment, definition);
+  const registry = { clp: clinePassAccountsFilePath, deepseek: deepseekAccountsFilePath, "opencode-go": opencodeGoAccountsFilePath, ccg: ccgAccountsFilePath }[definition.storageId ?? definition.id];
+  if (!registry) throw new Error("Relay Provider 注册材料不受支持");
+  const paths = [registry(environment), managedProviderMarkerPath(environment, definition),
+    configuredProfilePath(codexHomePath(environment), providerDescriptor(definition), marker.mode),
+    join(directory, definition.catalogFileName), join(directory, definition.catalogManifestFileName)];
+  const fingerprint = () => {
+    const hash = createHash("sha256");
+    for (const path of paths) hash.update(JSON.stringify([path, readPrivateFile(path, maximumCatalogBytes)]));
+    return hash.digest("hex");
+  };
+  const before = fingerprint();
+  if (isClinePassAccountProvider(provider) && !clinePassFollowsDeepseekContext(environment)) throw new Error("Relay CLP 模型来源无效");
+  const profile = loadConfiguredProviderProfile(environment, definition);
+  if (!profile) throw new Error("Relay Provider 已撤销");
+  const settings = loadModelCatalogSettings(profile.catalogPath, definition);
+  const models = settings.map(model => model.model);
+  const modelInputs = Object.fromEntries(settings.map(model => [model.model, model.inputModalities]));
+  if (fingerprint() !== before) throw new Error("Relay Provider 材料读取期间发生变化");
+  if (!findManagedProviderDefinition(environment, provider) || readManagedMarker(environment, definition)?.mode !== marker.mode) {
+    throw new Error("Relay Provider 账户或模式读取期间发生变化");
+  }
+  assertResponsesContextSyncComplete(environment);
+  const protocols = definition.upstreamWireApi === "chat_completions" ? ["chat"]
+    : definition.storageId === "deepseek" ? ["chat", "responses"] : ["responses"];
+  return { provider, baseUrl: profile.baseUrl, apiKey: profile.apiKey, models, modelInputs, protocols,
+    paths: [...paths, responsesContextSyncPath(environment)], revision: before };
 }
 
 export function readProviderProfile(
@@ -740,6 +781,7 @@ function modelCatalogSetting(content, definition, model) {
     : maxContextWindow;
   return {
     model,
+    inputModalities: Array.isArray(document.input_modalities) ? document.input_modalities : [],
     displayName: typeof document.display_name === "string" ? document.display_name : model,
     contextWindow,
     maxContextWindow: windowBase,

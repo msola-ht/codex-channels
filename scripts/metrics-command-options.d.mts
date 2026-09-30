@@ -13,6 +13,8 @@ export interface MetricsRangeOptions {
 }
 
 export interface MetricsFilterOptions extends MetricsRangeOptions {
+  source?: string;
+  caller?: string;
   thread?: string;
   turn?: string;
   provider?: string;
@@ -45,7 +47,7 @@ export function isMetricsProviderId(
 export function isPrunableMetricsProviderId(value: string): boolean;
 
 export const metricsCommandUsage: Readonly<Record<
-  "run" | "turns" | "threads" | "report" | "export" | "quota",
+  "run" | "turns" | "threads" | "report" | "export" | "quota" | "upgrade" | "rollback",
   string
 >>;
 
@@ -72,6 +74,7 @@ export function validateMetricsCommandArgs(
 ): void;
 
 export function parseCleanupOptions(args: string[]): MetricsCleanupOptions;
+export function parseMetricsUpgradeOptions(command: "upgrade" | "rollback", args: string[]): { apply: boolean; from: string; to: string; backup?: string; sha256?: string };
 
 export function parseMetricsRunArgs(
   args: string[],

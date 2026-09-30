@@ -13,6 +13,7 @@ import {
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { FastBadge } from "@/components/metrics/service-tier"
 import { StatusBadge } from "@/components/metrics/status-badge"
+import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import {
   DataTable,
   SortableHeader,
@@ -73,6 +74,9 @@ export function RequestsTable({
 }) {
   const { t, language } = useTranslation()
   const columnLabels: Record<string, string> = {
+    source: t("filters.source"),
+    caller: t("filters.caller"),
+    delivery: t("filters.delivery"),
     time: t("metrics.time"),
     provider: t("metrics.provider"),
     model: t("metrics.model"),
@@ -91,6 +95,22 @@ export function RequestsTable({
   }
 
   const columns = React.useMemo<DataTableColumn<RequestRecord>[]>(() => [
+    {
+      id: "source", enableSorting: false, header: t("filters.source"),
+      cell: ({ row }) => row.original.source === "relay" ? t("filters.relay") : t("filters.owned"),
+    },
+    {
+      id: "caller", enableSorting: false, header: t("filters.caller"),
+      cell: ({ row }) => row.original.callerDisplayName ? <TableHint hint={`${row.original.callerDisplayName}\n${row.original.callerId}`}>
+        <span className="block max-w-40 truncate">{row.original.callerDisplayName}</span>
+      </TableHint> : <TruncatedText text={row.original.callerId ?? "—"} className="max-w-40" />,
+    },
+    {
+      id: "delivery", enableSorting: false, header: t("filters.delivery"),
+      cell: ({ row }) => row.original.deliveryStatus === "finished" ? t("filters.deliveryFinished")
+        : row.original.deliveryStatus === "disconnected" ? t("filters.deliveryDisconnected")
+          : row.original.deliveryStatus === "failed" ? t("filters.deliveryFailed") : "—",
+    },
     {
       id: "time",
       accessorFn: (record) => record.recordedAtMs,
@@ -138,6 +158,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
+        if (record.source === "relay") return <RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
         const badge = <StatusBadge status={record.status} />
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
         const details = [
@@ -248,16 +269,12 @@ export function RequestsTable({
       cell: ({ row }) => <span className="whitespace-nowrap tabular-nums">{row.original.totalDurationMs == null ? "—" : formatElapsedDuration(row.original.totalDurationMs)}</span>,
     },
     {
-      id: "traffic",
-      header: t("requests.detailColumn"),
-      enableSorting: false,
-      cell: ({ row }) => row.original.traffic === null ? (
-        <span className="text-muted-foreground">{t("requests.noTraffic")}</span>
-      ) : (
-        <Button variant="link" size="sm" asChild>
+      id: "traffic", header: t("requests.detailColumn"), enableSorting: false,
+      cell: ({ row }) => row.original.traffic === null
+        ? <TableHint hint={row.original.source === "relay" ? t("requests.noTrafficReason") : null}><span className="text-muted-foreground">{t("requests.noTraffic")}</span></TableHint>
+        : <Button variant="link" size="sm" asChild>
           <Link to={trafficDetailPath(row.original.traffic)}>{t("requests.viewTraffic")}</Link>
-        </Button>
-      ),
+        </Button>,
     },
     {
       id: "ua",

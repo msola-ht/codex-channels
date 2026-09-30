@@ -215,8 +215,8 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首 Token | 请求耗时 | 请求模型 | 响应回显 | 转储定位 |");
-    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首 Token | 请求耗时 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
+    console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
         [
@@ -235,6 +235,7 @@ export function printMetricsExport(result, format) {
           markdownCell(record.responseModel ?? "未回显"),
           markdownCell(record.traffic == null ? "未关联"
             : `${record.traffic.label} / ${record.traffic.session} / #${record.traffic.interaction}`),
+          markdownCell(record.source), markdownCell(record.callerId), markdownCell(record.deliveryStatus),
         ].join(" | "),
       );
     }
@@ -554,6 +555,7 @@ function printTurnSummary(summary) {
 
 function csvColumns() {
   return [
+    ...["source", "callerId", "keyId", "credentialGeneration", "relayRequestId", "deliveryStatus"].map(key => [key, record => record[key]]),
     ["firstTokenMs", (record) => record.firstTokenMs],
     ["totalDurationMs", (record) => record.totalDurationMs],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],

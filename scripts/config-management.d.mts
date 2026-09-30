@@ -29,6 +29,7 @@ export interface GatewaySettings {
     sandbox: "read-only" | "workspace-write";
     defaultWorkspace: string | null;
     defaultModel: string | null;
+    modelTrafficMode: "production" | "debug";
     modelTrafficDumpEnabled: boolean;
     modelTrafficRetentionDays: number;
     officialTuiIdentity: {
@@ -93,6 +94,7 @@ export type GatewaySettingInput =
   | { kind: "system.default-workspace"; value: string }
   | { kind: "system.default-model"; value: string | null }
   | { kind: "system.model-traffic-dump"; value: boolean }
+  | { kind: "system.model-traffic-mode"; value: "production" | "debug" }
   | { kind: "system.model-traffic-retention-days"; value: number }
   | {
       kind: "system.official-tui-identity";

@@ -12,6 +12,7 @@ const allowedDistEntries = new Map([
   ["runtime", new Set([
     "dist/codex-client/index.js",
     "dist/provider-proxy/index.js",
+    "dist/model-relay/index.js",
   ])],
   ["scripts", new Set([
     "dist/codex-client/index.js",

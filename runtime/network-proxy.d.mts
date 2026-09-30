@@ -51,6 +51,8 @@ export function createRefreshableHttpProxySelector(
     readSystemProxy?: (platform: NodeJS.Platform, signal: AbortSignal) => Promise<ProxySettings>;
   },
 ): {
+  readonly revision: number;
+  refresh(): Promise<void>;
   validate(target: string | URL, explicitProxy?: string): Promise<void>;
   select(target: string | URL, explicitProxy?: string): Promise<string | undefined>;
   invalidate(): void;

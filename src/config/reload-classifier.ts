@@ -192,6 +192,7 @@ function hotReloadReasons(
   next: GatewayConfig,
 ): ConfigChange[] {
   const reasons: ConfigChange[] = [];
+  if (JSON.stringify(current.modelRelay) !== JSON.stringify(next.modelRelay)) reasons.push(configChange("model-relay.policy"));
   if (
     preservesExistingWorkspaces(current.workspaces, next.workspaces)
     && !sameWorkspaces(current.workspaces, next.workspaces)

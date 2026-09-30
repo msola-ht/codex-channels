@@ -1,4 +1,4 @@
-export type ServiceTarget = "gateway" | "app-server" | "webui" | "all";
+export type ServiceTarget = "gateway" | "app-server" | "webui" | "model-relay" | "all";
 export type ServicePlatform = "systemd" | "launchd" | "windows";
 
 export interface ServiceDefinition {
@@ -27,3 +27,5 @@ export function serviceIdentifiers(
   target?: string,
   order?: "start" | "stop",
 ): string[];
+
+export function serviceCommandTarget(target: ServiceTarget): "gateway" | "app-server" | "webui" | "relay" | "all";

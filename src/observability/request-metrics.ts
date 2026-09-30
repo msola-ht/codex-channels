@@ -3,6 +3,12 @@ export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface ModelRequestMetricSample {
+  source?: "owned" | "relay";
+  callerId?: string | null;
+  keyId?: string | null;
+  credentialGeneration?: number | null;
+  relayRequestId?: string | null;
+  deliveryStatus?: "finished" | "disconnected" | "failed" | null;
   provider: string;
   transport: ModelRequestTransport;
   responseFormat: ModelResponseFormat;
@@ -204,6 +210,8 @@ export type ModelRequestMetricsAggregationDimension =
   | "model";
 
 export interface ModelRequestMetricsFilters {
+  source?: "owned" | "relay";
+  callerId?: string;
   threadId?: string;
   turnId?: string;
   provider?: string | string[];

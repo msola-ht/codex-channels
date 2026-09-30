@@ -1,3 +1,50 @@
+/** Protocol of the recorded model endpoint, independent of Provider capabilities or stream mode. */
+export function requestProtocol(request) {
+  if (!["http", "websocket"].includes(request?.transport) || request.transport === "http" && request.method !== "POST") return undefined;
+  let path = request?.path;
+  if (typeof path !== "string" && typeof request?.url === "string") {
+    try {
+      const url = new URL(request.url);
+      if (!(request.transport === "websocket" ? ["ws:", "wss:"] : ["http:", "https:"]).includes(url.protocol)) return undefined;
+      path = url.pathname;
+    } catch { return undefined; }
+  }
+  if (typeof path !== "string" || !path.startsWith("/")) return undefined;
+  path = path.split("?", 1)[0];
+  if (/(?:^|\/)responses$/u.test(path)) return "responses";
+  if (request.transport !== "websocket" && /(?:^|\/)chat\/completions$/u.test(path)) return "chat";
+  return undefined;
+}
+
+/** Client-reported User-Agent evidence only; browser names do not identify extensions. */
+export function requestClientName(request) {
+  if (request?.debug !== undefined && request.debug?.version !== 1) return undefined;
+  const headers = request?.debug === undefined ? request?.headers : request.debug.inbound?.headers;
+  const value = Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === "user-agent")?.[1];
+  if (typeof value !== "string" || value.length > 1024 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return undefined;
+  const apps = [["WorkBuddy", "WorkBuddy"], ["CodeBuddy", "CodeBuddy"], ["codex_cli_rs", "Codex"],
+    ["codex_vscode", "Codex"], ["codex-tui", "Codex"], ["Cline", "Cline"], ["RooCode", "Roo Code"], ["CherryStudio", "Cherry Studio"],
+    ["Kelivo", "Kelivo"], ["ImmersiveTranslate", "Immersive Translate"]];
+  for (const [product, label] of apps) {
+    if (value.toLowerCase() === product.toLowerCase() || new RegExp(`(?:^|[ ;(])${product}/[0-9]`, "iu").test(value)) return label;
+  }
+  const browsers = [[/(?:^|[ ;(])(?:Edg|EdgA|EdgiOS)\/[0-9]/iu, "Edge"],
+    [/(?:^|[ ;(])(?:OPR|Opera)\/[0-9]/iu, "Opera"],
+    [/(?:^|[ ;(])SamsungBrowser\/[0-9]/iu, "Samsung Internet"],
+    [/(?:^|[ ;(])(?:Firefox|FxiOS)\/[0-9]/iu, "Firefox"],
+    [/(?:^|[ ;(])(?:Chrome|CriOS)\/[0-9]/iu, "Chrome"],
+    [/Version\/[0-9].*Safari\/[0-9]/iu, "Safari"]];
+  const browser = browsers.find(([pattern]) => pattern.test(value))?.[1];
+  if (!browser) return undefined;
+  const platform = /Android/iu.test(value) ? "Android"
+    : /iPhone|iPad|iPod/iu.test(value) ? "iOS"
+    : /Windows/iu.test(value) ? "Windows"
+    : /Macintosh|Mac OS X/iu.test(value) ? "macOS"
+    : /CrOS/iu.test(value) ? "ChromeOS"
+    : /Linux/iu.test(value) ? "Linux" : undefined;
+  return platform ? `${browser} / ${platform}` : browser;
+}
+
 /** 从转储的原始字段投影展示信息；不改写终态，也不把推导结果写回磁盘。 */
 export function requestMetadata(body) {
   const client = body?.client_metadata;
@@ -21,7 +68,7 @@ export function requestParameters(body) {
 
 /** 仅投影已保存的输入；裁剪标记、非文本内容和未知条目保留为 JSON。 */
 export function requestContent(body) {
-  const input = body?.input;
+  const input = body?.input ?? body?.messages;
   return {
     instructions: body?.instructions == null ? null : displayText(body.instructions),
     input: input == null ? null : (Array.isArray(input) ? input : [input]).map((item) => {
@@ -42,10 +89,10 @@ export function requestContent(body) {
 }
 
 export function parameterComparison(request, body) {
-  const response = body?.response ?? body;
+  const response = body?.response ?? (body?.success === true && body?.data ? body.data : body);
   const fields = ["reasoning.effort", "reasoning.summary", "text.verbosity", "text.format",
     "tool_choice", "parallel_tool_calls", "temperature", "top_p", "frequency_penalty",
-    "presence_penalty", "max_output_tokens", "service_tier"];
+    "presence_penalty", "max_output_tokens", "max_tokens", "max_completion_tokens", "stream", "reasoning_effort", "service_tier"];
   return fields.map((field) => {
     const read = (value) => field.split(".").reduce((part, key) => part?.[key], value);
     const sent = read(request);
@@ -60,16 +107,16 @@ function displayText(value) {
 }
 
 export function responseFacts(body) {
-  const response = body?.response ?? body;
+  const response = body?.response ?? (body?.success === true && body?.data ? body.data : body);
   const usage = response?.usage;
   return {
     responseId: stringValue(response?.id),
     serviceTier: stringValue(response?.service_tier),
     usage: usage == null ? null : {
-      inputTokens: tokenCount(usage.input_tokens),
-      cachedTokens: tokenCount(usage.input_tokens_details?.cached_tokens),
-      outputTokens: tokenCount(usage.output_tokens),
-      reasoningTokens: tokenCount(usage.output_tokens_details?.reasoning_tokens),
+      inputTokens: tokenCount(usage.input_tokens ?? usage.prompt_tokens),
+      cachedTokens: tokenCount(usage.input_tokens_details?.cached_tokens ?? usage.prompt_tokens_details?.cached_tokens),
+      outputTokens: tokenCount(usage.output_tokens ?? usage.completion_tokens),
+      reasoningTokens: tokenCount(usage.output_tokens_details?.reasoning_tokens ?? usage.completion_tokens_details?.reasoning_tokens),
       totalTokens: tokenCount(usage.total_tokens),
     },
     failure: response?.error == null && response?.incomplete_details == null
@@ -195,10 +242,22 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
   function event(text) {
     const value = parseObject(text);
     observeModelEvent?.(value);
+    if (Array.isArray(value?.choices)) for (const choice of value.choices) {
+      const index = choice?.index ?? (value.choices.length === 1 ? 0 : undefined);
+      if (!Number.isSafeInteger(index) || index < 0 || index > 128) continue;
+      const previous = items.get(index)?.item?.content ?? "";
+      const delta = choice?.delta?.content;
+      if (typeof delta === "string") add(index, { type: "message", content: previous + delta });
+    }
     if (value === undefined && text.trim() !== "[DONE]" && !hasTerminalOutput) truncated = true;
     if (!hasTerminalOutput && value?.type === "response.output_item.done"
       && Number.isSafeInteger(value.output_index) && value.output_index >= 0) {
       add(value.output_index, value.item);
+    }
+    if (!hasTerminalOutput && ["response.completed", "response.failed", "response.incomplete"].includes(value?.type)
+      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output) && value.response.output.length > 0) {
+      items.clear(); bytes = 0;
+      value.response.output.forEach((item, index) => add(index, item));
     }
   }
 

@@ -27,7 +27,7 @@
   自身退出时只释放租约和 Proxy，不终止共享 App Server。
 - `windows-desktop-app-inspect.ps1`：只读查询当前用户 `OpenAI.Codex` 包、包内 Desktop 可执行文件
   和同路径进程状态，供 `desktop-app-command.mjs` 在 Windows 上失败关闭地判断能否启动。
-- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
+- `source-update.mjs` / `source-update.d.mts`：比较受管源码与官方 `main` 的提交，在同盘候选目录构建并只读检查当前配置、数据库升级条件和精确 Codex CLI 合同；CLI 不匹配时确认后准备候选并校验，通过后才安装。统一负责停止核心服务、切换源码与全局命令、调用目标版本数据库升级入口、恢复服务并等待就绪；停止前记录 Relay 运行状态，成功及失败恢复都只启动原本运行且仍启用的 Relay。失败保留阶段信息和必要的旧源码备份，数据库升级未完成时不启动服务。无新提交或 npm 安装时同步配套 CLI 并执行必要的数据库升级，不更新 Gateway 包或用户设置。
 - `source-install-metadata.mjs` / `source-install-metadata.d.mts`：记录受管源码使用过的 npm 全局
   prefix，并从当前全局包路径识别其所属 prefix，供跨 Node.js 管理器更新和卸载使用。
 - `source-uninstall.mjs` / `source-uninstall.d.mts`：校验当前进程、受管源码目录和命令入口归属后，
@@ -259,7 +259,7 @@
   CLI 负责选择与渲染，读取、校验和写入复用 Config 管理接口。
 - `config-system-menu.mjs`：独立管理模型请求转储及其保留天数、审批超时、Gateway 外部渠道 Sandbox、默认 Workspace、
   Gateway 新 Thread 模型覆盖、一键官方 TUI 身份、模型上游终端标识与模型可见时区；模型请求转储独立写入
-  `[debug].model_traffic_dump` / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
+  `[debug].model_traffic_dump` / 既有裁剪模式参数 / `model_traffic_retention_days` 并要求重启 App Server；终端标识预填运行该命令的终端探测结果并允许
   编辑，留空即删除配置；模型可见时区与网关时区分别复用 `codexc timezone` 与 `codexc timezone --gateway`。
 - `timezone-command.mjs`：实现公开 `codexc timezone`，解析 IANA 时区名称与 `--system` / `--json`，
   交互入口只列常见时区，并提供「恢复系统时区」与「其他（手动输入 IANA 名称）」两个动作项，
@@ -425,6 +425,8 @@
   阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
+- `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；Relay 管理与全局转储升级共用。
+- `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；验证并移除旧 Relay 采集字段，保留身份、凭据、保留天数和其他配置。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
@@ -433,12 +435,12 @@
   未识别文件与目录保持不变。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
-- `traffic-dump-reader.mjs`：V2 转储共享读取实现，严格读取 `manifest.json`、`interactions.jsonl` 与
+- `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。
   `readDumpResponseProviders` 为指标列表按单批次的精确调用编号扫描响应索引，只保留命中的上游提供商，不读取正文。正文和独立 trace
   均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出；`describeDumpTurnStates` 按精确批次与编号独立读取字符数，不阻塞列表摘要接口。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
-- `traffic-dump-presentation.mjs`：从已有 V2 正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
+- `traffic-dump-presentation.mjs`：从已有 V2 请求接口识别协议、请求头识别客户端自报名称，从正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
 
 ## 构建、打包与服务
@@ -457,7 +459,7 @@
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
-  启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
+  启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口；显式 `--ignore-scripts` 时不执行准备，兼容仍调用 prepare 的 npm 版本。
 - `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
   全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的
@@ -486,7 +488,7 @@
   预检、定义原子写入、核心服务激活和就绪确认五个结构化阶段；返回不含配置凭据的修订计划、进度、
   完成阶段、稳定恢复动作和最终结果。Linux systemd 与 macOS launchd 共用任务契约，但继续由各自
   控制脚本实现 linger、旧 Job 检测及服务管理，不解析 Shell 文案推断结果；Windows 明确失败关闭。
-- `service-command.mjs`：实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
+- `service-command.mjs`：公开 `relay` 目标映射到既有内部 `model-relay` 服务标识，仅为旧更新器保留带提示的 `start model-relay` 升级入口；实现公开 `service` 子命令和隐藏的 Gateway/App Server 服务入口装配；集中解析
   服务目标与日志参数、选择三平台控制器、限制 App Server 内的自中断操作，并在启动后复用统一就绪
   检查。CLI 只保留帮助展示和命令分派。
 - `config-activation-result.mjs` / `config-activation-result.d.mts`：把配置写入器的内部激活范围转换为
@@ -539,3 +541,13 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
+
+- `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用/历史身份摘要回退。
+- `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
+- `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
+- `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
+
+`metrics-database.mjs` 的 `upgrade --from 22 --to 23` 默认只预检，`--apply` 才持锁备份迁移；
+`rollback --from 23 --to 22 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
+两者不自动操作服务，回滚不恢复旧配置/凭据。查询与导出支持 `--source owned|relay`、`--caller ID`。

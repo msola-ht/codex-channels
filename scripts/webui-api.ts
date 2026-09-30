@@ -9,6 +9,8 @@ export interface Range<Name extends string = RangeName> {
 }
 
 export interface MetricsQuery {
+  source?: "owned" | "relay"
+  callerId?: string
   range?: RangeName
   from?: string
   to?: string
@@ -211,6 +213,14 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  source?: "owned" | "relay"
+  callerId?: string | null
+  /** 当前配置中的用途名称；仅用于展示，不改变历史调用身份或筛选。 */
+  callerDisplayName?: string
+  keyId?: string | null
+  credentialGeneration?: number | null
+  relayRequestId?: string | null
+  deliveryStatus?: "finished" | "disconnected" | "failed" | null
   /** 按调用记录的 Chat 上游诊断关联出的实际上游提供商；仅列表接口按需填充，缺失表示调用记录不可用或未记录。 */
   upstreamProvider?: string
   totalDurationMs: number | null
@@ -295,6 +305,7 @@ export interface SettingsSummaryResponse {
       sandbox: "read-only" | "workspace-write"
       defaultWorkspace: string | null
       defaultModel: string | null
+      modelTrafficMode: "production" | "debug"
       modelTrafficDumpEnabled: boolean
       modelTrafficRetentionDays: number
     }
@@ -327,7 +338,7 @@ export interface SettingsSummaryResponse {
 }
 
 export interface ManagementServiceEntry {
-  target: "gateway" | "app-server" | "webui"
+  target: "gateway" | "app-server" | "webui" | "model-relay"
   name: string
   identifier: string | null
   loaded: boolean
@@ -385,7 +396,7 @@ export interface ManagementProvidersResponse {
 export interface ManagementSettingsResponse {
   revision: string
   display: SettingsSummaryResponse["gateway"]["display"]
-  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
+  system: Pick<SettingsSummaryResponse["gateway"]["system"], "approvalTimeoutSeconds" | "sandbox" | "defaultWorkspace" | "defaultModel" | "modelTrafficMode" | "modelTrafficDumpEnabled" | "modelTrafficRetentionDays"> & {
     idleReleaseMinutes: number
     officialTuiIdentity: {
       clientIdentity: { name: string | null; title: string | null; version: string | null }
@@ -476,7 +487,7 @@ export type ManagementTaskInput =
   | { operation: "update"; action?: "source" }
   | { operation: "service"; action: "install" | "uninstall" }
   | { operation: "service"; action: "reload" }
-  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "all" }
+  | { operation: "service"; action: "start" | "stop" | "restart"; target: "gateway" | "app-server" | "webui" | "model-relay" | "all" }
   | { operation: "metrics"; action: "cleanup" | "reset" }
   | { operation: "metrics"; action: "prune"; target: string }
   | { operation: "traffic"; action: "cleanup" }
@@ -849,6 +860,10 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 从已记录 User-Agent 识别的客户端自报名称，并非已验证身份。 */
+  clientName?: string
+  /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
+  protocol?: "chat" | "responses"
   id: number
   label: string
   session: string
@@ -898,7 +913,18 @@ export interface TrafficTurnStatesResponse {
 
 export type TrafficHeaderValue = string | string[]
 
+export interface TrafficDebugStage {
+  headers: Record<string, TrafficHeaderValue>
+  headersTruncated: boolean
+  body: string
+  bodyTruncated: boolean
+  status?: number
+  state?: "finished" | "disconnected" | "failed" | "not_started"
+}
+
 export interface TrafficExchangeDetail {
+  debug?: { inbound: TrafficDebugStage; delivered: TrafficDebugStage | null; transformations: Array<"headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped"> }
+
   chatDiagnostics?: { fields: Record<string, string | number | boolean>; truncated: boolean }
   modelEvidence: {
     serverModels: Array<{ source: string; model: string }>
@@ -906,6 +932,9 @@ export interface TrafficExchangeDetail {
     turnStateLengths: Array<{ source: string; characters: number }>
     truncated: boolean
   }
+  clientName?: string
+  /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
+  protocol?: "chat" | "responses"
   parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
   id: number
   startedAtMs: number
@@ -926,6 +955,7 @@ export interface TrafficExchangeDetail {
     path?: string
     url?: string
     headers: Record<string, TrafficHeaderValue>
+    headersTruncated?: boolean
     body: string
     bodyTruncated: boolean
     bytes?: number
@@ -945,9 +975,12 @@ export interface TrafficExchangeDetail {
     }
   }
   response: {
+    capture?: "redacted_upstream_chat" | "redacted_upstream_responses"
+    deliveryStatus?: "finished" | "disconnected" | "failed"
     state: "completed" | "failed" | "incomplete"
     status: number | null
     headers: Record<string, TrafficHeaderValue>
+    headersTruncated?: boolean
     body: string
     bodyTruncated: boolean
     bytes?: number
@@ -997,3 +1030,47 @@ export interface TrafficDetailResponse {
 export interface TrafficTraceResponse extends Omit<TrafficDetailResponse, "exchange"> {
   exchange: Pick<TrafficExchangeDetail, "id" | "trace" | "tracePage">
 }
+
+export type RelayReasoning = "passthrough" | "off";
+export interface RelayManagedCaller {
+  caller_id: string; display_name?: string; key_id: string; credential_generation: number; enabled: boolean;
+  provider: string; models: string[]; reasoning: RelayReasoning;
+}
+export interface RelayManagementSnapshot {
+  revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
+  runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number;
+    oldestWaitMs: number; queueTimeouts: number;
+    capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
+    metrics: { accepted: number; unconfirmed: number; rejected: number; localDropped: number } }
+    | { state: "stopped" | "unknown" };
+  providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio"> }> }>;
+}
+export type RelayManagementInput =
+  | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "edit"; name?: string; provider?: string; caller: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "rotate" | "disable" | "delete"; caller: string };
+export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
+export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
+export interface RelayManagementResult {
+  cleanupStatus?: "failed";
+  activation: "saved_and_applied" | "saved_not_running" | "saved_unconfirmed";
+  key?: string; auditStatus: "recorded" | "failed";
+}
+
+/** Ephemeral authenticated model requests; not a persisted request history. */
+export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
+  state: "running";
+  configurationValid: boolean;
+  enabled: boolean;
+  listening: boolean;
+  requests: Array<{
+    requestId: string;
+    callerId: string;
+    displayName: string | null;
+    provider: string;
+    model: string | null;
+    protocol: "chat" | "responses";
+    phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
+    elapsedMs: number;
+  }>;
+};

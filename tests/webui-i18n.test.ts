@@ -200,7 +200,7 @@ describe("WebUI 界面文案语言切换", () => {
         const refreshFeedbackEn = renderWithClock(AccountRefreshFeedback,
           { control: { refreshing: false, disabled: false, error: { kind: "refresh-failed", message: "账户刷新失败" }, onRefresh: noop },
             hasSnapshot: true }, "en");
-        const requestRecord = { provider: "openai", model: "model-test", recordedAtMs: 1000,
+        const requestRecord = { id: 42, provider: "openai", model: "model-test", recordedAtMs: 1000,
           cacheUsage: { inputTokens: 100, cachedInputTokens: 50, missingRequestCount: 0 },
           inputTokens: 100, cachedInputTokens: 50, outputTokens: 20, reasoningOutputTokens: 5,
           tokensPerSecond: 20, compact: null, requestCount: 1, unsuccessfulRequestCount: 0,
@@ -521,6 +521,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.requestsTableEn).toContain("Request duration");
     expect(result.requestsTableEn).toContain("Traffic");
     expect(result.requestsTableEn).toContain("Not linked");
+    expect(result.requestsTableEn).not.toContain('href="/requests/');
     expect(result.requestsTableEn).toContain("Response model: model-other (Name mismatch)");
     expect(result.requestsTableEmptyEn).toContain("No records");
     expect(result.requestsTableLoadingEn).toContain('aria-label="Loading…"');

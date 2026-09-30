@@ -7,6 +7,13 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
+function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
+  return <fieldset data-slot="field-set" className={cn("flex min-w-0 flex-col gap-4", className)} {...props} />
+}
+function FieldLegend({ className, ...props }: React.ComponentProps<"legend">) {
+  return <legend data-slot="field-legend" className={cn("mb-2 font-medium", className)} {...props} />
+}
+
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return <div data-slot="field-group" className={cn("group/field-group @container/field-group flex w-full flex-col gap-5", className)} {...props} />
 }
@@ -50,4 +57,4 @@ function FieldError({ className, children, errors, ...props }: React.ComponentPr
   return <div role="alert" data-slot="field-error" className={cn("text-sm font-normal text-destructive", className)} {...props}>{content}</div>
 }
 
-export { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel }
+export { FieldSet, FieldLegend, Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel }

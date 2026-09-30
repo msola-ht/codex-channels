@@ -13,6 +13,7 @@ import { dirname, resolve } from "node:path";
 
 import { parse, stringify } from "smol-toml";
 import { z } from "zod";
+import { modelRelayConfigSchema } from "./model-relay-config.mjs";
 
 import {
   securePrivateDirectorySync,
@@ -214,6 +215,7 @@ const gatewayDocumentSchema = z.strictObject({
   weixin: weixinSetupSchema.optional(),
   codex: codexSchema,
   gateway: gatewaySchema.optional(),
+  model_relay: modelRelayConfigSchema.optional(),
   approval: z.strictObject({
     timeout_seconds: z.number().int().min(30).max(3600).default(900),
   }).default({ timeout_seconds: 900 }),
@@ -355,7 +357,7 @@ export function materializeGatewayConfigDefaults(configPath, document) {
   return true;
 }
 
-export function writeGatewayConfig(configPath, document) {
+export function writeGatewayConfig(configPath, document, { maximumBytes } = {}) {
   if (process.platform === "win32" && !existsSync(configPath)) {
     const parent = dirname(resolve(configPath));
     mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -375,6 +377,7 @@ export function writeGatewayConfig(configPath, document) {
           source.workspaceIds,
           workspaceIds(document),
         );
+    if (maximumBytes !== undefined && Buffer.byteLength(content, "utf8") > maximumBytes) throw new Error("配置文件超过容量上限，未保存");
     writePrivateFileAtomicSync(configPath, content);
     sourceByDocument.set(document, {
       content,

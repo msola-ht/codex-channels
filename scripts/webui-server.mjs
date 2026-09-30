@@ -20,6 +20,7 @@ import {
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
 import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
+import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
   RequestMetricsQueryService,
   parseRequestMetricsFilters,
@@ -68,6 +69,7 @@ import {
 } from "./webui-account-settings-management.mjs";
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { routeCodexSettingsManagement } from "./webui-management-codex-route.mjs";
+import { routeRelayManagement } from "./webui-management-relay-route.mjs";
 import { routeGatewaySettingsManagement } from "./webui-management-gateway-route.mjs";
 import {
   routeProviderManagement,
@@ -370,6 +372,7 @@ async function routeManagement(environment, url, request, response, state, token
     ...routeContext,
     gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
   })) return;
+  if (await routeRelayManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
   if (await routeStatusManagement({
     ...routeContext,
@@ -487,7 +490,7 @@ function openMetricsStore(environment, endAtMs = Date.now()) {
     if (error instanceof MetricsDatabaseAccessError) {
       throw new ApiError(503, error.code, error.code === "metrics_database_unavailable"
         ? "指标数据库尚未创建，请先运行 Gateway 收集模型请求"
-        : "指标数据库版本或结构不兼容，请停止 Gateway 后运行 codexc metrics reset");
+        : "指标数据库版本或结构不兼容，请核对版本及备份，并按显式升级流程处理，勿删除数据库");
     }
     throw error;
   }
@@ -626,10 +629,22 @@ async function handleRequests(environment, url, response) {
       sortDirection: sort.direction,
       ...filters,
     });
+    const records = await attachUpstreamProviders(environment, page.records);
+    if (records.some(record => record.source === "relay")) {
+      const config = readGatewayConfig(resolveGatewayConfigPath(environment));
+      const relay = modelRelayConfigSchema.parse(config.model_relay ?? {});
+      const callers = new Map(relay.callers.map(caller => [caller.caller_id, caller]));
+      for (const record of records) {
+        const caller = callers.get(record.callerId);
+        if (record.source === "relay" && caller?.key_id === record.keyId && caller.provider === record.provider && caller.display_name) {
+          record.callerDisplayName = caller.display_name;
+        }
+      }
+    }
     sendJson(response, 200, {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
-      records: await attachUpstreamProviders(environment, page.records),
+      records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
       aggregate: page.aggregate,
@@ -748,6 +763,7 @@ async function handleSettingsSummary(environment, response, serviceStatusCache) 
         sandbox: gateway.system.sandbox,
         defaultWorkspace: gateway.system.defaultWorkspace,
         defaultModel: gateway.system.defaultModel,
+        modelTrafficMode: gateway.system.modelTrafficMode,
         modelTrafficDumpEnabled: gateway.system.modelTrafficDumpEnabled,
         modelTrafficRetentionDays: gateway.system.modelTrafficRetentionDays,
       },
@@ -797,12 +813,12 @@ function parseRange(url, defaultRange = "90d", nowMs = Date.now()) {
 }
 
 function parseMetricsFilters(url, threadId) {
-  const allowed = new Set(["range", "from", "to", "threadId", "turnId", "provider", "model", "operation", "status", "filter", "offset", "limit", "sort", "direction"]);
+  const allowed = new Set(["range", "from", "to", "source", "callerId", "threadId", "turnId", "provider", "model", "operation", "status", "filter", "offset", "limit", "sort", "direction"]);
   for (const key of url.searchParams.keys()) {
     if (!allowed.has(key)) throw new ApiError(400, "unsupported_parameter", "包含不支持的指标查询参数");
     if (key !== "provider" && url.searchParams.getAll(key).length !== 1) throw new ApiError(400, "invalid_parameter", "除 provider 外的指标查询参数不能重复");
   }
-  const values = Object.fromEntries(["threadId", "turnId", "provider", "model", "operation", "status"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
+  const values = Object.fromEntries(["source", "callerId", "threadId", "turnId", "provider", "model", "operation", "status"].filter((key) => url.searchParams.has(key)).map((key) => [key, url.searchParams.get(key)]));
   if (url.searchParams.has("provider")) values.provider = url.searchParams.getAll("provider");
   if (threadId !== undefined) {
     if (values.threadId !== undefined && values.threadId !== threadId) throw new ApiError(400, "invalid_filter", "Thread ID 与路径不一致");

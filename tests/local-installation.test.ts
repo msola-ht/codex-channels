@@ -23,6 +23,10 @@ import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { resolveAppServerRuntime } from "../runtime/app-server-runtime.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { applyDatabaseUpdates, inspectCoreServiceInstallation, inspectGatewayConfiguration, inspectDatabaseUpdates, waitForCoreServiceTarget } from "../scripts/local-installation.mjs";
+import { initialSchemaSql, metricStorageV20Columns, modelRequestMetricsTableSql, modelRequestMetricsIndexesSql,
+  modelRequestMetricsV20TableSql, modelRequestMetricsV20IndexesSql, schemaMetadataSql } from "../src/observability/sqlite-request-metrics-schema.js";
+import { securePrivateFileSync } from "../runtime/private-file.mjs";
+import { maintainMetricsSchema } from "../scripts/metrics-database.mjs";
 
 const temporaryDirectories: string[] = [];
 
@@ -33,6 +37,27 @@ afterEach(() => {
 });
 
 describe("local installation inspection", () => {
+  it.skipIf(process.platform !== "linux")("previews and explicitly upgrades v20 through the target-version entry, then archives v22 for rollback", async () => {
+    const { environment, dataDir } = fixture();
+    const path = join(dataDir, "data", "request-metrics.sqlite3"); mkdirSync(join(dataDir, "data"), { recursive: true });
+    const db = new DatabaseSync(path); securePrivateFileSync(path);
+    db.exec(schemaMetadataSql + initialSchemaSql.replace(modelRequestMetricsTableSql, modelRequestMetricsV20TableSql)
+      .replace(modelRequestMetricsIndexesSql, modelRequestMetricsV20IndexesSql).replace("'schema_version', 23", "'schema_version', 20"));
+    db.close();
+    const fakeSystemctl = join(dataDir, "systemctl-fixture");
+    writeFileSync(fakeSystemctl, "#!/bin/sh\nprintf 'LoadState=not-found\\nActiveState=inactive\\nSubState=dead\\nMainPID=0\\n'\n", { mode: 0o700 });
+    const isolatedEnvironment = { ...environment, SYSTEMCTL_BINARY: fakeSystemctl };
+    expect(inspectDatabaseUpdates(isolatedEnvironment)).toMatchObject({ required: true, metrics: { schemaVersion: 20, targetSchemaVersion: 23 } });
+    const preview = await maintainMetricsSchema("upgrade", ["--from", "20", "--to", "23"], isolatedEnvironment);
+    expect(preview).toMatchObject({ changed: false, backupPath: null });
+    const result = await applyDatabaseUpdates(isolatedEnvironment) as unknown as { backupPath: string; backupSha256: string };
+    expect(result.backupPath).toContain(".v20-");
+    expect(inspectDatabaseUpdates(isolatedEnvironment).required).toBe(false);
+    const current = new DatabaseSync(path, { readOnly: true });
+    expect(current.prepare(`SELECT ${metricStorageV20Columns.join(", ")} FROM model_request_metrics`).all()).toEqual([]); current.close();
+    expect(await maintainMetricsSchema("rollback", ["--from", "23", "--to", "20", "--backup", result.backupPath, "--sha256", result.backupSha256, "--apply"], isolatedEnvironment)).toMatchObject({ archivedPath: expect.stringContaining(".v23-rollback-") });
+    expect(inspectDatabaseUpdates(isolatedEnvironment).required).toBe(true);
+  });
   it("upgrades v5 explicitly with a private backup, preserves bindings and permits safe retries", async () => {
     const { environment, dataDir } = fixture();
     const path = join(dataDir, "data", "gateway.sqlite3");

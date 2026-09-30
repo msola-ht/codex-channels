@@ -111,7 +111,7 @@ export function parseRequestMetricsDate(value: string): number {
 
 export function parseRequestMetricsFilters(input: Record<string, unknown>): ModelRequestMetricsFilters {
   const filters: ModelRequestMetricsFilters = {};
-  for (const key of ["threadId", "turnId", "model", "filter"] as const) {
+  for (const key of ["threadId", "turnId", "model", "filter", "callerId"] as const) {
     const value = input[key];
     if (value === undefined) continue;
     if (typeof value !== "string" || value.trim().length === 0 || value.length > 128) {
@@ -131,6 +131,10 @@ export function parseRequestMetricsFilters(input: Record<string, unknown>): Mode
   if (input.operation !== undefined) {
     if (input.operation !== "response" && input.operation !== "compact") throw new Error("operation 只支持 response、compact");
     filters.operation = input.operation;
+  }
+  if (input.source !== undefined) {
+    if (input.source !== "owned" && input.source !== "relay") throw new Error("source 只支持 owned、relay");
+    filters.source = input.source;
   }
   if (input.status !== undefined) {
     if (input.status !== "completed" && input.status !== "failed" && input.status !== "incomplete" && input.status !== "unknown") throw new Error("status 不支持该请求状态");
@@ -163,6 +167,7 @@ export function queryRequestMetricsErrors(
 
 export class RequestMetricsQueryService {
   constructor(private readonly store: RequestMetricsQueryStore) {}
+
 
   aggregate(
     dimension: ModelRequestMetricsAggregationDimension,

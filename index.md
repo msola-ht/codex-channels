@@ -59,6 +59,8 @@
 - [`docs/surface-integration-guide.md`](docs/surface-integration-guide.md)：新增通讯渠道指南。
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
+- [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
+  转发方案：独立服务、原生 Chat/Responses、公共提供商接入、鉴权限流、指标与转储、数据升级及分阶段验收。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
   身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
 - [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
@@ -74,6 +76,7 @@
 - [`src/README.md`](src/README.md)：源码模块与边界。
 - [`src/delivery/README.md`](src/delivery/README.md)：独立持久投递模块及公开接口。
 - [`src/model-api/README.md`](src/model-api/README.md)：纯模型 API 消息与流式转换模块。
+- [`src/model-relay/README.md`](src/model-relay/README.md)：独立模型 API 的身份、准入与撤销模块。
 - [`src/surfaces/README.md`](src/surfaces/README.md)：通讯渠道公共边界。
 - [`bin/README.md`](bin/README.md)：npm CLI 入口。
 - [`runtime/README.md`](runtime/README.md)：CLI 与 Gateway 共享运行时。

@@ -3,11 +3,11 @@ import { once } from "node:events";
 import { createServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { StringDecoder } from "node:string_decoder";
 import { ChatToResponses, ModelConversionError, responsesToChat } from "../model-api/index.js";
 import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "./chat-diagnostics.js";
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
+import { readChatBody, readChatFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
 
 /**
  * 桥负责单次请求预算；外层代理额外保留终态发送时间，避免先截断结构化错误。
@@ -71,12 +71,12 @@ export class ChatCompletionsBridge {
     const publishDiagnostics = (): void => this.diagnostics.publish(request.headers[chatDiagnosticsHeader], diagnostics.snapshot());
     try {
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new ModelConversionError("Compressed model requests are unsupported");
-      const payloadBody = await readRequestBody(request, controller.signal);
+      const payloadBody = await readChatBody(request, controller.signal, 16 * 1024 * 1024);
       receivingBody = false;
       const { request: body, toolNames } = responsesToChat(JSON.parse(payloadBody) as unknown);
       status = 502;
       const upstream = this.options.resolveUpstream
-        ? await abortable(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
+        ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
       const payload = JSON.stringify(body);
@@ -108,33 +108,20 @@ export class ChatCompletionsBridge {
       const emit = async (events: Record<string, unknown>[]): Promise<void> => {
         for (const event of events) {
           if (controller.signal.aborted) throw new Error("aborted");
-          if (!response.write(`event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`)) await once(response, "drain", { signal: controller.signal });
+          await writeChatData(response, `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`, controller.signal);
         }
       };
       await emit(converter.start());
-      const decoder = new StringDecoder("utf8");
-      let buffer = "";
       let done = false;
-      for await (const value of incoming) {
-        buffer += decoder.write(Buffer.isBuffer(value) ? value : Buffer.from(value as string));
-        if (buffer.length > 2 * 1024 * 1024) throw new ModelConversionError("Chat event exceeds size limit");
-        let match: RegExpExecArray | null;
-        while ((match = /\r?\n\r?\n/u.exec(buffer))) {
-          const frame = buffer.slice(0, match.index);
-          buffer = buffer.slice(match.index + match[0].length);
-          const data = frame.split(/\r?\n/u).filter(line => line.startsWith("data:")).map(line => line.slice(5).replace(/^ /u, "")).join("\n");
-          if (!data) continue;
-          if (done) throw new ModelConversionError("Chat data after DONE");
-          if (data === "[DONE]") done = true;
-          else {
-            const chunk: unknown = JSON.parse(data);
-            diagnostics.push(chunk);
-            const upstreamError = chatStreamError(chunk);
-            if (upstreamError) throw upstreamError;
-            await emit(converter.push(chunk));
-          }
-        }
-        if (done) break;
+      for await (const data of readChatFrames(incoming, controller.signal, {
+        frameBytes: Infinity, bufferBytes: Infinity, totalBytes: Infinity, bufferCharacters: 2 * 1024 * 1024,
+      })) {
+        if (data === "[DONE]") { done = true; break; }
+        const chunk: unknown = JSON.parse(data);
+        diagnostics.push(chunk);
+        const upstreamError = chatStreamError(chunk);
+        if (upstreamError) throw upstreamError;
+        await emit(converter.push(chunk));
       }
       if (!done) throw new ModelConversionError("Chat stream disconnected before DONE");
       const terminal = converter.finish();
@@ -166,39 +153,4 @@ export class ChatCompletionsBridge {
       clearTimeout(timer); response.off("close", abort); controller.abort(); this.active.delete(controller);
     }
   }
-}
-
-/** Stop receiving immediately on cancellation without destroying the error response socket. */
-function readRequestBody(request: IncomingMessage, signal: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const cleanup = (): void => {
-      request.off("data", data); request.off("end", end); request.off("error", error);
-      signal.removeEventListener("abort", abort);
-    };
-    const error = (reason: unknown): void => {
-      cleanup(); request.pause(); chunks.length = 0; reject(reason instanceof Error ? reason : new Error("Request cancelled"));
-    };
-    const abort = (): void => error(signal.reason);
-    const end = (): void => { cleanup(); resolve(Buffer.concat(chunks).toString("utf8")); };
-    const data = (chunk: Buffer): void => {
-      size += chunk.length;
-      if (size > 16 * 1024 * 1024) error(new ModelConversionError("Model request exceeds size limit"));
-      else chunks.push(chunk);
-    };
-    if (signal.aborted) { abort(); return; }
-    signal.addEventListener("abort", abort, { once: true });
-    request.on("data", data); request.once("end", end); request.once("error", error);
-  });
-}
-
-/** Detach from a resolver that cannot be cancelled; late settlement cannot start an upstream request. */
-function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = (): void => reject(signal.reason instanceof Error ? signal.reason : new Error("Request cancelled"));
-    if (signal.aborted) abort();
-    else signal.addEventListener("abort", abort, { once: true });
-    void pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
-  });
 }

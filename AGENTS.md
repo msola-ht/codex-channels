@@ -46,6 +46,7 @@
 ## Current Architecture
 
 - The repository contains one modular TypeScript Gateway. The official local entry point is `codexc`, installed from source through npm.
+- The optional Model Relay runs independently, exposes only the documented model API, and submits metrics through private IPC to Gateway's sole database writer. It does not expose or connect to App Server conversation capabilities.
 - Codex App Server runs independently. Default or fixed mode uses one primary instance; switching mode may add Provider-isolated instances supervised by the same service entry point.
   Native Codex TUI and Gateway connect to the corresponding Provider instance and share its Threads and live state.
 - App Server is the sole source of truth for Thread, Turn, Item, Goal and conversation history.
@@ -189,9 +190,11 @@ Surface -> Application/Core <- Codex Client
 - Escalation requests must explain the command's purpose and remain within this repository and task. They must not expand permission to modify, commit or write remotely.
 - Escalation grants execution permission, not user authorization. Commits, pushes, dependency changes and other external writes still follow their corresponding rules here.
 - Public `codexc` commands and subcommands must support both `-h` and `--help`. Keep only documented canonical names; do not add implicit aliases.
-  `gateway` and `service-app-server` are internal service-template entry points, excluded from public help.
-- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server` and `all`.
+  `gateway`, `service-app-server` and `service-model-relay` are internal service-template entry points, excluded from public help.
+- Manage background processes through `codexc service`. Start, stop, restart, status and logs use the targets `gateway`, `app-server`, `webui`, `relay` and `all`.
+  `service start model-relay` is the documented upgrade handoff for already-running older updaters; it emits a migration notice and retains normal validation/readiness checks. Other public actions reject the old target spelling.
   Start, stop and status default to `all`; restart and logs default to `gateway`.
+  `all` starts Relay only when installed and enabled, and stops installed Relay before Gateway. WebUI remains separately managed.
 - Project Codex command presets live in `.codex/rules/default.rules`. They may preauthorize only read-only Git inspections, existing repository verification scripts,
   and the explicitly listed `codexc channel send-image` operation, which sends a local image that has passed shared validation to a bound channel conversation.
   Do not preauthorize Git staging, commits, pushes, dependency installation, releases, service management, arbitrary shell commands or destructive commands.
@@ -220,6 +223,15 @@ Surface -> Application/Core <- Codex Client
   Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
   Update the root README only when user-facing development entry points change.
+- When changing installation, packaging or npm lifecycle behavior, verify the affected path with the Node.js version pinned in CI and its bundled npm, not only the local default version.
+  Prepared-artifact checks must not implicitly rebuild source artifacts or reinstall source dependencies; lifecycle entry points must honor explicit script-disabling settings even when npm invokes them.
+- Unix socket test fixtures must fit the strictest supported platform path limit, including generated filenames and nested directories.
+  On macOS, follow the existing short `/tmp` fixture convention instead of the long system temporary directory; keep directories private and clean them up.
+  Port-occupation fixtures must bind the same address family, address and port as the listener under test; do not assume wildcard and loopback bindings conflict on every platform.
+  Do not change production socket paths or relax ownership/permission checks merely to make a fixture pass.
+- For failed CI, inspect each failed job and its first actionable error; compare runtime versions, platform, paths and lifecycle behavior before editing.
+  Reproduce with isolated fixtures where possible and add focused regression coverage. Do not replace diagnosis with blind reruns, skipped tests or weaker checks.
+  Local verification and remote CI are separate evidence: report the exact commit and remaining failed/pending jobs, and never describe a PR as fully verified until its current required checks pass.
 - Protocol, Transport or shared App Server behavior changes require real App Server smoke verification covering the change. Extend existing contracts if insufficient; mocks alone are not enough.
 - Core protocol tests should cover initialization, message routing, request cleanup, primary Thread/Turn paths and subscription cancellation.
 - Session tests should cover bidirectional discovery and continuation, exclusive binding, active state and recovery after Gateway restart.

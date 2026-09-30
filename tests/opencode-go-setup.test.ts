@@ -45,6 +45,7 @@ import { applyOpencodeGoAccountConfiguration } from "../scripts/opencode-go-acco
 import { opencodeGoAccountPaths } from "../scripts/opencode-go-account-files.mjs";
 import {
   loadManagedModelWindow,
+  loadConfiguredRelayProviderMaterial,
   loadManagedModelProviderSettings,
   writeManagedModelProviderProfileDefault,
 } from "../runtime/model-provider-runtime.mjs";
@@ -104,6 +105,7 @@ describe.skipIf(process.platform === "win32")("OpenCode Go setup", () => {
       apiKey: "sk-test-secret",
       confirmExclusiveConfigChange: true,
     }, { environment, downloadCatalog: successfulCatalog });
+    expect(loadConfiguredRelayProviderMaterial("ocg-main", environment)).toMatchObject({ protocols: ["responses"], apiKey: "sk-test-secret" });
     await applyOpencodeGoAccountConfiguration({
       accountId: "main",
       contact: "user@example.com",

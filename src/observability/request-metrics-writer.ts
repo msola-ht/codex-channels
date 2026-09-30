@@ -23,6 +23,7 @@ export class BufferedModelRequestMetricsWriter<
   private readonly checkpoints: WriteCheckpoint[] = [];
   private flushTimer: NodeJS.Timeout | undefined;
   private enqueuedCount = 0;
+  private pendingRelay = 0;
   private processedCount = 0;
   private closed = false;
 
@@ -36,6 +37,8 @@ export class BufferedModelRequestMetricsWriter<
     if (this.pending.length >= maximumPendingRecords) {
       throw new Error("模型请求指标待写队列已满");
     }
+    if (sample.source === "relay" && this.pendingRelay >= 256) throw new Error("Relay 指标待写队列已满");
+    if (sample.source === "relay") this.pendingRelay += 1;
     this.pending.push(sample);
     this.enqueuedCount += 1;
     this.scheduleFlush();
@@ -88,6 +91,7 @@ export class BufferedModelRequestMetricsWriter<
   private flushBatch(): void {
     const samples = this.pending.splice(0, maximumBatchSize);
     if (samples.length === 0) return;
+    this.pendingRelay -= samples.filter(sample => sample.source === "relay").length;
     const firstSequence = this.processedCount + 1;
     try {
       if (this.store.recordBatch) {

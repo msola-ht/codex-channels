@@ -140,6 +140,7 @@ describe("network proxy discovery", async () => {
     expect(await selector.select("https://api.openai.com/v1/responses")).toBeUndefined();
 
     selector.invalidate();
+    expect(selector.revision).toBeGreaterThan(0);
     expect(await selector.select("https://api.openai.com/v1/responses"))
       .toBe("http://127.0.0.1:7890/");
     expect(readSystemProxy).toHaveBeenCalledTimes(2);
@@ -158,6 +159,39 @@ describe("network proxy discovery", async () => {
     systemProxy = { https_proxy: "http://127.0.0.1:7890" };
     expect(await selector.select("https://api.openai.com/v1/responses"))
       .toBe("http://127.0.0.1:7890/");
+  });
+
+  it("keeps the route revision across polling a slow unchanged discovery, but revokes changed routes", async () => {
+    vi.useFakeTimers();
+    let systemProxy: { https_proxy?: string } = {};
+    const readSystemProxy = vi.fn(async () => { await new Promise(resolve => setTimeout(resolve, 1100)); return systemProxy; });
+    const selector = createRefreshableHttpProxySelector({}, {}, { platform: "darwin", readSystemProxy });
+    const poll = setInterval(() => { void selector.refresh(); }, 1000);
+    try {
+      const revision = selector.revision;
+      const selection = selector.select("https://example.invalid");
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(await selection).toBeUndefined(); expect(selector.revision).toBe(revision);
+      expect(readSystemProxy).toHaveBeenCalledTimes(1);
+      systemProxy = { https_proxy: "http://127.0.0.1:7890" };
+      const changed = selector.refresh(); await vi.advanceTimersByTimeAsync(1100); await changed;
+      expect(selector.revision).toBeGreaterThan(revision);
+      expect(await selector.select("https://example.invalid")).toBe("http://127.0.0.1:7890/");
+    } finally { clearInterval(poll); await selector.close(); vi.useRealTimers(); }
+  });
+
+  it("does not give a late revoked discovery to a caller which already saw the new revision", async () => {
+    let complete!: (value: { https_proxy?: string }) => void;
+    const readSystemProxy = vi.fn().mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }))
+      .mockResolvedValue({ https_proxy: "http://127.0.0.1:7891" });
+    const selector = createRefreshableHttpProxySelector({}, {}, { platform: "darwin", readSystemProxy });
+    const old = selector.select("https://example.invalid");
+    selector.invalidate();
+    const current = selector.select("https://example.invalid");
+    complete({ https_proxy: "http://127.0.0.1:7890" });
+    expect(await current).toBe("http://127.0.0.1:7891/");
+    expect(await old).toBe("http://127.0.0.1:7891/");
+    await selector.close();
   });
 
   it("does not add undefined proxy keys when no source defines a proxy", () => {

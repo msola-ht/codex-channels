@@ -56,3 +56,5 @@ export {
   withOfficialModelCatalog,
   writeCustomOfficialModelCatalog,
 } from "./model-provider-official-catalog.mjs";
+
+export { loadConfiguredRelayProviderMaterial, listRelayProviderIds } from "./model-provider-relay-material.mjs";

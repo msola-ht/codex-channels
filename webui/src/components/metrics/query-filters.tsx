@@ -41,9 +41,10 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
     ...(showThreadFilters && !threadId ? [["threadId", t("metrics.threadId")]] : []),
     ...(showThreadFilters ? [["turnId", t("metrics.turnId")]] : []),
     ["model", t("metrics.model")],
-  ] as Array<["threadId" | "turnId" | "model", string]>
+    ["callerId", t("filters.caller")],
+  ] as Array<["threadId" | "turnId" | "model" | "callerId", string]>
   const scopedFields = !showThreadFilters ? (["threadId", "turnId"] as const).filter((key) => Boolean(query[key])) : []
-  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length + scopedFields.length
+  const filterCount = [range !== "all", selectedProviders.length > 0, ...textFields.map(([key]) => Boolean(draft[key]?.trim())), Boolean(draft.source), Boolean(draft.operation), Boolean(draft.status)].filter(Boolean).length + scopedFields.length
   const apply = () => {
       if (range === "custom" && (!draft.from || !draft.to || draft.from > draft.to)) {
         setDateError(true)
@@ -56,6 +57,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
         to: range === "custom" ? draft.to : undefined,
         operation: draft.operation || undefined,
         status: draft.status || undefined,
+        source: draft.source || undefined,
         provider: selectedProviders.length === 0 ? undefined : selectedProviders,
         filter: draft.filter?.trim() || undefined,
       }
@@ -65,7 +67,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
       setOpen(false)
   }
   const reset = () => {
-    const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined }
+    const cleared: MetricsQuery = { range: "all", from: undefined, to: undefined, threadId: undefined, turnId: undefined, provider: undefined, model: undefined, operation: undefined, status: undefined, filter: undefined, source: undefined, callerId: undefined }
     setDraft(cleared)
     setRange("all")
     setDateError(false)
@@ -125,6 +127,7 @@ function QueryFiltersForm({ query, onChange, threadId, showThreadFilters = true,
           <Field key={key}><FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel><Input id={`${id}-${key}`} value={draft[key] ?? ""} maxLength={128} placeholder={t("common.all")} onChange={(event) => set(key, event.target.value)} /></Field>
         ))}
         {([
+          ["source", t("filters.source"), [["owned", t("filters.owned")], ["relay", t("filters.relay")]]],
           ["operation", t("filters.operation"), [["response", t("filters.response")], ["compact", t("metrics.compact")]]],
           ["status", t("filters.status"), [["completed", t("filters.completed")], ["failed", t("filters.failed")], ["incomplete", t("filters.incomplete")], ["unknown", t("filters.unknown")]]],
         ] as const).map(([key, label, options]) => (

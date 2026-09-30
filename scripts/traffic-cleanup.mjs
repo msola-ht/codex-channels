@@ -9,6 +9,9 @@ import {
   appServerSocketAcceptsWebSocket,
   inspectAppServerSupervisorState,
 } from "../runtime/app-server-supervisor.mjs";
+import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
+import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
+import { inspectManagedServiceStatus } from "./service-status.mjs";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import {
   parseTrafficCleanupArgs,
@@ -32,7 +35,7 @@ export async function runTrafficCleanup(
   renderPreview(preview, output);
   if (preview.targets.length === 0) return preview;
   if (!options.confirm) {
-    output.log("未删除。停止全部 App Server 后，加 --confirm 再执行。");
+    output.log("未删除。停止全部 App Server 与 Relay 后，加 --confirm 再执行。");
     return preview;
   }
   await assertAppServersStopped(environment, directory);
@@ -76,6 +79,12 @@ export async function assertConfiguredAppServersStopped(environment, directory) 
     throw new Error(
       `确认清理只允许当前配置的转储目录：${configuredDirectory}`,
     );
+  }
+  const relay = await queryModelRelayControl(modelRelayPaths(located.configPath).control, "status");
+  if (relay.result !== "not_running") throw new Error("清理转储前必须停止 Relay 并确认进程退出：codexc service stop relay");
+  const managed = inspectManagedServiceStatus({ environment, target: "model-relay" });
+  if (managed.services.some(service => service.running || !["inactive", "inactive/dead", "not-found", "missing", "not-loaded", "stopped", "disabled", "ready"].includes(service.state))) {
+    throw new Error("Relay 服务仍在运行或状态未确认；请先停止 Relay 再清理转储");
   }
   const document = readGatewayConfig(located.configPath);
   const runtime = resolveAppServerRuntime(document, located.dataDir, environment);

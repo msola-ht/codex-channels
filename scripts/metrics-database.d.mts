@@ -1,4 +1,5 @@
 import type { ModelRequestMetricsFilters, StoredModelRequestMetricsAggregate } from "../dist/observability/index.js";
+export function maintainMetricsSchema(command: "upgrade" | "rollback", args: string[], environment?: NodeJS.ProcessEnv): Promise<unknown>;
 
 export interface MetricsQueryOptions extends ModelRequestMetricsFilters {
   range?: string;

@@ -95,7 +95,13 @@
   Authorization、Cookie 等凭据字段只保留认证
   方案。精简模式继续裁剪 `input` 与过大条目，并从 trace 丢弃 `.delta`；逻辑响应始终只保存
   `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
+- `traffic-dump-headers.ts`：Codex/Relay 全模式共用的纯头脱敏函数及 Relay 有界采集，保留普通请求/响应头和关联 ID，仅遮蔽凭据类值、URL 秘密与 CSP nonce，限制字段与整体大小，不修改出站头。
+- `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
+- `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
+- `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
+- `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功。
+- `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文。
 
 模块只依赖 Node 内置 HTTP/HTTPS 与共享私有 IPC 能力，不接触平台 SDK、数据库或协议生成类型；
 `bin/codexc.mjs` 把代理装配到 App Server 服务生命周期，`bootstrap` 只把收到的指标组合到
@@ -120,7 +126,11 @@ HTTP 生成失败交互索引，WebSocket 仅保留握手 trace，不伪造 `res
 
 `chat-diagnostics.ts` 白名单提取有界的上游模型、标识、路由、费用与用量明细，经请求级进程内回调在终态交付前提交给代理，写入独立 `chat_diagnostics` trace 事件；随机关联编号随本地 HTTP 传递，观察器随请求关闭清理；不进入 App Server 输出或指标。转储同时把同一次调用诊断里的 `routing.finalProvider` 作为可选 `upstreamProvider` 写入 V2 响应索引，供调用列表与请求明细列表在模型名旁展示上游标签；没有诊断或字段缺失时不写入，也不推断。
 
-`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码，不自动重试。
+`chat-errors.ts` 按 Cline 官方错误合同归类 HTTP 与流内错误，限制错误正文读取大小，仅返回固定文案和白名单错误码；HTTP 错误可携带经验证的 Retry-After，供原生 Relay 交付，不自动重试。
 
 `chat-bridge.ts` 管理 Chat HTTP 连接、SSE 分帧、背压、取消和有限超时，通过 `model-api/index.ts` 调用纯转换模块。转换覆盖 Responses 的 `function`、`namespace`、自由格式 `custom` 工具与执行位置为 `client` 的 `tool_search`（含其结果带回的工具声明）；未映射的顶层工具声明及其 `tool_choice` 原样交给上游判断，不为它们注册客户端执行身份；回程不支持的工具调用仍明确失败。`text.format` 的 `json_schema` 映射为 Chat `response_format`，`text.verbosity` 校验后忽略。
 Runtime 在统计代理后装配本地 Chat 桥，两者共同归属 App Server 服务生命周期；转换后的 Responses 事件复用现有指标采集。桥在收到上游响应头前不写回任何字节，桥的单次请求预算默认 300 秒（见 `chatBridgeRequestTimeoutMs`），覆盖正文接收、路由等待及上游处理。正文接收超时返回 408 `request_timeout` 并关闭未完成的请求连接；上游阶段超时返回 `upstream_timeout`。面向桥的统计代理在此预算上额外预留 5 秒用于终态发送，避免先按空闲超时截断并丢失桥的错误分类。
+
+- `relay-traffic-dump.ts`：Relay Chat/Responses JSON/SSE 脱敏采集，复用 V2 存储与 ChatDiagnostics 白名单采集；JSON（含成功包装）读取 message、SSE 读取 delta 中的上游诊断，终态按同一 interaction 写入既有 chat_diagnostics 与 upstreamProvider，缺失不推断；所有账户共享容量和待写预算，按协议使用 relay.chat/relay.responses 标签，共享两协议容量和待写预算；`prepare(signal)` 在取消边界内异步初始化容量，服务组合层在其后复核全局采集设置；`setRetentionDays` 使用全局保留天数，`open(provider, signal, debug)` 在取消边界内等待首次初始化；共享存储报告实际接受的写入量，在途调用单独预留预算；后台单任务清理历史并保护活动及新建批次，整理期间继续采集；有限关闭，采集失败不影响模型交付；`diagnostics()` 提供当前 owner 状态、活动数与容量跳过累计，不推断历史未采集原因。
+- `relay-metric.ts`：直接模型调用的最小跨进程指标合同，不包含消息正文或凭据。
+- `relay-metrics-channel.ts`：版本化、受限帧与连接的私有指标 IPC；显式接收/拒绝，未知确认不判定为丢失；异步接收任务最多 8 个，断连时取消，任务实际结束才释放名额。

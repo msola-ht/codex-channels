@@ -126,6 +126,7 @@ describe("Gateway Config management", () => {
         idleReleaseMinutes: 15,
         sandbox: "workspace-write",
         defaultWorkspace: expect.any(String),
+        modelTrafficMode: "production",
         modelTrafficDumpEnabled: false,
         modelTrafficRetentionDays: 30,
       },
@@ -351,6 +352,17 @@ describe("Gateway Config management", () => {
       model_traffic_item_max_bytes: 32_768,
       model_traffic_retention_days: 14,
     });
+  });
+
+  it("uses the existing clipping fields for global mode without enabling capture", () => {
+    const fixture = createFixture();
+    for (const mode of ["debug", "production"] as const) {
+      updateGatewaySetting({ kind: "system.model-traffic-mode", value: mode }, { environment: fixture.environment, expectedRevision: loadGatewaySettings(fixture.environment).revision });
+      const settings = loadGatewaySettings(fixture.environment);
+      expect(settings.system.modelTrafficMode).toBe(mode);
+      expect(settings.system.modelTrafficDumpEnabled).toBe(false);
+      expect(readGatewayConfig(fixture.configPath).debug).toMatchObject({ model_traffic_input_items: mode === "debug" ? 0 : 3, model_traffic_item_max_bytes: mode === "debug" ? 0 : 65536 });
+    }
   });
 
   it("updates model traffic retention without replacing other dump controls", () => {

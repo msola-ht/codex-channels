@@ -45,6 +45,7 @@ export interface GatewayConfigDocument {
   };
   approval: { timeout_seconds: number };
   gateway?: { timezone?: string };
+  model_relay?: import("./model-relay-config.mjs").ModelRelayConfig;
   conversation: { idle_release_minutes: number };
   display: {
     operation_updates: "full" | "compact" | "hidden";
@@ -111,7 +112,7 @@ export function materializeGatewayConfigDefaults(
   configPath: string,
   document: TomlTable,
 ): boolean;
-export function writeGatewayConfig(configPath: string, document: TomlTable): void;
+export function writeGatewayConfig(configPath: string, document: TomlTable, options?: { maximumBytes?: number }): void;
 export function withGatewayConfigLock<T>(
   configPath: string,
   operation: () => T & (T extends PromiseLike<unknown> ? never : unknown),

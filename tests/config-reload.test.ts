@@ -11,10 +11,16 @@ import {
 } from "../src/config/index.js";
 import { TelegramAccessPolicy, WorkspaceRegistry } from "../src/policy/index.js";
 import { MemoryBindingStore } from "../src/storage/index.js";
+import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 
 const mainWorkspace = { id: "main", name: "Main", cwd: "/workspace" };
 
 describe("Gateway config reload", () => {
+  it("reloads Relay identity policy without restarting App Server or Gateway", () => {
+    expect(classifyConfigReload(config(), config({ modelRelay: modelRelayConfigSchema.parse({ enabled: true }) }))).toEqual({
+      action: "reload", changes: [{ code: "model-relay.policy", scope: "global" }],
+    });
+  });
   it("restarts for changed secure Weixin credentials even when config values are unchanged", () => {
     const current = config({ weixin: {
       accountId: "bot@im.bot", allowedUserIds: new Set(["actor@im.wechat"]),

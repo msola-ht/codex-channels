@@ -30,6 +30,14 @@ afterEach(() => {
 });
 
 describe("metrics command options", () => {
+  it("accepts only the explicit upgrade range and bounded relay query identities", () => {
+    expect(() => validateMetricsCommandArgs("upgrade", ["--from", "20", "--to", "23"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("upgrade", ["--from", "19", "--to", "23", "--apply"])).toThrow();
+    expect(() => validateMetricsCommandArgs("rollback", ["--from", "23", "--to", "20", "--backup", "fixture", "--sha256", "a".repeat(64), "--apply"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("rollback", ["--from", "23", "--to", "20"])).toThrow();
+    expect(() => validateMetricsCommandArgs("export", ["--source", "relay", "--caller", "client"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("export", ["--source", "unknown"])).toThrow();
+  });
   it("loads command help and validates queries without loading SQLite", () => {
     const loader = `export function resolve(specifier, context, nextResolve) {
       if (specifier === "node:sqlite") throw new Error("Query options must not load SQLite");

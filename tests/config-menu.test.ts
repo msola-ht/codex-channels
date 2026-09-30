@@ -560,6 +560,16 @@ describe("Codex Connect config menu", () => {
     expect(output.join("")).toContain("codexc service restart app-server");
   });
 
+  it("selects the shared debug capture mode without enabling collection", async () => {
+    const fixture = createFixture();
+    const result = await runConfig({ input: { isTTY: true }, environment: fixture.environment,
+      output: { write: vi.fn(), isTTY: true }, prompts: { intro: vi.fn(),
+        select: vi.fn().mockResolvedValueOnce("system").mockResolvedValueOnce("model_traffic_mode").mockResolvedValueOnce("debug"),
+        isCancel: () => false, cancel: vi.fn() } });
+    expect(result).toMatchObject({ modelTrafficMode: "debug", activation: "restart-app-server" });
+    expect(readGatewayConfig(fixture.configPath).debug).toEqual({ model_traffic_input_items: 0, model_traffic_item_max_bytes: 0 });
+  });
+
   it("updates model traffic retention through the system settings", async () => {
     const fixture = createFixture();
     const output: string[] = [];
@@ -1260,3 +1270,20 @@ function createFixture(): {
     environment,
   };
 }
+
+
+it("opens relay listener settings directly from Config and preserves unrelated settings", async () => {
+  const fixture = createFixture();
+  const before = readGatewayConfig(fixture.configPath);
+  before.telegram = { bot_token: "fixture", allowed_user_ids: [1] };
+  writeGatewayConfig(fixture.configPath, before);
+  const select = vi.fn().mockResolvedValueOnce("relay").mockResolvedValueOnce("lan");
+  const result = await runConfig({ environment: fixture.environment, input: { isTTY: true }, output: { isTTY: true, write: vi.fn() },
+    prompts: { intro: vi.fn(), select, confirm: vi.fn().mockResolvedValue(true), isCancel: () => false } });
+  expect(select.mock.calls[0]?.[0].options).toEqual(expect.arrayContaining([expect.objectContaining({ value: "relay", label: "模型转发监听" })]));
+  expect(result.activation).toBe("saved_not_running");
+  const after = readGatewayConfig(fixture.configPath);
+  expect(after.model_relay).toMatchObject({ host: "0.0.0.0", enabled: true });
+  delete after.model_relay;
+  expect(after).toEqual(before);
+});

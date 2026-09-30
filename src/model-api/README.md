@@ -1,12 +1,19 @@
 # 模型 API 转换
 
-独立的纯 TypeScript 转换模块，不依赖 Provider、HTTP、App Server RPC、配置或存储。
+独立的纯转换模块，不依赖 Provider 账户材料、HTTP、App Server RPC、配置读写或存储。原生协议思考策略仅引用共享的无 I/O 能力元数据。
 每个请求必须携带完整输入，转换状态只存活于单次流式响应，不缓存会话历史。
 
 - `index.ts`：公开 `responsesToChat`、`ChatToResponses` 与安全错误类型。
 - `responses-to-chat.ts`：Responses 文本、用户内联图片、函数与自由格式工具定义、调用和文本结果映射为 Chat 请求。
 - `chat-to-responses.ts`：单选择 Chat 流转换为 Responses 文本、推理摘要与正文、函数调用、自由格式调用、客户端检索调用和用量事件。
 - `validation.ts`：模型 API 信任边界的结构验证和不含报文的错误。
+- `chat-request.ts`：独立 Relay 直接 Chat 请求保留：仅校验本地 model/messages/stream/n 边界，其他字段和值交给上游处理；提供安全字段路径错误及显式每 Key 关闭思考的出站副本投影，不经过 Responses 转换。
+- `chat-response.ts`：直接 Chat JSON/SSE 的单选择响应观察、工具结构与资源边界、终态与 Usage 归约，不构造交付响应；公开不含报文的响应校验错误类别。
+- `responses-request.ts`：原生 Responses 同步无状态请求边界，保留输入、工具和模型参数，显式禁止上游存储，不经过 Chat 转换；由 Relay 原生 Responses HTTP 路由调用。
+
+直接 Chat 保留工具参数字符串，由客户端在执行前验证 JSON 与工具 Schema；支持最长 128 字符的函数名。`insufficient_system_resource`、`aborted` 与长度/过滤终态均记为 incomplete，原样交付；不将模型中断误判为协议错误。
+
+以下限制针对 Responses 与 Chat 的转换链路；独立 Relay 的直接 Chat 请求使用上述保留合同。
 
 当前支持文本、用户内联 Base64 图片与三类工具。Responses `function` 保持函数调用，含显式命名空间映射、调用还原和名称冲突检查，超长名称使用稳定摘要短名并在输出中还原原始身份。自由格式 `custom` 工具在 Chat 侧以单字段 `input` 的 JSON 函数下发，语法声明只作说明、不参与校验，回程把该字段还原为 `custom_tool_call`。执行位置为 `client` 的 `tool_search` 以下发时的参数原样声明，回程还原为 `tool_search_call`；其结果带回的工具会在同一请求里补充声明，已检索工具的 `defer_loading: true` 在 Chat 声明中移除；仅原始名称、命名空间和工具类型完全相同才去重，转换名冲突明确拒绝，因为 Chat 上游没有“上游自动补工具”的等价机制。未映射的顶层工具声明（如 `web_search`、服务端 `tool_search`）及其 `tool_choice` 原样交给上游判断，不在本地丢弃或提前拒绝；这些声明不进入客户端执行身份表，回程不支持的工具调用仍明确失败。同样拒绝图片文件引用、远程图片 URL、工具图片结果、加密推理、服务端会话引用和
 其他未支持语义。Responses `text.format` 的 `json_schema` 按原样映射为 Chat `response_format`（名称、严格标记和 schema 逐字段校验）。`text.verbosity` 取值校验后忽略，因为 Chat 上游没有等价字段；其他文本控制明确拒绝。显式推理等级 `none/low/high/max` 映射为 Chat `reasoning.effort`，`none` 关闭思考，缺失时不生成控制参数；其他等级、预算和摘要控制明确拒绝（`summary: none` 可省略）。

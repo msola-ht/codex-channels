@@ -28,7 +28,7 @@ show_logs() {
   fi
   runtime_dir="${socket_path:h}"
 
-  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "webui" || "$1" == "all" ]]; then
+  if (( $# > 0 )) && [[ "$1" == "gateway" || "$1" == "app-server" || "$1" == "webui" || "$1" == "model-relay" || "$1" == "all" ]]; then
     service="$1"
     shift
   fi
@@ -71,6 +71,10 @@ show_logs() {
     if [[ ! -f "$runtime_dir/webui.log" || "$runtime_dir/webui.error.log" -nt "$runtime_dir/webui.log" ]]; then
       [[ -f "$runtime_dir/webui.error.log" ]] && log_files+=("$runtime_dir/webui.error.log")
     fi
+  fi
+  if [[ "$service" == "model-relay" || "$service" == "all" ]]; then
+    [[ -f "$runtime_dir/model-relay.log" ]] && log_files+=("$runtime_dir/model-relay.log")
+    [[ -f "$runtime_dir/model-relay.error.log" ]] && log_files+=("$runtime_dir/model-relay.error.log")
   fi
   if (( ${#log_files[@]} == 0 )); then
     print_status failure "尚未找到后台日志：$runtime_dir"
@@ -149,10 +153,10 @@ start_job() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|webui|all)
+    gateway|app-server|webui|model-relay|all)
       ;;
     *)
-      print_status failure "服务目标必须是 gateway、app-server、webui 或 all：$1"
+      print_status failure "服务目标必须是 gateway、app-server、webui、model-relay 或 all：$1"
       return 2
       ;;
   esac
@@ -194,6 +198,7 @@ case "$action" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
+      model-relay) print_status success "Model Relay 已启动。" ;;
       all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -217,13 +222,15 @@ case "$action" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
       webui) print_status success "WebUI 已停止。" ;;
+      model-relay) print_status success "Model Relay 已停止。" ;;
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
   uninstall)
     core_labels=$(service_ids all stop)
     webui_label=$(service_ids webui stop)
-    for label in ${(f)core_labels} "$webui_label"; do
+    relay_label=$(service_ids model-relay stop)
+    for label in "$relay_label" ${(f)core_labels} "$webui_label"; do
       stop_job "$label"
       /bin/rm -f "$agents_dir/$label.plist"
     done
@@ -251,6 +258,7 @@ case "$action" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
+      model-relay) print_status success "Model Relay 已重启。" ;;
       all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -272,7 +280,7 @@ case "$action" in
   status)
     target="${2:-all}"
     require_target "$target"
-    labels=$(service_ids "$target" start)
+    labels=$(service_ids "$target" status)
     status_code=0
     for label in ${(f)labels}; do
       if ! launchctl print "$user_domain/$label" 2>/dev/null; then
@@ -287,7 +295,7 @@ case "$action" in
     show_logs "$@"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|model-relay|all]"
     exit 2
     ;;
 esac

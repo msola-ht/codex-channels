@@ -1,7 +1,7 @@
 # systemd 用户服务模板
 
 本目录保存 Linux 用户级 systemd 模板，用于把 Codex App Server、Gateway 与 WebUI
-安装为三个独立进程。
+以及可选 Model Relay 安装为独立进程。
 
 ## 文件
 
@@ -15,7 +15,7 @@
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
 由 systemd 自动拉起。Gateway 启动前会等待受监管的 App Server 与全部私有 WebSocket 就绪，
 避免开机并发启动时抢跑；Gateway 的日常重启不会停止共享 App Server。
-启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui` 或 `all`；
+启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui`、`model-relay` 或 `all`；
 WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
 `all`，重启和日志默认 `gateway`。
 
@@ -26,3 +26,8 @@ WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标�
 
 linger 是当前用户的系统级开机属性，可能同时服务于其他用户 unit，因此卸载 Codex Connect 时不
 自动关闭。用户配置和运行数据始终保留在 `~/.codex-connect`，卸载 unit 不会删除这些数据。
+
+- `codex-connect-model-relay.service.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
+
+Relay 默认禁用；`all` 启动仅纳入已安装且启用的 Relay，停止先关闭 Relay，再关闭 Gateway。
+状态包含已安装 Relay；单独停止 Gateway 不主动结束 Relay，指标接收不可用时由 Relay 记录未确认。

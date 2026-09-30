@@ -2,7 +2,7 @@
 import type { IncomingMessage } from "node:http";
 
 export class ChatUpstreamError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable: boolean) {
+  constructor(readonly code: string, message: string, readonly retryable: boolean, readonly retryAfter?: string) {
     super(message);
     this.name = "ChatUpstreamError";
   }
@@ -46,7 +46,12 @@ export function chatStreamError(value: unknown): ChatUpstreamError | undefined {
   }
   return undefined;
 }
-export async function readChatHttpError(incoming: IncomingMessage): Promise<ChatUpstreamError> {
+export async function readChatHttpError(incoming: IncomingMessage, capture?: { value(value: unknown, stream: boolean): void; invalid(bytes: number): void }): Promise<ChatUpstreamError> {
+  const retryAfter = incoming.statusCode === 429 || incoming.statusCode === 503 ? safeRetryAfter(incoming.headers["retry-after"]) : undefined;
+  const classify = (value: unknown): ChatUpstreamError => {
+    const error = chatUpstreamError(value, incoming.statusCode);
+    return new ChatUpstreamError(error.code, error.message, error.retryable, retryAfter);
+  };
   const parts: Buffer[] = [];
   let size = 0;
   try {
@@ -56,7 +61,20 @@ export async function readChatHttpError(incoming: IncomingMessage): Promise<Chat
       if (size > 64 * 1024) { incoming.destroy(); break; }
       parts.push(part);
     }
-    if (size <= 64 * 1024) return chatUpstreamError(object(JSON.parse(Buffer.concat(parts).toString("utf8"))).error, incoming.statusCode);
+    if (size <= 64 * 1024) {
+      const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
+      capture?.value(value, false);
+      return classify(object(value).error);
+    }
   } catch { /* Non-JSON or interrupted bodies retain the HTTP classification. */ }
-  return chatUpstreamError(undefined, incoming.statusCode);
+  capture?.invalid(size);
+  return classify(undefined);
+}
+
+/** Only standard delay-seconds or canonical HTTP-date; never forward arbitrary header text. */
+function safeRetryAfter(value: string | string[] | undefined): string | undefined {
+  if (typeof value !== "string" || value.length > 64) return undefined;
+  if (/^\d+$/u.test(value) && Number.isSafeInteger(Number(value))) return value;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toUTCString() === value ? value : undefined;
 }

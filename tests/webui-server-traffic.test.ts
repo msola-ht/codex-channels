@@ -4,16 +4,19 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { writeGatewayConfig } from "../runtime/gateway-config.mjs";
+import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config.mjs";
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { routeTrafficApi } from "../scripts/webui-traffic-route.mjs";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupWebuiTestFixtures,
   startWebuiTestServer,
   type WebuiTestServer,
 } from "./webui-server-test-fixture.js";
+
+// @ts-expect-error JavaScript presentation helper intentionally has no declaration file.
+import { requestClientName } from "../scripts/traffic-dump-presentation.mjs";
 
 const temporaryDirectories: string[] = [];
 const servers: WebuiTestServer[] = [];
@@ -23,6 +26,98 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it.each([
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36", "Chrome / macOS"],
+    ["Mozilla/5.0 (Windows NT 10.0) Chrome/143.0 Safari/537.36 Edg/143.0", "Edge / Windows"],
+    ["Mozilla/5.0 (Linux; Android 14) Chrome/143.0 Safari/537.36 SamsungBrowser/28.0", "Samsung Internet / Android"],
+    ["Mozilla/5.0 (Linux) Chrome/143.0 Safari/537.36 OPR/120.0", "Opera / Linux"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) FxiOS/140.0 Mobile/15 Safari/605.1", "Firefox / iOS"],
+    ["Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) CriOS/143.0 Mobile/15 Safari/605.1", "Chrome / iOS"],
+    ["Mozilla/5.0 (Macintosh) Version/18.0 Safari/605.1", "Safari / macOS"],
+    ["Mozilla/5.0 (X11; CrOS x86_64) Chrome/143.0 Safari/537.36", "Chrome / ChromeOS"],
+    ["Mozilla/5.0 Chrome/143.0 Safari/537.36 WorkBuddy/5.6.2", "WorkBuddy"],
+    ["Mozilla/5.0 AppleWebKit/537.36", undefined],
+  ])("identifies browser evidence without overriding apps: %s", (agent, expected) => {
+    expect(requestClientName({ headers: { "user-agent": agent } })).toBe(expected);
+  });
+
+  it("derives each call protocol from its endpoint, including historical HTTP and WebSocket dumps", async () => {
+    const fixture = createFixture();
+    const inputs = [
+      { path: "/api/v1/chat/completions", expected: "chat" },
+      { path: "/v1/responses?test=1", expected: "responses" },
+      { path: "/responses", expected: "responses" },
+      { path: "/models", method: "GET", expected: undefined },
+      { path: "/other", expected: undefined },
+      { path: "/responses/unknown", expected: undefined },
+    ];
+    const calls = inputs.map((input, index) => {
+      const call = httpInteraction(index + 1);
+      Object.assign(call.request, { path: input.path, method: input.method ?? "POST" });
+      return call;
+    });
+    calls.push(websocketInteraction(7));
+    const invalidUrl = websocketInteraction(8); invalidUrl.request.url = "file:///responses";
+    const missingUrl = websocketInteraction(9); delete missingUrl.request.url;
+    calls.push(invalidUrl, missingUrl);
+    writeSession(fixture.trafficDir, "ds-main", "protocols", calls);
+    const paths = [join(fixture.trafficDir, "ds-main-protocols")];
+    const result = await summarizeDumpFiles(paths);
+    expect(result.exchanges.map((row: { protocol?: string }) => row.protocol)).toEqual([...inputs.map(input => input.expected), "responses", undefined, undefined]);
+    expect((await describeDumpExchange(paths, 1)).protocol).toBe("chat");
+    const server = await startServer(fixture.environment);
+    const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=ds-main`);
+    expect(response.body.exchanges.find(row => row.id === 1)?.protocol).toBe("chat");
+    expect(response.body.exchanges.find(row => row.id === 2)?.protocol).toBe("responses");
+  });
+
+  it("projects client names from saved User-Agent with inbound precedence and browser identification", async () => {
+    const fixture = createFixture();
+    const agents = ["WorkBuddy/5.6.2 WorkBuddy/5.6.2 CLI/2.147.0", "codex_cli_rs/0.156.1", "Mozilla/5.0 Chrome/143.0", "node", "[REDACTED]", "WorkBuddy/5.6.2\nprivate"];
+    const interactions = agents.map((agent, index) => {
+      const item = httpInteraction(index + 1);
+      Object.assign(item.request, { headers: { "user-agent": agent } });
+      return item;
+    });
+    const inbound = httpInteraction(7);
+    Object.assign(inbound.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 1, inbound: { headers: { "User-Agent": "WorkBuddy/5.6.2" } } } });
+    interactions.push(inbound);
+    const unknownVersion = httpInteraction(8);
+    Object.assign(unknownVersion.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 2, inbound: { headers: { "user-agent": "WorkBuddy/5.6.2" } } } });
+    const missingInboundAgent = httpInteraction(9);
+    Object.assign(missingInboundAgent.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 1, inbound: { headers: {} } } });
+    interactions.push(unknownVersion, missingInboundAgent);
+    for (const [index, agent] of ["Kelivo", "WorkBuddy", "Kelivo-other", "codex-tui/0.156.1 (Debian 13.0.0; x86_64) xterm-256color (codex-tui; 0.156.1)"].entries()) {
+      const item = httpInteraction(10 + index);
+      Object.assign(item.request, { headers: { "user-agent": agent } }); interactions.push(item);
+    }
+    writeSession(fixture.trafficDir, "relay.chat", "client-evidence", interactions);
+    const paths = [join(fixture.trafficDir, "relay.chat-client-evidence")];
+    const rows = await summarizeDumpFiles(paths);
+    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", "Chrome", undefined, undefined, undefined, "WorkBuddy", undefined, undefined, "Kelivo", "WorkBuddy", undefined, "Codex"]);
+    expect((await describeDumpExchange(paths, 1)).clientName).toBe("WorkBuddy");
+    expect((await describeDumpExchange(paths, 3)).clientName).toBe("Chrome");
+    const server = await startServer(fixture.environment);
+    const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=relay.chat`);
+    expect(response.status).toBe(200);
+    expect(response.body.exchanges.find(row => row.id === 1)?.clientName).toBe("WorkBuddy");
+    expect(response.body.exchanges.find(row => row.id === 3)?.clientName).toBe("Chrome");
+  });
+
+  it("reports the shared global capture switch and retention for Relay", async () => {
+    const fixture = createFixture(); const configPath = fixture.environment.CODEX_CONNECT_CONFIG_FILE;
+    const document = readGatewayConfig(configPath);
+    document.debug = { model_traffic_dump: true, model_traffic_retention_days: 14 };
+    writeGatewayConfig(configPath, document);
+    writeSession(fixture.trafficDir, "relay.chat", "2026-09-29T00-00-00-000Z", [httpInteraction(1)]);
+    const server = await startServer(fixture.environment);
+    const result = await getJson<{ enabled: boolean; retentionDays: number }>(`${server.origin}/api/v1/traffic?label=relay.chat`);
+    expect(result.status).toBe(200); expect(result.body).toMatchObject({ enabled: true, retentionDays: 14 });
+  });
+
   it("does not infer new stages from legacy wall-clock records or invalid offsets", async () => {
     const fixture = createFixture();
     const legacy = httpInteraction(1);
@@ -336,10 +431,11 @@ describe("webui traffic V2 API", () => {
       interaction: 1, kind: "websocket_frame", direction: "upstream", text, part: index + 1, parts: 2,
     })));
     call.responseBody = JSON.stringify({ type: "response.completed", response: {
-      id: "resp-current", output: [], service_tier: "default",
+      id: "resp-current", status: "completed", output: [], service_tier: "default",
       usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 80 },
         output_tokens: 10, output_tokens_details: { reasoning_tokens: 2 } },
     } });
+    call.trace.push({ interaction: 1, kind: "websocket_frame", direction: "upstream", text: call.responseBody });
     writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [call]);
     const server = await startServer(fixture.environment);
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
@@ -370,6 +466,22 @@ describe("webui traffic V2 API", () => {
     expect(detail.response.output).toHaveLength(1);
     expect(detail.response.output[0].text).toBe("a".repeat(150));
     expect(detail.response.outputTruncated).toBe(true);
+  });
+
+  it.each(["completed", "failed", "incomplete"])("retains SSE done items when %s has empty output", async (status) => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    const events = [
+      { type: "response.output_item.done", output_index: 0, item: { type: "message", content: "retained answer" } },
+      { type: `response.${status}`, response: { status, output: [] } },
+    ];
+    call.trace = [{ interaction: 1, kind: "response_body", encoding: "utf8",
+      text: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join("") }];
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.output).toMatchObject([{ text: "retained answer" }]);
+    expect(detail.response.outputTruncated).toBe(false);
   });
 
   it.each([
@@ -619,6 +731,18 @@ describe("webui traffic V2 API", () => {
     const result = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic`);
     expect(result.status).toBe(503);
     expect(result.body.error.code).toBe("traffic_unsupported_version");
+  });
+
+  it.each([
+    [{ version: 2 }, "traffic_unsupported_version"],
+    [{ version: 1, transformations: [], inbound: { headers: null, headersTruncated: false, payload: {} } }, "traffic_unavailable"],
+  ])("reports unsupported or damaged debug records through a controlled API error", async (debug, code) => {
+    const fixture = createFixture(); const session = "2026-09-29T00-00-00-000Z";
+    const call = httpInteraction(1); call.request.debug = debug;
+    writeSession(fixture.trafficDir, "relay.chat", session, [call]);
+    const server = await startServer(fixture.environment);
+    const result = await getJson<TrafficErrorBody>(`${server.origin}/api/v1/traffic/exchange?label=relay.chat&session=${session}&id=1`);
+    expect(result.status).toBe(503); expect(result.body.error.code).toBe(code);
   });
 
   it.each(["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"])("rejects non-loopback callers before reading %s", async (apiPath) => {

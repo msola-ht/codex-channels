@@ -20,7 +20,7 @@ show_logs() {
   follow=0
   lines=100
   service=gateway
-  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "all" ]; }; then
+  if [ "$#" -gt 0 ] && { [ "$1" = "gateway" ] || [ "$1" = "app-server" ] || [ "$1" = "webui" ] || [ "$1" = "model-relay" ] || [ "$1" = "all" ]; }; then
     service=$1
     shift
   fi
@@ -98,10 +98,10 @@ ensure_linger() {
 
 require_target() {
   case "$1" in
-    gateway|app-server|webui|all)
+    gateway|app-server|webui|model-relay|all)
       ;;
     *)
-      print_status failure "服务目标必须是 gateway、app-server、webui 或 all：$1"
+      print_status failure "服务目标必须是 gateway、app-server、webui、model-relay 或 all：$1"
       return 2
       ;;
   esac
@@ -139,6 +139,7 @@ case "$action" in
       gateway) print_status note "Gateway 启动操作已完成，正在确认就绪状态。" ;;
       app-server) print_status note "Codex App Server 启动操作已完成，正在确认就绪状态。" ;;
       webui) print_status success "WebUI 已启动。" ;;
+      model-relay) print_status success "Model Relay 已启动。" ;;
       all) print_status note "Codex App Server 与 Gateway 启动操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -162,6 +163,7 @@ case "$action" in
       gateway) print_status success "Gateway 已停止。" ;;
       app-server) print_status success "Codex App Server 已停止。" ;;
       webui) print_status success "WebUI 已停止。" ;;
+      model-relay) print_status success "Model Relay 已停止。" ;;
       all) print_status success "Codex App Server 与 Gateway 已停止。" ;;
     esac
     ;;
@@ -185,6 +187,7 @@ case "$action" in
       gateway) print_status note "Gateway 重启操作已完成，正在确认就绪状态；Codex App Server 保持运行。" ;;
       app-server) print_status note "Codex App Server 重启操作已完成，正在确认就绪状态；Gateway 将自动重连。" ;;
       webui) print_status success "WebUI 已重启。" ;;
+      model-relay) print_status success "Model Relay 已重启。" ;;
       all) print_status note "Codex App Server 与 Gateway 重启操作已完成，正在确认就绪状态。" ;;
     esac
     ;;
@@ -200,7 +203,7 @@ case "$action" in
   status)
     target=${2:-all}
     require_target "$target"
-    resolved_units=$(service_ids "$target" start)
+    resolved_units=$(service_ids "$target" status)
     set -- $resolved_units
     set +e
     systemctl_user --no-pager status "$@"
@@ -218,7 +221,8 @@ case "$action" in
   uninstall)
     resolved_units=$(service_ids all stop)
     webui_unit=$(service_ids webui stop)
-    set -- $resolved_units "$webui_unit"
+    relay_unit=$(service_ids model-relay stop)
+    set -- $resolved_units "$webui_unit" "$relay_unit"
     if ! systemctl_user disable --now "$@"; then
       print_status failure "systemd 服务未能停止或禁用，已保留服务定义以便排查。"
       exit 1
@@ -230,7 +234,7 @@ case "$action" in
     print_status note "用户配置与运行数据保留在 ~/.codex-connect。"
     ;;
   *)
-    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|all]"
+    print_status failure "用法：$0 {install|uninstall|reload|start|stop|restart|status|logs} [gateway|app-server|webui|model-relay|all]"
     exit 2
     ;;
 esac

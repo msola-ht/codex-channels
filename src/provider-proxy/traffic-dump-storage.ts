@@ -58,6 +58,12 @@ interface TrafficDumpStorageOptions {
   label: string;
   onError: (error: Error) => void;
   retentionDays: number;
+  maximumPendingBytes?: number;
+  pendingBudget?: { bytes: number };
+  rotateAfterPayloadBytes?: number;
+  retentionManagedExternally?: boolean;
+  /** Count accepted writes (including queued data) for an external disk budget. */
+  onBytesAccepted?: (bytes: number) => void;
 }
 
 export interface TrafficDumpStorageState {
@@ -76,9 +82,12 @@ export class TrafficDumpStorage {
   private currentSession: TrafficDumpSession | undefined;
   private closed = false;
   private failed = false;
+  private localQueuedBytes = 0;
+  private get queuedBytes(): number { return this.options.pendingBudget?.bytes ?? this.localQueuedBytes; }
+  private set queuedBytes(value: number) { if (this.options.pendingBudget) this.options.pendingBudget.bytes = value; else this.localQueuedBytes = value; }
 
   constructor(
-    options: TrafficDumpStorageOptions,
+    private readonly options: TrafficDumpStorageOptions,
     private readonly state: TrafficDumpStorageState,
   ) {
     this.directory = options.directory;
@@ -191,6 +200,8 @@ export class TrafficDumpStorage {
     }
   }
 
+  abort(): void { this.fail(new Error("Traffic dump shutdown timeout")); }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -210,7 +221,9 @@ export class TrafficDumpStorage {
     const current = this.currentSession;
     if (
       current !== undefined
-      && (!rotate || startedAtMs - current.startedAtMs < sessionRotationIntervalMs)
+      && (!rotate || (startedAtMs - current.startedAtMs < sessionRotationIntervalMs
+        && (this.options.rotateAfterPayloadBytes === undefined || (current.payloadFileIndex === 1
+          && current.payloadWrittenBytes < this.options.rotateAfterPayloadBytes))))
     ) return current;
     const session = this.createSession(startedAtMs);
     this.currentSession = session;
@@ -336,12 +349,14 @@ export class TrafficDumpStorage {
     }
     securePrivateDirectorySync(sessionState.sessionDirectory);
     const manifestPath = join(sessionState.sessionDirectory, "manifest.json");
-    writeFileSync(manifestPath, `${JSON.stringify({
+    const manifest = `${JSON.stringify({
       createdAtMs: sessionState.startedAtMs,
       label: this.label,
       session,
       version: 2,
-    }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    }, null, 2)}\n`;
+    writeFileSync(manifestPath, manifest, { flag: "wx", mode: 0o600 });
+    this.options.onBytesAccepted?.(Buffer.byteLength(manifest));
     securePrivateFileSync(manifestPath);
     sessionState.writerSession = session;
     this.pruneSessions();
@@ -349,6 +364,7 @@ export class TrafficDumpStorage {
   }
 
   private pruneSessions(): void {
+    if (this.options.retentionManagedExternally) return;
     const protectedSessionDirectories = [...this.sessions]
       .flatMap((session) => session.sessionDirectory === undefined
         ? []
@@ -362,6 +378,12 @@ export class TrafficDumpStorage {
   }
 
   private enqueueWrite(stream: WriteStream, content: string | Buffer): void {
+    const size = Buffer.byteLength(content);
+    if (this.options.maximumPendingBytes !== undefined && this.queuedBytes + size > this.options.maximumPendingBytes) {
+      this.fail(new Error("Traffic dump pending capacity exceeded")); return;
+    }
+    this.queuedBytes += size;
+    this.options.onBytesAccepted?.(size);
     this.writeQueue = this.writeQueue.then(() => {
       if (this.failed) return;
       return new Promise<void>((resolveWrite, rejectWrite) => {
@@ -369,7 +391,7 @@ export class TrafficDumpStorage {
           ? resolveWrite()
           : rejectWrite(error));
       });
-    }).catch((error: unknown) => this.fail(error));
+    }).catch((error: unknown) => this.fail(error)).finally(() => { this.queuedBytes -= size; });
   }
 
   private enqueueClose(stream: WriteStream): void {

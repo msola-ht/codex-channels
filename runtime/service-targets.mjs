@@ -32,6 +32,11 @@ export const serviceDefinitions = Object.freeze([
     startOrder: 0,
     stopOrder: 0,
   }),
+  Object.freeze({
+    target: "model-relay", displayName: "Model Relay",
+    systemd: "codex-connect-model-relay.service", launchd: "com.hegenai.codex-model-relay",
+    windows: "Codex Connect Model Relay", core: false, helpOrder: 3, startOrder: 2, stopOrder: -1,
+  }),
 ]);
 
 export const serviceTargetUsage = [
@@ -78,4 +83,9 @@ export function serviceIdentifiers(platform, target = "all", order = "start") {
     throw new Error(`不支持的服务平台：${platform}`);
   }
   return serviceDefinitionsForTarget(target, order).map((definition) => definition[platform]);
+}
+
+/** Public CLI spelling; installed service identifiers remain stable. */
+export function serviceCommandTarget(target) {
+  return target === "model-relay" ? "relay" : target;
 }

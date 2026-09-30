@@ -4,6 +4,17 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("shows controlled relay outcomes without a request ID copy action", () => {
+    expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
+    expect(markup["relay-outcome-disconnected"]).toContain("客户端连接已断开");
+    expect(markup["relay-outcome-incomplete"]).toContain("上游生成未完整结束");
+    expect(markup["relay-outcome-unknown"]).not.toContain("untrusted-sensitive-value");
+    for (const name of ["rejected", "disconnected", "unknown", "incomplete"]) {
+      expect(markup[`relay-outcome-${name}`]).not.toContain("复制请求 ID");
+      expect(markup[`relay-outcome-${name}`]).not.toContain("7d40d091-8c74-4dcf-9e40-71531f3f1a98");
+      expect(markup[`relay-outcome-${name}`]).not.toContain("查看调用详情");
+    }
+  });
   beforeAll(() => {
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
@@ -54,11 +65,11 @@ describe("WebUI metrics table presentation", () => {
           traffic: null, userAgent: "fixture-client", operation: "response", httpStatus: 502,
           errorType: "upstream_error", errorCode: "fixture_error", errorMessage: "fixture failure",
           firstTokenMs: 100, totalDurationMs: 1000, upstreamTtftMs: null, cacheHitRate: 0.5 };
-        const render = (component, props) => renderToStaticMarkup(h(MemoryRouter, null,
-          h(LanguageContext.Provider, { value: { language: "zh", setLanguage: noop } }, h(TooltipProvider, null,
+        const render = (component, props, language = "zh", entry = "/") => renderToStaticMarkup(h(MemoryRouter, { initialEntries: [entry] },
+          h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(TooltipProvider, null,
             h(ServerTimeContext.Provider, { value: globalThis.fixtureServerClock ?? { nowMs: Date.now(), receivedAtMs: Date.now(), timeZone: "UTC" } }, h(component, props))))));
-        const requestProps = { ...pagination, records: [record], filter: "", total: 1 };
-        const exchange = { id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
+        const requestProps = { ...pagination, records: [{ ...record, id: 42 }], filter: "", total: 1 };
+        const exchange = { protocol: "responses", clientName: "WorkBuddy", id: 7, label: "openai", session: "batch-1", startedAtMs: 1000, category: "model", turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }],
           state: "completed", firstTokenMs: 100, durationMs: 1000, hasError: false, requestModel: "model-test", responseModels: ["model-test"] };
         const detail = { ...exchange, transport: "http", modelEvidence: { serverModels: [], safetyModels: [], turnStateLengths: [{ source: "http.headers.x-codex-turn-state", characters: 1234 }], truncated: false },
           parameterComparison: [], request: { headers: {}, body: "request-body", parameters: {},
@@ -113,6 +124,10 @@ describe("WebUI metrics table presentation", () => {
             turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
+          relayDebug: render(TrafficDetail, { detail: { ...detail, debug: {
+            inbound: { headers: { "x-client": "[REDACTED]" }, headersTruncated: true, body: "<script>private</script>", bodyTruncated: false },
+            delivered: { headers: {}, headersTruncated: false, body: "{}", bodyTruncated: true, state: "finished", status: 200 },
+            transformations: ["stream_defaulted", "json_unwrapped"] } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
@@ -121,6 +136,9 @@ describe("WebUI metrics table presentation", () => {
           requests: render(RequestsTable, requestProps),
           requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
           trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficRelayClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }], onOpen: noop }),
+          trafficRelayUnknown: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: undefined, requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"] }], onOpen: noop }),
+          detailRelayClp: render(TrafficDetail, { detail: { ...detail, account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }, provider: "relay.chat", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           trafficClpNoUpstream: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"] }], onOpen: noop }),
           requestsMatch: render(RequestsTable, { ...requestProps, records: [{ ...record, responseModel: "model-test" }] }),
           requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
@@ -217,6 +235,14 @@ describe("WebUI metrics table presentation", () => {
         result.fastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, requestServiceTier: "priority", serviceTier: "default",
           traffic: { label: "ocg", session: "batch-fast", interaction: 23 } }] });
         result.responseFastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, serviceTier: "priority", requestServiceTier: null }] });
+        for (const [name, outcome] of Object.entries({
+          rejected: { status: "failed", httpStatus: 403, errorCode: "permission_denied" },
+          disconnected: { status: "completed", deliveryStatus: "disconnected", errorCode: "client_disconnected" },
+          unknown: { status: "failed", errorCode: "untrusted-sensitive-value" },
+          incomplete: { status: "incomplete" },
+        })) result['relay-outcome-' + name] = render(RequestsTable, { ...requestProps, records: [{ ...record,
+          source: "relay", httpStatus: 200, errorCode: null, traffic: null,
+          relayRequestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", ...outcome }] });
         const response = { state: "completed", status: 200, usage: null, headers: {}, body: "", output: [] };
         result.fastRequestOnly = render(TrafficDetail, { detail: { ...detail,
           request: { ...detail.request, parameters: { serviceTier: "priority" } },
@@ -302,6 +328,13 @@ describe("WebUI metrics table presentation", () => {
   const headers = (html: string) => [...html.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/g)]
     .map((match) => match[1]!.replace(/<[^>]*>/g, ""));
 
+  it("renders Relay debug stages within the existing detail", () => {
+    expect(markup.relayDebug).toContain("调试报文");
+    expect(markup.relayDebug).toContain("客户端入站请求");
+    expect(markup.relayDebug).toContain("客户端交付报文");
+    expect(markup.relayDebug).toContain("Relay 出站请求");
+    expect(markup.relayDebug).not.toContain("<script>private</script>");
+  });
   it("distinguishes account loading and failures from confirmed empty configuration", () => {
     expect(markup.consoleAccountsLoading).toContain("正在加载账户列表");
     expect(markup.consoleAccountsLoading).not.toContain("尚未配置");
@@ -431,6 +464,17 @@ describe("WebUI metrics table presentation", () => {
     }
   });
 
+  it("uses the recorded Relay account for model display and the same upstream index in list and detail", () => {
+    for (const key of ["trafficRelayClp", "detailRelayClp"]) {
+      expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      expect(markup[key]).not.toContain('响应模型：deepseek/deepseek-v4.1-flash（名称不一致）');
+      expect(markup[key]).toContain('clp-main');
+    }
+    expect(markup.trafficRelayUnknown).toContain('响应模型：deepseek/deepseek-v4.1-flash（名称不一致）');
+    expect(markup.trafficRelayUnknown).not.toContain('title="routing.finalProvider"');
+  });
+
   it("shows only actual upstream badges for CLP account and dump identities", () => {
     for (const key of ["requestsClp", "trafficClp"]) {
       expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
@@ -509,9 +553,12 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
+      "来源", "调用方", "交付", "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
       "首 Token", "请求耗时", "调用详情",
     ]);
+    expect(markup.requests).toContain("未关联");
+    expect(markup.requests).not.toContain('href="/requests/');
+    expect(markup.requests).not.toContain('href="/traffic');
     expect(markup.requests).not.toContain('role="checkbox"');
     expect(markup.requests).not.toContain("已选");
     expect(markup.requests).toContain("名称不一致");
@@ -665,7 +712,10 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "模型", "状态", "首 Token", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "客户端", "模型", "协议", "状态", "首 Token", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(markup.traffic).toContain("WorkBuddy");
+    expect(markup.traffic).toContain("客户端");
+    expect(markup.traffic).toContain("Responses");
     expect(markup.traffic).toContain("100 ms");
     expect(markup.traffic).toContain("1,234");
     expect(markup.trafficCountsLoading).toContain("加载中…");
@@ -686,7 +736,7 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("distinguishes zero first-token latency from an unrecorded value", () => {
-    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][4]?.[1];
+    const cell = (html: string) => [...html.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)][6]?.[1];
     expect(cell(markup.trafficFirstZero!)).toBe("0 ms");
     expect(cell(markup.trafficFirstMissing!)).toBe("—");
   });
