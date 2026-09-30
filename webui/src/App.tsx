@@ -1,3 +1,4 @@
+import { modelNavItems } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
@@ -45,7 +46,14 @@ const SettingsPage = lazy(() =>
 const TrafficPage = lazy(() =>
   import("@/pages/traffic-page").then((module) => ({ default: module.TrafficPage })))
 
+const ProvidersPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ProvidersPage })))
+const ModelAccountsPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelAccountsPage })))
+const ModelConfigurationPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelConfigurationPage })))
+const ModelContextPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelContextPage })))
+
 function pageTitle(pathname: string, t: Translate): string {
+  const modelPage = modelNavItems.find(item => item.to === pathname)
+  if (modelPage) return t(modelPage.labelKey)
   if (pathname.startsWith("/threads/")) return t("pages.threadDetail")
   if (pathname === "/threads") return t("pages.threads")
   if (pathname === "/requests") return t("pages.requests")
@@ -61,6 +69,11 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   const { search } = useLocation()
   const { t } = useTranslation()
   const params = new URLSearchParams(search)
+  if (modelNavItems.some(item => item.to === pathname)) return <>
+    <BreadcrumbItem className="hidden md:block"><span>{t("modelManagement.title")}</span></BreadcrumbItem>
+    <BreadcrumbSeparator className="hidden md:block" />
+    <BreadcrumbItem><BreadcrumbPage>{pageTitle(pathname, t)}</BreadcrumbPage></BreadcrumbItem>
+  </>
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>
@@ -157,6 +170,10 @@ function Layout() {
                 <Route path="/errors" element={<ErrorsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />
+                <Route path="/models/providers" element={<ProvidersPage />} />
+                <Route path="/models/accounts" element={<ModelAccountsPage />} />
+                <Route path="/models/configuration" element={<ModelConfigurationPage />} />
+                <Route path="/models/context" element={<ModelContextPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Suspense>

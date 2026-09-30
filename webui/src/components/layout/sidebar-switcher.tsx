@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/sidebar"
 import { useSidebar } from "@/components/ui/sidebar-context"
 import { useTranslation } from "@/hooks/use-translation"
-import { navItems } from "@/lib/navigation"
+import { navItems, modelNavItems } from "@/lib/navigation"
 
 export function SidebarSwitcher() {
   const { isMobile } = useSidebar()
@@ -53,7 +53,7 @@ export function SidebarSwitcher() {
               {t("shell.pagesMenu")}
             </DropdownMenuLabel>
             <DropdownMenuGroup>
-              {navItems.map((item) => (
+              {[...navItems, ...modelNavItems].map((item) => (
                 <DropdownMenuItem
                   key={item.to}
                   onClick={() => navigate(item.to)}

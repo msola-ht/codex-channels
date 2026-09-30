@@ -1,3 +1,6 @@
+import { Fragment, useState } from "react"
+import { Boxes, ChevronRight } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavLink, useLocation } from "react-router"
 
 import {
@@ -12,10 +15,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
 import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
 import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
-import { navItems } from "@/lib/navigation"
+import { navItems, modelNavItems } from "@/lib/navigation"
 import { useSidebar } from "@/components/ui/sidebar-context"
 import { useTranslation } from "@/hooks/use-translation"
 
@@ -34,7 +38,9 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => (
-                <SidebarMenuItem key={item.to}>
+                <Fragment key={item.to}>
+                {item.to === "/relay" && <ModelNavigation key={pathname} />}
+                <SidebarMenuItem>
                   <SidebarMenuButton
                     asChild
                     isActive={
@@ -50,6 +56,7 @@ export function AppSidebar() {
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
+                </Fragment>
               ))}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -61,4 +68,25 @@ export function AppSidebar() {
       <SidebarRail aria-label={t("common.toggleSidebar")} title={t("common.toggleSidebar")} />
     </Sidebar>
   )
+}
+
+function ModelNavigation() {
+  const { pathname } = useLocation()
+  const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
+  const { t } = useTranslation()
+  const active = modelNavItems.some(item => item.to === pathname)
+  const [expanded, setExpanded] = useState(active)
+  return <Collapsible asChild open={expanded} onOpenChange={next => {
+    if (!isMobile && state === "collapsed") { setOpen(true); setExpanded(true) }
+    else setExpanded(next)
+  }}>
+    <SidebarMenuItem>
+      <CollapsibleTrigger asChild><SidebarMenuButton tooltip={t("modelManagement.title")} isActive={active}>
+        <Boxes /><span>{t("modelManagement.title")}</span><ChevronRight data-expanded={expanded} className="ml-auto data-[expanded=true]:rotate-90" />
+      </SidebarMenuButton></CollapsibleTrigger>
+      <CollapsibleContent><SidebarMenuSub>
+        {modelNavItems.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton asChild isActive={pathname === item.to}><NavLink to={item.to} onClick={() => setOpenMobile(false)}>{t(item.labelKey)}</NavLink></SidebarMenuSubButton></SidebarMenuSubItem>)}
+      </SidebarMenuSub></CollapsibleContent>
+    </SidebarMenuItem>
+  </Collapsible>
 }

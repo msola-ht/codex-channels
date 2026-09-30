@@ -93,7 +93,7 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
-模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商凭据仍在设置页维护。转发服务的启动、停止、重启位于模型转发页的「转发服务」卡片，沿用管理任务的预览确认、串行执行和结果反馈，任务结束后刷新服务与转发运行状态；页头刷新同步查询服务、管理任务和转发快照，恢复页面可见时节流补查，确认或写入期间延后执行。其他管理任务阻塞操作时显示原因及设置页任务入口；设置页不再展示单独的转发服务行，全部服务安装、卸载等全局操作仍在设置页。操作与升级/回退说明见[用户指南](user-guide.md)。
+模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商及账户凭据在「模型管理」维护，转发页的账户入口指向「账户与凭据」。转发服务的启动、停止、重启位于模型转发页的「转发服务」卡片，沿用管理任务的预览确认、串行执行和结果反馈，任务结束后刷新服务与转发运行状态；页头刷新同步查询服务、管理任务和转发快照，恢复页面可见时节流补查，确认或写入期间延后执行。其他管理任务阻塞操作时显示原因及设置页任务入口；设置页不再展示单独的转发服务行，全部服务安装、卸载等全局操作仍在设置页。操作与升级/回退说明见[用户指南](user-guide.md)。
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
 页面加载时先通过 `GET /api/v1/time` 获取服务端进程 IANA 时区与当前时间，缺省为系统时区，可用
@@ -353,7 +353,9 @@ webui/src/
   pages/       概览、会话、会话详情、请求、错误、调用详情、设置
 ```
 
-设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。
+左侧「模型管理」使用可折叠二级菜单：提供商（`#/models/providers`）、账户与凭据（`#/models/accounts`）、模型配置（`#/models/configuration`）、上下文与压缩（`#/models/context`）。子页可直接打开，当前子页高亮并展开父级；桌面图标模式点击父级先展开侧栏，手机选择子页后关闭抽屉。提供商状态与自定义提供商使用表格，新增或编辑在弹窗内预览确认；账户按平台汇总为可筛选表格，凭据只写入。模型配置区分 Codex 默认值、托管提供商默认值与渠道新会话覆盖；上下文页区分托管模型窗口占比和 Codex 自动压缩。用户偏好作为一组写入，Plan 思考等级等仍保留在设置页。各子页手动刷新及恢复可见时读取当前配置，确认期间延后自动刷新；写入后刷新同页关联配置。
+
+设置页保留 App Server 权限与用户偏好、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。
 
 Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOME/auth.json`；未检测到鉴权文件
 时按官方未登录处理，不把“OpenAI 官方”作为主 Provider 展示，而是显示“未登录”状态。

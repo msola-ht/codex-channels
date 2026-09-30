@@ -1,5 +1,6 @@
 import {
   Activity,
+  Boxes,
   KeyRound,
   ListOrdered,
   Bug,
@@ -27,4 +28,11 @@ export const navItems: NavItem[] = [
   { to: "/relay", labelKey: "relay.title", icon: KeyRound },
   { to: "/delivery", labelKey: "delivery.title", icon: ListOrdered },
   { to: "/settings", labelKey: "pages.settings", icon: Settings },
+]
+
+export const modelNavItems: NavItem[] = [
+  { to: "/models/providers", labelKey: "modelManagement.providers", icon: Boxes },
+  { to: "/models/accounts", labelKey: "modelManagement.accounts", icon: KeyRound },
+  { to: "/models/configuration", labelKey: "modelManagement.models", icon: Settings },
+  { to: "/models/context", labelKey: "modelManagement.context", icon: ListOrdered },
 ]

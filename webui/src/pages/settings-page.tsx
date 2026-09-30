@@ -4,9 +4,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
-import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
-import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
-import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
+import { ChannelStatusCard } from "@/components/settings/provider-channel-status"
 import { CliCommandRow } from "@/components/settings/cli-command-row"
 import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
 import { ManagementTaskControls } from "@/components/settings/management-task-controls"
@@ -14,20 +12,18 @@ import { ManagedServices } from "@/components/settings/managed-services"
 import { PendingSettingDialog } from "@/components/settings/settings-controls"
 import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
 import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
-import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/components/settings/settings-feedback"
+import { SettingsError, SettingsSkeleton } from "@/components/settings/settings-feedback"
 import type { UseApiState } from "@/hooks/use-api"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
 import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
-import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
-import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
 import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary, fetchUpstreamUserAgent } from "@/lib/api"
 import { resolveSettingsLoadState } from "@/lib/settings-state"
 import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsSummaryResponse, UpstreamUserAgentResponse } from "@/lib/types"
-import type { AccountSettingsController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
+import type { CodexSettingsController, GatewaySettingsController, ManagementTaskController } from "@/lib/settings-management"
 
-type SettingsRefreshSource = "gateway" | "codex" | "provider" | "account"
+type SettingsRefreshSource = "gateway" | "codex"
 
 const VISIBLE_REFRESH_MIN_INTERVAL_MS = 5_000
 
@@ -39,8 +35,6 @@ export function SettingsPage() {
   const management = useSettingsManagement()
   const codexManagement = useCodexSettingsManagement()
   const tasks = useManagementTasks()
-  const providerSettings = useProviderSettingsManagement()
-  const accountSettings = useAccountSettingsManagement()
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [copyError, setCopyError] = useState(false)
   const refetchSummary = summary.refetch
@@ -49,8 +43,6 @@ export function SettingsPage() {
   const refetchUpstreamAgent = upstreamAgent.refetch
   const refetchManagedSettings = management.refetch
   const refetchCodexSettings = codexManagement.refetch
-  const refetchProviderSettings = providerSettings.refetch
-  const refetchAccountSettings = accountSettings.refetch
   const summaryLoaded = summary.data !== null
   const lastVisibleRefreshAt = useRef(0)
   const refreshAllSettings = useCallback((source?: SettingsRefreshSource) => {
@@ -60,9 +52,7 @@ export function SettingsPage() {
     refetchUpstreamAgent()
     if (source !== "gateway") refetchManagedSettings()
     if (source !== "codex") refetchCodexSettings()
-    if (source !== "provider") refetchProviderSettings()
-    if (source !== "account") refetchAccountSettings()
-  }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
+  }, [refetchCodexSettings, refetchManagedSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
 
   useManagementTaskRefresh(tasks, refreshAllSettings)
 
@@ -114,8 +104,6 @@ export function SettingsPage() {
       management={management}
       codexManagement={codexManagement}
       tasks={tasks}
-      providerSettings={providerSettings}
-      accountSettings={accountSettings}
       onSettingsChanged={refreshAllSettings}
       copiedCommand={copiedCommand}
       copyError={copyError}
@@ -132,15 +120,13 @@ interface SettingsContentProps {
   management: GatewaySettingsController
   codexManagement: CodexSettingsController
   tasks: ManagementTaskController
-  providerSettings: ProviderSettingsController
-  accountSettings: AccountSettingsController
   onSettingsChanged: (source?: SettingsRefreshSource) => void
   copiedCommand: string | null
   copyError: boolean
   onCopy: (id: string, command: string) => Promise<void>
 }
 
-function SettingsContent({ summary, services, providers, upstreamAgent, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
+function SettingsContent({ summary, services, providers, upstreamAgent, management, codexManagement, tasks, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
   const confirmGatewaySetting = async () => {
     if (await management.confirmSetting()) onSettingsChanged("gateway")
   }
@@ -148,11 +134,7 @@ function SettingsContent({ summary, services, providers, upstreamAgent, manageme
     {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
     {(management.error !== null || management.managedSettings === null) && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
     <AppServerSettingsCard management={codexManagement} onChanged={() => onSettingsChanged("codex")} />
-    {providers.loading && providers.data === null ? <LoadingSettingsCard title="Provider 状态" /> : null}
     {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
-    {providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
-    <ProviderSettingsManagement management={providerSettings} onChanged={() => onSettingsChanged("provider")} />
-    <AccountSettingsManagement management={accountSettings} onChanged={() => onSettingsChanged("account")} />
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
     {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     <GatewaySettingsCard management={management} upstreamAgent={upstreamAgent} />
