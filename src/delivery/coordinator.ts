@@ -21,6 +21,9 @@ export class DeliveryCoordinator {
   private started = false;
   private stopped = false;
   private pumping = false;
+  private pumpTask: Promise<void> | undefined;
+  private managementTask: Promise<boolean> | undefined;
+  private readonly released = new Set<string>();
   private dirty = false;
   private closePromise: Promise<void> | undefined;
   private startPromise: Promise<void> | undefined;
@@ -80,7 +83,7 @@ export class DeliveryCoordinator {
     this.outstanding.set(value.conversation, (this.outstanding.get(value.conversation) ?? 0) + 1);
     const bytes = Buffer.byteLength(value.payload) + 64 * 1024;
     this.updateUsage(value.account, bytes, 1);
-    const task = this.journal.submit(value).then(() => { this.wake(); return true; }, (error: unknown) => {
+    const task = this.journal.submit(value).then(() => { this.options.changed?.(); this.wake(); return true; }, (error: unknown) => {
       const code = error instanceof DeliveryError ? error.code : "storage";
       const storageFailure = code === "storage" || code === "closed" || code === "conflict";
       if (storageFailure) this.storageFailed(value.account, value.id);
@@ -94,11 +97,47 @@ export class DeliveryCoordinator {
     return task;
   }
 
+  /** Runtime writer owns both the transaction and in-memory scheduling/accounting changes. */
+  resolveBatch(entries: Array<{ id: string; revision: string }>, action: "retry" | "ignore"): Promise<boolean> {
+    if (!this.started || this.stopped || this.managementTask) return Promise.reject(new DeliveryError("conflict"));
+    const task = Promise.resolve().then(async () => {
+      await this.pumpTask;
+      const rows = await this.journal.queueEntries(entries.map(entry => entry.id));
+      if (this.stopped) throw new DeliveryError("closed");
+      if (rows.some(row => row && this.active.has(row.conversation))) throw new DeliveryError("conflict");
+      if (rows.some((row, i) => !row || row.revision !== entries[i]!.revision || !["uncertain", "blocked"].includes(row.state))) return false;
+      let applied: boolean;
+      try { applied = await this.journal.resolveBatch(entries, action === "retry" ? "retry" : "confirm"); }
+      catch (error) {
+        if (!(error instanceof DeliveryError && error.code === "mailbox-full")) this.storageFailed();
+        throw error;
+      }
+      if (!applied) return false;
+      for (const row of rows) {
+        if (!row) continue;
+        const released = this.released.delete(row.id);
+        if (action === "ignore") {
+          if (!released) this.release(row.conversation, false);
+          this.updateUsage(row.account, -row.bytes, -1);
+        } else if (released) {
+          this.outstanding.set(row.conversation, (this.outstanding.get(row.conversation) ?? 0) + 1);
+        }
+      }
+      this.options.changed?.();
+      return true;
+    }).catch((error: unknown) => {
+      if (error instanceof DeliveryError && error.code === "mailbox-full") throw new DeliveryError("conflict");
+      throw error;
+    }).finally(() => { this.managementTask = undefined; this.wake(); });
+    this.managementTask = task;
+    return task;
+  }
+
   wake(): void {
     this.dirty = true;
-    if (!this.started || this.stopped || this.pumping) return;
+    if (!this.started || this.stopped || this.pumping || this.managementTask) return;
     this.pumping = true;
-    void this.pump().catch(() => {
+    this.pumpTask = this.pump().catch(() => {
       this.storageFailed();
     }).finally(() => {
       this.pumping = false;
@@ -109,11 +148,11 @@ export class DeliveryCoordinator {
   private async pump(): Promise<void> {
     do {
       this.dirty = false;
-      while (!this.stopped && this.active.size < (this.options.concurrency ?? 8)) {
+      while (!this.stopped && !this.managementTask && this.active.size < (this.options.concurrency ?? 8)) {
         const accounts = this.options.accounts();
         if (accounts.length === 0) break;
         const record = await this.journal.next([...this.active.keys()], accounts);
-        if (!record || this.stopped) break;
+        if (!record || this.stopped || this.managementTask) break;
         const controller = new AbortController();
         const task = this.run(record, controller).finally(() => {
           this.active.delete(record.conversation);
@@ -121,7 +160,7 @@ export class DeliveryCoordinator {
         });
         this.active.set(record.conversation, { controller, task });
       }
-    } while (this.dirty && !this.stopped);
+    } while (this.dirty && !this.stopped && !this.managementTask);
   }
 
   private async run(record: DeliveryRecord, controller: AbortController): Promise<void> {
@@ -135,12 +174,14 @@ export class DeliveryCoordinator {
     try {
       if (!(await Promise.race([this.options.authorized(record), cancelled]))) {
         if (!(await this.journal.transition(record.id, "pending", "blocked"))) throw new DeliveryError("conflict");
+        this.options.changed?.();
         await this.releaseRetainedBarrier({ ...record, state: "blocked" });
         this.options.fault("authorization-changed", record.account, record.id);
         return;
       }
       if (this.stopped) return;
       if (!(await this.journal.transition(record.id, "pending", "sending"))) throw new DeliveryError("conflict");
+      this.options.changed?.();
       try {
         controller.signal.throwIfAborted();
         await Promise.race([
@@ -150,6 +191,7 @@ export class DeliveryCoordinator {
         controller.signal.throwIfAborted();
       } catch {
         if (!(await this.journal.transition(record.id, "sending", "uncertain"))) throw new DeliveryError("conflict");
+        this.options.changed?.();
         await this.releaseRetainedBarrier({ ...record, state: "uncertain" });
         this.options.fault("delivery-uncertain", record.account, record.id);
         return;
@@ -175,6 +217,7 @@ export class DeliveryCoordinator {
     if (!this.options.mayReleaseUncertainBarrier?.(record)) return;
     if (!(await this.journal.releaseBarrier(record.id))) throw new DeliveryError("conflict");
     // Keep storage accounting; only the ordering/interaction barrier is released.
+    this.released.add(record.id);
     this.release(record.conversation, notify);
   }
 
@@ -207,7 +250,7 @@ export class DeliveryCoordinator {
     this.stopped = true;
     for (const { controller } of this.active.values()) controller.abort();
     this.closePromise = (async () => {
-      await Promise.allSettled([...this.submissions, ...[...this.active.values()].map((entry) => entry.task)]);
+      await Promise.allSettled([this.managementTask, this.pumpTask, ...this.submissions, ...[...this.active.values()].map((entry) => entry.task)]);
       await this.journal.close();
     })();
     return this.closePromise;

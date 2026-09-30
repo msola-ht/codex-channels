@@ -405,6 +405,19 @@ describe("systemd installer", () => {
       commandOptions,
     );
     const allRestartCalls = readFileSync(systemctlLog, "utf8");
+    const normalSystemctl = readFileSync(fakeSystemctl, "utf8");
+    writeFileSync(fakeSystemctl, normalSystemctl + '\nif [ "$*" = "--user stop codex-connect-gateway.service" ]; then exit 9; fi\n');
+    for (const args of [["restart", "all"], ["install"]]) {
+      writeFileSync(systemctlLog, "");
+      const failed = spawnSync("/bin/sh", [script, ...args], commandOptions);
+      expect(failed.status).not.toBe(0);
+      expect(failed.stdout + failed.stderr).toContain("已中止整体重启");
+      const failedCalls = readFileSync(systemctlLog, "utf8");
+      expect(failedCalls).toContain("--user stop codex-connect-gateway.service");
+      expect(failedCalls).not.toContain("--user stop codex-connect-app-server.service");
+      expect(failedCalls).not.toContain("--user restart");
+    }
+    writeFileSync(fakeSystemctl, normalSystemctl);
     writeFileSync(systemctlLog, "");
     const reloaded = execFileSync("/bin/sh", [script, "reload"], commandOptions);
     const reloadCalls = readFileSync(systemctlLog, "utf8");
@@ -422,6 +435,14 @@ describe("systemd installer", () => {
     expect(installCalls).toContain("--user enable codex-connect-app-server.service codex-connect-gateway.service");
     expect(installCalls).toContain("--user restart codex-connect-app-server.service");
     expect(installCalls).toContain("--user restart codex-connect-gateway.service");
+    const lifecycleCalls = (calls: string) => calls.split("\n").filter(line => /^--user (stop|restart) /u.test(line));
+    const safeRestartOrder = [
+      "--user stop codex-connect-gateway.service",
+      "--user stop codex-connect-app-server.service",
+      "--user restart codex-connect-app-server.service",
+      "--user restart codex-connect-gateway.service",
+    ];
+    expect(lifecycleCalls(installCalls)).toEqual(safeRestartOrder);
     expect(started).toContain("启动操作已完成，正在确认就绪状态");
     expect(started).toContain("[提示]");
     expect(startCalls).toContain("--user start codex-connect-app-server.service");
@@ -445,6 +466,7 @@ describe("systemd installer", () => {
     expect(allRestarted).toContain("Codex App Server 与 Gateway 重启操作已完成");
     expect(allRestartCalls).toContain("codex-connect-app-server.service");
     expect(allRestartCalls).toContain("codex-connect-gateway.service");
+    expect(lifecycleCalls(allRestartCalls)).toEqual(safeRestartOrder);
     expect(reloaded).toContain("重新读取配置");
     expect(reloadCalls).toContain("--user is-active --quiet codex-connect-gateway.service");
     expect(reloadCalls).toContain("--user kill --kill-whom=main --signal=HUP codex-connect-gateway.service");

@@ -14,6 +14,17 @@ class Page extends EventTarget {
 afterEach(() => vi.useRealTimers());
 
 describe("WebUI 自动刷新", () => {
+  it("supports a slower queue interval without changing the default interval", () => {
+    vi.useFakeTimers();
+    const page = new Page();
+    const refresh = vi.fn();
+    const stop = scheduleApiRefresh(refresh, false, true, page, 10_000);
+    vi.advanceTimersByTime(9_999);
+    expect(refresh).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    stop();
+  });
   it("waits for a slow request to finish before scheduling the next refresh", () => {
     vi.useFakeTimers();
     const page = new Page();

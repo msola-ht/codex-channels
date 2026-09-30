@@ -1,5 +1,22 @@
 import { Worker } from "node:worker_threads";
-import { DeliveryError, type DeliveryLimits, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult, type WorkerReply } from "./types.js";
+import { DeliveryError, type DeliveryLimits, type DeliveryQueueEntry, type DeliveryRecord, type DeliveryState, type DeliverySubmission, type DeliverySummary, type JournalCommand, type JournalResult, type WorkerReply } from "./types.js";
+
+// Keep node:sqlite out of CLI imports that only construct a Worker journal.
+export async function readDeliveryQueue(directory: string, options?: { before?: number; state?: DeliveryState; id?: string }) {
+  return (await import("./queue-reader.js")).readDeliveryQueue(directory, options);
+}
+
+export async function readDeliveryPayload(directory: string, id: string) {
+  return (await import("./queue-reader.js")).readDeliveryPayload(directory, id);
+}
+
+export async function readDeliveryEntries(directory: string, ids: string[]) {
+  return (await import("./queue-reader.js")).readDeliveryEntries(directory, ids);
+}
+
+export async function readDeliveryPayloads<T>(directory: string, ids: string[], project: (row: DeliveryQueueEntry, payload: string) => T) {
+  return (await import("./queue-reader.js")).readDeliveryPayloads(directory, ids, project);
+}
 
 export class DeliveryJournal {
   private readonly worker: Worker;
@@ -14,8 +31,8 @@ export class DeliveryJournal {
   /** Liveness only; callers must still await ready before accepting work. */
   get available(): boolean { return !this.failed && !this.closing; }
 
-  constructor(directory: string, private readonly options: { limits?: DeliveryLimits; workerUrl?: URL; onFailure?(): void } = {}) {
-    this.worker = new Worker(options.workerUrl ?? new URL("./worker.js", import.meta.url), { workerData: { directory, limits: options.limits } });
+  constructor(directory: string, private readonly options: { limits?: DeliveryLimits; workerUrl?: URL; onFailure?(): void; mode?: "runtime" | "maintenance" } = {}) {
+    this.worker = new Worker(options.workerUrl ?? new URL("./worker.js", import.meta.url), { workerData: { directory, limits: options.limits, mode: options.mode } });
     this.ready = new Promise<void>((resolve, reject) => {
       this.pending.set(0, { resolve: () => resolve(), reject, bytes: 0, timer: this.deadline() });
     });
@@ -42,6 +59,8 @@ export class DeliveryJournal {
     return this.call({ type: "next", excluded, ...(accounts ? { accounts } : {}) }) as Promise<DeliveryRecord | null>;
   }
   read(id: string): Promise<DeliveryRecord | null> { return this.call({ type: "read", id }) as Promise<DeliveryRecord | null>; }
+  queueEntry(id: string): Promise<DeliveryQueueEntry | null> { return this.call({ type: "queueEntry", id }) as Promise<DeliveryQueueEntry | null>; }
+  queueEntries(ids: string[]): Promise<Array<DeliveryQueueEntry | null>> { return this.call({ type: "queueEntries", ids }) as Promise<Array<DeliveryQueueEntry | null>>; }
   releaseBarrier(id: string): Promise<boolean> { return this.call({ type: "releaseBarrier", id }) as Promise<boolean>; }
   transition(id: string, from: DeliveryState, to: DeliveryState): Promise<boolean> { return this.call({ type: "state", id, from, to }) as Promise<boolean>; }
   acknowledge(id: string): Promise<boolean> { return this.call({ type: "acknowledge", id }) as Promise<boolean>; }
@@ -49,6 +68,8 @@ export class DeliveryJournal {
   summary(): Promise<DeliverySummary> { return this.call({ type: "summary" }) as Promise<DeliverySummary>; }
   list(after = 0, limit = 100): Promise<Array<Omit<DeliveryRecord, "payload">>> { return this.call({ type: "list", after, limit }) as Promise<Array<Omit<DeliveryRecord, "payload">>>; }
   resolve(id: string, action: "retry" | "confirm"): Promise<boolean> { return this.call({ type: "resolve", id, action }) as Promise<boolean>; }
+
+  resolveBatch(entries: Array<{ id: string; revision: string }>, action: "retry" | "confirm"): Promise<boolean> { return this.call({ type: "resolveBatch", entries, action }) as Promise<boolean>; }
 
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
@@ -77,7 +98,7 @@ export class DeliveryJournal {
     if (this.failed || (this.closing && command.type !== "close")) return Promise.reject(new DeliveryError("closed"));
     const bytes = command.type === "submit" ? Buffer.byteLength(command.value.payload) : 0;
     // The control path has reserved slots, so acknowledgements and close can drain a saturated mailbox.
-    if (this.pending.size >= (command.type === "submit" ? 128 : 160) || this.bytes + bytes > 8 * 1024 * 1024) return Promise.reject(new DeliveryError("mailbox-full"));
+    if (this.pending.size >= (["submit", "queueEntries", "resolveBatch"].includes(command.type) ? 128 : 160) || this.bytes + bytes > 8 * 1024 * 1024) return Promise.reject(new DeliveryError("mailbox-full"));
     const id = this.nextId++;
     this.bytes += bytes;
     return new Promise((resolve, reject) => {

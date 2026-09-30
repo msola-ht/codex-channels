@@ -1074,3 +1074,35 @@ export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
     elapsedMs: number;
   }>;
 };
+/** HTTP contract kept independent of generated dist declarations for clean WebUI builds. */
+export interface DeliveryQueueEntry {
+  id: string
+  revision: string
+  sequence: number
+  account: string
+  conversation: string
+  state: "pending" | "sending" | "uncertain" | "blocked"
+  createdAt: number
+  attempt: number
+  bytes: number
+  confirmed: number
+  checkpoints: number
+}
+export interface DeliveryQueueSnapshot {
+  state: "available" | "missing"
+  observedAt: number
+  summary: { records: number; bytes: number; pending: number; sending: number; uncertain: number; blocked: number } | null
+  records: DeliveryQueueEntry[]
+  nextCursor: number | null
+}
+export interface DeliveryRetryInput { id: string; revision: string }
+export interface DeliveryRetryResult { result: "pending"; auditStatus: "recorded" | "failed"; cleanupStatus: "closed" | "unconfirmed" }
+
+export interface DeliveryBatchInput { action: "retry" | "ignore"; entries: DeliveryRetryInput[] }
+export interface DeliveryBatchPreview { action: "retry" | "ignore"; count: number }
+export interface DeliveryBatchResult { result: "pending" | "ignored"; count: number; auditStatus: "recorded" | "failed"; cleanupStatus: "closed" | "unconfirmed" }
+
+export interface DeliveryContent { type: string; text: string | null; truncated: boolean; threadId: string | null; turnId: string | null; status: string | null; imageFormat: "png" | "jpeg" | null }
+
+export interface DeliveryContentsResponse { records: Array<DeliveryRetryInput & { content: DeliveryContent | null }> }
+export interface DeliveryQueueEvent { type: "changed" | "heartbeat" | "unavailable" }

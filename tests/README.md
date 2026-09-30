@@ -22,6 +22,8 @@ CLI 用例按领域直接保存在 `codexc-cli*.test.ts`；`codexc-cli-test-fixt
 - `bootstrap`、`config`、`storage`、`observability`、`provider-proxy`：组合根和生命周期、严格 TOML、当前 SQLite Schema、指标采集及 Provider 转发边界。
 - `scheduled-tasks`：Schedule 计算、状态机、存储和调度器合同。
 - `persistent-output-faults.test.ts`：持久投递的隔离进程崩溃切点与持续积压资源验证，依赖当前 `dist/`；SIGKILL 切点仅在非 Windows 环境执行。
+- `delivery-control.test.ts`、`delivery-queue-reader.test.ts`、`webui-delivery-management.test.ts`、`webui-delivery-page.test.ts`、`webui-delivery-events.test.ts`：投递箱只读分页、在线管理 IPC、在线/离线确认重试和双语队列展示边界。
+- `windows-service-control.test.ts`：Windows 服务重启的停止失败隔离与显式停止合同。
 - CLI、WebUI、安装、服务和更新脚本：公开命令、管理接口、构建产物、跨平台服务模板与升级失败行为。
 - 模块边界测试：一级模块公开入口、允许依赖方向和生成协议类型隔离。
 

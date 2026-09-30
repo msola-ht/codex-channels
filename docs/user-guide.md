@@ -281,7 +281,7 @@ codexc service restart all
 codexc service logs -n 200
 ```
 
-默认情况下 `start`、`stop`、`status` 操作全部核心服务；`restart`、`logs` 默认只操作 Gateway。App Server 与 Gateway 是独立目标，渠道内禁止停止或重启 App Server。
+默认情况下 `start`、`stop`、`status` 操作全部核心服务；`restart`、`logs` 默认只操作 Gateway。App Server 与 Gateway 是独立目标，渠道内禁止停止或重启 App Server。整体重启先停止已安装的 Relay、Gateway，再停止 App Server，随后按 App Server、Gateway、已安装且启用的 Relay 顺序启动，避免正常整体重启生成断开通知；Linux 重新安装服务也使用这一停止顺序。整体重启中任一停止失败即中止，不继续停止后续依赖或启动服务。macOS 普通 `start` 不强制重启已运行的服务。单独重启 Gateway 不停止共享 App Server；单独重启 App Server 时，仍运行的 Gateway 会按真实断线处理并重连。
 
 Linux 使用 systemd 用户服务；Windows 使用当前用户计划任务和隐藏的 PowerShell 7 进程，不需要管理员权限。Windows 私有配置 ACL 修复：
 

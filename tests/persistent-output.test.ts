@@ -7,7 +7,7 @@ import type { Api, InputFile } from "grammy";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
-import { DeliveryCoordinator, DeliveryJournal, defaultDeliveryLimits } from "../src/delivery/index.js";
+import { DeliveryCoordinator, DeliveryJournal, DeliveryError, defaultDeliveryLimits } from "../src/delivery/index.js";
 import { SurfaceManager } from "../src/bootstrap/surface-manager.js";
 import { PersistentSurfaceOutput } from "../src/bootstrap/persistent-surface-output.js";
 import { EventBus } from "../src/event-bus/index.js";
@@ -871,4 +871,91 @@ it("fences intake and output waiters immediately on a failed journal submission"
     expect(fault).toHaveBeenCalledWith("storage", "account", "lost");
     expect(await journal.summary()).toMatchObject({ records: 0 });
   } finally { await coordinator.close(); }
+});
+
+it("restores released barriers on online retry and refuses mutation while that conversation is active", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  store.execute({ type: "submit", value: submission("notice") });
+  store.execute({ type: "state", id: "notice", from: "pending", to: "uncertain" });
+  store.close();
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  let accounts: string[] = [];
+  let finish!: () => void;
+  let delivering = false;
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => accounts, authorized: () => true, mayReleaseUncertainBarrier: () => true, fault: () => {},
+    deliver: async () => { delivering = true; await new Promise<void>(resolve => { finish = resolve; }); },
+  });
+  try {
+    await coordinator.start();
+    expect(coordinator.hasOutstanding("chat")).toBe(false);
+    const notice = (await journal.queueEntry("notice"))!;
+    expect(await coordinator.resolveBatch([{ id: notice.id, revision: "stale" }], "ignore")).toBe(false);
+    const saturated = vi.spyOn(journal, "resolveBatch").mockRejectedValueOnce(new DeliveryError("mailbox-full"));
+    await expect(coordinator.resolveBatch([notice], "retry")).rejects.toMatchObject({ code: "conflict" });
+    saturated.mockRestore();
+    expect(coordinator.acceptsExecution("account")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(false);
+    expect((await journal.queueEntry("notice"))?.state).toBe("uncertain");
+    expect(await coordinator.resolveBatch([notice], "retry")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    accounts = ["account"]; coordinator.wake();
+    await vi.waitFor(() => expect(delivering).toBe(true));
+    await expect(coordinator.resolveBatch([notice], "ignore")).rejects.toMatchObject({ code: "conflict" });
+    finish();
+    await vi.waitFor(() => expect(coordinator.hasOutstanding("chat")).toBe(false));
+    expect((await journal.summary()).records).toBe(0);
+  } finally { finish?.(); await coordinator.close(); }
+});
+
+it("ignores a released notice without clearing another record's conversation barrier", async () => {
+  const directory = fixture();
+  const store = new SqliteDeliveryJournal(directory);
+  store.execute({ type: "submit", value: submission("notice") });
+  store.execute({ type: "state", id: "notice", from: "pending", to: "uncertain" });
+  store.execute({ type: "submit", value: submission("pending") }); store.close();
+  const journal = new DeliveryJournal(directory, { workerUrl });
+  const coordinator = new DeliveryCoordinator(journal, {
+    accounts: () => [], authorized: () => true, mayReleaseUncertainBarrier: () => true, fault: () => {}, deliver: async () => {},
+  });
+  try {
+    await coordinator.start();
+    const notice = (await journal.queueEntry("notice"))!;
+    expect(await coordinator.resolveBatch([notice], "ignore")).toBe(true);
+    expect(coordinator.hasOutstanding("chat")).toBe(true);
+    expect(await journal.summary()).toMatchObject({ records: 1, pending: 1, uncertain: 0 });
+    expect(await journal.read("notice")).toBeNull();
+  } finally { await coordinator.close(); }
+});
+
+it("keeps acknowledgement slots available when online management meets a saturated writer mailbox", async () => {
+  const source = `import {parentPort} from 'node:worker_threads';
+    parentPort.postMessage({id:0,ok:true,result:null});
+    parentPort.on('message',({id,command})=>{
+      const result=command.type==='list'?[]:command.type==='queueEntries'?command.ids.map(id=>({id,revision:'r',state:'uncertain',account:'a',conversation:'c',bytes:1})):true;
+      const reply=()=>parentPort.postMessage({id,ok:true,result});
+      if(command.type==='list')reply();else setTimeout(reply,200);
+    });`;
+  const journal = new DeliveryJournal(fixture(), { workerUrl: new URL(`data:text/javascript,${encodeURIComponent(source)}`) });
+  const faults: string[] = [];
+  const coordinator = new DeliveryCoordinator(journal, { accounts: () => [], authorized: () => true, deliver: async () => {}, fault: code => faults.push(code) });
+  try {
+    await coordinator.start();
+    const pending = Array.from({ length: 128 }, (_, i) => journal.submit(submission(String(i))));
+    const entries = Array.from({ length: 50 }, (_, i) => ({ id: `r${i}`, revision: "r" }));
+    await expect(coordinator.resolveBatch(entries, "ignore")).rejects.toMatchObject({ code: "conflict" });
+    await expect(journal.acknowledge("in-flight")).resolves.toBe(true);
+    await Promise.all(pending);
+    expect(faults).toEqual([]);
+    expect(coordinator.acceptsExecution("a")).toBe(true);
+    await expect(coordinator.resolveBatch(entries, "retry")).resolves.toBe(true);
+  } finally { await coordinator.close(); }
+});
+
+it("starts persistent delivery with a long data directory without exceeding Unix socket limits", async () => {
+  const directory = join(fixture(), "long-data-directory-".repeat(7), "outbox");
+  const output = new PersistentSurfaceOutput({ directory, workerUrl, accounts: () => [], owner: () => "owner", authorized: () => true, deliver: async () => {}, fault: () => {} });
+  try { await expect(output.start()).resolves.toBeUndefined(); }
+  finally { await output.close(); }
 });

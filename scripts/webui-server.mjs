@@ -70,6 +70,7 @@ import {
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { routeCodexSettingsManagement } from "./webui-management-codex-route.mjs";
 import { routeRelayManagement } from "./webui-management-relay-route.mjs";
+import { routeDeliveryManagement, closeDeliveryStreams } from "./webui-management-delivery-route.mjs";
 import { routeGatewaySettingsManagement } from "./webui-management-gateway-route.mjs";
 import {
   routeProviderManagement,
@@ -157,7 +158,7 @@ export function createWebuiServer({
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
   });
-  return { host, server, staticDir, token };
+  return { host, server, staticDir, token, closeNotifications: () => closeDeliveryStreams(management) };
 }
 
 export function resolveWebuiSettings({
@@ -346,8 +347,8 @@ async function routeManagement(environment, url, request, response, state, token
     );
   }
   if (!managementLockHeld) {
-    state.limiter.consume({ principalId, category: request.method === "GET" ? "read" : "write" });
-    if (request.method !== "GET" && isHighRiskManagementPath(path)) {
+    state.limiter.consume({ principalId, category: request.method === "GET" || (request.method === "POST" && path === "/delivery/content-batch") ? "read" : "write" });
+    if (request.method !== "GET" && path !== "/delivery/content-batch" && isHighRiskManagementPath(path)) {
       state.limiter.consume({ principalId, category: "high-risk" });
     }
   }
@@ -373,6 +374,7 @@ async function routeManagement(environment, url, request, response, state, token
     gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
   })) return;
   if (await routeRelayManagement(routeContext)) return;
+  if (await routeDeliveryManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
   if (await routeStatusManagement({
     ...routeContext,
@@ -936,7 +938,7 @@ function main() {
   try {
     const settings = resolveWebuiSettings({ args: process.argv.slice(2) });
     applyConfiguredTimezone(process.env, settings.configPath);
-    const { host, server } = createWebuiServer({
+    const { host, server, closeNotifications } = createWebuiServer({
       environment: process.env,
       host: settings.host,
       port: settings.port,
@@ -964,6 +966,7 @@ function main() {
     });
     const shutdown = () => {
       server.close(() => process.exit(0));
+      closeNotifications();
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);

@@ -21,8 +21,9 @@ describe("配置激活结果文案", () => {
       status: "restart",
       target: "app-server-gateway-webui",
       commands: [
+        "codexc service stop gateway",
         "codexc service restart app-server",
-        "codexc service restart gateway",
+        "codexc service start gateway",
         "codexc service restart webui",
       ],
     });
@@ -30,7 +31,7 @@ describe("配置激活结果文案", () => {
     writeGatewayConfigActivationNotice({ write: (value: string) => output.push(value) }, {}, activation);
     const text = output.join("");
     for (const command of activation.commands) expect(text).toContain(command);
-    expect(text).toContain("托管网关会通过配置监听自动重启");
+    expect(text).toContain("任一步失败时先处理错误");
     expect(text).toContain("直接运行的网关需重新执行原启动命令");
   });
 

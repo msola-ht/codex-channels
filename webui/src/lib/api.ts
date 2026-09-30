@@ -1,4 +1,6 @@
 import type {
+  DeliveryQueueEvent,
+  DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
   ErrorsResponse,
@@ -59,6 +61,48 @@ export class ApiClientError extends Error {
 
 export const API_PREFIX = "/api/v1"
 let unauthorizedHandler: (() => void) | null = null
+
+/** Fetch-based SSE keeps credentials in the Authorization header, never in the URL. */
+export async function watchDeliveryQueue(signal: AbortSignal, receive: (event: DeliveryQueueEvent) => void): Promise<void> {
+  const controller = new AbortController()
+  let idle = setTimeout(() => controller.abort(), 35_000)
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  try {
+    const headers = new Headers({ accept: "text/event-stream" })
+    const token = getToken()
+    if (token !== null) headers.set("authorization", `Bearer ${token}`)
+    const response = await fetch(`${API_PREFIX}/management/delivery/events`, { headers, cache: "no-store", signal: AbortSignal.any([signal, controller.signal]) })
+    if (response.status === 401) unauthorizedHandler?.()
+    if (!response.ok) throw new ApiClientError("Delivery notifications unavailable", response.status, "delivery_unavailable")
+    if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("Invalid delivery stream")
+    reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) throw new Error("Delivery stream disconnected")
+      clearTimeout(idle)
+      idle = setTimeout(() => controller.abort(), 35_000)
+      buffer += decoder.decode(value, { stream: true })
+      if (buffer.length > 4096) throw new Error("Delivery stream frame too large")
+      let end: number
+      while ((end = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, end)
+        buffer = buffer.slice(end + 2)
+        if (!frame.startsWith("data: ")) throw new Error("Invalid delivery event")
+        const event: unknown = JSON.parse(frame.slice(6))
+        if (!event || typeof event !== "object" || !("type" in event) || Object.keys(event).length !== 1 || !["changed", "heartbeat", "unavailable"].includes(String(event.type))) throw new Error("Invalid delivery event")
+        if (event.type === "unavailable") throw new Error("Delivery notifications unavailable")
+        receive(event as DeliveryQueueEvent)
+      }
+    }
+  } finally {
+    clearTimeout(idle)
+    controller.abort()
+    await reader?.cancel().catch(() => {})
+    reader?.releaseLock()
+  }
+}
 
 export function onUnauthorized(handler: () => void): () => void {
   unauthorizedHandler = handler
@@ -379,4 +423,31 @@ export function applyRelayManagement(input: RelayManagementMutation, confirmatio
 
 export function fetchRelayQueue(signal?: AbortSignal): Promise<RelayQueueSnapshot> {
   return getJson(`${API_PREFIX}/management/relay/queue`, signal)
+}
+
+export function fetchDeliveryQueue(before: number, state: string, signal?: AbortSignal): Promise<DeliveryQueueSnapshot> {
+  const params = new URLSearchParams({ before: String(before) })
+  if (state !== "all") params.set("state", state)
+  return getJson(`${API_PREFIX}/management/delivery/queue?${params}`, signal)
+}
+export function previewDeliveryRetry(input: DeliveryRetryInput, signal?: AbortSignal): Promise<{ preview: DeliveryQueueEntry; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/delivery/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function applyDeliveryRetry(input: DeliveryRetryInput, confirmationToken: string, signal?: AbortSignal): Promise<DeliveryRetryResult> {
+  return requestJson(`${API_PREFIX}/management/delivery/retry`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function previewDeliveryBatch(input: DeliveryBatchInput, signal?: AbortSignal): Promise<{ preview: DeliveryBatchPreview; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/delivery/batch-preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function applyDeliveryBatch(input: DeliveryBatchInput, confirmationToken: string, signal?: AbortSignal): Promise<DeliveryBatchResult> {
+  return requestJson(`${API_PREFIX}/management/delivery/batch-apply`, { method: "POST", body: JSON.stringify({ ...input, confirmationToken }) }, signal)
+}
+
+export function fetchDeliveryContent(input: DeliveryRetryInput, signal?: AbortSignal): Promise<DeliveryContent> {
+  return requestJson(`${API_PREFIX}/management/delivery/content?${new URLSearchParams({ id: input.id, revision: input.revision })}`, undefined, signal)
+}
+
+export function fetchDeliveryContents(entries: DeliveryRetryInput[], signal?: AbortSignal): Promise<DeliveryContentsResponse> {
+  return requestJson(`${API_PREFIX}/management/delivery/content-batch`, { method: "POST", body: JSON.stringify({ entries }) }, signal)
 }
