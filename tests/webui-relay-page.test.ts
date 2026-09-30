@@ -125,7 +125,7 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.unavailableEditor).toContain('>Not declared<');
 });
 
-it("uses queue cards and shared loading, empty and unavailable components", () => {
+it("uses a queue table and shared loading, empty and unavailable components", () => {
   const script = String.raw`
     import { createServer } from 'vite';
     import { createElement as h } from 'react';
@@ -140,7 +140,8 @@ it("uses queue cards and shared loading, empty and unavailable components", () =
     try {
       const {RelayQueueSheet}=await server.ssrLoadModule('/src/components/requests/relay-queue-sheet.tsx');
       const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
-      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(RelayQueueSheet)));
+      const {TooltipProvider}=await server.ssrLoadModule('/src/components/ui/tooltip.tsx');
+      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,h(RelayQueueSheet))));
       globalThis.queue={data:null,loading:true,error:null,errorCode:null,refetch(){}};
       const loading=render('zh');
       globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
@@ -165,13 +166,13 @@ it("uses queue cards and shared loading, empty and unavailable components", () =
   expect(result.notListening).toContain("Relay is not listening");
   expect(result.ready).toContain("请求模型");
   expect(result.loading).toContain('data-slot="skeleton"');
-  expect(result.empty).toContain('data-slot="empty"');
+  expect(result.empty).toContain("No model requests in progress");
   expect(result.unknown).toContain('data-slot="alert"');
   expect(result.ready).toContain('data-slot="card"');
   expect(result.ready).toContain("中文用途");
   expect(result.ready).toContain("long/model");
   expect(result.ready).toContain("Responses");
   expect(result.ready).toContain("等待名额");
-  expect(result.ready).not.toContain("<table");
+  expect(result.ready).toContain("<table");
   expect(result.failed).not.toContain("long/model");
 });

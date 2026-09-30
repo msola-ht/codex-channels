@@ -72,4 +72,4 @@ export type {
   WeeklyQuota,
 } from "../../../scripts/webui-api"
 
-export type { DeliveryQueueEvent, DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult } from "../../../scripts/webui-api"
+export type { QueueChangeEvent, DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult } from "../../../scripts/webui-api"

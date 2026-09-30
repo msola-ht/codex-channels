@@ -1,3 +1,4 @@
+import { openQueueStream } from "./webui-queue-events.mjs";
 import { requestDeliveryResolution, watchDeliveryChanges } from "../runtime/delivery-control.mjs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -5,17 +6,13 @@ import { DeliveryJournal, DeliveryError, readDeliveryQueue, readDeliveryPayload,
 import { decodePersistentOutput } from "../dist/surfaces/delivery-diagnostics/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
-import { fingerprintManagementValue, managementSecurityHeaders } from "./management-security.mjs";
+import { fingerprintManagementValue } from "./management-security.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 
 const mutation = z.strictObject({ id: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/u),
   confirmationToken: z.string().max(128).optional() });
 const query = z.strictObject({ before: z.string().regex(/^(0|[1-9][0-9]*)$/u).transform(Number).pipe(z.number().int().nonnegative().safe()).optional(),
   state: z.enum(["pending", "sending", "uncertain", "blocked"]).optional() });
-const streams = new WeakMap();
-export function closeDeliveryStreams(state) {
-  for (const close of streams.get(state) ?? []) close();
-}
 
 function directoryFor(environment) {
   const { configPath, dataDir } = locateUserConfig(environment);
@@ -29,23 +26,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
   if (path === "/delivery/events" && request.method === "GET") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "delivery_invalid", "投递参数无效");
     const directory = directoryFor(environment);
-    let active = streams.get(state);
-    if (!active) { active = new Set(); streams.set(state, active); }
-    if (active.size >= 8) throw new ApiError(429, "delivery_busy", "投递通知连接已满");
-    const controller = new AbortController();
-    const close = () => { controller.abort(); active.delete(close); response.end(); };
-    active.add(close);
-    response.once("close", close);
-    response.writeHead(200, { ...managementSecurityHeaders(), "content-type": "text/event-stream; charset=utf-8", "x-accel-buffering": "no" });
-    response.flushHeaders();
-    const send = type => {
-      if (controller.signal.aborted) return;
-      if (!response.write(`data: ${JSON.stringify({ type })}\n\n`)) { close(); response.destroy(); }
-    };
-    void watchDeliveryChanges(directory, controller.signal, send).catch(() => send("unavailable")).finally(() => {
-      close();
-      response.end();
-    });
+    openQueueStream(state, response, (signal, receive) => watchDeliveryChanges(directory, signal, receive));
     return true;
   }
   if (path === "/delivery/content-batch" && request.method === "POST") {

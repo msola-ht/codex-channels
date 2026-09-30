@@ -140,6 +140,7 @@
   私有 Gateway 所有权 IPC，保证同一配置只能运行一个 Gateway，并安全清理失效入口；所有权
   建立与应用就绪使用不同状态，应用开始停止时立即撤销就绪；公开同源健康探针供本地更新确认
   Gateway 已完成应用启动且尚未进入关闭流程。
+- `queue-events.mjs` / `queue-events.d.mts`：投递箱与 Relay 共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
 - `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供独立的私有账户刷新 IPC；
   WebUI 只提交精确 Provider ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
@@ -206,7 +207,7 @@
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。
 
-- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v4 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密。
+- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v4 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。配置两次读取间发生原子替换时丢弃快照并完整重读一次，持续变化或校验失败则拒绝，不延长原有截止时间。

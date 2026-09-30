@@ -44,8 +44,8 @@ const zh = {
     queueDisabled: "Relay 已停用，不接受新请求。下方仍展示尚未结束的请求。",
     queueNotListening: "Relay 尚未监听，不接受新请求。下方仍展示尚未结束的请求。",
     queueDetails: "请求队列",
-    queueLiveHint: "每次刷新完成后 2 秒自动更新，关闭后停止。仅展示当前已鉴权的模型请求，不保留历史。",
-    queueSnapshotHint: "当前快照；按接收顺序展示，等待请求按 Key 公平调度。",
+    queueLiveHint: "队列变化时自动更新，关闭侧栏或隐藏页面时暂停。仅展示当前已鉴权的模型请求，不保留历史。",
+    queueSnapshotHint: "耗时为快照值；默认按接收顺序展示，等待请求按 Key 公平调度。",
     queuePhase: "阶段", queueElapsed: "已耗时", queueModelPending: "尚未读取", queueEmpty: "当前没有进行中的模型请求",
     queuePhases: { input: "接收请求", queue: "等待名额", prepare: "准备上游", upstream: "上游处理", delivery: "交付响应" },
 
@@ -708,8 +708,8 @@ const en: Messages = {
     queueDisabled: "Relay is disabled and is not accepting new requests. Unfinished requests remain listed below.",
     queueNotListening: "Relay is not listening or accepting new requests. Unfinished requests remain listed below.",
     queueDetails: "Request queue",
-    queueLiveHint: "Refreshes 2 seconds after each update; stops when closed. Only current authenticated model requests are shown, with no history.",
-    queueSnapshotHint: "Current snapshot, ordered by arrival. Waiting requests are scheduled fairly by key.",
+    queueLiveHint: "Updates when the queue changes; pauses when the panel is closed or the page is hidden. Only current authenticated model requests are shown, with no history.",
+    queueSnapshotHint: "Elapsed time is from the snapshot. Arrival order by default; waiting requests are scheduled fairly by key.",
     queuePhase: "Phase", queueElapsed: "Elapsed", queueModelPending: "Not read yet", queueEmpty: "No model requests in progress",
     queuePhases: { input: "Receiving request", queue: "Waiting for capacity", prepare: "Preparing upstream", upstream: "Upstream processing", delivery: "Delivering response" },
 

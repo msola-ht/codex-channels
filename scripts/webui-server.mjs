@@ -1,3 +1,4 @@
+import { closeQueueStreams } from "./webui-queue-events.mjs";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
@@ -70,7 +71,7 @@ import {
 import { withModelProviderManagementTransaction } from "./model-provider-management-transaction.mjs";
 import { routeCodexSettingsManagement } from "./webui-management-codex-route.mjs";
 import { routeRelayManagement } from "./webui-management-relay-route.mjs";
-import { routeDeliveryManagement, closeDeliveryStreams } from "./webui-management-delivery-route.mjs";
+import { routeDeliveryManagement } from "./webui-management-delivery-route.mjs";
 import { routeGatewaySettingsManagement } from "./webui-management-gateway-route.mjs";
 import {
   routeProviderManagement,
@@ -158,7 +159,7 @@ export function createWebuiServer({
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
   });
-  return { host, server, staticDir, token, closeNotifications: () => closeDeliveryStreams(management) };
+  return { host, server, staticDir, token, closeNotifications: () => closeQueueStreams(management) };
 }
 
 export function resolveWebuiSettings({

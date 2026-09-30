@@ -8,7 +8,7 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     import ts from 'typescript';
     import assert from 'node:assert/strict';
     import {ManagementRateLimiter} from './scripts/management-access.mjs';
-    const source=fs.readFileSync('webui/src/hooks/use-delivery-events.ts','utf8').replace(/^import .*$/gm,'').replace(/export (function|interface)/g,'$1');
+    const source=fs.readFileSync('webui/src/hooks/use-queue-events.ts','utf8').replace(/^import .*$/gm,'').replace(/export (function|interface)/g,'$1');
     const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
     const page=new EventTarget(),win=new EventTarget();page.visibilityState='visible';
     const network={onLine:true},slots=[],effects=[],timers=new Map(),watches=[],latest={current:0};
@@ -19,10 +19,10 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     const schedule=(run,ms)=>{const key=++id;timers.set(key,{run,at:clock+ms});return key;};
     const tick=ms=>{clock+=ms;for(const[key,timer]of[...timers])if(timer.at<=clock){timers.delete(key);timer.run();}};
     const watch=(signal,receive)=>new Promise((resolve,reject)=>{watches.push({signal,receive,reject});signal.addEventListener('abort',()=>reject(new Error('abort')),{once:true});});
-    const hook=new Function('useEffect','useState','watchDeliveryQueue','ApiClientError','document','window','navigator','setTimeout','clearTimeout',code+';return useDeliveryEvents;')(
+    const hook=new Function('useEffect','useState','watchDeliveryQueue','ApiClientError','document','window','navigator','setTimeout','clearTimeout',code+';return useQueueEvents;')(
       useEffect,useState,watch,class extends Error{},page,win,network,schedule,key=>timers.delete(key));
     const refresh=()=>{refreshes++;loading=true;requested=latest.current;queueMicrotask(()=>render());};
-    const render=()=>{si=ei=0;const status=hook(refresh,loading,enabled,latest,read);for(const e of effects)if(e.pending){e.cleanup?.();e.pending=false;e.cleanup=e.run();}return status;};
+    const render=()=>{si=ei=0;const status=hook(refresh,loading,enabled,latest,read,watch);for(const e of effects)if(e.pending){e.cleanup?.();e.pending=false;e.cleanup=e.run();}return status;};
     const settle=()=>new Promise(resolve=>setImmediate(resolve));
     const push=()=>{watches.at(-1).receive({type:'changed'});render();};
     const success=()=>{loading=false;read={confirmed:requested,completedAt:clock,failed:false,failures:0,retryable:false,retryAt:0};render();};
@@ -57,6 +57,9 @@ it("confirms successful snapshots, bounds event reads and retries, and cleans up
     page.visibilityState='visible';page.dispatchEvent(new Event('visibilitychange'));assert.equal(watches.length,before+1);
     push();tick(250);await settle();success();
     watches.at(-1).reject(new Error('lost'));await settle();assert.equal(render(),'reconnecting');tick(1000);await settle();assert.equal(watches.length,before+2);
+    const disconnectedReads=refreshes;tick(1000);await settle();assert.equal(refreshes,disconnectedReads+1);success();
+    const offlineReads=refreshes;
+    for(let i=0;i<3;i++){watches.at(-1).reject(new Error('still down'));await settle();render();tick(30000);await settle();assert.equal(refreshes,offlineReads);}
     network.onLine=false;win.dispatchEvent(new Event('offline'));await settle();render();assert(watches.at(-1).signal.aborted);
     network.onLine=true;win.dispatchEvent(new Event('online'));const count=watches.length;
     for(const e of effects)e.cleanup?.();await settle();assert(watches.at(-1).signal.aborted);
@@ -71,7 +74,7 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
     import assert from 'node:assert/strict';
     const server=await createServer({server:{middlewareMode:true},appType:'custom',logLevel:'silent'});
     try {
-      const {watchDeliveryQueue,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
+      const {watchDeliveryQueue,watchRelayQueue,onUnauthorized}=await server.ssrLoadModule('/src/lib/api.ts');
       globalThis.localStorage={getItem:()=> 'private-token'};
       const encoder=new TextEncoder();
       const response=parts=>new Response(new ReadableStream({start(controller){for(const part of parts)controller.enqueue(encoder.encode(part));controller.close();}}),{headers:{'content-type':'text/event-stream'}});
@@ -82,6 +85,8 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
       };
       await assert.rejects(watchDeliveryQueue(new AbortController().signal,event=>received.push(event.type)),/disconnected/);
       assert.deepEqual(received,['changed','heartbeat','changed']);
+      globalThis.fetch=async(url,init)=>{assert.equal(url,'/api/v1/management/relay/queue/events');assert.equal(init.headers.get('authorization'),'Bearer private-token');return response(['data: {"type":"changed"}\n\n']);};
+      await assert.rejects(watchRelayQueue(new AbortController().signal,()=>{}),/disconnected/);
       for(const value of ['data: {"type":"unknown"}\n\n','data: {"type":"changed","secret":true}\n\n','x'.repeat(5000)]) {
         globalThis.fetch=async()=>response([value]);
         await assert.rejects(watchDeliveryQueue(new AbortController().signal,()=>assert.fail('invalid event escaped')));
@@ -103,7 +108,7 @@ it("reads fragmented SSE with header authentication and rejects malformed or exp
   })).not.toThrow();
 });
 
-it("records actual snapshot outcomes without acknowledging later notifications or cancelled reads", () => {
+it.each(["delivery", "relay"])("records %s snapshot outcomes without acknowledging later notifications or cancelled reads", kind => {
   const script = String.raw`
     import fs from 'node:fs';import ts from 'typescript';import assert from 'node:assert/strict';
     const source=fs.readFileSync('webui/src/hooks/use-delivery-queue.ts','utf8').replace(/^import .*$/gm,'').replace(/export (function|interface)/g,'$1');
@@ -111,9 +116,9 @@ it("records actual snapshot outcomes without acknowledging later notifications o
     const slots=[],refs=[],pending=[];let si=0,ri=0,options,captured;
     const useState=initial=>{const i=si++;if(!(i in slots))slots[i]=initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];};
     const useRef=initial=>refs[ri++]??(refs[ri-1]={current:initial});
-    class ApiClientError extends Error{constructor(status){super('failure');this.status=status;}}
-    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useDeliveryEvents','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
-      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
+    class ApiClientError extends Error{constructor(message,status=message,code){super('failure');this.status=status;this.code=code;}}
+    const hook=new Function('useState','useRef','useCallback','useManagementConfirmedMutation','useQueueEvents','watchDeliveryQueue','fetchDeliveryQueue','ApiClientError','previewDeliveryBatch','applyDeliveryBatch',code+';return useDeliveryQueue;')(
+      useState,useRef,fn=>fn,value=>{options=value;return{};},(refetch,loading,enabled,latest,read)=>{captured={latest,read};},()=>{},()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),ApiClientError,()=>{},()=>{});
     const render=()=>{si=ri=0;hook(0,'all');};
     Date.now=()=>1000;render();captured.latest.current=5;
     const first=options.load();captured.latest.current=10;pending.shift().resolve({records:[]});await first;render();
@@ -127,5 +132,25 @@ it("records actual snapshot outcomes without acknowledging later notifications o
     const previous=captured.read,abort=new AbortController();const cancelled=options.load(abort.signal).catch(()=>{});abort.abort();pending.shift().reject(new TypeError('aborted'));await cancelled;render();assert.equal(captured.read,previous);
     const success=options.load();pending.shift().resolve({records:[]});await success;render();assert.equal(captured.read.confirmed,10);assert.equal(captured.read.failures,0);assert.equal(captured.read.failed,false);
   `;
-  expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
+  let selected = kind === "delivery" ? script : script.replaceAll("use-delivery-queue", "use-relay-queue")
+    .replaceAll("useDeliveryQueue", "useRelayQueue").replaceAll("fetchDeliveryQueue", "fetchRelayQueue")
+    .replaceAll("watchDeliveryQueue", "watchRelayQueue").replaceAll("useManagementConfirmedMutation", "useApi")
+    .replace("options=value", "options={load:value}");
+  if (kind === "relay") selected += String.raw`
+    captured.latest.current=12;
+    for(let attempt=1;attempt<=4;attempt++) {
+      const task=options.load();pending.shift().resolve({state:'unknown'});
+      await assert.rejects(task,error=>error.code==='relay_queue_unconfirmed' && error.status===503);render();
+      assert.equal(captured.read.confirmed,10);assert.equal(captured.read.failed,true);
+      assert.equal(captured.read.retryable,true);assert.equal(captured.read.failures,attempt);
+    }
+    const last=captured.read,abortUnknown=new AbortController();
+    const cancelledUnknown=options.load(abortUnknown.signal);abortUnknown.abort();pending.shift().resolve({state:'unknown'});
+    await assert.rejects(cancelledUnknown);render();assert.equal(captured.read,last);
+    const stopped=options.load();pending.shift().resolve({state:'stopped'});await stopped;render();
+    assert.equal(captured.read.confirmed,12);assert.equal(captured.read.failed,false);assert.equal(captured.read.failures,0);
+    const empty=options.load();pending.shift().resolve({state:'running',requests:[]});await empty;render();
+    assert.equal(captured.read.failed,false);assert.equal(captured.read.failures,0);
+  `;
+  expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", selected], { encoding: "utf8" })).not.toThrow();
 });

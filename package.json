@@ -171,6 +171,7 @@
     "scripts/webui-management-tasks.mjs",
     "scripts/webui-provider-settings-management.mjs",
     "scripts/webui-server.mjs",
+    "scripts/webui-queue-events.mjs",
     "scripts/webui-service-status.mjs",
     "scripts/webui-traffic-route.mjs",
     "scripts/weixin-qr-contract-probe.mjs",

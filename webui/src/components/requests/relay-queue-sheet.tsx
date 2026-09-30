@@ -2,10 +2,9 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
-import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
+import { DataTable, SortableHeader, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
+import type { RelayQueueSnapshot } from "@/lib/types"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { ErrorBanner } from "@/components/metrics/error-banner"
 import { useTranslation } from "@/hooks/use-translation"
@@ -27,22 +26,27 @@ export function RelayQueueSheet() {
 
 function RelayQueueList() {
   const { t } = useTranslation()
-  const { data, loading, error, errorCode, refetch } = useRelayQueue()
+  const { data, loading, error, errorCode, refetch, notificationStatus } = useRelayQueue()
+  type Row = Extract<RelayQueueSnapshot, { state: "running" }>["requests"][number]
+  const columns: DataTableColumn<Row>[] = [
+    { id: "caller", accessorFn: row => row.displayName ?? row.callerId, header: ({ column }) => <SortableHeader column={column}>{t("relay.callerId")}</SortableHeader>, cell: ({ row: { original: row } }) => <TruncatedText text={row.displayName ?? row.callerId} /> },
+    { accessorKey: "model", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueModel")}</SortableHeader>, cell: ({ row: { original: row } }) => <div className="flex max-w-56 flex-col gap-1"><TruncatedText text={row.model ?? t("relay.queueModelPending")} /><TruncatedText text={`${row.provider} · ${row.protocol === "chat" ? "Chat" : "Responses"}`} className="text-xs text-muted-foreground" /></div> },
+    { accessorKey: "phase", header: ({ column }) => <SortableHeader column={column}>{t("relay.queuePhase")}</SortableHeader>, cell: ({ row: { original: row } }) => <Badge variant={row.phase === "queue" ? "outline" : "secondary"}>{t(`relay.queuePhases.${row.phase}`)}</Badge> },
+    { accessorKey: "elapsedMs", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueElapsed")}</SortableHeader>, cell: ({ row: { original: row } }) => formatElapsedDuration(row.elapsedMs) },
+  ]
   return <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4">
     <div className="flex shrink-0 items-center justify-between gap-2">
-      <p className="text-sm text-muted-foreground">{t("relay.queueSnapshotHint")}</p>
-      <Button size="sm" variant="outline" className="shrink-0" disabled={loading} onClick={refetch}>
+      <span className="w-40 text-xs text-muted-foreground" role="status">{t(`delivery.notifications.${notificationStatus ?? "connecting"}`)}</span>
+      <Button size="sm" variant="outline" className="w-24 shrink-0" disabled={loading} onClick={refetch}>
         {loading && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.refresh")}
       </Button>
     </div>
     <ErrorBanner error={error ? translateApiError(t, error, errorCode) : null} />
-    <div className="min-h-0 overflow-y-auto" aria-busy={loading}>
-      {loading && !data && <div role="status" aria-label={t("common.loading")} className="flex flex-col gap-3">
-        {[0, 1, 2].map(index => <Skeleton key={index} className="h-36 w-full shrink-0" />)}
-      </div>}
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" aria-busy={loading}>
+      {loading && !data && !error && <DataTable title={t("relay.queueDetails")} description={() => t("relay.queueSnapshotHint")} data={[]} columns={columns} loading storageKey="codex-webui:relay-queue-table-v1" pagination={{ mode: "client", defaultSorting: [], defaultPageSize: 10 }} />}
       {!error && data && (data.state !== "running"
         ? <Alert><AlertDescription>{t(data.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</AlertDescription></Alert>
-        : <div className="flex flex-col gap-3">
+        : <div className="flex min-h-0 flex-1 flex-col gap-3">
           {(!data.configurationValid || !data.enabled || !data.listening) && <Alert><AlertDescription>{t(!data.configurationValid
             ? "relay.queueInvalid" : !data.enabled ? "relay.queueDisabled" : "relay.queueNotListening")}</AlertDescription></Alert>}
           <div className="flex flex-wrap gap-2">
@@ -50,21 +54,11 @@ function RelayQueueList() {
             <Badge variant="outline">{t("relay.waitingCount", { count: data.requests.filter(row => row.phase === "queue").length })}</Badge>
             <Badge variant="outline">{t("relay.uploadingCount", { count: data.requests.filter(row => row.phase === "input").length })}</Badge>
           </div>
-          {!data.requests.length ? <Empty><EmptyHeader><EmptyDescription>{t("relay.queueEmpty")}</EmptyDescription></EmptyHeader></Empty>
-            : <ul className="flex flex-col gap-3" aria-label={t("relay.queueDetails")}>{data.requests.map(row => <li key={row.requestId}>
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle className="min-w-0 break-all">{row.displayName ?? row.callerId}</CardTitle>
-                  <CardDescription><Badge variant={row.phase === "queue" ? "outline" : "secondary"}>{t(`relay.queuePhases.${row.phase}`)}</Badge></CardDescription>
-                </CardHeader>
-                <CardContent><dl className="grid min-w-0 grid-cols-2 gap-3">
-                  <div className="min-w-0"><dt className="text-muted-foreground">{t("relay.provider")}</dt><dd className="break-all">{row.provider}</dd></div>
-                  <div><dt className="text-muted-foreground">{t("relay.protocol")}</dt><dd>{row.protocol === "chat" ? "Chat" : "Responses"}</dd></div>
-                  <div className="col-span-2 min-w-0"><dt className="text-muted-foreground">{t("relay.queueModel")}</dt><dd className="break-all">{row.model ?? t("relay.queueModelPending")}</dd></div>
-                  <div className="col-span-2"><dt className="text-muted-foreground">{t("relay.queueElapsed")}</dt><dd className="tabular-nums">{formatElapsedDuration(row.elapsedMs)}</dd></div>
-                </dl></CardContent>
-              </Card>
-            </li>)}</ul>}
+          <DataTable title={t("relay.queueDetails")} description={() => t("relay.queueSnapshotHint")}
+            data={data.requests} columns={columns} getRowId={row => row.requestId} storageKey="codex-webui:relay-queue-table-v1"
+            columnLabels={{ caller: t("relay.callerId"), model: t("relay.queueModel"), phase: t("relay.queuePhase"), elapsedMs: t("relay.queueElapsed") }}
+            numericColumnIds={["elapsedMs"]} emptyText={t("relay.queueEmpty")}
+            pagination={{ mode: "client", defaultSorting: [], defaultPageSize: 10, pageSizeOptions: [10, 25, 50] }} />
         </div>)}
     </div>
   </div>

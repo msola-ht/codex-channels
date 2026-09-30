@@ -1,3 +1,4 @@
+import { QueueEventsServer, watchQueueChanges } from "./queue-events.mjs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
@@ -60,8 +61,6 @@ function readFrame(socket) {
 export class DeliveryControlServer {
   #server;
   #events;
-  #subscribers = new Set();
-  #notification;
   #closed = false;
   #directory;
   #resolve;
@@ -81,74 +80,22 @@ export class DeliveryControlServer {
       });
     }, { maximumConnections: 8, connectionTimeoutMs: timeoutMs });
     await this.#server.start("Delivery control is already running");
-    this.#events = new PrivateIpcServer(`${path}.events`, socket => {
-      socket.on("error", () => {});
-      socket.on("end", () => socket.destroy());
-      const handshake = setTimeout(() => socket.destroy(), timeoutMs);
-      void readFrame(socket).then(value => {
-        z.strictObject({ version: z.literal(1), action: z.literal("watch") }).parse(value);
-        if (this.#closed || socket.destroyed) return;
-        this.#subscribers.add(socket);
-        const send = type => { if (!socket.write(`${JSON.stringify({ version: 1, type })}\n`)) socket.destroy(); };
-        const heartbeat = setInterval(() => send("heartbeat"), 15_000);
-        socket.once("close", () => { clearInterval(heartbeat); this.#subscribers.delete(socket); });
-        socket.on("data", () => socket.destroy());
-        send("changed"); // Subscribe before the initial snapshot so no change can fall through the gap.
-      }).catch(() => socket.destroy()).finally(() => clearTimeout(handshake));
-    }, { maximumConnections: 8, connectionTimeoutMs: 300_000 });
-    try { await this.#events.start("Delivery notifications are already running"); }
+    this.#events = new QueueEventsServer(`${path}.events`);
+    try { await this.#events.start(); }
     catch (error) { await this.#server.close(); throw error; }
   }
-  changed() {
-    if (this.#closed || this.#notification) return;
-    this.#notification = setTimeout(() => {
-      this.#notification = undefined;
-      for (const socket of this.#subscribers) {
-        if (!socket.write('{"version":1,"type":"changed"}\n')) socket.destroy();
-      }
-    }, 100);
-  }
+  changed() { this.#events?.changed(); }
   async close() {
     this.#closed = true;
-    clearTimeout(this.#notification);
     await Promise.all([this.#events?.close(), this.#server?.close()]);
   }
 }
 
 /** Authenticated private stream; abort and peer loss release every listener and timer. */
 export async function watchDeliveryChanges(directory, signal, receive) {
-  signal.throwIfAborted();
   const path = `${deliveryControlSocketPath(directory)}.events`;
   validateParent(path);
-  const socket = createPrivateIpcConnection(path);
-  try {
-    await new Promise((resolve, reject) => {
-      let buffer = "";
-      const abort = () => socket.destroy();
-      signal.addEventListener("abort", abort, { once: true });
-      socket.setTimeout(35_000, abort);
-      socket.once("error", reject);
-      socket.once("close", () => {
-        signal.removeEventListener("abort", abort);
-        if (signal.aborted) resolve(); else reject(new Error("Delivery notifications disconnected"));
-      });
-      socket.once("connect", () => socket.write('{"version":1,"action":"watch"}\n'));
-      socket.on("data", chunk => {
-        buffer += chunk.toString();
-        if (buffer.length > 4096) { socket.destroy(); return; }
-        let newline;
-        while ((newline = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, newline);
-          buffer = buffer.slice(newline + 1);
-          try {
-            const event = z.strictObject({ version: z.literal(1), type: z.enum(["changed", "heartbeat"]) }).parse(JSON.parse(line));
-            receive(event.type);
-          } catch { socket.destroy(); return; }
-        }
-      });
-      if (signal.aborted) abort();
-    });
-  } finally { socket.destroy(); }
+  return watchQueueChanges(path, signal, receive);
 }
 
 /** null proves no command was sent; after writing, any connection loss is unconfirmed. */

@@ -1,3 +1,4 @@
+import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import { manageModelRelay, parseModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import * as providerRuntime from "../runtime/model-provider-runtime.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
@@ -187,4 +188,31 @@ it("authenticates the live queue endpoint and distinguishes unavailable from emp
     query.mockResolvedValueOnce({ result: "unconfirmed" });
     expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "unknown" });
   } finally { query.mockRestore(); }
+});
+
+it("streams authenticated Relay invalidations, preserves control capacity and closes when Relay stops", async () => {
+  const f = await fixture();
+  const control = new relayControl.ModelRelayControl(modelRelayPaths(join(f.home, "config.toml")).control,
+    async () => ({ result: "queue", configurationValid: true, enabled: true, listening: true, requests: [] }));
+  await control.start();
+  const abort = new AbortController();
+  try {
+    const url = `${f.url}/queue/events`;
+    expect((await fetch(url)).status).toBe(401);
+    expect((await fetch(url, { headers: { ...f.headers, origin: "https://evil.invalid" } })).status).toBe(403);
+    expect((await fetch(`${url}?extra=1`, { headers: f.headers })).status).toBe(400);
+    const response = await fetch(url, { headers: f.headers, signal: abort.signal });
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    const reader = response.body!.getReader();
+    const next = async () => new TextDecoder().decode((await reader.read()).value);
+    expect(await next()).toBe('data: {"type":"changed"}\n\n');
+    for (let i = 0; i < 100; i++) control.changed();
+    expect(await next()).toBe('data: {"type":"changed"}\n\n');
+    expect(await (await fetch(`${f.url}/queue`, { headers: f.headers })).json()).toMatchObject({ state: "running", requests: [] });
+    await control.close();
+    expect(await next()).toBe('data: {"type":"unavailable"}\n\n');
+    expect((await reader.read()).done).toBe(true);
+    reader.releaseLock();
+  } finally { abort.abort(); await control.close(); }
 });

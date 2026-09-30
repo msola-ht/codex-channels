@@ -1,7 +1,8 @@
+import { watchDeliveryQueue } from "@/lib/api"
 import { useCallback, useRef, useState } from "react"
 import { useApi, useApiPolling } from "@/hooks/use-api"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
-import { useDeliveryEvents, type DeliverySnapshotRead } from "@/hooks/use-delivery-events"
+import { useQueueEvents, type QueueSnapshotRead } from "@/hooks/use-queue-events"
 import { ApiClientError, fetchDeliveryContents, fetchDeliveryQueue, previewDeliveryBatch, applyDeliveryBatch } from "@/lib/api"
 import type { DeliveryBatchInput, DeliveryBatchResult, DeliveryContent, DeliveryQueueEntry } from "@/lib/types"
 
@@ -17,7 +18,7 @@ async function applyRetry(input: DeliveryBatchInput, token: string, signal?: Abo
 /** The list is remounted when its cursor or filter changes. */
 export function useDeliveryQueue(before: number, filter: string) {
   const latest = useRef(0)
-  const [read, setRead] = useState<DeliverySnapshotRead | null>(null)
+  const [read, setRead] = useState<QueueSnapshotRead | null>(null)
   const load = useCallback(async (signal?: AbortSignal) => {
     const revision = latest.current
     try {
@@ -41,7 +42,7 @@ export function useDeliveryQueue(before: number, filter: string) {
   }, [before, filter])
   const state = useManagementConfirmedMutation({ load, preview: previewDeliveryBatch, apply: applyRetry, retainDataOnError: false })
   const [result, setResult] = useState<DeliveryBatchResult | null>(null)
-  const notificationStatus = useDeliveryEvents(state.refetch, state.loading, !state.busy && state.pendingPreview === null, latest, read)
+  const notificationStatus = useQueueEvents(state.refetch, state.loading, !state.busy && state.pendingPreview === null, latest, read, watchDeliveryQueue)
   const confirm = async () => {
     setResult(null)
     setResult(await state.confirm())
