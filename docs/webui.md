@@ -89,11 +89,11 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
 | 模型转发 | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
-| 设置 | `#/settings` | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
+| 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
 
-模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商凭据仍在设置页维护。转发服务的启动、停止、重启位于模型转发页的「转发服务」卡片，沿用管理任务的预览确认、串行执行和结果反馈，任务结束后刷新服务与转发运行状态；页头刷新同步查询服务、管理任务和转发快照，恢复页面可见时节流补查，确认或写入期间延后执行。其他管理任务阻塞操作时显示原因及设置页任务入口；设置页不再展示单独的转发服务行，全部服务安装、卸载等全局操作仍在设置页。操作与升级/回退说明见[用户指南](user-guide.md)。
+模型转发页管理每个客户端的 Key、上游允许模型及思考策略；提供商及账户凭据在「模型管理」维护，转发页的账户入口指向「账户与凭据」。转发服务的启动、停止、重启位于模型转发页的「转发服务」卡片，沿用管理任务的预览确认、串行执行和结果反馈，任务结束后刷新服务与转发运行状态；页头刷新同步查询服务、管理任务和转发快照，恢复页面可见时节流补查，确认或写入期间延后执行。其他管理任务阻塞操作时显示原因及「设置 → 服务与维护」入口；设置页不再展示单独的转发服务行，全部服务安装、卸载等全局操作位于「设置 → 服务与维护」。操作与升级/回退说明见[用户指南](user-guide.md)。
 
 指标接口只接受 GET；`/api/v1/daily` 按 `range` 返回本地指标库的服务端自然日聚合。
 页面加载时先通过 `GET /api/v1/time` 获取服务端进程 IANA 时区与当前时间，缺省为系统时区，可用
@@ -350,10 +350,18 @@ webui/src/
   lib/         API 客户端、共享类型转出与格式化（Token/时间）
   hooks/       资源数据 hook（统一 loading/error/refetch）
   components/  Sidebar 布局、指标区块、共享数据表格组件与调用摘要/明细区块
-  pages/       概览、会话、会话详情、请求、错误、调用详情、设置
+  pages/       概览、会话、会话详情、请求、错误、调用详情、模型管理、消息渠道、设置子页
 ```
 
-设置页按 App Server、Provider、Gateway、Workspace 与 WebUI 分区；每个已开放分区在同一位置展示当前值和修改控件，预览与确认写入紧邻对应设置。页面重新获得焦点时会读取当前设置；后台读取保留已有卡片内容，避免刷新时闪烁。App Server 用户默认值、Fast、联网搜索、计划工具、空闲总结、模型压缩、其他偏好和权限已经通过结构化 RPC 接入；Gateway 显示、系统、自动化、Telegram 消息格式、代理、Workspace 权限、WebUI 和本地指标存储设置均复用 Config 管理接口。高风险设置使用服务端一次性确认令牌；渠道授权和服务维护任务仍保留独立任务边界。
+左侧「模型管理」使用可折叠二级菜单：提供商（`#/models/providers`）、账户与凭据（`#/models/accounts`）、模型配置（`#/models/configuration`）、上下文与压缩（`#/models/context`）。子页可直接打开，当前子页高亮并展开父级；点击父级展开子菜单并进入提供商页，右侧箭头单独控制展开或收起；桌面图标模式点击父级同时展开侧栏，手机选择子页后关闭抽屉。提供商状态与自定义提供商使用表格，新增或编辑在弹窗内预览确认；账户按平台汇总为可筛选表格，凭据只写入。模型配置区分 Codex 默认值、托管提供商默认值与渠道新会话覆盖；上下文页区分托管模型窗口占比和 Codex 自动压缩。用户偏好作为一组写入，Plan 思考等级等仍保留在设置页。各子页手动刷新及恢复可见时读取当前配置，确认期间延后自动刷新；写入后刷新同页关联配置。
+
+侧栏「调用监控」归并请求、调用详情与错误，原有 `#/requests`、`#/traffic`、`#/errors` 地址和查询参数保留。「消息渠道」包含渠道配置（`#/channels`）、投递队列（`#/delivery`）和消息展示（`#/channels/display`）。渠道配置只显示 Gateway 配置快照，不代表实时连接状态；配置与授权继续使用对应 CLI 入口。消息展示集中管理 Telegram 格式、操作详情、计划更新和思考状态。
+
+「设置」分为常规与偏好（`#/settings`）、工作区与权限（`#/settings/permissions`）、网络与访问（`#/settings/network`）、数据与日志（`#/settings/data`）、服务与维护（`#/settings/services`）。常规页保留 Codex 整组用户偏好和 Gateway 会话/自动化选项；权限页分别展示 Codex、Gateway 全局和 Workspace 权限，并集中默认 Workspace 选择；网络页管理 WebUI 监听/令牌、共享代理、Plugin API 与整组官方 TUI 请求身份；数据页管理调用采集、日志、指标保留与清理；服务页管理服务、源码更新及后台任务结果。Relay 服务仍在模型转发页操作。
+
+所有导航分组使用同一套 Sidebar/Collapsible 组合：一级文字进入首个子页并展开，箭头独立折叠且带旋转过渡；分组组件不会随路由重建，进入子页时展开对应组，其他组保留手动展开状态。桌面图标模式点击父级展开侧栏；手机点击子页关闭抽屉。设置子页只组合所需配置与资源；恢复可见时节流读取，预览确认或写入期间延后刷新，后台读取保留表单及草稿。CLI 命令仍从设置摘要读取，按页面用途显示；该摘要是现有整份接口，未新增分区 API。调用详情的「采集设置」进入数据页，Relay 管理任务提示进入服务页。
+
+配置修改沿用现有版本检查、预览确认及保存回读；高风险操作保留服务端一次性确认令牌。App Server 用户默认值、Fast、联网搜索、计划工具、空闲总结、模型压缩、其他偏好和权限通过原结构化 RPC 接入；Gateway 配置复用 Config 管理接口。渠道授权和服务维护任务仍保留原边界；设置拆页不增加后端能力或更改权限语义。
 
 Provider 状态卡会在当前主 Provider 为 OpenAI 官方时检查 `CODEX_HOME/auth.json`；未检测到鉴权文件
 时按官方未登录处理，不把“OpenAI 官方”作为主 Provider 展示，而是显示“未登录”状态。

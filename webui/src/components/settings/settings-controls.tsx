@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
@@ -49,12 +49,12 @@ export function ManagementConfirmationDialog({
   const { t } = useTranslation()
   return (
     <AlertDialog open={open} onOpenChange={(nextOpen) => { if (!nextOpen && !saving) onCancel() }}>
-      <AlertDialogContent>
+      <AlertDialogContent className="max-h-[85dvh] overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="flex flex-col gap-1 text-sm">{children}</div>
+        <div className="flex min-w-0 flex-col gap-1 text-sm [overflow-wrap:anywhere]">{children}</div>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={saving}>{t("accountConfirmation.cancel")}</AlertDialogCancel>
           <AlertDialogAction
@@ -114,11 +114,18 @@ export function PendingSettingDialog({ pending, saving, loading, onConfirm, onCa
   )
 }
 
-export function ManagedSelect({ label, value, options, disabled, onChange }: { label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
+export function ManagedSelect({ label, value, options, disabled, onChange, description }: { description?: string; label: string; value: string; options: string[][]; disabled: boolean; onChange: (value: string) => void }) {
   const selectId = useId()
   const nonEmptyOptions = options.filter(([option]) => option !== "")
   const effectiveOptions = value !== "" && !nonEmptyOptions.some(([option]) => option === value) ? [[value, value], ...nonEmptyOptions] : nonEmptyOptions
-  return <Field orientation="responsive" data-disabled={disabled}><FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel><Select value={value} disabled={disabled} onValueChange={onChange}><SelectTrigger id={selectId} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>{effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}</Select></Field>
+  const labelContent = <FieldLabel className="text-muted-foreground" htmlFor={selectId}>{label}</FieldLabel>
+  return <Field orientation="responsive" data-disabled={disabled}>
+    {description ? <FieldContent className="min-w-0">{labelContent}<FieldDescription id={`${selectId}-description`}>{description}</FieldDescription></FieldContent> : labelContent}
+    <Select value={value} disabled={disabled} onValueChange={onChange}>
+      <SelectTrigger id={selectId} aria-describedby={description ? `${selectId}-description` : undefined} size="sm" className="w-full sm:w-[160px]"><SelectValue placeholder={value === "" ? "未配置" : undefined} /></SelectTrigger>
+      {effectiveOptions.length > 0 ? <SelectContent><SelectGroup>{effectiveOptions.map(([option, text]) => <SelectItem key={option} value={option}>{text}</SelectItem>)}</SelectGroup></SelectContent> : null}
+    </Select>
+  </Field>
 }
 
 function formatPreviewValue(value: unknown): string {

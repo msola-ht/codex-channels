@@ -7,10 +7,6 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RefreshCwIcon } from "lucide-react"
 
-export function SettingsSkeleton() {
-  return <div className="grid gap-6" aria-label="正在加载设置快照"><Skeleton className="h-48 w-full" /><Skeleton className="h-72 w-full" /><Skeleton className="h-72 w-full" /></div>
-}
-
 export function SettingsError({ message, retry }: { message: string; retry: () => void }) {
   return <Alert variant="destructive"><AlertTitle>设置快照加载失败</AlertTitle><AlertDescription>{message}</AlertDescription><AlertAction><Button variant="outline" size="sm" onClick={retry}><RefreshCwIcon data-icon="inline-start" />重试</Button></AlertAction></Alert>
 }

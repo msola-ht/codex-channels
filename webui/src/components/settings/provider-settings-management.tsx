@@ -1,3 +1,5 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useEffect, useMemo, useState } from "react"
 
 import { useSettingsDraft } from "@/hooks/use-settings-draft"
@@ -8,29 +10,31 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
 import { ManagedSelect, ManagementConfirmationDialog } from "@/components/settings/settings-controls"
 import { LoadingSettingsCard, SettingsEmpty, SettingsError } from "@/components/settings/settings-feedback"
 import { formatTokens } from "@/lib/format"
 import type { ManagementProviderSettingsResponse } from "@/lib/types"
 import type { ProviderSettingsController } from "@/lib/settings-management"
 
-export function ProviderSettingsManagement({ management, onChanged }: { management: ProviderSettingsController; onChanged?: () => void }) {
+export function ProviderSettingsManagement({ management, onChanged, section }: { management: ProviderSettingsController; onChanged?: () => void; section: "providers" | "models" | "context" }) {
   const settings = management.settings
   if (management.loading && settings === null) return <LoadingSettingsCard title="Provider 设置" />
   if (settings === null) return <SettingsError message={management.error ?? "Provider 设置暂不可用"} retry={management.refetch} />
-  return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} /></>
+  return <>{management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}<ProviderSettingsCard settings={settings} management={management} onChanged={onChanged} section={section} /></>
 }
 
 function ProviderSettingsCard({
   settings,
   management,
   onChanged,
+  section,
 }: {
+  section: "providers" | "models" | "context"
   settings: ManagementProviderSettingsResponse
   management: ProviderSettingsController
   onChanged?: () => void
 }) {
+  const [editorOpen, setEditorOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [providerId, setProviderId] = useState("")
   const [providerName, setProviderName] = useState("")
@@ -67,6 +71,7 @@ function ProviderSettingsCard({
   useEffect(() => { resetWindow() }, [windowId, resetWindow])
 
   const resetForm = () => {
+    setEditorOpen(false)
     setEditingId(null)
     setProviderId("")
     setProviderName("")
@@ -81,6 +86,7 @@ function ProviderSettingsCard({
   }
 
   const edit = (candidate: typeof candidates[number]) => {
+    setEditorOpen(true)
     setCatalogKind(candidate.catalog === "custom" ? "custom" : "official")
     setCustomModels(candidate.models?.map(entry => ({ ...entry, reasoningEfforts: [...entry.reasoningEfforts] })) ?? [])
     setEditingId(candidate.id)
@@ -168,11 +174,11 @@ function ProviderSettingsCard({
 
   return <Card>
     <CardHeader>
-      <CardTitle>Provider 设置</CardTitle>
-      <CardDescription>托管 Provider 默认值和Codex 兼容 Provider 共用结构化预览、一次性确认和原子事务；凭据只写入，不回显。</CardDescription>
+      <CardTitle>{section === "providers" ? "自定义提供商" : section === "models" ? "托管提供商默认值" : "托管模型上下文窗口"}</CardTitle>
+      <CardDescription>{section === "providers" ? "管理接入地址、模型和凭据；修改前预览确认，凭据不会回显。" : section === "models" ? "选择每个托管提供商的默认模型与思考等级。" : "同名模型在所有托管提供商间共用窗口占比。"}</CardDescription>
     </CardHeader>
     <CardContent className="flex flex-col gap-6 text-sm">
-      <section className="flex flex-col gap-3">
+      {section === "models" && <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div><h3 className="font-medium">托管 Provider 默认值</h3><p className="text-xs text-muted-foreground">修改模型目录中的默认模型与思考等级；上下文窗口在下方「模型上下文窗口」按模型名统一设置。</p></div>
           <Badge variant="outline">{settings.managedProviders.length} 个</Badge>
@@ -185,27 +191,35 @@ function ProviderSettingsCard({
           </FieldGroup>
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || managedModelEntry === undefined} onClick={() => void updateManagedDefault()}>保存托管 Provider 默认值</Button>
         </>}
-      </section>
-      <Separator />
-      <section className="flex flex-col gap-3">
+      </section>}
+      {section === "context" && <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div><h3 className="font-medium">模型上下文窗口</h3><p className="text-xs text-muted-foreground">按模型名统一上下文窗口占比（相对模型最大窗口）；同名模型在所有 Provider 共享同一值，自动压缩使用上游默认。</p></div>
           <Badge variant="outline">{settings.modelWindow.length} 个模型</Badge>
         </div>
         {windowEntry === undefined ? <SettingsEmpty>当前没有可设置的受管模型。</SettingsEmpty> : <>
           <FieldGroup>
-            <ManagedSelect label="模型" value={windowEntry.id} options={settings.modelWindow.map((candidate) => [candidate.id, candidate.displayName])} disabled={busy || pending !== null} onChange={setWindowModel} />
+            <Table><TableHeader><TableRow><TableHead>模型</TableHead><TableHead>提供商</TableHead><TableHead>窗口占比</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{settings.modelWindow.map(entry => <TableRow key={entry.id} data-state={entry.id === windowEntry.id ? "selected" : undefined}><TableCell>{entry.displayName}</TableCell><TableCell>{entry.providers.join("、")}</TableCell><TableCell>{entry.conflicts ? "不一致" : `${entry.windowPercent ?? 100}%`}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy || pending !== null || entry.id === windowEntry.id} onClick={() => setWindowModel(entry.id)}>选择</Button></TableCell></TableRow>)}</TableBody></Table>
+            <p className="text-sm">当前编辑：{windowEntry.displayName}</p>
             <Field orientation="responsive" data-invalid={windowError !== null} data-disabled={busy || pending !== null}><FieldLabel className="text-muted-foreground" htmlFor="provider-window-percent">窗口占比（%）</FieldLabel><FieldContent className="sm:max-w-[220px]"><Input id="provider-window-percent" aria-invalid={windowError !== null} aria-describedby={windowError === null ? undefined : "provider-window-percent-error"} className="w-full sm:w-[160px] sm:self-end" type="number" min={10} max={100} value={windowPercent} disabled={busy || pending !== null} onChange={(event) => { patchWindow({ percent: event.target.value }); setWindowError(null) }} /><FieldError id="provider-window-percent-error" className="sm:text-right">{windowError}</FieldError></FieldContent></Field>
           </FieldGroup>
           <p className="text-xs text-muted-foreground">应用 Provider：{windowEntry.providers.join("、") || "无"} · 上下文窗口 {formatTokens(windowEntry.contextWindow)} / 最大 {formatTokens(windowEntry.maxContextWindow)} tokens</p>
           {windowEntry.conflicts === true ? <Alert><AlertTitle>窗口占比不一致</AlertTitle><AlertDescription>当前不同 Provider 的窗口占比不一致：{Object.entries(windowEntry.perProvider ?? {}).filter(([, value]) => value !== undefined).map(([provider, value]) => `${provider} ${value}%`).join("；") || "部分未设置"}；保存后将以本次输入统一。</AlertDescription></Alert> : null}
           <Button className="self-start" variant="outline" size="sm" disabled={busy || pending !== null || windowEntry === undefined} onClick={() => void updateWindow()}>保存模型上下文窗口</Button>
         </>}
-      </section>
-      <Separator />
-      <section className="flex flex-col gap-3">
+      </section>}
+      {section === "providers" && <section className="flex flex-col gap-3">
         <div><h3 className="font-medium">自定义提供商</h3><p className="text-xs text-muted-foreground">Codex 兼容 Provider 使用官方目录；自定义 Responses Provider 使用下方声明的模型与能力。可切换模式保留官方主 Provider；固定模式会修改 Codex 主配置并需要重启全部服务。</p></div>
-        {candidates.length === 0 ? <SettingsEmpty>当前没有自定义提供商。</SettingsEmpty> : candidates.map((candidate) => <div key={`${candidate.id}:${candidate.baseUrl}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-2"><div className="min-w-0"><div className="font-medium">{candidate.displayName} {"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : null}</div><div className="truncate text-xs text-muted-foreground">{candidate.id} · {candidate.baseUrl || "地址未返回"}</div></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></div>)}
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null} onClick={() => { resetForm(); management.clearError(); setEditorOpen(true) }}>新增提供商</Button><Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
+        <Table><TableHeader><TableRow><TableHead>提供商</TableHead><TableHead>地址</TableHead><TableHead>状态</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>
+          {candidates.length === 0 ? <TableRow><TableCell colSpan={4}><SettingsEmpty>当前没有自定义提供商。</SettingsEmpty></TableCell></TableRow> : candidates.map(candidate => <TableRow key={candidate.id}>
+            <TableCell><div className="flex flex-col gap-1"><span>{candidate.displayName}</span><span className="text-xs text-muted-foreground">{candidate.id}</span></div></TableCell>
+            <TableCell className="max-w-64 truncate">{candidate.baseUrl || "—"}</TableCell>
+            <TableCell>{"active" in candidate && candidate.active ? <Badge variant="secondary">当前</Badge> : "—"}</TableCell>
+            <TableCell><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => edit(candidate)}>编辑</Button><Button variant="outline" size="sm" disabled={busy || pending !== null} onClick={() => void switchProvider(candidate.id)}>切换</Button><Button variant="destructive" size="sm" disabled={busy || pending !== null} onClick={() => void removeProvider(candidate.id)}>删除</Button></div></TableCell>
+          </TableRow>)}
+        </TableBody></Table>
+        <Dialog open={editorOpen} onOpenChange={open => { if (!open && !management.busy && pending === null) resetForm() }}><DialogContent closeLabel="关闭" showCloseButton={!management.busy && pending === null} className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{editingId === null ? "新增提供商" : "编辑提供商"}</DialogTitle><DialogDescription>配置地址、模型和凭据；预览确认后保存，API Key 不会回显。</DialogDescription></DialogHeader>
         <ManagedSelect label="提供商类型" value={catalogKind} options={[["official", "Codex 兼容 Provider"], ["custom", "自定义 Responses Provider"]]} disabled={busy || pending !== null || editingId !== null} onChange={(value) => { setCatalogKind(value); setProviderId(value === "custom" ? "rs-" : ""); setModel(""); setCustomModels([]) }} />
         <FieldGroup className="grid gap-3 md:grid-cols-2">
           <Field data-disabled={busy || pending !== null || editingId !== null}><FieldLabel htmlFor="custom-provider-id">{catalogKind === "custom" ? "Provider ID（rs- 开头）" : "Provider ID"}</FieldLabel><Input id="custom-provider-id" placeholder="例如 my-provider" value={providerId} disabled={busy || pending !== null || editingId !== null} onChange={(event) => setProviderId(event.target.value)} /></Field>
@@ -234,8 +248,10 @@ function ProviderSettingsCard({
           <Button variant="outline" disabled={busy || pending !== null || customModels.length >= 64} onClick={() => setCustomModels(current => [...current, { id: current.length === 0 ? model : "", name: current.length === 0 ? model : "", contextWindow: 0, reasoningEfforts: [], defaultReasoningEffort: null, supportsImages: false }])}>添加模型</Button>
         </div> : null}
         {mode === "exclusive" ? <Field orientation="horizontal" data-disabled={busy || pending !== null}><Checkbox id="custom-provider-remove-base-url" checked={confirmRemoveBaseUrl} disabled={busy || pending !== null} onCheckedChange={(checked) => setConfirmRemoveBaseUrl(checked === true)} /><FieldLabel htmlFor="custom-provider-remove-base-url" className="text-xs text-muted-foreground">确认固定模式需要时移除顶层 openai_base_url</FieldLabel></Field> : null}
-        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Provider" : "保存 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}<Button variant="outline" disabled={busy || pending !== null} onClick={() => void switchProvider("openai")}>切回官方 OpenAI</Button></div>
-      </section>
+        <div className="flex flex-wrap gap-2"><Button disabled={busy || pending !== null || providerId.trim() === "" || providerName.trim() === "" || baseUrl.trim() === "" || model.trim() === "" || (editingId === null && apiKey.trim() === "")} onClick={() => void saveCustom()}>{editingId === null ? "新增 Provider" : "保存 Provider"}</Button>{editingId !== null ? <Button variant="outline" disabled={busy || pending !== null} onClick={resetForm}>取消编辑</Button> : null}</div>
+        {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
+        </DialogContent></Dialog>
+      </section>}
       {pending !== null ? <ProviderSettingsConfirmationDialog pending={pending.preview} saving={management.busy} loading={management.loading} onConfirm={() => void confirmPending()} onCancel={cancelPending} /> : null}
       {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
     </CardContent>

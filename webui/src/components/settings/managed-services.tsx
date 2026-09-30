@@ -8,7 +8,7 @@ import { SettingsEmpty } from "@/components/settings/settings-feedback"
 import type { ManagementTaskController } from "@/lib/settings-management"
 import type { ManagementServicesResponse } from "@/lib/types"
 
-export function ManagedServices({ services, tasks, scope }: { services: ManagementServicesResponse; tasks: ManagementTaskController; scope?: ManagementServicesResponse["entries"][number]["target"] }) {
+export function ManagedServices({ services, tasks, scope, showTasks = true }: { services: ManagementServicesResponse; tasks: ManagementTaskController; showTasks?: boolean; scope?: ManagementServicesResponse["entries"][number]["target"] }) {
   const { t } = useTranslation()
   const otherTaskActive = scope && tasks.tasks.some(task => ["queued", "running", "cancelling"].includes(task.state) && (task.operation !== "service" || task.target !== scope))
   const entries = scope ? services.entries.filter(service => service.target === scope) : services.entries
@@ -18,7 +18,7 @@ export function ManagedServices({ services, tasks, scope }: { services: Manageme
   }
   const taskBusy = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   return <>
-    {otherTaskActive && <Alert><AlertDescription>{t("relay.otherTaskActive")} <Link to="/settings" className="underline">{t("relay.viewTasks")}</Link></AlertDescription></Alert>}
+    {otherTaskActive && <Alert><AlertDescription>{t("relay.otherTaskActive")} <Link to="/settings/services" className="underline">{t("relay.viewTasks")}</Link></AlertDescription></Alert>}
     {!scope && <div className="flex flex-wrap gap-2">
       <Button variant="outline" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "install" })}>安装全部服务</Button>
       <Button variant="destructive" size="sm" disabled={taskBusy || services.platform === null} onClick={() => void tasks.run({ operation: "service", action: "uninstall" })}>卸载全部服务</Button>
@@ -48,11 +48,11 @@ export function ManagedServices({ services, tasks, scope }: { services: Manageme
       </div>
     ))}
     {services.platform === null ? <p className="text-xs text-muted-foreground">当前平台服务状态不可用，请使用 CLI 查看详细信息。</p> : null}
-    {recentTasks.length > 0 ? <RecentManagementTasks tasks={{ ...tasks, tasks: recentTasks }} /> : null}
+    {showTasks && recentTasks.length > 0 ? <RecentManagementTasks tasks={{ ...tasks, tasks: recentTasks }} /> : null}
   </>
 }
 
-function RecentManagementTasks({ tasks }: { tasks: ManagementTaskController }) {
+export function RecentManagementTasks({ tasks }: { tasks: ManagementTaskController }) {
   return <div className="mt-2 rounded-md border p-2 text-xs">
     <span className="font-medium">最近管理任务</span>
     {tasks.tasks.slice(-3).map((task) => <div key={task.id} className="mt-1 flex flex-wrap items-center justify-between gap-2"><span className="break-all">{task.operation}:{task.action}{task.target ? `:${task.target}` : ""}</span><div className="flex items-center gap-2"><Badge variant={task.state === "completed" ? "secondary" : task.state === "failed" ? "destructive" : "outline"}>{task.state}</Badge>{["queued", "running", "cancelling"].includes(task.state) ? <Button variant="ghost" size="sm" disabled={tasks.loading || task.state === "cancelling"} onClick={() => void tasks.cancel(task.id)}>取消</Button> : null}</div></div>)}

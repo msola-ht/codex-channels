@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { scheduleApiRefresh, settledTaskIds } from "../webui/src/lib/api-polling.js";
+import { scheduleApiRefresh, scheduleVisibleSettingsRefresh, settledTaskIds } from "../webui/src/lib/api-polling.js";
 
 class Page extends EventTarget {
   visibilityState = "visible";
@@ -138,4 +138,71 @@ it("invalidates failed live snapshots through retries while preserving the defau
     }
   `;
   expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
+});
+
+
+describe("设置页面恢复补查", () => {
+  it("retains busy events through the throttle and coalesces them into one refresh", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const page = new Page();
+    const refresh = vi.fn();
+    const state = { pending: false, lastRefresh: 0 };
+    let stop = scheduleVisibleSettingsRefresh(refresh, false, page, state);
+    page.change("visible");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    stop();
+    stop = scheduleVisibleSettingsRefresh(refresh, true, page, state);
+    vi.advanceTimersByTime(1_000);
+    page.change("hidden");
+    page.change("visible");
+    expect(state.pending).toBe(true);
+    stop();
+    stop = scheduleVisibleSettingsRefresh(refresh, false, page, state);
+    page.change("visible");
+    vi.advanceTimersByTime(3_999);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(state.pending).toBe(false);
+    vi.advanceTimersByTime(20_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("cancels delayed work while hidden or unmounted and resumes only when visible", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const page = new Page();
+    const refresh = vi.fn();
+    const state = { pending: true, lastRefresh: 10_000 };
+    const stop = scheduleVisibleSettingsRefresh(refresh, false, page, state);
+    page.change("hidden");
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(6_000);
+    expect(refresh).not.toHaveBeenCalled();
+    page.change("visible");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    page.change("visible");
+    expect(vi.getTimerCount()).toBe(1);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    page.change("visible");
+    vi.advanceTimersByTime(6_000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not repeat pending work already satisfied by a manual refresh", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const page = new Page();
+    const refresh = vi.fn();
+    const state = { pending: true, lastRefresh: 10_000 };
+    const stop = scheduleVisibleSettingsRefresh(refresh, false, page, state);
+    state.pending = false;
+    state.lastRefresh = Date.now();
+    vi.advanceTimersByTime(6_000);
+    expect(refresh).not.toHaveBeenCalled();
+    stop();
+  });
 });

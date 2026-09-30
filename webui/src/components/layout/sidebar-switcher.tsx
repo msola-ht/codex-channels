@@ -20,7 +20,7 @@ import { useTranslation } from "@/hooks/use-translation"
 import { navItems } from "@/lib/navigation"
 
 export function SidebarSwitcher() {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const navigate = useNavigate()
   const { t } = useTranslation()
 
@@ -56,7 +56,7 @@ export function SidebarSwitcher() {
               {navItems.map((item) => (
                 <DropdownMenuItem
                   key={item.to}
-                  onClick={() => navigate(item.to)}
+                  onClick={() => { navigate(item.to); setOpenMobile(false) }}
                   className="gap-2 p-2"
                 >
                   <div className="flex size-6 items-center justify-center rounded-md border">

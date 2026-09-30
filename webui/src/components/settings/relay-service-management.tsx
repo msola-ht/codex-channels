@@ -24,7 +24,7 @@ export function RelayServiceManagement({ controller, snapshot, loading, current 
         {!current || !snapshot ? <Badge variant="outline">{t(loading ? "relay.refreshing" : "relay.runtimeUnknown")}</Badge> : snapshot.runtime?.state === "running"
           ? <Badge variant={snapshot.runtime.listening && snapshot.runtime.configurationValid ? "secondary" : "outline"}>{t(snapshot.runtime.listening && snapshot.runtime.configurationValid ? "relay.listening" : "relay.notListening")}</Badge>
           : <Badge variant="outline">{t(snapshot.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
-        <Link to="/settings" className="text-muted-foreground underline">{t("relay.providers")}</Link>
+        <Link to="/models/accounts" className="text-muted-foreground underline">{t("relay.providers")}</Link>
       </div>
     </CardHeader>
     <CardContent className="flex flex-col gap-3">

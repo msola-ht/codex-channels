@@ -1,181 +1,112 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
-import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
-import { ChannelStatusCard, ProviderStatusCard } from "@/components/settings/provider-channel-status"
-import { ProviderSettingsManagement } from "@/components/settings/provider-settings-management"
-import { AccountSettingsManagement } from "@/components/settings/account-settings-management"
-import { CliCommandRow } from "@/components/settings/cli-command-row"
-import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
-import { ManagementTaskControls } from "@/components/settings/management-task-controls"
-import { ManagedServices } from "@/components/settings/managed-services"
-import { PendingSettingDialog } from "@/components/settings/settings-controls"
-import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
-import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
-import { SettingsError, SettingsSkeleton, LoadingSettingsCard } from "@/components/settings/settings-feedback"
-import type { UseApiState } from "@/hooks/use-api"
-import { useApi, useApiPolling } from "@/hooks/use-api"
-import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
-import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
-import { useProviderSettingsManagement } from "@/hooks/use-provider-settings-management"
-import { useAccountSettingsManagement } from "@/hooks/use-account-settings-management"
+import { useCallback } from "react"
 import { useSettingsManagement } from "@/hooks/use-settings-management"
-import { fetchManagementProviders, fetchManagementServices, fetchSettingsSummary, fetchUpstreamUserAgent } from "@/lib/api"
-import { resolveSettingsLoadState } from "@/lib/settings-state"
-import type { ManagementProvidersResponse, ManagementServicesResponse, SettingsSummaryResponse, UpstreamUserAgentResponse } from "@/lib/types"
-import type { AccountSettingsController, CodexSettingsController, GatewaySettingsController, ManagementTaskController, ProviderSettingsController } from "@/lib/settings-management"
+import { useCodexSettingsManagement } from "@/hooks/use-codex-settings-management"
+import { useApi, useApiPolling, type UseApiState } from "@/hooks/use-api"
+import { useManagementTasks, useManagementTaskRefresh } from "@/hooks/use-management-tasks"
+import { useTranslation } from "@/hooks/use-translation"
+import { fetchManagementProviders, fetchManagementServices, fetchUpstreamUserAgent, fetchSettingsSummary } from "@/lib/api"
+import { SettingsPageFrame } from "@/components/settings/settings-page-frame"
+import { GatewaySettingsSection } from "@/components/settings/gateway-settings-section"
+import { SettingsCliCommands } from "@/components/settings/settings-cli-commands"
+import { AppServerSettingsCard } from "@/components/settings/app-server-settings-card"
+import { GatewaySettingsCard } from "@/components/settings/gateway-settings-card"
+import { WorkspaceSettingsCard } from "@/components/settings/workspace-settings-card"
+import { WebuiDataSettingsCard } from "@/components/settings/webui-data-settings-card"
+import { ManagedServices, RecentManagementTasks } from "@/components/settings/managed-services"
+import { ManagementTaskControls } from "@/components/settings/management-task-controls"
+import { SettingsError, LoadingSettingsCard } from "@/components/settings/settings-feedback"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
+import type { SettingsSummaryResponse } from "@/lib/types"
+import type { GatewaySettingsController, CodexSettingsController, ManagementTaskController } from "@/lib/settings-management"
 
-type SettingsRefreshSource = "gateway" | "codex" | "provider" | "account"
+function gatewayBusy(state: GatewaySettingsController) { return state.loading || state.saving || state.pendingSetting !== null }
+function codexBusy(state: CodexSettingsController) { return state.loading || state.saving || state.pendingSetting !== null }
+function tasksBusy(state: ManagementTaskController) { return state.loading || state.saving || state.pendingPreview !== null }
 
-const VISIBLE_REFRESH_MIN_INTERVAL_MS = 5_000
+export function SettingsPage({ section = "general" }: { section?: "general" | "permissions" }) {
+  return section === "general" ? <GeneralSettingsPage /> : <PreferenceSettingsPage section="permissions" />
+}
 
-export function SettingsPage() {
+function GeneralSettingsPage() {
   const summary = useApi(fetchSettingsSummary, [])
-  const services = useApi(fetchManagementServices, [])
+  return <PreferenceSettingsPage section="general" summary={summary} />
+}
+
+function PreferenceSettingsPage({ section, summary }: { section: "general" | "permissions"; summary?: UseApiState<SettingsSummaryResponse> & { refetch: () => void } }) {
+  const gateway = useSettingsManagement()
+  const codex = useCodexSettingsManagement()
+  const reloadGateway = gateway.refetch, reloadCodex = codex.refetch
+  const reloadSummary = summary?.refetch
+  const refresh = useCallback(() => { reloadGateway(); reloadCodex(); reloadSummary?.() }, [reloadGateway, reloadCodex, reloadSummary])
+  return <SettingsPageFrame title={section === "general" ? "navigation.general" : "navigation.permissions"} busy={gatewayBusy(gateway) || codexBusy(codex) || (summary?.loading ?? false)} refresh={refresh}>
+    <AppServerSettingsCard management={codex} section={section} onChanged={reloadGateway} />
+    <GatewaySettingsSection management={gateway} onChanged={reloadCodex}>
+      <GatewaySettingsCard management={gateway} section={section} />
+      {section === "permissions" && <WorkspaceSettingsCard management={gateway} />}
+    </GatewaySettingsSection>
+    {section === "general" && summary && <SettingsCliCommands scope="general" summary={summary} />}
+  </SettingsPageFrame>
+}
+
+export function NetworkSettingsPage() {
+  const gateway = useSettingsManagement()
+  const upstream = useApi(fetchUpstreamUserAgent, [])
+  const reloadGateway = gateway.refetch, reloadUpstream = upstream.refetch
+  const refresh = useCallback(() => { reloadGateway(); reloadUpstream() }, [reloadGateway, reloadUpstream])
+  return <SettingsPageFrame title="navigation.network" busy={gatewayBusy(gateway) || upstream.loading} refresh={refresh}>
+    <GatewaySettingsSection management={gateway} onChanged={reloadUpstream}>
+      <WebuiDataSettingsCard management={gateway} section="network" />
+      <GatewaySettingsCard management={gateway} section="network" upstreamAgent={upstream} />
+    </GatewaySettingsSection>
+  </SettingsPageFrame>
+}
+
+export function DataSettingsPage() {
+  const summary = useApi(fetchSettingsSummary, [])
+  const reloadSummary = summary.refetch
+  const gateway = useSettingsManagement()
   const providers = useApi(fetchManagementProviders, [])
-  const upstreamAgent = useApi(fetchUpstreamUserAgent, [])
-  const management = useSettingsManagement()
-  const codexManagement = useCodexSettingsManagement()
   const tasks = useManagementTasks()
-  const providerSettings = useProviderSettingsManagement()
-  const accountSettings = useAccountSettingsManagement()
-  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
-  const [copyError, setCopyError] = useState(false)
-  const refetchSummary = summary.refetch
-  const refetchServices = services.refetch
-  const refetchProviders = providers.refetch
-  const refetchUpstreamAgent = upstreamAgent.refetch
-  const refetchManagedSettings = management.refetch
-  const refetchCodexSettings = codexManagement.refetch
-  const refetchProviderSettings = providerSettings.refetch
-  const refetchAccountSettings = accountSettings.refetch
-  const summaryLoaded = summary.data !== null
-  const lastVisibleRefreshAt = useRef(0)
-  const refreshAllSettings = useCallback((source?: SettingsRefreshSource) => {
-    refetchSummary()
-    refetchServices()
-    refetchProviders()
-    refetchUpstreamAgent()
-    if (source !== "gateway") refetchManagedSettings()
-    if (source !== "codex") refetchCodexSettings()
-    if (source !== "provider") refetchProviderSettings()
-    if (source !== "account") refetchAccountSettings()
-  }, [refetchAccountSettings, refetchCodexSettings, refetchManagedSettings, refetchProviderSettings, refetchProviders, refetchServices, refetchSummary, refetchUpstreamAgent])
-
-  useManagementTaskRefresh(tasks, refreshAllSettings)
-
-  useApiPolling(services.refetch, services.loading,
-    tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state)))
-
-  const refreshVisibleSettings = useCallback(() => {
-    if (!summaryLoaded || document.visibilityState !== "visible") return
-    const now = Date.now()
-    if (now - lastVisibleRefreshAt.current < VISIBLE_REFRESH_MIN_INTERVAL_MS) return
-    lastVisibleRefreshAt.current = now
-    refreshAllSettings()
-  }, [refreshAllSettings, summaryLoaded])
-
-  useEffect(() => {
-    const handleVisibilityChange = () => refreshVisibleSettings()
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-    }
-  }, [refreshVisibleSettings])
-
-  const copyCommand = async (id: string, command: string) => {
-    try {
-      if (!navigator.clipboard) throw new Error("clipboard_unavailable")
-      await navigator.clipboard.writeText(command)
-      setCopiedCommand(id)
-      setCopyError(false)
-    } catch {
-      setCopiedCommand(null)
-      setCopyError(true)
-    }
-  }
-
-  const loadState = resolveSettingsLoadState(summary.data, summary.loading, summary.error)
-  return <div className="flex flex-col gap-6">
-    <div>
-      <h1 className="text-xl font-semibold">设置</h1>
-      <p className="text-sm text-muted-foreground">按 App Server、Gateway 和 WebUI 边界查看并修改配置。</p>
-    </div>
-    {loadState === "loading" ? <SettingsSkeleton /> : null}
-    {summary.error !== null || loadState === "error" ? <SettingsError message={summary.error ?? "设置快照加载失败"} retry={summary.refetch} /> : null}
-    {loadState === "empty" ? <SettingsError message="服务未返回可用的设置快照" retry={summary.refetch} /> : null}
-    {loadState === "ready" && summary.data !== null ? <SettingsContent
-      summary={summary.data}
-      services={services}
-      providers={providers}
-      upstreamAgent={upstreamAgent}
-      management={management}
-      codexManagement={codexManagement}
-      tasks={tasks}
-      providerSettings={providerSettings}
-      accountSettings={accountSettings}
-      onSettingsChanged={refreshAllSettings}
-      copiedCommand={copiedCommand}
-      copyError={copyError}
-      onCopy={copyCommand}
-    /> : null}
-  </div>
+  const reloadGateway = gateway.refetch, reloadProviders = providers.refetch, reloadTasks = tasks.refetch
+  const refreshSettings = useCallback(() => { reloadGateway(); reloadProviders() }, [reloadGateway, reloadProviders])
+  const refresh = useCallback(() => { refreshSettings(); reloadTasks(); reloadSummary() }, [refreshSettings, reloadTasks, reloadSummary])
+  useManagementTaskRefresh(tasks, refreshSettings)
+  return <SettingsPageFrame title="navigation.data" busy={gatewayBusy(gateway) || providers.loading || tasksBusy(tasks) || summary.loading} refresh={refresh}>
+    <GatewaySettingsSection management={gateway}>
+      <GatewaySettingsCard management={gateway} section="data" />
+      <WebuiDataSettingsCard management={gateway} section="data" />
+    </GatewaySettingsSection>
+    {providers.error && <SettingsError message={providers.error} retry={reloadProviders} />}
+    <TaskErrors tasks={tasks} />
+    <ManagementTaskControls tasks={tasks} section="data" providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map(provider => provider.id) ?? [])]} />
+    {tasks.tasks.length > 0 && <RecentManagementTasks tasks={tasks} />}
+    <SettingsCliCommands scope="data" summary={summary} />
+  </SettingsPageFrame>
 }
 
-interface SettingsContentProps {
-  summary: SettingsSummaryResponse
-  services: UseApiState<ManagementServicesResponse> & { refetch: () => void }
-  providers: UseApiState<ManagementProvidersResponse> & { refetch: () => void }
-  upstreamAgent: UseApiState<UpstreamUserAgentResponse> & { refetch: () => void }
-  management: GatewaySettingsController
-  codexManagement: CodexSettingsController
-  tasks: ManagementTaskController
-  providerSettings: ProviderSettingsController
-  accountSettings: AccountSettingsController
-  onSettingsChanged: (source?: SettingsRefreshSource) => void
-  copiedCommand: string | null
-  copyError: boolean
-  onCopy: (id: string, command: string) => Promise<void>
+export function ServiceSettingsPage() {
+  const summary = useApi(fetchSettingsSummary, [])
+  const reloadSummary = summary.refetch
+  const { t } = useTranslation()
+  const services = useApi(fetchManagementServices, [])
+  const tasks = useManagementTasks()
+  const reloadServices = services.refetch, reloadTasks = tasks.refetch
+  const refresh = useCallback(() => { reloadServices(); reloadTasks(); reloadSummary() }, [reloadServices, reloadTasks, reloadSummary])
+  useManagementTaskRefresh(tasks, reloadServices)
+  useApiPolling(reloadServices, services.loading, tasks.tasks.some(task => ["queued", "running", "cancelling"].includes(task.state)))
+  return <SettingsPageFrame title="navigation.services" busy={services.loading || tasksBusy(tasks) || summary.loading} refresh={refresh}>
+    <TaskErrors tasks={tasks} />
+    {services.error ? <SettingsError message={services.error} retry={reloadServices} /> : !services.data ? <LoadingSettingsCard title={t("navigation.services")} /> : <Card>
+      <CardHeader><CardTitle>{t("navigation.services")}</CardTitle><CardDescription>{t("navigation.servicesHint")}</CardDescription></CardHeader>
+      <CardContent><ManagedServices services={{ ...services.data, entries: services.data.entries.filter(service => service.target !== "model-relay") }} tasks={tasks} showTasks={false} /></CardContent>
+    </Card>}
+    <ManagementTaskControls tasks={tasks} section="services" />
+    {tasks.tasks.length > 0 && <RecentManagementTasks tasks={tasks} />}
+    <SettingsCliCommands scope="services" summary={summary} />
+  </SettingsPageFrame>
 }
 
-function SettingsContent({ summary, services, providers, upstreamAgent, management, codexManagement, tasks, providerSettings, accountSettings, onSettingsChanged, copiedCommand, copyError, onCopy }: SettingsContentProps) {
-  const confirmGatewaySetting = async () => {
-    if (await management.confirmSetting()) onSettingsChanged("gateway")
-  }
-  return <>
-    {management.loading ? <p className="text-sm text-muted-foreground">正在读取可编辑设置…</p> : null}
-    {(management.error !== null || management.managedSettings === null) && !management.loading ? <SettingsError message={management.error ?? "设置管理暂不可用"} retry={management.refetch} /> : null}
-    <AppServerSettingsCard management={codexManagement} onChanged={() => onSettingsChanged("codex")} />
-    {providers.loading && providers.data === null ? <LoadingSettingsCard title="Provider 状态" /> : null}
-    {providers.error ? <SettingsError message={providers.error} retry={providers.refetch} /> : null}
-    {providers.error === null && providers.data !== null ? <ProviderStatusCard state={providers.data} /> : null}
-    <ProviderSettingsManagement management={providerSettings} onChanged={() => onSettingsChanged("provider")} />
-    <AccountSettingsManagement management={accountSettings} onChanged={() => onSettingsChanged("account")} />
-    <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmGatewaySetting()} onCancel={management.cancelSetting} />
-    {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
-    <GatewaySettingsCard management={management} upstreamAgent={upstreamAgent} />
-    <WorkspaceSettingsCard management={management} />
-    <WebuiDataSettingsCard management={management} />
-    <ChannelStatusCard channels={summary.gateway.channels} />
-    {tasks.error !== null ? <SettingsError message={tasks.error} retry={tasks.refetch} /> : null}
-    {tasks.actionError !== null ? <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert> : null}
-    <Card>
-      <CardHeader><CardTitle>服务状态</CardTitle><CardDescription>状态和版本由当前平台服务管理器查询，未运行时显示最近错误；启停、重载和安装操作需要确认</CardDescription></CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {services.loading ? <p className="text-sm text-muted-foreground">正在读取服务状态…</p> : null}
-        {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
-        {services.error === null && services.data !== null ? <ManagedServices services={{ ...services.data, entries: services.data.entries.filter(service => service.target !== "model-relay") }} tasks={tasks} /> : null}
-      </CardContent>
-    </Card>
-    <ManagementTaskControls tasks={tasks} providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map((provider) => provider.id) ?? [])]} />
-    <Card>
-      <CardHeader><CardTitle>CLI 与独立授权入口</CardTitle><CardDescription>需要终端身份流的官方登录、渠道 OAuth/扫码和项目技能仍通过对应 CLI 流程管理</CardDescription></CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {summary.cli.map((entry, index) => <Fragment key={entry.id}>{index > 0 ? <Separator /> : null}<CliCommandRow entry={entry} copied={copiedCommand === entry.id} onCopy={() => onCopy(entry.id, entry.command)} /></Fragment>)}
-        {copyError ? <Alert variant="destructive"><AlertDescription>浏览器未允许访问剪贴板，请手动选择并复制命令。</AlertDescription></Alert> : null}
-      </CardContent>
-    </Card>
-  </>
+function TaskErrors({ tasks }: { tasks: ManagementTaskController }) {
+  return <>{tasks.error && <SettingsError message={tasks.error} retry={tasks.refetch} />}{tasks.actionError && <Alert variant="destructive"><AlertDescription>{tasks.actionError}</AlertDescription></Alert>}</>
 }

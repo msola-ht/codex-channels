@@ -1,3 +1,4 @@
+import { Link } from "react-router"
 import { RefreshCwIcon } from "lucide-react"
 import { useId } from "react"
 
@@ -101,7 +102,7 @@ export function TrafficPage() {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold">{t("pages.traffic")}</h1>
+          <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{t("pages.traffic")}</h1><Button asChild variant="outline" size="sm"><Link to="/settings/data">{t("navigation.captureSettings")}</Link></Button></div>
           <p className="text-sm text-muted-foreground">
             <code className="rounded bg-muted px-1 text-xs">{dumpKey}</code>{" "}
             {t("traffic.listIntro")}
