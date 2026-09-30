@@ -95,7 +95,7 @@
   Authorization、Cookie 等凭据字段只保留认证
   方案。精简模式继续裁剪 `input` 与过大条目，并从 trace 丢弃 `.delta`；逻辑响应始终只保存
   `response.completed|failed|incomplete|error` 终态。写入失败时停止转储并经 `onError` 上报，模型请求继续正常转发。
-- `relay-debug-headers.ts`：调试采集的纯头脱敏函数，保留名称、遮蔽凭据与未知头值；格式校验后保留明确的请求/追踪 ID 和 SDK/IDE 环境头，限制字段与整体大小。
+- `traffic-dump-headers.ts`：Codex/Relay 全模式共用的纯头脱敏函数及 Relay 有界采集，保留普通请求/响应头和关联 ID，仅遮蔽凭据类值、URL 秘密与 CSP nonce，限制字段与整体大小，不修改出站头。
 - `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。

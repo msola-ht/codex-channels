@@ -1,3 +1,4 @@
+import { redactTrafficHeaderValue } from "./traffic-dump-headers.js";
 import type { IncomingHttpHeaders } from "node:http";
 import { StringDecoder } from "node:string_decoder";
 
@@ -11,17 +12,6 @@ const compactionBufferLimitBytes = 32 * 1_048_576;
 const sseEventLimitCharacters = 1_048_576;
 /** 摘要字段只接受短字符串，避免扫描器为异常字段持续累积内存。 */
 const maximumJsonFieldCharacters = 4_096;
-
-const credentialHeaderNames = new Set([
-  "authorization",
-  "proxy-authorization",
-  "cookie",
-  "set-cookie",
-  "x-api-key",
-  "api-key",
-  "openai-api-key",
-  "x-goog-api-key",
-]);
 
 export function bodyBufferLimit(inputItems: number, itemMaxBytes: number): number {
   return inputItems > 0 || itemMaxBytes > 0
@@ -602,20 +592,11 @@ export function sanitizedHeaders(
   const output: Record<string, string | string[]> = {};
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue;
-    output[name] = credentialHeaderNames.has(name.toLowerCase())
-      ? redactHeaderValue(value)
-      : value;
+    output[name] = Array.isArray(value)
+      ? value.map(item => redactTrafficHeaderValue(name, item))
+      : redactTrafficHeaderValue(name, value);
   }
   return output;
-}
-
-function redactHeaderValue(value: string | string[]): string | string[] {
-  return Array.isArray(value) ? value.map(redactedValue) : redactedValue(value);
-}
-
-function redactedValue(value: string): string {
-  const scheme = /^(Bearer|Basic|Digest)\s/iu.exec(value);
-  return scheme ? `${scheme[1]} <redacted>` : "<redacted>";
 }
 
 export function errorText(error: unknown): string {

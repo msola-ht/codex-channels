@@ -12,7 +12,7 @@ import { sendRelayMetrics, RelayTrafficDump, pruneModelTrafficDumpSessions } fro
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
 import { describeDumpExchange, readDumpResponseProviders } from "../scripts/traffic-dump-reader.mjs";
 import * as retention from "../src/provider-proxy/traffic-dump-retention.js";
-import { relayDebugHeaders } from "../src/provider-proxy/relay-debug-headers.js";
+import { capturedTrafficHeaders } from "../src/provider-proxy/traffic-dump-headers.js";
 import { RelayMetricsComposition } from "../src/bootstrap/relay-metrics-composition.js";
 import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 
@@ -283,36 +283,38 @@ describe("isolated Relay vertical request chain", () => {
     }
   });
 
-  it("prepares bounded debug headers without exposing credentials or URL details", () => {
-    const result = relayDebugHeaders({
-      Authorization: "Bearer PRIVATE", "Proxy-Authorization": "PRIVATE", Cookie: "PRIVATE",
-      "set-cookie": ["PRIVATE", "PRIVATE"], "x-api-key": "PRIVATE", "x-access-token": "PRIVATE",
-      "x-unknown-client": "PRIVATE", "user-agent": "browser-fixture", accept: "application/json",
-      origin: "https://example.test", referer: "https://example.test/private/path?secret=PRIVATE#PRIVATE",
-    });
-    expect(JSON.stringify(result)).not.toContain("PRIVATE");
-    expect(result.headers["x-unknown-client"]).toBe("[REDACTED]");
-    expect(result.headers["user-agent"]).toBe("browser-fixture");
-    expect(result.headers.referer).toBe("https://example.test");
-    expect(result.headers["set-cookie"]).toEqual(["[REDACTED]", "[REDACTED]"]);
-    expect(result.truncated).toBe(false);
-    const diagnostic = relayDebugHeaders({ "x-request-id": "3390a228-c744-47a8-99b4-601f202be616",
-      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-      "x-stainless-runtime-version": "v24.21.0", "x-stainless-lang": "js", "x-stainless-retry-count": "0",
-      "x-user-id": "PRIVATE", "x-conversation-id": "PRIVATE", "x-agent-purpose": "PRIVATE", "x-ide-version": "5.6.2" });
-    expect(diagnostic.headers["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
-    expect(diagnostic.headers.traceparent).toContain("4bf92");
-    expect(diagnostic.headers["x-stainless-runtime-version"]).toBe("v24.21.0");
-    expect(diagnostic.headers["x-stainless-retry-count"]).toBe("0");
-    expect(diagnostic.headers["x-ide-version"]).toBe("5.6.2");
-    expect(JSON.stringify(diagnostic)).not.toContain("PRIVATE");
-    expect(relayDebugHeaders({ "x-request-id": "Bearer PRIVATE", "x-stainless-lang": "js\nPRIVATE" }).headers)
-      .toEqual({ "x-request-id": "[REDACTED]", "x-stainless-lang": "[REDACTED]" });
-
-    expect(relayDebugHeaders({ origin: "https://user:pass@example.test", referer: "file:///private" }).headers)
-      .toEqual({ origin: "[REDACTED]", referer: "[REDACTED]" });
-    expect(relayDebugHeaders({ "user-agent": "中".repeat(1024) }).truncated).toBe(true);
-    const many = relayDebugHeaders(Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`x-header-${i}`, "PRIVATE"])));
+  it("preserves debug diagnostics while redacting credentials with bounded output", () => {
+    const plain = { "sec-ch-ua": '"Chromium";v="143", "Not/A)Brand";v="24"',
+      "sec-ch-ua-platform": '"macOS"', "sec-ch-ua-mobile": "?0", dnt: "1", "sec-gpc": "1",
+      "sec-fetch-storage-access": "none", origin: "null", "x-unknown-client": "custom-client",
+      "x-conversation-id": "session-fixture", "x-user-id": "user-fixture", "x-request-id": "arbitrary-provider-id",
+      "x-stainless-runtime-version": "v24.21.0", "x-agent-purpose": "translation", via: "1.1 proxy",
+      "strict-transport-security": "max-age=31536000; includeSubDomains", "x-content-type-options": "nosniff",
+      "x-frame-options": "SAMEORIGIN", "alt-svc": 'h3=":443"; ma=86400', "content-type": "text/event-stream",
+      "reporting-endpoints": 'default="https://reports.test/path?sample=1"',
+      "content-security-policy": "default-src 'self'; report-uri https://reports.test/path" };
+    expect(capturedTrafficHeaders(plain).headers).toEqual(plain);
+    const secrets = capturedTrafficHeaders({ Authorization: "Bearer PRIVATE", "proxy-authorization": "Basic PRIVATE",
+      Cookie: "PRIVATE", "set-cookie": ["PRIVATE", "PRIVATE"], "x-api-key": "PRIVATE", "x-access-token": "PRIVATE",
+      "x-auth": "PRIVATE", "x-password": "PRIVATE", "x-unknown": "Bearer PRIVATE", "x-custom-authentication-value": "PRIVATE", "x-custom-value": "  Bearer PRIVATE",
+      referer: "https://user:PRIVATE@example.test/path?token=PRIVATE&lang=zh#PRIVATE",
+      "reporting-endpoints": 'default="https://reports.test/path?signature=PRIVATE&sample=1"',
+      "content-security-policy": "script-src 'nonce-PRIVATE'; report-uri https://reports.test/path?key=PRIVATE" });
+    expect(JSON.stringify(secrets)).not.toContain("PRIVATE");
+    expect(capturedTrafficHeaders({ location: "/next#access_token=PRIVATE&view=normal" }).headers)
+      .toEqual({ location: "/next#access_token=[REDACTED]&view=normal" });
+    expect(capturedTrafficHeaders({ location: "/next?access_token=PRIVATE&view=normal",
+      "content-security-policy": "report-uri /reports?%74oken=PRIVATE" }).headers)
+      .toEqual({ location: "/next?access_token=[REDACTED]&view=normal", "content-security-policy": "report-uri /reports?%74oken=[REDACTED]" });
+    expect(secrets.headers["set-cookie"]).toEqual(["[REDACTED]", "[REDACTED]"]);
+    expect(secrets.headers.referer).toContain("example.test/path?");
+    expect(secrets.headers.referer).toContain("lang=zh");
+    expect(secrets.headers["content-security-policy"]).toContain("'nonce-[REDACTED]'");
+    expect(secrets.headers["reporting-endpoints"]).toContain("sample=1");
+    expect(capturedTrafficHeaders({ origin: "chrome-extension://extension-id", "user-agent": "Kelivo" }).headers)
+      .toEqual({ origin: "chrome-extension://extension-id", "user-agent": "Kelivo" });
+    expect(capturedTrafficHeaders({ "x-custom": "中".repeat(1024) }).truncated).toBe(true);
+    const many = capturedTrafficHeaders(Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`x-header-${i}`, "diagnostic"])));
     expect(many.truncated).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(many.headers))).toBeLessThanOrEqual(16 * 1024);
   });
@@ -573,13 +575,13 @@ describe("isolated Relay vertical request chain", () => {
     let forwarded: Record<string, unknown> = {};
     const f = await fixture((req, res) => {
       forwarded = { ...req.headers };
-      res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "PRIVATE" })
+      res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "upstream-diagnostic" })
         .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value));
     }, undefined, undefined, dump, true);
     const input = stream ? { ...body, stream } : body;
-    const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/PRIVATE?q=PRIVATE", "x-client": "PRIVATE", cookie: "PRIVATE", "user-agent": "WorkBuddy/5.6.2", "x-request-id": "3390a228-c744-47a8-99b4-601f202be616" });
+    const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/path?token=PRIVATE", "x-client": "client-diagnostic", cookie: "PRIVATE", "user-agent": "WorkBuddy/5.6.2", "x-request-id": "3390a228-c744-47a8-99b4-601f202be616" });
     const received = await reply.text();
-    expect(forwarded["x-client"]).toBe("PRIVATE");
+    expect(forwarded["x-client"]).toBe("client-diagnostic");
     expect(forwarded["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
     expect(forwarded["user-agent"]).toBe("WorkBuddy/5.6.2");
     expect(forwarded.cookie).toBeUndefined();
@@ -595,7 +597,7 @@ describe("isolated Relay vertical request chain", () => {
     expect(JSON.parse(detail.request.body).stream).toBe(stream);
     expect(detail.debug.delivered.body).toBe(received);
     expect(detail.debug.delivered.state).toBe("finished");
-    expect(detail.debug.inbound.headers["x-client"]).toBe("[REDACTED]");
+    expect(detail.debug.inbound.headers["x-client"]).toBe("client-diagnostic");
     expect(detail.request.headers.authorization).toBe("[REDACTED]");
     expect(detail.debug.transformations).toContain("headers_filtered");
     if (!stream) { expect(detail.debug.transformations).toContain("stream_defaulted"); expect(detail.debug.transformations).toContain("json_unwrapped"); }
@@ -1166,3 +1168,49 @@ it("cancels wildcard-listener requests on client disconnect and listener stop", 
   expect(f.relay.queueSnapshot()).toEqual([]);
   expect(f.relay.admission.active).toBe(0);
 });
+
+it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream => [false, true].map(debug => ({ protocol, stream, debug })))))("keeps diagnostic capture separate from native forwarding ($protocol, stream=$stream, debug=$debug)", async ({ protocol, stream, debug }) => {
+    const directory = mkdtempSync(join(tmpdir(), "relay-header-matrix-"));
+    const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+    cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+    const value = protocol === "chat" ? { ...answer, choices: [{ index: 0, ...(stream ? { delta: { content: "hello" } } : { message: { role: "assistant", content: "hello" } }), finish_reason: "stop" }] }
+      : { id: "resp_fixture", object: "response", status: "completed", model: "fixture/model", output: [] };
+    const wire = !stream ? JSON.stringify(value) : protocol === "chat" ? frame(value) + "data: [DONE]\n\n" : frame({ type: "response.completed", response: value });
+    let observed: Record<string, unknown> = {};
+    const f = await fixture((req, res) => {
+      observed = { ...req.headers };
+      res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-request-id": "provider-custom-id",
+        "x-vendor-diagnostic": "custom-detail", "set-cookie": "PRIVATE",
+        "content-security-policy": "script-src 'nonce-PRIVATE'; default-src 'self'",
+        "reporting-endpoints": 'default="https://report.test/path?token=PRIVATE&sample=1"' }).end(wire);
+    }, undefined, undefined, dump, debug);
+    const reply = await fetch(`${f.relay.address()}/v1/${protocol === "chat" ? "chat/completions" : "responses"}`, {
+      method: "POST", headers: { authorization, "user-agent": "Kelivo", "x-conversation-id": "conversation-fixture", "x-vendor-diagnostic": "client-detail", "content-type": "application/json" },
+      body: JSON.stringify(protocol === "chat" ? { ...body, stream } : { model: "fixture/model", input: "hello", stream }),
+    });
+    expect(reply.status).toBe(200); await reply.text(); await f.relay.close(); await dump.close();
+    expect(observed["x-conversation-id"]).toBe("conversation-fixture");
+    expect(observed["x-vendor-diagnostic"]).toBe("client-detail");
+    expect(observed.authorization).not.toBe(authorization);
+    const ref = f.metrics[0]!.traffic!; const path = join(directory, `${ref.label}-${ref.session}`);
+    const detail = await describeDumpExchange([path], ref.interaction);
+    expect(detail.clientName).toBe("Kelivo"); expect(detail.protocol).toBe(protocol);
+    if (debug) {
+      expect(detail.debug.inbound.headers["x-conversation-id"]).toBe("conversation-fixture");
+      expect(detail.request.headers["x-vendor-diagnostic"]).toBe("client-detail");
+      expect(detail.response.headers["x-vendor-diagnostic"]).toBe("custom-detail");
+      expect(detail.response.headers["x-request-id"]).toBe("provider-custom-id");
+      expect(detail.response.headers["content-security-policy"]).toContain("'nonce-[REDACTED]'");
+      expect(detail.response.headers["reporting-endpoints"]).toContain("sample=1");
+      expect(detail.debug.delivered.state).toBe("finished");
+    } else {
+      expect(detail.debug).toBeUndefined();
+      expect(detail.request.headers["x-vendor-diagnostic"]).toBe("client-detail");
+      expect(detail.response.headers["x-vendor-diagnostic"]).toBe("custom-detail");
+      expect(detail.response.headers["set-cookie"]).toEqual(["[REDACTED]"]);
+    }
+    for (const file of readdirSync(path)) {
+      const content = readFileSync(join(path, file), "utf8");
+      expect(content).not.toContain("PRIVATE"); expect(content).not.toContain(authorization);
+    }
+  });

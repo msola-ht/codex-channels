@@ -443,7 +443,7 @@ describe("ModelTrafficDump V2", () => {
     const index = readIndex(sessions[0]!);
     expect(index.map((record) => record.kind)).toEqual(["request", "response"]);
     expect(index[0]).toMatchObject({
-      headers: { authorization: "Bearer <redacted>" },
+      headers: { authorization: "[REDACTED]" },
       id: 1,
       requestKind: "turn",
       requestModel: "gpt-6-astra",
@@ -1027,3 +1027,30 @@ function oldSession(directory: string, session: string, createdAtMs: number, siz
   utimesSync(path, timestamp, timestamp);
   return path;
 }
+
+it.each([false, true].flatMap(debug => ["http", "websocket"].map(transport => ({ debug, transport }))))("shares necessary header redaction for Codex $transport in debug=$debug", async ({ debug, transport }) => {
+  const { directory, dump } = fixture(debug ? { inputItems: 0, itemMaxBytes: 0 } : { inputItems: 3, itemMaxBytes: 65536 });
+  const headers = { authorization: "Bearer PRIVATE", "x-api-key": "PRIVATE", "x-token": "PRIVATE", "user-agent": "codex-tui/0.156.1",
+    "x-client-request-id": "request-fixture", "thread-id": "thread-fixture", "x-codex-turn-state": "s".repeat(2048),
+    "x-vendor": "diagnostic", referer: "https://example.test/path?token=PRIVATE&mode=test" };
+  if (transport === "http") {
+    const exchange = dump.beginHttpExchange({ headers, method: "POST", path: "/responses", startedAtMs: Date.now() });
+    exchange.requestChunk(Buffer.from(JSON.stringify({ model: "fixture", input: "hello" }))); exchange.requestEnd();
+    exchange.responseHead(200, { "content-type": "application/json", "set-cookie": ["PRIVATE"], "x-request-id": "response-fixture" });
+    exchange.responseChunk(Buffer.from(JSON.stringify({ id: "resp_fixture", object: "response", model: "fixture", status: "completed", output: [] }))); exchange.responseEnd();
+  } else {
+    const exchange = dump.beginWebSocketExchange({ headers, url: "wss://example.test/responses", startedAtMs: Date.now() });
+    exchange.webSocketFrame("client", textFrame({ type: "response.create", model: "fixture" }), false);
+    exchange.webSocketFrame("upstream", textFrame({ type: "response.completed", response: { model: "fixture", status: "completed", output: [] } }), false);
+    exchange.webSocketClose("upstream", 1000, Buffer.alloc(0));
+  }
+  await dump.close();
+  const sessions = listDumpFiles(directory); const detail = await describeDumpExchange(sessions, 1);
+  expect(detail.clientName).toBe("Codex"); expect(detail.protocol).toBe("responses");
+  expect(detail.request.headers["thread-id"]).toBe("thread-fixture");
+  expect(detail.request.headers["x-vendor"]).toBe("diagnostic");
+  expect(detail.request.headers["x-codex-turn-state"]).toHaveLength(2048);
+  expect(detail.request.headers.referer).toContain("mode=test");
+  if (transport === "http") expect(detail.response.headers["x-request-id"]).toBe("response-fixture");
+  for (const file of readdirSync(sessions[0]!)) expect(readFileSync(join(sessions[0]!, file), "utf8")).not.toContain("PRIVATE");
+});

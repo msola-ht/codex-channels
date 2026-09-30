@@ -1,7 +1,7 @@
 import type { WriteStream } from "node:fs";
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
-import { relayDebugHeaders } from "./relay-debug-headers.js";
+import { capturedTrafficHeaders } from "./traffic-dump-headers.js";
 import { ChatDiagnostics } from "./chat-diagnostics.js";
 import { waitForChatOperation } from "./chat-io.js";
 import { pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
@@ -10,9 +10,6 @@ import type { ProviderProxyMetrics } from "./response-metrics-observer.js";
 
 const MiB = 1024 * 1024;
 const reservationBytes = 9 * MiB + 64 * 1024;
-function headersOf(headers: IncomingHttpHeaders | OutgoingHttpHeaders): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(headers).filter(([key]) => ["content-type", "accept", "user-agent"].includes(key.toLowerCase())));
-}
 
 export interface DirectChatCapture {
   inbound?(value: unknown, headers: IncomingHttpHeaders): void;
@@ -130,9 +127,9 @@ export class RelayTrafficDump {
       const delivered = debug ? new RelayDumpPayload(storage, session, 4 * MiB) : undefined;
       let inbound: { headers: Record<string, string | string[]>; headersTruncated: boolean; payload: ReturnType<RelayDumpPayload["finish"]> } | undefined;
       let inboundBody: unknown;
-      let inboundHead: ReturnType<typeof relayDebugHeaders> | undefined;
+      let inboundHead: ReturnType<typeof capturedTrafficHeaders> | undefined;
       let deliveredStatus: number | undefined;
-      let deliveredHeaders: ReturnType<typeof relayDebugHeaders> = { headers: {}, truncated: false };
+      let deliveredHeaders: ReturnType<typeof capturedTrafficHeaders> = { headers: {}, truncated: false };
       let upstreamHeadersTruncated = false;
       const diagnostics = new ChatDiagnostics();
       const requestChanges = new Set<string>();
@@ -142,10 +139,10 @@ export class RelayTrafficDump {
         ...(debug ? {
           inbound: (value: unknown, headers: IncomingHttpHeaders) => safe(() => {
             // Retain only until actual submission, so a failed outbound recheck cannot persist input.
-            inboundBody = value; inboundHead = relayDebugHeaders(headers);
+            inboundBody = value; inboundHead = capturedTrafficHeaders(headers);
           }),
           delivered: (value: unknown, stream: boolean, status: number, headers: OutgoingHttpHeaders) => safe(() => {
-            deliveredStatus = status; deliveredHeaders = relayDebugHeaders(headers); delivered!.value(value, stream);
+            deliveredStatus = status; deliveredHeaders = capturedTrafficHeaders(headers); delivered!.value(value, stream);
           }),
           transformed: (operation: "headers_filtered" | "headers_overridden" | "stream_defaulted" | "store_defaulted" | "json_unwrapped") => safe(() => {
             (operation === "json_unwrapped" ? responseChanges : requestChanges).add(operation);
@@ -161,14 +158,14 @@ export class RelayTrafficDump {
           const content = Buffer.from(redactRelayValue(request));
           const omitted = content.length > (debug ? MiB / 2 : MiB);
           const part = omitted ? undefined : storage.writePayload(session, content, "utf8");
-          const head = debug ? relayDebugHeaders(headers) : undefined;
+          const head = capturedTrafficHeaders(headers);
           storage.writeInteraction(session, { id, kind: "request", transport: "http", account: provider, startedAtMs,
-            method: "POST", path, headers: head?.headers ?? headersOf(headers),
-            ...(debug ? { headersTruncated: head!.truncated, debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
+            method: "POST", path, headers: head.headers, headersTruncated: head.truncated,
+            ...(debug ? { debug: { version: 1, inbound, transformations: [...requestChanges] } } : {}), requestModel: request.model,
             bytes: Buffer.byteLength(JSON.stringify(request)), payload: { bytes: part?.bytes ?? 0, parts: part ? [part] : [], truncated: omitted } });
           requestSaved = true;
         }),
-        head: (code, headers) => safe(() => { status = code; diagnostics.responseStatus(code); diagnostics.header(headers["x-request-id"]); const head = debug ? relayDebugHeaders(headers) : undefined; responseHeaders = head?.headers ?? headersOf(headers); upstreamHeadersTruncated = head?.truncated ?? false; }),
+        head: (code, headers) => safe(() => { status = code; diagnostics.responseStatus(code); diagnostics.header(headers["x-request-id"]); const head = capturedTrafficHeaders(headers); responseHeaders = head.headers; upstreamHeadersTruncated = head.truncated; }),
         value: (value, stream) => safe(() => {
           upstream.value(value, stream);
           const envelope = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -184,9 +181,9 @@ export class RelayTrafficDump {
             const snapshot = diagnostics.snapshot();
             const finalProvider = snapshot.fields["routing.finalProvider"];
             if (protocol === "chat") storage.writeTrace(session, { kind: "chat_diagnostics", interaction: id, ...snapshot });
-            storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders,
+            storage.writeInteraction(session, { id, kind: "response", transport: "http", status, headers: responseHeaders, headersTruncated: upstreamHeadersTruncated,
               ...(typeof finalProvider === "string" && finalProvider !== "" ? { upstreamProvider: finalProvider } : {}),
-              ...(debug ? { headersTruncated: upstreamHeadersTruncated, debug: { version: 1,
+              ...(debug ? { debug: { version: 1,
                 delivered: { status: deliveredStatus, headers: deliveredHeaders.headers, headersTruncated: deliveredHeaders.truncated,
                   payload: delivered!.finish(), state: deliveredStatus === undefined ? "not_started" : delivery }, transformations: [...responseChanges] } } : {}),
               responseModels: responseModel === undefined ? [] : [responseModel],

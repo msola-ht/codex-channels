@@ -16,19 +16,33 @@ export function requestProtocol(request) {
   return undefined;
 }
 
-/** Client-reported User-Agent evidence only; never infer an app from a generic browser/SDK. */
+/** Client-reported User-Agent evidence only; browser names do not identify extensions. */
 export function requestClientName(request) {
   if (request?.debug !== undefined && request.debug?.version !== 1) return undefined;
   const headers = request?.debug === undefined ? request?.headers : request.debug.inbound?.headers;
   const value = Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === "user-agent")?.[1];
   if (typeof value !== "string" || value.length > 1024 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return undefined;
   const apps = [["WorkBuddy", "WorkBuddy"], ["CodeBuddy", "CodeBuddy"], ["codex_cli_rs", "Codex"],
-    ["codex_vscode", "Codex"], ["Cline", "Cline"], ["RooCode", "Roo Code"], ["CherryStudio", "Cherry Studio"],
+    ["codex_vscode", "Codex"], ["codex-tui", "Codex"], ["Cline", "Cline"], ["RooCode", "Roo Code"], ["CherryStudio", "Cherry Studio"],
     ["Kelivo", "Kelivo"], ["ImmersiveTranslate", "Immersive Translate"]];
   for (const [product, label] of apps) {
-    if (new RegExp(`(?:^|[ ;(])${product}/[0-9]`, "iu").test(value)) return label;
+    if (value.toLowerCase() === product.toLowerCase() || new RegExp(`(?:^|[ ;(])${product}/[0-9]`, "iu").test(value)) return label;
   }
-  return undefined;
+  const browsers = [[/(?:^|[ ;(])(?:Edg|EdgA|EdgiOS)\/[0-9]/iu, "Edge"],
+    [/(?:^|[ ;(])(?:OPR|Opera)\/[0-9]/iu, "Opera"],
+    [/(?:^|[ ;(])SamsungBrowser\/[0-9]/iu, "Samsung Internet"],
+    [/(?:^|[ ;(])(?:Firefox|FxiOS)\/[0-9]/iu, "Firefox"],
+    [/(?:^|[ ;(])(?:Chrome|CriOS)\/[0-9]/iu, "Chrome"],
+    [/Version\/[0-9].*Safari\/[0-9]/iu, "Safari"]];
+  const browser = browsers.find(([pattern]) => pattern.test(value))?.[1];
+  if (!browser) return undefined;
+  const platform = /Android/iu.test(value) ? "Android"
+    : /iPhone|iPad|iPod/iu.test(value) ? "iOS"
+    : /Windows/iu.test(value) ? "Windows"
+    : /Macintosh|Mac OS X/iu.test(value) ? "macOS"
+    : /CrOS/iu.test(value) ? "ChromeOS"
+    : /Linux/iu.test(value) ? "Linux" : undefined;
+  return platform ? `${browser} / ${platform}` : browser;
 }
 
 /** 从转储的原始字段投影展示信息；不改写终态，也不把推导结果写回磁盘。 */

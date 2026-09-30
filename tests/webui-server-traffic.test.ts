@@ -15,6 +15,9 @@ import {
   type WebuiTestServer,
 } from "./webui-server-test-fixture.js";
 
+// @ts-expect-error JavaScript presentation helper intentionally has no declaration file.
+import { requestClientName } from "../scripts/traffic-dump-presentation.mjs";
+
 const temporaryDirectories: string[] = [];
 const servers: WebuiTestServer[] = [];
 
@@ -23,6 +26,21 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it.each([
+    ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36", "Chrome / macOS"],
+    ["Mozilla/5.0 (Windows NT 10.0) Chrome/143.0 Safari/537.36 Edg/143.0", "Edge / Windows"],
+    ["Mozilla/5.0 (Linux; Android 14) Chrome/143.0 Safari/537.36 SamsungBrowser/28.0", "Samsung Internet / Android"],
+    ["Mozilla/5.0 (Linux) Chrome/143.0 Safari/537.36 OPR/120.0", "Opera / Linux"],
+    ["Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) FxiOS/140.0 Mobile/15 Safari/605.1", "Firefox / iOS"],
+    ["Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) CriOS/143.0 Mobile/15 Safari/605.1", "Chrome / iOS"],
+    ["Mozilla/5.0 (Macintosh) Version/18.0 Safari/605.1", "Safari / macOS"],
+    ["Mozilla/5.0 (X11; CrOS x86_64) Chrome/143.0 Safari/537.36", "Chrome / ChromeOS"],
+    ["Mozilla/5.0 Chrome/143.0 Safari/537.36 WorkBuddy/5.6.2", "WorkBuddy"],
+    ["Mozilla/5.0 AppleWebKit/537.36", undefined],
+  ])("identifies browser evidence without overriding apps: %s", (agent, expected) => {
+    expect(requestClientName({ headers: { "user-agent": agent } })).toBe(expected);
+  });
+
   it("derives each call protocol from its endpoint, including historical HTTP and WebSocket dumps", async () => {
     const fixture = createFixture();
     const inputs = [
@@ -53,7 +71,7 @@ describe("webui traffic V2 API", () => {
     expect(response.body.exchanges.find(row => row.id === 2)?.protocol).toBe("responses");
   });
 
-  it("projects client names from saved User-Agent with inbound precedence and no browser guessing", async () => {
+  it("projects client names from saved User-Agent with inbound precedence and browser identification", async () => {
     const fixture = createFixture();
     const agents = ["WorkBuddy/5.6.2 WorkBuddy/5.6.2 CLI/2.147.0", "codex_cli_rs/0.156.1", "Mozilla/5.0 Chrome/143.0", "node", "[REDACTED]", "WorkBuddy/5.6.2\nprivate"];
     const interactions = agents.map((agent, index) => {
@@ -72,15 +90,21 @@ describe("webui traffic V2 API", () => {
     Object.assign(missingInboundAgent.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
       debug: { version: 1, inbound: { headers: {} } } });
     interactions.push(unknownVersion, missingInboundAgent);
+    for (const [index, agent] of ["Kelivo", "WorkBuddy", "Kelivo-other", "codex-tui/0.156.1 (Debian 13.0.0; x86_64) xterm-256color (codex-tui; 0.156.1)"].entries()) {
+      const item = httpInteraction(10 + index);
+      Object.assign(item.request, { headers: { "user-agent": agent } }); interactions.push(item);
+    }
     writeSession(fixture.trafficDir, "relay.chat", "client-evidence", interactions);
     const paths = [join(fixture.trafficDir, "relay.chat-client-evidence")];
     const rows = await summarizeDumpFiles(paths);
-    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", undefined, undefined, undefined, undefined, "WorkBuddy", undefined, undefined]);
+    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", "Chrome", undefined, undefined, undefined, "WorkBuddy", undefined, undefined, "Kelivo", "WorkBuddy", undefined, "Codex"]);
     expect((await describeDumpExchange(paths, 1)).clientName).toBe("WorkBuddy");
+    expect((await describeDumpExchange(paths, 3)).clientName).toBe("Chrome");
     const server = await startServer(fixture.environment);
     const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=relay.chat`);
     expect(response.status).toBe(200);
     expect(response.body.exchanges.find(row => row.id === 1)?.clientName).toBe("WorkBuddy");
+    expect(response.body.exchanges.find(row => row.id === 3)?.clientName).toBe("Chrome");
   });
 
   it("reports the shared global capture switch and retention for Relay", async () => {
