@@ -1,3 +1,4 @@
+import { DeliveryControlServer } from "../../runtime/delivery-control.mjs";
 import { randomUUID } from "node:crypto";
 import { DeliveryCoordinator, DeliveryJournal, DeliveryError } from "../delivery/index.js";
 import type { ConversationTarget, OutputEvent } from "../conversation-core/index.js";
@@ -16,6 +17,7 @@ export interface PersistentSurfaceOutputOptions {
 }
 
 export class PersistentSurfaceOutput {
+  private readonly control: DeliveryControlServer;
   private readonly coordinator: DeliveryCoordinator;
   private readonly journal: DeliveryJournal;
   private readonly preparing = new Set<Promise<void>>();
@@ -48,6 +50,7 @@ export class PersistentSurfaceOutput {
         if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
         await withPersistentDeliveryDiagnostics(record.id, () => withPersistentOutputImage(payload, options.directory, (event) => options.deliver(event, signal, async (checkpoint) => {
           if (!(await this.journal.checkpoint(record.id, checkpoint))) throw new DeliveryError("storage");
+          this.control.changed();
           if (checkpoint.state === "started") {
             signal.throwIfAborted();
             if (!options.authorized(payload.event, payload.owner)) throw new Error("投递授权已变化");
@@ -57,9 +60,20 @@ export class PersistentSurfaceOutput {
       fault: (code, account, id) => options.fault(code, account, id),
       changed: () => this.notifyIdleWaiters(),
     });
+    this.control = new DeliveryControlServer(options.directory, async (entries, action) => {
+      const applied = await this.coordinator.resolveBatch(entries, action);
+      if (applied && action === "ignore") for (const entry of entries) this.liveOrders.delete(entry.id);
+      return applied;
+    });
   }
 
-  start(): Promise<void> { return this.coordinator.start(); }
+  private startPromise: Promise<void> | undefined;
+  start(): Promise<void> { return this.startPromise ??= this.startInternal(); }
+  private async startInternal(): Promise<void> {
+    await this.coordinator.start();
+    try { await this.control.start(); }
+    catch (error) { await this.coordinator.close(); throw error; }
+  }
   wake(): void { this.coordinator.wake(); }
   acceptsExecution(target: ConversationTarget): boolean {
     return this.executionBlockReason(target) === undefined;
@@ -134,6 +148,7 @@ export class PersistentSurfaceOutput {
 
   async close(): Promise<void> {
     this.closed = true;
+    await this.control.close().catch(() => this.options.fault("control-close"));
     this.notifyIdleWaiters();
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -150,6 +165,7 @@ export class PersistentSurfaceOutput {
 
   private closeExpired = false;
   private notifyIdleWaiters(): void {
+    this.control.changed();
     for (const check of [...this.idleWaiters]) check();
     this.options.changed?.();
   }

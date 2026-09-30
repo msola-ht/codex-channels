@@ -1105,3 +1105,4 @@ export interface DeliveryBatchResult { result: "pending" | "ignored"; count: num
 export interface DeliveryContent { type: string; text: string | null; truncated: boolean; threadId: string | null; turnId: string | null; status: string | null; imageFormat: "png" | "jpeg" | null }
 
 export interface DeliveryContentsResponse { records: Array<DeliveryRetryInput & { content: DeliveryContent | null }> }
+export interface DeliveryQueueEvent { type: "changed" | "heartbeat" | "unavailable" }

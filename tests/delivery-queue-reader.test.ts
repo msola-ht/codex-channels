@@ -136,3 +136,14 @@ it("uses indexed lookups and one read transaction for batch metadata without glo
     expect(() => readDeliveryEntries(directory, ["one", "one"])).toThrow();
   } finally { prepare.mockRestore(); writer.close(); }
 });
+
+it("reads a bounded metadata batch through the writer without changing input order", () => {
+  const writer = new SqliteDeliveryJournal(fixture());
+  try {
+    writer.execute({ type: "submit", value: { id: "one", account: "a", conversation: "c", payload: "body" } });
+    expect(writer.execute({ type: "queueEntries", ids: ["missing", "one"] })).toEqual([null, expect.objectContaining({ id: "one" })]);
+    expect(() => writer.execute({ type: "queueEntries", ids: [] })).toThrow("conflict");
+    expect(() => writer.execute({ type: "queueEntries", ids: ["one", "one"] })).toThrow("conflict");
+    expect(() => writer.execute({ type: "queueEntries", ids: Array.from({ length: 51 }, (_, i) => String(i)) })).toThrow("conflict");
+  } finally { writer.close(); }
+});

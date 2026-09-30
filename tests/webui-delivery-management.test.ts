@@ -1,5 +1,7 @@
+import { deliveryControlSocketPath } from "../runtime/delivery-control.mjs";
 import { join } from "node:path";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { PrivateIpcServer } from "../runtime/private-ipc.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { SqliteDeliveryJournal } from "../src/delivery/sqlite-journal.js";
@@ -28,6 +30,42 @@ async function fixture() {
   const content = (id: string, revision: string) => fetch(`${url}/content?${new URLSearchParams({ id, revision })}`, { headers });
   return { directory, home: f.home, url, headers, snapshot, post, content };
 }
+it("authenticates SSE and streams real queue changes without exposing payloads", async () => {
+  const f = await fixture();
+  const writer = new SqliteDeliveryJournal(f.directory);
+  writer.execute({ type: "resolve", id: "record", action: "confirm" });
+  writer.close();
+  const output = new PersistentSurfaceOutput({ directory: f.directory, workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
+    accounts: () => ['["feishu","main"]'], owner: () => "owner", authorized: () => false,
+    deliver: async () => {}, fault: () => {},
+  });
+  await output.start();
+  const abort = new AbortController();
+  try {
+    expect((await fetch(`${f.url}/events`)).status).toBe(401);
+    expect((await fetch(`${f.url}/events?token=secret`, { headers: f.headers })).status).toBe(400);
+    expect((await fetch(`${f.url}/events`, { headers: { ...f.headers, origin: "https://evil.invalid" } })).status).toBe(403);
+    const response = await fetch(`${f.url}/events`, { headers: f.headers, signal: abort.signal });
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    const reader = response.body!.getReader();
+    const read = async () => new TextDecoder().decode((await reader.read()).value);
+    expect(await read()).toBe('data: {"type":"changed"}\n\n');
+    output.accept({ type: "text.completed", target: { surface: "feishu", accountId: "main", conversationId: "chat" },
+      threadId: "t", turnId: "u", itemId: "item", text: "SECRET BODY" });
+    expect(await read()).toBe('data: {"type":"changed"}\n\n');
+    await vi.waitFor(async () => expect((await f.snapshot()).records[0]?.state).toBe("blocked"));
+    const row = (await f.snapshot()).records[0]!;
+    const input = { action: "ignore", entries: [{ id: row.id, revision: row.revision }] };
+    const preview = await (await f.post("batch-preview", input)).json() as { confirmationToken: string };
+    expect((await f.post("batch-apply", { ...input, confirmationToken: preview.confirmationToken })).status).toBe(200);
+    expect(await read()).toBe('data: {"type":"changed"}\n\n');
+    expect((await f.snapshot()).records).toEqual([]);
+    await output.close();
+    expect(await read()).toBe('data: {"type":"unavailable"}\n\n');
+    expect((await reader.read()).done).toBe(true);
+  } finally { abort.abort(); await output.close(); }
+});
 it("authenticates reads, validates filters, and returns only safe metadata", async () => {
   const f = await fixture();
   expect((await fetch(`${f.url}/queue`)).status).toBe(401);
@@ -275,4 +313,60 @@ it("reads three full pages of summaries without consuming write quotas or exhaus
     expect(result.records[0]?.content).toBeNull();
     expect(result.records[1]?.content).toMatchObject({ text: "x".repeat(160) });
   } finally { writer.close(); }
+});
+
+it.each([{ action: "retry", authorized: true }, { action: "ignore", authorized: true }, { action: "retry", authorized: false }] as const)("processes $action through the live Gateway writer (authorized=$authorized)", async ({ action, authorized }) => {
+  const f = await fixture();
+  const writer = new SqliteDeliveryJournal(f.directory);
+  writer.execute({ type: "resolve", id: "record", action: "confirm" });
+  const target = { surface: "feishu" as const, accountId: "main", conversationId: "chat" };
+  for (const id of ["first", "second"]) writer.execute({ type: "submit", value: {
+    id, account: '["feishu","main"]', conversation: '["feishu","main","chat"]', payload: JSON.stringify({ version: 1, owner: "owner", event: {
+      type: "text.completed", target, threadId: "t", turnId: "u", itemId: id, text: id,
+    } }),
+  } });
+  writer.execute({ type: "state", id: "first", from: "pending", to: "uncertain" }); writer.close();
+  const sent: string[] = [];
+  let checks = 0;
+  const output = new PersistentSurfaceOutput({ directory: f.directory, workerUrl: new URL("../dist/delivery/worker.js", import.meta.url),
+    accounts: () => ['["feishu","main"]'], owner: () => "owner", authorized: (_event, owner) => { checks++; return authorized && owner === "owner"; },
+    deliver: async event => { if (event.type === "text.completed") sent.push(event.text); }, fault: () => {},
+  });
+  try {
+    await output.start();
+    const row = (await f.snapshot()).records.find(row => row.id === "first")!;
+    const input = { action, entries: [{ id: row.id, revision: row.revision }] };
+    const preview = await (await f.post("batch-preview", input)).json() as { confirmationToken: string };
+    const response = await f.post("batch-apply", { ...input, confirmationToken: preview.confirmationToken });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ result: action === "retry" ? "pending" : "ignored", auditStatus: "recorded" });
+    if (authorized) {
+      await output.waitForIdle(target, AbortSignal.timeout(3000));
+      expect(sent).toEqual(action === "retry" ? ["first", "second"] : ["second"]);
+      expect((await f.snapshot()).summary?.records).toBe(0);
+    } else {
+      await vi.waitFor(async () => expect((await f.snapshot()).records.find(row => row.id === "first")?.state).toBe("blocked"));
+      expect(sent).toEqual([]);
+    }
+    expect(checks).toBeGreaterThan(0);
+    expect((await f.post("batch-apply", { ...input, confirmationToken: preview.confirmationToken })).status).toBe(409);
+  } finally { await output.close(); }
+});
+
+it("does not fall back to an offline mutation after losing an online response", async () => {
+  const f = await fixture();
+  const server = new PrivateIpcServer(deliveryControlSocketPath(f.directory), socket => {
+    socket.on("error", () => {});
+    socket.once("data", () => socket.destroy());
+  });
+  await server.start("occupied");
+  try {
+    const row = (await f.snapshot()).records[0]!;
+    const input = { action: "ignore", entries: [{ id: row.id, revision: row.revision }] };
+    const preview = await (await f.post("batch-preview", input)).json() as { confirmationToken: string };
+    const response = await f.post("batch-apply", { ...input, confirmationToken: preview.confirmationToken });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "delivery_unconfirmed" } });
+    expect((await f.snapshot()).records[0]?.id).toBe(row.id);
+  } finally { await server.close(); }
 });

@@ -118,7 +118,7 @@ export class SqliteDeliveryJournal {
 
   execute(command: JournalCommand): JournalResult {
     if (this.closed) throw new DeliveryError("closed");
-    if (this.mode === "maintenance" && !["queueEntry", "resolve", "resolveBatch", "close"].includes(command.type)) throw new DeliveryError("conflict");
+    if (this.mode === "maintenance" && !["queueEntry", "queueEntries", "resolve", "resolveBatch", "close"].includes(command.type)) throw new DeliveryError("conflict");
     switch (command.type) {
       case "submit": return this.submit(command.value);
       case "next": {
@@ -139,6 +139,10 @@ export class SqliteDeliveryJournal {
       case "read": {
         const row = this.database.prepare("SELECT * FROM deliveries WHERE id=?").get(command.id);
         return row ? this.decode(row as unknown as Row) : null;
+      }
+      case "queueEntries": {
+        if (!command.ids.length || command.ids.length > 50 || new Set(command.ids).size !== command.ids.length) throw new DeliveryError("conflict");
+        return command.ids.map(id => readDeliveryQueueRows(this.database, 0, null, id)[0] ?? null);
       }
       case "queueEntry": return readDeliveryQueueRows(this.database, 0, null, command.id)[0] ?? null;
       case "releaseBarrier": {

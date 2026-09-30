@@ -1,16 +1,21 @@
+import { requestDeliveryResolution, watchDeliveryChanges } from "../runtime/delivery-control.mjs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { DeliveryJournal, DeliveryError, readDeliveryQueue, readDeliveryPayload, readDeliveryEntries, readDeliveryPayloads } from "../dist/delivery/index.js";
 import { decodePersistentOutput } from "../dist/surfaces/delivery-diagnostics/index.js";
 import { readGatewayConfig } from "../runtime/gateway-config.mjs";
 import { locateUserConfig, resolveConfiguredPath } from "./runtime-config.mjs";
-import { fingerprintManagementValue } from "./management-security.mjs";
+import { fingerprintManagementValue, managementSecurityHeaders } from "./management-security.mjs";
 import { ApiError, readJsonBody, sendManagementJson } from "./webui-http.mjs";
 
 const mutation = z.strictObject({ id: z.string().min(1).max(4096), revision: z.string().regex(/^[a-f0-9]{64}$/u),
   confirmationToken: z.string().max(128).optional() });
 const query = z.strictObject({ before: z.string().regex(/^(0|[1-9][0-9]*)$/u).transform(Number).pipe(z.number().int().nonnegative().safe()).optional(),
   state: z.enum(["pending", "sending", "uncertain", "blocked"]).optional() });
+const streams = new WeakMap();
+export function closeDeliveryStreams(state) {
+  for (const close of streams.get(state) ?? []) close();
+}
 
 function directoryFor(environment) {
   const { configPath, dataDir } = locateUserConfig(environment);
@@ -21,6 +26,28 @@ function entryRevision(directory, row) { return fingerprintManagementValue({ dir
 function retryable(row) { return row && ["uncertain", "blocked"].includes(row.state); }
 
 export async function routeDeliveryManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {
+  if (path === "/delivery/events" && request.method === "GET") {
+    if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "delivery_invalid", "投递参数无效");
+    const directory = directoryFor(environment);
+    let active = streams.get(state);
+    if (!active) { active = new Set(); streams.set(state, active); }
+    if (active.size >= 8) throw new ApiError(429, "delivery_busy", "投递通知连接已满");
+    const controller = new AbortController();
+    const close = () => { controller.abort(); active.delete(close); response.end(); };
+    active.add(close);
+    response.once("close", close);
+    response.writeHead(200, { ...managementSecurityHeaders(), "content-type": "text/event-stream; charset=utf-8", "x-accel-buffering": "no" });
+    response.flushHeaders();
+    const send = type => {
+      if (controller.signal.aborted) return;
+      if (!response.write(`data: ${JSON.stringify({ type })}\n\n`)) { close(); response.destroy(); }
+    };
+    void watchDeliveryChanges(directory, controller.signal, send).catch(() => send("unavailable")).finally(() => {
+      close();
+      response.end();
+    });
+    return true;
+  }
   if (path === "/delivery/content-batch" && request.method === "POST") {
     const parsed = z.strictObject({ entries: batchMutation.shape.entries }).safeParse(await readJsonBody(request, maximumBodyBytes));
     if (!parsed.success || new Set(parsed.data.entries.map(entry => entry.id)).size !== parsed.data.entries.length) throw new ApiError(400, "delivery_invalid", "投递参数无效");
@@ -86,22 +113,7 @@ export async function routeDeliveryManagement({ environment, maximumBodyBytes, p
   state.confirmations.consume(confirmationToken, binding);
   try { state.audit.assertWritable(); }
   catch { throw new ApiError(503, "management_audit_unavailable", "审计不可用，未重试投递"); }
-  const journal = new DeliveryJournal(directory, { mode: "maintenance" });
-  let cleanupStatus = "closed";
-  try {
-    await journal.ready;
-    // Lock acquisition is authoritative: never compete with Gateway or another operator.
-    const current = await journal.queueEntry(id);
-    if (!retryable(current) || entryRevision(directory, current) !== revision) throw new ApiError(409, "delivery_stale", "投递记录已变化，请刷新后重试");
-    if (!(await journal.resolve(id, "retry"))) throw new ApiError(409, "delivery_stale", "投递记录已变化，请刷新后重试");
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    if (error instanceof DeliveryError && error.code === "conflict") throw new ApiError(409, "delivery_busy", "请先停止 Gateway，再确认重试；投递箱正被占用");
-    throw new ApiError(503, "delivery_unconfirmed", "无法确认重试结果，请刷新队列核对，不要重复提交");
-  } finally {
-    // A completed mutation must not be reported as unapplied if cleanup fails.
-    await journal.close().catch(() => { cleanupStatus = "unconfirmed"; });
-  }
+  const cleanupStatus = await resolveDelivery(directory, [row], "retry");
   let auditStatus = "recorded";
   try {
     state.audit.record({ sessionId: principalId, source: "webui", operation: "delivery.retry", target: fingerprintManagementValue(id),
@@ -136,16 +148,7 @@ async function batchDelivery({ environment, maximumBodyBytes, path, principalId,
   state.confirmations.consume(confirmationToken, binding);
   try { state.audit.assertWritable(); }
   catch { throw new ApiError(503, "management_audit_unavailable", "审计不可用，未处理投递"); }
-  const journal = new DeliveryJournal(directory, { mode: "maintenance" });
-  let cleanupStatus = "closed";
-  try {
-    await journal.ready;
-    if (!(await journal.resolveBatch(rows.map(row => ({ id: row.id, revision: row.revision })), action === "retry" ? "retry" : "confirm"))) throw new ApiError(409, "delivery_stale", "记录已变化，请重新选择");
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
-    if (error instanceof DeliveryError && error.code === "conflict") throw new ApiError(409, "delivery_busy", "请先停止 Gateway，投递箱正被占用");
-    throw new ApiError(503, "delivery_unconfirmed", "处理结果未确认，请核对队列");
-  } finally { await journal.close().catch(() => { cleanupStatus = "unconfirmed"; }); }
+  const cleanupStatus = await resolveDelivery(directory, rows, action);
   let auditStatus = "recorded";
   try { state.audit.record({ sessionId: principalId, source: "webui", operation: binding.operation, target: fingerprintManagementValue(entries.map(entry => entry.id)),
     inputFingerprint: binding.inputFingerprint, revision: binding.resourceRevision, phase: "completed", resultCode: action === "retry" ? "pending" : "ignored", recovery: "none" }); }
@@ -160,4 +163,27 @@ function displayContent(payload, limit) {
     threadId: "threadId" in event ? event.threadId ?? null : null, turnId: "turnId" in event ? event.turnId : null,
     status: "status" in event ? event.status : event.type === "operation.updated" ? event.operation.status : null,
     imageFormat: image?.format ?? null };
+}
+
+async function resolveDelivery(directory, rows, action) {
+  const entries = rows.map(row => ({ id: row.id, revision: row.revision }));
+  let result;
+  try { result = await requestDeliveryResolution(directory, entries, action); }
+  catch { throw new ApiError(503, "delivery_unconfirmed", "无法确认处理结果，请刷新核对"); }
+  if (result === "applied") return "closed";
+  if (result === "stale") throw new ApiError(409, "delivery_stale", "记录已变化，请刷新后重试");
+  if (result === "busy") throw new ApiError(409, "delivery_busy", "目标会话正在投递，请稍后重试");
+  if (result !== null) throw new ApiError(503, "delivery_unconfirmed", "处理结果未确认，请核对队列，不要重复提交");
+  // Fallback only when no IPC command was sent; the writer lock remains authoritative.
+  const journal = new DeliveryJournal(directory, { mode: "maintenance" });
+  let cleanupStatus = "closed";
+  try {
+    await journal.ready;
+    if (!(await journal.resolveBatch(entries, action === "retry" ? "retry" : "confirm"))) throw new ApiError(409, "delivery_stale", "记录已变化，请重新选择");
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error instanceof DeliveryError && error.code === "conflict") throw new ApiError(409, "delivery_busy", "投递正在处理或运行中的 Gateway 尚不支持在线管理，请稍后重试或升级 Gateway");
+    throw new ApiError(503, "delivery_unconfirmed", "处理结果未确认，请核对队列");
+  } finally { await journal.close().catch(() => { cleanupStatus = "unconfirmed"; }); }
+  return cleanupStatus;
 }

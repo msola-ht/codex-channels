@@ -77,11 +77,15 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
         onValueChange={value => { if (filters.includes(value as Filter)) onFilter(value as Filter) }} className="flex-wrap">
         {filters.map(value => <ToggleGroupItem key={value} value={value}>{t(`delivery.states.${value}`)}{!error && data?.summary && <span className="tabular-nums">{value === "all" ? data.summary.records : data.summary[value]}</span>}</ToggleGroupItem>)}
       </ToggleGroup>
-      <Button size="sm" variant="outline" disabled={loading || locked} onClick={() => { refetch(); summaries.refetch() }} aria-busy={loading}>
-        {loading && <Spinner data-icon="inline-start" aria-hidden="true" />}{t(loading ? "delivery.refreshing" : "relay.refresh")}
+      <div className="flex items-center gap-2">
+      <span className="w-40 text-right text-xs text-muted-foreground" role="status">{t(`delivery.notifications.${queue.notificationStatus ?? "connecting"}`)}</span>
+      <Button size="sm" variant="outline" className="w-36 shrink-0" disabled={loading || locked} onClick={() => { refetch(); summaries.refetch() }} aria-busy={loading || busy}>
+        <span className="flex size-4 items-center justify-center">{(loading || busy) && <Spinner aria-hidden="true" />}</span>
+        {t(busy && !pendingPreview ? "delivery.processing" : loading ? "delivery.refreshing" : "relay.refresh")}
       </Button>
+      </div>
     </div>
-    {busy && !pendingPreview && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner aria-hidden="true" />{t("delivery.preparing")}</p>}
+    {busy && !pendingPreview && <span role="status" className="sr-only">{t("delivery.preparing")}</span>}
     {error && <Alert variant="destructive"><AlertDescription>{translateApiError(t, error, errorCode)}</AlertDescription></Alert>}
     {queue.actionError && <Alert variant="destructive"><AlertDescription>{translateApiError(t, queue.actionError, queue.actionErrorCode)}</AlertDescription></Alert>}
     {queue.result && <Alert variant={queue.result.cleanupStatus === "unconfirmed" ? "destructive" : "default"}><AlertDescription>{t(queue.result.cleanupStatus === "unconfirmed" ? "delivery.cleanupUnconfirmed" : queue.result.auditStatus === "failed" ? "delivery.batchAuditFailed" : queue.result.result === "ignored" ? "delivery.ignored" : "delivery.saved")}</AlertDescription></Alert>}
@@ -115,7 +119,6 @@ function DeliveryQueueList({ filter, before, pageNumber, onFilter, onNext, onPre
             })}
           </ul>
         </div>
-        <code className="text-xs">codexc service stop gateway</code>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={busy}>{t("delivery.cancel")}</AlertDialogCancel>
           <AlertDialogAction variant={pendingPreview?.input.action === "ignore" ? "destructive" : "default"} aria-busy={busy} disabled={busy || loading} onClick={event => { event.preventDefault(); void queue.confirm() }}>{busy && <Spinner data-icon="inline-start" aria-hidden="true" />}{t(busy ? "delivery.processing" : pendingPreview?.input.action === "ignore" ? "delivery.ignoreConfirm" : "delivery.confirm")}</AlertDialogAction>

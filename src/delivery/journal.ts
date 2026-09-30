@@ -60,6 +60,7 @@ export class DeliveryJournal {
   }
   read(id: string): Promise<DeliveryRecord | null> { return this.call({ type: "read", id }) as Promise<DeliveryRecord | null>; }
   queueEntry(id: string): Promise<DeliveryQueueEntry | null> { return this.call({ type: "queueEntry", id }) as Promise<DeliveryQueueEntry | null>; }
+  queueEntries(ids: string[]): Promise<Array<DeliveryQueueEntry | null>> { return this.call({ type: "queueEntries", ids }) as Promise<Array<DeliveryQueueEntry | null>>; }
   releaseBarrier(id: string): Promise<boolean> { return this.call({ type: "releaseBarrier", id }) as Promise<boolean>; }
   transition(id: string, from: DeliveryState, to: DeliveryState): Promise<boolean> { return this.call({ type: "state", id, from, to }) as Promise<boolean>; }
   acknowledge(id: string): Promise<boolean> { return this.call({ type: "acknowledge", id }) as Promise<boolean>; }
@@ -97,7 +98,7 @@ export class DeliveryJournal {
     if (this.failed || (this.closing && command.type !== "close")) return Promise.reject(new DeliveryError("closed"));
     const bytes = command.type === "submit" ? Buffer.byteLength(command.value.payload) : 0;
     // The control path has reserved slots, so acknowledgements and close can drain a saturated mailbox.
-    if (this.pending.size >= (command.type === "submit" ? 128 : 160) || this.bytes + bytes > 8 * 1024 * 1024) return Promise.reject(new DeliveryError("mailbox-full"));
+    if (this.pending.size >= (["submit", "queueEntries", "resolveBatch"].includes(command.type) ? 128 : 160) || this.bytes + bytes > 8 * 1024 * 1024) return Promise.reject(new DeliveryError("mailbox-full"));
     const id = this.nextId++;
     this.bytes += bytes;
     return new Promise((resolve, reject) => {

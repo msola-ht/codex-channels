@@ -57,7 +57,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 详细行为见 `docs/webui.md`。
 
-`pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧导航进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与可见性轮询，筛选或翻页时重建当前查询，离开页面时取消请求。
+`pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧导航进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-delivery-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
 

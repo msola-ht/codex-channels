@@ -83,6 +83,7 @@ export type JournalCommand =
   | { type: "acknowledge"; id: string }
   | { type: "read"; id: string }
   | { type: "queueEntry"; id: string }
+  | { type: "queueEntries"; ids: string[] }
   | { type: "releaseBarrier"; id: string }
   | { type: "summary" }
   | { type: "checkpoint"; id: string; value: DeliveryRecord["progress"][number] }
@@ -91,7 +92,7 @@ export type JournalCommand =
   | { type: "resolveBatch"; entries: Array<{ id: string; revision: string }>; action: "retry" | "confirm" }
   | { type: "close" };
 
-export type JournalResult = number | boolean | DeliveryRecord | DeliveryQueueEntry | DeliverySummary | Array<Omit<DeliveryRecord, "payload">> | null;
+export type JournalResult = number | boolean | DeliveryRecord | DeliveryQueueEntry | Array<DeliveryQueueEntry | null> | DeliverySummary | Array<Omit<DeliveryRecord, "payload">> | null;
 
 export interface WorkerRequest { id: number; command: JournalCommand }
 export type WorkerReply =
