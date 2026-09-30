@@ -15,7 +15,7 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { startModelRelayService } from "../runtime/model-relay-service.mjs";
 import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
-import { queryModelRelayControl } from "../runtime/model-relay-control.mjs";
+import { ModelRelayControl, queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-setup.mjs";
 import * as privateFile from "../runtime/private-file.mjs";
@@ -222,7 +222,7 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   malformed.on("error", () => {}); await once(malformed, "connect");
   malformed.write('{"version":1,"operation":"status","requestId":{"toString":null}}\n');
   await once(malformed, "close");
-  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 2, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
+  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 3, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
   await expect(startModelRelayService(f.configPath, f.environment)).rejects.toThrow();
   expect(await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
   const models = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${String(issued.key)}` } });
@@ -582,4 +582,24 @@ it("renames and rolls back display names without restoring old credentials", asy
   const { display_name: removed, ...identity } = current;
   expect(removed).toBe("网页翻译");
   expect(read()).toEqual(identity);
+});
+
+
+it("rejects incompatible or malformed runtime diagnostics instead of inventing zero counts", async () => {
+  const f = await fixture();
+  const valid = { result: "status", configurationValid: true, enabled: false, listening: false, active: 0,
+    queue: { pending: 0, waiting: 0, bytes: 0, oldestWaitMs: 0, timedOut: 0 }, unavailableAccounts: 0,
+    capture: { enabled: false, state: "initializing", active: 0, skippedCapacity: 0 },
+    metrics: { local_dropped: 0, accepted: 0, rejected: 0, unconfirmed: 0, pending: 0, active: 0, bytes: 0 } };
+  let response: Record<string, unknown> = valid;
+  const endpoint = modelRelayPaths(f.configPath).control;
+  const control = new ModelRelayControl(endpoint, async () => response);
+  await control.start(); cleanups.push(() => control.close());
+  expect(await queryModelRelayControl(endpoint, "status")).toMatchObject(valid);
+  for (const patch of [{ version: 2 }, { capture: undefined }, { capture: { ...valid.capture, state: "invalid" } },
+    { capture: { ...valid.capture, secret: "hidden" } }, { queue: { ...valid.queue, oldestWaitMs: -1 } },
+    { queue: { ...valid.queue, timedOut: 0.5 } }]) {
+    response = { ...valid, ...patch };
+    expect(await queryModelRelayControl(endpoint, "status")).toEqual({ result: "unconfirmed" });
+  }
 });

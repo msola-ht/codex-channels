@@ -34,9 +34,9 @@ it("exposes bounded runtime status separately from configured concurrency", asyn
   expect(await f.snapshot()).toMatchObject({ maxConcurrency: 10, runtime: { state: "stopped" } });
   const query = vi.spyOn(relayControl, "queryModelRelayControl");
   try {
-    query.mockResolvedValueOnce({ result: "status", listening: true, configurationValid: true, active: 4, queue: { pending: 3, waiting: 2, bytes: 100 }, metrics: {}, secret: "DO-NOT-EXPOSE" });
+    query.mockResolvedValueOnce({ result: "status", listening: true, configurationValid: true, active: 4, queue: { pending: 3, waiting: 2, bytes: 100, oldestWaitMs: 1200, timedOut: 3 }, capture: { enabled: true, state: "ready", active: 2, skippedCapacity: 1, secret: "DO-NOT-EXPOSE" }, metrics: { accepted: 10, unconfirmed: 2, rejected: 1, local_dropped: 3 }, secret: "DO-NOT-EXPOSE" });
     const running = await f.snapshot();
-    expect(running.runtime).toEqual({ state: "running", listening: true, configurationValid: true, active: 4, waiting: 2, uploading: 1 });
+    expect(running.runtime).toEqual({ state: "running", listening: true, configurationValid: true, active: 4, waiting: 2, uploading: 1, oldestWaitMs: 1200, queueTimeouts: 3, capture: { enabled: true, state: "ready", active: 2, skippedCapacity: 1 }, metrics: { accepted: 10, unconfirmed: 2, rejected: 1, localDropped: 3 } });
     expect(JSON.stringify(running)).not.toContain("DO-NOT-EXPOSE");
     query.mockResolvedValueOnce({ result: "unconfirmed" });
     expect((await f.snapshot()).runtime).toEqual({ state: "unknown" });

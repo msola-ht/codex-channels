@@ -114,7 +114,7 @@ describe("Relay bounded waiting admission", () => {
     const order: string[] = [];
     const wait = (lease: typeof a1, name: string) => admission.wait(lease, "fixture/model", 100, lease.signal).then(() => order.push(name));
     const promises = [wait(a1, "a1"), wait(a2, "a2"), wait(b, "b")];
-    expect(admission.active).toBe(1); expect(admission.queue).toEqual({ pending: 3, waiting: 3, bytes: 300 });
+    expect(admission.active).toBe(1); expect(admission.queue).toMatchObject({ pending: 3, waiting: 3, bytes: 300 });
     active.release(); await promises[0]; expect(order).toEqual(["a1"]);
     a1.release(); await promises[2]; expect(order).toEqual(["a1", "b"]);
     b.release(); await promises[1]; expect(order).toEqual(["a1", "b", "a2"]);
@@ -150,7 +150,7 @@ describe("Relay bounded waiting admission", () => {
       a2.release(); await Promise.resolve();
       if (b2) { expect(order).toEqual([...prefix, "c1", "a2", "b2"]); b2.release(); }
       expect(errors).toEqual(mode === "cancelled" ? ["b1"] : []);
-      expect(admission.queue).toEqual({ pending: 0, waiting: 0, bytes: 0 }); expect(admission.active).toBe(0);
+      expect(admission.queue).toMatchObject({ pending: 0, waiting: 0, bytes: 0 }); expect(admission.active).toBe(0);
     } finally {
       admission.close(); active.release(); leases.forEach(lease => lease.release()); await Promise.all(waits);
     }
@@ -187,7 +187,7 @@ describe("Relay bounded waiting admission", () => {
       const lease = admission.reserve(token());
       waits.push(admission.wait(lease, "fixture/model", 1, lease.signal).catch(() => {}));
     }
-    expect(admission.queue).toEqual({ pending: 32, waiting: 32, bytes: 32 });
+    expect(admission.queue).toMatchObject({ pending: 32, waiting: 32, bytes: 32 });
     expect(() => admission.reserve(token("key-b"))).toThrow("relay_queue_full");
     admission.close(); await Promise.all(waits); active.release(); expect(admission.queue.bytes).toBe(0);
   });
@@ -217,13 +217,16 @@ describe("Relay bounded waiting admission", () => {
       admission.acquire(token()).release();
       const lease = admission.reserve(token()); const waiting = admission.wait(lease, "fixture/model", 5, lease.signal);
       await vi.advanceTimersByTimeAsync(999); expect(admission.active).toBe(0);
+      expect(admission.queue.oldestWaitMs).toBe(999);
       await vi.advanceTimersByTimeAsync(1); await waiting; expect(admission.active).toBe(1); lease.release();
       const next = admission.reserve(token()); const nextWait = admission.wait(next, "fixture/model", 5, next.signal);
       admission.apply(config); await nextWait;
       const timeout = admission.reserve(token());
       const rejection = expect(admission.wait(timeout, "fixture/model", 5, timeout.signal)).rejects.toThrow("relay_queue_timeout");
       await vi.advanceTimersByTimeAsync(30_000); await rejection;
-      expect(admission.queue.pending).toBe(0); next.release(); expect(admission.active).toBe(0);
+      expect(admission.queue).toMatchObject({ pending: 0, oldestWaitMs: 0, timedOut: 1 });
+      next.release(); expect(admission.active).toBe(0);
+      admission.apply(config); expect(admission.queue.timedOut).toBe(1);
     } finally { admission.close(); vi.useRealTimers(); }
   });
 });
@@ -235,6 +238,7 @@ it("honors reduced global concurrency and an expired deadline even before its ti
   const lease = admission.reserve(token()); const rejected = expect(admission.wait(lease, "fixture/model", 1, lease.signal)).rejects.toThrow("relay_queue_timeout");
   admission.apply({ ...config, maxConcurrency: 1 }); a.release(); expect(admission.queue.waiting).toBe(1);
   now = 30_001; b.release(); await rejected;
+  expect(admission.queue).toMatchObject({ oldestWaitMs: 0, timedOut: 1 });
   expect(admission.active).toBe(0); expect(admission.queue.pending).toBe(0); admission.close();
 });
 

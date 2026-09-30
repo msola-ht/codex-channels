@@ -43,6 +43,7 @@ export class RelayTrafficDump {
   private reserved = 0;
   private closed = false;
   private failed = false;
+  private skippedCapacity = 0;
   private readonly reported = new Set<string>();
   private readonly storage: Record<"chat" | "responses", TrafficDumpStorage>;
   constructor(private readonly options: { directory: string; onError(error: Error): void }) {
@@ -59,6 +60,10 @@ export class RelayTrafficDump {
   }
 
   setRetentionDays(days: number): void { this.retentionDays = days; }
+  diagnostics(): { state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number } {
+    return { state: this.closed ? "closed" : this.failed ? "failed" : this.ready ? "ready" : "initializing",
+      active: this.active, skippedCapacity: this.skippedCapacity };
+  }
   /** Initialize before enabling capture; never waits for model traffic. */
   async prepare(signal?: AbortSignal): Promise<void> {
     if (!this.ready) {
@@ -93,12 +98,14 @@ export class RelayTrafficDump {
   }
   begin(provider: string, debug = false, protocol: "chat" | "responses" = "chat"): DirectChatCapture | undefined {
     const storage = this.storage[protocol];
-    if (this.closed || this.failed || this.active >= 32) return undefined;
+    if (this.closed || this.failed) return undefined;
+    if (this.active >= 32) { this.skippedCapacity = Math.min(Number.MAX_SAFE_INTEGER, this.skippedCapacity + 1); return undefined; }
     const reservation = reservationBytes + (debug ? 128 * 1024 : 0);
     const full = this.retained + this.reserved + reservation > 512 * MiB;
     const elapsed = performance.now() - this.lastMaintenance;
     if (!this.ready || elapsed >= 60_000 || full && elapsed >= 1000) void this.maintain();
     if (!this.ready || full) {
+      if (full) this.skippedCapacity = Math.min(Number.MAX_SAFE_INTEGER, this.skippedCapacity + 1);
       this.notice("Relay traffic dump capacity unavailable; capture skipped"); return undefined;
     }
     try {

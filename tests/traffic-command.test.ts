@@ -166,7 +166,8 @@ describe("traffic cleanup", () => {
     const home = temporaryDirectory(); const configPath = join(home, "config.toml");
     writeFileSync(configPath, "version = 1\n", { mode: 0o600 });
     const control = new ModelRelayControl(modelRelayPaths(configPath).control, async () => ({ result: "status",
-      configurationValid: true, enabled: false, listening: false, active: 0, queue: { pending: 0, waiting: 0, bytes: 0 }, unavailableAccounts: 0,
+      configurationValid: true, enabled: false, listening: false, active: 0, queue: { pending: 0, waiting: 0, bytes: 0, oldestWaitMs: 0, timedOut: 0 }, unavailableAccounts: 0,
+      capture: { enabled: false, state: "initializing", active: 0, skippedCapacity: 0 },
       metrics: { local_dropped: 0, accepted: 0, rejected: 0, unconfirmed: 0, pending: 0, active: 0, bytes: 0 } }));
     await control.start();
     try { await expect(assertConfiguredAppServersStopped({ CODEX_CONNECT_HOME: home }, join(home, "traffic"))).rejects.toThrow("停止 Relay"); }

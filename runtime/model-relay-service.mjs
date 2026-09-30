@@ -129,7 +129,9 @@ export async function startModelRelayService(configPath, environment = process.e
       return { result: "applied", digest: snapshot.digest };
     }
     return { result: "status", configurationValid: snapshot !== undefined, enabled: snapshot?.config.enabled === true, listening: Boolean(listening),
-      active: relay?.diagnostics().active ?? 0, queue: relay?.diagnostics().queue ?? { pending: 0, waiting: 0, bytes: 0 }, unavailableAccounts: snapshot?.unavailable.length ?? 0, metrics: sender.diagnostics() };
+      active: relay?.diagnostics().active ?? 0, queue: relay?.diagnostics().queue ?? { pending: 0, waiting: 0, bytes: 0, oldestWaitMs: 0, timedOut: 0 },
+      capture: { ...dump.diagnostics(), enabled: snapshot?.debug.model_traffic_dump === true },
+      unavailableAccounts: snapshot?.unavailable.length ?? 0, metrics: sender.diagnostics() };
   });
   const close = () => {
     if (closeTask) return closeTask;

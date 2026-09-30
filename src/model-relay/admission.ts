@@ -51,6 +51,7 @@ export class RelayAdmission {
   private readonly pendingKeys = new Set<string>();
   private wakeTimer: NodeJS.Timeout | undefined;
   private scheduling = false;
+  private timedOut = 0;
 
   constructor(policy: RelayPolicy, private readonly now: () => number = () => performance.now()) {
     this.policy = freezePolicy(policy);
@@ -60,8 +61,10 @@ export class RelayAdmission {
   }
 
   get active(): number { return this.leases.size - this.pending.size; }
-  get queue(): { pending: number; waiting: number; bytes: number } {
-    return { pending: this.pending.size, waiting: [...this.pending.values()].filter(entry => entry.ready).length, bytes: this.pendingBytes };
+  get queue(): { pending: number; waiting: number; bytes: number; oldestWaitMs: number; timedOut: number } {
+    const waiting = [...this.pending.values()].flatMap(entry => entry.ready ? [entry.ready] : []);
+    return { pending: this.pending.size, waiting: waiting.length, bytes: this.pendingBytes,
+      oldestWaitMs: Math.floor(Math.max(0, ...waiting.map(entry => this.now() - (entry.deadline - 30_000)))), timedOut: this.timedOut };
   }
 
   /** Reserve bounded upload memory before reading any body; no execution credits yet. */
@@ -84,6 +87,7 @@ export class RelayAdmission {
       entry.ready = { model, deadline: this.now() + 30_000, resolve: () => finish(), reject: error => finish(error) };
       signal.addEventListener("abort", abort, { once: true });
       entry.timer = setTimeout(() => {
+        this.timedOut = Math.min(Number.MAX_SAFE_INTEGER, this.timedOut + 1);
         entry.ready?.reject(new RelayAdmissionError(429, "relay_queue_timeout")); lease.release();
       }, 30_000);
       this.schedule();
@@ -192,6 +196,7 @@ export class RelayAdmission {
           // An incomplete upload cannot be overtaken by another request from this key.
           if (!entry.ready) continue;
           if (this.now() >= entry.ready.deadline) {
+            this.timedOut = Math.min(Number.MAX_SAFE_INTEGER, this.timedOut + 1);
             entry.ready.reject(new RelayAdmissionError(429, "relay_queue_timeout")); lease.release(); progressed = true; continue;
           }
           try { lease.check(entry.ready.model); } catch { lease.cancel(); progressed = true; continue; }

@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { RelayRuntimeStatus } from "@/components/requests/relay-runtime-status"
 
 export function RelayPage() {
   const { t } = useTranslation()
@@ -102,6 +103,7 @@ export function RelayPage() {
       </> : <Badge variant="outline">{t(data.runtime?.state === "stopped" ? "relay.stopped" : "relay.runtimeUnknown")}</Badge>}
     </div>}
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
+    {snapshotCurrent && data?.runtime?.state === "running" && <RelayRuntimeStatus runtime={data.runtime} />}
     {data && !management.loading && !management.error && <Table><TableHeader><TableRow>
       {(["purpose", "provider", "protocol", "models", "reasoning", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
     </TableRow></TableHeader><TableBody>

@@ -17,7 +17,7 @@ export class ModelRelayControl {
         handled = true;
         let request;
         try { request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim()); } catch { socket.destroy(); return; }
-        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 2
+        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 3
           || typeof request.requestId !== "string" || !uuid.test(request.requestId) || !["apply", "status"].includes(request.operation)
           || Object.keys(request).some(key => !["version", "requestId", "operation", ...(request.operation === "apply" ? ["digest"] : [])].includes(key))
           || (request.operation === "apply" && (typeof request.digest !== "string" || !/^[a-f0-9]{64}$/u.test(request.digest)))) {
@@ -27,8 +27,8 @@ export class ModelRelayControl {
           if (this.#closed || controller.signal.aborted) throw new Error("Control closed");
           return handler(request, controller.signal);
         }).then(result => {
-          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 2, requestId: request.requestId, ...result })}\n`);
-        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 2, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
+          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 3, requestId: request.requestId, ...result })}\n`);
+        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 3, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
       });
     }, { maximumConnections: 4, connectionTimeoutMs: 2000 });
   }
@@ -46,27 +46,32 @@ export async function queryModelRelayControl(path, operation, digest) {
     try { socket = createPrivateIpcConnection(path); } catch { finish({ result: "unconfirmed" }); return; }
     socket.once("error", () => finish({ result: "unconfirmed" }));
     socket.once("close", () => finish({ result: "unconfirmed" }));
-    socket.once("connect", () => socket.write(`${JSON.stringify({ version: 2, requestId, operation, ...(digest === undefined ? {} : { digest }) })}\n`));
+    socket.once("connect", () => socket.write(`${JSON.stringify({ version: 3, requestId, operation, ...(digest === undefined ? {} : { digest }) })}\n`));
     socket.on("data", chunk => {
       bytes += chunk.toString("utf8");
       if (Buffer.byteLength(bytes) > 8192) { finish({ result: "unconfirmed" }); return; }
       if (!bytes.includes("\n")) return;
       try {
         const response = JSON.parse(bytes.trim());
-        if (response.version !== 2 || response.requestId !== requestId
+        if (response.version !== 3 || response.requestId !== requestId
           || (operation === "apply" && (response.result !== "applied" || response.digest !== digest))
           || (operation === "status" && response.result !== "status")) throw new Error("Invalid acknowledgment");
         const keys = operation === "apply" ? ["version", "requestId", "result", "digest"]
-          : ["version", "requestId", "result", "configurationValid", "enabled", "listening", "active", "queue", "unavailableAccounts", "metrics"];
+          : ["version", "requestId", "result", "configurationValid", "enabled", "listening", "active", "queue", "unavailableAccounts", "metrics", "capture"];
         if (Object.keys(response).some(key => !keys.includes(key))) throw new Error("Invalid acknowledgment");
         if (operation === "status") {
           if (typeof response.configurationValid !== "boolean" || typeof response.enabled !== "boolean" || typeof response.listening !== "boolean"
             || !Number.isSafeInteger(response.active) || response.active < 0
             || !Number.isSafeInteger(response.unavailableAccounts) || response.unavailableAccounts < 0
             || !response.queue || typeof response.queue !== "object" || Array.isArray(response.queue)
-            || Object.keys(response.queue).length !== 3
-            || !["pending", "waiting", "bytes"].every(key => Number.isSafeInteger(response.queue[key]) && response.queue[key] >= 0)
+            || Object.keys(response.queue).length !== 5
+            || !["pending", "waiting", "bytes", "oldestWaitMs", "timedOut"].every(key => Number.isSafeInteger(response.queue[key]) && response.queue[key] >= 0)
             || response.queue.pending > 32 || response.queue.waiting > response.queue.pending || response.queue.bytes > 16 * 1024 * 1024
+            || !response.capture || typeof response.capture !== "object" || Array.isArray(response.capture)
+            || Object.keys(response.capture).length !== 4 || typeof response.capture.enabled !== "boolean"
+            || !["initializing", "ready", "failed", "closed"].includes(response.capture.state)
+            || !["active", "skippedCapacity"].every(key => Number.isSafeInteger(response.capture[key]) && response.capture[key] >= 0)
+            || response.capture.active > 32
             || !response.metrics || typeof response.metrics !== "object" || Array.isArray(response.metrics)
             || Object.keys(response.metrics).length !== 7
             || !["local_dropped", "accepted", "rejected", "unconfirmed", "pending", "active", "bytes"].every(key => Number.isSafeInteger(response.metrics[key]) && response.metrics[key] >= 0)) throw new Error("Invalid acknowledgment");

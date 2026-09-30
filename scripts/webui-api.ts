@@ -1031,7 +1031,10 @@ export interface RelayManagedCaller {
 }
 export interface RelayManagementSnapshot {
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
-  runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number }
+  runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number;
+    oldestWaitMs: number; queueTimeouts: number;
+    capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
+    metrics: { accepted: number; unconfirmed: number; rejected: number; localDropped: number } }
     | { state: "stopped" | "unknown" };
   providers: Array<{ id: string; available: boolean; protocols?: Array<"chat" | "responses">; reason?: string; models: Array<{ id: string; reasoningOff: boolean; inputModalities: Array<"text" | "image" | "audio"> }> }>;
 }

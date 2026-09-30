@@ -57,7 +57,7 @@ export class ModelRelayServer {
     if (!address || typeof address === "string") throw new Error("Relay is not listening");
     return `http://${address.family === "IPv6" ? `[${address.address}]` : address.address}:${address.port}`;
   }
-  diagnostics(): { active: number; metricFailures: number; queue: { pending: number; waiting: number; bytes: number } } {
+  diagnostics(): { active: number; metricFailures: number; queue: RelayAdmission["queue"] } {
     return { active: this.admission.active, queue: this.admission.queue, metricFailures: this.metricFailures };
   }
   /** Disable the endpoint without forgetting the process's rate history. */

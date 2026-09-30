@@ -6,6 +6,15 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   relay: {
+    "diagnosticsLabel": "队列与采集状态",
+    "oldestWait": "最早等待 {value}",
+    "queueTimeouts": "排队超时 {count} 次",
+    "captureActive": "采集中 {count}",
+    "captureSkipped": "容量不足跳过 {count} 次",
+    "queueHint": "接收请求表示正文尚未收齐；等待执行表示正在排队；处理中包含出站准备、上游调用和交付。排队最多等待 30 秒。",
+    "metricCounts": "指标接收确认 {accepted} · 未确认 {unconfirmed} · 拒收 {rejected} · 本地丢弃 {localDropped}",
+    "diagnosticsHint": "以上为刷新时的进程快照，累计计数在重启后清零。接收确认不等于落盘，未确认不等于丢失。转储状态仅描述当前 Relay，不能解释历史未关联原因；全局采集开关在设置页管理。",
+    "captureStates": {"disabled": "采集未开启", "initializing": "采集初始化中", "ready": "采集已就绪", "failed": "采集故障", "closed": "采集已关闭", "unknown": "采集状态未确认"},
     "refreshing": "正在刷新运行状态…",
     "runtimeLabel": "运行状态（点击刷新更新）",
     "configuredConcurrency": "配置并发上限 {count}",
@@ -16,7 +25,7 @@ const zh = {
     "uploadingCount": "接收请求 {count}",
     "stopped": "服务未运行",
     "runtimeUnknown": "运行状态无法确认",
-    "invalid": "参数无效。检查用途名称、模型授权和思考策略；强制关闭目前仅支持 CLP 的 cline-pass/deepseek-v4.1-flash。",
+    "invalid": "参数无效。请检查用途名称、模型授权和所选提供商的思考策略能力。",
     "stale": "配置或确认已过期，请刷新后重新预览。",
     "draftStale": "配置或上游目录已变化。草稿尚未保存；请重新加载最新内容再编辑，以免覆盖其他修改。",
     "reloadDraft": "重新加载并丢弃草稿",
@@ -363,6 +372,11 @@ const zh = {
     "activationFallback": "按操作结果"
   },
   requests: {
+    "copyRequestId": "复制请求 ID",
+    "requestIdCopied": "请求 ID 已复制",
+    "requestIdCopyFailed": "复制失败，请手动复制下方请求 ID",
+    "noTrafficReason": "没有转储关联，原因未记录；不能据此判断当时是否开启采集。已有转储也可能因保留期限或手动清理而不可用。",
+    "relayReasons": {"disconnected": "客户端连接已断开", "revoked": "请求因撤销或关闭被取消", "timeout": "请求或上游响应超时", "rateLimited": "上游限流", "invalidResponse": "上游响应格式不符合协议", "authentication": "上游认证失败", "payment": "上游额度不足", "permission": "上游权限不足", "context": "输入超过上下文限制", "filtered": "上游内容过滤", "rejected": "上游拒绝请求", "upstreamFailed": "上游调用失败", "requestFailed": "请求失败，原因未细分", "deliveryFailed": "响应交付失败", "incomplete": "上游生成未完整结束"},
     "title": "请求明细",
     "export": "导出全部匹配请求（JSON）",
     "exporting": "正在导出…",
@@ -617,6 +631,15 @@ export type Messages = typeof zh
 
 const en: Messages = {
   relay: {
+    "diagnosticsLabel": "Queue and capture status",
+    "oldestWait": "Oldest wait {value}",
+    "queueTimeouts": "Queue timeouts {count}",
+    "captureActive": "Capturing {count}",
+    "captureSkipped": "Capacity skips {count}",
+    "queueHint": "Receiving means the body is still uploading; waiting means queued; processing includes preparation, upstream calls and delivery. Queue wait is limited to 30 seconds.",
+    "metricCounts": "Metrics accepted {accepted} · Unconfirmed {unconfirmed} · Rejected {rejected} · Locally dropped {localDropped}",
+    "diagnosticsHint": "This is a snapshot at refresh time. Counters reset on restart. Acceptance does not confirm persistence; unconfirmed does not mean lost. Capture status describes the current Relay, not historical missing links. Manage the global capture switch in Settings.",
+    "captureStates": {"disabled": "Capture disabled", "initializing": "Capture initializing", "ready": "Capture ready", "failed": "Capture failed", "closed": "Capture closed", "unknown": "Capture status unconfirmed"},
     "refreshing": "Refreshing runtime status…",
     "runtimeLabel": "Runtime status (use Refresh to update)",
     "configuredConcurrency": "Configured concurrency limit {count}",
@@ -627,7 +650,7 @@ const en: Messages = {
     "uploadingCount": "Receiving {count}",
     "stopped": "Service stopped",
     "runtimeUnknown": "Runtime status unconfirmed",
-    "invalid": "Invalid input. Check the purpose name, allowed models and reasoning policy. Force off currently supports only CLP cline-pass/deepseek-v4.1-flash.",
+    "invalid": "Invalid input. Check the purpose name, allowed models and the selected provider’s reasoning capabilities.",
     "stale": "Configuration or confirmation is stale. Refresh and preview again.",
     "draftStale": "Configuration or the upstream catalog has changed. Your draft is unsaved. Reload the latest values before editing to avoid overwriting other changes.",
     "reloadDraft": "Reload and discard draft",
@@ -974,6 +997,11 @@ const en: Messages = {
     "activationFallback": "As directed by the result"
   },
   requests: {
+    "copyRequestId": "Copy request ID",
+    "requestIdCopied": "Request ID copied",
+    "requestIdCopyFailed": "Copy failed. Select and copy the request ID below.",
+    "noTrafficReason": "No dump reference; the reason was not recorded. This does not indicate whether capture was enabled then. Existing dumps may also become unavailable through retention or manual cleanup.",
+    "relayReasons": {"disconnected": "Client disconnected", "revoked": "Cancelled by revocation or shutdown", "timeout": "Request or upstream timed out", "rateLimited": "Upstream rate limited", "invalidResponse": "Invalid upstream response format", "authentication": "Upstream authentication failed", "payment": "Upstream quota exhausted", "permission": "Upstream permission denied", "context": "Context limit exceeded", "filtered": "Upstream content filter", "rejected": "Upstream rejected the request", "upstreamFailed": "Upstream call failed", "requestFailed": "Request failed; reason not classified", "deliveryFailed": "Response delivery failed", "incomplete": "Upstream generation ended incomplete"},
     "title": "Request details",
     "export": "Export all matching requests (JSON)",
     "exporting": "Exporting…",

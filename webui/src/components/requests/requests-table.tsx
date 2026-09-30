@@ -13,6 +13,7 @@ import {
 import { ProviderBadge } from "@/components/metrics/provider-badge"
 import { FastBadge } from "@/components/metrics/service-tier"
 import { StatusBadge } from "@/components/metrics/status-badge"
+import { RelayRequestStatus } from "@/components/requests/relay-request-status"
 import {
   DataTable,
   SortableHeader,
@@ -157,6 +158,7 @@ export function RequestsTable({
       ),
       cell: ({ row }) => {
         const record = row.original
+        if (record.source === "relay") return <RelayRequestStatus key={record.relayRequestId ?? record.id} record={record} />
         const badge = <StatusBadge status={record.status} />
         if (!record.errorMessage && !record.errorType && !record.errorCode) return badge
         const details = [
@@ -269,7 +271,7 @@ export function RequestsTable({
     {
       id: "traffic", header: t("requests.detailColumn"), enableSorting: false,
       cell: ({ row }) => row.original.traffic === null
-        ? <span className="text-muted-foreground">{t("requests.noTraffic")}</span>
+        ? <TableHint hint={row.original.source === "relay" ? t("requests.noTrafficReason") : null}><span className="text-muted-foreground">{t("requests.noTraffic")}</span></TableHint>
         : <Button variant="link" size="sm" asChild>
           <Link to={trafficDetailPath(row.original.traffic)}>{t("requests.viewTraffic")}</Link>
         </Button>,

@@ -409,6 +409,7 @@ describe("isolated Relay vertical request chain", () => {
     try {
       await dump.prepare();
       for (let index = 0; index < 20; index++) expect(dump.begin("clp-a")).toBeUndefined();
+      expect(dump.diagnostics()).toEqual({ state: "ready", active: 0, skippedCapacity: 20 });
       expect(scans).toHaveBeenCalledOnce();
       clock = vi.spyOn(performance, "now").mockReturnValue(performance.now() + 2000);
       scans.mockImplementation(async options => { options.onRemoved?.(512 * 1024 * 1024); return 0; });
@@ -481,9 +482,12 @@ describe("isolated Relay vertical request chain", () => {
     const error = vi.fn(); const dump = new RelayTrafficDump({ directory, onError: error }); cleanups.push(() => dump.close());
     await dump.prepare();
     const captures = Array.from({ length: 3 }, () => dump.begin("clp-a")!);
+    expect(dump.diagnostics()).toMatchObject({ state: "ready", active: 3 });
     for (const capture of captures) { capture.submitted({ ...body, stream: false }, {}, "/v1/chat/completions"); capture.value({ content: "x".repeat(6 * 1024 * 1024) }, false); }
     for (const capture of captures) expect(capture.finish("finished")).toBeUndefined();
+    expect(dump.diagnostics()).toMatchObject({ state: "failed", active: 0, skippedCapacity: 0 });
     await dump.close(); expect(error).toHaveBeenCalledTimes(1);
+    expect(dump.diagnostics().state).toBe("closed");
   });
   it.each([false, true])("captures redacted upstream Chat and associates one metric (stream=%s)", async stream => {
     const directory = mkdtempSync(join(tmpdir(), "relay-dump-"));

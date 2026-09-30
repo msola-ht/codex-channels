@@ -21,6 +21,9 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, path
     const runtime = status.result === "status" ? {
       state: "running", listening: status.listening, configurationValid: status.configurationValid,
       active: status.active, waiting: status.queue.waiting, uploading: status.queue.pending - status.queue.waiting,
+      oldestWaitMs: status.queue.oldestWaitMs, queueTimeouts: status.queue.timedOut,
+      capture: { enabled: status.capture.enabled, state: status.capture.state, active: status.capture.active, skippedCapacity: status.capture.skippedCapacity },
+      metrics: { accepted: status.metrics.accepted, unconfirmed: status.metrics.unconfirmed, rejected: status.metrics.rejected, localDropped: status.metrics.local_dropped },
     } : { state: status.result === "not_running" ? "stopped" : "unknown" };
     sendManagementJson(response, 200, { ...snapshot, runtime }); return true;
   }

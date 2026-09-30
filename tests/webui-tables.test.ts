@@ -4,6 +4,17 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("shows controlled relay outcomes and a request ID without adding an uncaptured detail page", () => {
+    expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
+    expect(markup["relay-outcome-disconnected"]).toContain("客户端连接已断开");
+    expect(markup["relay-outcome-incomplete"]).toContain("上游生成未完整结束");
+    expect(markup["relay-outcome-unknown"]).not.toContain("untrusted-sensitive-value");
+    for (const name of ["rejected", "disconnected", "unknown", "incomplete"]) {
+      expect(markup[`relay-outcome-${name}`]).toContain("复制请求 ID");
+      expect(markup[`relay-outcome-${name}`]).toContain("7d40d091-8c74-4dcf-9e40-71531f3f1a98");
+      expect(markup[`relay-outcome-${name}`]).not.toContain("查看调用详情");
+    }
+  });
   beforeAll(() => {
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
@@ -224,6 +235,14 @@ describe("WebUI metrics table presentation", () => {
         result.fastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, requestServiceTier: "priority", serviceTier: "default",
           traffic: { label: "ocg", session: "batch-fast", interaction: 23 } }] });
         result.responseFastRequests = render(RequestsTable, { ...requestProps, records: [{ ...record, serviceTier: "priority", requestServiceTier: null }] });
+        for (const [name, outcome] of Object.entries({
+          rejected: { status: "failed", httpStatus: 403, errorCode: "permission_denied" },
+          disconnected: { status: "completed", deliveryStatus: "disconnected", errorCode: "client_disconnected" },
+          unknown: { status: "failed", errorCode: "untrusted-sensitive-value" },
+          incomplete: { status: "incomplete" },
+        })) result['relay-outcome-' + name] = render(RequestsTable, { ...requestProps, records: [{ ...record,
+          source: "relay", httpStatus: 200, errorCode: null, traffic: null,
+          relayRequestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", ...outcome }] });
         const response = { state: "completed", status: 200, usage: null, headers: {}, body: "", output: [] };
         result.fastRequestOnly = render(TrafficDetail, { detail: { ...detail,
           request: { ...detail.request, parameters: { serviceTier: "priority" } },
