@@ -241,6 +241,22 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream =>
+    ["json", "content_type"].map(failure => ({ protocol, stream, failure })))))(
+    "classifies response decoding failures consistently ($protocol, stream=$stream, $failure)", async ({ protocol, stream, failure }) => {
+      const f = await fixture((_request, response) => {
+        response.writeHead(200, { "content-type": failure === "content_type" ? "text/plain" : stream ? "text/event-stream" : "application/json" });
+        response.end(stream ? "data: PRIVATE invalid json\n\n" : "PRIVATE invalid json");
+      });
+      const result = protocol === "chat" ? await f.post({ ...body, stream }) : await fetch(`${f.relay.address()}/v1/responses`, {
+        method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify({ model: body.model, input: "hello", stream }),
+      });
+      const text = await result.text();
+      expect(result.status).toBe(502); expect(text).not.toContain("PRIVATE");
+      expect(JSON.parse(text)).toMatchObject({ error: { code: `invalid_upstream_${failure}`, upstream_attempted: true } });
+      expect(f.metrics).toHaveLength(1);
+      expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed", errorCode: `invalid_upstream_${failure}` });
+    });
 
   it.each(["clp-a", "ds-a"])("forwards long Chat histories and opaque parameters (%s)", async provider => {
     const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;

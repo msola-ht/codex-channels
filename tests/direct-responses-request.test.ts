@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { DirectResponsesRequestError, validateDirectResponsesRequest, validateDirectChatRequest, applyChatReasoningPolicy, applyResponsesReasoningPolicy } from "../src/model-api/index.js";
 
 describe("native Responses request boundary", () => {
+  it.each(["extra_body", "extraBody"].flatMap(container =>
+    ["reasoning", "thinking", "reasoning_effort", "enable_thinking"].map(field => ({ container, field }))))(
+    "reports the same exact reasoning conflict path in both protocols ($container.$field)", ({ container, field }) => {
+      const fields = { model: "deepseek-flash", [container]: { [field]: "PRIVATE" } };
+      const chat = validateDirectChatRequest({ ...fields, messages: [{ role: "user", content: "hello" }] });
+      const responses = validateDirectResponsesRequest("ds-main", { ...fields, input: "hello" });
+      expect(applyChatReasoningPolicy(chat, "ds-main", "passthrough")).toBe(chat);
+      expect(applyResponsesReasoningPolicy(responses, "ds-main", "passthrough")).toBe(responses);
+      for (const apply of [() => applyChatReasoningPolicy(chat, "ds-main", "off"), () => applyResponsesReasoningPolicy(responses, "ds-main", "off")]) {
+        try { apply(); expect.fail("must reject"); }
+        catch (error) {
+          expect(error).toMatchObject({ param: `${container}.${field}` });
+          expect(String(error)).not.toContain("PRIVATE");
+        }
+      }
+    });
+
   it("uses protocol-specific DS reasoning controls without rewriting history", () => {
     const input = validateDirectResponsesRequest("ds-main", { model: "deepseek-flash", input: [{ type: "reasoning", content: [{ type: "reasoning_text", text: "prior" }] }], reasoning: { effort: "high", summary: "auto" } });
     expect(applyResponsesReasoningPolicy(input, "ds-main", "off")).toMatchObject({ input: input.input, reasoning: { effort: "none", summary: "auto" } });

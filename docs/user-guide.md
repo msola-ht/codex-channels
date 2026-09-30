@@ -634,6 +634,7 @@ codexc relay edit --caller translation --reasoning passthrough
 强制关闭支持 CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，同一 Key 的全部允许模型必须支持。
 关闭策略覆盖顶层思考控制参数，CLP Chat 和 DS Responses 实际出站为 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
+Chat 和 Responses 的冲突错误均定位到完整字段路径，例如 `extra_body.reasoning`。
 更换提供商、修改模型或策略会取消该 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
 
 新增可选字段 `model_relay.callers[].reasoning` 和 `display_name` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
@@ -680,6 +681,7 @@ Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响�
 `request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。
 `X-Relay-Request-Id` 可与指标记录关联。`invalid_upstream_*` 表示上游响应类型或字段校验失败；
 例如上游 HTTP 200 配合 `invalid_upstream_tools` 表示工具响应字段校验未通过，并非上游返回了 502。
+Chat 和 Responses 的 JSON/SSE 内容无法解析为 JSON 时统一返回 `invalid_upstream_json`，不回显上游原文。
 WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
 上游 429/503 提供的 `Retry-After` 在为受限整数秒或规范 HTTP 日期时会保留，客户端可据此退避；Relay 不自动重试。
 Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborted` 终态原样交付，指标与新转储记为未完整完成。
