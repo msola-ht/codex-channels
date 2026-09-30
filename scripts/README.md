@@ -499,11 +499,11 @@
   `restart / app-server-gateway-webui` 并列出三个服务的重启命令；本模块不承载服务控制。
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
-  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示。
+  重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
 - `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
   重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
   WebUI 独立不并入 `all`，
-  日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
+  普通启动不强制终止已运行的进程，日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
   检测到不支持的旧标签时明确拒绝启动。
 - `service-target-query.mjs`：把共享服务目录中的 systemd unit 或 launchd label 逐行提供给平台

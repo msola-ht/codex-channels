@@ -71,6 +71,16 @@ stop_unit() {
   systemctl_user stop "$unit"
 }
 
+stop_before_all_restart() {
+  stopping_units=$(service_ids all stop)
+  for stopping_unit in $stopping_units; do
+    if ! stop_unit "$stopping_unit"; then
+      print_status failure "停止服务失败，已中止整体重启：$stopping_unit。请运行 codexc service status。"
+      return 1
+    fi
+  done
+}
+
 ensure_linger() {
   user_id=$(id -u)
   linger=$(
@@ -114,6 +124,7 @@ case "$action" in
     resolved_units=$(service_ids all start)
     set -- $resolved_units
     systemctl_user enable "$@"
+    stop_before_all_restart
     for unit in "$@"; do systemctl_user restart "$unit"; done
     print_status note "Codex App Server 与 Gateway systemd 用户服务已安装，启动操作已完成，正在确认就绪状态。"
     print_status note "systemd linger 已启用，未登录时也会随系统启动。"
@@ -171,6 +182,9 @@ case "$action" in
     target=${2:-gateway}
     require_target "$target"
     resolved_units=$(service_ids "$target" start)
+    if [ "$target" = "all" ]; then
+      stop_before_all_restart
+    fi
     failed_units=""
     for unit in $resolved_units; do
       if ! systemctl_user restart "$unit"; then
