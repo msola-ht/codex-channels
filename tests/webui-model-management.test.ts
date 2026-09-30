@@ -24,6 +24,7 @@ it("separates model settings from general preferences and renders model submenus
       const providers={...base,settings:{defaults:{},managedProviders:[{id:'ds-main',displayName:'DeepSeek',model:'test-model',reasoningEffort:'medium',models:[{id:'test-model',displayName:'Test model',reasoningEfforts:[{effort:'medium'}]}]}],modelWindow:[{id:'test-model',displayName:'Test model',providers:['ds-main'],contextWindow:10000,maxContextWindow:20000,windowPercent:50}],customProviders:{fixedCandidates:[],switchingProviders:[],backupCandidates:[]}}};
       const accounts={...base,settings:{opencodeGo:{accounts:[]},deepseek:{accounts:[{id:'main',model:'test-model',mode:'switching',default:true}],legacyConfigurationPresent:false},clinePass:{accounts:[]}}};
       const general=render(h(AppServerSettingsCard,{management:codex}));
+      const permissions=render(h(AppServerSettingsCard,{management:codex,section:"permissions"}));
       const models=render(h(AppServerSettingsCard,{management:codex,section:'models'}));
       const context=render(h(AppServerSettingsCard,{management:codex,section:'context'}));
       const custom=render(h(ProviderSettingsManagement,{management:providers,section:'providers'}));
@@ -32,13 +33,15 @@ it("separates model settings from general preferences and renders model submenus
       const account=render(h(AccountSettingsManagement,{management:accounts}));
       const en=render(h(AccountSettingsManagement,{management:accounts}),'en');
       const sidebar=render(h(SidebarProvider,null,h(AppSidebar)));
-      console.log(JSON.stringify({general,models,context,custom,defaults,windows,account,en,sidebar,paths:modelNavItems.map(item=>item.to)}));
+      console.log(JSON.stringify({general,permissions,models,context,custom,defaults,windows,account,en,sidebar,paths:modelNavItems.map(item=>item.to)}));
     } finally {await server.close();}
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
   })) as Record<string, string> & {paths: string[]};
-  expect(result.general).toContain("Sandbox");
+  expect(result.general).not.toContain("Sandbox");
+  expect(result.permissions).toContain("Sandbox");
+  expect(result.permissions).not.toContain("Plan 思考等级");
   expect(result.general).toContain("Plan 思考等级");
   expect(result.general).not.toContain("codex-context-window");
   expect(result.general).not.toMatch(/>默认模型<|>Fast</u);

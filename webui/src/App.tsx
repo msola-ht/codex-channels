@@ -1,4 +1,4 @@
-import { modelNavItems } from "@/lib/navigation"
+import { navItems, navGroups } from "@/lib/navigation"
 import { translateApiError } from "@/lib/i18n/translate"
 import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
@@ -51,17 +51,16 @@ const ModelAccountsPage = lazy(() => import("@/pages/model-management-page").the
 const ModelConfigurationPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelConfigurationPage })))
 const ModelContextPage = lazy(() => import("@/pages/model-management-page").then(module => ({ default: module.ModelContextPage })))
 
+const NetworkSettingsPage = lazy(() => import("@/pages/settings-page").then(module => ({ default: module.NetworkSettingsPage })))
+const DataSettingsPage = lazy(() => import("@/pages/settings-page").then(module => ({ default: module.DataSettingsPage })))
+const ServiceSettingsPage = lazy(() => import("@/pages/settings-page").then(module => ({ default: module.ServiceSettingsPage })))
+const ChannelsPage = lazy(() => import("@/pages/channels-page").then(module => ({ default: module.ChannelsPage })))
+const ChannelDisplayPage = lazy(() => import("@/pages/channels-page").then(module => ({ default: module.ChannelDisplayPage })))
+
 function pageTitle(pathname: string, t: Translate): string {
-  const modelPage = modelNavItems.find(item => item.to === pathname)
-  if (modelPage) return t(modelPage.labelKey)
   if (pathname.startsWith("/threads/")) return t("pages.threadDetail")
-  if (pathname === "/threads") return t("pages.threads")
-  if (pathname === "/requests") return t("pages.requests")
-  if (pathname === "/traffic") return t("pages.traffic")
-  if (pathname === "/errors") return t("pages.errors")
-  if (pathname === "/relay") return t("relay.title")
-  if (pathname === "/delivery") return t("delivery.title")
-  if (pathname === "/settings") return t("pages.settings")
+  const page = navItems.find(item => item.to === pathname)
+  if (page) return t(page.labelKey)
   return t("pages.console")
 }
 
@@ -69,11 +68,6 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
   const { search } = useLocation()
   const { t } = useTranslation()
   const params = new URLSearchParams(search)
-  if (modelNavItems.some(item => item.to === pathname)) return <>
-    <BreadcrumbItem className="hidden md:block"><span>{t("modelManagement.title")}</span></BreadcrumbItem>
-    <BreadcrumbSeparator className="hidden md:block" />
-    <BreadcrumbItem><BreadcrumbPage>{pageTitle(pathname, t)}</BreadcrumbPage></BreadcrumbItem>
-  </>
   if (pathname === "/traffic" && params.has("id")) {
     for (const key of ["id", "exchangeLabel", "exchangeSession", "traceOffset"]) params.delete(key)
     return <>
@@ -100,6 +94,12 @@ function BreadcrumbTrail({ pathname }: { pathname: string }) {
       </>
     )
   }
+  const group = navGroups.find(group => group.children.some(child => child.to === pathname))
+  if (group) return <>
+    <BreadcrumbItem className="hidden md:block"><span>{t(group.labelKey)}</span></BreadcrumbItem>
+    <BreadcrumbSeparator className="hidden md:block" />
+    <BreadcrumbItem><BreadcrumbPage>{pageTitle(pathname, t)}</BreadcrumbPage></BreadcrumbItem>
+  </>
   return (
     <BreadcrumbItem>
       <BreadcrumbPage>{pageTitle(pathname, t)}</BreadcrumbPage>
@@ -174,7 +174,13 @@ function Layout() {
                 <Route path="/models/accounts" element={<ModelAccountsPage />} />
                 <Route path="/models/configuration" element={<ModelConfigurationPage />} />
                 <Route path="/models/context" element={<ModelContextPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/channels" element={<ChannelsPage />} />
+                <Route path="/channels/display" element={<ChannelDisplayPage />} />
+                <Route path="/settings" element={<SettingsPage key="general" />} />
+                <Route path="/settings/permissions" element={<SettingsPage key="permissions" section="permissions" />} />
+                <Route path="/settings/network" element={<NetworkSettingsPage />} />
+                <Route path="/settings/data" element={<DataSettingsPage />} />
+                <Route path="/settings/services" element={<ServiceSettingsPage />} />
               </Routes>
             </Suspense>
           </div>

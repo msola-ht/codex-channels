@@ -135,7 +135,7 @@ Gateway 会在关闭 Client 和停止 App Server 前向所有已知授权渠道�
 ### 代理与权限
 
 共享代理统一保存在当前 Codex Home 的 `.env`，默认 `~/.codex/.env`。执行
-`codexc config → 网络代理`，或在 WebUI 设置页修改；批量输入留空保持原值，取消不写入。
+`codexc config → 网络代理`，或在 WebUI「设置 → 网络与访问」修改；批量输入留空保持原值，取消不写入。
 CLI 单项和批量代理设置均可选择 `127.0.0.1:7890`、`127.0.0.1:7897` 或自定义完整 URL；两个本地选项使用 HTTP 协议。
 例如：
 
@@ -245,7 +245,7 @@ Host 租约存在时空闲释放不会停止主实例。`desktop-app open` 会�
 ### Computer Use 与浏览器排障
 
 配置入口：`codexc config → Codex 新会话与用户偏好 → 电脑、浏览器与 MCP`，或 WebUI
-设置页的 App Server 卡片。两者修改同一份 Codex 用户配置，使用版本检查；WebUI 写入前需要预览并确认。
+「设置 → 工作区与权限」中的 Codex 权限与工具分区。两者修改同一份 Codex 用户配置，使用版本检查；WebUI 写入前需要预览并确认。
 
 当前支持默认应用访问、浏览器历史访问和默认站点策略，以及配置中已有的 macOS Bundle ID、Windows AUMID
 和站点规则。普通 MCP 可修改启用状态、启动/调用超时、工具允许/禁用列表与审批策略；已有单工具覆盖还可修改

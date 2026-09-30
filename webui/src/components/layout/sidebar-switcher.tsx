@@ -17,10 +17,10 @@ import {
 } from "@/components/ui/sidebar"
 import { useSidebar } from "@/components/ui/sidebar-context"
 import { useTranslation } from "@/hooks/use-translation"
-import { navItems, modelNavItems } from "@/lib/navigation"
+import { navItems } from "@/lib/navigation"
 
 export function SidebarSwitcher() {
-  const { isMobile } = useSidebar()
+  const { isMobile, setOpenMobile } = useSidebar()
   const navigate = useNavigate()
   const { t } = useTranslation()
 
@@ -53,10 +53,10 @@ export function SidebarSwitcher() {
               {t("shell.pagesMenu")}
             </DropdownMenuLabel>
             <DropdownMenuGroup>
-              {[...navItems, ...modelNavItems].map((item) => (
+              {navItems.map((item) => (
                 <DropdownMenuItem
                   key={item.to}
-                  onClick={() => navigate(item.to)}
+                  onClick={() => { navigate(item.to); setOpenMobile(false) }}
                   className="gap-2 p-2"
                 >
                   <div className="flex size-6 items-center justify-center rounded-md border">

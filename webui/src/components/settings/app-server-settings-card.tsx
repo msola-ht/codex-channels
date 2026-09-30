@@ -1,3 +1,4 @@
+import { useTranslation } from "@/hooks/use-translation"
 import { useEffect, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -12,7 +13,8 @@ import { LoadingSettingsCard, SettingsError } from "@/components/settings/settin
 import type { CodexSettingsController } from "@/lib/settings-management"
 import { ToolAccessSettings } from "@/components/settings/tool-access-settings"
 
-export function AppServerSettingsCard({ management, onChanged, section = "general" }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "models" | "context" }) {
+export function AppServerSettingsCard({ management, onChanged, section = "general" }: { management: CodexSettingsController; onChanged?: () => void; section?: "general" | "permissions" | "models" | "context" }) {
+  const { t } = useTranslation()
   const settings = management.codexSettings
   const selectedModel = settings?.models.find((model) => model.model === settings.defaults.model) ?? settings?.models[0]
   const [compact, patchCompact, resetCompact] = useSettingsDraft({ contextWindow: settings?.compact.contextWindow == null ? "" : String(settings.compact.contextWindow), compactPercent: settings?.compact.autoCompactPercent == null ? "" : String(settings.compact.autoCompactPercent) })
@@ -78,7 +80,7 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
   return <>
     <PendingSettingDialog pending={management.pendingSetting} saving={management.saving} loading={management.loading} onConfirm={() => void confirmSetting()} onCancel={management.cancelSetting} />
     <Card>
-      <CardHeader><CardTitle>{section === "models" ? "Codex 模型默认值" : section === "context" ? "Codex 上下文与压缩" : "Codex 用户偏好与权限"}</CardTitle><CardDescription>修改前预览确认；具体生效范围和是否需要重启会在确认时显示。</CardDescription></CardHeader>
+      <CardHeader><CardTitle>{section === "models" ? "Codex 模型默认值" : section === "context" ? "Codex 上下文与压缩" : t(section === "permissions" ? "navigation.codexPermissions" : "navigation.codexGeneral")}</CardTitle><CardDescription>修改前预览确认；具体生效范围和是否需要重启会在确认时显示。</CardDescription></CardHeader>
       <CardContent className="flex flex-col gap-5 text-sm">
       {management.error !== null ? <SettingsError message={management.error} retry={management.refetch} /> : null}
         {section !== "context" && <FieldGroup className="grid gap-x-8 gap-y-3 md:grid-cols-2">
@@ -92,6 +94,8 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
           <ManagedSelect label="联网搜索" value={settings.defaults.webSearch ?? "disabled"} options={[["live", "实时"], ["indexed", "索引"], ["cached", "缓存"], ["disabled", "关闭"]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "web-search", mode: value }, "联网搜索")} />
           <ManagedSelect label="计划清单工具" value={String(settings.defaults.updatePlanEnabled)} options={[["true", "已启用"], ["false", "未启用"]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "update-plan", enabled: value === "true" }, "计划清单工具")} />
           <ManagedSelect label="空闲总结" value={String(settings.defaults.autoRecapEnabled)} options={[["false", "关闭"], ["true", "开启"]]} disabled={busy} onChange={(value) => void management.previewSetting({ kind: "auto-recap", enabled: value === "true" }, "空闲总结")} />
+          </>}
+          {section === "permissions" && <>
           <ManagedSelect label="Sandbox" value={settings.permissions.sandboxMode ?? "read-only"} options={[["read-only", "只读"], ["workspace-write", "工作区可写"]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: value, approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: settings.permissions.networkAccess ?? false }, "Sandbox")} />
           <ManagedSelect label="审批策略" value={settings.permissions.approvalPolicy ?? "on-request"} options={[["on-request", "按需"], ["never", "从不"]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: value, networkAccess: settings.permissions.networkAccess ?? false }, "审批策略")} />
           <ManagedSelect label="网络访问" value={String(settings.permissions.networkAccess ?? false)} options={[["true", "已允许"], ["false", "已禁止"]]} disabled={busy || !settings.permissions.editable} onChange={(value) => void management.previewSetting({ kind: "permissions", sandboxMode: settings.permissions.sandboxMode ?? "read-only", approvalPolicy: settings.permissions.approvalPolicy ?? "on-request", networkAccess: value === "true" }, "网络访问")} />
@@ -124,9 +128,8 @@ export function AppServerSettingsCard({ management, onChanged, section = "genera
           <Button className="self-start" variant="outline" disabled={officialDisabled || planEffort === ""} onClick={savePreferences}>保存用户偏好</Button>
         </section>
 
-        <Separator />
-        <ToolAccessSettings management={management} />
         </>}
+        {section === "permissions" && <><Separator /><ToolAccessSettings management={management} /></>}
         {localError !== null ? <Alert variant="destructive"><AlertDescription>{localError}</AlertDescription></Alert> : null}
         {management.actionError !== null ? <Alert variant="destructive"><AlertDescription>{management.actionError}</AlertDescription></Alert> : null}
       </CardContent>

@@ -5,6 +5,8 @@ import type { DisplayLanguage } from "@/lib/format"
  * 由 `Messages` 类型检查在构建期保证两种语言键一致。
  */
 const zh = {
+  channelSettings: {title: "通讯渠道状态", description: "来源为 Gateway 配置快照；渠道凭据、允许名单和运行连接不在 WebUI 展示。", empty: "当前没有已配置的通讯渠道。", channel: "渠道", state: "配置状态", enabled: "已启用", disabled: "已配置，未启用"},
+  navigation: {captureSettings: "采集设置", configurationHint: "修改前预览确认；生效范围和重启要求以确认信息为准。", metricsHint: "保留策略作用于本地指标记录。", networkHint: "代理和令牌现有值不会回显；修改前预览确认。", "monitoring": "调用监控", "channels": "消息渠道", "channelConfiguration": "渠道配置", "channelDisplay": "消息展示", "general": "常规与偏好", "permissions": "工作区与权限", "network": "网络与访问", "data": "数据与日志", "services": "服务与维护", "expand": "展开{name}", "collapse": "收起{name}", "gatewayGeneral": "Gateway 常规设置", "gatewayPermissions": "Gateway 全局权限", "gatewayData": "调用采集与日志", "gatewayNetwork": "高级接入设置", "codexGeneral": "Codex 用户偏好", "codexPermissions": "Codex 权限与工具", "networkCard": "WebUI 与共享代理", "dataCard": "指标存储", "cli": "终端操作入口", "cliHint": "以下操作在服务器终端执行。", "copyFailed": "浏览器未允许访问剪贴板，请手动复制命令。", "servicesHint": "管理服务状态、源码更新和后台维护任务；操作前预览确认。", "dataHint": "调整保留策略，按需清理或重建指标库；操作前预览确认。"},
   delivery: {
     contentSummary: "内容摘要", summaryUnavailable: "摘要暂不可用",
     listTitle: "投递列表", listSummary: "共 {count} 条匹配投递 · 最新入箱优先",
@@ -704,6 +706,8 @@ const zh = {
 export type Messages = typeof zh
 
 const en: Messages = {
+  channelSettings: {title: "Channel configuration status", description: "Based on the Gateway configuration snapshot. Credentials, allowlists, and live connections are not shown here.", empty: "No channels are configured.", channel: "Channel", state: "Configuration status", enabled: "Enabled", disabled: "Configured, disabled"},
+  navigation: {captureSettings: "Capture settings", configurationHint: "Preview and confirm changes. The confirmation explains scope and restart requirements.", metricsHint: "Retention applies to locally stored metrics.", networkHint: "Existing proxy and token values are never shown. Preview and confirm changes.", "monitoring": "Monitoring", "channels": "Channels", "channelConfiguration": "Channel configuration", "channelDisplay": "Message presentation", "general": "General & preferences", "permissions": "Workspaces & permissions", "network": "Network & access", "data": "Data & logs", "services": "Services & maintenance", "expand": "Expand {name}", "collapse": "Collapse {name}", "gatewayGeneral": "Gateway preferences", "gatewayPermissions": "Gateway global permissions", "gatewayData": "Request capture & logs", "gatewayNetwork": "Advanced connection settings", "codexGeneral": "Codex preferences", "codexPermissions": "Codex permissions & tools", "networkCard": "WebUI & shared proxies", "dataCard": "Metrics storage", "cli": "Terminal commands", "cliHint": "Run these commands in the server terminal.", "copyFailed": "Clipboard access was denied. Copy the command manually.", "servicesHint": "Manage services, source updates, and background maintenance tasks. Preview and confirm changes.", "dataHint": "Configure retention and clean or rebuild metrics as needed. Preview and confirm changes."},
   delivery: {
     contentSummary: "Content summary", summaryUnavailable: "Summary unavailable",
     listTitle: "Delivery list", listSummary: "{count} matching deliveries · Newest first",

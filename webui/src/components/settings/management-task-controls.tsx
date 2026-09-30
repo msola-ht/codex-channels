@@ -14,26 +14,28 @@ const maintenanceActions = [
   ["reset", "重建指标库"],
 ] as const
 
-export function ManagementTaskControls({ tasks, providerIds }: { tasks: ManagementTaskController; providerIds: string[] }) {
+export function ManagementTaskControls({ tasks, providerIds = [], section = "data" }: { tasks: ManagementTaskController; providerIds?: string[]; section?: "data" | "services" }) {
+  const { t } = useTranslation()
   const providerOptions = [...new Set(providerIds.filter((providerId) => providerId.length > 0))]
-  const [pruneProvider, setPruneProvider] = useState(providerOptions[0] ?? "openai")
+  const [editedPruneProvider, setPruneProvider] = useState<string | null>(null)
+  const pruneProvider = editedPruneProvider ?? providerOptions[0] ?? ""
   const hasActiveTask = tasks.tasks.some((task) => ["queued", "running", "cancelling"].includes(task.state))
   const disabled = tasks.loading || tasks.error !== null || tasks.saving || tasks.pendingPreview !== null || hasActiveTask
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>维护任务</CardTitle>
-        <CardDescription>通过当前管理会话预览并确认服务、指标库和源码维护操作；任务在后台串行执行。</CardDescription>
+        <CardTitle>{t(section === "data" ? "navigation.data" : "navigation.services")}</CardTitle>
+        <CardDescription>{t(section === "data" ? "navigation.dataHint" : "navigation.servicesHint")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>更新源码</Button>
-          {maintenanceActions.map(([action, label]) => (
+          {section === "services" && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "update" })}>更新源码</Button>}
+          {section === "data" && maintenanceActions.map(([action, label]) => (
             <Button key={action} variant="destructive" size="sm" disabled={disabled} onClick={() => void tasks.run({ operation: "metrics", action })}>{label}</Button>
           ))}
         </div>
-        <FieldGroup className="gap-0">
+        {section === "data" && <FieldGroup className="gap-0">
           <Field orientation="responsive" data-disabled={disabled}>
             <FieldLabel htmlFor="management-prune-provider" className="text-muted-foreground">清理 Provider 指标</FieldLabel>
             <FieldContent className="flex-row items-center gap-2">
@@ -58,7 +60,7 @@ export function ManagementTaskControls({ tasks, providerIds }: { tasks: Manageme
               </Button>
             </FieldContent>
           </Field>
-        </FieldGroup>
+        </FieldGroup>}
       </CardContent>
       <ManagementTaskConfirmationDialog tasks={tasks} />
     </Card>

@@ -210,7 +210,7 @@ it("scopes relay service controls and task feedback without bypassing the global
   expect(result.running).not.toContain("卸载全部服务");
   expect(result.running).toContain("service:restart:model-relay");
   expect(result.busy).toContain("其他管理任务正在执行");
-  expect(result.busy).toContain('href="/settings"');
+  expect(result.busy).toContain('href="/settings/services"');
   expect(result.busy.match(/<button[^>]*disabled/g)).toHaveLength(2);
   expect(result.stopped).toContain("启动");
   expect(result.stopped).not.toMatch(/>重启<|>停止</u);
