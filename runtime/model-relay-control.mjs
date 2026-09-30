@@ -1,3 +1,4 @@
+import { relayDisplayNameSchema } from "./model-relay-config.mjs";
 import { randomUUID } from "node:crypto";
 import { PrivateIpcServer, createPrivateIpcConnection, privateIpcEndpointExists } from "./private-ipc.mjs";
 
@@ -17,7 +18,7 @@ export class ModelRelayControl {
         handled = true;
         let request;
         try { request = JSON.parse(Buffer.concat(chunks).toString("utf8").trim()); } catch { socket.destroy(); return; }
-        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 3
+        if (!request || Array.isArray(request) || typeof request !== "object" || request.version !== 4
           || typeof request.requestId !== "string" || !uuid.test(request.requestId) || !["apply", "status", "queue"].includes(request.operation)
           || Object.keys(request).some(key => !["version", "requestId", "operation", ...(request.operation === "apply" ? ["digest"] : [])].includes(key))
           || (request.operation === "apply" && (typeof request.digest !== "string" || !/^[a-f0-9]{64}$/u.test(request.digest)))) {
@@ -27,8 +28,8 @@ export class ModelRelayControl {
           if (this.#closed || controller.signal.aborted) throw new Error("Control closed");
           return handler(request, controller.signal);
         }).then(result => {
-          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 3, requestId: request.requestId, ...result })}\n`);
-        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 3, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
+          if (!this.#closed && !controller.signal.aborted) socket.end(`${JSON.stringify({ version: 4, requestId: request.requestId, ...result })}\n`);
+        }, () => { if (!socket.destroyed) socket.end(`${JSON.stringify({ version: 4, requestId: request.requestId, result: "rejected", reason: "unavailable" })}\n`); });
       });
     }, { maximumConnections: 4, connectionTimeoutMs: 2000 });
   }
@@ -46,7 +47,7 @@ export async function queryModelRelayControl(path, operation, digest) {
     try { socket = createPrivateIpcConnection(path); } catch { finish({ result: "unconfirmed" }); return; }
     socket.once("error", () => finish({ result: "unconfirmed" }));
     socket.once("close", () => finish({ result: "unconfirmed" }));
-    socket.once("connect", () => socket.write(`${JSON.stringify({ version: 3, requestId, operation, ...(digest === undefined ? {} : { digest }) })}\n`));
+    socket.once("connect", () => socket.write(`${JSON.stringify({ version: 4, requestId, operation, ...(digest === undefined ? {} : { digest }) })}\n`));
     socket.on("data", chunk => {
       bytes += chunk.length;
       if (bytes > (operation === "queue" ? 128 * 1024 : 8192)) { finish({ result: "unconfirmed" }); return; }
@@ -54,17 +55,19 @@ export async function queryModelRelayControl(path, operation, digest) {
       if (!chunk.includes(10)) return;
       try {
         const response = JSON.parse(Buffer.concat(chunks).toString("utf8").trim());
-        if (response.version !== 3 || response.requestId !== requestId
+        if (response.version !== 4 || response.requestId !== requestId
           || (operation === "apply" && (response.result !== "applied" || response.digest !== digest))
           || (operation === "status" && response.result !== "status")
           || (operation === "queue" && response.result !== "queue")) throw new Error("Invalid acknowledgment");
         const keys = operation === "apply" ? ["version", "requestId", "result", "digest"]
-          : operation === "queue" ? ["version", "requestId", "result", "requests"]
+          : operation === "queue" ? ["version", "requestId", "result", "configurationValid", "enabled", "listening", "requests"]
           : ["version", "requestId", "result", "configurationValid", "enabled", "listening", "active", "queue", "unavailableAccounts", "metrics", "capture"];
         if (Object.keys(response).some(key => !keys.includes(key))) throw new Error("Invalid acknowledgment");
         if (operation === "queue") {
-          if (!Array.isArray(response.requests) || response.requests.length > 64 || response.requests.some(row =>
-            !row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).length !== 7
+          if (typeof response.configurationValid !== "boolean" || typeof response.enabled !== "boolean" || typeof response.listening !== "boolean"
+            || !Array.isArray(response.requests) || response.requests.length > 64 || response.requests.some(row =>
+            !row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).length !== 8
+            || (row.displayName !== null && !relayDisplayNameSchema.safeParse(row.displayName).success)
             || typeof row.requestId !== "string" || !uuid.test(row.requestId)
             || typeof row.callerId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/u.test(row.callerId)
             || typeof row.provider !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(row.provider)

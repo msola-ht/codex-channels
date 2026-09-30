@@ -80,6 +80,8 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   })) as { captureFailed: string; captureDisabled: string; captureUnknown: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
   expect(result.captureFailed).toContain("采集故障"); expect(result.captureDisabled).toContain("采集未开启");
   expect(result.captureUnknown).toContain("采集状态未确认"); expect(result.captureUnknown).not.toContain("采集未开启");
+  expect(result.zh).toMatch(/<th[^>]*>凭据代次<\/th>/u);
+  expect(result.en).toContain("Credential generation");
   expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toContain("处理中 4");
   expect(result.en).toContain("Oldest wait 1.2 s"); expect(result.en).toContain("Capacity skips 1"); expect(result.en).toContain("Unconfirmed 2");
   expect(result.zh).toContain("采集已就绪"); expect(result.zh).toContain("排队超时 3 次");
@@ -121,4 +123,55 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.dual).toContain('>Responses<');
   expect(result.unknownInputs).toContain('>Not declared<');
   expect(result.unavailableEditor).toContain('>Not declared<');
+});
+
+it("uses queue cards and shared loading, empty and unavailable components", () => {
+  const script = String.raw`
+    import { createServer } from 'vite';
+    import { createElement as h } from 'react';
+    import { renderToStaticMarkup } from 'react-dom/server';
+    const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
+      name: 'queue-fixture', enforce: 'pre', transform(code, id) {
+        if (id.endsWith('/requests/relay-queue-sheet.tsx')) return code.replace('useState(false)', 'useState(true)');
+        if (id.endsWith('/hooks/use-relay-queue.ts')) return 'export function useRelayQueue() { return globalThis.queue; }';
+        if (id.endsWith('/ui/sheet.tsx')) return "import {createElement as h} from 'react'; export const Sheet=({children})=>children; export const SheetTrigger=({children})=>children; export const SheetContent=({children})=>h('section',{role:'dialog'},children); export const SheetHeader=({children})=>h('header',null,children); export const SheetTitle=({children})=>h('h2',null,children); export const SheetDescription=({children})=>h('p',null,children);";
+      }
+    }] });
+    try {
+      const {RelayQueueSheet}=await server.ssrLoadModule('/src/components/requests/relay-queue-sheet.tsx');
+      const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
+      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(RelayQueueSheet)));
+      globalThis.queue={data:null,loading:true,error:null,errorCode:null,refetch(){}};
+      const loading=render('zh');
+      globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
+      const empty=render('en');
+      globalThis.queue.data={state:'unknown'}; const unknown=render('zh');
+      globalThis.queue.data={state:'running',configurationValid:true,enabled:true,listening:true,requests:[{requestId:'id',callerId:'client',displayName:'中文用途',provider:'clp-test',model:'long/model',protocol:'responses',phase:'queue',elapsedMs:2000}]};
+      const ready=render('zh');
+      globalThis.queue.data.enabled=false; globalThis.queue.data.listening=false; const disabled=render('zh');
+      globalThis.queue.data.configurationValid=false; const invalid=render('zh');
+      globalThis.queue.data.configurationValid=true; globalThis.queue.data.enabled=true; const notListening=render('en');
+
+      globalThis.queue.error='unavailable'; const failed=render('zh');
+      console.log(JSON.stringify({loading,empty,unknown,ready,failed,disabled,invalid,notListening}));
+    } finally { await server.close(); }
+  `;
+  const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
+  })) as Record<string, string>;
+  expect(result.disabled).toContain("Relay 已停用");
+  expect(result.disabled).toContain("long/model");
+  expect(result.invalid).toContain("当前运行配置不可用");
+  expect(result.notListening).toContain("Relay is not listening");
+  expect(result.ready).toContain("请求模型");
+  expect(result.loading).toContain('data-slot="skeleton"');
+  expect(result.empty).toContain('data-slot="empty"');
+  expect(result.unknown).toContain('data-slot="alert"');
+  expect(result.ready).toContain('data-slot="card"');
+  expect(result.ready).toContain("中文用途");
+  expect(result.ready).toContain("long/model");
+  expect(result.ready).toContain("Responses");
+  expect(result.ready).toContain("等待名额");
+  expect(result.ready).not.toContain("<table");
+  expect(result.failed).not.toContain("long/model");
 });

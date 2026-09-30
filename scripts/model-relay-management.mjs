@@ -22,7 +22,8 @@ const conflict = () => new ConfigManagementError("stale-revision", "relay", "Rel
 export async function readRelayQueue(environment = process.env) {
   const { configPath } = locateUserConfig(environment);
   const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue");
-  return result.result === "queue" ? { state: "running", requests: result.requests }
+  return result.result === "queue" ? { state: "running", configurationValid: result.configurationValid, enabled: result.enabled,
+    listening: result.listening, requests: result.requests }
     : { state: result.result === "not_running" ? "stopped" : "unknown" };
 }
 

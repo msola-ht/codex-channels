@@ -176,9 +176,14 @@ it("authenticates the live queue endpoint and distinguishes unavailable from emp
   expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "stopped" });
   const query = vi.spyOn(relayControl, "queryModelRelayControl");
   try {
-    query.mockResolvedValueOnce({ result: "queue", requests: [] });
-    expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "running", requests: [] });
+    query.mockResolvedValueOnce({ result: "queue", configurationValid: true, enabled: true, listening: true, requests: [] });
+    expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "running", configurationValid: true, enabled: true, listening: true, requests: [] });
     expect(query).toHaveBeenLastCalledWith(expect.any(String), "queue");
+    for (const health of [{ configurationValid: true, enabled: false, listening: false }, { configurationValid: false, enabled: false, listening: false }]) {
+      query.mockResolvedValueOnce({ result: "queue", ...health, requests: [] });
+      expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "running", ...health, requests: [] });
+    }
+
     query.mockResolvedValueOnce({ result: "unconfirmed" });
     expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "unknown" });
   } finally { query.mockRestore(); }

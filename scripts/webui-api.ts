@@ -1053,9 +1053,13 @@ export interface RelayManagementResult {
 /** Ephemeral authenticated model requests; not a persisted request history. */
 export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
   state: "running";
+  configurationValid: boolean;
+  enabled: boolean;
+  listening: boolean;
   requests: Array<{
     requestId: string;
     callerId: string;
+    displayName: string | null;
     provider: string;
     model: string | null;
     protocol: "chat" | "responses";

@@ -6,6 +6,13 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   relay: {
+    keysTitle: "API Key",
+    keysHint: "按用途管理密钥、模型和思考策略。",
+    generationLabel: "凭据代次",
+    queueModel: "请求模型",
+    queueInvalid: "当前运行配置不可用，Relay 已停止接受新请求。下方仍展示尚未结束的请求。",
+    queueDisabled: "Relay 已停用，不接受新请求。下方仍展示尚未结束的请求。",
+    queueNotListening: "Relay 尚未监听，不接受新请求。下方仍展示尚未结束的请求。",
     queueDetails: "请求队列",
     queueLiveHint: "每次刷新完成后 2 秒自动更新，关闭后停止。仅展示当前已鉴权的模型请求，不保留历史。",
     queueSnapshotHint: "当前快照；按接收顺序展示，等待请求按 Key 公平调度。",
@@ -635,6 +642,13 @@ export type Messages = typeof zh
 
 const en: Messages = {
   relay: {
+    keysTitle: "API Key",
+    keysHint: "Manage keys, models and reasoning policies by purpose.",
+    generationLabel: "Credential generation",
+    queueModel: "Requested model",
+    queueInvalid: "The runtime configuration is unavailable. Relay is not accepting new requests. Unfinished requests remain listed below.",
+    queueDisabled: "Relay is disabled and is not accepting new requests. Unfinished requests remain listed below.",
+    queueNotListening: "Relay is not listening or accepting new requests. Unfinished requests remain listed below.",
     queueDetails: "Request queue",
     queueLiveHint: "Refreshes 2 seconds after each update; stops when closed. Only current authenticated model requests are shown, with no history.",
     queueSnapshotHint: "Current snapshot, ordered by arrival. Waiting requests are scheduled fairly by key.",

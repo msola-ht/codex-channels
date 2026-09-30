@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -89,7 +90,7 @@ export function RelayPage() {
   return <div className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><h1 ref={pageHeading} tabIndex={-1} className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
-      <div className="flex flex-wrap gap-2"><RelayQueueSheet callers={data?.callers ?? []} /><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
+      <div className="flex flex-wrap gap-2"><RelayQueueSheet /><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
@@ -105,19 +106,19 @@ export function RelayPage() {
     </div>}
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
     {snapshotCurrent && data?.runtime?.state === "running" && <RelayRuntimeStatus runtime={data.runtime} />}
-    {data && !management.loading && !management.error && <Table><TableHeader><TableRow>
-      {(["purpose", "provider", "protocol", "models", "reasoning", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
+    {data && !management.loading && !management.error && <Card><CardHeader><CardTitle>{t("relay.keysTitle")}</CardTitle><CardDescription>{t("relay.keysHint")}</CardDescription></CardHeader><CardContent className="min-w-0"><Table><TableHeader><TableRow>
+      {(["purpose", "provider", "protocol", "models", "reasoning", "generationLabel", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
     </TableRow></TableHeader><TableBody>
       {data.callers.map(entry => {
         const protocols = data.providers.find(value => value.id === entry.provider)?.protocols
         return <TableRow key={entry.key_id}>
-        <TableCell><div className="max-w-60 whitespace-normal break-words">{entry.display_name ?? entry.caller_id}</div><div className="text-xs text-muted-foreground">{entry.caller_id}</div><div className="text-xs text-muted-foreground">{entry.key_id} · {t("relay.generation", { value: entry.credential_generation })}</div></TableCell>
-        <TableCell>{entry.provider}</TableCell>
+        <TableCell className="min-w-40 max-w-60 whitespace-normal"><div className="break-all">{entry.display_name ?? entry.caller_id}</div><div className="break-all text-xs text-muted-foreground">{entry.caller_id}</div><div className="break-all text-xs text-muted-foreground">{entry.key_id}</div></TableCell>
+        <TableCell className="max-w-40 whitespace-normal break-all">{entry.provider}</TableCell>
         <TableCell><div className="flex flex-wrap gap-1">{protocols?.length
           ? protocols.map(protocol => <Badge key={protocol} variant="outline">{protocol === "chat" ? "Chat" : "Responses"}</Badge>)
-          : <Badge variant="outline">{t("relay.capabilityUnknown")}</Badge>}</div></TableCell><TableCell className="max-w-72 whitespace-normal break-all">{entry.models.join(", ")}</TableCell>
-        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
-        <TableCell><div className="flex flex-wrap gap-2">
+          : <Badge variant="outline">{t("relay.capabilityUnknown")}</Badge>}</div></TableCell><TableCell className="max-w-72 whitespace-normal break-all"><ul className="flex flex-col gap-1">{entry.models.map(model => <li key={model}>{model}</li>)}</ul></TableCell>
+        <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell className="tabular-nums">{t("relay.generation", { value: entry.credential_generation })}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
+        <TableCell className="min-w-40 max-w-64"><div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
           <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
@@ -125,8 +126,8 @@ export function RelayPage() {
           <Button size="sm" variant="ghost" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
         </div></TableCell>
       </TableRow>})}
-      {!data.callers.length && <TableRow><TableCell colSpan={7}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}
-    </TableBody></Table>}
+      {!data.callers.length && <TableRow><TableCell colSpan={8}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}
+    </TableBody></Table></CardContent></Card>}
     <Dialog open={editing !== null && !preview} onOpenChange={open => { if (!open && !management.busy) setEditing(null) }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} onCloseAutoFocus={restoreFocus} showCloseButton={!management.busy} onEscapeKeyDown={event => { if (management.busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}><DialogHeader className="pr-8"><DialogTitle>{t(editing === "new" ? "relay.create" : "relay.edit")}</DialogTitle><DialogDescription>{t("relay.formHint")}</DialogDescription></DialogHeader>
         <FieldGroup className="min-h-0 overflow-y-auto px-1 py-1">

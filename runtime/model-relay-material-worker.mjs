@@ -7,28 +7,34 @@ import { readCodexProxySnapshot } from "./codex-proxy-env.mjs";
 
 if (!parentPort) throw new Error("Internal Relay worker requires a parent");
 parentPort.on("message", () => {
-  try {
-    const { configPath, environment } = workerData;
-    assertPrivateConfigAccessSync(configPath);
-    const content = readPrivateFileSync(configPath, 1024 * 1024);
-    const document = validateGatewayConfigDocument(parseGatewayConfig(content));
-    const config = document.model_relay ?? modelRelayConfigSchema.parse({});
-    if (workerData.purpose === "metrics") {
-      let providers = [];
-      try { providers = listRelayProviderIds(environment); } catch { /* Reject unknown accounts. */ }
-      if (readPrivateFileSync(configPath, 1024 * 1024) !== content) throw new Error("Configuration changed during read");
-      parentPort.postMessage({ ok: true, providers, callers: [...config.callers, ...(config.retired_callers ?? [])].map(({ caller_id, key_id, provider, credential_generation }) =>
-        ({ caller_id, key_id, provider, credential_generation })) });
+  // An atomic save may overlap a read. Discard that snapshot and reread once;
+  // malformed/private-file failures still fail closed immediately. Reader deadlines apply.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { configPath, environment } = workerData;
+      assertPrivateConfigAccessSync(configPath);
+      const content = readPrivateFileSync(configPath, 1024 * 1024);
+      const document = validateGatewayConfigDocument(parseGatewayConfig(content));
+      const config = document.model_relay ?? modelRelayConfigSchema.parse({});
+      if (workerData.purpose === "metrics") {
+        let providers = [];
+        try { providers = listRelayProviderIds(environment); } catch { /* Reject unknown accounts. */ }
+        if (readPrivateFileSync(configPath, 1024 * 1024) !== content) continue;
+        parentPort.postMessage({ ok: true, providers, callers: [...config.callers, ...(config.retired_callers ?? [])].map(({ caller_id, key_id, provider, credential_generation }) =>
+          ({ caller_id, key_id, provider, credential_generation })) });
+        return;
+      }
+      const materials = []; const unavailable = [];
+      if (config.enabled) for (const account of config.accounts) {
+        try { materials.push(loadConfiguredRelayProviderMaterial(account.provider, environment)); }
+        catch { unavailable.push(account.provider); }
+      }
+      const proxy = readCodexProxySnapshot(environment);
+      if (readPrivateFileSync(configPath, 1024 * 1024) !== content) continue;
+      parentPort.postMessage({ ok: true, config, debug: validateDebugConfigDocument(document.debug ?? {}), digest: modelRelayConfigDigest(config), materials, unavailable,
+        proxy: proxy.settings, proxyPath: proxy.path });
       return;
-    }
-    const materials = []; const unavailable = [];
-    if (config.enabled) for (const account of config.accounts) {
-      try { materials.push(loadConfiguredRelayProviderMaterial(account.provider, environment)); }
-      catch { unavailable.push(account.provider); }
-    }
-    const proxy = readCodexProxySnapshot(environment);
-    if (readPrivateFileSync(configPath, 1024 * 1024) !== content) throw new Error("Configuration changed during read");
-    parentPort.postMessage({ ok: true, config, debug: validateDebugConfigDocument(document.debug ?? {}), digest: modelRelayConfigDigest(config), materials, unavailable,
-      proxy: proxy.settings, proxyPath: proxy.path });
-  } catch { parentPort.postMessage({ ok: false }); }
+    } catch { break; }
+  }
+  parentPort.postMessage({ ok: false });
 });

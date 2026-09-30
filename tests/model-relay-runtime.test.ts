@@ -1,6 +1,7 @@
 import fs from "node:fs";
+import { Worker } from "node:worker_threads";
 import { syncBuiltinESMExports } from "node:module";
-import { readRelayManagement, manageModelRelay as sharedManage } from "../scripts/model-relay-management.mjs";
+import { readRelayQueue, readRelayManagement, manageModelRelay as sharedManage } from "../scripts/model-relay-management.mjs";
 import { GatewayOwner } from "../runtime/gateway-owner.mjs";
 import { upgradeTrafficCapture, parseTrafficUpgradeArgs } from "../scripts/traffic-upgrade.mjs";
 import { createHash } from "node:crypto";
@@ -218,13 +219,15 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   Object.assign(document.model_relay!, { port: address.port }); writePrivateFileAtomicSync(f.configPath, stringify(document));
   const service = await startModelRelayService(f.configPath, f.environment).catch((cause: unknown) => { throw new Error("initial service startup failed", { cause }); }); cleanups.push(() => service.close());
   expect(service.status()).toEqual({ enabled: false, listening: false });
+  expect(await readRelayQueue(f.environment)).toEqual({ state: "running", configurationValid: true, enabled: false, listening: false, requests: [] });
   const malformed = createPrivateIpcConnection(modelRelayPaths(f.configPath).control);
   malformed.on("error", () => {}); await once(malformed, "connect");
   malformed.write('{"version":1,"operation":"status","requestId":{"toString":null}}\n');
   await once(malformed, "close");
-  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 3, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
+  expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ version: 4, configurationValid: true, queue: { pending: 0, waiting: 0, bytes: 0 } });
   await expect(startModelRelayService(f.configPath, f.environment)).rejects.toThrow();
   expect(await manageModelRelay(parseModelRelayCommand(["enable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
+  expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: true, enabled: true, listening: true });
   const models = await fetch(`http://127.0.0.1:${address.port}/v1/models`, { headers: { authorization: `Bearer ${String(issued.key)}` } });
   expect(models.status).toBe(200); expect(await models.json()).toMatchObject({ data: [{ id: "cline-pass/deepseek-v4.1-flash" }] });
   expect(await manageModelRelay(parseModelRelayCommand(["disable"]), f.environment)).toMatchObject({ activation: "saved_and_applied" });
@@ -233,10 +236,12 @@ it("owns a private control endpoint; enables, disables, fails closed and recover
   const saved = readFileSync(f.configPath, "utf8"); writePrivateFileAtomicSync(f.configPath, "broken = [");
   await expect(service.refresh()).rejects.toThrow(); expect(service.status().listening).toBe(false);
   expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ configurationValid: false, listening: false });
+  expect(await readRelayQueue(f.environment)).toMatchObject({ configurationValid: false, enabled: false, listening: false });
   writePrivateFileAtomicSync(f.configPath, saved); await expect(service.refresh()).resolves.toBeUndefined();
   expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toMatchObject({ result: "status", listening: false });
   await service.close();
   expect(await queryModelRelayControl(modelRelayPaths(f.configPath).control, "status")).toEqual({ result: "not_running" });
+  expect(await readRelayQueue(f.environment)).toEqual({ state: "stopped" });
   // The CLP profile remains untouched throughout independent process lifecycle.
   expect(readFileSync(clinePassSetupPaths(f.environment, "test").profile, "utf8")).toContain("sk_fixture-key");
 });
@@ -688,6 +693,11 @@ it("settles cancelled calls under their original provider across rebind, deletio
     headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" },
     body: JSON.stringify({ model, messages: [{ role: "user", content: "fixture" }] }) }).then(async response => { await response.text(); return response.status; }).catch(() => "disconnected" as const);
   const old = request(); await vi.waitFor(() => expect(held).toHaveLength(1));
+  expect(await readRelayQueue(f.environment)).toMatchObject({ state: "running", listening: true, requests: [{ callerId: "client", displayName: null, provider: "clp-test" }] });
+  await run(["edit", "--caller", "client", "--name", "新用途"]);
+  expect(await readRelayQueue(f.environment)).toMatchObject({ requests: [{ callerId: "client", displayName: "新用途", phase: "upstream", provider: "clp-test" }] });
+  expect(held).toHaveLength(1);
+
   expect(await run(["edit", "--caller", "client", "--provider", "clp-other", "--model", model])).toMatchObject({ activation: "saved_and_applied" });
   expect([503, "disconnected"]).toContain(await old);
   await vi.waitFor(() => expect(store.count()).toBe(1));
@@ -704,6 +714,7 @@ it("settles cancelled calls under their original provider across rebind, deletio
   const restarted = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => restarted.close());
   expect(await request()).toBe(401);
   expect(store.count()).toBe(2);
+  expect(await readRelayQueue(f.environment)).toMatchObject({ requests: [] });
 }, 15_000);
 
 it("rejects exhausted history and serialized file size before replacing configuration", async () => {
@@ -749,16 +760,20 @@ it("prunes orphan relay references but preserves shared providers and historical
 
 it("validates bounded private queue snapshots and refuses incompatible peers", async () => {
   const f = await fixture();
-  const row = { requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", provider: "clp-test",
+  const row = { requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
     model: "x".repeat(200), protocol: "chat", phase: "queue", elapsedMs: 123 };
-  let response: Record<string, unknown> = { result: "queue", requests: Array.from({ length: 64 }, () => row) };
+  let response: Record<string, unknown> = { result: "queue", configurationValid: true, enabled: true, listening: true, requests: Array.from({ length: 64 }, () => row) };
   const endpoint = modelRelayPaths(f.configPath).control;
   const control = new ModelRelayControl(endpoint, async () => response);
   await control.start(); cleanups.push(() => control.close());
   expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject(response);
   for (const requests of [[{ ...row, secret: "hidden" }], [{ ...row, phase: "unknown" }], [{ ...row, elapsedMs: -1 }],
-    [{ ...row, model: "x".repeat(201) }], Array.from({ length: 65 }, () => row)]) {
-    response = { result: "queue", requests };
+    [{ ...row, displayName: "bad\nname" }], [{ ...row, displayName: undefined }], [{ ...row, model: "x".repeat(201) }], Array.from({ length: 65 }, () => row)]) {
+    response = { result: "queue", configurationValid: true, enabled: true, listening: true, requests };
+    expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
+  }
+  for (const patch of [{ version: 3 }, { configurationValid: undefined }, { enabled: "yes" }, { listening: undefined }]) {
+    response = { result: "queue", configurationValid: true, enabled: true, listening: true, requests: [], ...patch };
     expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
   }
   response = { result: "status" };
@@ -771,8 +786,8 @@ it("preserves Unicode model names across fragmented queue IPC responses", async 
   const server = new PrivateIpcServer(endpoint, socket => {
     socket.once("data", data => {
       const request = JSON.parse(data.toString()) as { requestId: string };
-      const payload = Buffer.from(JSON.stringify({ version: 3, requestId: request.requestId, result: "queue", requests: [{
-        requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", provider: "clp-test",
+      const payload = Buffer.from(JSON.stringify({ version: 4, requestId: request.requestId, result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{
+        requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", displayName: "中文用途", provider: "clp-test",
         model: "中文模型", protocol: "responses", phase: "upstream", elapsedMs: 1,
       }] }) + "\n");
       const boundary = payload.indexOf(Buffer.from("中")) + 1;
@@ -781,5 +796,37 @@ it("preserves Unicode model names across fragmented queue IPC responses", async 
     });
   });
   await server.start("occupied"); cleanups.push(() => server.close());
-  expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject({ result: "queue", requests: [{ model: "中文模型" }] });
+  expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject({ result: "queue", configurationValid: true, enabled: true, listening: true, requests: [{ model: "中文模型" }] });
+});
+
+it.each(["provider", "metrics"])("rereads only a changing config once for %s snapshots", async purpose => {
+  const f = await fixture();
+  for (const mode of ["once", "continuous", "invalid"]) {
+    // Inject a save between the two reads inside the real worker, without changing user files.
+    const worker = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      const fs = require("node:fs");
+      const open = fs.openSync, read = fs.readFileSync, close = fs.closeSync;
+      const descriptors = new Set(); let reads = 0;
+      fs.openSync = (...args) => { const fd = open(...args); if (args[0] === workerData.configPath) descriptors.add(fd); return fd; };
+      fs.closeSync = fd => { descriptors.delete(fd); return close(fd); };
+      fs.readFileSync = (...args) => {
+        const content = read(...args);
+        if (!descriptors.has(args[0])) return content;
+        reads += 1;
+        if (workerData.mode === "invalid") return "[broken";
+        return content + "\\n# revision " + (workerData.mode === "continuous" ? reads : Math.min(reads, 2));
+      };
+      require("node:module").syncBuiltinESMExports();
+      const send = parentPort.postMessage.bind(parentPort);
+      parentPort.postMessage = result => send({ ...result, reads });
+      import(workerData.module).then(() => send("ready"));
+    `, { eval: true, workerData: { configPath: f.configPath, environment: f.environment, purpose, mode,
+      module: new URL("../runtime/model-relay-material-worker.mjs", import.meta.url).href } });
+    try {
+      expect((await once(worker, "message"))[0]).toBe("ready");
+      const received = once(worker, "message"); worker.postMessage({ operation: "read" });
+      expect((await received)[0]).toMatchObject({ ok: mode === "once", reads: mode === "invalid" ? 1 : 4 });
+    } finally { await worker.terminate(); }
+  }
 });
