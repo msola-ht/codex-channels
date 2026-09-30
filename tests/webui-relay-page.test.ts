@@ -97,6 +97,10 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");
   expect(result.en).toContain("Force off"); expect(result.en).toContain("Follow client");
   expect(result.en).not.toContain("强制关闭");
+  expect(result.zh).toContain(">删除</button>");
+  expect(result.en).toContain(">Delete</button>");
+  expect(result.availableEditor).toMatch(/<button[^>]*id="relay-provider"[^>]*>/u);
+  expect(result.availableEditor.match(/<button[^>]*id="relay-provider"[^>]*>/u)?.[0]).not.toMatch(/ disabled(?:=|\s|>)/u);
   expect(result.empty).toContain("No keys yet");
   expect(result.zh).not.toContain("cr1.");
   expect(result.failed).toMatch(/<button(?![^>]* disabled=)[^>]*>Refresh<\/button>/u);

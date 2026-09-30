@@ -17,8 +17,9 @@ export function createRelayMetricAuthorization(configPath, environment = process
       reading ??= reader.read().finally(() => { reading = undefined; });
       const snapshot = await reading;
       if (closed || signal?.aborted) return "closing";
-      const caller = snapshot.callers.find(value => value.caller_id === sample.callerId && value.key_id === sample.keyId);
-      if (!caller || caller.provider !== sample.provider || sample.credentialGeneration > caller.credential_generation) return "invalid_sample";
+      const caller = snapshot.callers.find(value => value.caller_id === sample.callerId && value.key_id === sample.keyId
+        && value.provider === sample.provider && sample.credentialGeneration <= value.credential_generation);
+      if (!caller) return "invalid_sample";
       return snapshot.providers.includes(sample.provider) ? undefined : "unknown_provider";
     } catch { return "invalid_sample"; }
     finally { pending--; }

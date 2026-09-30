@@ -112,7 +112,7 @@ export function materializeGatewayConfigDefaults(
   configPath: string,
   document: TomlTable,
 ): boolean;
-export function writeGatewayConfig(configPath: string, document: TomlTable): void;
+export function writeGatewayConfig(configPath: string, document: TomlTable, options?: { maximumBytes?: number }): void;
 export function withGatewayConfigLock<T>(
   configPath: string,
   operation: () => T & (T extends PromiseLike<unknown> ? never : unknown),

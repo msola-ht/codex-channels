@@ -12,10 +12,12 @@ export interface RelayCaller {
   models: readonly string[];
   reasoning?: "passthrough" | "off";
 }
+type RetiredIdentity = Pick<RelayCaller, "callerId" | "keyId" | "credentialGeneration">;
 export interface RelayPolicy extends RelayLimit {
   enabled: boolean;
   callers: readonly RelayCaller[];
   accounts: readonly { provider: string }[];
+  retiredCallers?: readonly RetiredIdentity[];
 }
 
 export class RelayAdmissionError extends Error {
@@ -43,6 +45,7 @@ export class RelayAdmission {
   private readonly leases = new Map<RelayLease, string>();
   private readonly revokedProviders = new Set<string>();
   private readonly identities = new Map<string, Readonly<RelayCaller>>();
+  private retiredIdentities = new Map<string, RetiredIdentity>();
   private readonly failures: Bucket;
   private closed = false;
   private accepting = true;
@@ -58,6 +61,7 @@ export class RelayAdmission {
     this.failures = { tokens: 8, updated: now(), active: 0, limit: { maxConcurrency: 64, requestsPerMinute: 60, burst: 8 } };
     this.budget = { tokens: policy.burst, active: 0, updated: now(), limit: this.policy };
     for (const caller of this.policy.callers) this.identities.set(caller.keyId, caller);
+    this.retiredIdentities = retirementIndex(this.policy);
   }
 
   get active(): number { return this.leases.size - this.pending.size; }
@@ -215,19 +219,43 @@ export class RelayAdmission {
   /** Caller passes a fully validated policy; publication and revocation are synchronous. */
   apply(policy: RelayPolicy): void {
     if (this.closed) throw new RelayAdmissionError(503, "relay_unavailable");
+    const retired = retirementIndex(policy);
+    for (const [key, prior] of this.retiredIdentities) {
+      const next = retired.get(key);
+      if (!next || next.callerId !== prior.callerId || next.credentialGeneration < prior.credentialGeneration) {
+        this.failClosed(); throw new RelayAdmissionError(503, "credential_rollback_rejected");
+      }
+    }
     for (const caller of policy.callers) {
+      const historical = retired.get(caller.keyId);
+      if (historical && (historical.callerId !== caller.callerId || historical.credentialGeneration > caller.credentialGeneration)
+        || this.retiredIdentities.has(caller.keyId) && !this.policy.callers.some(value => value.keyId === caller.keyId)
+        || [...retired.values()].some(value => value.callerId === caller.callerId && value.keyId !== caller.keyId)) {
+        this.failClosed(); throw new RelayAdmissionError(503, "credential_rollback_rejected");
+      }
       const prior = this.identities.get(caller.keyId);
       if ([...this.identities.values()].some(value => value.callerId === caller.callerId && value.keyId !== caller.keyId)
-        || prior && (prior.callerId !== caller.callerId || prior.provider !== caller.provider || caller.credentialGeneration < prior.credentialGeneration
+        || prior && (prior.callerId !== caller.callerId || caller.credentialGeneration < prior.credentialGeneration
         || caller.credentialGeneration === prior.credentialGeneration && (caller.secretSha256 !== prior.secretSha256 || !prior.enabled && caller.enabled))) {
         this.failClosed(); throw new RelayAdmissionError(503, "credential_rollback_rejected");
       }
     }
-    if (new Set([...this.identities.keys(), ...policy.callers.map(caller => caller.keyId)]).size > 256) {
+    // Only discard old credential hashes once durable settlement identities cover them.
+    const identities = new Map(this.identities);
+    for (const [key, prior] of identities) {
+      const historical = retired.get(key);
+      if (!policy.callers.some(value => value.keyId === key) && historical?.callerId === prior.callerId
+        && historical.credentialGeneration >= prior.credentialGeneration) identities.delete(key);
+    }
+    if (new Set([...identities.keys(), ...policy.callers.map(caller => caller.keyId)]).size > 256) {
       this.failClosed(); throw new RelayAdmissionError(503, "policy_capacity_exceeded");
     }
     this.policy = freezePolicy(policy);
     refill(this.budget, this.now()); this.budget.limit = this.policy; this.budget.tokens = Math.min(this.budget.tokens, policy.burst);
+    this.retiredIdentities = retired;
+    this.identities.clear();
+    for (const [key, caller] of identities) this.identities.set(key, caller);
+    for (const provider of this.revokedProviders) if (!policy.accounts.some(value => value.provider === provider)) this.revokedProviders.delete(provider);
     for (const [key, caller] of this.identities) if (!policy.callers.some(value => value.keyId === key)) this.identities.set(key, { ...caller, enabled: false });
     for (const caller of this.policy.callers) this.identities.set(caller.keyId, caller);
     for (const lease of this.leases.keys()) {
@@ -262,7 +290,16 @@ function privilege(caller: RelayCaller): string {
 }
 function freezePolicy(policy: RelayPolicy): RelayPolicy {
   return Object.freeze({ ...policy,
+    retiredCallers: Object.freeze((policy.retiredCallers ?? []).map(caller => Object.freeze({ ...caller }))),
     accounts: Object.freeze(policy.accounts.map(account => Object.freeze({ ...account }))),
     callers: Object.freeze(policy.callers.map(caller => Object.freeze({ ...caller, models: Object.freeze([...caller.models]) }))),
   });
+}
+
+function retirementIndex(policy: RelayPolicy): Map<string, RetiredIdentity> {
+  const result = new Map<string, RetiredIdentity>();
+  for (const caller of policy.retiredCallers ?? []) {
+    if ((result.get(caller.keyId)?.credentialGeneration ?? 0) < caller.credentialGeneration) result.set(caller.keyId, Object.freeze({ ...caller }));
+  }
+  return result;
 }

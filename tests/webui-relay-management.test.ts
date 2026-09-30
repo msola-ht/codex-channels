@@ -1,3 +1,4 @@
+import { manageModelRelay, parseModelRelayCommand } from "../scripts/model-relay-command.mjs";
 import * as providerRuntime from "../runtime/model-provider-runtime.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
 import * as fileLock from "../runtime/private-file-lock.mjs";
@@ -140,4 +141,30 @@ it("does not return confirmation or write config when preview cleanup fails", as
     expect(error).not.toContain("fixture private cleanup failure");
     expect(readFileSync(join(f.home, "config.toml"), "utf8")).toBe(before);
   } finally { lock.mockRestore(); }
+});
+
+it.each(["edit", "delete"] as const)("previews and confirms %s with revision and replay protection", async command => {
+  const f = await fixture();
+  await applyClinePassConfiguration({ accountId: "other", apiKey: "fixture-other" }, { environment: f.environment });
+  async function apply(input: RelayManagementInput) {
+    const body = { input, revision: (await f.snapshot()).revision };
+    const response = await f.post("preview", body); expect(response.status).toBe(200);
+    const preview = await response.json() as { confirmationToken: string; preview: { callers: Array<{ provider: string; display_name?: string }> } };
+    const saved = await f.post("apply", { ...body, confirmationToken: preview.confirmationToken });
+    expect(saved.status).toBe(200);
+    expect((await f.post("apply", { ...body, confirmationToken: preview.confirmationToken })).status).toBe(409);
+    return preview.preview;
+  }
+  await manageModelRelay(parseModelRelayCommand(["issue", "--caller", input.caller, "--key", input.key, "--provider", input.provider,
+    "--model", input.models[0]!, "--name", "沉浸式翻译", "--reasoning", "off"]), f.environment);
+  const before = (await f.snapshot()).callers[0]!;
+  if (command === "edit") {
+    const edited = await apply({ command, caller: input.caller, provider: "clp-other", models: input.models, reasoning: "off" });
+    expect(edited.callers[0]?.provider).toBe("clp-other");
+    expect((await f.snapshot()).callers[0]).toEqual({ ...before, provider: "clp-other" });
+  } else {
+    const deleted = await apply({ command, caller: input.caller });
+    expect(deleted.callers[0]).toMatchObject({ display_name: "沉浸式翻译", provider: "clp-test" });
+    expect((await f.snapshot()).callers).toEqual([]);
+  }
 });

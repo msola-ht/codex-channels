@@ -17,7 +17,7 @@ parentPort.on("message", () => {
       let providers = [];
       try { providers = listRelayProviderIds(environment); } catch { /* Reject unknown accounts. */ }
       if (readPrivateFileSync(configPath, 1024 * 1024) !== content) throw new Error("Configuration changed during read");
-      parentPort.postMessage({ ok: true, providers, callers: config.callers.map(({ caller_id, key_id, provider, credential_generation }) =>
+      parentPort.postMessage({ ok: true, providers, callers: [...config.callers, ...(config.retired_callers ?? [])].map(({ caller_id, key_id, provider, credential_generation }) =>
         ({ caller_id, key_id, provider, credential_generation })) });
       return;
     }

@@ -11,11 +11,11 @@
   在保留已有注释的前提下合并缺失的 Schema 安全默认值，
   所有基于已读取文档的写入在同一同步配置文件锁内复核原文后再执行私有文件原子替换；需要同时
   更新 Gateway 配置与直接 API 凭据的同步管理事务复用该可重入锁，异步操作必须使用独立事务锁，
-  拒绝并发覆盖，
+  拒绝并发覆盖；写入者可指定 `maximumBytes`，在保留注释后、原子替换前检查完整文件大小，
   并以 `0600` 权限写入 CLI、脚本和 Gateway 共享的 TOML 配置。
 - `gateway-config.d.mts`：声明共享 TOML 配置模块的 TypeScript 接口。
 - `chat-reasoning.mjs` / `chat-reasoning.d.mts`：无 I/O 的精确 Chat 关闭思考能力表，供配置、管理和模型 API 共用。
-- `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、每 Key 思考策略及仅全局限流策略投影和显式旧限流字段转换；服务默认关闭、只允许回环、保留停用身份，不生成凭据；仅显式转储升级可验证并移除旧采集字段。
+- `model-relay-config.mjs` / `model-relay-config.d.mts`：可选 Relay 严格配置、可选中文用途名称、仅结算使用的历史身份摘要、每 Key 思考策略及仅全局限流策略投影和显式旧限流字段转换；服务默认关闭、只允许回环、保留停用身份，不生成凭据；仅显式转储升级可验证并移除旧采集字段。
 - `network-proxy.mjs`：按 Codex `.env`、标准环境变量和受支持系统代理的顺序解析统一代理环境，只返回
   实际解析出的大小写代理变量；集中按目标协议选择、校验 HTTP(S) 客户端代理并匹配
   `NO_PROXY`。Codex `.env` 或环境变量提供任一 HTTP、HTTPS 或 ALL 代理地址时跳过系统读取，不补齐其他字段；
@@ -208,7 +208,7 @@
 - `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v3 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，有界连接、帧和等待，不传递秘密。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。
-- `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置，取消或关闭后的迟到结果不得通过。
+- `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置中的活动/历史身份，校验提供商和已签发代次；取消或关闭后的迟到鉴权结果不得通过。
 - `model-relay-service.mjs` / `model-relay-service.d.mts`：独立进程组合与生命周期、材料刷新/撤销、共享网络出口选择和可选 V2 Relay 转储 owner；未变化配置不重复发布准入策略，代理连接池跟随全局并发上限；复用全局 debug 开关、裁剪模式和保留天数；不复用 App Server 的代理实例。
 
 公开服务命令通过 `service-targets.mjs` 的 `serviceCommandTarget` 将内部 `model-relay` 标识显示为 `relay`；平台服务标识和已有定义文件保持稳定。

@@ -1040,8 +1040,8 @@ export interface RelayManagementSnapshot {
 }
 export type RelayManagementInput =
   | { command: "issue"; name?: string; caller: string; key: string; provider: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "edit"; name?: string; caller: string; models: string[]; reasoning: RelayReasoning }
-  | { command: "rotate" | "disable"; caller: string };
+  | { command: "edit"; name?: string; provider?: string; caller: string; models: string[]; reasoning: RelayReasoning }
+  | { command: "rotate" | "disable" | "delete"; caller: string };
 export interface RelayManagementMutation { revision: string; input: RelayManagementInput }
 export interface RelayManagementPreview { command: RelayManagementInput["command"]; caller: string; callers: RelayManagedCaller[] }
 export interface RelayManagementResult {

@@ -22,6 +22,8 @@ function schema(legacy, legacyCapture = false) {
     port: z.number().int().min(1024).max(65535).default(4119),
     ...limits(10, 10),
     accounts: z.array(z.strictObject({ provider, ...(legacy ? limits(10, 10) : {}) })).max(128).default([]),
+    retired_callers: z.array(z.strictObject({ caller_id: identity, key_id: identity, provider,
+      credential_generation: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) })).max(4096).optional(),
     callers: z.array(z.strictObject({
       caller_id: identity,
       display_name: relayDisplayNameSchema.optional(),
@@ -45,6 +47,18 @@ function schema(legacy, legacyCapture = false) {
       if (new Set(values.map(entry => entry[key])).size !== values.length) {
         context.addIssue({ code: "custom", path: [path], message: `Relay ${key} 必须唯一` });
       }
+    }
+    const retired = value.retired_callers ?? [];
+    if (new Set(retired.map(entry => JSON.stringify([entry.caller_id, entry.key_id, entry.provider]))).size !== retired.length) {
+      context.addIssue({ code: "custom", path: ["retired_callers"], message: "Relay 历史身份与提供商组合必须唯一" });
+    }
+    const callerKeys = new Map(), keyCallers = new Map();
+    for (const entry of [...retired, ...value.callers]) {
+      if (callerKeys.has(entry.caller_id) && callerKeys.get(entry.caller_id) !== entry.key_id
+        || keyCallers.has(entry.key_id) && keyCallers.get(entry.key_id) !== entry.caller_id) {
+        context.addIssue({ code: "custom", path: ["retired_callers"], message: "Relay 历史身份不能重新分配" });
+      }
+      callerKeys.set(entry.caller_id, entry.key_id); keyCallers.set(entry.key_id, entry.caller_id);
     }
     for (const [index, caller] of value.callers.entries()) {
       if (caller.reasoning === "off" && !caller.models.every(model => supportsChatReasoningOff(caller.provider, model))) {
@@ -71,6 +85,8 @@ export function upgradeModelRelayLimits(value) {
 export function relayPolicyFromConfig(config) {
   const limit = value => ({ maxConcurrency: value.max_concurrency, requestsPerMinute: value.requests_per_minute, burst: value.burst });
   return { enabled: config.enabled, ...limit(config),
+    retiredCallers: (config.retired_callers ?? []).map(({ caller_id, key_id, credential_generation }) =>
+      ({ callerId: caller_id, keyId: key_id, credentialGeneration: credential_generation })),
     accounts: config.accounts.map(account => ({ provider: account.provider })),
     callers: config.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id,
       credentialGeneration: caller.credential_generation, secretSha256: caller.secret_sha256,

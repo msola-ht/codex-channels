@@ -257,3 +257,59 @@ it("revokes only the key whose reasoning policy changed, including waiting lease
   expect(() => active.check()).toThrow("request_revoked");
   active.release(); sibling.release(); admission.close();
 });
+
+it("rebinding and deletion cancel old leases without changing the secret or other callers", async () => {
+  const config = { ...policy(), maxConcurrency: 2, requestsPerMinute: 0 };
+  const admission = new RelayAdmission(config);
+  const active = admission.acquire(token());
+  const other = admission.acquire(token("key-b"));
+  const upload = admission.reserve(token());
+  const waiting = admission.reserve(token());
+  const settled = admission.wait(waiting, "fixture/model", 10, waiting.signal).catch(error => error);
+  const rebound = { ...config, accounts: [...config.accounts, { provider: "clp-new" }],
+    callers: config.callers.map(caller => caller.keyId === "key-a" ? { ...caller, provider: "clp-new" } : caller) };
+  admission.apply(rebound);
+  for (const lease of [active, upload, waiting]) {
+    expect(lease.signal.aborted).toBe(true);
+    expect(() => lease.check()).toThrow("request_revoked");
+    lease.release();
+  }
+  expect(await settled).toBeInstanceOf(Error);
+  expect(other.signal.aborted).toBe(false);
+  const next = admission.acquire(token());
+  expect(next.caller.provider).toBe("clp-new");
+  admission.apply({ ...rebound, callers: rebound.callers.filter(caller => caller.keyId !== "key-a") });
+  expect(next.signal.aborted).toBe(true);
+  expect(() => admission.acquire(token())).toThrow("invalid_api_key");
+  expect(other.signal.aborted).toBe(false);
+  next.release(); other.release(); admission.close();
+});
+
+it("compacts deleted credentials covered by durable history without exhausting live identities", () => {
+  const stable = policy().callers[0]!;
+  const base: RelayPolicy = { ...policy(), callers: [stable], requestsPerMinute: 0, retiredCallers: [] };
+  const admission = new RelayAdmission(base);
+  const retired: NonNullable<RelayPolicy["retiredCallers"]>[number][] = [];
+  for (let i = 0; i < 300; i++) {
+    const caller = { ...stable, callerId: `temporary-${i}`, keyId: `temporary-${i}` };
+    admission.apply({ ...base, callers: [stable, caller], retiredCallers: [...retired] });
+    admission.acquire(token(caller.keyId)).release();
+    retired.push({ callerId: caller.callerId, keyId: caller.keyId, credentialGeneration: 1 });
+    admission.apply({ ...base, retiredCallers: [...retired] });
+    admission.acquire(token()).release();
+  }
+  expect(() => admission.acquire(token("temporary-0"))).toThrow("invalid_api_key");
+  const restarted = new RelayAdmission({ ...base, retiredCallers: retired });
+  expect(() => restarted.acquire(token("temporary-0"))).toThrow("invalid_api_key");
+  expect(() => restarted.apply({ ...base, retiredCallers: retired, callers: [stable,
+    { ...stable, keyId: "temporary-0", callerId: "temporary-0", credentialGeneration: 2 }] })).toThrow("credential_rollback_rejected");
+  expect(() => admission.apply(base)).toThrow("credential_rollback_rejected");
+  admission.close(); restarted.close();
+});
+
+it("keeps revocation protection for deletions lacking durable history", () => {
+  const base = policy(); const admission = new RelayAdmission(base);
+  admission.apply({ ...base, callers: [] });
+  expect(() => admission.apply(base)).toThrow("credential_rollback_rejected");
+  admission.close();
+});

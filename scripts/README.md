@@ -425,7 +425,7 @@
   阶段及全部检查的累计耗时；完整测试已经成功构建 Gateway 后，日常门禁只复用该产物执行 tarball
   安装冒烟。干净源码安装保留在独立 `npm run test:package`、正式发布和升级验证中。
 - `validate-config.mjs`：在安装系统服务前使用已构建的 Gateway 配置模块执行完整校验。
-- `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存；Relay 管理与全局转储升级共用。
+- `config-backup.mjs`：调用方持有配置锁并验证目标后，执行私有备份、同步及逐字节校验，再原子保存，可传递完整文件容量上限；Relay 管理与全局转储升级共用。
 - `traffic-upgrade.mjs` / `traffic-upgrade.d.mts`：`codexc traffic upgrade` 先确认 Gateway owner 已退出，再显式统一 Codex/Relay 采集开关与模式；验证并移除旧 Relay 采集字段，保留身份、凭据、保留天数和其他配置。
 - `traffic-command-options.mjs` / `traffic-command-options.d.mts`：集中解析并预检 `codexc traffic` 的
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
@@ -542,7 +542,7 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 
 - `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
 
-- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑/轮换/停用、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用回退。
+- `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用/历史身份摘要回退。
 - `model-relay-management.mjs` / `model-relay-management.d.mts`：CLI/WebUI 共享 Relay 管理，脱敏资源、目录输入能力与策略能力、只读预览、版本检查、配置锁/备份/原子保存及 IPC 生效确认；只在实际保存后返回一次新秘密；Relay 专用事务保留已保存结果并单独标记锁清理失败。
 - `webui-management-relay-route.mjs`：Relay 管理 GET/preview/apply 路由，复用管理鉴权、确认、Provider 事务和脱敏审计；GET 复用 CLI 私有状态查询并只返回受控运行与队列摘要。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。

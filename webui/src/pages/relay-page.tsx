@@ -45,7 +45,7 @@ export function RelayPage() {
   const latestCaller = editing && editing !== "new" ? data?.callers.find(value => value.caller_id === editing.caller_id) : undefined
   const supportsOff = models.length > 0 && models.every(model => selected?.models.some(value => value.id === model && value.reasoningOff))
   const policyChanged = editing === "new" || editing === null || reasoning !== editing.reasoning
-    || models.length !== editing.models.length || models.some(model => !editing.models.includes(model))
+    || provider !== editing.provider || models.length !== editing.models.length || models.some(model => !editing.models.includes(model))
   const openEditor = (value: "new" | RelayManagedCaller, discardDraft = false) => {
     if (!data || blocked) return
     if (!discardDraft) returnFocus.current = document.activeElement as HTMLElement
@@ -65,7 +65,7 @@ export function RelayPage() {
   const submit = () => {
     if (blocked || draftStale || !draftRevision || editing === null) return
     if (editing === "new") mutate({ command: "issue", caller, name, key: `key-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")}`, provider, models, reasoning }, draftRevision)
-    else mutate({ command: "edit", caller, name, models, reasoning }, draftRevision)
+    else mutate({ command: "edit", caller, name, provider, models, reasoning }, draftRevision)
   }
   const confirm = async () => {
     const saved = await management.confirm()
@@ -120,6 +120,7 @@ export function RelayPage() {
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
           <Button size="sm" variant="outline" disabled={blocked} onClick={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
           <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
+          <Button size="sm" variant="destructive" disabled={blocked} onClick={() => startAction({ command: "delete", caller: entry.caller_id })}>{t("relay.delete")}</Button>
           <Button size="sm" variant="ghost" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
         </div></TableCell>
       </TableRow>})}
@@ -136,7 +137,7 @@ export function RelayPage() {
           <Field data-invalid={name.length > 0 && nameInvalid} data-disabled={management.busy}><FieldLabel htmlFor="relay-name">{t("relay.purpose")}</FieldLabel>{editing === "new" && <ToggleGroup type="single" variant="outline" size="sm" className="max-w-full flex-wrap" value={name} disabled={management.busy} aria-label={t("relay.purposePresetsLabel")} onValueChange={value => { if (value) setName(value) }}>
             {(["translation", "coding", "chat", "writing", "testing"] as const).map(preset => <ToggleGroupItem key={preset} value={t(`relay.purposePresets.${preset}`)}>{t(`relay.purposePresets.${preset}`)}</ToggleGroupItem>)}
           </ToggleGroup>}<Input id="relay-name" value={name} disabled={management.busy} onChange={event => setName(event.target.value)} aria-invalid={name.length > 0 && nameInvalid} aria-describedby={name.length > 0 && nameInvalid ? "relay-name-hint relay-name-error" : "relay-name-hint"} /><FieldDescription id="relay-name-hint">{t("relay.purposeHint")}</FieldDescription>{name.length > 0 && nameInvalid && <FieldError id="relay-name-error">{t("relay.nameInvalid")}</FieldError>}{editing !== "new" && <FieldDescription>{t("relay.callerId")}: {caller}</FieldDescription>}</Field>
-          <Field data-disabled={editing !== "new" || management.busy}><FieldLabel htmlFor="relay-provider">{t("relay.provider")}</FieldLabel><Select value={provider} disabled={editing !== "new" || management.busy} onValueChange={value => { setProvider(value); setModels([]) }}><SelectTrigger id="relay-provider"><SelectValue placeholder={t("relay.chooseProvider")} /></SelectTrigger><SelectContent><SelectGroup>{data?.providers.map(value => <SelectItem key={value.id} value={value.id} disabled={!value.available}>{value.id}{value.available ? "" : ` (${t("relay.unavailable")})`}</SelectItem>)}</SelectGroup></SelectContent></Select>{selected?.protocols?.length ? <FieldDescription>{t("relay.protocols", { value: selected.protocols.map(value => value === "chat" ? "Chat Completions" : "Responses").join(" / ") })}</FieldDescription> : null}</Field>
+          <Field data-disabled={management.busy}><FieldLabel htmlFor="relay-provider">{t("relay.provider")}</FieldLabel><Select value={provider} disabled={management.busy} onValueChange={value => { setProvider(value); setModels([]); setReasoning("passthrough") }}><SelectTrigger id="relay-provider"><SelectValue placeholder={t("relay.chooseProvider")} /></SelectTrigger><SelectContent><SelectGroup>{data?.providers.map(value => <SelectItem key={value.id} value={value.id} disabled={!value.available}>{value.id}{value.available ? "" : ` (${t("relay.unavailable")})`}</SelectItem>)}</SelectGroup></SelectContent></Select>{selected?.protocols?.length ? <FieldDescription>{t("relay.protocols", { value: selected.protocols.map(value => value === "chat" ? "Chat Completions" : "Responses").join(" / ") })}</FieldDescription> : null}</Field>
           <FieldSet disabled={management.busy || capabilityUnavailable}><FieldLegend>{t("relay.models")}</FieldLegend><div className="flex max-h-48 flex-col gap-2 overflow-y-auto">{[...new Set([...(selected?.models.map(value => value.id) ?? []), ...models])].map(model => {
             const inputs = selected?.models.find(value => value.id === model)?.inputModalities
             return <Field key={model} orientation="horizontal"><Checkbox id={`model-${model}`} checked={models.includes(model)} disabled={management.busy || capabilityUnavailable} onCheckedChange={checked => setModels(values => checked ? [...values, model] : values.filter(value => value !== model))} /><FieldLabel className="min-w-0 flex-col items-start gap-1 break-all" htmlFor={`model-${model}`}><span>{model}</span><span className="flex flex-wrap gap-1" aria-label={t("relay.inputFormats")}>{inputs?.length
@@ -153,7 +154,7 @@ export function RelayPage() {
         <div className="min-h-0 overflow-y-auto">
           {preview && <dl className="grid min-w-0 gap-3"><div><dt className="text-muted-foreground">{t("relay.purpose")}</dt><dd className="break-words">{previewCaller?.display_name ?? preview.caller}</dd></div><div><dt className="text-muted-foreground">{t("relay.callerId")}</dt><dd className="break-all">{preview.caller}</dd></div>{previewCaller && <><div><dt className="text-muted-foreground">{t("relay.provider")}</dt><dd className="break-all">{previewCaller.provider}</dd></div><div><dt className="text-muted-foreground">{t("relay.models")}</dt><dd className="break-all">{previewCaller.models.join(", ")}</dd></div><div><dt className="text-muted-foreground">{t("relay.reasoning")}</dt><dd>{t(previewCaller.reasoning === "off" ? "relay.off" : "relay.passthrough")}</dd></div></>}</dl>}
         </div>
-        <AlertDialogFooter><AlertDialogCancel disabled={management.busy}>{t("relay.cancel")}</AlertDialogCancel><AlertDialogAction variant={preview?.command === "disable" ? "destructive" : "default"} disabled={management.busy} onClick={event => { event.preventDefault(); void confirm() }}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.confirm")}</AlertDialogAction></AlertDialogFooter>
+        <AlertDialogFooter><AlertDialogCancel disabled={management.busy}>{t("relay.cancel")}</AlertDialogCancel><AlertDialogAction variant={(preview?.command === "disable" || preview?.command === "delete") ? "destructive" : "default"} disabled={management.busy} onClick={event => { event.preventDefault(); void confirm() }}>{management.busy && <Spinner data-icon="inline-start" aria-label={t("common.loading")} />}{t("relay.confirm")}</AlertDialogAction></AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
     <Dialog open={result !== null} onOpenChange={open => { if (!open) setResult(null) }}><DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} onCloseAutoFocus={restoreFocus} showCloseButton={!management.busy} onEscapeKeyDown={event => { if (management.busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}><DialogHeader className="pr-8"><DialogTitle>{t("relay.saved")}</DialogTitle><DialogDescription>{result ? t(`relay.${result.activation}`) : ""}</DialogDescription></DialogHeader>

@@ -989,13 +989,16 @@ describe("isolated Relay vertical request chain", () => {
     expect(await response.json()).toEqual({ object: "list", data: [{ id: "fixture/model", object: "model", owned_by: "relay" }] });
     expect(f.calls()).toBe(0); expect(f.metrics).toEqual([]);
   });
-  it.each(["rotation", "reasoning"])("cancels pending preparation and ignores its late result after %s", async change => {
+  it.each(["rotation", "reasoning", "provider", "delete"])("cancels pending preparation and ignores its late result after %s", async change => {
     let release!: () => void; let preparing!: () => void;
     const ready = new Promise<void>(resolve => { preparing = resolve; });
     const pending = new Promise<void>(resolve => { release = resolve; });
     const f = await fixture(() => { throw new Error("late send"); }, async prepared => { preparing(); await pending; return prepared; });
     const result = f.post(); await ready;
-    const policy = config(); f.relay.admission.apply({ ...policy, callers: policy.callers.map(caller => change === "rotation" ? ({ ...caller, credentialGeneration: 2 }) : ({ ...caller, reasoning: "off" })) });
+    const policy = config(); f.relay.admission.apply({ ...policy,
+      accounts: [...policy.accounts, { provider: "clp-other" }],
+      callers: change === "delete" ? [] : policy.callers.map(caller => change === "rotation" ? ({ ...caller, credentialGeneration: 2 })
+        : change === "provider" ? ({ ...caller, provider: "clp-other" }) : ({ ...caller, reasoning: "off" })) });
     const response = await result; expect(response.status).toBe(503); await response.text();
     release(); await new Promise(resolve => setImmediate(resolve));
     expect(f.calls()).toBe(0); expect(f.metrics).toEqual([]); expect(f.relay.diagnostics().active).toBe(0);

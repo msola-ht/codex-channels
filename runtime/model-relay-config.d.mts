@@ -10,12 +10,14 @@ export interface ModelRelayConfig extends ModelRelayLimitConfig {
   enabled: boolean; host: "127.0.0.1" | "::1"; port: number;
   accounts: Array<{ provider: string }>;
   callers: ModelRelayCallerConfig[];
+  retired_callers?: Array<Pick<ModelRelayCallerConfig, "caller_id" | "key_id" | "provider" | "credential_generation">>;
 }
 export const modelRelayConfigSchema: ZodType<ModelRelayConfig>;
 export function modelRelayConfigDigest(config: ModelRelayConfig): string;
 export function relayPolicyFromConfig(config: ModelRelayConfig): {
   enabled: boolean; maxConcurrency: number; requestsPerMinute: number; burst: number;
   accounts: Array<{ provider: string }>;
+  retiredCallers: Array<{ callerId: string; keyId: string; credentialGeneration: number }>;
   callers: Array<{ callerId: string; keyId: string; credentialGeneration: number; secretSha256: string;
     enabled: boolean; provider: string; models: string[]; reasoning: "passthrough" | "off" }>;
 };

@@ -80,3 +80,15 @@ it("accepts Unicode display names without changing authorization policy and reje
     expect(modelRelayConfigSchema.safeParse({ ...base, callers: [{ ...caller, display_name: name }] }).success).toBe(false);
   }
 });
+
+it("keeps retired settlement identities bounded, strict and outside admission policy", () => {
+  const retired = { caller_id: "old", key_id: "old-key", provider: "clp-example", credential_generation: 1 };
+  const config = modelRelayConfigSchema.parse({ retired_callers: [retired] });
+  expect(relayPolicyFromConfig(config).callers).toEqual([]);
+  expect(modelRelayConfigSchema.parse({})).not.toHaveProperty("retired_callers");
+  for (const values of [[retired, retired], [{ ...retired, secret_sha256: "a".repeat(64) }],
+    [{ ...retired, credential_generation: 0 }], [retired, { ...retired, key_id: "other", provider: "clp-other" }],
+    Array.from({ length: 4097 }, (_, i) => ({ ...retired, caller_id: `c${i}`, key_id: `k${i}` }))]) {
+    expect(modelRelayConfigSchema.safeParse({ retired_callers: values }).success).toBe(false);
+  }
+});
