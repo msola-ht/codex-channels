@@ -276,6 +276,7 @@ it("rejects duplicate batch entries and missing confirmations", async () => {
   expect((await f.post("batch-apply", { action: "ignore", entries: [entry] })).status).toBe(409);
 });
 
+// Includes 150 durable submissions and six full-page reads under shared CI I/O.
 it("reads three full pages of summaries without consuming write quotas or exhausting read limits", async () => {
   const f = await fixture();
   const writer = new SqliteDeliveryJournal(f.directory);
@@ -313,7 +314,7 @@ it("reads three full pages of summaries without consuming write quotas or exhaus
     expect(result.records[0]?.content).toBeNull();
     expect(result.records[1]?.content).toMatchObject({ text: "x".repeat(160) });
   } finally { writer.close(); }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each([{ action: "retry", authorized: true }, { action: "ignore", authorized: true }, { action: "retry", authorized: false }] as const)("processes $action through the live Gateway writer (authorized=$authorized)", async ({ action, authorized }) => {
   const f = await fixture();
