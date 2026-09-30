@@ -24,7 +24,8 @@ contract.each([
   { emptyOpening: false, effort: "max", useDefault: false },
   { emptyOpening: false, effort: "high", useDefault: true, fullReasoning: true },
   { emptyOpening: false, effort: "high", useDefault: true, hostedSearch: true },
-])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError, full reasoning: $fullReasoning, hosted search: $hostedSearch)", async ({ emptyOpening, effort, useDefault, incomplete, streamError, fullReasoning, hostedSearch }) => {
+  { emptyOpening: false, effort: "high", useDefault: true, fullReasoning: true, toolImages: true },
+])("CLP preserves items and tool follow-up ($effort, empty opening: $emptyOpening, incomplete: $incomplete, stream error: $streamError, full reasoning: $fullReasoning, hosted search: $hostedSearch, tool images: $toolImages)", async ({ emptyOpening, effort, useDefault, incomplete, streamError, fullReasoning, hostedSearch, toolImages }) => {
   const root = mkdtempSync(join(tmpdir(), "chat-contract-"));
   const environment = { ...process.env, CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect") };
   const reasoningField = fullReasoning ? "reasoning_content" : "reasoning";
@@ -84,7 +85,10 @@ contract.each([
     rpc.setServerRequestHandler(async request => {
       if (request.method !== "item/tool/call") throw new Error("Unexpected privileged request");
       expect(request.params).toMatchObject({ tool: "schedule_task", arguments: { action: "list" } });
-      return { contentItems: [{ type: "inputText", text: "Gateway scheduled tasks: empty" }], success: true };
+      return { contentItems: [
+        { type: "inputText", text: "Gateway scheduled tasks: empty" },
+        ...(toolImages ? [{ type: "inputImage" as const, imageUrl }] : []),
+      ], success: true };
     });
     await rpc.connect();
     const { thread } = await rpc.request<ThreadStartResponse>({ method: "thread/start", params: { cwd: root, modelProvider: "clp-test", sandbox: "read-only", approvalPolicy: "never", ephemeral: true, ...(hostedSearch ? { config: { web_search: "live" } } : {}), dynamicTools: [{ type: "function", name: "schedule_task", description: "List fixture tasks", inputSchema: { type: "object", properties: { action: { type: "string" } }, required: ["action"], additionalProperties: false } }] } });
@@ -99,6 +103,16 @@ contract.each([
         { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
       ]) }));
     }
+    const assertToolImage = (body: typeof bodies[number]) => {
+      const label = '[Tool output image: {"call_id":"fixture-call","image":1}]';
+      const index = body.messages.findIndex(message => message.role === "tool" && message.tool_call_id === "fixture-call");
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(body.messages[index]?.content).toContain(label);
+      expect(body.messages[index + 1]).toMatchObject({ role: "user", content: [
+        { type: "text", text: label }, { type: "image_url", image_url: { url: imageUrl } },
+      ] });
+    };
+    if (toolImages) assertToolImage(bodies[1]!);
     if (streamError) expect(JSON.stringify(turns)).not.toContain("private upstream diagnostic");
     expect(deltas.map(item => item.delta).join("")).toBe("Checking tasks.First answer. Chat tool round trip complete");
     for (const delta of deltas) {
@@ -115,6 +129,7 @@ contract.each([
       await waitFor(() => turns.some(entry => entry.id === next.turn.id), 15000);
       expect(turns).toContainEqual(expect.objectContaining({ id: next.turn.id, status: "completed" }));
       expect(bodies).toHaveLength(3);
+      if (toolImages) assertToolImage(bodies[2]!);
       expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Inspect scheduled tasks first." }));
       expect(bodies[2]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Review task results.Double check.", content: "First answer. Chat tool round trip complete" }));
     }

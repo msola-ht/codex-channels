@@ -67,12 +67,20 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   if (source.instructions != null) messages.push({ role: "system", content: string(source.instructions) });
   const pendingCalls = new Set<string>();
   const seenCalls = new Set<string>();
+  const pendingImages: ChatUserContentPart[] = [];
+  // Chat 的 tool 消息只能携带文本，工具结果中的图片改由结果之后的 user 消息承载。
+  // 并行调用要求 tool 消息连续，因此图片先缓存，等本轮结果齐了再一次性写出。
+  const flushToolImages = (): void => {
+    if (pendingImages.length === 0) return;
+    messages.push({ role: "user", content: pendingImages.splice(0, pendingImages.length) });
+  };
   // A Chat assistant message owns its text, reasoning and all parallel calls.
   // Once tool results start, a new assistant group requires every result first.
   const assistant = (): ChatTextMessage => {
     const last = messages.at(-1);
     if (last?.role === "assistant") return last;
     if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
+    flushToolImages();
     const message: ChatTextMessage = { role: "assistant", content: null };
     messages.push(message);
     return message;
@@ -87,6 +95,11 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
   const pushResult = (callId: string, content: string): void => {
     if (!pendingCalls.delete(callId)) throw new ModelConversionError("Unmatched tool result");
     messages.push({ role: "tool", tool_call_id: callId, content });
+  };
+  const pushToolOutput = (callId: string, value: unknown): void => {
+    const result = toolResult(callId, value);
+    pushResult(callId, result.text);
+    pendingImages.push(...result.images);
   };
   /** tool_search 结果带回的工具必须在本轮声明；Chat 上游没有“上游自动补工具”的等价机制。 */
   const discovered: unknown[] = [];
@@ -106,9 +119,9 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
       const message = assistant();
       pushCall(message, string(item.call_id), toolSearchName, JSON.stringify(toolSearchArguments(item.arguments)));
     } else if (item.type === "function_call_output") {
-      pushResult(string(item.call_id), textContent(item.output));
+      pushToolOutput(string(item.call_id), item.output);
     } else if (item.type === "custom_tool_call_output") {
-      pushResult(string(item.call_id), textContent(item.output));
+      pushToolOutput(string(item.call_id), item.output);
     } else if (item.type === "tool_search_output") {
       if (item.execution !== "client") throw new ModelConversionError("Server-executed tool search is unsupported");
       pushResult(string(item.call_id), JSON.stringify(array(item.tools)));
@@ -142,6 +155,7 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
         message.content = (message.content ?? "") + textContent(item.content);
       } else {
         if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
+        flushToolImages();
         messages.push(role === "user"
           ? { role, content: userContent(item.content) }
           : { role, content: textContent(item.content) });
@@ -151,6 +165,7 @@ export function responsesToChat(value: unknown): { request: ChatRequest; toolNam
     }
   }
   if (pendingCalls.size) throw new ModelConversionError("Missing tool results");
+  flushToolImages();
   const result: ChatRequest = { model: string(source.model), messages, stream: true, stream_options: { include_usage: true } };
   if (reasoningControl) result.reasoning = reasoningControl;
   const convertTool = (raw: unknown, namespace?: string, loaded = false): JsonObject => {
@@ -282,20 +297,48 @@ function userContent(value: unknown): string | ChatUserContentPart[] {
   const parts: ChatUserContentPart[] = array(value).map(raw => {
     const part = object(raw);
     if (part.type === "input_text") return { type: "text", text: string(part.text) };
-    if (part.type !== "input_image" || part.file_id != null) throw new ModelConversionError("Unsupported user content");
-    const url = string(part.image_url);
-    // Preserve inline data without decoding or fetching it in this pure adapter.
-    // Surface image validation remains responsible for file format and size.
-    const prefix = /^data:image\/(?:png|jpeg|webp|gif);base64,/u.exec(url);
-    const encoded = prefix ? url.slice(prefix[0].length) : "";
-    if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) {
-      throw new ModelConversionError("Only inline Base64 images are supported");
-    }
-    const detail = part.detail;
-    if (detail != null && detail !== "auto" && detail !== "low" && detail !== "high") throw new ModelConversionError("Unsupported Chat image detail");
-    return { type: "image_url", image_url: { url, ...(detail == null ? {} : { detail }) } };
+    if (part.type !== "input_image") throw new ModelConversionError("Unsupported user content");
+    return chatImagePart(part);
   });
   return parts.some(part => part.type === "image_url") ? parts : parts.map(part => part.type === "text" ? part.text : "").join("");
+}
+
+/** 用户输入与工具结果共用同一份内联图片校验；保持纯转换，不下载也不解码。 */
+function chatImagePart(part: JsonObject): ChatUserContentPart {
+  if (part.file_id != null) throw new ModelConversionError("Image references are unsupported");
+  const url = string(part.image_url);
+  // Preserve inline data without decoding or fetching it in this pure adapter.
+  // Surface image validation remains responsible for file format and size.
+  const prefix = /^data:image\/(?:png|jpeg|webp|gif);base64,/u.exec(url);
+  const encoded = prefix ? url.slice(prefix[0].length) : "";
+  if (!encoded || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) {
+    throw new ModelConversionError("Only inline Base64 images are supported");
+  }
+  const detail = part.detail;
+  if (detail != null && detail !== "auto" && detail !== "low" && detail !== "high") throw new ModelConversionError("Unsupported Chat image detail");
+  return { type: "image_url", image_url: { url, ...(detail == null ? {} : { detail }) } };
+}
+
+/** 工具结果只保留文本，图片交给紧随其后的 user 消息；Chat 的 tool 消息不能携带图片。 */
+function toolResult(callId: string, value: unknown): { text: string; images: ChatUserContentPart[] } {
+  if (typeof value === "string") return { text: value, images: [] };
+  const text: string[] = [];
+  const images: ChatUserContentPart[] = [];
+  let imageIndex = 0;
+  for (const raw of array(value)) {
+    const part = object(raw);
+    if (part.type === "input_text" || part.type === "output_text") { text.push(string(part.text)); continue; }
+    if (part.type === "input_image") {
+      const image = chatImagePart(part);
+      // 在原文位置与图片前写入相同标记，保留并行调用归属和混合图文顺序。
+      const label = `[Tool output image: ${JSON.stringify({ call_id: callId, image: ++imageIndex })}]`;
+      text.push(`\n${label}\n`);
+      images.push({ type: "text", text: label }, image);
+      continue;
+    }
+    throw new ModelConversionError("Unsupported tool result content");
+  }
+  return { text: text.join(""), images };
 }
 
 function textContent(value: unknown): string {
