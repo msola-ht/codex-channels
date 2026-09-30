@@ -168,7 +168,8 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
   cleanups.push(async () => { backend.closeAllConnections(); await new Promise<void>(resolve => backend.close(() => resolve())); });
   const address = backend.address(); if (!address || typeof address === "string") throw new Error("fixture");
   const metrics: RelayMetric[] = [];
-  const relay = new ModelRelayServer({ ...(dump ? { capture: async (provider, signal, protocol) => { await dump.prepare(signal); return dump.begin(provider, debug, protocol); } } : {}), policy, enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
+  const queueChanges: string[][] = [];
+  const relay = new ModelRelayServer({ queueChanged: () => queueChanges.push(relay.queueSnapshot().map(row => row.phase)), ...(dump ? { capture: async (provider, signal, protocol) => { await dump.prepare(signal); return dump.begin(provider, debug, protocol); } } : {}), policy, enqueueMetric: metric => { metrics.push(metric); sink?.(metric); },
     prepare: async () => {
       preparedCount++;
       const prepared: PreparedRelayProvider = { target: { host: "127.0.0.1", port: address.port, protocol: "http", basePath: "/v1", authorization: "Bearer UPSTREAM-SECRET" },
@@ -178,7 +179,7 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
   await relay.start(0); cleanups.push(() => relay.close());
   const post = (data: unknown = body, headers: Record<string, string> = {}) => fetch(`${relay.address()}/v1/chat/completions`, {
     method: "POST", headers: { authorization, "content-type": "application/json", ...headers }, body: JSON.stringify(data) });
-  return { relay, metrics, calls: () => calls, preparedCount: () => preparedCount, post };
+  return { relay, metrics, queueChanges, calls: () => calls, preparedCount: () => preparedCount, post };
 }
 
 describe("isolated Relay vertical request chain", () => {
@@ -1214,3 +1215,15 @@ it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream =
       expect(content).not.toContain("PRIVATE"); expect(content).not.toContain(authorization);
     }
   });
+
+ it("notifies queue lifecycle changes without publishing request content", async () => {
+  const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)); });
+  const response = await f.post();
+  await response.text();
+  await vi.waitFor(() => expect(f.relay.queueSnapshot()).toEqual([]));
+  expect(f.queueChanges).toContainEqual(["input"]);
+  expect(f.queueChanges).toContainEqual(["queue"]);
+  expect(f.queueChanges).toContainEqual(["prepare"]);
+  expect(f.queueChanges).toContainEqual(["upstream"]);
+  expect(f.queueChanges.at(-1)).toEqual([]);
+ });

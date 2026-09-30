@@ -884,3 +884,20 @@ it("updates listener interactively with backup, cancellation and stale-config pr
   text = ""; expect(await runRelayListenMenu(options)).toEqual({ action: "unchanged" });
   expect(text).toContain("未变化");
 });
+
+it("isolates Relay queue subscribers from command capacity and cancels watchers", async () => {
+  const f = await fixture();
+  const path = modelRelayPaths(f.configPath).control;
+  const control = new ModelRelayControl(path, async () => ({ result: "queue", configurationValid: true, enabled: true, listening: true, requests: [] }));
+  await control.start();
+  const abort = new AbortController();
+  const receive = Array.from({ length: 8 }, () => vi.fn());
+  const watchers = receive.map(callback => relayControl.watchRelayChanges(path, abort.signal, callback));
+  try {
+    await vi.waitFor(() => expect(receive.every(callback => callback.mock.calls.length === 1)).toBe(true));
+    await expect(relayControl.watchRelayChanges(path, abort.signal, () => {})).rejects.toThrow();
+    expect(await queryModelRelayControl(path, "queue")).toMatchObject({ result: "queue", requests: [] });
+    for (let i = 0; i < 50; i++) control.changed();
+    await vi.waitFor(() => expect(receive.every(callback => callback.mock.calls.length === 2)).toBe(true));
+  } finally { abort.abort(); await Promise.all(watchers); await control.close(); }
+});

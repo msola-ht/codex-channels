@@ -27,6 +27,7 @@ export interface PreparedRelayProvider {
 export type { RelayMetric } from "../provider-proxy/index.js";
 export interface ModelRelayOptions {
   policy: RelayPolicy;
+  queueChanged?(): void;
   capture?(provider: string, signal: AbortSignal, protocol: "chat" | "responses"): DirectChatCapture | undefined | Promise<DirectChatCapture | undefined>;
   prepare(provider: string, signal: AbortSignal): Promise<PreparedRelayProvider>;
   enqueueMetric(metric: RelayMetric): void;
@@ -143,6 +144,7 @@ export class ModelRelayServer {
         this.requests.set(relayRequestId, () => ({ requestId: relayRequestId, callerId: caller.callerId,
           provider: caller.provider, model: requestModel || null, protocol, phase,
           elapsedMs: Math.max(0, Math.floor(performance.now() - receivedAt)) }));
+        this.options.queueChanged?.();
       }
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
@@ -163,11 +165,11 @@ export class ModelRelayServer {
         throw new RelayAdmissionError(400, "invalid_request");
       }
       if (body) {
-        phase = "queue";
+        phase = "queue"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
         await this.admission.wait(lease, body.model, Buffer.byteLength(JSON.stringify(body)), signal);
         signal.throwIfAborted();
       }
-      phase = "prepare";
+      phase = "prepare"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       const prepared = await waitForChatOperation(this.options.prepare(lease.caller.provider, signal), signal);
       lease.check(body?.model); prepared.recheck();
       if (models) {
@@ -177,7 +179,7 @@ export class ModelRelayServer {
       }
       if (!prepared.protocols.includes(protocol)) throw new RelayAdmissionError(400, "protocol_not_supported");
       if (!prepared.models.includes(body!.model)) throw new RelayAdmissionError(403, "model_not_allowed");
-      phase = "upstream";
+      phase = "upstream"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.();
       capture = await this.options.capture?.(lease.caller.provider, signal, protocol);
       capture?.inbound?.(inbound, request.headers);
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
@@ -189,7 +191,7 @@ export class ModelRelayServer {
         headers: (status: number) => { httpStatus = status; },
         content: () => { firstTokenMs ??= performance.now() - started!; },
         emit: async (value: Record<string, unknown> | undefined, terminal: boolean, rawFrame?: string) => {
-          if (terminal) { completedAt = performance.now(); phase = "delivery"; }
+          if (terminal) { completedAt = performance.now(); phase = "delivery"; if (this.requests.has(relayRequestId)) this.options.queueChanged?.(); }
           if (stream) {
             if (value !== undefined) {
               const frame = rawFrame === undefined ? `${protocol === "responses" ? `event: ${String(value.type)}\n` : ""}data: ${JSON.stringify(value)}\n\n` : `${rawFrame}\n\n`;
@@ -249,7 +251,7 @@ export class ModelRelayServer {
         } catch { response.destroy(); }
       }
     } finally {
-      this.requests.delete(relayRequestId);
+      if (this.requests.delete(relayRequestId)) this.options.queueChanged?.();
       clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
       if (observer.status === "failed") errorCode ??= "upstream_response_failed";
       const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);

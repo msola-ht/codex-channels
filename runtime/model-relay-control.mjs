@@ -1,3 +1,4 @@
+import { QueueEventsServer, watchQueueChanges } from "./queue-events.mjs";
 import { relayDisplayNameSchema } from "./model-relay-config.mjs";
 import { randomUUID } from "node:crypto";
 import { PrivateIpcServer, createPrivateIpcConnection, privateIpcEndpointExists } from "./private-ipc.mjs";
@@ -5,8 +6,10 @@ import { PrivateIpcServer, createPrivateIpcConnection, privateIpcEndpointExists 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 export class ModelRelayControl {
   #server;
+  #events;
   #closed = false;
   constructor(path, handler) {
+    this.#events = new QueueEventsServer(`${path}.events`);
     this.#server = new PrivateIpcServer(path, socket => {
       let bytes = 0; const chunks = []; let handled = false;
       const controller = new AbortController();
@@ -33,8 +36,12 @@ export class ModelRelayControl {
       });
     }, { maximumConnections: 4, connectionTimeoutMs: 2000 });
   }
-  start() { return this.#server.start("Model Relay 已在运行"); }
-  close() { this.#closed = true; return this.#server.close(); }
+  async start() {
+    await this.#server.start("Model Relay 已在运行");
+    try { await this.#events.start(); } catch (error) { await this.#server.close(); throw error; }
+  }
+  changed() { this.#events.changed(); }
+  close() { this.#closed = true; return Promise.all([this.#server.close(), this.#events.close()]).then(() => undefined); }
 }
 
 export async function queryModelRelayControl(path, operation, digest) {
@@ -98,3 +105,5 @@ export async function queryModelRelayControl(path, operation, digest) {
     });
   });
 }
+
+export function watchRelayChanges(path, signal, receive) { return watchQueueChanges(`${path}.events`, signal, receive); }

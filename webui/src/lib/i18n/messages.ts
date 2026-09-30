@@ -35,6 +35,9 @@ const zh = {
     unconfirmed: "无法确认重试是否完成。请刷新队列核对，不要重复提交。",
   },
   relay: {
+    otherTaskActive: "其他管理任务正在执行，完成后可操作转发服务。",
+    viewTasks: "查看管理任务",
+    serviceManagement: "转发服务",
     stats: { service: "服务状态", queue: "请求队列", capture: "调用采集", metrics: "指标交付", active: "处理中", waiting: "等待执行", uploading: "接收请求", capturing: "采集中", skipped: "容量不足跳过", accepted: "接收确认", unconfirmed: "未确认", rejected: "拒收", dropped: "本地丢弃", captureHint: "仅当前采集状态，历史未关联需另查。全局开关在设置页。", metricsHint: "接收确认不等于落盘，未确认不等于丢失。", snapshotHint: "以上为手动刷新时的进程快照，累计计数在重启后清零。" },
     keysTitle: "API Key",
     keysHint: "按用途管理密钥、模型和思考策略。",
@@ -44,8 +47,8 @@ const zh = {
     queueDisabled: "Relay 已停用，不接受新请求。下方仍展示尚未结束的请求。",
     queueNotListening: "Relay 尚未监听，不接受新请求。下方仍展示尚未结束的请求。",
     queueDetails: "请求队列",
-    queueLiveHint: "每次刷新完成后 2 秒自动更新，关闭后停止。仅展示当前已鉴权的模型请求，不保留历史。",
-    queueSnapshotHint: "当前快照；按接收顺序展示，等待请求按 Key 公平调度。",
+    queueLiveHint: "队列变化时自动更新，关闭侧栏或隐藏页面时暂停。仅展示当前已鉴权的模型请求，不保留历史。",
+    queueSnapshotHint: "耗时为快照值；默认按接收顺序展示，等待请求按 Key 公平调度。",
     queuePhase: "阶段", queueElapsed: "已耗时", queueModelPending: "尚未读取", queueEmpty: "当前没有进行中的模型请求",
     queuePhases: { input: "接收请求", queue: "等待名额", prepare: "准备上游", upstream: "上游处理", delivery: "交付响应" },
 
@@ -77,8 +80,8 @@ const zh = {
     "refresh": "刷新",
     "create": "新建 Key",
     "providers": "管理提供商账户",
-    "configEnabled": "Relay 配置已启用；点击刷新更新运行状态。",
-    "configDisabled": "Relay 配置未启用；签发 Key 不会启动服务。",
+    "configEnabled": "配置已启用",
+    "configDisabled": "配置已停用",
     "purpose": "用途名称",
     "purposePresetsLabel": "常用用途，选择后仍可修改",
     "purposePresets": {
@@ -699,6 +702,9 @@ const en: Messages = {
     unconfirmed: "The retry result could not be confirmed. Refresh the queue to check before submitting again.",
   },
   relay: {
+    otherTaskActive: "Another management task is running. Relay service actions will be available when it finishes.",
+    viewTasks: "View management tasks",
+    serviceManagement: "Relay service",
     stats: { service: "Service status", queue: "Request queue", capture: "Traffic capture", metrics: "Metric delivery", active: "Processing", waiting: "Waiting", uploading: "Receiving", capturing: "Capturing", skipped: "Capacity skips", accepted: "Accepted", unconfirmed: "Unconfirmed", rejected: "Rejected", dropped: "Locally dropped", captureHint: "Current Relay capture state only; investigate historical missing links separately. Manage global capture in Settings.", metricsHint: "Accepted does not mean persisted; unconfirmed does not mean lost.", snapshotHint: "Process snapshot from the last manual refresh. Cumulative counters reset on restart." },
     keysTitle: "API Key",
     keysHint: "Manage keys, models and reasoning policies by purpose.",
@@ -708,8 +714,8 @@ const en: Messages = {
     queueDisabled: "Relay is disabled and is not accepting new requests. Unfinished requests remain listed below.",
     queueNotListening: "Relay is not listening or accepting new requests. Unfinished requests remain listed below.",
     queueDetails: "Request queue",
-    queueLiveHint: "Refreshes 2 seconds after each update; stops when closed. Only current authenticated model requests are shown, with no history.",
-    queueSnapshotHint: "Current snapshot, ordered by arrival. Waiting requests are scheduled fairly by key.",
+    queueLiveHint: "Updates when the queue changes; pauses when the panel is closed or the page is hidden. Only current authenticated model requests are shown, with no history.",
+    queueSnapshotHint: "Elapsed time is from the snapshot. Arrival order by default; waiting requests are scheduled fairly by key.",
     queuePhase: "Phase", queueElapsed: "Elapsed", queueModelPending: "Not read yet", queueEmpty: "No model requests in progress",
     queuePhases: { input: "Receiving request", queue: "Waiting for capacity", prepare: "Preparing upstream", upstream: "Upstream processing", delivery: "Delivering response" },
 
@@ -741,8 +747,8 @@ const en: Messages = {
     "refresh": "Refresh",
     "create": "Create key",
     "providers": "Manage provider accounts",
-    "configEnabled": "Relay configuration is enabled. Use Refresh to update runtime status.",
-    "configDisabled": "Relay configuration is disabled. Issuing a key does not start the service.",
+    "configEnabled": "Configuration enabled",
+    "configDisabled": "Configuration disabled",
     "purpose": "Purpose",
     "purposePresetsLabel": "Common purposes, editable after selection",
     "purposePresets": {

@@ -19,8 +19,8 @@ i18n-glossary.json  翻译术语、原样保留项和规则，供开发工具生
 .npmignore  覆盖本目录的 Git 忽略规则，确保构建后的 dist 进入 npm tarball
 src/
   lib/         API 客户端、令牌存取、共享类型转出与格式化；api-polling.ts 管理请求结束后的刷新计时与页面可见性，server-time.ts 管理服务端时钟推进与恢复页面后的校准调度，format.ts 统一服务端时区展示，trend.ts 按服务端日期补齐日图表并呈现单日小时统计；metrics-query.ts 统一查询参数和逐层跳转地址，overview-state.ts 保证控制台快照属于当前加载批次，account-refresh-state.ts 区分 DS、OCG、CCG、Cline Pass 账户快照时效与逐账户刷新结果，traffic-state.ts 隔离不同转储查询的结果并生成精确关联地址，i18n/ 存放中英文界面文案字典与取值函数
-  hooks/       数据 hook（useApi 统一 loading/error/refetch，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（侧栏打开期间的有界轮询），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
-  components/  layout（Sidebar）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格、relay-request-status 受控失败分类、relay-queue-sheet 右侧当前请求明细、relay-runtime-status 队列/采集及指标确认快照）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，account-id-field 共用新增账户预设与自定义输入）
+  hooks/       数据 hook（useApi 统一 loading/error/refetch，useApiPolling 复用自动刷新调度，use-dashboard 整批加载概览、趋势和热力图，use-server-time 在页面呈现前初始化服务端时区，并通过上下文共享已校准时间基准）、use-metrics-query（URL 筛选/排序/分页）、use-traffic-query（调用详情页 URL 提供商、批次筛选、独立明细提供商/批次与分页）、use-metrics-export（可取消请求导出）、use-traffic（转储列表与明细）、Relay 服务管理 use-relay-service-management（统一手动、页面恢复及任务完成刷新）、Relay Key 管理 use-relay-management（复用确认 Hook）、use-relay-queue（侧栏打开期间的 SSE 推送与有界快照刷新），设置管理（共用版本化预览/确认状态机，use-settings-draft 按字段保留未提交草稿）、全局货币上下文与 use-translation（按当前显示语言翻译界面文案）
+  components/  layout（Sidebar）、overview（控制台卡片、account-refresh-feedback 刷新反馈、account-subscription-notice 订阅状态与确认删除）、metrics（指标区块、query-filters 共用筛选栏、query-summary 期间汇总与共享数据表格）、requests（请求明细数据表格、relay-request-status 受控失败分类、relay-queue-sheet 右侧当前请求表格、relay-runtime-status 队列/采集及指标确认快照）、traffic（调用摘要、明细、traffic-model 共用模型名称对照、请求内容/参数对照与清理入口）、settings（按设置域拆分的卡片与控件，account-id-field 共用新增账户预设与自定义输入，relay-service-management 在模型转发页组合服务操作、任务确认与完成后状态刷新）
   pages/       概览、会话、会话详情、请求、错误、调用详情、渠道投递队列、模型转发（独立 Key 管理，中文用途名称及居中弹窗，手动刷新运行状态、右侧队列明细自动刷新）、设置（只负责组合设置域组件）
   App.tsx      路由布局与页面级懒加载，保留页面切换间的控制台已应用范围（令牌登录由 AuthGate 与 main.tsx 启动入口协作）
 ```
@@ -57,7 +57,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 详细行为见 `docs/webui.md`。
 
-`pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧导航进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-delivery-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
+`pages/delivery-page.tsx` 组合渠道投递队列独立页面，由左侧导航进入 `#/delivery`；`components/delivery/delivery-queue.tsx` 提供精简表格列表、状态计数筛选、行内内容摘要、游标分页和勾选批量重试/忽略确认；`hooks/use-delivery-queue.ts` 复用管理确认 Hook 与 `hooks/use-queue-events.ts` 的 SSE 变化订阅，筛选或翻页时重建当前查询，离开页面时取消请求。
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
 
@@ -69,3 +69,5 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 `components/metrics/data-table.tsx` 的 `TruncatedText` 按实际溢出显示全文提示，`SortableHeader` 复用排序按钮展示列口径；提示延迟由 `App.tsx` 的 Provider 统一设置。
 
 `components/ui/dialog.tsx`：沿用 Radix/shadcn 的居中弹窗，关闭按钮名称由调用方本地化；Relay 表单和一次性密钥结果复用此组件，确认操作使用已有 AlertDialog。
+
+`hooks/use-queue-events.ts` 由渠道投递与 Relay 队列复用，负责可见性、退避重连、变化合并及快照确认；已连接通知中断时补查一次快照，未恢复连接的失败尝试不持续触发读取。Relay 侧栏通过现有 DataTable 提供排序、分页和列显隐，耗时表示快照时的值。

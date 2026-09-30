@@ -28,8 +28,10 @@ export async function startModelRelayService(configPath, environment = process.e
   const sender = new RelayMetricsSender((envelope, signal) => sendRelayMetrics(paths.metrics, envelope, signal));
   const unavailable = async () => {
     relay?.admission.failClosed();
+    const changed = snapshot !== undefined || listening !== undefined;
     snapshot = undefined;
     await relay?.stopListening().catch(() => {}); listening = undefined;
+    if (changed) control.changed();
   };
   const updateWatchers = next => {
     const directories = new Set([configPath, next.proxyPath, ...next.materials.flatMap(material => material.paths)].map(path => dirname(path)));
@@ -57,7 +59,7 @@ export async function startModelRelayService(configPath, environment = process.e
     if (next.debug.model_traffic_dump) void dump.prepare();
     const policyChanged = !snapshot || snapshot.digest !== next.digest;
     snapshot = next;
-    relay ??= new ModelRelayServer({ capture: async (provider, signal, protocol) => {
+    relay ??= new ModelRelayServer({ queueChanged: () => control.changed(), capture: async (provider, signal, protocol) => {
       if (!snapshot?.debug.model_traffic_dump) return undefined;
       await dump.prepare(signal);
       signal.throwIfAborted();
@@ -109,6 +111,7 @@ export async function startModelRelayService(configPath, environment = process.e
       listening = address;
     }
     updateWatchers(next);
+    if (policyChanged) control.changed();
   };
   function refresh() {
     if (closed) return Promise.reject(new Error("Relay closed"));

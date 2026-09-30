@@ -1,8 +1,9 @@
 import { useEffect, useState, type RefObject } from "react"
-import { ApiClientError, watchDeliveryQueue } from "@/lib/api"
+import { ApiClientError } from "@/lib/api"
+import type { QueueChangeEvent } from "@/lib/types"
 
 /** Notification subscription survives reads and confirmations; only invalidations are deferred. */
-export interface DeliverySnapshotRead {
+export interface QueueSnapshotRead {
   confirmed: number
   completedAt: number
   failed: boolean
@@ -11,8 +12,8 @@ export interface DeliverySnapshotRead {
   retryAt: number
 }
 
-export function useDeliveryEvents(refetch: () => void, loading: boolean, enabled: boolean,
-  latest: RefObject<number>, read: DeliverySnapshotRead | null): "connecting" | "live" | "reconnecting" | "paused" | "retrying" | "stale" {
+export function useQueueEvents(refetch: () => void, loading: boolean, enabled: boolean,
+  latest: RefObject<number>, read: QueueSnapshotRead | null, watch: (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => Promise<void>): "connecting" | "live" | "reconnecting" | "paused" | "retrying" | "stale" {
   const [status, setStatus] = useState<"connecting" | "live" | "reconnecting" | "paused">("connecting")
   const [revision, setRevision] = useState(0)
   useEffect(() => {
@@ -27,13 +28,16 @@ export function useDeliveryEvents(refetch: () => void, loading: boolean, enabled
       retry = undefined
       const current = new AbortController()
       controller = current
-      void watchDeliveryQueue(current.signal, event => {
+      let connected = false
+      void watch(current.signal, event => {
         if (stopped || current.signal.aborted) return
+        connected = true
         delay = 1_000
         setStatus("live")
         if (event.type === "changed") setRevision(++latest.current)
       }).catch(error => {
         if (stopped || current.signal.aborted) return
+        if (connected) setRevision(++latest.current)
         setStatus("reconnecting")
         if (error instanceof ApiClientError && [400, 401, 403].includes(error.status)) return
         retry = setTimeout(connect, delay)
@@ -63,10 +67,10 @@ export function useDeliveryEvents(refetch: () => void, loading: boolean, enabled
       window.removeEventListener("online", resume)
       window.removeEventListener("offline", resume)
     }
-  }, [latest])
+  }, [latest, watch])
   const needsRefresh = revision > (read?.confirmed ?? 0)
   useEffect(() => {
-    if (!enabled || loading || status !== "live") return
+    if (!enabled || loading || !["live", "reconnecting"].includes(status)) return
     if (read?.failed && (!read.retryable || read.failures > 3)) return
     if (!needsRefresh && !read?.failed) return
     // Event-driven throttling, not polling: no timer remains once the snapshot catches up.

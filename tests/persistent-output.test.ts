@@ -479,6 +479,7 @@ it.each([false, true])("keeps the full durable Telegram result until its documen
 });
 
 
+// Real Worker/SQLite checkpoints may exceed the 1 s polling default on shared CI disks.
 it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const)("preserves complete Weixin results and Conversation ordering across restart (%s)", async (mode) => {
   const directory = fixture();
   const target = { surface: "weixin" as const, accountId: "account-fixture@im.bot", conversationId: "actor-fixture@im.wechat" };
@@ -522,7 +523,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
     await journal.submit(entry("independent", "other"));
     await coordinator.start();
     if (hasFile) {
-      await vi.waitFor(() => expect(fileText).toBe(text));
+      await vi.waitFor(() => expect(fileText).toBe(text), { timeout: 10_000 });
       expect(await journal.list()).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: "full-result", state: "sending" }),
         expect.objectContaining({ id: "same-conversation-next", state: "pending" }),
@@ -531,7 +532,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
       finishFile();
     }
     await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(success
-      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }), { timeout: 10_000 });
     expect(sent).toContain("independent");
     expect(sent.includes("same-conversation-next")).toBe(success);
     expect(faults).toEqual(success ? [] : ["delivery-uncertain"]);
@@ -550,9 +551,9 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
     await recovered.ready;
     await recovered.submit(entry("after-restart-independent", "other"));
     await recovery.start();
-    await vi.waitFor(() => expect(sent.slice(beforeRestart)).toEqual(["after-restart-independent"]));
+    await vi.waitFor(() => expect(sent.slice(beforeRestart)).toEqual(["after-restart-independent"]), { timeout: 10_000 });
     await vi.waitFor(async () => expect(await recovered.summary()).toMatchObject(success
-      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }));
+      ? { records: 0 } : { records: 2, uncertain: 1, pending: 1, sending: 0 }), { timeout: 10_000 });
   } finally { await recovery.close(); await recoveredOutbox.close(); }
   if (!success) {
     const stored = new SqliteDeliveryJournal(directory);
@@ -562,7 +563,7 @@ it.each(["confirmed", "boundary", "failed", "unavailable", "oversized"] as const
       expect(stored.execute({ type: "next", excluded: [] })).toMatchObject({ id: "full-result", payload });
     } finally { stored.close(); }
   }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "stream-unavailable", "static-commentary"] as const)("requires a complete Feishu file before deleting a truncated preview (%s)", async (mode) => {
   const directory = fixture();
@@ -603,11 +604,11 @@ it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "s
     await coordinator.start();
     await coordinator.submit({ ...submission("full-feishu"), payload: JSON.stringify(event) });
     if (!unavailable) {
-      await vi.waitFor(() => expect(fileText).toBe(text));
+      await vi.waitFor(() => expect(fileText).toBe(text), { timeout: 10_000 });
       expect(await journal.summary()).toMatchObject({ records: 1, sending: 1 });
       releaseFile();
     }
-    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }));
+    await vi.waitFor(async () => expect(await journal.summary()).toMatchObject(retained ? { records: 1, uncertain: 1 } : { records: 0 }), { timeout: 10_000 });
     if (!unavailable) { expect(fileText).toBe(text); expect(sendFile).toHaveBeenCalledOnce(); }
     expect(previews.join("\n")).toContain(unavailable ? "内容过长，已截断" : "内容预览，完整回复见附件");
     if (unavailable) expect(previews.join("\n")).not.toContain("完整回复见附件");
@@ -621,7 +622,7 @@ it.each(["confirmed", "failed", "unavailable", "stream", "stream-commentary", "s
       expect(reopened.execute({ type: "next", excluded: [] })).toMatchObject({ payload: JSON.stringify(event) });
     }
   } finally { reopened.close(); }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["confirmed", "failed", "cancelled", "post-failed"] as const)("recovers a failed Feishu reply stream through bounded Posts and durable file confirmation (%s)", async (outcome) => {
   const directory = fixture();
@@ -717,7 +718,7 @@ it("keeps recovery fenced until every journal page has been classified and count
     expect(coordinator.hasOutstanding("not-yet-scanned")).toBe(false);
     expect(await journal.summary()).toMatchObject({ records: 101, uncertain: 100, pending: 1 });
   } finally { await coordinator.close(); }
-});
+}, process.platform === "win32" ? 120_000 : 30_000);
 
 it.each(["turn-started", "global-idle"] as const)("keeps Weixin %s failure durable while allowing the complete answer through its real Outbox", async (notice) => {
   const directory = fixture();

@@ -1,5 +1,5 @@
 import type {
-  DeliveryQueueEvent,
+  QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
   RelayQueueSnapshot, RelayManagementSnapshot, RelayManagementMutation, RelayManagementPreview, RelayManagementResult,
   ServerTimeResponse,
@@ -62,8 +62,11 @@ export class ApiClientError extends Error {
 export const API_PREFIX = "/api/v1"
 let unauthorizedHandler: (() => void) | null = null
 
+export const watchDeliveryQueue = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("delivery/events", signal, receive)
+export const watchRelayQueue = (signal: AbortSignal, receive: (event: QueueChangeEvent) => void) => watchQueue("relay/queue/events", signal, receive)
+
 /** Fetch-based SSE keeps credentials in the Authorization header, never in the URL. */
-export async function watchDeliveryQueue(signal: AbortSignal, receive: (event: DeliveryQueueEvent) => void): Promise<void> {
+async function watchQueue(path: string, signal: AbortSignal, receive: (event: QueueChangeEvent) => void): Promise<void> {
   const controller = new AbortController()
   let idle = setTimeout(() => controller.abort(), 35_000)
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
@@ -71,29 +74,29 @@ export async function watchDeliveryQueue(signal: AbortSignal, receive: (event: D
     const headers = new Headers({ accept: "text/event-stream" })
     const token = getToken()
     if (token !== null) headers.set("authorization", `Bearer ${token}`)
-    const response = await fetch(`${API_PREFIX}/management/delivery/events`, { headers, cache: "no-store", signal: AbortSignal.any([signal, controller.signal]) })
+    const response = await fetch(`${API_PREFIX}/management/${path}`, { headers, cache: "no-store", signal: AbortSignal.any([signal, controller.signal]) })
     if (response.status === 401) unauthorizedHandler?.()
-    if (!response.ok) throw new ApiClientError("Delivery notifications unavailable", response.status, "delivery_unavailable")
-    if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("Invalid delivery stream")
+    if (!response.ok) throw new ApiClientError("Queue notifications unavailable", response.status, path.startsWith("relay/") ? "relay_unavailable" : "delivery_unavailable")
+    if (!response.headers.get("content-type")?.startsWith("text/event-stream") || !response.body) throw new Error("Invalid queue stream")
     reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ""
     while (true) {
       const { done, value } = await reader.read()
-      if (done) throw new Error("Delivery stream disconnected")
+      if (done) throw new Error("Queue stream disconnected")
       clearTimeout(idle)
       idle = setTimeout(() => controller.abort(), 35_000)
       buffer += decoder.decode(value, { stream: true })
-      if (buffer.length > 4096) throw new Error("Delivery stream frame too large")
+      if (buffer.length > 4096) throw new Error("Queue stream frame too large")
       let end: number
       while ((end = buffer.indexOf("\n\n")) >= 0) {
         const frame = buffer.slice(0, end)
         buffer = buffer.slice(end + 2)
-        if (!frame.startsWith("data: ")) throw new Error("Invalid delivery event")
+        if (!frame.startsWith("data: ")) throw new Error("Invalid queue event")
         const event: unknown = JSON.parse(frame.slice(6))
-        if (!event || typeof event !== "object" || !("type" in event) || Object.keys(event).length !== 1 || !["changed", "heartbeat", "unavailable"].includes(String(event.type))) throw new Error("Invalid delivery event")
-        if (event.type === "unavailable") throw new Error("Delivery notifications unavailable")
-        receive(event as DeliveryQueueEvent)
+        if (!event || typeof event !== "object" || !("type" in event) || Object.keys(event).length !== 1 || !["changed", "heartbeat", "unavailable"].includes(String(event.type))) throw new Error("Invalid queue event")
+        if (event.type === "unavailable") throw new Error("Queue notifications unavailable")
+        receive(event as QueueChangeEvent)
       }
     }
   } finally {

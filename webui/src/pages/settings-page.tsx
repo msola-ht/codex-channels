@@ -166,7 +166,7 @@ function SettingsContent({ summary, services, providers, upstreamAgent, manageme
       <CardContent className="flex flex-col gap-3">
         {services.loading ? <p className="text-sm text-muted-foreground">正在读取服务状态…</p> : null}
         {services.error ? <SettingsError message={services.error} retry={services.refetch} /> : null}
-        {services.error === null && services.data !== null ? <ManagedServices services={services.data} tasks={tasks} /> : null}
+        {services.error === null && services.data !== null ? <ManagedServices services={{ ...services.data, entries: services.data.entries.filter(service => service.target !== "model-relay") }} tasks={tasks} /> : null}
       </CardContent>
     </Card>
     <ManagementTaskControls tasks={tasks} providerIds={[...(providers.data?.primary.id ? [providers.data.primary.id] : []), ...(providers.data?.providers.map((provider) => provider.id) ?? [])]} />

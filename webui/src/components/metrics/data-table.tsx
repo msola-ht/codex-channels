@@ -316,7 +316,7 @@ export function DataTable<TData extends RowData>({
           onSortingChange: (updater: SortingState | ((old: SortingState) => SortingState)) => {
             const next = typeof updater === "function" ? updater(sorting) : updater
             setClientSorting(
-              next.length === 0 ? DEFAULT_SORTING : next.slice(-1),
+              next.length === 0 ? pagination.defaultSorting ?? DEFAULT_SORTING : next.slice(-1),
             )
             setClientPage(0)
           },
