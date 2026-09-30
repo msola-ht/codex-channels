@@ -860,6 +860,10 @@ export interface TrafficLabel {
 }
 
 export interface TrafficExchangeSummary {
+  /** 从已记录 User-Agent 识别的客户端自报名称，并非已验证身份。 */
+  clientName?: string
+  /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
+  protocol?: "chat" | "responses"
   id: number
   label: string
   session: string
@@ -928,6 +932,9 @@ export interface TrafficExchangeDetail {
     turnStateLengths: Array<{ source: string; characters: number }>
     truncated: boolean
   }
+  clientName?: string
+  /** 已记录请求接口使用的协议，不代表提供商的全部能力。 */
+  protocol?: "chat" | "responses"
   parameterComparison: Array<{ field: string; request: string | null; response: string | null }>
   id: number
   startedAtMs: number

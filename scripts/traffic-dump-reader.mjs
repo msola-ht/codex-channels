@@ -12,7 +12,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestContent, requestMetadata, requestParameters, responseFacts } from "./traffic-dump-presentation.mjs";
+import { callTiming, createModelEvidenceCollector, createOutputCollector, failureStage, parameterComparison, requestClientName, requestContent, requestMetadata, requestParameters, requestProtocol, responseFacts } from "./traffic-dump-presentation.mjs";
 
 const manifestName = "manifest.json";
 const interactionFileName = "interactions.jsonl";
@@ -426,8 +426,12 @@ function summaryOf(interaction, body) {
   const metadata = relay ? {} : requestMetadata(body);
   const requestKind = relay ? undefined : metadata.requestKind ?? (body?.generate === false ? "prewarm" : request.requestKind);
   const firstTokenMs = firstTokenMsOf(response);
+  const clientName = requestClientName(request);
+  const protocol = requestProtocol(request);
   return {
     id: request.id,
+    ...(clientName === undefined ? {} : { clientName }),
+    ...(protocol === undefined ? {} : { protocol }),
     label: labelOf(interaction.directory),
     session: interaction.session,
     startedAtMs: request.startedAtMs,

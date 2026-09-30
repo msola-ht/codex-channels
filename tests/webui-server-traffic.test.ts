@@ -8,7 +8,7 @@ import { readGatewayConfig, writeGatewayConfig } from "../runtime/gateway-config
 // @ts-expect-error JavaScript CLI helper intentionally has no declaration file.
 import { routeTrafficApi } from "../scripts/webui-traffic-route.mjs";
 // @ts-expect-error JavaScript reader intentionally has no declaration file.
-import { describeDumpExchange } from "../scripts/traffic-dump-reader.mjs";
+import { describeDumpExchange, summarizeDumpFiles } from "../scripts/traffic-dump-reader.mjs";
 import {
   cleanupWebuiTestFixtures,
   startWebuiTestServer,
@@ -23,6 +23,66 @@ afterEach(async () => {
 });
 
 describe("webui traffic V2 API", () => {
+  it("derives each call protocol from its endpoint, including historical HTTP and WebSocket dumps", async () => {
+    const fixture = createFixture();
+    const inputs = [
+      { path: "/api/v1/chat/completions", expected: "chat" },
+      { path: "/v1/responses?test=1", expected: "responses" },
+      { path: "/responses", expected: "responses" },
+      { path: "/models", method: "GET", expected: undefined },
+      { path: "/other", expected: undefined },
+      { path: "/responses/unknown", expected: undefined },
+    ];
+    const calls = inputs.map((input, index) => {
+      const call = httpInteraction(index + 1);
+      Object.assign(call.request, { path: input.path, method: input.method ?? "POST" });
+      return call;
+    });
+    calls.push(websocketInteraction(7));
+    const invalidUrl = websocketInteraction(8); invalidUrl.request.url = "file:///responses";
+    const missingUrl = websocketInteraction(9); delete missingUrl.request.url;
+    calls.push(invalidUrl, missingUrl);
+    writeSession(fixture.trafficDir, "ds-main", "protocols", calls);
+    const paths = [join(fixture.trafficDir, "ds-main-protocols")];
+    const result = await summarizeDumpFiles(paths);
+    expect(result.exchanges.map((row: { protocol?: string }) => row.protocol)).toEqual([...inputs.map(input => input.expected), "responses", undefined, undefined]);
+    expect((await describeDumpExchange(paths, 1)).protocol).toBe("chat");
+    const server = await startServer(fixture.environment);
+    const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=ds-main`);
+    expect(response.body.exchanges.find(row => row.id === 1)?.protocol).toBe("chat");
+    expect(response.body.exchanges.find(row => row.id === 2)?.protocol).toBe("responses");
+  });
+
+  it("projects client names from saved User-Agent with inbound precedence and no browser guessing", async () => {
+    const fixture = createFixture();
+    const agents = ["WorkBuddy/5.6.2 WorkBuddy/5.6.2 CLI/2.147.0", "codex_cli_rs/0.156.1", "Mozilla/5.0 Chrome/143.0", "node", "[REDACTED]", "WorkBuddy/5.6.2\nprivate"];
+    const interactions = agents.map((agent, index) => {
+      const item = httpInteraction(index + 1);
+      Object.assign(item.request, { headers: { "user-agent": agent } });
+      return item;
+    });
+    const inbound = httpInteraction(7);
+    Object.assign(inbound.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 1, inbound: { headers: { "User-Agent": "WorkBuddy/5.6.2" } } } });
+    interactions.push(inbound);
+    const unknownVersion = httpInteraction(8);
+    Object.assign(unknownVersion.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 2, inbound: { headers: { "user-agent": "WorkBuddy/5.6.2" } } } });
+    const missingInboundAgent = httpInteraction(9);
+    Object.assign(missingInboundAgent.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 1, inbound: { headers: {} } } });
+    interactions.push(unknownVersion, missingInboundAgent);
+    writeSession(fixture.trafficDir, "relay.chat", "client-evidence", interactions);
+    const paths = [join(fixture.trafficDir, "relay.chat-client-evidence")];
+    const rows = await summarizeDumpFiles(paths);
+    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", undefined, undefined, undefined, undefined, "WorkBuddy", undefined, undefined]);
+    expect((await describeDumpExchange(paths, 1)).clientName).toBe("WorkBuddy");
+    const server = await startServer(fixture.environment);
+    const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=relay.chat`);
+    expect(response.status).toBe(200);
+    expect(response.body.exchanges.find(row => row.id === 1)?.clientName).toBe("WorkBuddy");
+  });
+
   it("reports the shared global capture switch and retention for Relay", async () => {
     const fixture = createFixture(); const configPath = fixture.environment.CODEX_CONNECT_CONFIG_FILE;
     const document = readGatewayConfig(configPath);

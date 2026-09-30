@@ -6,6 +6,19 @@ const visible = new Set([
   "referer", "user-agent", "transfer-encoding", "vary",
   "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user",
 ]);
+// Only named diagnostic fields with bounded, recognizable formats are recorded.
+const diagnostic = new Map<string, RegExp>([
+  ...["x-request-id", "x-relay-request-id", "x-trace-id", "x-root-request-id"].map(name =>
+    [name, /^(?:[a-f0-9]{16,64}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/iu] as const),
+  ["traceparent", /^[a-f0-9]{2}-[a-f0-9]{32}-[a-f0-9]{16}-[a-f0-9]{2}$/iu],
+  ["b3", /^[a-f0-9]{16}(?:[a-f0-9]{16})?-[a-f0-9]{16}(?:-[01d](?:-[a-f0-9]{16})?)?$/iu],
+  ...["x-b3-traceid", "x-b3-spanid", "x-b3-parentspanid"].map(name => [name, /^(?:[a-f0-9]{16}|[a-f0-9]{32})$/iu] as const),
+  ["x-b3-sampled", /^[01]$/u],
+  ...["x-stainless-lang", "x-stainless-package-version", "x-stainless-os", "x-stainless-arch",
+    "x-stainless-runtime", "x-stainless-runtime-version", "x-ide-name", "x-ide-type", "x-ide-version", "x-product"]
+    .map(name => [name, /^[a-z0-9][a-z0-9 ._+()/-]{0,95}$/iu] as const),
+  ["x-stainless-retry-count", /^\d{1,4}$/u],
+]);
 const secret = /authorization|cookie|token|secret|credential|signature|api[-_]?key/iu;
 
 /** Pure sanitization for Relay debug capture; never performs I/O. */
@@ -20,8 +33,8 @@ export function relayDebugHeaders(input: IncomingHttpHeaders | OutgoingHttpHeade
     if (value === undefined) continue;
     const name = rawName.toLowerCase();
     const sanitize = (part: string | number): string => {
-      if (secret.test(name) || !visible.has(name)) return "[REDACTED]";
       let text = String(part);
+      if (secret.test(name) || !visible.has(name) && !diagnostic.get(name)?.test(text)) return "[REDACTED]";
       if (name === "origin" || name === "referer") {
         try {
           const url = new URL(text);

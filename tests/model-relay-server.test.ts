@@ -296,6 +296,19 @@ describe("isolated Relay vertical request chain", () => {
     expect(result.headers.referer).toBe("https://example.test");
     expect(result.headers["set-cookie"]).toEqual(["[REDACTED]", "[REDACTED]"]);
     expect(result.truncated).toBe(false);
+    const diagnostic = relayDebugHeaders({ "x-request-id": "3390a228-c744-47a8-99b4-601f202be616",
+      traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+      "x-stainless-runtime-version": "v24.21.0", "x-stainless-lang": "js", "x-stainless-retry-count": "0",
+      "x-user-id": "PRIVATE", "x-conversation-id": "PRIVATE", "x-agent-purpose": "PRIVATE", "x-ide-version": "5.6.2" });
+    expect(diagnostic.headers["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
+    expect(diagnostic.headers.traceparent).toContain("4bf92");
+    expect(diagnostic.headers["x-stainless-runtime-version"]).toBe("v24.21.0");
+    expect(diagnostic.headers["x-stainless-retry-count"]).toBe("0");
+    expect(diagnostic.headers["x-ide-version"]).toBe("5.6.2");
+    expect(JSON.stringify(diagnostic)).not.toContain("PRIVATE");
+    expect(relayDebugHeaders({ "x-request-id": "Bearer PRIVATE", "x-stainless-lang": "js\nPRIVATE" }).headers)
+      .toEqual({ "x-request-id": "[REDACTED]", "x-stainless-lang": "[REDACTED]" });
+
     expect(relayDebugHeaders({ origin: "https://user:pass@example.test", referer: "file:///private" }).headers)
       .toEqual({ origin: "[REDACTED]", referer: "[REDACTED]" });
     expect(relayDebugHeaders({ "user-agent": "中".repeat(1024) }).truncated).toBe(true);
@@ -557,16 +570,27 @@ describe("isolated Relay vertical request chain", () => {
     const dump = new RelayTrafficDump({ directory, onError: () => {} }); cleanups.push(() => dump.close());
     const value = stream ? { model: answer.model, choices: [{ index: 0, delta: { content: "hello" }, finish_reason: "stop" }] }
       : { success: true, data: answer };
-    const f = await fixture((_req, res) => res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "PRIVATE" })
-      .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value)), undefined, undefined, dump, true);
+    let forwarded: Record<string, unknown> = {};
+    const f = await fixture((req, res) => {
+      forwarded = { ...req.headers };
+      res.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json", "x-opaque": "PRIVATE" })
+        .end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify(value));
+    }, undefined, undefined, dump, true);
     const input = stream ? { ...body, stream } : body;
-    const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/PRIVATE?q=PRIVATE", "x-client": "PRIVATE", cookie: "PRIVATE" });
+    const reply = await f.post(input, { origin: "https://example.test", referer: "https://example.test/PRIVATE?q=PRIVATE", "x-client": "PRIVATE", cookie: "PRIVATE", "user-agent": "WorkBuddy/5.6.2", "x-request-id": "3390a228-c744-47a8-99b4-601f202be616" });
     const received = await reply.text();
+    expect(forwarded["x-client"]).toBe("PRIVATE");
+    expect(forwarded["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
+    expect(forwarded["user-agent"]).toBe("WorkBuddy/5.6.2");
+    expect(forwarded.cookie).toBeUndefined();
+    expect(forwarded.authorization).not.toBe(authorization);
     await f.relay.close(); await dump.close();
     expect(f.metrics).toHaveLength(1);
     const ref = f.metrics[0]!.traffic!;
     const path = join(directory, `relay.chat-${ref.session}`);
     const detail = await describeDumpExchange([path], ref.interaction);
+    expect(detail.clientName).toBe("WorkBuddy");
+    expect(detail.debug.inbound.headers["x-request-id"]).toBe("3390a228-c744-47a8-99b4-601f202be616");
     expect(JSON.parse(detail.debug.inbound.body)).toEqual(input);
     expect(JSON.parse(detail.request.body).stream).toBe(stream);
     expect(detail.debug.delivered.body).toBe(received);

@@ -39,7 +39,9 @@ export function TrafficTable({
           <TableRow>
             <TableHead>{t("metrics.time")}</TableHead>
             <TableHead>{t("metrics.provider")}</TableHead>
+            <TableHead><TableHint hint={t("traffic.clientHint")}>{t("traffic.client")}</TableHint></TableHead>
             <TableHead>{t("metrics.model")}</TableHead>
+            <TableHead>{t("traffic.protocol")}</TableHead>
             <TableHead>{t("filters.status")}</TableHead>
             <TableHead className="text-right whitespace-nowrap">
               <TableHint hint={t("traffic.firstTokenHint")}>{t("requests.firstColumn")}</TableHint>
@@ -52,7 +54,7 @@ export function TrafficTable({
         </TableHeader>
         <TableBody>
           {loading ? Array.from({ length: 5 }, (_, index) => (
-            <TableRow key={index}>{Array.from({ length: 9 }, (_, column) => (
+            <TableRow key={index}>{Array.from({ length: 11 }, (_, column) => (
               <TableCell key={column}><Skeleton className="h-5 w-full min-w-12" /></TableCell>
             ))}</TableRow>
           )) : exchanges.map((exchange) => {
@@ -78,9 +80,11 @@ export function TrafficTable({
                 >{formatTime(exchange.startedAtMs)}</Button>
               </TableCell>
               <TableCell><Badge variant="outline">{["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account ?? exchange.label : exchange.label}</Badge></TableCell>
+              <TableCell className="whitespace-nowrap">{exchange.clientName ?? "—"}</TableCell>
               <TableCell>
                 <TrafficModel provider={["relay.chat", "relay.responses"].includes(exchange.label) ? exchange.account : exchange.label} request={exchange.requestModel} responses={exchange.responseModels} upstream={exchange.upstreamProvider} />
               </TableCell>
+              <TableCell>{exchange.protocol ? <Badge variant="outline">{exchange.protocol === "chat" ? "Chat" : "Responses"}</Badge> : "—"}</TableCell>
               <TableCell className="whitespace-nowrap text-xs">
                 {exchange.status === undefined ? "" : `HTTP ${exchange.status} · `}
                 {stateLabel(t, exchange.state)}
@@ -104,7 +108,7 @@ export function TrafficTable({
           )})}
           {!loading && exchanges.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="h-16 text-center text-muted-foreground">
+              <TableCell colSpan={11} className="h-16 text-center text-muted-foreground">
                 {t("traffic.empty")}
               </TableCell>
             </TableRow>

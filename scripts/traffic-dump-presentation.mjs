@@ -1,3 +1,36 @@
+/** Protocol of the recorded model endpoint, independent of Provider capabilities or stream mode. */
+export function requestProtocol(request) {
+  if (!["http", "websocket"].includes(request?.transport) || request.transport === "http" && request.method !== "POST") return undefined;
+  let path = request?.path;
+  if (typeof path !== "string" && typeof request?.url === "string") {
+    try {
+      const url = new URL(request.url);
+      if (!(request.transport === "websocket" ? ["ws:", "wss:"] : ["http:", "https:"]).includes(url.protocol)) return undefined;
+      path = url.pathname;
+    } catch { return undefined; }
+  }
+  if (typeof path !== "string" || !path.startsWith("/")) return undefined;
+  path = path.split("?", 1)[0];
+  if (/(?:^|\/)responses$/u.test(path)) return "responses";
+  if (request.transport !== "websocket" && /(?:^|\/)chat\/completions$/u.test(path)) return "chat";
+  return undefined;
+}
+
+/** Client-reported User-Agent evidence only; never infer an app from a generic browser/SDK. */
+export function requestClientName(request) {
+  if (request?.debug !== undefined && request.debug?.version !== 1) return undefined;
+  const headers = request?.debug === undefined ? request?.headers : request.debug.inbound?.headers;
+  const value = Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === "user-agent")?.[1];
+  if (typeof value !== "string" || value.length > 1024 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return undefined;
+  const apps = [["WorkBuddy", "WorkBuddy"], ["CodeBuddy", "CodeBuddy"], ["codex_cli_rs", "Codex"],
+    ["codex_vscode", "Codex"], ["Cline", "Cline"], ["RooCode", "Roo Code"], ["CherryStudio", "Cherry Studio"],
+    ["Kelivo", "Kelivo"], ["ImmersiveTranslate", "Immersive Translate"]];
+  for (const [product, label] of apps) {
+    if (new RegExp(`(?:^|[ ;(])${product}/[0-9]`, "iu").test(value)) return label;
+  }
+  return undefined;
+}
+
 /** 从转储的原始字段投影展示信息；不改写终态，也不把推导结果写回磁盘。 */
 export function requestMetadata(body) {
   const client = body?.client_metadata;
