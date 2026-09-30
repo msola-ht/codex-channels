@@ -22,8 +22,8 @@ export function validateDirectChatRequest(value: unknown): DirectChatRequest {
     || [...model].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
     throw new DirectChatRequestError("model", "Expected a nonempty model identifier of at most 200 characters");
   }
-  if (!Array.isArray(value.messages) || value.messages.length === 0 || value.messages.length > 256) {
-    throw new DirectChatRequestError("messages", "Expected 1 to 256 messages");
+  if (!Array.isArray(value.messages) || value.messages.length === 0) {
+    throw new DirectChatRequestError("messages", "Expected a nonempty message array");
   }
   for (const [index, message] of value.messages.entries()) {
     if (!record(message)) throw new DirectChatRequestError(`messages[${index}]`, "Expected a message object");

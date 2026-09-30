@@ -105,7 +105,13 @@ it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s
   const provider = "rs-LocalTest";
   const upstream = createHttpServer((request, response) => {
     expect(request.url).toBe("/v1/responses"); expect(request.headers.authorization).toBe("Bearer fixture-custom-secret");
-    response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ id: "resp_fixture", object: "response", status: "completed", model: "fixture/model", output: [], usage: { input_tokens: 1, output_tokens: 2 } }));
+    const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      const forwarded = JSON.parse(Buffer.concat(chunks).toString());
+      expect(forwarded).toMatchObject({ model: "fixture/model", stream: false, store: false, background: false });
+      expect(forwarded.input).toHaveLength(300);
+      response.setHeader("content-type", "application/json"); response.end(JSON.stringify({ id: "resp_fixture", object: "response", status: "completed", model: "fixture/model", output: [], usage: { input_tokens: 1, output_tokens: 2 } }));
+    });
   });
   await new Promise<void>(resolve => upstream.listen(0, "127.0.0.1", resolve));
   cleanups.push(async () => { upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); });
@@ -143,7 +149,8 @@ it.each(["127.0.0.1", "[::1]"])("uses registered custom Responses material at %s
     authorize: createRelayMetricAuthorization(f.configPath, f.environment) });
   await receiver.apply(true); cleanups.push(() => receiver.close());
   const service = await startModelRelayService(f.configPath, f.environment); cleanups.push(() => service.close());
-  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" }, body: JSON.stringify({ model: "fixture/model", input: "fixture" }) });
+  const request = () => fetch(`http://127.0.0.1:${address.port}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${String(issued.key)}`, "content-type": "application/json" }, body: JSON.stringify({ model: "fixture/model", store: true, background: true,
+    input: Array.from({ length: 300 }, () => ({ role: "user", content: "fixture" })) }) });
   expect(await (await request()).json()).toMatchObject({ id: "resp_fixture", status: "completed" });
   await vi.waitFor(() => expect(store.count()).toBe(1));
   expect(store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", limit: 10 }).records[0]).toMatchObject({ provider,

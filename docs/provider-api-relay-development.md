@@ -445,7 +445,7 @@ Cline API 属于动态平台合同，项目没有锁定的本地服务端源码�
 | --- | --- |
 | 请求体 | 必须为 JSON 对象；HTTP 正文仍限 1 MiB、上传 15 秒 |
 | `model` | 非空字符串，最多 200 字符，不含控制字符；精确匹配本地目录与调用方模型授权 |
-| `messages` | 1–256 个对象；内部角色、内容、工具历史和扩展字段原样保留，由上游校验 |
+| `messages` | 非空对象数组，不设条数上限，受 1 MiB 请求正文预算限制；内部角色、内容、工具历史和扩展字段原样保留，由上游校验 |
 | `stream` | 如提供必须为布尔；省略时仍显式补 false，保持本地 JSON 默认合同 |
 | `n` | 省略、null 或 1；当前响应和指标仅支持单选择，其他值在出站前拒绝 |
 | 其他字段 | 原样保留，包括 null、采样/长度参数、stream_options、结构化输出、工具、推理和未知扩展；不删除、不转换、不猜测别名 |
@@ -1354,7 +1354,7 @@ WebUI 只有独立 `/relay` 页面的一张 Key 表：用途（现有 callerId�
 
 CLI/WebUI 共用提供商列表、模型目录和协议能力；不新增协议配置门户。关闭思考按 Provider、模型和协议的明确能力执行；不能把 CLP 的 reasoning.effort 参数盲目套给全部 Chat 提供商，未知能力仅允许透传。提供商删除、模型目录或网络材料变化仍取消相关租约；名称显示不得改变鉴权身份。
 
-Responses 首批只支持同步 POST 创建响应及其 JSON/SSE 交付，GET /v1/models 继续返回受限模型列表。input 接受字符串或对象数组，也允许仅有 instructions；工具、图片和扩展参数作为上游数据保留，不执行工具。model/stream/输入外形及容量是本地边界。store 缺省显式置 false；拒绝 store=true、background=true、非空 previous_response_id/conversation，不提供响应读取、取消端点或服务端会话生命周期。入站与出站差异在调试转储中可见，不暗中转换历史或模型。错误不得包含未经约束的上游正文。
+Responses 首批只支持同步 POST 创建响应及其 JSON/SSE 交付，GET /v1/models 继续返回受限模型列表。input 接受字符串或对象数组，也允许仅有 instructions；工具、图片和扩展参数作为上游数据保留，不执行工具。model/stream/输入外形及容量是本地边界。store 可省略或传布尔值，出站统一置 false；传 true 时关闭存储后继续转发，调试转储保留入站与出站值供对照，非布尔值仍拒绝。background 可省略或传布尔值，传入时统一置 false 后继续前台交付，省略时不补字段；非布尔值仍拒绝。官方 DS 的 previous_response_id、conversation 原样交给上游忽略，不在本地拒绝；其他 Responses 提供商仍拒绝非 null 的会话引用，因为不同 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能放行读取共享账户历史的引用。分支只依据鉴权绑定的 Provider，不接受请求正文指定身份。依据 [DeepSeek Responses 参数兼容表](https://api-docs.deepseek.com/guides/responses_api/)，该透传不恢复服务端历史，客户端仍须携带完整上下文。不提供响应读取、取消端点或服务端会话生命周期。Chat 消息和 Responses 输入项取消 256 条上限，资源由现有 1 MiB 正文和有界队列预算约束。入站与出站差异在调试转储中可见，不暗中转换历史或模型。错误不得包含未经约束的上游正文。
 
 SSE 保持事件名称与数据字段；终态之前断流为失败，incomplete 不能记为 completed。上游完成与客户端交付完成分别记录；取消之后的异步迟到结果不得出站。背压、上传/首包/总时限、并发及队列容量共用现有机制。每次实际出站仅一次指标结算，Thread/Turn 保持空值。
 

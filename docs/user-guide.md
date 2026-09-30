@@ -590,7 +590,9 @@ Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨�
 客户端使用 `/v1/chat/completions` 或 `/v1/responses` 选择原生协议；不会互转或自动重试另一协议。
 `codexc relay providers` 和管理页展示账户的实际协议能力：CLP 为 Chat，DS 为 Chat/Responses，其他已接入的 Responses 提供商为 Responses。
 自定义主/切换 Provider 必须有可独立读取的 API Key 和有效模型目录；不借用 Codex OAuth 登录态。
-Responses 只提供同步无状态创建；不提供 `store=true`、`background=true`、服务端会话引用或响应管理端点。
+Responses 只提供同步无状态创建；`store` 可省略或传布尔值，出站统一设为 `false`，传 `true` 时会关闭存储后继续转发，不因该值拒绝请求。非布尔值仍报参数错误；调试调用详情记录入站与出站差异。
+`background` 可省略或传布尔值，传入时统一设为 `false`，继续在当前请求内交付结果，不因 `true` 报错；省略时不补字段。
+官方 DS 的 `previous_response_id`、`conversation` 原样转发，由上游按其无状态合同忽略；客户端仍需在 `input` 中携带所需完整历史，引用不会恢复上下文。其他 Responses 提供商仍拒绝服务端会话引用：多个 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能通过引用读取共享账户历史。Relay 不提供响应管理端点。
 普通参数、工具声明和远程图片交由上游处理；Chat 保留原始响应字段与工具增量，客户端须等待有效终态后才执行工具。
 回退仅支持 CLP 的旧程序前，停止 Gateway、Relay 和 WebUI，使用 `codexc relay rollback-providers --provider ID`（可重复）明确列出所有非 CLP Relay 账户；
 命令备份后移除这些引用及其 Key，保持提供商自身配置和剩余凭据。重新接入须重新签发，不恢复备份中的旧秘密。
@@ -643,8 +645,8 @@ WebUI 及其他手工写入者须自行保持停止。失败保留原配置，�
 
 
 Relay 的 Chat 请求保留模型参数、消息内容和扩展字段，由 CLP 判断是否支持；远程图片 URL
-也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息数量、stream 布尔、单选择
-n=1 和请求大小等边界由 Relay 校验；省略 stream 时默认 JSON。请求参数不能改变本机账户、
+也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息结构、stream 布尔、单选择
+n=1 和请求大小等边界由 Relay 校验；Chat 消息和 Responses 输入项不设条数上限，仍受 1 MiB 请求正文预算限制；省略 stream 时默认 JSON。请求参数不能改变本机账户、
 凭据或上游地址。参数透传不代表当前模型支持所有能力，响应仍遵循已记录的单选择 JSON/SSE 合同。
 
 Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给 CLP。
