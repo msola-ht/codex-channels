@@ -72,6 +72,50 @@ describe("Responses / Chat conversion", () => {
     ]);
     expect(converted.request.tools).toEqual([{ type: "function", function: { name: "tool", parameters: { type: "object" } } }]);
   });
+  it("moves tool result images into the user message that follows the results", () => {
+    const url = "data:image/png;base64,iVBORw0KGgo=";
+    const converted = responsesToChat({ ...request([
+      { type: "function_call", call_id: "shot", name: "screenshot", arguments: "{}" },
+      { type: "function_call_output", call_id: "shot", output: [
+        { type: "input_text", text: "Wall time: 1 s" },
+        { type: "input_image", image_url: url, detail: "high" },
+      ] },
+      { role: "user", content: "接着看" },
+    ]), tools: [{ type: "function", name: "screenshot", parameters: { type: "object" } }] }).request.messages;
+    expect(converted).toEqual([
+      { role: "assistant", content: null, tool_calls: [{ id: "shot", type: "function", function: { name: "screenshot", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "shot", content: "Wall time: 1 s" },
+      { role: "user", content: [{ type: "image_url", image_url: { url, detail: "high" } }] },
+      { role: "user", content: "接着看" },
+    ]);
+  });
+  it("writes parallel tool result images once after the whole result group", () => {
+    const url = "data:image/png;base64,iVBORw0KGgo=";
+    const converted = responsesToChat({ ...request([
+      ...["a", "b"].map(call_id => ({ type: "function_call", call_id, name: "tool", arguments: "{}" })),
+      { type: "function_call_output", call_id: "a", output: [{ type: "input_text", text: "a" }, { type: "input_image", image_url: url }] },
+      { type: "function_call_output", call_id: "b", output: [{ type: "input_image", image_url: url }, { type: "input_text", text: "b" }] },
+    ]), tools: [{ type: "function", name: "tool", parameters: { type: "object" } }] }).request.messages;
+    expect(converted).toEqual([
+      { role: "assistant", content: null, tool_calls: ["a", "b"].map(id => ({ id, type: "function", function: { name: "tool", arguments: "{}" } })) },
+      { role: "tool", tool_call_id: "a", content: "a" },
+      { role: "tool", tool_call_id: "b", content: "b" },
+      { role: "user", content: [{ type: "image_url", image_url: { url } }, { type: "image_url", image_url: { url } }] },
+    ]);
+  });
+  it.each([
+    [{ type: "input_audio", audio_url: "data:audio/wav;base64,c2VjcmV0" }],
+    [{ type: "input_image", image_url: "https://example.test/secret.png" }],
+    [{ type: "input_image", file_id: "secret" }],
+    [{ type: "input_image", image_url: "data:image/png;base64,c2VjcmV0", detail: "original" }],
+  ])("still rejects tool result parts the Chat tool role cannot carry", output => {
+    const body = request([
+      { type: "function_call", call_id: "c", name: "tool", arguments: "{}" },
+      { type: "function_call_output", call_id: "c", output },
+    ]);
+    expect(() => responsesToChat(body)).toThrow();
+    try { responsesToChat(body); } catch (error) { expect(String(error)).not.toContain("secret"); }
+  });
   it("reassembles interleaved tool fragments and preserves absent cache usage", () => {
     const converter = new ChatToResponses("r", "fixture");
     converter.start();
