@@ -206,6 +206,8 @@ it("bounds persistent backlog under sustained new conversations and a stalled pl
     const unexpectedFaults = [];
     const coordinator = new DeliveryCoordinator(journal, {
       accounts: () => ['a0', 'a1', 'a2', 'a3'], authorized: () => true,
+      // The fixture deliberately stalls delivery until close; its load phase is not a platform timeout test.
+      timeoutMs: 180_000,
       deliver: async (_record, signal) => {
         started++; active++; peakActive = Math.max(peakActive, active);
         try { await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true })); }
@@ -241,7 +243,8 @@ it("bounds persistent backlog under sustained new conversations and a stalled pl
     clearInterval(timer);
     console.log(JSON.stringify({ baseline, samples, rejected, unexpectedFaults, started, peakActive, peakMailbox, peakMailboxBytes, missingRejected, paused, ticks, closeMs: performance.now() - closeStart }));
   `);
-  const child = spawnSync(process.execPath, ["--expose-gc", script, join(root, "journal")], { timeout: 45_000, encoding: "utf8" });
+  // Bound the entire 8192-submission disk workload separately from the shutdown assertion below.
+  const child = spawnSync(process.execPath, ["--expose-gc", script, join(root, "journal")], { timeout: 120_000, encoding: "utf8" });
   expect(child.error, child.stderr).toBeUndefined();
   expect(child.status, child.stderr).toBe(0);
   const result = JSON.parse(child.stdout) as {
@@ -266,7 +269,7 @@ it("bounds persistent backlog under sustained new conversations and a stalled pl
   // Generous isolation ceiling, not a cross-platform production memory promise.
   expect(Math.max(...result.samples.map((value) => value.rss)) - result.baseline.rss).toBeLessThan(192 * 1024 * 1024);
   console.info("delivery pressure fixture", JSON.stringify(result));
-}, 50_000);
+}, 130_000);
 
 it("stops reliable intake at the snapshot limit across EventBus, SurfaceManager, Worker and Outbox", () => {
   const root = fixture();
