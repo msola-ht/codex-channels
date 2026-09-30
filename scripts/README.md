@@ -459,7 +459,7 @@
   `codexc webui`（API）与 Vite dev server，任一子进程退出时统一清理另一个进程。
 - `package-path.mjs`：提供不依赖第三方包的 npm 包根目录解析。
 - `prepare-package.mjs`：源码仓库安装或 npm 打包前按 lockfile 补齐缺失的本地构建依赖、
-  启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口。
+  启用仓库 Git hooks、构建源码，并验证已安装包包含运行入口；显式 `--ignore-scripts` 时不执行准备，兼容仍调用 prepare 的 npm 版本。
 - `smoke-source-prepare.mjs`：在不含 `node_modules` 和 `dist` 的临时源码副本中验证显式源码
   全局安装命令会完成构建、保留模型目录与启动网络策略资源并生成 `codexc` 入口；失败时保留 stdout 与 stderr。
 - `smoke-package.mjs`：生成实际 tarball，在隔离目录安装，验证 WebUI 前端产物，并执行公开的

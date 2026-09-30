@@ -1528,3 +1528,5 @@ WebUI 关联审查：概览复用现有 Card 拆分服务、队列、采集和�
 此前关联验证：采集、读取/API、表格与 CLI 4 文件 253 项通过，类型/运行时边界、ESLint、WebUI 构建/Lint、双语及文档检查通过。实际已有 #2/#3 转储只读识别为 WorkBuddy/Chat。本轮必要脱敏规则验证：4 个相关测试文件共 274 项通过，覆盖 Relay Chat/Responses × JSON/SSE × 生产/调试八种组合，以及 Codex HTTP/WebSocket × 生产/调试四种组合；验证普通头保留、凭据/URL 敏感参数/CSP nonce 遮蔽、客户端与协议投影、容量截断及真实出站头不被转储改写。类型检查、针对性 ESLint、WebUI 构建/Lint、643 项双语键及文档检查通过。不修改实际配置或服务，不发真实模型请求。
 
 提交前关联审查补充：浏览器识别按专用标识优先于 Chrome/Safari 兼容标识，覆盖 Edge、Opera、Samsung Internet、Firefox、Chrome、Safari 及移动端和操作系统；明确应用优先，保留旧转储投影与未知入站不回退的边界。补齐相对跳转 URL 片段中敏感参数及带空白认证值的脱敏回归。
+
+CI 关联修复：上一轮 Ubuntu 完整测试通过但 npm 10 在 `pack --ignore-scripts` 时仍执行 prepare、跳过 prebuild，导致重复构建 TS5055；准备入口现遵守 npm 的 ignore-scripts 设置，不放宽安装冒烟。macOS 两组 Relay IPC 夹具因系统临时目录过长超过 Unix socket 路径限制，改用项目既有的 macOS `/tmp` 夹具约定，不改变生产 IPC 路径。Node 22.13.0 / npm 10.9.2 隔离验证：相关 3 文件 61 项测试及 tarball 安装冒烟通过，针对性 Lint 与文档检查通过。跨平台通过结论以修复后远端 CI 为准。

@@ -9,7 +9,10 @@ import { resolveExecutableInvocation } from "../runtime/executable.mjs";
 const sourceConfig = join(packageDir, "tsconfig.build.json");
 const builtEntry = join(packageDir, "dist", "main.js");
 
-if (existsSync(sourceConfig)) {
+// npm 10 can invoke prepare during pack even when --ignore-scripts was requested.
+if (process.env.npm_config_ignore_scripts === "true") {
+  // Preserve the explicitly prepared build; do not install dependencies or hooks.
+} else if (existsSync(sourceConfig)) {
   if (ensureSourceDependencies()) {
     installGitHooks(packageDir);
     process.exitCode = runNpm(["run", "build"]);

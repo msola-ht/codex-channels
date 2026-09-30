@@ -223,6 +223,14 @@ Surface -> Application/Core <- Codex Client
   Clean-source global installation is excluded from routine commit and PR gates, but remains required in full `npm run test:package`, explicitly authorized source releases and Codex CLI upgrade validation.
 - When changing check scripts, Git hooks or CI, keep `verify:commit`, `.githooks/pre-commit`, GitHub Actions and affected script indexes and workflow documentation consistent.
   Update the root README only when user-facing development entry points change.
+- When changing installation, packaging or npm lifecycle behavior, verify the affected path with the Node.js version pinned in CI and its bundled npm, not only the local default version.
+  Prepared-artifact checks must not implicitly rebuild source artifacts or reinstall source dependencies; lifecycle entry points must honor explicit script-disabling settings even when npm invokes them.
+- Unix socket test fixtures must fit the strictest supported platform path limit, including generated filenames and nested directories.
+  On macOS, follow the existing short `/tmp` fixture convention instead of the long system temporary directory; keep directories private and clean them up.
+  Do not change production socket paths or relax ownership/permission checks merely to make a fixture pass.
+- For failed CI, inspect each failed job and its first actionable error; compare runtime versions, platform, paths and lifecycle behavior before editing.
+  Reproduce with isolated fixtures where possible and add focused regression coverage. Do not replace diagnosis with blind reruns, skipped tests or weaker checks.
+  Local verification and remote CI are separate evidence: report the exact commit and remaining failed/pending jobs, and never describe a PR as fully verified until its current required checks pass.
 - Protocol, Transport or shared App Server behavior changes require real App Server smoke verification covering the change. Extend existing contracts if insufficient; mocks alone are not enough.
 - Core protocol tests should cover initialization, message routing, request cleanup, primary Thread/Turn paths and subscription cancellation.
 - Session tests should cover bidirectional discovery and continuation, exclusive binding, active state and recovery after Gateway restart.

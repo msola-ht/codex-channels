@@ -45,7 +45,7 @@ vi.mock("https-proxy-agent", async () => {
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "relay-runtime-"));
+  const root = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "relay-runtime-"));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const environment = { CODEX_HOME: join(root, "codex"), CODEX_CONNECT_HOME: join(root, "connect"),
     CODEX_CONNECT_CONFIG_FILE: join(root, "connect", "config.toml"), HTTP_PROXY: "", HTTPS_PROXY: "", ALL_PROXY: "", NO_PROXY: "*" };

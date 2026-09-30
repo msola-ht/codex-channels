@@ -388,7 +388,7 @@ describe("traffic command V2 rendering", () => {
 });
 
 function temporaryDirectory() {
-  const directory = mkdtempSync(join(tmpdir(), "codexc-traffic-cli-v2-"));
+  const directory = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "codexc-traffic-cli-v2-"));
   temporaryDirectories.push(directory);
   return directory;
 }
