@@ -347,10 +347,11 @@ describe("webui traffic V2 API", () => {
       interaction: 1, kind: "websocket_frame", direction: "upstream", text, part: index + 1, parts: 2,
     })));
     call.responseBody = JSON.stringify({ type: "response.completed", response: {
-      id: "resp-current", output: [], service_tier: "default",
+      id: "resp-current", status: "completed", output: [], service_tier: "default",
       usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 80 },
         output_tokens: 10, output_tokens_details: { reasoning_tokens: 2 } },
     } });
+    call.trace.push({ interaction: 1, kind: "websocket_frame", direction: "upstream", text: call.responseBody });
     writeSession(fixture.trafficDir, "openai", "2026-09-17T00-00-00-000Z", [call]);
     const server = await startServer(fixture.environment);
     const list = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic`);
@@ -381,6 +382,22 @@ describe("webui traffic V2 API", () => {
     expect(detail.response.output).toHaveLength(1);
     expect(detail.response.output[0].text).toBe("a".repeat(150));
     expect(detail.response.outputTruncated).toBe(true);
+  });
+
+  it.each(["completed", "failed", "incomplete"])("retains SSE done items when %s has empty output", async (status) => {
+    const fixture = createFixture();
+    const call = httpInteraction(1);
+    const events = [
+      { type: "response.output_item.done", output_index: 0, item: { type: "message", content: "retained answer" } },
+      { type: `response.${status}`, response: { status, output: [] } },
+    ];
+    call.trace = [{ interaction: 1, kind: "response_body", encoding: "utf8",
+      text: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join("") }];
+    const session = "2026-09-17T00-00-00-000Z";
+    writeSession(fixture.trafficDir, "openai", session, [call]);
+    const detail = await describeDumpExchange([join(fixture.trafficDir, `openai-${session}`)], 1);
+    expect(detail.response.output).toMatchObject([{ text: "retained answer" }]);
+    expect(detail.response.outputTruncated).toBe(false);
   });
 
   it.each([

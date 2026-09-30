@@ -4,14 +4,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
-  it("shows controlled relay outcomes and a request ID without adding an uncaptured detail page", () => {
+  it("shows controlled relay outcomes without a request ID copy action", () => {
     expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
     expect(markup["relay-outcome-disconnected"]).toContain("客户端连接已断开");
     expect(markup["relay-outcome-incomplete"]).toContain("上游生成未完整结束");
     expect(markup["relay-outcome-unknown"]).not.toContain("untrusted-sensitive-value");
     for (const name of ["rejected", "disconnected", "unknown", "incomplete"]) {
-      expect(markup[`relay-outcome-${name}`]).toContain("复制请求 ID");
-      expect(markup[`relay-outcome-${name}`]).toContain("7d40d091-8c74-4dcf-9e40-71531f3f1a98");
+      expect(markup[`relay-outcome-${name}`]).not.toContain("复制请求 ID");
+      expect(markup[`relay-outcome-${name}`]).not.toContain("7d40d091-8c74-4dcf-9e40-71531f3f1a98");
       expect(markup[`relay-outcome-${name}`]).not.toContain("查看调用详情");
     }
   });

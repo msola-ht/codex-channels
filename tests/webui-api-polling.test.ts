@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { scheduleApiRefresh, settledTaskIds } from "../webui/src/lib/api-polling.js";
@@ -75,4 +76,55 @@ describe("WebUI 管理任务终态关联刷新", () => {
   it("does not refresh for queued or running tasks", () => {
     expect(settledTaskIds(new Map(), [{ id: "task", state: "running" }])).toEqual([]);
   });
+});
+
+it("invalidates failed live snapshots through retries while preserving the default cache policy", () => {
+  const script = String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    const source = fs.readFileSync("webui/src/hooks/use-api.ts", "utf8")
+      .replace(/^import .*$/gm, "").replace(/export (function|interface)/g, "$1");
+    const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+    for (const retainDataOnError of [false, true]) {
+      const slots = [], refs = [];
+      let si = 0, ri = 0, previousDeps, effect, cleanup;
+      const useState = initial => {
+        const index = si++;
+        if (!(index in slots)) slots[index] = initial;
+        return [slots[index], value => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
+      };
+      const useRef = initial => refs[ri++] ?? (refs[ri - 1] = { current: initial });
+      const useEffect = (run, deps) => {
+        if (!previousDeps || deps.some((value, index) => value !== previousDeps[index])) effect = run;
+        previousDeps = deps;
+      };
+      const hook = new Function("useState", "useRef", "useEffect", "useCallback", "ApiClientError", code + ";return useApi;")(
+        useState, useRef, useEffect, fn => fn, class extends Error {});
+      const pending = [];
+      const loader = signal => new Promise((resolve, reject) => pending.push({ signal, resolve, reject }));
+      const render = () => {
+        si = ri = 0;
+        const result = hook(loader, [], retainDataOnError ? undefined : { retainDataOnError });
+        if (effect) { cleanup?.(); cleanup = effect(); effect = undefined; }
+        return result;
+      };
+      const settle = () => new Promise(resolve => setImmediate(resolve));
+      render(); pending[0].resolve({ requests: ["old"] }); await settle();
+      let view = render(); assert.deepEqual(view.data, { requests: ["old"] });
+      view.refetch(); render(); pending[1].reject(new Error("unavailable")); await settle();
+      view = render(); assert.ok(view.error);
+      const expected = retainDataOnError ? { requests: ["old"] } : null;
+      assert.deepEqual(view.data, expected);
+      view.refetch(); view = render();
+      assert.equal(view.loading, true); assert.equal(view.error, null); assert.deepEqual(view.data, expected);
+      pending[2].resolve({ requests: ["new"] }); await settle();
+      view = render(); assert.deepEqual(view.data, { requests: ["new"] });
+      view.refetch(); render(); cleanup();
+      assert.equal(pending[3].signal.aborted, true);
+      pending[3].resolve({ requests: ["late"] }); await settle();
+      assert.deepEqual(render().data, { requests: ["new"] });
+    }
+  `;
+  expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
 });

@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
+import { RelayQueueSheet } from "@/components/requests/relay-queue-sheet"
 import { RelayRuntimeStatus } from "@/components/requests/relay-runtime-status"
 
 export function RelayPage() {
@@ -88,7 +89,7 @@ export function RelayPage() {
   return <div className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><h1 ref={pageHeading} tabIndex={-1} className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
-      <div className="flex gap-2"><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
+      <div className="flex flex-wrap gap-2"><RelayQueueSheet callers={data?.callers ?? []} /><Button variant="outline" disabled={refreshingBlocked} onClick={management.refetch}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />

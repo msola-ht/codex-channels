@@ -168,3 +168,18 @@ it.each(["edit", "delete"] as const)("previews and confirms %s with revision and
     expect((await f.snapshot()).callers).toEqual([]);
   }
 });
+
+it("authenticates the live queue endpoint and distinguishes unavailable from empty", async () => {
+  const f = await fixture();
+  const url = `${f.url}/queue`;
+  expect((await fetch(url)).status).toBe(401);
+  expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "stopped" });
+  const query = vi.spyOn(relayControl, "queryModelRelayControl");
+  try {
+    query.mockResolvedValueOnce({ result: "queue", requests: [] });
+    expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "running", requests: [] });
+    expect(query).toHaveBeenLastCalledWith(expect.any(String), "queue");
+    query.mockResolvedValueOnce({ result: "unconfirmed" });
+    expect(await (await fetch(url, { headers: f.headers })).json()).toEqual({ state: "unknown" });
+  } finally { query.mockRestore(); }
+});

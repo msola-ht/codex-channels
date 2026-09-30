@@ -639,6 +639,15 @@ describe("isolated Relay vertical request chain", () => {
     const queuedJson = f.post(); const queuedStream = f.post({ ...body, stream: true });
     await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(2));
     expect(f.preparedCount()).toBe(10); expect(f.relay.diagnostics().active).toBe(10);
+    const snapshot = f.relay.queueSnapshot();
+    expect(snapshot).toHaveLength(12);
+    expect(snapshot.filter(row => row.phase === "queue")).toHaveLength(2);
+    expect(snapshot.filter(row => row.phase === "upstream")).toHaveLength(10);
+    for (const row of snapshot) {
+      expect(row).toEqual({ requestId: expect.any(String), callerId: "caller-a", provider: "clp-a", model: "fixture/model",
+        protocol: "chat", phase: expect.any(String), elapsedMs: expect.any(Number) });
+    }
+
     replies[0]!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
     await vi.waitFor(() => expect(f.calls()).toBe(11));
     replies[10]!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
@@ -654,6 +663,7 @@ describe("isolated Relay vertical request chain", () => {
     expect(new Set(f.metrics.map(metric => metric.relayRequestId)).size).toBe(12);
     expect(f.metrics.every(metric => metric.status === "completed")).toBe(true);
     expect(f.relay.diagnostics()).toMatchObject({ active: 0, queue: { pending: 0, waiting: 0, bytes: 0 } });
+    expect(f.relay.queueSnapshot()).toEqual([]);
   });
   it("drops disconnected waiters and cancels the rest immediately on shutdown", async () => {
     let upstream: ServerResponse | undefined;
@@ -668,6 +678,7 @@ describe("isolated Relay vertical request chain", () => {
     await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(1));
     controller.abort(); await cancelled;
     await vi.waitFor(() => expect(f.relay.diagnostics().queue.pending).toBe(0));
+    expect(f.relay.queueSnapshot()).toHaveLength(1);
     const waiting = f.post(); await vi.waitFor(() => expect(f.relay.diagnostics().queue.waiting).toBe(1));
     const close = f.relay.close();
     const rejected = await waiting; expect(rejected.status).toBe(503);
@@ -676,6 +687,7 @@ describe("isolated Relay vertical request chain", () => {
     upstream!.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
     await (await active).text(); await close;
     expect(f.metrics).toHaveLength(1); expect(f.relay.diagnostics().queue.bytes).toBe(0);
+    expect(f.relay.queueSnapshot()).toEqual([]);
   });
   it("unwraps CLP's successful JSON envelope before delivery and usage settlement", async () => {
     const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" })

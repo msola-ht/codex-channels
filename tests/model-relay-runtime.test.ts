@@ -20,7 +20,7 @@ import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "
 import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-setup.mjs";
 import * as privateFile from "../runtime/private-file.mjs";
 import * as gatewayConfig from "../runtime/gateway-config.mjs";
-import { createPrivateIpcConnection } from "../runtime/private-ipc.mjs";
+import { PrivateIpcServer, createPrivateIpcConnection } from "../runtime/private-ipc.mjs";
 import { once } from "node:events";
 import { RelayMetricsComposition, createRelayMetricAuthorization } from "../src/bootstrap/relay-metrics-composition.js";
 import { BufferedModelRequestMetricsWriter, SqliteModelRequestMetricsStore } from "../src/observability/index.js";
@@ -745,4 +745,41 @@ it("prunes orphan relay references but preserves shared providers and historical
   await run(["issue", "--caller", "c", "--key", "c", "--provider", "clp-test", "--model", model]);
   expect(read().accounts).toEqual([{ provider: "clp-test" }]);
   expect(loadConfiguredRelayProviderMaterial("clp-other", f.environment).apiKey).toBe("fixture-other");
+});
+
+it("validates bounded private queue snapshots and refuses incompatible peers", async () => {
+  const f = await fixture();
+  const row = { requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", provider: "clp-test",
+    model: "x".repeat(200), protocol: "chat", phase: "queue", elapsedMs: 123 };
+  let response: Record<string, unknown> = { result: "queue", requests: Array.from({ length: 64 }, () => row) };
+  const endpoint = modelRelayPaths(f.configPath).control;
+  const control = new ModelRelayControl(endpoint, async () => response);
+  await control.start(); cleanups.push(() => control.close());
+  expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject(response);
+  for (const requests of [[{ ...row, secret: "hidden" }], [{ ...row, phase: "unknown" }], [{ ...row, elapsedMs: -1 }],
+    [{ ...row, model: "x".repeat(201) }], Array.from({ length: 65 }, () => row)]) {
+    response = { result: "queue", requests };
+    expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
+  }
+  response = { result: "status" };
+  expect(await queryModelRelayControl(endpoint, "queue")).toEqual({ result: "unconfirmed" });
+});
+
+it("preserves Unicode model names across fragmented queue IPC responses", async () => {
+  const f = await fixture();
+  const endpoint = modelRelayPaths(f.configPath).control;
+  const server = new PrivateIpcServer(endpoint, socket => {
+    socket.once("data", data => {
+      const request = JSON.parse(data.toString()) as { requestId: string };
+      const payload = Buffer.from(JSON.stringify({ version: 3, requestId: request.requestId, result: "queue", requests: [{
+        requestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98", callerId: "client", provider: "clp-test",
+        model: "中文模型", protocol: "responses", phase: "upstream", elapsedMs: 1,
+      }] }) + "\n");
+      const boundary = payload.indexOf(Buffer.from("中")) + 1;
+      socket.write(payload.subarray(0, boundary));
+      setTimeout(() => socket.end(payload.subarray(boundary)), 10);
+    });
+  });
+  await server.start("occupied"); cleanups.push(() => server.close());
+  expect(await queryModelRelayControl(endpoint, "queue")).toMatchObject({ result: "queue", requests: [{ model: "中文模型" }] });
 });

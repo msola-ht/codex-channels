@@ -18,6 +18,14 @@ const commands = ["status", "providers", "callers", "issue", "edit", "delete", "
 const invalid = message => new ConfigManagementError("relay_invalid", "relay", message);
 const conflict = () => new ConfigManagementError("stale-revision", "relay", "Relay 配置或模型目录已变化，请刷新后重新预览");
 
+/** Read-only runtime snapshot, independent of provider catalogs and edit revisions. */
+export async function readRelayQueue(environment = process.env) {
+  const { configPath } = locateUserConfig(environment);
+  const result = await queryModelRelayControl(modelRelayPaths(configPath).control, "queue");
+  return result.result === "queue" ? { state: "running", requests: result.requests }
+    : { state: result.result === "not_running" ? "stopped" : "unknown" };
+}
+
 export function readRelayManagement(environment = process.env) {
   const { configPath } = locateUserConfig(environment);
   assertPrivateConfigAccessSync(configPath);

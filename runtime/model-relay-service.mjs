@@ -128,6 +128,7 @@ export async function startModelRelayService(configPath, environment = process.e
       if (snapshot?.digest !== request.digest) throw new Error("Relay policy digest mismatch");
       return { result: "applied", digest: snapshot.digest };
     }
+    if (request.operation === "queue") return { result: "queue", requests: relay?.queueSnapshot() ?? [] };
     return { result: "status", configurationValid: snapshot !== undefined, enabled: snapshot?.config.enabled === true, listening: Boolean(listening),
       active: relay?.diagnostics().active ?? 0, queue: relay?.diagnostics().queue ?? { pending: 0, waiting: 0, bytes: 0, oldestWaitMs: 0, timedOut: 0 },
       capture: { ...dump.diagnostics(), enabled: snapshot?.debug.model_traffic_dump === true },

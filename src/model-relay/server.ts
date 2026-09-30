@@ -6,6 +6,16 @@ import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDir
 import { sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
+export interface RelayQueueEntry {
+  requestId: string;
+  callerId: string;
+  provider: string;
+  model: string | null;
+  protocol: "chat" | "responses";
+  phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
+  elapsedMs: number;
+}
+
 export interface PreparedRelayProvider {
   readonly target: DirectChatTarget;
   readonly models: readonly string[];
@@ -24,6 +34,7 @@ export interface ModelRelayOptions {
 /** Independent HTTP lifecycle; injected preparation never runs before authentication. */
 export class ModelRelayServer {
   readonly admission: RelayAdmission;
+  private readonly requests = new Map<string, () => RelayQueueEntry>();
   private readonly active = new Set<AbortController>();
   private readonly tasks = new Set<Promise<void>>();
   private readonly headerTimers = new Map<Socket, NodeJS.Timeout>();
@@ -59,6 +70,10 @@ export class ModelRelayServer {
   }
   diagnostics(): { active: number; metricFailures: number; queue: RelayAdmission["queue"] } {
     return { active: this.admission.active, queue: this.admission.queue, metricFailures: this.metricFailures };
+  }
+  /** Current authenticated model requests only; no bodies, credentials or history. */
+  queueSnapshot(): RelayQueueEntry[] {
+    return [...this.requests.values()].map(read => read());
   }
   /** Disable the endpoint without forgetting the process's rate history. */
   async stopListening(): Promise<void> {
@@ -108,6 +123,7 @@ export class ModelRelayServer {
     let phase: "input" | "queue" | "prepare" | "upstream" | "delivery" = "input";
     const protocol = request.url === "/v1/responses" ? "responses" : "chat";
     const observer = protocol === "responses" ? new DirectResponsesObserver() : new DirectChatResponse();
+    const receivedAt = performance.now();
     const relayRequestId = randomUUID();
     response.setHeader("x-relay-request-id", relayRequestId);
     let deliveryStatus: RelayMetric["deliveryStatus"] = "failed";
@@ -121,6 +137,12 @@ export class ModelRelayServer {
         this.admission.acquire(undefined);
       }
       lease = models ? this.admission.acquire(request.headers.authorization) : this.admission.reserve(request.headers.authorization);
+      if (!models) {
+        const caller = lease.caller;
+        this.requests.set(relayRequestId, () => ({ requestId: relayRequestId, callerId: caller.callerId,
+          provider: caller.provider, model: requestModel || null, protocol, phase,
+          elapsedMs: Math.max(0, Math.floor(performance.now() - receivedAt)) }));
+      }
       const signal = AbortSignal.any([controller.signal, lease.signal]);
       if (request.headers["content-encoding"] && request.headers["content-encoding"] !== "identity") throw new RelayAdmissionError(415, "unsupported_encoding");
       let body: DirectChatRequest | DirectResponsesRequest | undefined;
@@ -226,6 +248,7 @@ export class ModelRelayServer {
         } catch { response.destroy(); }
       }
     } finally {
+      this.requests.delete(relayRequestId);
       clearTimeout(totalTimer); response.off("close", disconnected); controller.abort(); this.active.delete(controller);
       if (observer.status === "failed") errorCode ??= "upstream_response_failed";
       const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);

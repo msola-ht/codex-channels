@@ -6,6 +6,12 @@ import type { DisplayLanguage } from "@/lib/format"
  */
 const zh = {
   relay: {
+    queueDetails: "请求队列",
+    queueLiveHint: "每次刷新完成后 2 秒自动更新，关闭后停止。仅展示当前已鉴权的模型请求，不保留历史。",
+    queueSnapshotHint: "当前快照；按接收顺序展示，等待请求按 Key 公平调度。",
+    queuePhase: "阶段", queueElapsed: "已耗时", queueModelPending: "尚未读取", queueEmpty: "当前没有进行中的模型请求",
+    queuePhases: { input: "接收请求", queue: "等待名额", prepare: "准备上游", upstream: "上游处理", delivery: "交付响应" },
+
     "diagnosticsLabel": "队列与采集状态",
     "oldestWait": "最早等待 {value}",
     "queueTimeouts": "排队超时 {count} 次",
@@ -373,9 +379,6 @@ const zh = {
     "activationFallback": "按操作结果"
   },
   requests: {
-    "copyRequestId": "复制请求 ID",
-    "requestIdCopied": "请求 ID 已复制",
-    "requestIdCopyFailed": "复制失败，请手动复制下方请求 ID",
     "noTrafficReason": "没有转储关联，原因未记录；不能据此判断当时是否开启采集。已有转储也可能因保留期限或手动清理而不可用。",
     "relayReasons": {"disconnected": "客户端连接已断开", "revoked": "请求因撤销或关闭被取消", "timeout": "请求或上游响应超时", "rateLimited": "上游限流", "invalidResponse": "上游响应格式不符合协议", "authentication": "上游认证失败", "payment": "上游额度不足", "permission": "上游权限不足", "context": "输入超过上下文限制", "filtered": "上游内容过滤", "rejected": "上游拒绝请求", "upstreamFailed": "上游调用失败", "requestFailed": "请求失败，原因未细分", "deliveryFailed": "响应交付失败", "incomplete": "上游生成未完整结束"},
     "title": "请求明细",
@@ -632,6 +635,12 @@ export type Messages = typeof zh
 
 const en: Messages = {
   relay: {
+    queueDetails: "Request queue",
+    queueLiveHint: "Refreshes 2 seconds after each update; stops when closed. Only current authenticated model requests are shown, with no history.",
+    queueSnapshotHint: "Current snapshot, ordered by arrival. Waiting requests are scheduled fairly by key.",
+    queuePhase: "Phase", queueElapsed: "Elapsed", queueModelPending: "Not read yet", queueEmpty: "No model requests in progress",
+    queuePhases: { input: "Receiving request", queue: "Waiting for capacity", prepare: "Preparing upstream", upstream: "Upstream processing", delivery: "Delivering response" },
+
     "diagnosticsLabel": "Queue and capture status",
     "oldestWait": "Oldest wait {value}",
     "queueTimeouts": "Queue timeouts {count}",
@@ -999,9 +1008,6 @@ const en: Messages = {
     "activationFallback": "As directed by the result"
   },
   requests: {
-    "copyRequestId": "Copy request ID",
-    "requestIdCopied": "Request ID copied",
-    "requestIdCopyFailed": "Copy failed. Select and copy the request ID below.",
     "noTrafficReason": "No dump reference; the reason was not recorded. This does not indicate whether capture was enabled then. Existing dumps may also become unavailable through retention or manual cleanup.",
     "relayReasons": {"disconnected": "Client disconnected", "revoked": "Cancelled by revocation or shutdown", "timeout": "Request or upstream timed out", "rateLimited": "Upstream rate limited", "invalidResponse": "Invalid upstream response format", "authentication": "Upstream authentication failed", "payment": "Upstream quota exhausted", "permission": "Upstream permission denied", "context": "Context limit exceeded", "filtered": "Upstream content filter", "rejected": "Upstream rejected the request", "upstreamFailed": "Upstream call failed", "requestFailed": "Request failed; reason not classified", "deliveryFailed": "Response delivery failed", "incomplete": "Upstream generation ended incomplete"},
     "title": "Request details",

@@ -1049,3 +1049,17 @@ export interface RelayManagementResult {
   activation: "saved_and_applied" | "saved_not_running" | "saved_unconfirmed";
   key?: string; auditStatus: "recorded" | "failed";
 }
+
+/** Ephemeral authenticated model requests; not a persisted request history. */
+export type RelayQueueSnapshot = { state: "stopped" | "unknown" } | {
+  state: "running";
+  requests: Array<{
+    requestId: string;
+    callerId: string;
+    provider: string;
+    model: string | null;
+    protocol: "chat" | "responses";
+    phase: "input" | "queue" | "prepare" | "upstream" | "delivery";
+    elapsedMs: number;
+  }>;
+};

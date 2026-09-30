@@ -208,7 +208,7 @@ export function createOutputCollector(maxBytes, terminalOutput, observeModelEven
       add(value.output_index, value.item);
     }
     if (!hasTerminalOutput && ["response.completed", "response.failed", "response.incomplete"].includes(value?.type)
-      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output)) {
+      && value.type === `response.${value.response?.status}` && Array.isArray(value.response?.output) && value.response.output.length > 0) {
       items.clear(); bytes = 0;
       value.response.output.forEach((item, index) => add(index, item));
     }

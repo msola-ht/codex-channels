@@ -205,7 +205,7 @@
 
 这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。
 
-- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v3 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，有界连接、帧和等待，不传递秘密。
+- `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v3 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密。
 - `model-relay-paths.mjs` / `model-relay-paths.d.mts`：按配置路径派生控制与指标端点。
 - `model-relay-material-reader.mjs` / `model-relay-material-worker.mjs`：单 Worker 按固定用途读取 Provider 材料或指标身份快照；串行、可取消、有界，不阻塞调用线程。指标身份准备限时 750 毫秒，不返回凭据或身份哈希。
 - `model-relay-metrics-authorization.mjs` / `model-relay-metrics-authorization.d.mts`：Gateway 指标身份异步鉴权，最多保留 8 个检查；读取当前配置中的活动/历史身份，校验提供商和已签发代次；取消或关闭后的迟到鉴权结果不得通过。

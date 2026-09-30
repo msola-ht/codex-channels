@@ -1,5 +1,3 @@
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/metrics/status-badge"
 import { useTranslation } from "@/hooks/use-translation"
 import type { RequestRecord } from "@/lib/types"
@@ -27,19 +25,9 @@ function reason(record: RequestRecord) {
 
 export function RelayRequestStatus({ record }: { record: RequestRecord }) {
   const { t } = useTranslation()
-  const [copy, setCopy] = useState<"idle" | "pending" | "copied" | "failed">("idle")
   const label = reason(record)
-  const copyId = async () => {
-    if (!record.relayRequestId) return
-    setCopy("pending")
-    try { await navigator.clipboard.writeText(record.relayRequestId); setCopy("copied") }
-    catch { setCopy("failed") }
-  }
   return <div className="flex flex-col items-start gap-1">
     <StatusBadge status={record.status} />
     {label && <span className="max-w-48 whitespace-normal text-xs text-muted-foreground">{t(`requests.relayReasons.${label}`)}</span>}
-    {record.relayRequestId && <Button size="sm" variant="ghost" title={record.relayRequestId} disabled={copy === "pending"} onClick={() => void copyId()}>{t("requests.copyRequestId")}</Button>}
-    {copy !== "idle" && copy !== "pending" && <span role="status" className="text-xs text-muted-foreground">{t(copy === "copied" ? "requests.requestIdCopied" : "requests.requestIdCopyFailed")}</span>}
-    {copy === "failed" && <code className="max-w-48 select-text whitespace-normal break-all">{record.relayRequestId}</code>}
   </div>
 }
