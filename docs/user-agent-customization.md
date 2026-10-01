@@ -155,8 +155,7 @@ WebSocket 请求时。内部指标、Thread、Turn 和 App Server 协议版本�
 
 保存显式覆盖后由统一配置激活通知提示：该设置同时改变 Gateway 客户端连接与 App Server 出站
 Provider Proxy，需要 `codexc service restart all`；App Server 不会自动重启，受管 Gateway
-会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。现有 Thread 不使用新身份或
-UA。回显不出现在聊天渠道。
+会按既有配置热载机制自行重建连接，前台 Gateway 需手动重启。已有 Thread 的身份与 Provider 归属不改写；App Server 重启后恢复 Thread，后续请求使用新进程身份与出站 UA。回显不出现在聊天渠道。
 
 首期不增加独立 `codexc ua` 命令，也不在 `codexc setup` 的 Provider 页面重复入口。
 脚本或自动化直接编辑 TOML；交互入口与配置文件使用同一校验和原子写入实现。
@@ -213,7 +212,7 @@ Provider ID 字符串插值到全局 UA。
   避免在 App Server 会话遥测中保留 Gateway 标识。
 - `src/provider-proxy`：由 `runtime/app-server-service-runtime.mjs` 注入可选完整 UA，在 HTTP 和 WebSocket 出站请求头的
   统一函数中覆盖；不修改入站 Header，但把该请求实际发往上游的 UA 一并写入指标记录
-  `model_request_metrics.user_agent`（Schema v13 引入，当前 Schema v20，限长 512），供 WebUI 请求明细逐条展示。
+  `model_request_metrics.user_agent`（Schema v13 引入，当前 Schema v23，限长 512），供 WebUI 请求明细逐条展示。
 - `runtime/terminal-identity.mjs`：按当前锁定 Codex CLI 的探测顺序从进程环境推导终端标识；
   `detectTerminalUserAgentToken` 复现官方取值供 UA 文本预填使用，`detectTerminalIdentity`
   只在结果可作为 `terminal_identity` 记录时返回，探不到终端或只探测到 `dumb` 时返回 `null`。
@@ -236,14 +235,14 @@ Provider ID 字符串插值到全局 UA。
 - `scripts/webui-management-status-route.mjs`：`/api/v1/management/upstream-user-agent` 返回模型上游实际使用的
   `User-Agent` 与取值来源；配置覆盖优先，否则用同一非全局身份读取 App Server 生成的 UA，
   App Server 未运行时返回不可用状态而不是让接口失败。
-- `codexc doctor`：只显示「默认/已自定义」状态，不发送探测请求，不打印完整值。
+- `codexc doctor`：只显示「默认/已自定义」状态，不为 UA 校验发起模型生成请求，不打印完整值；常规只读 App Server 握手诊断仍保留。
 
 不修改 Codex `~/.codex/config.toml`、Provider Profile、API Key 文件、数据库 Schema、指标协议或
 Surface 配置。
 
 ## 验证计划
 
-本次改动不新增测试文件或用例，只在默认行为变化处同步已有断言：
+当前行为由以下配置、代理与真实合同检查覆盖：
 
 - `npm run check`：类型与版本一致性，覆盖 `GatewayConfig`、`ClientInfo` 注入签名和
   Provider Proxy 选项类型。
@@ -258,7 +257,7 @@ Surface 配置。
 
 已确认不新增协议方法；默认身份变化只调整 `initialize.clientInfo` 的既有取值，`thread/start`
 去掉 `serviceName` 是本次唯一删除的协议字段，两者都已由真实 App Server 合同测试覆盖。上游 UA
-覆盖仍只改变本地 Provider Proxy 出站 Header，不改入站 Header、指标载荷或
+覆盖仍只改变本地 Provider Proxy 出站 Header，不改入站 Header 或
 Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支持范围，原因是锁定协议
 不暴露其他客户端身份，见「当前链路」。
 
@@ -274,5 +273,5 @@ Codex `~/.codex/config.toml`。跨连接读取"原生 Codex TUI 的 UA"不在支
 - 配置 `upstream_user_agent` 后，HTTP 与 WebSocket 上游观察到的值与 TOML 字符串完全一致，
   多客户端下同样确定。
 - 非法值在服务启动或交互保存前明确拒绝，不降级到默认值。
-- 完整 UA 不进入指标数据库、日志、渠道消息或 PR 验证产物。
+- 实际出站 UA 经限长后进入指标库，供本机 WebUI 核对；不在普通日志、渠道消息或 PR 验证产物中输出完整自定义值。
 - 文档、配置示例、Setup 提示、模块 README 和测试在实现提交中同步更新。

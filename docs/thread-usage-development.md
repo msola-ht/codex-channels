@@ -53,7 +53,7 @@ Business/Enterprise 工作区开放，但不把本次不可用精确归因到某
 | 口径 | `/usage` Thread 官方估算 | `/metrics` 本地请求统计 |
 | --- | --- | --- |
 | 来源 | OpenAI 活动账户的计费后端 | Gateway Provider 代理与指标库 |
-| Provider | 仅 OpenAI ChatGPT 后端 | OpenAI、DeepSeek、OpenCode Go |
+| Provider | 仅 OpenAI ChatGPT 后端 | 当前接入的模型提供商（包括 OpenAI、DS、OCG、CCG、CLP 和自定义提供商） |
 | 金额 | 官方估算 Credit 与可选美元 | 只统计请求与 Token，不在本地计算金额 |
 | 更新 | 可能在 Turn 完成后延迟结算 | 请求完成后由本地 Writer 持久化 |
 | 子代理 | 协议只保证精确 Thread，不保证递归合计 | 会话累计递归纳入显式父子关系 |

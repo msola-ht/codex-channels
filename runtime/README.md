@@ -52,7 +52,7 @@
 - `managed-provider-account-options.mjs` / `managed-provider-account-options.d.mts`：CLI 和 WebUI 共用账户 ID 预设及新增输入校验，不访问文件或凭据。
 - `managed-provider-account-registry.mjs` / `managed-provider-account-registry.d.mts`：复用 DS、OCG、
   CCG 的单一默认账户约束，并集中 DS/CCG 同构注册表记录与凭据变量冲突校验。
-- `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中三家账户
+- `managed-provider-account-routing.mjs` / `managed-provider-account-routing.d.mts`：集中 DS、OCG、CCG、CLP 四家账户
   Provider 的账户 ID、共享统计代理键和同一家多账户默认选择；混合 Provider 不推断默认值。
 - `model-provider-profile.mjs` / `model-provider-profile.d.mts`：按编译期 Provider 定义生成隔离的
   私有 Profile、Provider 配置和管理标记，并为自定义主 Provider 提供共享的块字段构造与
@@ -205,7 +205,7 @@
 - `workspace-permission.mjs` / `workspace-permission.d.mts`：统一 Workspace 的 Sandbox、审批策略
   与 Permission Profile 更新及互斥规则，供 CLI、Config 菜单和渠道写入适配器复用。
 
-这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随 npm 包发布。
+这里的模块同时被 `bin/`、`scripts/`、`src/config` 和 `src/bootstrap` 使用，必须保持无平台 SDK 依赖，并随本地 npm 打包产物安装，不向 npm Registry 发布新版本。
 
 - `model-relay-control.mjs` / `model-relay-control.d.mts`：独立 Relay 的 v4 私有状态（含队列等待时长、超时计数及采集状态）/配置摘要确认 IPC，另提供只读 queue 操作（携带运行配置、启用、监听状态及用途名称，最多 64 行、128 KiB 响应），有界连接、帧和等待，不传递秘密；独立 `.events` 端点推送队列变化，订阅不占用管理命令连接。
 - `model-relay-listen-host.mjs` / `model-relay-listen-host.d.mts`：配置与 HTTP 服务共用的纯监听地址校验，接受回环、RFC1918 IPv4 和显式 IPv4 通配地址，不解析 DNS 或选择网卡。

@@ -8,14 +8,15 @@
 - `codex-connect-app-server.service.template`：启动共享 Codex App Server，并监听私有 Unix Socket。
 - `codex-connect-gateway.service.template`：启动连接该 Socket 的 Gateway。
 - `codex-connect-webui.service.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
+- `codex-connect-model-relay.service.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 模板由 `codexc service install` 调用的服务安装管理接口渲染到 `~/.config/systemd/user`（或 `$XDG_CONFIG_HOME/systemd/user`）。
-服务都通过 CLI 服务入口启动，并在每次启动时按 TOML、systemd 用户管理器继承的标准
+服务都通过 CLI 服务入口启动，并在每次启动时按 Codex Home 的 `.env`、systemd 用户管理器继承的标准
 代理环境变量和 GNOME 手动代理的顺序解析代理，不把自动发现的地址固化到 unit。安装、启停和
 卸载由 `scripts/systemd-control.sh` 完成；Gateway unit 显式标记为受监管进程，配置要求重启时
 由 systemd 自动拉起。Gateway 启动前会等待受监管的 App Server 与全部私有 WebSocket 就绪，
 避免开机并发启动时抢跑；Gateway 的日常重启不会停止共享 App Server。
-启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui`、`model-relay` 或 `all`；
+启停、重启、状态和日志可选择 `gateway`、`app-server`、`webui`、`relay` 或 `all`；
 WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标时，启停和状态默认
 `all`，重启和日志默认 `gateway`。
 
@@ -26,8 +27,6 @@ WebUI 独立于 `all`，安装时只生成 unit 不自动启动。不写目标�
 
 linger 是当前用户的系统级开机属性，可能同时服务于其他用户 unit，因此卸载 Codex Connect 时不
 自动关闭。用户配置和运行数据始终保留在 `~/.codex-connect`，卸载 unit 不会删除这些数据。
-
-- `codex-connect-model-relay.service.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 Relay 默认禁用；`all` 启动仅纳入已安装且启用的 Relay，停止先关闭 Relay，再关闭 Gateway。
 状态包含已安装 Relay；单独停止 Gateway 不主动结束 Relay，指标接收不可用时由 Relay 记录未确认。

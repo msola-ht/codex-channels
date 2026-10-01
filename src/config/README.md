@@ -93,7 +93,7 @@ Thread 的 Server Request。变化需要重启 Gateway，不需要重装或重�
 Workspace 上配置。
 
 模型统计代理由 App Server 服务自动装配：主 Provider 随服务启动，切换 Provider 在首次使用时
-按需启动，不属于用户配置；其上游网络请求继续复用 `network` 与标准代理环境变量。
+按需启动，不属于用户配置；其上游网络请求继续复用 Codex `.env`、标准环境变量与受支持系统代理的统一解析结果，不接受旧 `[network]` 表。
 `codex.default_model` 只覆盖当前主 Provider 的渠道新会话默认模型；模型不在该 Provider 目录中时
 明确报错，不按同名模型回退到其他 Provider。
 

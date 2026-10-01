@@ -15,7 +15,7 @@
 
 Schedule 目前支持 `interval`（每 N 分钟，UTC anchor 加固定分钟间隔）、`once`（绝对日期时间，或
 `afterMinutes + anchorAt` 的“从现在起 N 分钟后/小时后执行一次”；触发一次后进入 `finished` 终态）、
-`monthly`（每月指定日，月份无该日时跳过）、`daily`、`weekdays` 和 `weekly`。后五者按任务时区的
+`monthly`（每月指定日，月份无该日时跳过）、`daily`、`weekdays` 和 `weekly`。`monthly`、`daily`、`weekdays`、`weekly` 按任务时区的
 `HH:mm` 计算。不存在的 DST 本地时间跳过，重复的本地时间只选择较早的 UTC occurrence。相对延时以
 固定 UTC 分钟数计算，不随 DST 改变。时间计算不会读取或改变进程的 `TZ`。
 

@@ -28,7 +28,7 @@
   才可复用；Gateway 自身使用与 Provider 无关的配置级所有权 Socket，重复 Gateway 与未受监管
   App Server 均失败关闭；强制停止时等待本次前台启动创建的进程组退出后再结束公开命令。
 - `remote`：连接共享 App Server 并启动原生 Codex TUI；切换模式可用 `--profile sf-ds-<账户>`、
-  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>` 或 `--profile sf-custom-<Provider ID>`
+  `--profile sf-ocg-<账户>`、`--profile sf-ccg-<账户>`、`--profile sf-clp-<账户>` 或 `--profile sf-custom-<Provider ID>`
   选择隔离实例；按当前目录或 `--workspace` 解析 Workspace 权限并允许显式 Codex 参数覆盖；
   在 TUI 生命周期内持有对应实例的 Supervisor 租约，直接运行的 `codex --remote` 不具备该保护；
   预期配置错误只展示一次，TUI 的终止信号原样返回调用终端。
@@ -46,21 +46,22 @@
 - `opencode-go account`：新增、列出、删除、设置默认或停止 OpenCode Go 账户；新增账户必须输入邮箱或手机号二选一，联系方式只用于本机展示；Key 只写入
   `0600` 私有 Profile，`list --json` 不输出 Key 或 Profile 路径，`stop` 通过 App Server 监管 Socket
   释放对应隔离实例。
-- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。当前数据库入口只校验版本与结构；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
+- `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。数据库入口支持带一致性备份的显式状态库 v5→v6 和指标库 v20/v21/v22→v23 升级，范围与恢复步骤见[源码安装与更新](../docs/source-install.md)；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
 - `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
-- `traffic`：把 `[debug].model_traffic_dump` 生成的 JSON Lines 转储渲染成人可读文本，支持列出
+- `traffic`：把 `[debug].model_traffic_dump` 生成的 V2 session 转储渲染成人可读文本，支持列出
   exchange 摘要、展开指定 exchange 的完整请求与响应、关键字与长度过滤，以及持续跟随新写入的
-  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 已停止。
+  记录；参数在读取用户配置前完成校验，查询只读转储目录，不访问网络或凭据。`traffic cleanup` 默认预览，确认删除要求全部 App Server 与 Relay 已停止。
 - `channel send-image`：把本地 PNG/JPEG 图片交给 Gateway，由 Thread 绑定渠道的机器人凭据
   发送回对应会话；见 `docs/channel-image.md`。
-- `webui`：启动本机只读指标与设置界面；监听参数在读取用户配置前完成校验。
+- `relay`：管理独立模型 API 转发的监听、调用方、Key 和运行状态；边界与操作见[模型 API 转发](../docs/user-guide.md#可选模型-api-转发)。
+- `webui`：启动本机指标查询与受控设置界面；监听参数在读取用户配置前完成校验。
 - `service`：交互终端无参数时选择操作及明确目标，日志菜单显示最近 100 行；卸载需确认，配置损坏时仍能进入菜单执行诊断恢复操作。非交互终端无参数时显示帮助。安装动作复用结构化服务安装任务，完整校验配置后生成全部后台服务定义，并启动 App Server
   与 Gateway；启停、重启、状态和日志命令使用
-  `gateway`、`app-server`、`webui` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
-  `all` 只包含 App Server 与 Gateway 两项核心服务；核心服务安装、启动或重启后按目标等待监管拓扑、
+  `gateway`、`app-server`、`webui`、`relay` 或 `all` 明确目标，日常 `restart` 默认只操作 Gateway；
+  `all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装的 Relay；WebUI 单独管理；核心服务安装、启动或重启后按目标等待监管拓扑、
   WebSocket 与 Gateway 应用就绪状态稳定，再输出最终成功状态。状态、日志、停止、配置重载和卸载等
   诊断恢复操作不依赖配置文件可读，因此配置缺失或损坏时仍可管理已有后台服务；`status --json`
   把 macOS launchd、Linux systemd 与 Windows 用户级计划任务归一为同一状态结构，服务异常时仍输出
@@ -82,7 +83,7 @@ Server Socket。启动主 App Server 与 Provider App Server 前，入口把 `[c
 提示一次；已配置或探测不到终端时保持配置不变；补入失败只提示原因并继续当前命令。`start`、
 `restart`、`reload`、`stop`、`status`、`logs` 与 `uninstall` 不改写该配置。
 
-所有公开命令和子命令都支持 `-h` / `--help`；`gateway` 与 `service-app-server` 仅作为服务模板的
+所有公开命令和子命令都支持 `-h` / `--help`；`gateway`、`service-app-server` 与 `service-model-relay` 仅作为服务模板的
 内部进程入口，不出现在公开命令列表。CLI 只负责参数校验、环境装配和进程分发，不保存
 Conversation、Thread 或审批状态。新增用户命令时应复用现有应用能力或脚本，并同步更新根目录
 README 和 CLI 测试。

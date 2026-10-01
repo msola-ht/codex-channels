@@ -14,7 +14,6 @@
 - [`docs/ccg.md`](docs/ccg.md)：CCG 多账户接入、共享模型目录、旧单账户移除、额度查询与固定/切换模式。
 - [`docs/errors.md`](docs/errors.md)：错误码字典、日志字段约定与排查示例。
 - [`docs/webui.md`](docs/webui.md)：本地指标 WebUI 的命令、架构、页面、API、低风险设置、边界与安全。
-- [`docs/webui-i18n-plan.md`](docs/webui-i18n-plan.md)：WebUI 中英文接入阶段、当前覆盖范围、实现边界与验收计划。
 - [`docs/channel-image.md`](docs/channel-image.md)：渠道图片发送的固定方式、spool 目录与安全边界。
 - [`docs/source-install.md`](docs/source-install.md)：Linux/macOS 与 Windows PowerShell Git 源码安装、目录、更新和失败边界。
 
@@ -35,8 +34,6 @@
 
 ## 协议与设计
 
-- [`docs/modularity-review.md`](docs/modularity-review.md)：模块关联审查、职责重构计划、实时进度与复查结果。
-- [`docs/critical-output-backlog-review.md`](docs/critical-output-backlog-review.md)：关键输出积压的端到端链路、容量边界、复现证据与分阶段治理计划。
 - [`docs/delivery.md`](docs/delivery.md)：关键结果投递箱的容量、状态、离线核对与备份恢复。
 - [`docs/management-interface-security.md`](docs/management-interface-security.md)：本机管理写接口的 Bearer 认证、Origin、修订、防重放、任务与审计边界。
 - [`docs/windows-support-development.md`](docs/windows-support-development.md)：Windows 开发预览的
@@ -60,7 +57,7 @@
 - [`docs/provider-integration-guide.md`](docs/provider-integration-guide.md)：新增第三方模型
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
-  转发方案：独立服务、原生 Chat/Responses、公共提供商接入、鉴权限流、指标与转储、数据升级及分阶段验收。
+  当前转发合同：独立服务、原生 Chat/Responses、提供商接入、鉴权与队列、指标与转储、升级回退及验收边界。
 - [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 只读
   复用本机 Codex 登录态的转发设计、WSS 上游、头部对齐、受控边界与分阶段实施。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端

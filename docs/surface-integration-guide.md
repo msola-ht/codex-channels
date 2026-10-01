@@ -79,7 +79,7 @@ Setup、Doctor、菜单、输入状态、连接健康、平台授权和媒体传
 | 一级模块 | 通用合同 | 使用位置 |
 | --- | --- | --- |
 | [`surfaces`](../src/surfaces/index.ts) | `SurfaceAdapter`、`SurfaceOutputPort`、`SurfaceConfigurationChange`、`ConversationDeliveryQueue` | 平台模块与 Bootstrap |
-| [`application`](../src/application/index.ts) | `ConversationService`、`ConversationCommandService`、`ConversationCommandResult`、通用命令名称与类型判断 | 平台模块 |
+| [`application`](../src/application/index.ts) | `ConversationTurnUseCases`、`ConversationCommandExecutor`、`ConversationCommandResult`、通用命令名称与类型判断 | 平台模块 |
 | [`approval`](../src/approval/index.ts) | `InteractionPort`、`InteractionRequest`、`InteractionDecision` | 平台模块与 Bootstrap |
 | [`conversation-core`](../src/conversation-core/index.ts) | `ConversationTarget`、`OutputEvent`、`SurfaceId`、`UserFacingError`、`isCriticalOutputEvent` | 平台模块 |
 | [`policy`](../src/policy/index.ts) | `SurfaceAccessContext`、`SurfaceAccessPolicy`、`ConversationActorRegistry`、`Workspace` | 平台模块与 Bootstrap |
@@ -140,8 +140,9 @@ src/surfaces/<surface>/
 
 - `surface` 和 `accountId`：提供稳定路由身份。
 - `interactions`：实现 `InteractionPort`，处理审批、用户输入和 MCP elicitation。
-- `output.handle(event)`：只做同步入队，不等待平台网络请求。
-- `start()`：启动平台客户端或长连接；失败必须抛出，由组合根回滚已启动模块。
+- `output.observe(event)`：同步更新本地生命周期，不等待平台网络；恢复投递不重放观察。
+- `output.handle(event)`：普通路径只入队；生产装配使用 `deliver` 等待可靠发送及检查点结算，使用 `deliverSnapshot` 有界发送可失效的临时状态。端口虽为可选，接入当前持久投递链路须实现相应能力，不能把入队成功当作送达。
+- `start()`：启动平台客户端或长连接；失败必须抛出，由 SurfaceManager 隔离该账号、有限退避并恢复，其他账号继续运行；全局组合失败另按生命周期清理。
 - `stop()`：拒绝新输出，取消平台监听，有限等待在途发送；必须可重复调用。
 - `configurationChanged?()`：异步入队普通配置生命周期通知，不向上抛平台网络失败。
 - `deliverConfigurationChange()`：等待持久配置事件实际送达；失败必须抛出，使事件保留待重试。
@@ -183,7 +184,7 @@ API。插件 ID 必须与返回模块的 Surface ID 一致，同一个 `surface 
 1. 从已验证的 `GatewayConfig` 读取该渠道配置。
 2. 清理该 `surface + accountId` 下已撤权 Actor 的绑定。
 3. 创建该渠道的 `SurfaceAccessPolicy`。
-4. 创建平台 Adapter，并注入 `ConversationService`、`SurfaceAccessPolicy`、
+4. 创建平台 Adapter，并注入 `ConversationTurnUseCases`、`SurfaceAccessPolicy`、
    `ConversationActorRegistry`、Logger 和致命故障回调。具体存储实现只留在 Bootstrap，
    Surface 不得导入 `storage`。
 5. 返回 Bootstrap 当前使用的运行时模块描述，封装热加载与重启通知行为。
@@ -207,8 +208,8 @@ API。插件 ID 必须与返回模块的 Surface ID 一致，同一个 `surface 
 2. 构造 `ConversationTarget` 与 `SurfaceAccessContext`。
 3. 调用该渠道的 `SurfaceAccessPolicy.isAllowed()`；未授权时停止处理。
 4. 通过 `ConversationActorRegistry` 记录已确认的 Actor。
-5. 普通文本或图片调用 `ConversationService.submit()`；通用命令调用
-   `ConversationCommandService.execute()`。
+5. 普通文本或图片通过注入的 `ConversationTurnUseCases.submit()` 提交；通用命令调用
+   `ConversationCommandExecutor.execute()`，具体服务只由 Bootstrap 装配。
 6. 只渲染 `ConversationCommandResult` 或明确标记的结构化用户错误。
 
 平台帮助、身份查询、回调取消和文件下载可以留在 Surface。Thread、Turn、Workspace、模型、
@@ -303,18 +304,18 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 - 由操作者明确输入、属于静态应用配置的 Bot Token、App Secret 等平台凭据保存在权限受限的统一
   `config.toml`，不得复制到 SQLite、日志、服务定义或其他平台文件。扫码登录、OAuth 或其他平台
   授权流程签发的账号 Token 不属于静态应用配置；需要跨重启使用时必须保存到项目规定的 macOS
-  Keychain 或 Linux 加密凭据后端，不得写入配置或 StateStore。SDK 使用应用凭据自动换取且可以
+  Keychain、Linux 加密凭据后端或 Windows DPAPI 主密钥保护后端，不得写入配置或 StateStore。SDK 使用应用凭据自动换取且可以
   重新获取的短期租户 Access Token 只保留在进程内存中，不另行写入磁盘。
 - 新增一种持久账号 Token 前，必须先评审其独立命名空间、严格载荷 Schema、版本、账号键、撤销、
   原子替换、损坏处理和回滚方式，并说明是否改变现有凭据格式。可以复用平台无关的 Keychain、
   加密与私有文件机制，但不得直接复用其他 Surface 的载荷类型、Keychain Service、文件名或账号
   键，也不得为了统一存储迁移现有 Surface 凭据。
-- 不持久化消息正文、回调原文、卡片内容、Diff、Plan 或审批详情。
+- Surface 和 StateStore 不持久化消息或回调历史。共享独立投递箱按[投递合同](delivery.md)加密保存待送达结果及检查点，新增渠道复用该边界，不再建立一套正文库。
 - 临时下载必须限制大小、类型、路径和保留时间，保存到用户数据目录并定期清理。
 - 外部用户只能选择配置中已授权的 Workspace，不能提交任意绝对路径。
 - 平台 API 错误只记录受约束的错误类型和机器码，不记录响应正文、Header、Token 或用户输入。
 - 一个 Surface 故障耗尽重试后，通过组合工厂注入的致命故障回调向 Bootstrap 报告精确
-  `surface + accountId` 和受约束的错误；由进程管理器恢复。平台模块不得自行退出整个进程或
+  `surface + accountId` 和受约束的错误；由 SurfaceManager 按账号隔离、有限退避重建，耗尽后保留明确故障状态。平台模块不得自行退出整个进程或
   终止共享 App Server。
 
 ## 分阶段实施
@@ -365,7 +366,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
   或丢弃，只有标记可合并的中间状态才允许按合并键替换。
 - 审批请求不被丢弃或悬挂。
 - 审批超时、一次性令牌、跨客户端失效和关闭取消。
-- 部分启动失败反向回滚，重复关闭安全，关闭等待有上限。
+- 单账号启动失败隔离并有限恢复；全局装配失败清理已建资源，重复关闭安全，关闭等待有上限。
 - 热加载、重启、重装和配置事件确认语义。
 - 其他 Surface 引起进程重启或重装时，当前 Surface 收到不泄露私有原因的通用通知。
 - 敏感字段、平台错误和未知内部异常不进入日志或外部消息。
@@ -374,12 +375,7 @@ Surface 的 `InteractionPort` 只负责展示稳定 `InteractionRequest` 并返�
 平台 SDK 的 Mock 测试只验证 Surface 边界；Application、Core、Approval 和 Routing 继续使用各自
 现有测试。条件允许时增加平台测试租户或沙箱集成测试，但不得依赖真实模型调用完成常规提交门禁。
 
-提交前运行：
-
-```bash
-npm run docs:check
-npm run verify:commit
-```
+开发阶段运行受影响的定向测试与 `npm run docs:check`；普通提交由 pre-commit 执行一次完整 `verify:commit`，不提前重复。
 
 并同步更新根 README 文档索引、`src/README.md`、`src/surfaces/README.md`、新渠道目录 README、
 测试索引、配置示例与公开 Setup/Doctor 说明。

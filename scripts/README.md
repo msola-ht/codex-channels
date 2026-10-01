@@ -36,7 +36,7 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6 与指标库 v20/v21/v22 → v23；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，以及供安装流程调用的 v5 → v6 显式升级；运行时不迁移。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
@@ -54,8 +54,8 @@
   服务状态无法确认、处于非停止状态或前台 Gateway
   指标 Socket 仍可连接时均拒绝 reset。`cleanup` 按 `[metrics.storage]` 或命令行覆盖值创建私有
   备份后清理最旧请求记录，可选 `--vacuum` 立即回收 SQLite 文件空间。
-  `prune <provider>` 备份后删除本地指标库中指定提供商（openai、deepseek、`ocg-<账户>` 或当前配置/私有备份中的自定义主 Provider）的全部请求
-  行，并自动停止、重启 Gateway；任一步骤失败也会尝试把服务重新拉起，额度重置
+  `prune <provider>` 备份后删除本地指标库中指定提供商（区分大小写的精确 Provider ID，含历史记录对应的 ID）的全部请求
+  行，Gateway 按执行前的运行状态恢复；额度重置
   后可用它从零重新统计用量。
 - `metrics-command-options.mjs` / `metrics-command-options.d.mts`：集中解析并预检 `codexc metrics` 的
   时间范围、组合筛选、分组、格式及维护命令参数，通过 Observability 的 `query/index` 无状态入口复用规范范围、日期解析与聚合维度，并向顶层帮助
@@ -87,7 +87,7 @@
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
   Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；状态
-  快照按 DS、OCG、CCG 三家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
+  快照按 DS、OCG、CCG、CLP 四家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
 - `webui-management-settings.mjs`：集中维护 WebUI 可编辑设置白名单、高风险设置分类、输入归一化和脱敏投影，供
   管理路由复用，避免把配置字段规则埋在 HTTP 服务中。
@@ -349,7 +349,7 @@
 - `codex-remote-options.mjs` / `codex-remote-options.d.mts`：在读取 Gateway 配置前解析
   `codexc remote` 自有的 Workspace 与受管 Provider Profile 参数；受管 Provider 只使用与磁盘文件及
   原生 Codex 一致的 `sf-*` 规范名称，旧的无前缀名称只返回明确替换提示，并尊重 `--` 后原样传给 Codex 的参数边界。
-  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG 或 CCG 账户时使用注册表默认账户，
+  无显式 Profile 且官方未登录时解析唯一第三方 Profile；候选全部为同一家 DS、OCG、CCG 或 CLP 账户时使用注册表默认账户，
   其他多个候选要求明确选择，不修改主配置。
 - `codex-remote.mjs`：为原生 `codex --remote` 选择 Provider Socket 和工作目录；切换模式下识别
   与原生 Codex 及磁盘文件相同的 `sf-*` Provider Profile 名称，选择对应隔离实例并供 Remote TUI
@@ -381,7 +381,7 @@
   Draft PR 暂时跳过，转为 Ready 时由同一门禁重新检查。
 - `protocol-schema.mjs`：在同一文件系统按指定稳定/实验模式临时生成、逐文件比较并安全替换协议类型目录。
 - `generate-protocol.mjs`：先在临时目录调用当前 Codex CLI 的 `generate-ts --experimental`，
-  成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于受控 Plan 边界。
+  成功后替换协议类型、记录版本与实验状态并同步 npm/Gateway 版本；实验生成只服务于 `docs/index.md` 明确列出的受控协议边界。
 - `check-protocol.mjs`：校验本机 Codex CLI 版本，并按记录的实验状态重新生成到临时目录确认类型逐文件一致。
 - `weixin-qr-contract-probe.mjs`：隔离二维码合同探针；默认离线显示帮助，只有显式
   `qr --live` 并再次确认连接替换风险后才访问固定微信端点，严格裁剪状态、限制官方重定向域名
@@ -431,7 +431,7 @@
   转储目录、逻辑调用编号、正文长度、关键字、跟随与清理参数，使顶层 CLI 在读取配置前拒绝非法输入，
   并向顶层帮助导出规范用法行。
 - `traffic-cleanup.mjs` / `traffic-cleanup.d.mts`：实现并声明 `codexc traffic cleanup`；默认只预览
-  已识别的 V2 session 与旧版逐帧 JSONL，确认全部 App Server 已停止后才按 `--confirm` 永久删除，
+  已识别的 V2 session 与旧版逐帧 JSONL，确认全部 App Server 与 Relay 已停止后才按 `--confirm` 永久删除，
   未识别文件与目录保持不变。
 - `traffic-command.mjs`：`codexc traffic` 的实现，把 V2 逻辑调用索引与正文引用渲染成人可读文本；
   每个编号固定展示一条请求和一个终态响应，支持编号、关键字、正文上限与持续跟随；不修改转储文件。
@@ -500,8 +500,8 @@
 - `config-activation-notice.mjs` / `config-activation-notice.d.mts`：统一配置写入后的生效提示，区分新会话读取、
   Gateway 自动重新读取、需要重建 Gateway 或 App Server，以及需要通过 `codexc service install`
   重新生成服务环境的变化；WebUI 的专属重启要求继续单独提示；同时重启 App Server、Gateway 和 WebUI 的指令先停止 Gateway，再重启 App Server、启动 Gateway，最后重启 WebUI。
-- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 launchd 服务；启停、
-  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`all` 目标，
+- `launchd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 launchd 服务；启停、
+  重启、状态和日志支持 `gateway`、`app-server`、`webui`、`relay`、`all` 目标，
   WebUI 独立不并入 `all`，
   普通启动不强制终止已运行的进程，日常重启默认只更新 Gateway；模板为 App Server 与 Gateway 注入各自服务角色，公开 CLI 据此
   拒绝 App Server 内的自重启；
@@ -513,7 +513,7 @@
   并返回非零状态，查询器故障则失败关闭。
 - `cli-status.mjs`：让 systemd/launchd 控制脚本复用公开 CLI 的成功、失败、提示和处理状态前缀、
   TTY 颜色及 `NO_COLOR` 规则；日志和数据内容不经过状态渲染。
-- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载三个当前 systemd 用户服务；
+- `systemd-control.sh`：安装、启停、热加载、查看状态与日志，以及卸载 App Server、Gateway、WebUI 与可选 Relay 的 systemd 用户服务；
   安装前确保当前用户的 linger 已启用并复查，使用户未登录时也能随系统启动，无法启用则在修改
   unit 状态前失败并显示管理员处理命令；与 launchd 使用相同的目标、服务角色和默认值，WebUI
   独立不并入 `all`；停止不存在的 Unit 与 launchd 一样按已停止处理，用户数据始终保留。

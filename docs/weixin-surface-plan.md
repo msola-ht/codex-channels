@@ -50,7 +50,7 @@
 
 微信每个入站回复窗口只能承载少量下行消息，因此只有生命周期、终态和全局空闲通知占用主动发送
 预算：`turn.started`、`turn.completed`、`conversation.idle.released`、`globalIdle` 警告与
-`text.completed` 最终回答。推理状态、结构化计划、操作与子代理过程、连接、账户、额度、MCP 状态、
+`text.completed` 最终回答，以及上下文压缩的开始与完成通知。推理状态、结构化计划、操作与子代理过程、连接、账户、额度、MCP 状态、
 CLI/TUI 输入镜像和 App Server 自动生成图片事件都不占用该预算，也不写入微信会话；这些事件仍由
 Telegram、飞书或显式查询入口展示。判定由目录级 `src/surfaces/delivery-policy.ts` 统一给出，
 Outbox 不再各自维护允许列表。
@@ -90,18 +90,17 @@ Policy / Application / Core / Approval / Routing
 
 - Surface ID 固定为 `weixin`；账号和 Actor 使用固定协议返回的完整字符串身份。
 - 只接受当前 Bot、已授权 Actor 和私聊消息；未知、畸形、重复、过旧或未授权输入失败关闭。
-- 公开本地命令只保留 `/wx doctor`；未知或旧命令明确拒绝，不作为模型输入。
+- 公开本地命令只保留 `/wx doctor`；`/wx` 内未知子命令明确拒绝；其他未识别斜杠前缀按共享输入解析规则处理。
 - App Server 是 Thread、Turn、Item、Goal 和历史的唯一事实来源。
 - 微信回复上下文和轮询游标只服务平台传输，不形成第二套会话状态。
 
 ## 凭据、游标与回复上下文
 
-- Bot Token 使用独立安全凭据 Store；macOS 使用 Keychain，Linux 使用 AES-256-GCM 私有文件。
+- Bot Token 使用独立安全凭据 Store；macOS 使用 Keychain，Linux 使用 AES-256-GCM 私有文件，Windows 使用当前用户 DPAPI 保护主密钥。
 - `get_updates_buf` 使用账号隔离、严格版本和原子替换的私有检查点。
 - 最近 `context_token` 使用独立加密回复上下文后端，只用于已有授权绑定的回复、上线和受限配置
   通知。
-- Token、`context_token`、游标、二维码、CDN URL、AES Key、消息正文和原始响应不得进入 TOML、
-  SQLite、日志或平台消息。
+- Token、`context_token`、游标、二维码、CDN URL、AES Key 和原始响应不得进入 TOML、StateStore、日志或面向用户的诊断。入站消息不建立持久历史；待发送结果由独立加密[投递箱](delivery.md)保存，完成确认后清理，不属于会话历史。
 - 消息批次只有在业务处理全部成功后才推进游标；进程在提交后、保存游标前退出时允许至少一次
   重放，不伪造无法证明的精确一次语义。
 

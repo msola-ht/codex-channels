@@ -55,7 +55,7 @@
   Thread 启动、恢复、切换或模型设置更新时维护思考等级，指标采集按 Thread 关联补齐。
   请求明细读取时直接从输入与缓存 Token 计算未缓存 Token 和缓存命中率，不保存派生列。
   请求首 Token 与总耗时均从提交发送计时；不计算 TPS，不把请求计时聚合为整轮耗时。
-  Schema v20 将旧 `first_content_ms` 替换为 `first_token_ms` 并统一发送起点；旧库需显式归档重建，不迁移旧计时。
+  Schema v20 将旧 `first_content_ms` 替换为 `first_token_ms` 并统一发送起点；v20 之前的计时不迁移；当前支持的 v20/v21/v22→v23 显式升级见下方存储边界。
   内部读取限制为每次
   最多 500 条；精确 Thread 查询把
   最近 Turn 的运行聚合和指标库保留范围内的 Thread 会话累计分开返回，由

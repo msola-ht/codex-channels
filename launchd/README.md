@@ -8,9 +8,10 @@
 - `com.hegenai.codex-app-server.plist.template`：启动共享 Codex App Server，并监听私有 Unix Socket。
 - `com.hegenai.codex-gateway.plist.template`：启动连接该 Socket 的 Gateway。
 - `com.hegenai.codex-webui.plist.template`：启动指标与低风险设置 WebUI，读取 `[webui]` 配置。
+- `com.hegenai.codex-model-relay.plist.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 模板中的占位符由 `codexc service install` 调用的服务安装管理接口写入实际路径和运行环境。服务都通过 CLI
-服务入口启动，并在每次启动时按 TOML、标准环境变量和 macOS 系统代理的顺序解析代理，不把
+服务入口启动，并在每次启动时按 Codex Home 的 `.env`、标准环境变量和 macOS 系统代理的顺序解析代理，不把
 自动发现的地址固化到 plist。安装流程加载 App Server 与 Gateway 服务，WebUI plist 只生成不
 自动加载；Gateway plist 显式标记为受监管进程，配置要求重启时由 launchd 自动拉起；若检测到
 不支持的其他标签仍在运行则明确拒绝，避免多个 Gateway 同时轮询。Gateway 启动前会等待受监管的
@@ -19,7 +20,7 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 不得终止共享 App Server。
 
 日常管理统一使用 `codexc service`。启停、重启、状态和日志可选择 `gateway`、`app-server`、
-`webui`、`model-relay` 或 `all`；WebUI 独立于 `all`，安装时只生成 plist 不自动
+`webui`、`relay` 或 `all`；WebUI 独立于 `all`，安装时只生成 plist 不自动
 启动。不写目标时，启停和状态默认 `all`，重启和日志默认 `gateway`。
 
 验证模板：
@@ -27,8 +28,6 @@ App Server 与全部私有 WebSocket 就绪，避免登录或开机并发加载�
 ```bash
 plutil -lint launchd/*.plist.template
 ```
-
-- `com.hegenai.codex-model-relay.plist.template`：独立模型 API 进程，使用内部 `service-model-relay` 入口。
 
 Relay 默认禁用；`all` 启动仅纳入已安装且启用的 Relay，停止先关闭 Relay，再关闭 Gateway。
 状态包含已安装 Relay；单独停止 Gateway 不主动结束 Relay，指标接收不可用时由 Relay 记录未确认。

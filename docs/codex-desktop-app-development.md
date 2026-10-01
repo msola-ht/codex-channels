@@ -243,7 +243,7 @@ codexc desktop-app open
 - Desktop 创建、恢复、归档、改名或更新 Thread 后，Gateway 只根据官方通知和后续
   `thread/list` / `thread/read` 观察结果，不从桥连接事件推断业务状态。
 - 渠道自动接续仍执行现有来源、Workspace、活动状态和绑定独占检查；桥不绕过这些检查。
-- 同一 Thread 的活动 Turn 不能被第二端无条件追加新 Turn。渠道补充输入继续使用 App Server Queue；
+- 同一 Thread 的活动 Turn 不能被第二端无条件追加新 Turn。普通渠道补充输入通过 `turn/steer` 进入活动 Turn，显式 `/queue` 才进入 App Server Queue；
   Desktop 如何呈现 Queue 由官方客户端决定。
 - Server Request 由产生请求的 App Server 连接处理。Desktop 发起 Turn 的命令、文件、权限、用户
   输入或 MCP 请求留在 Desktop；Gateway 发起 Turn 的请求仍走现有渠道审批。桥不广播、不转移、
@@ -278,8 +278,7 @@ Desktop 创建的私有工具 Pipe、代码签名校验或内置 MCP 生命周�
   通过当前用户私有 Supervisor
   连接交给服务；Desktop 提供的内置插件布尔启用值原样受控应用到共享主实例。该平台不启动回环
   桥，不创建桥令牌，也不解析 JSON-RPC 业务消息。
-- 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 必须
-  显示环境未受管，文档继续要求通过 `codexc desktop-app open` 启动。
+- 用户从 Dock 直接重新启动时不会经过受管入口，可能回到 Desktop 私有 App Server；`status` 的 `toolHostAttached` 仅报告当前工具 Host 租约，不能证明任意 Desktop 进程的环境；需通过 `codexc desktop-app open` 启动。
 
 ### Windows
 

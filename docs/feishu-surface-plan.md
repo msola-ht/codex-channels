@@ -68,17 +68,16 @@ Feishu 有界输出队列
 - `surface + appId + chatId` 标识 Conversation，`open_id` 标识当前应用作用域内的 Actor。
 - 只接受当前 App、已授权 Actor 和私聊消息；缺少 App、Chat、Actor 或消息标识时失败关闭。
 - 菜单、选择卡、输入卡和审批卡动作必须绑定 App、Chat、消息、Actor 和一次性令牌。
-- 公开本地命令只保留 `/fs <status|doctor|revoke>`；未知或旧命令明确拒绝，不作为模型输入。
+- 公开本地命令只保留 `/fs <status|doctor|revoke>`；`/fs` 内未知子命令明确拒绝；其他未知或畸形斜杠前缀按普通模型输入处理。
 - 用户 OAuth 只申请当前能力缺失且应用已经开通的 Scope，不提供全量预授权命令。
-- macOS Token 使用 Keychain；Linux 使用独立 AES-256-GCM 私有凭据文件。Token 不进入 TOML、
+- macOS Token 使用 Keychain；Linux 使用独立 AES-256-GCM 私有凭据文件，Windows 用当前用户 DPAPI 保护主密钥。Token 不进入 TOML、
   StateStore、Application/Core、日志或平台消息。
 
 ## 输入、输出与持久化
 
-- Surface 在下载后完成大小、内容签名、格式和保留期校验，Application 只接收受管本机路径或
-  已验证的内联文本。
-- 不持久化消息正文、平台事件原文、卡片内容、审批详情或完整会话历史。
-- SQLite 只保存共享会话恢复所需的最小绑定；飞书 OAuth 使用独立安全凭据后端。
+- Surface 在下载后完成大小、内容签名、格式和保留期校验，Application 只接收已验证的文本、图片 Data URL 或受管本机音频路径。
+- Surface 不建立消息或平台事件历史，不把正文、卡片或审批详情写入 StateStore。
+- StateStore 只保存最小绑定；待送达结果由独立加密[投递箱](delivery.md)按共享合同保存，不能据此扩大为会话历史库。飞书 OAuth 使用独立安全凭据后端。
 - 操作详情、错误和平台响应在进入消息前必须经过现有脱敏边界；Token、Cookie、
   Authorization Header 和未经约束的上游正文不得显示。
 - 生成图片只读取 App Server 明确提供且通过共享文件边界验证的 PNG/JPEG；渠道 spool 图片

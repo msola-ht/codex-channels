@@ -88,3 +88,37 @@ RUN_CODEX_INTEGRATION=1 npm test -- --run tests/real-app-server.test.ts
 ```
 
 该模式会接触用户当前 App Server 和指定 Thread；执行前应确认 Thread 空闲，并在结果中单独记录环境问题。
+
+## 持久投递故障与压力验证
+
+`persistent-output-faults.test.ts` 使用临时 Journal、实际 Worker/Coordinator、渠道 Outbox 和
+模拟平台，覆盖进程崩溃与持续积压。非 Windows 的 SIGKILL 场景不能作为 Windows 或物理断电证明。
+当前运维合同见 [投递箱运维](../docs/delivery.md)，真实平台结论见
+[渠道验收矩阵](../docs/channel-acceptance-matrix.md#长正文验收证据)。
+
+```bash
+npm test -- tests/persistent-output-faults.test.ts tests/persistent-output.test.ts
+```
+
+入口会先构建当前 Worker；夹具不读取真实 Token，不访问真实渠道或停止用户服务。
+
+2026-09-28 已执行的隔离证据如下，历史测量值不是当前机器 SLA，也不代表本次文档整理重跑了测试：
+
+- 飞书链路 8 个切点：提交前、提交后、平台调用前、started 后、模拟平台成功后、首片 confirmed 后、
+  确认删除前、确认删除后。恢复后核对原文、检查点、pending/uncertain、同会话屏障和其他会话调度；
+  提交前无记录是明确接收缺口，不覆盖 SQLite 事务内部每条指令。
+- Telegram 4 个切点：预览 confirmed 后/附件调用前、附件 started 后/平台调用前、模拟平台已收附件/
+  confirmed 落盘前、全部 confirmed 后/记录删除前。重启实际 Coordinator 后，首条保持 uncertain、
+  同会话后续保持 pending、另一会话继续；没有自动重复附件，显式离线 retry 读回原文与哈希一致。
+- 持续积压：Linux / Node 24、4 个账号、8 个停滞平台槽，分批提交 8,192 条各 4 KiB 新会话正文；
+  保留 3,852 条、拒绝 4,340 条，后四次采样存量不再增长。逻辑计费 268,222,464 字节、主库
+  17.125 MiB；RSS 增量约 28.77 MiB，GC 后主线程堆约 5.16–5.17 MiB，邮箱峰值 34 项/128 KiB。
+- 跨层突发：实际 EventBus → SurfaceManager → PersistentSurfaceOutput → Worker/Coordinator →
+  飞书 Outbox；挂起 8 个平台槽后同步发布 8,192 条结果，触发过载停止。重开库保留 128 条 pending
+  与 8 条 uncertain，未额外启动发送；停止及排空约 56 ms、RSS 增量约 3.86 MiB。
+
+上述是离散采样和模拟平台结果，不证明长期无泄漏、设备耐久、生产网络故障恢复或无限输入零丢失。
+授权 owner v2、关闭时派生终态排空及异步计划任务撤权回归分别由
+`persistent-output-ownership.test.ts`、`surface-output-chain.test.ts`、
+`subagent-completion-tracker.test.ts`、`gateway-startup-cleanup.test.ts` 和
+`scheduled-task-executor.test.ts` 维护；当前行为以这些测试及运维文档为准，不沿用修复前的执行阻塞规则。
