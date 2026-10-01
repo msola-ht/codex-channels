@@ -11,7 +11,7 @@ import { sample } from "./request-metrics-fixtures.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanupWebuiTestFixtures, createWebuiTestFixture, startWebuiTestServer, type WebuiTestServer } from "./webui-server-test-fixture.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration } from "../scripts/cline-pass-account-management.mjs";
 import type { RelayManagementSnapshot, RelayManagementResult, RelayManagementInput } from "../scripts/webui-api.js";
 
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));

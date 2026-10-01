@@ -92,6 +92,11 @@ try {
     import { join } from "node:path";
     const setup = await import(pathToFileURL(join(process.argv[1], "scripts", "setup.mjs")).href);
     if (typeof setup.runSetup !== "function") throw new Error("Installed Setup entry point is missing");
+    const clineMenu = await import(pathToFileURL(join(process.argv[1], "scripts", "cline-pass-setup.mjs")).href);
+    const clineManagement = await import(pathToFileURL(join(process.argv[1], "scripts", "cline-pass-account-management.mjs")).href);
+    if (typeof clineMenu.runClinePassSetup !== "function" || typeof clineManagement.applyClinePassConfiguration !== "function") {
+      throw new Error("Installed Cline Pass entry points are missing");
+    }
   `, installedPackage], temporaryDirectory, environment, true);
   for (const requiredFile of [
     "runtime/model-relay-service.mjs",

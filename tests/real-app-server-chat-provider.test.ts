@@ -8,7 +8,7 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
 import type { ThreadStartResponse, TurnStartResponse } from "../src/codex-protocol/index.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
-import { applyClinePassConfiguration, createClinePassCatalog } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration, createClinePassCatalog } from "../scripts/cline-pass-account-management.mjs";
 import { loadManagedProviderAppServers, withProviderBaseUrl } from "../runtime/model-provider-runtime.mjs";
 import { waitFor } from "./support/real-app-server-helpers.js";
 import { createResponsesModelCatalog } from "../runtime/model-provider-responses-catalog.mjs";

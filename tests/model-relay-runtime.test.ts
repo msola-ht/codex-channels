@@ -20,7 +20,7 @@ import { modelRelayPaths } from "../runtime/model-relay-paths.mjs";
 import * as relayControl from "../runtime/model-relay-control.mjs";
 import { ModelRelayControl, queryModelRelayControl } from "../runtime/model-relay-control.mjs";
 import { manageModelRelay, parseModelRelayCommand, runModelRelayCommand } from "../scripts/model-relay-command.mjs";
-import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration, clinePassSetupPaths } from "../scripts/cline-pass-account-management.mjs";
 import * as privateFile from "../runtime/private-file.mjs";
 import * as gatewayConfig from "../runtime/gateway-config.mjs";
 import { PrivateIpcServer, createPrivateIpcConnection } from "../runtime/private-ipc.mjs";

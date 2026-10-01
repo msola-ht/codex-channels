@@ -101,7 +101,7 @@
 - `webui-reset-credit-route.mjs`：OpenAI 重置券实时列表、预览及消费确认路由，复用管理鉴权、限速、一次性令牌和审计，通过 Gateway 私有账户 IPC 执行。
 - `webui-management-providers.mjs`：将 Provider 管理状态裁剪为 WebUI 可展示的安全摘要；不读取或返回凭据正文。
 - `webui-provider-settings-management.mjs`：复用主 Provider、受管 Provider 默认值与模型窗口、自定义 Provider 管理接口，为 WebUI 提供统一的资源投影、输入归一化、预览、确认后写入和结果脱敏；不读取或返回凭据正文。
-- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management 和 DeepSeek 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
+- `webui-account-settings-management.mjs`：复用 OpenCode Go 账户 provisioning/management、DeepSeek 与 CLP 多账户管理接口，为 WebUI 提供账户资源投影、移除与配置预览、确认后写入和结果脱敏；不返回凭据正文。
 - `webui-management-task-resource.mjs` / `webui-service-status.mjs`：管理任务资源快照、服务状态缓存和版本映射；任务预览与
   设置摘要共用同一服务状态查询，不重复启动平台服务管理器。
 - `webui-management-operations.mjs` / `webui-http.mjs`：集中管理设置校验、管理错误、高风险路径分类、Provider 状态缓存，以及
@@ -546,7 +546,8 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 查询未归档与已归档成员，执行前重新检查会话组及绑定；仅在交互终端 `--confirm` 确认后向父会话
 发送一次官方归档。结果区分可查询成员已核验、部分完成、未归档、未确认与跳过，已确认归档的成员失效展示缓存，不重试写入或自动回滚。
 
-- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户固定/切换配置、默认账户与移除，CLI/WebUI 共用预览和私有写入事务；共享 DS Flash 模板与统一上下文设置。
+- `cline-pass-setup.mjs` / `cline-pass-setup.d.mts`：CLP 多账户交互菜单、输入与确认，委托账户管理模块执行后显示激活提示。
+- `cline-pass-account-management.mjs` / `cline-pass-account-management.d.mts`：CLI/WebUI 共用的 CLP 固定/切换配置、默认账户与移除预览及私有写入事务；共享 DS Flash 模板与统一上下文设置，不依赖终端交互。
 
 - `model-relay-listen-menu.mjs`：CLI 与 Config 一级菜单共用的监听交互入口，关闭/本机/局域网/指定 IP，保存前确认和配置修订检查，不自动安装或启动服务。
 - `model-relay-command.mjs` / `model-relay-command.d.mts`：Relay CLI 参数与帮助、队列状态、上游能力及调用方查询、签发/编辑改绑/轮换/停用/删除、中文用途名称、显式旧限流升级及名称/策略/非 CLP 引用/历史身份摘要回退。

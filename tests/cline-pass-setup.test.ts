@@ -1,3 +1,7 @@
+import { runClinePassSetup } from "../scripts/cline-pass-setup.mjs";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
 import { previewDeepseekAccountConfiguration, applyDeepseekAccountConfiguration } from "../scripts/deepseek-account-management.mjs";
 import { responsesContextSyncPath } from "../runtime/model-provider-responses-catalog.mjs";
 import { createManagedProviderProfile } from "../runtime/model-provider-profile.mjs";
@@ -7,11 +11,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { parse, stringify } from "smol-toml";
-import { applyClinePassConfiguration, clinePassSetupPaths, removeClinePassConfiguration, createClinePassCatalog, runClinePassSetup } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration, clinePassSetupPaths, removeClinePassConfiguration, createClinePassCatalog } from "../scripts/cline-pass-account-management.mjs";
 import { loadManagedModelProviderSettings, loadManagedModelWindow, writeManagedModelWindowGlobal, loadConfiguredRelayProviderMaterial } from "../runtime/model-provider-runtime.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
 const roots: string[] = [];
+it.each(["cline-pass-account-management", "webui-account-settings-management", "webui-server"])(
+  "loads %s without terminal prompts or the CLP menu",
+  (module) => {
+    const loader = `export async function resolve(specifier, context, nextResolve) {
+      if (specifier === "@clack/prompts" || specifier.endsWith("/cline-pass-setup.mjs")) {
+        throw new Error("Unexpected terminal dependency: " + specifier);
+      }
+      return nextResolve(specifier, context);
+    }`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", `
+      import { register } from "node:module";
+      register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);
+      await import(${JSON.stringify(pathToFileURL(resolve(`scripts/${module}.mjs`)).href)});
+    `], { encoding: "utf8", timeout: 10_000 });
+    expect(result.status, result.stderr).toBe(0);
+  },
+);
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "cline-setup-")); roots.push(root);
@@ -132,7 +153,7 @@ it("isolates accounts, preserves shared settings, and removes only the selected 
   expect(readFileSync(second.profile, "utf8")).toContain("sk_second");
   expect(readFileSync(second.profile, "utf8")).not.toContain("sk_first");
   expect(loadManagedModelWindow(environment)[0]?.providers).toEqual(["clp-test", "clp-work"]);
-  const { setClinePassDefaultAccount } = await import("../scripts/cline-pass-setup.mjs");
+  const { setClinePassDefaultAccount } = await import("../scripts/cline-pass-account-management.mjs");
   const { resolveDefaultManagedProvider, sharedProviderProxyKey, managedProviderAccountIdFromProvider } = await import("../runtime/managed-provider-account-routing.mjs");
   expect(sharedProviderProxyKey("clp-work")).toBe("clp");
   expect(managedProviderAccountIdFromProvider("clp-work")).toBe("work");

@@ -1,5 +1,5 @@
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
-import { previewClinePassConfiguration, applyClinePassConfiguration, previewClinePassRemoval, removeClinePassConfiguration, previewClinePassDefaultAccount, setClinePassDefaultAccount } from "./cline-pass-setup.mjs";
+import { previewClinePassConfiguration, applyClinePassConfiguration, previewClinePassRemoval, removeClinePassConfiguration, previewClinePassDefaultAccount, setClinePassDefaultAccount } from "./cline-pass-account-management.mjs";
 import {
   applyDeepseekAccountConfiguration,
   previewDeepseekAccountConfiguration,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createClinePassAccountAdapter } from "../src/bootstrap/cline-pass-account-adapter.js";
 import { ProviderAccountService, type OfficialAccountSnapshot } from "../src/application/index.js";
-import { applyClinePassConfiguration } from "../scripts/cline-pass-setup.mjs";
+import { applyClinePassConfiguration } from "../scripts/cline-pass-account-management.mjs";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 
 vi.mock("../scripts/model-catalog-validation.mjs", () => ({ validateModelCatalogWithCodex: async () => undefined }));
