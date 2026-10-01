@@ -1032,6 +1032,45 @@ describe("SurfaceManager", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("fences new account queries at beginShutdown and aborts in-flight queries only at stop", async () => {
+    const feishu = surface("feishu", "tenant-a", []);
+    const received: OutputEvent[] = [];
+    feishu.output.handle = (event) => { received.push(event); };
+    let signal: AbortSignal | undefined;
+    const read = vi.fn((_provider: string, currentSignal: AbortSignal) => {
+      signal = currentSignal;
+      return new Promise<undefined>((resolve) => {
+        currentSignal.addEventListener("abort", () => resolve(undefined), { once: true });
+      });
+    });
+    const output = new EventBus<OutputEvent>(logger);
+    const manager = createManager([feishu], output, { completionAccountStatus: read });
+    const completion = (conversationId: string): OutputEvent => ({
+      type: "turn.completed",
+      target: { surface: "feishu", accountId: "tenant-a", conversationId },
+      threadId: conversationId, turnId: "turn", status: "completed", modelProvider: "clp-main",
+    });
+    await manager.start();
+    try {
+      output.publish(completion("in-flight"));
+      await settle();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(signal?.aborted).toBe(false);
+      manager.beginShutdown();
+      expect(signal?.aborted).toBe(false);
+      output.publish(completion("after-fence"));
+      await settle();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(received).toEqual([expect.objectContaining({ threadId: "after-fence" })]);
+      expect(received[0]).not.toHaveProperty("accountStatus");
+      await manager.stop();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      await manager.stop();
+      await output.close();
+    }
+  });
+
   it("defers Turn completion enrichment until the buffered event is delivered", async () => {
     const feishu = surface("feishu", "tenant-a", []);
     const reads: string[] = [];
