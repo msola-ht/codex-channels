@@ -40,6 +40,7 @@ import {
 } from "@/lib/format"
 import type {
   Aggregate,
+  OpenAiAccountCredits,
   CcgCreditAccountUsage,
   DeepseekAccountBalance,
   ErrorsReport,
@@ -184,10 +185,12 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
 }
 
 export function WeeklyQuotaCard({
+  credits = null,
   usedPercent,
   resetsAt,
   planType,
 }: {
+  credits?: OpenAiAccountCredits | null
   usedPercent: number | null
   resetsAt: number | null
   planType: string | null
@@ -203,7 +206,7 @@ export function WeeklyQuotaCard({
           )}
         </CardTitle>
         {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
-          {t("overview.usedPercent", { percent: usedPercent.toFixed(1) })}
+          {t("overview.weeklyQuotaUsed", { percent: usedPercent.toFixed(1) })}
         </CardDescription>}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
@@ -217,6 +220,24 @@ export function WeeklyQuotaCard({
               </p>
             </>
           )}
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">{t("overview.creditsRemaining")}</dt>
+          <dd className="text-right break-all tabular-nums">{credits?.unlimited ? t("overview.creditsUnlimited") : credits?.remaining ?? t("overview.creditNotProvided")}</dd>
+          <dt className="text-muted-foreground">{t("overview.resetCreditsAvailable")}</dt>
+          <dd className="text-right tabular-nums">{credits?.resetCreditsAvailable ?? t("overview.creditNotProvided")}</dd>
+        </dl>
+        {credits?.resetCreditsAvailable === "0" ? null : (
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <p>{t("overview.resetCreditsExpiry")}</p>
+            {credits?.expirations?.map(expiration => <p key={expiration.expiresAt ?? "unlimited"}>
+              {expiration.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(expiration.expiresAt * 1000)}
+              {" · "}{t("overview.creditCount", { count: expiration.count })}
+            </p>)}
+            {credits?.undisclosedCount ? <p>{t("overview.creditExpiryUndisclosed", { count: credits.undisclosedCount })}</p>
+              : !credits?.expirations?.length ? <p>{t("overview.creditNotProvided")}</p> : null}
+          </div>
+        )}
+        {credits ? <p className="text-xs text-muted-foreground">{t("overview.accountUpdatedAt", { time: formatTime(credits.observedAtMs) })}</p> : null}
       </CardContent>
     </Card>
   )

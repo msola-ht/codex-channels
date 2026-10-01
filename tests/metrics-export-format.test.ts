@@ -25,6 +25,7 @@ describe("metrics export display helpers", () => {
     const result = {
       generatedAt: "2026-09-19T00:00:00Z", range: { name: "all" }, weeklyQuota: null,
       records: [{ recordedAtMs: 0, weeklyQuota: null, firstTokenMs: 12.5, totalDurationMs: 1234.5, upstreamTtftMs: 672,
+        responseUsageAmount: "0.12345678901234567890",
         requestModel: "requested", responseModel: "echoed", operation: "response",
         requestServiceTier: "priority", serviceTier: "default",
         traffic: { label: "openai", session: "session-2", interaction: 23 } }],
@@ -36,7 +37,7 @@ describe("metrics export display helpers", () => {
     const [headingLine, valueLine] = render("csv").split("\n");
     const headings = headingLine!.split(",");
     const values = valueLine!.split(",");
-    for (const [field, value] of Object.entries({ firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
+    for (const [field, value] of Object.entries({ responseUsageAmount: "0.12345678901234567890", firstTokenMs: "12.5", totalDurationMs: "1234.5", upstreamTtftMs: "672", requestModel: "requested", responseModel: "echoed",
       requestServiceTier: "priority", serviceTier: "default",
       trafficLabel: "openai", trafficSession: "session-2", trafficInteraction: "23" })) {
       expect(values[headings.indexOf(field)]).toBe(value);

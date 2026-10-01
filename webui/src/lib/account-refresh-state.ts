@@ -1,7 +1,7 @@
 import type {
   CcgCreditAccountUsage, DeepseekAccountBalance, DeepseekBalance,
   ManagementProvidersResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
-  QuotaAccountUsage, OpencodeGoQuotaWindow,
+  QuotaAccountUsage, OpencodeGoQuotaWindow, OpenAiAccountCredits,
 } from "./types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
@@ -213,4 +213,36 @@ function quotaWindowsFromSnapshot(value: OpencodeGoQuotaWindow[] | undefined): O
         resetsAt: window.resetsAt === null ? null : window.resetsAt * 1000,
       }))
     : []
+}
+
+
+/** OpenAI 余额与重置券均来自账户快照，不从周额度或请求消耗推算。 */
+export function openAiCreditsFromSnapshot(snapshot: OfficialAccountSnapshot | undefined): OpenAiAccountCredits | null {
+  if (!snapshot || snapshot.provider !== "openai") return null
+  const value = snapshot.limits as { kind?: string; provider?: string; limits?: {
+    ordinaryUsageLimit?: { credits?: { balance?: string | null; unlimited?: boolean } | null }
+    resetCreditsAvailable?: number | string | null
+    resetCreditExpiresAt?: Array<number | null> | null
+  } } | null
+  if (value?.kind !== "rate-limits" || value.provider !== "openai" || !value.limits) return null
+  const limits = value.limits
+  const credits = limits.ordinaryUsageLimit?.credits
+  const count = limits.resetCreditsAvailable
+  const available = typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? String(count)
+    : typeof count === "string" && /^[0-9]{1,128}$/u.test(count) ? count : null
+  const dates = limits.resetCreditExpiresAt
+  const groups = new Map<number | null, number>()
+  const hasDates = Array.isArray(dates) && dates.every(date => date === null
+    || (typeof date === "number" && Number.isFinite(date) && date >= 0 && date <= 8_640_000_000_000))
+  if (hasDates) for (const date of dates) groups.set(date, (groups.get(date) ?? 0) + 1)
+  const undisclosed = available === null ? null : BigInt(available) - BigInt(hasDates ? dates.length : 0)
+  return {
+    observedAtMs: snapshot.observedAtMs,
+    remaining: typeof credits?.balance === "string" ? credits.balance : null,
+    unlimited: credits?.unlimited === true,
+    resetCreditsAvailable: available,
+    expirations: hasDates ? [...groups].sort(([left], [right]) => left === null ? 1 : right === null ? -1 : left - right)
+      .map(([expiresAt, count]) => ({ expiresAt, count })) : null,
+    undisclosedCount: undisclosed !== null && undisclosed > 0n ? undisclosed.toString() : null,
+  }
 }

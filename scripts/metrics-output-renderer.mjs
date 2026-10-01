@@ -559,6 +559,7 @@ function csvColumns() {
     ["firstTokenMs", (record) => record.firstTokenMs],
     ["totalDurationMs", (record) => record.totalDurationMs],
     ["upstreamTtftMs", (record) => record.upstreamTtftMs],
+    ["responseUsageAmount", (record) => record.responseUsageAmount],
     ["requestModel", (record) => record.requestModel],
     ["responseModel", (record) => record.responseModel],
     ["trafficLabel", (record) => record.traffic?.label],

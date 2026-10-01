@@ -631,6 +631,7 @@ describe("shared Surface lifecycle presentation", () => {
       "模型：gpt-test · medium · Fast 开启",
       "提供商：OpenAI 官方",
       "最近请求缓存命中率：75.00%",
+      "OpenAI Credits：未提供",
       "本轮耗时：1 min 5 s",
       "",
       "当前会话：",
@@ -641,6 +642,7 @@ describe("shared Surface lifecycle presentation", () => {
       "上下文压缩：2 次",
       "Goal：进行中 · 12.5 K / 100 K",
       "Git 分支：feature/lifecycle",
+      "OpenAI Credits：未提供",
       "",
       "账户状态：",
       "周限：剩余 63%",
@@ -1015,3 +1017,30 @@ function tokenBreakdown(
     reasoningOutputTokens: 0,
   };
 }
+
+
+describe("completion response usage", () => {
+  it.each(["telegram", "feishu", "weixin"])("shows exact turn and session Credits on %s", surface => {
+    const presentation = createTurnCompletedPresentation({
+      type: "turn.completed", target: { surface, accountId: "default", conversationId: "test" },
+      threadId: "thread", turnId: "turn", status: "completed", modelProvider: "openai",
+      timing: { responseUsage: { amount: "0", observedRequestCount: 1, missingRequestCount: 0 } },
+      sessionAggregate: { requestCount: 4, unsuccessfulRequestCount: 0, inputTokens: 1,
+        cachedInputTokens: null, outputTokens: 1, reasoningOutputTokens: 0,
+        responseUsage: { amount: "0.1234567890123456789", observedRequestCount: 3, missingRequestCount: 1 } },
+    });
+    expect(presentation.fields).toContainEqual({ label: "OpenAI Credits", value: "0" });
+    expect(presentation.sections?.find(section => section.title === "当前会话")?.fields).toContainEqual({
+      label: "OpenAI Credits", value: "0.1234567890123456789（部分，1 次请求未提供）",
+    });
+  });
+  it("keeps unavailable official usage unknown and does not label third-party usage as OpenAI Credits", () => {
+    const event = { type: "turn.completed", target: { surface: "telegram", accountId: "default", conversationId: "test" },
+      threadId: "thread", turnId: "turn", status: "completed", modelProvider: "openai" } as const;
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation(event)).match(/OpenAI Credits：未提供/gu)).toHaveLength(2);
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation({ ...event, modelProvider: "deepseek" }))).not.toContain("OpenAI Credits");
+    const unknownProviderEvent: Parameters<typeof createTurnCompletedPresentation>[0] = { ...event };
+    delete unknownProviderEvent.modelProvider;
+    expect(renderPlainLifecyclePresentation(createTurnCompletedPresentation(unknownProviderEvent))).not.toContain("OpenAI Credits");
+  });
+});

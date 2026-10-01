@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  openAiCreditsFromSnapshot,
   accountRefreshErrors,
   accountSnapshotIsStale,
   scheduleAccountSnapshotExpiry,
@@ -235,5 +236,30 @@ describe("WebUI account snapshot expiry scheduling", () => {
     const stop = scheduleAccountSnapshotExpiry(0, vi.fn(), new Page(), Date.now);
     expect(vi.getTimerCount()).toBe(0);
     stop();
+  });
+});
+
+
+describe("OpenAI credit snapshot presentation", () => {
+  const snapshot = { provider: "openai", accountId: null, displayName: "OpenAI", default: true,
+    observedAtMs: 1000, available: true, usage: null, limits: { kind: "rate-limits", provider: "openai", limits: {
+      ordinaryUsageLimit: { credits: { balance: "0", unlimited: false } },
+      resetCreditsAvailable: 5, resetCreditExpiresAt: [2000, null, 1000, 1000],
+    } } };
+  it("preserves zero, groups exact expiry dates, and counts undisclosed vouchers", () => {
+    expect(openAiCreditsFromSnapshot(snapshot)).toEqual({ observedAtMs: 1000, remaining: "0", unlimited: false,
+      resetCreditsAvailable: "5", expirations: [{ expiresAt: 1000, count: 2 }, { expiresAt: 2000, count: 1 }, { expiresAt: null, count: 1 }], undisclosedCount: "1" });
+  });
+  it("distinguishes missing details from no expiry and preserves large serialized counts", () => {
+    const limits = { ...snapshot.limits.limits, resetCreditsAvailable: "9007199254740993", resetCreditExpiresAt: null };
+    expect(openAiCreditsFromSnapshot({ ...snapshot, limits: { ...snapshot.limits, limits } })).toMatchObject({
+      resetCreditsAvailable: "9007199254740993", expirations: null, undisclosedCount: "9007199254740993",
+    });
+    expect(openAiCreditsFromSnapshot({ ...snapshot, limits: { kind: "rate-limits", provider: "openai", limits: {} } })).toMatchObject({
+      remaining: null, resetCreditsAvailable: null, expirations: null,
+    });
+    expect(openAiCreditsFromSnapshot(undefined)).toBeNull();
+    expect(openAiCreditsFromSnapshot({ ...snapshot, provider: "deepseek" })).toBeNull();
+    expect(openAiCreditsFromSnapshot({ ...snapshot, limits: null })).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ export type {
   QuotaAccountUsage,
   OpencodeGoQuotaWindow,
   OpencodeGoUsageResponse,
+  OpenAiAccountCredits,
   OfficialAccountSnapshot,
   OfficialAccountSnapshotsResponse,
   OverviewResponse,

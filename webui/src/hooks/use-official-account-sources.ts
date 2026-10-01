@@ -10,7 +10,7 @@ import {
 import {
   accountRefreshErrors, accountSnapshotsWithMissingProviders, accountSnapshotsAfterRefresh,
   accountSnapshotsWithoutRemoved, ccgAccountFromSnapshot, deepseekAccountFromSnapshot,
-  quotaAccountFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
+  quotaAccountFromSnapshot, openAiCreditsFromSnapshot, refreshableAccounts, remainingRemovedAccountProviders,
   type RefreshableAccount, type AccountRefreshError, type AccountRefreshControl,
   type AccountRefreshFailure, type AccountRemovalNotice,
 } from "@/lib/account-refresh-state"
@@ -133,6 +133,7 @@ function accountSources(result: Awaited<ReturnType<typeof fetchOfficialAccountSn
     : null
   const clinePass = result.snapshots.filter((snapshot) => snapshot.provider.startsWith("clp-"))
   return {
+    openai: openAiCreditsFromSnapshot(result.snapshots.find(snapshot => snapshot.provider === "openai")),
     deepseek,
     opencodeGo,
     ccg,

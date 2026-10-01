@@ -917,8 +917,8 @@ export abstract class GatewayComponentGraph {
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadSummary(threadId);
-          return mergeCompletionTiming(summary.latestTurn, turnId, current);
+          const summary = metricsStore.threadTurnSummary(threadId, turnId);
+          return mergeCompletionTiming(summary, turnId, current);
         },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
@@ -931,6 +931,7 @@ export abstract class GatewayComponentGraph {
           summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
+            responseUsage: summary.responseUsage ?? null,
             requestCount: summary.requestCount,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
@@ -945,6 +946,7 @@ export abstract class GatewayComponentGraph {
           const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
           if (aggregate === null) return undefined;
           return {
+            responseUsage: aggregate.responseUsage ?? null,
             requestCount: aggregate.requestCount,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,

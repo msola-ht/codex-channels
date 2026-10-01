@@ -37,6 +37,7 @@ export interface MetricRow {
   output_tokens: number | null;
   reasoning_output_tokens: number | null;
   total_tokens: number | null;
+  response_usage_amount: string | null;
   request_started_at_ms: number;
   response_completed_at_ms: number;
   recorded_at_ms: number;
@@ -169,6 +170,7 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     outputTokens: row.output_tokens,
     reasoningOutputTokens: row.reasoning_output_tokens,
     totalTokens: row.total_tokens,
+    responseUsageAmount: row.response_usage_amount,
     requestStartedAtMs: row.request_started_at_ms,
     responseCompletedAtMs: row.response_completed_at_ms,
     weeklyQuota: row.weekly_quota_limit_id === null

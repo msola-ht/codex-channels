@@ -192,6 +192,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(sample.relayRequestId))) {
       throw new Error("Relay 指标请求 ID 无效");
     }
+    if (sample.responseUsageAmount != null && (typeof sample.responseUsageAmount !== "string"
+      || sample.responseUsageAmount.length > 128 || !/^[0-9]+(?:\.[0-9]+)?$/u.test(sample.responseUsageAmount))) {
+      throw new Error("单次响应用量数值无效");
+    }
     const recordedAtMs = sample.recordedAtMs ?? Date.now();
     this.insert!.run(
       sample.provider,
@@ -236,6 +240,7 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.requestServiceTier ?? null,
       sample.source ?? "owned", sample.callerId ?? null, sample.keyId ?? null,
       sample.credentialGeneration ?? null, sample.relayRequestId ?? null, sample.deliveryStatus ?? null,
+      sample.responseUsageAmount ?? null,
     );
     return recordedAtMs;
   }

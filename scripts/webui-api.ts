@@ -228,6 +228,7 @@ export interface RequestRecord {
   firstTokenMs: number | null
   requestModel: string | null
   responseModel: string | null
+  responseUsageAmount?: string | null
   upstreamTtftMs: number | null
   id: number
   provider: string | null
@@ -830,6 +831,15 @@ export interface CcgCreditAccountUsage {
 
 export interface CcgCreditUsageResponse {
   accounts: CcgCreditAccountUsage[]
+}
+
+export interface OpenAiAccountCredits {
+  observedAtMs: number
+  remaining: string | null
+  unlimited: boolean
+  resetCreditsAvailable: string | null
+  expirations: Array<{ expiresAt: number | null; count: number }> | null
+  undisclosedCount: string | null
 }
 
 export interface OfficialAccountSnapshot {

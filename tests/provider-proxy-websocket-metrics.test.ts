@@ -54,6 +54,7 @@ describe("ProviderProxy WebSocket metrics", () => {
         socket.send(JSON.stringify({
           response: {
             id: "r1",
+            usage_metadata: { amount: "0.12345678901234567890" },
             service_tier: "default",
             output: [{ type: "message" }],
             usage: {
@@ -146,6 +147,7 @@ describe("ProviderProxy WebSocket metrics", () => {
       requestServiceTier: "priority",
       serviceTier: "default",
       upstreamTtftMs: 569,
+      responseUsageAmount: "0.12345678901234567890",
       threadId: "thread-ws",
       turnId: "turn-ws",
       reasoningEffort: "medium",

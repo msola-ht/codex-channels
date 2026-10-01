@@ -13,6 +13,7 @@ import {
 
 import {
   boundedString,
+  responseUsageAmount,
   type ProviderProxyMetrics,
 } from "./response-metrics-observer.js";
 
@@ -257,6 +258,8 @@ function parseMetrics(value: string): ProviderProxyMetrics | undefined {
     || !nullableTokenCount(record.outputTokens)
     || !nullableTokenCount(record.reasoningOutputTokens)
     || !nullableTokenCount(record.totalTokens)
+    || (record.responseUsageAmount !== undefined && record.responseUsageAmount !== null
+      && responseUsageAmount(record.responseUsageAmount) === null)
     || !finiteNumber(record.requestStartedAtMs)
     || !finiteNumber(record.responseCompletedAtMs)
     || (record.totalDurationMs !== undefined

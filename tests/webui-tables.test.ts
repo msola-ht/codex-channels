@@ -4,6 +4,21 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("shows OpenAI remaining Credits, voucher counts and expiry details without losing zero or precision", () => {
+    expect(markup.quotaCredits).toContain("12.34567890123456789");
+    expect(markup.quotaCredits).toContain("周额度已用 37.5%");
+    expect(markup.quotaCreditsEnglish).toContain("Credits remaining");
+    expect(markup.quotaCreditsEnglish).toContain("No expiry");
+    expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
+    expect(markup.quotaCredits).toContain("可用重置券");
+    expect(markup.quotaCredits).toContain("1970-01-01 00:33");
+    expect(markup.quotaCredits).toContain("无到期时间");
+    expect(markup.quotaCredits).toContain("其余 2 张：服务端未提供到期明细");
+    expect(markup.quotaZeroCredits).toContain(">0</dd>");
+    expect(markup.quotaZeroCredits).not.toContain("重置券到期时间");
+    expect(markup.quotaUnlimitedCredits).toContain("无限");
+    expect(markup.quotaEmpty).toContain("未提供");
+  });
   it("shows controlled relay outcomes without a request ID copy action", () => {
     expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
     expect(markup["relay-outcome-disconnected"]).toContain("客户端连接已断开");
@@ -102,6 +117,15 @@ describe("WebUI metrics table presentation", () => {
           quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
           quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
           quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
+          quotaCreditsEnglish: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null,
+            credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
+          quotaCredits: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: "plus",
+            credits: { observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
+              expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
+          quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
+            credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } }),
+          quotaUnlimitedCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
+            credits: { observedAtMs: 1000, remaining: null, unlimited: true, resetCreditsAvailable: "1", expirations: null, undisclosedCount: "1" } }),
           emptyHint: render(TableHint, { hint: null, children: "—" }),
           shortText: render(TruncatedText, { text: "short" }),
           shortLink: render(TruncatedText, { text: "short", asChild: true, children: h("a", { href: "/test" }, "short") }),

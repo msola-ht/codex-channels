@@ -33,6 +33,8 @@ export interface ModelRequestMetricSample {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
+  /** 单次响应官方用量原值；缺失为 null，不换算单位或作为最终账单。 */
+  responseUsageAmount?: string | null;
   requestStartedAtMs: number;
   responseCompletedAtMs: number;
   upstreamTtftMs?: number | null;
@@ -133,7 +135,15 @@ export interface StoredCompactRequestMetricsSummary {
   outputTokens: number;
 }
 
+/** 本地已观测 OpenAI 单次响应原值之和；缺失请求不按零计费。 */
+export interface ResponseUsageSummary {
+  amount: string | null;
+  observedRequestCount: number;
+  missingRequestCount: number;
+}
+
 export interface StoredTurnRequestMetricsSummary {
+  responseUsage?: ResponseUsageSummary | null;
   /** 当前 Thread/Turn 首个有效 OpenAI 样本，不含压缩和子代理。 */
   upstreamTtftMs?: number | null;
   provider: string | null;
@@ -150,6 +160,7 @@ export interface StoredTurnRequestMetricsSummary {
 }
 
 export interface StoredThreadRequestMetricsAggregate {
+  responseUsage?: ResponseUsageSummary | null;
   provider: string | null;
   turnCount: number;
   requestCount: number;

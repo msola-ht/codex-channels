@@ -356,7 +356,13 @@ Schema v17 保存可空转储标签、实际 writer session 与 interaction，�
 共享读取器向 CLI 与 WebUI 投影请求耗时；缺少标记不补算历史值。Schema v18 引入的 `total_duration_ms` 在 v20 统一为提交发送至结束，不聚合为 Turn 耗时。
 验证覆盖 `provider-proxy-upstream-timing.test.ts`、HTTP/WS metrics、traffic dump、request metrics store 与 WebUI 数据和表格测试。
 Schema v19 的 `request_service_tier` 由 `provider-proxy/proxy.ts` 从 HTTP/WS 出站请求独立采集，经指标 IPC、Store 与 JSON/CSV 导出传递；WebUI 请求和错误明细按请求层级显示 FAST，不被响应 `default` 覆盖。请求层级缺失时为 NULL；由 `provider-proxy-http-metrics.test.ts`、`provider-proxy-websocket-metrics.test.ts`、`provider-proxy-metrics.test.ts` 和 `webui-tables.test.ts` 验证，不新增 App Server RPC。
-运行时只接受当前 Schema v23；v20/v21/v22 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
+Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JSON/SSE 与 WebSocket 终态
+`response.usage_metadata.amount` 提取，IPC、明细查询及 JSON/CSV 导出使用 `responseUsageAmount`；保留十进制原值和零值，缺失为 NULL，不换算美元或当作最终账单。
+依据锁定官方 [`response_usage.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/protocol/src/response_usage.rs)
+及 [`client_websockets.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/tests/suite/client_websockets.rs) 的 Credits 元数据合同；不新增 App Server RPC 或通知订阅。
+完成卡片通过精确 Turn 查询及递归会话查询汇总 OpenAI 单次原值，携带采集/缺失请求数；不新增 Schema 字段或使用浮点求和。
+验证使用 HTTP/WS metrics、指标 IPC、request metrics store、relay upgrade、metrics export、thread summary、completion timing 与 lifecycle presentation 测试。
+运行时只接受当前 Schema v24；v20/v21/v22/v23 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。

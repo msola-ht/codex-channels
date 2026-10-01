@@ -47,7 +47,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     if (!threadId || adapter.provider !== "openai" || !adapter.accountThreadUsage) {
       const result = await accountUsage;
       signal?.throwIfAborted();
-      this.persist(result, { kind: "unsupported", provider: modelProvider });
+      this.persist(result);
       return result;
     }
     const [usage, threadUsage]: [ProviderAccountUsage, AccountThreadUsage] = await Promise.all([
@@ -58,7 +58,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     ]);
     signal?.throwIfAborted();
     const result = usage.kind === "token-usage" ? { ...usage, threadUsage } : usage;
-    this.persist(result, { kind: "unsupported", provider: modelProvider });
+    this.persist(result);
     return result;
   }
 
@@ -140,11 +140,12 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     });
   }
 
-  private persist(usage: ProviderAccountUsage, limits: ProviderAccountLimits): void {
+  private persist(usage: ProviderAccountUsage, limits?: ProviderAccountLimits): void {
     if (!this.snapshotWriter) return;
     const mergedUsage = usage;
-    const mergedLimits = limits.provider === usage.provider
-      ? limits : this.snapshotLimits.get(usage.provider) ?? limits;
+    // 用量查询没有额度观测；只合并已成功保存的额度，不用占位值覆盖。
+    const mergedLimits = limits ?? this.snapshotLimits.get(usage.provider)
+      ?? { kind: "unsupported" as const, provider: usage.provider };
     this.snapshotWriter.writeOfficialAccountSnapshot(createOfficialAccountSnapshot({
       provider: mergedUsage.provider,
       observedAtMs: Date.now(),
@@ -152,7 +153,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
       limits: mergedLimits,
     }));
     this.snapshotUsage.set(usage.provider, usage);
-    this.snapshotLimits.set(limits.provider, limits);
+    this.snapshotLimits.set(usage.provider, mergedLimits);
   }
 }
 

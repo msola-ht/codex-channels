@@ -33,6 +33,40 @@ describe("ProviderAccountService", () => {
     expect(failure).not.toHaveBeenCalled();
   });
 
+  it.each(["usage-first", "limits-first"])("preserves both OpenAI observations when warmup finishes %s", async order => {
+    const written: OfficialAccountSnapshot[] = [];
+    let finishUsage!: () => void;
+    let finishLimits!: () => void;
+    const usage = { kind: "token-usage" as const, provider: "openai" as const, usage: {
+      summary: { lifetimeTokens: 10, peakDailyTokens: 5, longestRunningTurnSec: 1,
+        currentStreakDays: 2, longestStreakDays: 3 }, daily: [],
+    } };
+    const limits = { kind: "rate-limits" as const, provider: "openai" as const, limits: {
+      ...emptyRateLimits(), resetCreditsAvailable: 3, resetCreditExpiresAt: [1_791_173_933],
+    } };
+    const service = new ProviderAccountService([{
+      provider: "openai",
+      accountUsage: () => new Promise(resolve => { finishUsage = () => resolve(usage); }),
+      accountLimits: () => new Promise(resolve => { finishLimits = () => resolve(limits); }),
+    }], { writeOfficialAccountSnapshot: snapshot => { written.push(snapshot); } });
+    const warmup = service.refreshSnapshots();
+    if (order === "usage-first") {
+      finishUsage();
+      await Promise.resolve();
+      finishLimits();
+    } else {
+      finishLimits();
+      await Promise.resolve();
+      finishUsage();
+    }
+    await warmup;
+    expect(written.at(-1)).toMatchObject({ usage, limits });
+    const refresh = service.accountUsage("openai");
+    finishUsage();
+    await refresh;
+    expect(written.at(-1)).toMatchObject({ usage, limits });
+  });
+
   it("reports each failed warmup query while keeping successful accounts independent", async () => {
     const failure = vi.fn();
     const write = vi.fn();

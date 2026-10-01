@@ -59,7 +59,7 @@
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
 - `completion-account-status.ts`：将本次具体 Provider 的官方余额、Credits 与配额窗口投影为完成卡摘要，不携带凭据或完整账户响应。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token 与压缩统计；
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、压缩统计与 OpenAI 单次响应用量汇总；
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。

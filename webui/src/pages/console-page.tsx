@@ -27,6 +27,7 @@ import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 import type { Translate } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 import type {
+  OpenAiAccountCredits,
   CcgCreditUsageResponse,
   QuotaAccountUsage,
   DeepseekBalanceResponse,
@@ -77,6 +78,7 @@ export function ConsolePage({ range, onRangeChange }: {
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
         weeklyQuota={dashboard.weeklyQuota}
+        openai={officialAccounts.data?.openai ?? null}
         accountDataLoaded={officialAccounts.data !== null}
         accountLoading={officialAccounts.loading}
         deepseek={officialAccounts.data?.deepseek ?? null}
@@ -167,6 +169,7 @@ function AccountStatusCards({
   onAccountRemoved,
   removalNotice,
   weeklyQuota,
+  openai,
   accountDataLoaded,
   accountLoading,
   deepseek,
@@ -181,6 +184,7 @@ function AccountStatusCards({
 }: {
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: AccountRemovalNotice | null
+  openai: OpenAiAccountCredits | null
   weeklyQuota: OverviewResponse["weeklyQuota"]
   accountDataLoaded: boolean
   accountLoading: boolean
@@ -218,6 +222,7 @@ function AccountStatusCards({
       </AlertDescription></Alert> : null}
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
+          credits={openai}
           usedPercent={weeklyQuota?.usedPercent ?? null}
           resetsAt={weeklyQuota?.resetsAt ?? null}
           planType={weeklyQuota?.planType ?? null}

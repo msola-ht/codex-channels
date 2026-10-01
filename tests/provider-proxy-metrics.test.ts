@@ -39,6 +39,11 @@ describe("Provider proxy metrics channel", () => {
       }
       expect(received.map((value) => value.upstreamTtftMs)).toEqual([0, 569.25]);
       received.length = 0;
+      for (const responseUsageAmount of ["0", "0.12345678901234567890", null, undefined, 1, "-1", "secret", "9".repeat(129)]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), responseUsageAmount } as ProviderProxyMetrics);
+      }
+      expect(received.map(value => value.responseUsageAmount)).toEqual(["0", "0.12345678901234567890", null, undefined]);
+      received.length = 0;
       for (const value of [0, 12.5, -1, "123", null]) {
         await sendProviderProxyMetrics(socketPath, {
           ...metrics(), timingBasis: "submitted", firstTokenMs: value, requestModel: "requested", responseModel: "echoed",

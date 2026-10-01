@@ -1,5 +1,7 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
+  ResponseUsageSummary,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
@@ -389,7 +391,7 @@ export class SqliteRequestMetricsQueries {
     const turn = latestTurn === undefined
       ? undefined
       : this.queryThreadTurnSummary(threadId, latestTurn.turn_id);
-    const threadAggregate = this.reader.prepare(`
+    const scopeSql = `
       WITH RECURSIVE thread_tree(thread_id) AS (
         SELECT ?
         UNION
@@ -403,6 +405,8 @@ export class SqliteRequestMetricsQueries {
         WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
           AND metric.turn_id IS NOT NULL
       )
+    `;
+    const threadAggregate = this.reader.prepare(`${scopeSql}
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
@@ -421,10 +425,16 @@ export class SqliteRequestMetricsQueries {
     `).get(threadId) as unknown as TurnSummaryRow;
     return {
       threadId,
-      latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
+      latestTurn: turn === undefined ? null : {
+        ...toStoredTurnSummary(turn),
+        responseUsage: this.turnResponseUsage(threadId, latestTurn!.turn_id),
+      },
       threadAggregate: threadAggregate.request_count === 0
         ? null
-        : toStoredThreadAggregate(threadAggregate),
+        : {
+          ...toStoredThreadAggregate(threadAggregate),
+          responseUsage: this.scopedResponseUsage(scopeSql, [threadId]),
+        },
     };
   }
 
@@ -443,7 +453,7 @@ export class SqliteRequestMetricsQueries {
       LIMIT 1
     `).get(threadId, turnId);
     if (child === undefined) return null;
-    const row = this.reader.prepare(`
+    const scopeSql = `
       WITH RECURSIVE task_threads(thread_id, turn_id) AS (
         SELECT child.thread_id, child.turn_id
         FROM subagent_turns AS child
@@ -469,6 +479,8 @@ export class SqliteRequestMetricsQueries {
           )
         )
       )
+    `;
+    const row = this.reader.prepare(`${scopeSql}
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
         (SELECT model FROM scoped ORDER BY id DESC LIMIT 1) AS model,
@@ -491,7 +503,10 @@ export class SqliteRequestMetricsQueries {
     // The direct-child probe above is the display gate. Keep a zero summary
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.
-    return row === undefined ? null : toStoredTurnSummary(row);
+    return row === undefined ? null : {
+      ...toStoredTurnSummary(row),
+      responseUsage: this.scopedResponseUsage(scopeSql, [threadId, turnId, threadId, turnId]),
+    };
   }
 
   threadTurnSummary(
@@ -502,7 +517,22 @@ export class SqliteRequestMetricsQueries {
     validateThreadId(threadId, "Thread ID");
     validateThreadId(turnId, "Turn ID");
     const row = this.queryThreadTurnSummary(threadId, turnId);
-    return row === undefined ? null : toStoredTurnSummary(row);
+    return row === undefined ? null : {
+      ...toStoredTurnSummary(row),
+      responseUsage: this.turnResponseUsage(threadId, turnId),
+    };
+  }
+
+  private scopedResponseUsage(scopeSql: string, parameters: SQLInputValue[]): ResponseUsageSummary | null {
+    return summarizeResponseUsage(this.reader.iterateRows(`${scopeSql}
+      SELECT response_usage_amount FROM scoped WHERE provider = 'openai'
+    `, ...parameters) as Iterable<{ response_usage_amount: string | null }>);
+  }
+
+  private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
+    return this.scopedResponseUsage(`WITH scoped AS (
+      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+    )`, [threadId, turnId]);
   }
 
   private queryThreadTurnSummary(
