@@ -35,7 +35,12 @@ export function requestClientName(request) {
     [/(?:^|[ ;(])(?:Chrome|CriOS)\/[0-9]/iu, "Chrome"],
     [/Version\/[0-9].*Safari\/[0-9]/iu, "Safari"]];
   const browser = browsers.find(([pattern]) => pattern.test(value))?.[1];
-  if (!browser) return undefined;
+  // 未列举的客户端也可展示开头明确自报的产品名；不从注释或后续库名猜应用。
+  if (!browser) {
+    const product = /^([A-Za-z][A-Za-z0-9._+-]*(?: [A-Za-z][A-Za-z0-9._+-]*){0,3})(?:\/[vV]?[0-9][A-Za-z0-9._+-]{0,63}| [vV]?[0-9]+\.[0-9][A-Za-z0-9._+-]{0,61})(?=$|[ (])/u.exec(value)?.[1];
+    // Mozilla 是浏览器兼容前缀，不能当作未识别浏览器的应用名称。
+    return product === undefined || product.length > 64 || product.toLowerCase() === "mozilla" ? undefined : product;
+  }
   const platform = /Android/iu.test(value) ? "Android"
     : /iPhone|iPad|iPod/iu.test(value) ? "iOS"
     : /Windows/iu.test(value) ? "Windows"
