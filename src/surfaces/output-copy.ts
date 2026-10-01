@@ -55,5 +55,5 @@ export function formatProviderIdleReleaseNotice(): string {
 }
 
 export function formatOperationFailure(detail: string): string {
-  return `操作失败：${detail}。`;
+  return `操作失败：${detail.replace(/[。．.!！?？]+$/u, "")}。`;
 }

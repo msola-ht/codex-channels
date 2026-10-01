@@ -490,6 +490,13 @@ codexc service restart gateway
 有重试策略时记录 `attempt`、`maximumAttempts`；重试等待仍计入外层输出执行耗时。
 飞书 API 阶段完成仅代表 HTTP SDK 调用返回，业务响应仍需经过现有校验；输出任务成功也不代表用户已读。
 
+图片引用准备失败另带 `imageUploadDiagnosticId`、`imageUploadStage`、`imageUploadReason`、
+`imageUploadElapsedMs` 和 `imageUploadStageElapsedMs`，与当前渠道的输入标识关联。
+阶段区分会话读取、模型配置、本地模型代理、账户与凭据校验、图片校验、文件创建、字节传输和完成确认；
+有对应证据时记录白名单内的 `imageUploadNetworkCode`、`imageUploadHttpStatus` 或 `imageUploadRpcCode`。
+这些字段不包含原始异常、凭据、签名 URL 或响应正文。微信在发送用户错误提示前也记录图片失败，
+不因错误已被处理而丢失诊断。上传耗时不包含后续 Turn 提交等待。
+
 下次出现“终端已有结果，渠道迟迟未收到”时，先保留发生时间和渠道，再查看：
 
 ```bash

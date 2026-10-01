@@ -125,7 +125,8 @@ function elapsed(started: number): number {
 }
 
 function diagnosticErrorMetadata(error: unknown): Record<string, unknown> {
-  const { errorType, errorCode } = surfaceErrorMetadata(error);
+  const metadata = surfaceErrorMetadata(error);
+  delete metadata.errorMessage;
   const causes: Array<{ errorType: string; errorCode?: string | number }> = [];
   const seen = new Set<unknown>([error]);
   let current = error;
@@ -137,6 +138,6 @@ function diagnosticErrorMetadata(error: unknown): Record<string, unknown> {
     causes.push({ errorType: cause.errorType,
       ...(cause.errorCode === undefined ? {} : { errorCode: cause.errorCode }) });
   }
-  return { errorType, ...(errorCode === undefined ? {} : { errorCode }),
+  return { ...metadata,
     ...(causes.length === 0 ? {} : { causes }) };
 }

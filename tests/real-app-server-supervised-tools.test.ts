@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { SubagentCompletionTracker } from "../src/bootstrap/subagent-completion-tracker.js";
+import { ImageReferenceUpload } from "../src/codex-client/image-reference-upload.js";
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { handleApprovalServerRequest } from "../src/codex-client/server-request-adapter.js";
 import { toConversationInputEvent } from "../src/codex-client/index.js";
@@ -74,6 +75,12 @@ contractSuite("real supervised App Server tools", () => {
         expect(requests.some(path => path.includes("accounts/check"))).toBe(true);
         const hidden = await rpc.request<GetAuthStatusResponse>({ method: "getAuthStatus", params: { includeToken: false, refreshToken: false } });
         expect(hidden.authToken).toBeNull();
+        // Real RPC failures in image preparation retain only safe diagnostics and never dispatch a Turn.
+        const images = new ImageReferenceUpload(rpc, fetch, fetch, async () => auth);
+        let dispatched = false;
+        await expect(images.submit("invalid-image-fixture-thread", [], async () => { dispatched = true; }))
+          .rejects.toMatchObject({ code: "image.reference.failed", details: { stage: "thread-read", reason: "rpc" } });
+        expect(dispatched).toBe(false);
       } finally {
         await rpc?.close();
         await proxy?.close();

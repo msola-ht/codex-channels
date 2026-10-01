@@ -50,7 +50,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
-| `image.reference.failed` | 图片上传、账户路由校验或引用提交失败，也用于上传取消与超时 | 检查 Codex 登录状态及网络后重新发送；不会自动重传或改用内联图片 |
+| `image.reference.failed` | 图片提交前的校验或上传失败；提示具体阶段，区分网络、HTTP 拒绝、响应格式异常、主动取消与超时 | 按提示检查本地代理、网络或账户；通过日志中的 `imageUploadDiagnosticId` 关联诊断，不会自动重传或改用内联图片。Turn 提交后的错误保留原有分类 |
 | `image.url.invalid` | 图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL | Application 收到非法内联图片输入 |
 | `image.too-large` | 单张超过 10 MiB / 批量超过 20 MiB | 图片超过暂存大小限制 |
 | `image.too-many` | 一次最多处理 4 张图片 | 单次发送图片过多 |
