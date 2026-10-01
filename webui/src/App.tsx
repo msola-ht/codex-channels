@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
-import { AppSidebar } from "@/components/layout/app-sidebar"
+import { AppSidebar, AppSidebarProvider } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -18,7 +18,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useTranslation } from "@/hooks/use-translation"
@@ -132,7 +132,7 @@ function Layout() {
 
   return (
     <ServerTimeContext.Provider value={time.data}>
-      <SidebarProvider className="min-h-0 min-w-0">
+      <AppSidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0">
           <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
@@ -185,7 +185,7 @@ function Layout() {
             </Suspense>
           </div>
         </SidebarInset>
-      </SidebarProvider>
+      </AppSidebarProvider>
     </ServerTimeContext.Provider>
   )
 }

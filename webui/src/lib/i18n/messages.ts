@@ -686,11 +686,6 @@ const zh = {
   },
   shell: {
     navigation: "导航",
-    pagesMenu: "页面",
-    subtitle: "本地指标与设置",
-    menuDescription: "本地指标、设置与维护",
-    localService: "本地服务",
-    readOnly: "只读模式",
     timeZoneHint: "页面时间与统计日期均使用服务端系统时区",
     timeSyncPending: "时间待校准",
     timeZoneLoading: "正在读取服务端时区…",
@@ -1397,11 +1392,6 @@ const en: Messages = {
   },
   shell: {
     navigation: "Navigation",
-    pagesMenu: "Pages",
-    subtitle: "Local metrics and settings",
-    menuDescription: "Local metrics, settings and maintenance",
-    localService: "Local service",
-    readOnly: "Read-only",
     timeZoneHint: "Page time and statistics dates use the server system time zone",
     timeSyncPending: "Time not calibrated",
     timeZoneLoading: "Reading server time zone…",

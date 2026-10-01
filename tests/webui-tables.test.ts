@@ -21,6 +21,16 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.quotaUnlimitedCredits).toContain("无限");
     expect(markup.quotaEmpty).toContain("未提供");
   });
+  it("shows reset credit metadata in the header and expiry details without a disclosure", () => {
+    const html = markup.quotaCredits!;
+    const header = html.slice(0, html.indexOf('data-slot="card-content"'));
+    expect(header).toContain("可用重置券");
+    expect(header).toContain("更新于 1970-01-01 00:00");
+    expect(html).not.toContain('data-slot="collapsible"');
+    expect(html).toContain("1970-01-01 00:33");
+    expect(html).toContain("使用重置券");
+    expect(html).toContain('<ul aria-label="重置券到期时间"');
+  });
   it("shows controlled relay outcomes without a request ID copy action", () => {
     expect(markup["relay-outcome-rejected"]).toContain("上游权限不足");
     expect(markup["relay-outcome-disconnected"]).toContain("客户端连接已断开");

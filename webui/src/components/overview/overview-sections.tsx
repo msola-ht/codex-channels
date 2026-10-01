@@ -202,12 +202,14 @@ export function WeeklyQuotaCard({
   return (
     <Card size="sm">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <CardTitle className="flex items-center gap-2">
-          {t("overview.weeklyQuotaTitle")}
-          {planType === null ? null : (
-            <Badge variant="outline">{planTypeLabel(t, planType)}</Badge>
-          )}
-        </CardTitle>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <CardTitle>{t("overview.weeklyQuotaTitle")}</CardTitle>
+          {planType === null ? null : <Badge variant="outline">{planTypeLabel(t, planType)}</Badge>}
+          <Badge variant="secondary">
+            {t("overview.resetCreditsAvailable")} {credits?.resetCreditsAvailable ?? t("overview.creditNotProvided")}
+          </Badge>
+          {credits ? <CardDescription className="whitespace-nowrap tabular-nums">{t("overview.accountUpdatedAt", { time: formatTime(credits.observedAtMs) })}</CardDescription> : null}
+        </div>
         {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
           {t("overview.weeklyQuotaUsed", { percent: usedPercent.toFixed(1) })}
         </CardDescription>}
@@ -226,22 +228,23 @@ export function WeeklyQuotaCard({
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           <dt className="text-muted-foreground">{t("overview.creditsRemaining")}</dt>
           <dd className="text-right break-all tabular-nums">{credits?.unlimited ? t("overview.creditsUnlimited") : credits?.remaining ?? t("overview.creditNotProvided")}</dd>
-          <dt className="text-muted-foreground">{t("overview.resetCreditsAvailable")}</dt>
-          <dd className="text-right tabular-nums">{credits?.resetCreditsAvailable ?? t("overview.creditNotProvided")}</dd>
         </dl>
-        {credits?.resetCreditsAvailable === "0" ? null : (
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <p>{t("overview.resetCreditsExpiry")}</p>
-            {credits?.expirations?.map(expiration => <p key={expiration.expiresAt ?? "unlimited"}>
-              {expiration.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(expiration.expiresAt * 1000)}
-              {" · "}{t("overview.creditCount", { count: expiration.count })}
-            </p>)}
-            {credits?.undisclosedCount ? <p>{t("overview.creditExpiryUndisclosed", { count: credits.undisclosedCount })}</p>
-              : !credits?.expirations?.length ? <p>{t("overview.creditNotProvided")}</p> : null}
-          </div>
-        )}
-        {onCreditsChanged ? <ResetCreditAction onChanged={onCreditsChanged} /> : null}
-        {credits ? <p className="text-xs text-muted-foreground">{t("overview.accountUpdatedAt", { time: formatTime(credits.observedAtMs) })}</p> : null}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {credits?.resetCreditsAvailable === "0" ? null : (
+            <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{t("overview.resetCreditsExpiry")}</span>
+              <ul aria-label={t("overview.resetCreditsExpiry")} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {credits?.expirations?.map(expiration => <li key={expiration.expiresAt ?? "unlimited"} className="whitespace-nowrap tabular-nums">
+                  {expiration.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(expiration.expiresAt * 1000)}
+                  {" · "}{t("overview.creditCount", { count: expiration.count })}
+                </li>)}
+                {credits?.undisclosedCount ? <li>{t("overview.creditExpiryUndisclosed", { count: credits.undisclosedCount })}</li>
+                  : !credits?.expirations?.length ? <li>{t("overview.creditNotProvided")}</li> : null}
+              </ul>
+            </div>
+          )}
+          {onCreditsChanged ? <div className="ml-auto shrink-0"><ResetCreditAction onChanged={onCreditsChanged} /></div> : null}
+        </div>
       </CardContent>
     </Card>
   )

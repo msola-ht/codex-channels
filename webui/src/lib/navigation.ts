@@ -48,15 +48,20 @@ export const settingsNavItems: NavItem[] = [
   { to: "/settings/data", labelKey: "navigation.data", icon: Database },
   { to: "/settings/services", labelKey: "navigation.services", icon: Server },
 ]
-export interface NavGroup extends NavItem { children: NavItem[] }
+export interface NavGroup {
+  id: string
+  labelKey: MessageKey
+  icon: LucideIcon
+  children: NavItem[]
+}
 export const navigation: (NavItem | NavGroup)[] = [
   { to: "/", labelKey: "pages.console", icon: LayoutDashboard },
   { to: "/threads", labelKey: "pages.threads", icon: MessagesSquare },
-  { to: "/requests", labelKey: "navigation.monitoring", icon: Activity, children: monitoringNavItems },
-  { to: "/models/providers", labelKey: "modelManagement.title", icon: Boxes, children: modelNavItems },
+  { id: "monitoring", labelKey: "navigation.monitoring", icon: Activity, children: monitoringNavItems },
+  { id: "models", labelKey: "modelManagement.title", icon: Boxes, children: modelNavItems },
   { to: "/relay", labelKey: "relay.title", icon: KeyRound },
-  { to: "/channels", labelKey: "navigation.channels", icon: MessagesSquare, children: channelNavItems },
-  { to: "/settings", labelKey: "pages.settings", icon: Settings, children: settingsNavItems },
+  { id: "channels", labelKey: "navigation.channels", icon: MessagesSquare, children: channelNavItems },
+  { id: "settings", labelKey: "pages.settings", icon: Settings, children: settingsNavItems },
 ]
 export const navItems = navigation.flatMap(item => "children" in item ? item.children : [item])
 export const navGroups = navigation.filter((item): item is NavGroup => "children" in item)
