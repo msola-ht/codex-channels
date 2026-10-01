@@ -186,12 +186,14 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
 }
 
 export function WeeklyQuotaCard({
+  refreshControl,
   credits = null,
   onCreditsChanged,
   usedPercent,
   resetsAt,
   planType,
 }: {
+  refreshControl?: AccountRefreshControl
   onCreditsChanged?: () => void
   credits?: OpenAiAccountCredits | null
   usedPercent: number | null
@@ -208,13 +210,15 @@ export function WeeklyQuotaCard({
           <Badge variant="secondary">
             {t("overview.resetCreditsAvailable")} {credits?.resetCreditsAvailable ?? t("overview.creditNotProvided")}
           </Badge>
-          {credits ? <CardDescription className="whitespace-nowrap tabular-nums">{t("overview.accountUpdatedAt", { time: formatTime(credits.observedAtMs) })}</CardDescription> : null}
+          {credits || refreshControl ? <AccountUpdateDescription observedAtMs={credits?.observedAtMs ?? 0} isDefault={false} refreshFailed={Boolean(refreshControl?.error)} /> : null}
         </div>
         {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
           {t("overview.weeklyQuotaUsed", { percent: usedPercent.toFixed(1) })}
         </CardDescription>}
+        {refreshControl && !refreshControl.error ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        <AccountRefreshFeedback control={refreshControl} hasSnapshot={credits !== null} />
         {usedPercent === null
           ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("overview.weeklyQuotaEmpty")}</EmptyTitle></EmptyHeader></Empty>
           : (

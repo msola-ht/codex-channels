@@ -100,8 +100,6 @@ export function ConsolePage({ range, onRangeChange }: {
 function accountRefreshFailureText(t: Translate, failure: AccountRefreshFailure | null): string | null {
   if (failure === null) return null
   switch (failure.kind) {
-    case "sourceMissing":
-      return t("console.accountSourceMissing")
     case "syncFailed":
       return t("console.accountSyncFailed", { message: translateApiErrorCode(t, failure.code) })
     case "listFailed":
@@ -225,6 +223,7 @@ function AccountStatusCards({
       </AlertDescription></Alert> : null}
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
+          refreshControl={refreshControls.openai}
           credits={openai}
           onCreditsChanged={onCreditsChanged}
           usedPercent={weeklyQuota?.usedPercent ?? null}

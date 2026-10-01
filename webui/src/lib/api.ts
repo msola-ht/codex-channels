@@ -6,6 +6,7 @@ import type {
   ServerTimeResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
+  OfficialAccountSourcesResponse,
   OverviewResponse,
   MetricsRangeQuery,
   MetricsQuery,
@@ -357,6 +358,10 @@ export function fetchOfficialAccountSnapshots(
   signal?: AbortSignal,
 ): Promise<OfficialAccountSnapshotsResponse> {
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
+}
+
+export function fetchOfficialAccountSources(signal?: AbortSignal): Promise<OfficialAccountSourcesResponse> {
+  return getJson<OfficialAccountSourcesResponse>(`${API_PREFIX}/management/accounts/sources`, signal)
 }
 
 export function fetchTrafficExchanges(

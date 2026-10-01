@@ -352,7 +352,9 @@ async function routeManagement(environment, url, request, response, state, token
     );
   }
   if (!managementLockHeld) {
-    state.limiter.consume({ principalId, category: request.method === "GET" || (request.method === "POST" && path === "/delivery/content-batch") ? "read" : "write" });
+    state.limiter.consume({ principalId, category: request.method === "POST" && path === "/accounts/refresh"
+      ? "account-refresh"
+      : request.method === "GET" || (request.method === "POST" && path === "/delivery/content-batch") ? "read" : "write" });
     if (request.method !== "GET" && path !== "/delivery/content-batch" && isHighRiskManagementPath(path)) {
       state.limiter.consume({ principalId, category: "high-risk" });
     }

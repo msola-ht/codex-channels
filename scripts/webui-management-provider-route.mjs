@@ -1,3 +1,7 @@
+import { join } from "node:path";
+import { parse } from "smol-toml";
+import { codexHomePath, hasCodexAuthFile } from "../runtime/codex-home.mjs";
+import { readCodexConfigFile } from "../runtime/model-provider-managed-runtime.mjs";
 import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
@@ -40,6 +44,23 @@ export async function routeProviderManagement({
   state,
 }) {
   if (await routeResetCredits({ configPath, maximumBodyBytes, path, principalId, request, response, state })) return true;
+  if (path === "/accounts/sources" && request.method === "GET") {
+    const { accountMetadata, warnings } = loadAccountSources(environment);
+    try {
+      if (hasCodexAuthFile(environment)) {
+        let config = {};
+        try { config = parse(readCodexConfigFile(join(codexHomePath(environment), "config.toml"))); }
+        catch (error) { if (error?.code !== "ENOENT") throw error; }
+        if (config.model_provider === undefined || config.model_provider === "openai") {
+          accountMetadata.unshift({ provider: "openai", accountId: null, displayName: "OpenAI", default: false });
+        }
+      }
+    } catch {
+      warnings.push({ source: "openai", code: "registry_unavailable", message: "OpenAI 账户来源暂不可用" });
+    }
+    sendManagementJson(response, 200, { accounts: accountMetadata, warnings });
+    return true;
+  }
   if (path === "/accounts/refresh" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     if (
@@ -245,52 +266,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
     const storedSnapshots = typeof store.latestAccountSnapshots === "function"
       ? store.latestAccountSnapshots()
       : [];
-    const warnings = [];
-    const dsAccounts = loadAccountRegistry(
-      () => loadDeepseekAccounts(environment),
-      warnings,
-      "deepseek",
-      "DeepSeek 账户元数据暂不可用",
-    );
-    const ocgAccounts = loadAccountRegistry(
-      () => loadOpencodeGoAccounts(environment),
-      warnings,
-      "opencode-go",
-      "OpenCode Go 账户元数据暂不可用",
-    );
-    const ccgAccounts = loadAccountRegistry(
-      () => loadCcgAccounts(environment),
-      warnings,
-      "ccg",
-      "CommandCode Go 账户元数据暂不可用",
-    );
-    const clineAccounts = loadAccountRegistry(
-      () => loadClinePassAccounts(environment),
-      warnings,
-      "clp",
-      "Cline Pass 配置暂不可用",
-    );
-    const accountMetadata = [
-      ...(clineAccounts ?? []).map(account => ({ provider: clinePassProviderId(account.id), accountId: account.id, displayName: `Cline Pass ${account.id}`, default: account.default })),
-      ...(dsAccounts ?? []).map((account) => ({
-        provider: deepseekProviderId(account.id),
-        accountId: account.id,
-        displayName: `DS ${account.id}`,
-        default: account.default,
-      })),
-      ...(ocgAccounts ?? []).map((account) => ({
-        provider: opencodeGoProviderId(account.id),
-        accountId: account.id,
-        displayName: opencodeGoAccountDisplayName(account),
-        default: account.default,
-      })),
-      ...(ccgAccounts ?? []).map((account) => ({
-        provider: ccgProviderId(account.id),
-        accountId: account.id,
-        displayName: `CommandCode Go ${account.id}`,
-        default: account.default,
-      })),
-    ];
+    const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
       .filter((snapshot) => {
@@ -343,6 +319,56 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
   } finally {
     store.close();
   }
+}
+
+function loadAccountSources(environment) {
+  const warnings = [];
+  const dsAccounts = loadAccountRegistry(
+    () => loadDeepseekAccounts(environment),
+    warnings,
+    "deepseek",
+    "DeepSeek 账户元数据暂不可用",
+  );
+  const ocgAccounts = loadAccountRegistry(
+    () => loadOpencodeGoAccounts(environment),
+    warnings,
+    "opencode-go",
+    "OpenCode Go 账户元数据暂不可用",
+  );
+  const ccgAccounts = loadAccountRegistry(
+    () => loadCcgAccounts(environment),
+    warnings,
+    "ccg",
+    "CommandCode Go 账户元数据暂不可用",
+  );
+  const clineAccounts = loadAccountRegistry(
+    () => loadClinePassAccounts(environment),
+    warnings,
+    "clp",
+    "Cline Pass 配置暂不可用",
+  );
+  const accountMetadata = [
+    ...(clineAccounts ?? []).map(account => ({ provider: clinePassProviderId(account.id), accountId: account.id, displayName: `Cline Pass ${account.id}`, default: account.default })),
+    ...(dsAccounts ?? []).map((account) => ({
+      provider: deepseekProviderId(account.id),
+      accountId: account.id,
+      displayName: `DS ${account.id}`,
+      default: account.default,
+    })),
+    ...(ocgAccounts ?? []).map((account) => ({
+      provider: opencodeGoProviderId(account.id),
+      accountId: account.id,
+      displayName: opencodeGoAccountDisplayName(account),
+      default: account.default,
+    })),
+    ...(ccgAccounts ?? []).map((account) => ({
+      provider: ccgProviderId(account.id),
+      accountId: account.id,
+      displayName: `CommandCode Go ${account.id}`,
+      default: account.default,
+    })),
+  ];
+  return { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata };
 }
 
 function loadAccountRegistry(load, warnings, source, message) {

@@ -857,10 +857,15 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "deepseek" | "opencode-go" | "ccg" | "clp"
+    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp"
     code: "registry_unavailable"
     message: string
   }>
+}
+
+export interface OfficialAccountSourcesResponse {
+  accounts: Array<Pick<OfficialAccountSnapshot, "provider" | "accountId" | "displayName" | "default">>
+  warnings: OfficialAccountSnapshotsResponse["warnings"]
 }
 
 export interface TrafficLabel {

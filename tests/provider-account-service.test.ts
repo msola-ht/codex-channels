@@ -10,6 +10,41 @@ import {
 } from "../src/application/index.js";
 
 describe("ProviderAccountService", () => {
+  it("does not refresh OpenAI quota age with usage or overwrite stored quotas after restart", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const write = vi.fn();
+    const usage: ProviderAccountUsage = { kind: "token-usage", provider: "openai", usage: { summary: {
+      lifetimeTokens: 1, peakDailyTokens: null, longestRunningTurnSec: null, currentStreakDays: null, longestStreakDays: null,
+    }, daily: [] } };
+    const accountLimits = vi.fn(async () => ({ kind: "rate-limits" as const, provider: "openai" as const, limits: emptyRateLimits() }));
+    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => usage, accountLimits }], { writeOfficialAccountSnapshot: write });
+    try {
+      await service.accountUsage("openai");
+      expect(write).not.toHaveBeenCalled();
+      await service.accountLimits("openai");
+      now.mockReturnValue(3_601_000);
+      await service.accountUsage("openai");
+      expect(accountLimits).toHaveBeenCalledTimes(1);
+      expect(write.mock.calls.at(-1)?.[0].observedAtMs).toBe(1000);
+      await service.accountLimits("openai");
+      expect(write.mock.calls.at(-1)?.[0].observedAtMs).toBe(3_601_000);
+    } finally { now.mockRestore(); }
+  });
+
+  it("does not let an older quota request overwrite a newer successful observation", async () => {
+    const write = vi.fn();
+    let finish!: (value: { kind: "rate-limits"; provider: string; limits: AccountRateLimits }) => void;
+    const before = { kind: "rate-limits" as const, provider: "openai", limits: { ...emptyRateLimits(), resetCreditsAvailable: 2 } };
+    const after = { ...before, limits: { ...before.limits, resetCreditsAvailable: 1 } };
+    const read = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockResolvedValue(after);
+    const service = new ProviderAccountService([{ provider: "openai", accountUsage: async () => ({ kind: "unsupported", provider: "openai" }), accountLimits: read }], { writeOfficialAccountSnapshot: write });
+    const earlier = service.accountLimits("openai");
+    await service.accountLimits("openai");
+    finish(before);
+    await earlier;
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0]?.[0].limits).toEqual(after);
+  });
   it.each(["clp-main", "openai"])("cancels %s warmup and ignores late usage and limits without reporting shutdown as failure", async provider => {
     const write = vi.fn();
     const failure = vi.fn();

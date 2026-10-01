@@ -336,7 +336,6 @@ const zh = {
     "accountRemovedNotice": "本地账户 {account} 已删除。此操作不会取消官方订阅。",
     "accountRemovedRestart": "请运行 codexc service restart all，使运行中的服务应用配置。",
     "accountSyncFailed": "本地账户已删除，列表同步失败：{message}",
-    "accountSourceMissing": "账户来源不存在或不支持刷新",
     "loadingAccounts": "正在加载账户列表",
   },
   overview: {
@@ -1042,7 +1041,6 @@ const en: Messages = {
     "accountRemovedNotice": "Local account {account} was removed. This does not cancel the official subscription.",
     "accountRemovedRestart": "Run codexc service restart all so running services apply the configuration.",
     "accountSyncFailed": "The local account was removed, but the list sync failed: {message}",
-    "accountSourceMissing": "The account source does not exist or does not support refreshing",
     "loadingAccounts": "Loading account list",
   },
   overview: {

@@ -114,9 +114,10 @@ it("invalidates failed live snapshots through retries while preserving the defau
         useState, useRef, useEffect, fn => fn, class extends Error {});
       const pending = [];
       const loader = signal => new Promise((resolve, reject) => pending.push({ signal, resolve, reject }));
+      let mergeData;
       const render = () => {
         si = ri = 0;
-        const result = hook(loader, [], retainDataOnError ? undefined : { retainDataOnError });
+        const result = hook(loader, [], { retainDataOnError, mergeData });
         if (effect) { cleanup?.(); cleanup = effect(); effect = undefined; }
         return result;
       };
@@ -135,6 +136,16 @@ it("invalidates failed live snapshots through retries while preserving the defau
       assert.equal(pending[3].signal.aborted, true);
       pending[3].resolve({ requests: ["late"] }); await settle();
       assert.deepEqual(render().data, { requests: ["new"] });
+      mergeData = (previous, next) => previous?.revision > next.revision ? previous : next;
+      render(); pending.at(-1).resolve({ revision: 2, requests: ["fresh"] }); await settle();
+      view = render(); view.refetch(); render();
+      pending.at(-1).resolve({ revision: 1, requests: ["stale read"] }); await settle();
+      view = render(); assert.deepEqual(view.data, { revision: 2, requests: ["fresh"] });
+      view.replaceData({ revision: 0, requests: ["stale replacement"] });
+      view = render(); assert.deepEqual(view.data, { revision: 2, requests: ["fresh"] });
+      view.replaceData(previous => ({ ...previous, requests: [...previous.requests, "functional update"] }));
+      assert.deepEqual(render().data, { revision: 2, requests: ["fresh", "functional update"] });
+      cleanup();
     }
   `;
   expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
@@ -205,4 +216,116 @@ describe("设置页面恢复补查", () => {
     expect(refresh).not.toHaveBeenCalled();
     stop();
   });
+});
+
+it("cancels superseded batch snapshot reads without losing new accounts or retaining deleted accounts", () => {
+  const script = String.raw`
+    import fs from "node:fs";
+    import ts from "typescript";
+    import assert from "node:assert/strict";
+    const slots = [], refs = [], dependencies = [], cleanups = [];
+    let si = 0, ri = 0, ei = 0;
+    const effects = [];
+    const react = {
+      useState(initial) {
+        const index = si++;
+        if (!(index in slots)) slots[index] = initial;
+        return [slots[index], value => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
+      },
+      useRef(initial) { return refs[ri++] ?? (refs[ri - 1] = { current: initial }); },
+      useCallback(fn) { return fn; },
+      useEffect(run, deps) {
+        const index = ei++;
+        if (!dependencies[index] || deps.some((value, i) => value !== dependencies[index][i])) {
+          effects.push(() => { cleanups[index]?.(); cleanups[index] = run(); });
+        }
+        dependencies[index] = deps;
+      },
+    };
+    const load = (path, imports) => {
+      const code = ts.transpileModule(fs.readFileSync(path, "utf8"), {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+      }).outputText;
+      const exports = {};
+      new Function("exports", "require", code)(exports, name => {
+        assert.ok(name in imports, name);
+        return imports[name];
+      });
+      return exports;
+    };
+    const reads = [];
+    const cline = { provider: "clp-test", accountId: "test", displayName: "CLP", default: false,
+      observedAtMs: 1000, available: true, usage: null, limits: null };
+    const old = { observedAtMs: 1000, snapshots: [cline], warnings: [] };
+    const openai = { ...cline, provider: "openai", accountId: null, observedAtMs: 2000,
+      limits: { kind: "rate-limits", provider: "openai", limits: {
+        ordinaryUsageLimit: { secondary: { usedPercent: 12, windowDurationMins: 10080, resetsAt: null } },
+      } } };
+    const fresh = { ...old, observedAtMs: 2000, snapshots: [cline, openai] };
+    let sources = ["clp-test", "openai"], postResult = null;
+    const api = {
+      ApiClientError: class extends Error {},
+      fetchOfficialAccountSources: async () => ({ accounts: sources.map(provider => ({ provider, displayName: provider })), warnings: [] }),
+      fetchOfficialAccountSnapshots: signal => new Promise((resolve, reject) => reads.push({ signal, resolve, reject })),
+      refreshOfficialAccountSnapshot: async provider => {
+        if (postResult) return postResult;
+        if (provider === "openai") throw new Error("initial OpenAI failure");
+        return old;
+      },
+    };
+    const polling = { scheduleVisibleSettingsRefresh: () => () => {} };
+    const state = load("webui/src/lib/account-refresh-state.ts", {});
+    const useApi = load("webui/src/hooks/use-api.ts", { react, "@/lib/api": api, "../lib/api-polling": polling });
+    const { useOfficialAccountSources } = load("webui/src/hooks/use-official-account-sources.ts", {
+      react, "@/lib/api": api, "@/hooks/use-api": useApi,
+      "@/lib/api-polling": polling, "@/lib/account-refresh-state": state,
+    });
+    globalThis.document = {};
+    const render = () => {
+      si = ri = ei = 0;
+      const view = useOfficialAccountSources();
+      while (effects.length) effects.shift()();
+      return view;
+    };
+    const settle = () => new Promise(resolve => setImmediate(resolve));
+    render(); await settle();
+    assert.equal(reads.length, 2);
+    let view = render();
+    view.refetchSnapshots(); render();
+    assert.equal(reads[1].signal.aborted, true);
+    reads[2].resolve(fresh); await settle();
+    assert.equal(render().data.openaiWeeklyQuota.usedPercent, 12);
+    // 模拟不配合取消的迟到响应，仍不能清除独立读取新增的账户。
+    reads[1].resolve(old); await settle();
+    view = render();
+    assert.equal(view.data.openaiWeeklyQuota.usedPercent, 12);
+    assert.equal(view.refreshError, null);
+    assert.equal(view.refreshing, false);
+    // 新的权威整表仍能删除账户，不能把旧账户永久并入列表。
+    sources = ["openai"];
+    postResult = { ...fresh, snapshots: [openai] };
+    const removal = view.refresh(); await settle();
+    reads.at(-1).resolve(postResult); await removal;
+    view = render();
+    assert.deepEqual(view.data.clinePass, []);
+    assert.equal(view.data.openaiWeeklyQuota.usedPercent, 12);
+    // 被替代的读取不报错；新的独立读取失败仍应显示错误并保留额度。
+    const retry = view.refresh(); await settle();
+    const superseded = reads.at(-1);
+    render().refetchSnapshots(); render();
+    assert.equal(superseded.signal.aborted, true);
+    reads.at(-1).reject(new Error("independent sync failed"));
+    superseded.reject(new Error("cancelled old sync"));
+    await retry; await settle();
+    view = render();
+    assert.equal(view.error, "independent sync failed");
+    assert.equal(view.refreshError, null);
+    assert.equal(view.data.openaiWeeklyQuota.usedPercent, 12);
+    const unmount = view.refresh(); await settle();
+    const pendingSync = reads.at(-1);
+    for (const cleanup of cleanups) cleanup?.();
+    assert.equal(pendingSync.signal.aborted, true);
+    pendingSync.resolve(old); await unmount;
+  `;
+  expect(() => execFileSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8" })).not.toThrow();
 });

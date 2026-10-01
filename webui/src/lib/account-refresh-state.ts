@@ -1,12 +1,12 @@
 import type {
   CcgCreditAccountUsage, DeepseekAccountBalance, DeepseekBalance,
-  ManagementProvidersResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
+  OfficialAccountSourcesResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
   QuotaAccountUsage, OpencodeGoQuotaWindow, OpenAiAccountCredits,
 } from "./types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
 
-export type RefreshableAccount = Pick<ManagementProvidersResponse["providers"][number], "id" | "displayName">
+export interface RefreshableAccount { id: string; displayName: string }
 
 export interface AccountRefreshError {
   kind: "refresh-failed"
@@ -24,7 +24,6 @@ export interface AccountRefreshControl {
 export type AccountRefreshFailure =
   | { kind: "listFailed"; code: string | null }
   | { kind: "syncFailed"; code: string | null }
-  | { kind: "sourceMissing" }
 
 /** 删除成功提示只保存账户标识与是否需重启服务，文案在渲染时翻译。 */
 export interface AccountRemovalNotice {
@@ -62,12 +61,42 @@ export function scheduleAccountSnapshotExpiry(
   }
 }
 
-export function refreshableAccounts(result: ManagementProvidersResponse): RefreshableAccount[] {
-  return result.providers.filter((provider) => provider.kind === "managed" && (
-    provider.id.startsWith("clp-") || provider.id === "deepseek" || provider.id.startsWith("ds-")
-      || provider.id === "ocg" || provider.id.startsWith("ocg-")
-      || provider.id === "ccg" || provider.id.startsWith("ccg-")
-  ))
+export function refreshableAccounts(result: OfficialAccountSourcesResponse): RefreshableAccount[] {
+  return result.accounts.map(account => ({ id: account.provider, displayName: account.displayName }))
+}
+
+/** 整表读取负责账户增删与元数据；迟到的旧观测不能覆盖当前较新观测。 */
+export function mergeAccountSnapshotLists(previous: OfficialAccountSnapshotsResponse | null, next: OfficialAccountSnapshotsResponse): OfficialAccountSnapshotsResponse {
+  const current = new Map(previous?.snapshots.map(snapshot => [snapshot.provider, snapshot]))
+  const snapshots = next.snapshots.map(snapshot => {
+    const old = current.get(snapshot.provider)
+    return old && old.observedAtMs > snapshot.observedAtMs
+      ? { ...old, displayName: snapshot.displayName, default: snapshot.default }
+      : snapshot
+  })
+  return { ...next, snapshots, observedAtMs: Math.max(0, ...snapshots.map(snapshot => snapshot.observedAtMs)) }
+}
+
+/** 限制同时出站的查询，并在每个账户完成时立即交付结果。 */
+export async function refreshAccountSnapshots(
+  providers: readonly string[],
+  query: (provider: string, signal: AbortSignal) => Promise<OfficialAccountSnapshotsResponse>,
+  receive: (provider: string, result: PromiseSettledResult<OfficialAccountSnapshotsResponse>) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(4, providers.length) }, async () => {
+    while (!signal.aborted && next < providers.length) {
+      const provider = providers[next++]!
+      let result: PromiseSettledResult<OfficialAccountSnapshotsResponse>
+      try {
+        result = { status: "fulfilled", value: await query(provider, signal) }
+      } catch (reason) {
+        result = { status: "rejected", reason }
+      }
+      if (!signal.aborted) receive(provider, result)
+    }
+  }))
 }
 
 export function accountRefreshErrors(
@@ -123,9 +152,10 @@ export function accountSnapshotsAfterRefresh(
   for (const [index, result] of results.entries()) {
     if (result.status !== "fulfilled") continue
     const snapshot = result.value.snapshots.find((item) => item.provider === providers[index])
-    if (snapshot) snapshots.set(snapshot.provider, snapshot)
+    const current = snapshot ? snapshots.get(snapshot.provider) : undefined
+    if (snapshot && (!current || current.observedAtMs <= snapshot.observedAtMs)) snapshots.set(snapshot.provider, snapshot)
   }
-  return { ...base, snapshots: [...snapshots.values()] }
+  return { ...base, observedAtMs: Math.max(0, ...[...snapshots.values()].map(snapshot => snapshot.observedAtMs)), snapshots: [...snapshots.values()] }
 }
 
 export function accountSnapshotsWithoutRemoved(

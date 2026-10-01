@@ -16,6 +16,9 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
   private readonly adapters = new Map<string, ProviderAccountAdapter>();
   private readonly snapshotUsage = new Map<string, ProviderAccountUsage>();
   private readonly snapshotLimits = new Map<string, ProviderAccountLimits>();
+  private readonly limitsObservedAt = new Map<string, number>();
+  private limitsQuerySequence = 0;
+  private readonly savedLimitsSequence = new Map<string, number>();
 
   constructor(
     adapters: readonly ProviderAccountAdapter[],
@@ -67,13 +70,16 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     const adapter = this.adapters.get(modelProvider);
     // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
     if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
+    const sequence = ++this.limitsQuerySequence;
     const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
+    if (sequence < (this.savedLimitsSequence.get(modelProvider) ?? 0)) return result;
     this.persist(
       this.snapshotUsage.get(modelProvider)
         ?? { kind: "unsupported", provider: modelProvider },
       result,
     );
+    this.savedLimitsSequence.set(modelProvider, sequence);
     return result;
   }
 
@@ -142,18 +148,27 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
 
   private persist(usage: ProviderAccountUsage, limits?: ProviderAccountLimits): void {
     if (!this.snapshotWriter) return;
+    // OpenAI 用量不能刷新额度时间，也不能在重启后用占位额度覆盖已有记录。
+    if (usage.provider === "openai" && limits === undefined && !this.limitsObservedAt.has(usage.provider)) {
+      this.snapshotUsage.set(usage.provider, usage);
+      return;
+    }
+    const observedAtMs = usage.provider === "openai" && limits === undefined
+      ? this.limitsObservedAt.get(usage.provider)!
+      : Date.now();
     const mergedUsage = usage;
     // 用量查询没有额度观测；只合并已成功保存的额度，不用占位值覆盖。
     const mergedLimits = limits ?? this.snapshotLimits.get(usage.provider)
       ?? { kind: "unsupported" as const, provider: usage.provider };
     this.snapshotWriter.writeOfficialAccountSnapshot(createOfficialAccountSnapshot({
       provider: mergedUsage.provider,
-      observedAtMs: Date.now(),
+      observedAtMs,
       usage: mergedUsage,
       limits: mergedLimits,
     }));
     this.snapshotUsage.set(usage.provider, usage);
     this.snapshotLimits.set(usage.provider, mergedLimits);
+    if (limits !== undefined) this.limitsObservedAt.set(usage.provider, observedAtMs);
   }
 }
 

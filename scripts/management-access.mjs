@@ -1,5 +1,5 @@
-const maximumRateLimitEntries = 128 * 3;
-const requestRateLimits = { read: 120, write: 30, "high-risk": 5 };
+const requestRateLimits = { read: 120, write: 30, "high-risk": 5, "account-refresh": 120 };
+const maximumRateLimitEntries = 128 * Object.keys(requestRateLimits).length;
 
 export class ManagementSecurityError extends Error {
   constructor(code, message, status = 403) {

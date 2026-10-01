@@ -27,6 +27,7 @@ export type {
   OpenAiAccountCredits,
   OfficialAccountSnapshot,
   OfficialAccountSnapshotsResponse,
+  OfficialAccountSourcesResponse,
   OverviewResponse,
   ProviderGroup,
   Range,

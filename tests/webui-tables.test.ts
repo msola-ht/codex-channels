@@ -4,6 +4,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 describe("WebUI metrics table presentation", () => {
   let markup: Record<string, string>;
+  it("shows OpenAI refresh progress and per-account failure feedback", () => {
+    expect(markup.quotaRefreshing).toContain("刷新中");
+    expect(markup.quotaRefreshing).toContain("disabled");
+    expect(markup.quotaRefreshFailed).toContain("刷新失败");
+    expect(markup.quotaRefreshFailed).toContain("账户查询超时，请重试");
+    expect(markup.quotaRefreshFailed).toContain("重试");
+  });
   it("shows OpenAI remaining Credits, voucher counts and expiry details without losing zero or precision", () => {
     expect(markup.quotaCredits).toContain("12.34567890123456789");
     expect(markup.quotaCredits).toContain("周额度已用 37.5%");
@@ -129,6 +136,10 @@ describe("WebUI metrics table presentation", () => {
           quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
           quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
           quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
+          quotaRefreshing: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
+            refreshControl: { refreshing: true, disabled: true, error: null, onRefresh: noop } }),
+          quotaRefreshFailed: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
+            refreshControl: { refreshing: false, disabled: false, error: { kind: "refresh-failed", message: "账户查询超时，请重试" }, onRefresh: noop } }),
           quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
           quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",

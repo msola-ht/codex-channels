@@ -7,17 +7,67 @@ import {
   scheduleAccountSnapshotExpiry,
   accountSnapshotsWithMissingProviders,
   accountSnapshotsAfterRefresh,
+  mergeAccountSnapshotLists,
   accountSnapshotsWithoutRemoved,
   ccgAccountFromSnapshot,
   deepseekAccountFromSnapshot,
   refreshableAccounts,
+  refreshAccountSnapshots,
   remainingRemovedAccountProviders,
   quotaAccountFromSnapshot,
 } from "../webui/src/lib/account-refresh-state.js";
 import { estimateServerTime } from "../webui/src/lib/server-time.js";
-import type { ManagementProvidersResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
+import type { OfficialAccountSourcesResponse, OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
 
 describe("WebUI per-account refresh state", () => {
+  it("maps the isolated account source list without model configuration", () => {
+    const accounts = ["openai", "clp-main", "ds-main"].map(provider => ({ provider, accountId: null, displayName: provider, default: false }));
+    expect(refreshableAccounts({ accounts, warnings: [] })).toEqual(accounts.map(account => ({ id: account.provider, displayName: account.displayName })));
+  });
+
+  it("keeps newer quota observations across late single-account and whole-list responses", () => {
+    const snapshot = { provider: "openai", accountId: null, displayName: "OpenAI", default: false,
+      observedAtMs: 2000, available: true, usage: null, limits: { usedPercent: 0 } };
+    const current = { observedAtMs: 2000, snapshots: [snapshot], warnings: [] };
+    const older = { ...current, observedAtMs: 1000, snapshots: [{ ...snapshot, observedAtMs: 1000, limits: { usedPercent: 80 } }] };
+    expect(accountSnapshotsAfterRefresh(current, ["openai"], [{ status: "fulfilled", value: older }])).toEqual(current);
+    expect(mergeAccountSnapshotLists(current, older)).toEqual(current);
+    expect(mergeAccountSnapshotLists(current, { ...older, snapshots: [] }).snapshots).toEqual([]);
+  });
+
+  it("publishes completed accounts before slower queries and preserves individual failures", async () => {
+    const response = { snapshots: [], warnings: [], observedAtMs: 0 };
+    let finish!: (value: typeof response) => void;
+    const slow = new Promise<typeof response>(resolve => { finish = resolve; });
+    const receive = vi.fn();
+    const refresh = refreshAccountSnapshots(["clp-slow", "ds-fast", "ccg-failed"], async provider => {
+      if (provider === "clp-slow") return slow;
+      if (provider === "ccg-failed") throw new Error("unavailable");
+      return response;
+    }, receive, new AbortController().signal);
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledTimes(2));
+    expect(receive).toHaveBeenCalledWith("ds-fast", { status: "fulfilled", value: response });
+    expect(receive).toHaveBeenCalledWith("ccg-failed", { status: "rejected", reason: expect.any(Error) });
+    finish(response);
+    await refresh;
+    expect(receive).toHaveBeenLastCalledWith("clp-slow", { status: "fulfilled", value: response });
+  });
+
+  it("bounds outgoing queries and drops late results and queued work after cancellation", async () => {
+    const controller = new AbortController();
+    const response = { snapshots: [], warnings: [], observedAtMs: 0 };
+    let finish!: (value: typeof response) => void;
+    const pending = new Promise<typeof response>(resolve => { finish = resolve; });
+    const query = vi.fn(async () => pending);
+    const receive = vi.fn();
+    const refresh = refreshAccountSnapshots(Array.from({ length: 10 }, (_, i) => `clp-${i}`), query, receive, controller.signal);
+    expect(query).toHaveBeenCalledTimes(4);
+    controller.abort();
+    finish(response);
+    await refresh;
+    expect(query).toHaveBeenCalledTimes(4);
+    expect(receive).not.toHaveBeenCalled();
+  });
   it("establishes the first snapshot from a successful refresh even when list reads fail", () => {
     const response = { observedAtMs: 123, warnings: [], snapshots: [{
       provider: "ocg-main", accountId: "main", displayName: "OCG", default: true,
@@ -37,7 +87,7 @@ describe("WebUI per-account refresh state", () => {
     expect(quotaAccountFromSnapshot(refreshed.snapshots[0]!).subscriptionRequired).toBe(true);
     const failed = accountSnapshotsAfterRefresh(refreshed, ["ocg-old"], [{ status: "rejected", reason: new Error("timeout") }]);
     expect(failed.snapshots).toEqual([missing]);
-    const recovered = accountSnapshotsAfterRefresh(failed, ["ocg-old"], [{ status: "fulfilled", value: response }]);
+    const recovered = accountSnapshotsAfterRefresh(failed, ["ocg-old"], [{ status: "fulfilled", value: { ...response, observedAtMs: 3, snapshots: [{ ...old, observedAtMs: 3 }] } }]);
     expect(quotaAccountFromSnapshot(recovered.snapshots[0]!).subscriptionRequired).toBe(false);
   });
 
@@ -113,17 +163,6 @@ describe("WebUI per-account refresh state", () => {
     expect(accountSnapshotIsStale(99_999, 1_000_000)).toBe(true);
   });
 
-  it("refreshes all managed DS, OCG, and CCG accounts", () => {
-    const providers = [
-      { id: "openai", kind: "managed" }, { id: "deepseek", kind: "managed" },
-      { id: "ds-work", kind: "managed" },
-      { id: "ocg-one", kind: "managed" }, { id: "ocg-custom", kind: "custom" },
-      { id: "ccg-main", kind: "managed" }, { id: "ccg-custom", kind: "custom" },
-    ].map((provider) => ({ ...provider, displayName: provider.id }));
-    expect(refreshableAccounts({ providers } as ManagementProvidersResponse).map((provider) => provider.id))
-      .toEqual(["deepseek", "ds-work", "ocg-one", "ccg-main"]);
-  });
-
   it("projects DS balances and CCG credits from account snapshots", () => {
     const base = {
       accountId: "main", displayName: "Account", default: true,
@@ -148,8 +187,8 @@ describe("WebUI per-account refresh state", () => {
 });
 
 it("includes CLP in refresh and maps official quota reset seconds to milliseconds", () => {
-  const providers = { providers: [{ id: "clp-test", kind: "managed", displayName: "CLP" }] } as ManagementProvidersResponse;
-  expect(refreshableAccounts(providers)).toEqual(providers.providers);
+  const sources: OfficialAccountSourcesResponse = { accounts: [{ provider: "clp-test", accountId: "test", default: true, displayName: "CLP" }], warnings: [] };
+  expect(refreshableAccounts(sources)).toEqual([{ id: "clp-test", displayName: "CLP" }]);
   const account = quotaAccountFromSnapshot({ provider: "clp-test", accountId: null, displayName: "CLP", default: false,
     observedAtMs: 1234, available: true, limits: null, usage: { kind: "quota-windows", windows: [
       { windowId: "five-hour", label: "5小时", usedPercent: 12.5, resetsAt: 1800000000, status: null },
