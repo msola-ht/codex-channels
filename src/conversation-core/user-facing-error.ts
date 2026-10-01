@@ -104,6 +104,7 @@ export type UserFacingErrorCode =
   | "agents.usage"
   | "agents.not-found"
   | "agents.config-unreadable"
+  | "reset-credit.failed"
   | "command.unsupported"
   | "review.usage";
 

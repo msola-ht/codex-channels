@@ -465,3 +465,7 @@ export function previewResetCredit(input: { creditId: string }, signal?: AbortSi
 export function consumeResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<ResetCreditResult> {
   return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/consume`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
 }
+
+export function cancelResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<{ cancelled: true }> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/cancel`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
+}

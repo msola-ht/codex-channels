@@ -48,6 +48,8 @@ describe("OpenAI reset credit confirmation", () => {
     reject(new Error("private upstream message"));
     await expect(first).rejects.toMatchObject({ code: "reset_unknown", message: "reset_unknown" });
     expect(f.consumeResetCredit).toHaveBeenCalledOnce();
+    await expect(f.service.consume(b.attemptId)).rejects.toMatchObject({ code: "reset_stale" });
+    for (let i = 0; i < 128; i++) await f.service.preview("credit-a");
   });
   it("keeps success when snapshot refresh fails", async () => {
     const f = fixture(); f.refresh.mockRejectedValue(new Error("disk"));

@@ -144,7 +144,7 @@ export function requestGatewayAccountRefresh(configPath, provider, signal) {
 }
 
 export function requestGatewayResetCredits(configPath, request, signal) {
-  if (!["reset/list", "reset/preview", "reset/consume"].includes(request?.method)) return Promise.reject(new GatewayAccountRefreshError("invalid_request", "重置券请求无效"));
+  if (!["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(request?.method)) return Promise.reject(new GatewayAccountRefreshError("invalid_request", "重置券请求无效"));
   return requestGatewayAccountOperation(configPath, request, signal);
 }
 
@@ -277,8 +277,8 @@ function readJsonLine(socket) {
 }
 
 function parseRefreshRequest(value) {
-  if (value?.version === protocolVersion && ["reset/list", "reset/preview", "reset/consume"].includes(value.method)) {
-    const field = value.method === "reset/preview" ? "creditId" : value.method === "reset/consume" ? "attemptId" : null;
+  if (value?.version === protocolVersion && ["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(value.method)) {
+    const field = value.method === "reset/preview" ? "creditId" : ["reset/consume", "reset/cancel"].includes(value.method) ? "attemptId" : null;
     if (Object.keys(value).some(key => !["version", "method", field].includes(key))
       || (field !== null && (typeof value[field] !== "string" || !value[field] || value[field].length > 256 || /[\0\r\n]/u.test(value[field])))) {
       throw new GatewayAccountRefreshError("invalid_request", "重置券请求无效");

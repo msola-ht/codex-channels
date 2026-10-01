@@ -29,6 +29,7 @@ import {
 } from "../conversation-extension-command-format.js";
 import {
   formatConversationLimits,
+  formatConversationResetCredits,
   formatConversationModels,
   formatConversationUsage,
 } from "../conversation-model-account-command-format.js";
@@ -198,8 +199,13 @@ export async function renderTelegramCommandResult(
         formatConversationMetrics(result),
       );
       return;
+    case "reset-credit":
+      await replyTelegramPanel(context, formatConversationResetCredits(result, "buttons"),
+        resetCreditKeyboard(result, String(context.chat?.id ?? ""), String(context.from?.id ?? "")));
+      return;
     case "limits":
-      await replyTelegramPanel(context, formatConversationLimits(result));
+      await replyTelegramPanel(context, formatConversationLimits(result), result.result.kind === "rate-limits"
+        ? { inline_keyboard: [[{ text: "查看重置券", callback_data: "rc:page:1" }]] } : undefined);
       return;
     case "permissions":
       await replyTelegramPanel(
@@ -638,4 +644,35 @@ export async function replyTelegramPanel(
 
 function boundedButtonLabel(value: string): string {
   return value.length <= 48 ? value : `${value.slice(0, 47)}…`;
+}
+
+const resetCreditListTokens = new Map<string, { token: string; expiresAt: number }>();
+export function telegramResetCreditListToken(
+  result: Extract<ConversationCommandResult, { kind: "reset-credit" }>, chatId: string, actorId: string,
+): string {
+  for (const [key, value] of resetCreditListTokens) if (value.expiresAt <= Date.now()) resetCreditListTokens.delete(key);
+  const key = JSON.stringify([chatId, actorId, result.result]);
+  const previous = resetCreditListTokens.get(key);
+  if (previous) return previous.token;
+  const token = randomBytes(32).toString("base64url");
+  if (resetCreditListTokens.size >= 1000) resetCreditListTokens.delete(resetCreditListTokens.keys().next().value!);
+  resetCreditListTokens.set(key, { token, expiresAt: Date.now() + 5 * 60_000 });
+  return token;
+}
+function resetCreditKeyboard(
+  result: Extract<ConversationCommandResult, { kind: "reset-credit" }>, chatId: string, actorId: string,
+): InlineKeyboardMarkup | undefined {
+  const value = result.result;
+  if (value.type === "preview") return { inline_keyboard: [[
+    { text: "确认使用", callback_data: `rc:confirm:${value.token}` },
+    { text: "取消", callback_data: `rc:cancel:${value.token}` },
+  ]] };
+  if (value.type !== "list") return undefined;
+  const token = telegramResetCreditListToken(result, chatId, actorId);
+  return { inline_keyboard: [
+    ...value.credits.map((credit, index) => [{ text: boundedButtonLabel(`${index + 1}. ${credit.title ?? "用量重置券"}`), callback_data: `rc:use:${value.page}:${index}:${token}` }]),
+    [ ...(value.page > 1 ? [{ text: "上一页", callback_data: `rc:page:${value.page - 1}` }] : []),
+      ...(value.page < value.pageCount ? [{ text: "下一页", callback_data: `rc:page:${value.page + 1}` }] : []),
+      { text: "刷新", callback_data: `rc:page:${value.page}` } ],
+  ] };
 }

@@ -37,6 +37,7 @@ import {
 } from "../output-copy.js";
 import { formatTextFileTooLarge } from "../text-file-copy.js";
 import { SurfaceInputCoalescer } from "../surface-input-coalescer.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
 import { formatQuotedInput } from "../quoted-input.js";
 import { surfaceCommandAliases } from "../slash-command.js";
 import {
@@ -50,6 +51,7 @@ import {
   formatTelegramThreadQueueDeleteConfirmation,
   formatTelegramThreadQueueItemAction,
   telegramModelSelectionToken,
+  telegramResetCreditListToken,
   replyTelegramPanel,
   telegramPluginSelectionToken,
   threadQueueDeleteConfirmationKeyboard,
@@ -585,6 +587,32 @@ export class TelegramSurface {
       await context.editMessageText(
         "请输入权限 Profile，例如发送：\n/workspaceperm profile :read-only",
       );
+    });
+    this.bot.callbackQuery(/^rc:page:([1-9]\d{0,3})$/, async context => {
+      await context.answerCallbackQuery({ text: "正在查询重置券" });
+      const result = await this.commands.execute(target(context), "limits", `reset ${context.match[1]}`, String(context.from.id));
+      await renderTelegramCommandResult(context, result);
+    });
+    this.bot.callbackQuery(/^rc:use:([1-9]\d{0,3}):([0-7]):([A-Za-z0-9_-]{43})$/, async context => {
+      await context.answerCallbackQuery({ text: "正在核对重置券" });
+      const actor = String(context.from.id);
+      const listed = await this.commands.execute(target(context), "limits", `reset ${context.match[1]}`, actor);
+      if (listed.kind !== "reset-credit" || listed.result.type !== "list"
+        || telegramResetCreditListToken(listed, String(context.chat?.id ?? ""), actor) !== context.match[3]) {
+        throw new UserFacingError("reset-credit.failed", "重置券列表已变化", { reason: "reset_stale" });
+      }
+      const credit = listed.result.credits[Number(context.match[2])];
+      if (!credit) throw new UserFacingError("reset-credit.failed", "重置券列表已变化", { reason: "reset_stale" });
+      const result = await this.commands.execute(target(context), "limits", `reset use ${credit.id}`, actor);
+      await renderTelegramCommandResult(context, result);
+    });
+    this.bot.callbackQuery(/^rc:(confirm|cancel):([0-9a-f-]{36})$/, async context => {
+      await context.answerCallbackQuery({ text: "正在处理重置券确认" });
+      const result = await this.commands.execute(target(context), "limits", `reset ${context.match[1]} ${context.match[2]}`, String(context.from.id));
+      // 业务结果已确定；清理旧按钮失败不能把已消费误报为消费失败。
+      try { await context.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }); }
+      catch (error) { this.logger.warn({ ...surfaceErrorMetadata(error) }, "重置券按钮清理失败"); }
+      await renderTelegramCommandResult(context, result);
     });
     this.bot.callbackQuery(
       /^schedule:confirm:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,

@@ -392,6 +392,22 @@ codexc traffic
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
 
+### OpenAI 重置券 CLI
+
+Gateway 和主 App Server 可用、已登录 ChatGPT 时，可在本机使用：
+
+```bash
+codexc reset-credit list          # 实时列表，日期为 UTC
+codexc reset-credit list --json   # 机器可读的账户 ID、数量与可用券明细
+codexc reset-credit use           # 交互选券、预览并确认
+codexc reset-credit use <券ID>    # 指定券后预览并确认
+```
+
+命令不依赖 WebUI 进程。取消或中断已获取的预览会尝试通过私有 IPC 释放记录，清理失败会明确提示并由 5 分钟有效期兜底。消费必须在交互终端明确确认，默认取消；不支持 `--yes` 或非交互消费。
+预览展示账户、券名称、官方说明和到期时间；Gateway 复核账户与券状态后单次执行，5 分钟预览过期需重新操作。
+中断、超时或丢失消费响应时不自动重试，先重新运行 `list` 核对官方状态。消费结果与账户快照刷新结果分开显示。
+API Key 账户、未知类型或未提供明细的券不可使用。渠道使用 `/limits reset` 查询、`/limits reset use <券ID>` 预览，再按返回的 `/limits reset confirm <令牌>` 确认或 `/limits reset cancel <令牌>` 取消。飞书和 Telegram 的 `/limits` 提供“查看重置券”按钮；列表可点选、翻页、刷新，预览提供“确认使用”和“取消”按钮，无需复制令牌。微信使用文字命令，飞书和 Telegram 也保留文字入口；令牌仅限原用户、会话、工作区及当前 Thread，5 分钟过期，重启失效。WebUI 操作见[重置券使用](webui.md#openai-重置券使用)。
+
 ### 正常发图与图片引用
 
 照常在渠道发送图片即可，不需要额外命令。使用 OpenAI ChatGPT 登录时，Gateway 上传已校验的

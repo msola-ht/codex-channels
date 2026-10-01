@@ -1,7 +1,7 @@
 import pino from "pino";
 import { vi } from "vitest";
 
-import type { ScheduledTaskUseCases } from "../src/application/index.js";
+import type { ConversationResetCreditService, ScheduledTaskUseCases } from "../src/application/index.js";
 import {
   FeishuConversationAdapter as ProductionFeishuConversationAdapter,
   FeishuOutbox,
@@ -47,14 +47,15 @@ export class FeishuConversationAdapter extends ProductionFeishuConversationAdapt
     interactions?: FeishuAdapterArguments[8],
     inputOptions: FeishuAdapterArguments[9] & {
       scheduledTasks?: ScheduledTaskUseCases;
+      resetCredits?: ConversationResetCreditService;
     } = {},
   ) {
-    const { scheduledTasks, ...options } = inputOptions;
+    const { scheduledTasks, resetCredits, ...options } = inputOptions;
     super(
       conversationInputUseCases(conversations),
       outbox,
       images,
-      conversationCommandExecutor(conversations, scheduledTasks),
+      conversationCommandExecutor(conversations, scheduledTasks, resetCredits),
       permissionStatus,
       oauth,
       commandCenter,

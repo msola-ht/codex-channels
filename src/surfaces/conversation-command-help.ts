@@ -80,6 +80,7 @@ export const conversationCommandHelpSections = [
       "/plugin · /plugin health · /plugin list [页码] [search <关键词>]",
       "/plugin <名称、完整 ID 或序号> [任务]",
       "/usage · /limits · /permissions",
+      "/limits reset [页码] · /limits reset use <券ID> · /limits reset confirm|cancel <令牌>",
       "/metrics session",
       "/metrics <global|providers|models|errors> [24h|7d|30d|90d|all]",
     ],

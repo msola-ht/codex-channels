@@ -34,7 +34,9 @@ describe("Gateway account refresh IPC", () => {
     await expect(requestGatewayResetCredits(configPath, { method: "reset/list" })).resolves.toEqual({ credits: [] });
     await expect(requestGatewayResetCredits(configPath, { method: "reset/consume", attemptId: "attempt" })).rejects.toMatchObject({ code: "reset_unknown" });
     await expect(requestGatewayResetCredits(configPath, { method: "reset/preview", creditId: "" })).rejects.toMatchObject({ code: "invalid_request" });
-    expect(reset).toHaveBeenCalledTimes(2);
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/cancel", attemptId: "attempt" })).resolves.toEqual({ credits: [] });
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/cancel", attemptId: "" })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(reset).toHaveBeenCalledTimes(3);
   });
 
   it("refreshes a supported account through the private Gateway endpoint", async () => {

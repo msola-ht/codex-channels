@@ -283,7 +283,7 @@ export class FeishuCommandCenter {
       || (action.tag !== "button" && action.tag !== "form_submit")
       || token === undefined
       || resolvedCommand === undefined
-      || input.length > 256
+      || !isBoundedCommandInput(resolvedCommand, input)
       || !isCommandCenterAction(resolvedCommand)
     ) {
       return "invalid";
@@ -874,7 +874,7 @@ function collectCommandSelections(
       && typeof command === "string"
       && isCommandCenterAction(command)
       && typeof input === "string"
-      && input.length <= 256
+      && isBoundedCommandInput(command, input)
     ) {
       selections.add(selectionKey(command, input));
     }
@@ -928,4 +928,9 @@ function resolveFormInput(
     return undefined;
   }
   return `${form.inputPrefix ?? ""}${value}`;
+}
+
+function isBoundedCommandInput(command: string, input: string): boolean {
+  // 券 ID 最长 256 字符，另计规范命令前缀；其余命令保持原限制。
+  return input.length <= (command === "limits" && input.startsWith("reset use ") ? 266 : 256);
 }

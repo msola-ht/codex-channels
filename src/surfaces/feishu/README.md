@@ -27,7 +27,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
   收起的核对面板中。
 - `card-action.ts`：严格裁剪 `card.action.trigger` 的路由字段和受限字符串动作值。
 - `command-center.ts`：生成 CardKit 2.0 分类命令中心、帮助、选择与输入卡片，维护有界短期令牌与菜单事件去重，并复用
-  Application 的唯一命令目录与执行入口；选择卡和通用输入卡不解析第二套命令语法。
+  Application 的唯一命令目录与执行入口；重置券选券及确认复用选择卡的一次性令牌，
+  选择卡和通用输入卡不解析第二套命令语法。
 - `application-api.ts`：隔离应用权限与已发布配置读取及 SDK 增量授权，严格裁剪远端应用及
   版本响应。
 - `application-setup.ts`：生成 CardKit 2.0 精简 Doctor 和缺失权限授权卡片，绑定 App、Chat、Actor 和

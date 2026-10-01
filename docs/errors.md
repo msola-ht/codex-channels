@@ -133,6 +133,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `scheduled-task.not-found` | 找不到指定计划任务或 Run | ID 不存在、已删除或不属于当前 Actor/Conversation |
 | `scheduled-task.snapshot.required` | 请先刷新计划任务或 Run 列表 | 数字选择器快照缺失或过期 |
 | `scheduled-task.state.invalid` | 当前状态不允许该计划任务操作 | 功能未启用、任务阻塞或 Run 不可重试 |
+| `reset-credit.failed` | 按受控 reason 展示用法、授权不足、确认失效、忙碌、结果待确认或暂不可用 | `/limits reset` 参数、身份或上下文复核失败；消费响应丢失时不自动重试 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
 
 ### 提供商、协作模式与计划

@@ -35,5 +35,5 @@ export function requestGatewayAccountRefresh(
   signal?: AbortSignal,
 ): Promise<{ provider: string }>;
 
-export type ResetCreditRequest = { method: "reset/list" } | { method: "reset/preview"; creditId: string } | { method: "reset/consume"; attemptId: string };
+export type ResetCreditRequest = { method: "reset/list" } | { method: "reset/preview"; creditId: string } | { method: "reset/consume" | "reset/cancel"; attemptId: string };
 export function requestGatewayResetCredits(configPath: string, request: ResetCreditRequest, signal?: AbortSignal): Promise<unknown>;

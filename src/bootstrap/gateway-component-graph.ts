@@ -87,6 +87,7 @@ import {
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
   OpenAiResetCreditService,
+  ConversationResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
 } from "../application/index.js";
@@ -863,7 +864,16 @@ export abstract class GatewayComponentGraph {
       : undefined;
     const scheduledTaskUseCases = this.scheduledTasks?.service;
     const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
-    const commands = new ConversationCommandService(service, scheduledTaskUseCases);
+    const channelResetCredits = new ConversationResetCreditService(this.resetCredits, (target, actorId) => {
+      this.requireRunning();
+      if (!this.accessPolicy(target)?.isAllowed({ target, actorId }) || !this.bindings.actors(target).includes(actorId)) {
+        throw new UserFacingError("reset-credit.failed", "当前用户未获授权", { reason: "forbidden" });
+      }
+      const status = service.status(target);
+      const workspace = this.workspaces.require(status.workspaceId);
+      return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
+    });
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -1183,6 +1193,7 @@ export abstract class GatewayComponentGraph {
       case "reset/list": return this.resetCredits.list(signal);
       case "reset/preview": return this.resetCredits.preview(request.creditId, signal);
       case "reset/consume": return this.resetCredits.consume(request.attemptId, signal);
+      case "reset/cancel": this.resetCredits.cancel(request.attemptId); return { cancelled: true };
     }
   }
 
@@ -1398,17 +1409,21 @@ export abstract class GatewayComponentGraph {
     if (JSON.stringify(current) !== owner) return false;
     const target = event.target;
     const actors = this.bindings.actors(target);
-    const policy = target.surface === "telegram" && this.config.telegramEnabled
+    const policy = this.accessPolicy(target);
+    if (!policy) return false;
+    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
+    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
+      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
+  }
+
+  private accessPolicy(target: ConversationTarget) {
+    return target.surface === "telegram" && this.config.telegramEnabled
       ? new TelegramAccessPolicy(this.config.telegramAllowedUserIds, "default")
       : target.surface === "feishu" && this.config.feishu
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
       : undefined;
-    if (!policy) return false;
-    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
-    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
-      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
   }
 
   private shutdownComponents(): Promise<void> {

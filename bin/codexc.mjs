@@ -71,6 +71,7 @@ import {
 } from "../scripts/service-command.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
 import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
+import { runResetCreditCommand } from "../scripts/reset-credit-command.mjs";
 import { runDeliveryCommand } from "../scripts/delivery-command.mjs";
 import { runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 
@@ -103,6 +104,7 @@ const helpText = {
   deepseek                     管理 DeepSeek 多账户
 
 指标与工具：
+  reset-credit                 查询并确认使用 OpenAI 重置券
   metrics                      查询、导出和维护模型指标（交互菜单或子命令）
   relay                        管理模型转发监听、调用方与访问密钥
   delivery                     离线核对并处理未确认的渠道投递
@@ -479,6 +481,9 @@ async function executeCommand(command, args) {
       }
       requireNoArguments(args, "用法：codexc uninstall");
       runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
+      break;
+    case "reset-credit":
+      await runResetCreditCommand(args);
       break;
     case "metrics":
       await metrics(args);

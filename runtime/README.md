@@ -142,7 +142,7 @@
   Gateway 已完成应用启动且尚未进入关闭流程。
 - `queue-events.mjs` / `queue-events.d.mts`：投递箱与 Relay 共用的有界私有变化通知流；独立订阅连接、首次失效通知、100 毫秒合并、心跳、取消与背压清理，只传变化类型。
 - `delivery-control.mjs` / `delivery-control.d.mts`：投递箱私有在线管理与变化通知 IPC（`watchDeliveryChanges`）；Unix 使用系统 `/tmp` 规范目录下的当前用户私有短目录，以投递目录规范路径的 SHA-256 确定端点，连接前校验父目录及 Socket 所有者和权限；Windows 继续使用私有描述文件及认证管道。最多 50 条修订绑定的重试/忽略请求，限制连接数、报文大小和等待时间；只输出受控结果，已发送请求的响应丢失不允许离线回退或自动重试。
-- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览和消费；
+- `gateway-account-refresh.mjs` / `gateway-account-refresh.d.mts`：提供 v2 私有账户 IPC，支持 Provider 刷新及 OpenAI 重置券列表、预览、取消和消费；
   WebUI 提交精确 Provider ID、券 ID 或短期操作 ID，Gateway 使用现有账户适配器和统一代理查询，并保持指标库单写入者；
   公开错误文案按受控原因生成，不透传内部 message；调用方取消或连接结束时取消该等待，
   关闭主动取消刷新并释放 IPC 任务，不等待不响应取消的回调。

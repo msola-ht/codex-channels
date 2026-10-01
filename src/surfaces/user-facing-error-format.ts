@@ -1,5 +1,6 @@
 import {
   archivedSessionCommandUsageText,
+  resetCreditCommandUsage,
   mcpCommandUsageText,
   pluginCommandUsageText,
   sessionCommandUsageText,
@@ -15,6 +16,15 @@ export function formatSurfaceUserFacingError(
   surfaceLabel: "Telegram" | "飞书" | "微信",
 ): string {
   switch (error.code) {
+    case "reset-credit.failed":
+      switch (error.details.reason) {
+        case "usage": return resetCreditCommandUsage;
+        case "forbidden": return "当前用户没有操作该账户重置券的授权";
+        case "reset_stale": return "用户、会话、工作区、账户、券状态或确认已变化，请重新使用 /limits reset 查询";
+        case "reset_busy": return "已有重置操作正在处理或确认数量已达上限，请稍后查询";
+        case "reset_unknown": return "消费结果待确认，请使用 /limits reset 核对官方状态，不要直接重复消费";
+        default: return "重置券暂不可用，请检查 ChatGPT 登录状态并稍后查询";
+      }
     case "message.empty":
       return "消息不能为空";
     case "conversation.name.invalid":

@@ -15,6 +15,7 @@ import {
 } from "./conversation-extension-command-format.js";
 import {
   formatConversationLimits,
+  formatConversationResetCredits,
   formatConversationModels,
   formatConversationUsage,
 } from "./conversation-model-account-command-format.js";
@@ -102,6 +103,8 @@ export function renderConversationCommandResult(
       return formatConversationUsage(result);
     case "metrics":
       return formatConversationMetrics(result);
+    case "reset-credit":
+      return formatConversationResetCredits(result);
     case "limits":
       return formatConversationLimits(result);
     case "permissions":

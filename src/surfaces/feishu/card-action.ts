@@ -147,7 +147,9 @@ function requireStringRecord(
         key.length === 0
         || key.length > 64
         || typeof entry !== "string"
-        || entry.length > maximumValueLength,
+        || entry.length > (field === "action.value" && key === "codexc_command_input"
+          && record.codexc_command === "limits" && entry.startsWith("reset use ")
+          ? 266 : maximumValueLength),
     )
   ) {
     throw new FeishuCardActionError(field);

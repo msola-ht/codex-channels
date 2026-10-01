@@ -54,6 +54,7 @@ codexc doctor                # 只读诊断
 codexc metrics               # 查询和导出本机模型请求指标
 codexc relay status          # 查询可选模型 API 转发进程
 codexc traffic               # 查看模型请求与响应转储
+codexc reset-credit list     # 查询 OpenAI 可用重置券；use 交互确认使用
 codexc webui                 # 启动本地指标与设置 WebUI
 codexc update                # 更新受管源码、同步配套 CLI 并检查数据库升级
 codexc remote                # 连接 Gateway 共享的原生 TUI

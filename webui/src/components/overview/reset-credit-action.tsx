@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -7,13 +7,21 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Spinner } from "@/components/ui/spinner"
 import { useManagementConfirmedMutation } from "@/hooks/use-management-confirmed-mutation"
 import { useTranslation } from "@/hooks/use-translation"
-import { ApiClientError, consumeResetCredit, fetchResetCredits, previewResetCredit, refreshOfficialAccountSnapshot } from "@/lib/api"
+import { ApiClientError, cancelResetCredit, consumeResetCredit, fetchResetCredits, previewResetCredit, refreshOfficialAccountSnapshot } from "@/lib/api"
 import { formatTime } from "@/lib/format"
 import type { ResetCreditPreview, ResetCreditResult } from "@/lib/types"
 
 const applyReset = async (_input: { creditId: string }, token: string, signal: AbortSignal | undefined, preview: ResetCreditPreview) =>
   consumeResetCredit(preview.attemptId, token, signal).catch((error: unknown) => {
-    if (error instanceof ApiClientError) throw error
+    // 只保留后端明确返回的受控结果；外层 HTTP 错误不能证明消费未执行。
+    if (error instanceof ApiClientError && [
+      "reset_stale", "reset_busy", "reset_unavailable", "reset_unknown",
+      "management.confirmation-invalid", "management_audit_unavailable",
+      "unauthorized", "invalid_request", "management_unavailable",
+      "management.rate-limited", "management.origin-invalid",
+      "management.request-line-too-large", "management.headers-too-large",
+      "management.content-type-invalid", "management.body-too-large",
+    ].includes(error.code)) throw error
     throw new ApiClientError("reset_unknown", 503, "reset_unknown")
   })
 
@@ -33,12 +41,19 @@ function ResetCreditDialog({ onClose, onChanged }: { onClose: () => void; onChan
   const [refreshFailed, setRefreshFailed] = useState(false)
   const [selected, setSelected] = useState("")
   const [result, setResult] = useState<ResetCreditResult | null>(null)
-  const busy = management.busy || refreshing
+  const actionInFlight = useRef(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelFailed, setCancelFailed] = useState(false)
+  const busy = management.busy || refreshing || cancelling
   const pending = management.pendingPreview
   const credit = pending?.preview.credit ?? management.data?.credits.find(item => item.id === selected)
   const confirm = async () => {
-    const outcome = await management.confirm()
-    if (outcome) { setResult(outcome); onChanged(); setSelected("") }
+    if (busy || actionInFlight.current) return
+    actionInFlight.current = true
+    try {
+      const outcome = await management.confirm()
+      if (outcome) { setResult(outcome); onChanged(); setSelected("") }
+    } finally { actionInFlight.current = false }
   }
   const refresh = async () => {
     management.clearError()
@@ -48,18 +63,30 @@ function ResetCreditDialog({ onClose, onChanged }: { onClose: () => void; onChan
     catch { setRefreshFailed(true) }
     finally { management.refetch(); setSelected(""); setRefreshing(false) }
   }
+  const cancel = async (close: boolean) => {
+    if (busy || actionInFlight.current) return
+    if (!pending) { onClose(); return }
+    actionInFlight.current = true
+    setCancelling(true)
+    setCancelFailed(false)
+    try {
+      await cancelResetCredit(pending.preview.attemptId, pending.confirmationToken, AbortSignal.timeout(5_000))
+      if (close) onClose()
+    } catch { setCancelFailed(true) }
+    finally { management.cancel(); actionInFlight.current = false; setCancelling(false) }
+  }
   const errorCode = management.actionErrorCode
   const errorMessage = errorCode === "reset_unknown" ? t("resetCredits.unknown")
     : errorCode === "reset_stale" || errorCode === "management.confirmation-invalid" ? t("resetCredits.stale")
     : errorCode === "reset_busy" ? t("resetCredits.busy") : t("resetCredits.unavailable")
-  return <Dialog open onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog open onOpenChange={open => { if (!open && !busy) void cancel(true) }}>
     <DialogContent closeLabel={t("resetCredits.close")} showCloseButton={!busy}>
       <DialogHeader>
         <DialogTitle>{pending ? t("resetCredits.confirmTitle") : t("resetCredits.open")}</DialogTitle>
         <DialogDescription>{t("resetCredits.description")}</DialogDescription>
       </DialogHeader>
       {management.loading ? <Spinner aria-label={t("common.loading")} /> : null}
-      {management.error || management.actionError ? <Alert variant="destructive"><AlertDescription>{errorMessage}</AlertDescription></Alert> : null}
+      {management.error || management.actionError || cancelFailed ? <Alert variant="destructive"><AlertDescription>{cancelFailed ? t("resetCredits.unavailable") : errorMessage}</AlertDescription></Alert> : null}
       {refreshFailed ? <Alert variant="destructive"><AlertDescription>{t("resetCredits.manualRefreshFailed")}</AlertDescription></Alert> : null}
       {result ? <Alert><AlertDescription>
         <p>{t(`resetCredits.${result.outcome}`)}</p>
@@ -82,12 +109,12 @@ function ResetCreditDialog({ onClose, onChanged }: { onClose: () => void; onChan
         <p>{credit.expiresAt === null ? t("overview.creditNoExpiry") : t("resetCredits.expires", { time: formatTime(credit.expiresAt * 1000) })}</p>
       </div> : null}
       <DialogFooter>
-        <Button variant="outline" disabled={busy} onClick={() => { if (pending) management.cancel(); else onClose() }}>{t("resetCredits.cancel")}</Button>
+        <Button variant="outline" disabled={busy} onClick={() => void cancel(false)}>{t("resetCredits.cancel")}</Button>
         {!pending ? <Button variant="outline" disabled={busy || management.loading} onClick={() => void refresh()}>{t("common.refresh")}</Button> : null}
         {pending ? <Button disabled={busy || management.loading || management.error !== null} onClick={() => void confirm()}>
           {management.busy ? <Spinner data-icon="inline-start" /> : null}{t("resetCredits.confirm")}
         </Button> : <Button disabled={busy || management.loading || !credit || management.error !== null}
-          onClick={() => { setResult(null); void management.mutate({ creditId: selected }) }}>{t("resetCredits.preview")}</Button>}
+          onClick={() => { setResult(null); setCancelFailed(false); void management.mutate({ creditId: selected }) }}>{t("resetCredits.preview")}</Button>}
       </DialogFooter>
     </DialogContent>
   </Dialog>

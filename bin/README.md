@@ -49,6 +49,7 @@
 - `update`：受管 Git 源码安装先构建并预检官方 `main` 候选，通过后停服、同步配套 CLI、切换源码和全局命令、调用目标版本的数据库升级入口，再恢复核心服务。数据库入口支持带一致性备份的显式状态库 v5→v6 和指标库 v20/v21/v22→v23 升级，范围与恢复步骤见[源码安装与更新](../docs/source-install.md)；用户设置和 Provider 模型目录不改写。npm 安装仅同步配套 CLI 并检查数据库升级，不更新 Gateway 包。
 - `uninstall`：只卸载当前受管 Git 源码安装；先卸载后台服务，再删除源码仓库、对应 npm 全局命令
   和旧 Shell PATH 配置，保留用户配置、数据库、凭据、日志和输出。Registry 安装交给 npm 卸载。
+- `reset-credit`：通过 Gateway 查询 OpenAI 重置券，交互选券、预览后默认拒绝消费；明确确认才提交，非交互终端仅支持查询。
 - `metrics`：交互菜单提供运行、会话明细、会话列表、聚合、请求明细、历史额度窗口和数据库状态；清理与重置交互集中在 `cleanup`，直接维护子命令保留；`status --json` 返回稳定的路径、Schema
   兼容性与记录数，日常兼容升级使用 `update`。
 - `traffic`：把 `[debug].model_traffic_dump` 生成的 V2 session 转储渲染成人可读文本，支持列出

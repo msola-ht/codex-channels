@@ -50,11 +50,14 @@ export class OpenAiResetCreditService {
     return { attemptId, ...attempt };
   }
 
-  async consume(attemptId: string, signal?: AbortSignal) {
-    if (this.busy) throw new ResetCreditError("reset_busy");
+  cancel(attemptId: string): void { this.attempts.delete(attemptId); }
+
+  async consume(attemptId: string, signal?: AbortSignal, validateAuthorization?: () => void) {
     const attempt = this.attempts.get(attemptId);
     this.attempts.delete(attemptId);
     if (!attempt || attempt.expiresAt <= Date.now()) throw new ResetCreditError("reset_stale");
+    // 所有确认调用均消耗一次性预览，包括并发忙碌的拒绝。
+    if (this.busy) throw new ResetCreditError("reset_busy");
     this.busy = true;
     try {
       const snapshot = await this.list(signal);
@@ -62,6 +65,7 @@ export class OpenAiResetCreditService {
       if (attempt.expiresAt <= Date.now() || snapshot.accountId !== attempt.accountId || !credit || JSON.stringify(credit) !== JSON.stringify(attempt.credit)
         || (credit.expiresAt !== null && credit.expiresAt * 1000 <= Date.now())) throw new ResetCreditError("reset_stale");
       signal?.throwIfAborted();
+      validateAuthorization?.();
       let outcome: ResetCreditOutcome;
       try { outcome = await this.port.consumeResetCredit(credit.id, attemptId, signal); }
       catch { throw new ResetCreditError("reset_unknown"); }

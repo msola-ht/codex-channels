@@ -165,7 +165,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 三个 Surface、CLI 与 WebUI 共用该纯函数；账户用量秒数仍使用独立的中文周期格式。不负责计时、状态或持久化。
 `account-format.ts` 统一套餐名称、额度状态、百分比、周期与重置时间格式，供命令结果、运行时通知
 和生命周期汇报复用。
-`conversation-model-account-command-format.ts` 在 OpenAI `/limits` 中展示重置券可用数量，并按相同
+`conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
 `provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。

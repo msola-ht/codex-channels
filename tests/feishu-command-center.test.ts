@@ -148,6 +148,21 @@ describe("Feishu command center", () => {
     );
   });
 
+  it("binds long reset credit selections to the owner and consumes the card once", async () => {
+    const fixture = createFixture();
+    const input = `reset use ${"a".repeat(256)}`;
+    await fixture.center.openResponse(target, "ou_actor", {
+      title: "选择重置券", choices: [{ label: "选择", action: "limits", input }],
+    });
+    const action = cardAction(fixture.cards[0]!, "limits");
+    expect(fixture.center.handleCardAction({ ...action, actorOpenId: "other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction({ ...action, messageId: "other" })).toBe("invalid");
+    expect(fixture.center.handleCardAction(action)).toBe("accepted");
+    expect(fixture.center.handleCardAction(action)).toBe("invalid");
+    await settle();
+    expect(fixture.execute).toHaveBeenCalledExactlyOnceWith(target, "limits", "ou_actor", input);
+  });
+
   it("opens a directly supplied schedule confirmation as a bound choice card", async () => {
     const fixture = createFixture();
     const input = "confirm 12345678-1234-1234-1234-123456789abc";

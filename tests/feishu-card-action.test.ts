@@ -32,6 +32,17 @@ function createAction(): Record<string, unknown> {
 }
 
 describe("decodeFeishuCardAction", () => {
+  it("allows the bounded reset-credit prefix without broadening other action values", () => {
+    const event = createAction();
+    const value = { codexc_command: "limits", codexc_command_input: `reset use ${"a".repeat(256)}` };
+    event.action = { tag: "button", value };
+    expect(decodeFeishuCardAction(event).value).toEqual(value);
+    expect(() => decodeFeishuCardAction({ ...event, action: { tag: "button", value: { ...value,
+      codexc_command_input: `${value.codexc_command_input}a` } } })).toThrow(FeishuCardActionError);
+    expect(() => decodeFeishuCardAction({ ...event, action: { tag: "button", value: { ...value,
+      codexc_command: "model" } } })).toThrow(FeishuCardActionError);
+  });
+
   it("maps only the stable routing and string action fields", () => {
     expect(decodeFeishuCardAction(createAction())).toEqual({
       messageId: "om_message",

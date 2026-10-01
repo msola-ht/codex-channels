@@ -492,3 +492,31 @@ function formatAccountDuration(value: bigint | number | null): string {
 function formatUsageTokens(value: bigint | number | null): string {
   return value === null ? "未知" : formatTokenCount(Number(value));
 }
+
+export function formatConversationResetCredits(result: Extract<ConversationCommandResult, { kind: "reset-credit" }>, interaction: "text" | "buttons" = "text"): string {
+  const value = result.result;
+  const text = (input: string) => input.replace(/\s+/gu, " ").replace(/[\\`*_[\]<>]/gu, "\\$&");
+  const details = (credit: { id: string; title: string | null; description: string | null; expiresAt: number | null }) => [
+    `券 ID：${text(credit.id)}`, `名称：${text(credit.title ?? "用量重置券")}`,
+    `说明：${text(credit.description ?? "使用范围以官方执行结果为准")}`,
+    credit.expiresAt === null ? "到期：无到期时间" : `到期：${formatResetTime(credit.expiresAt)}`,
+  ];
+  if (value.type === "cancelled") return "已取消重置券确认，未发起消费。";
+  if (value.type === "consumed") {
+    const outcomes = { reset: "用量已重置。", nothingToReset: "当前没有需要重置的用量窗口。",
+      noCredit: "所选重置券已不可用。", alreadyRedeemed: "本次操作此前已成功，未重复消费。" };
+    return toStructuredMarkdownList(["OpenAI 重置券结果", outcomes[value.outcome],
+      ...(!value.refreshed ? ["操作结果已确认，但账户额度刷新失败。"] : []), "查询最新状态：/limits reset"].join("\n"));
+  }
+  if (value.type === "preview") return toStructuredMarkdownList(["确认使用 OpenAI 重置券", `账户：${text(value.accountId)}`,
+    ...details(value.credit), "确认有效期为 5 分钟，仅限原发起用户在当前会话和工作区使用。",
+    ...(interaction === "buttons" ? ["请点击下方按钮确认使用或取消。"]
+      : [`确认：/limits reset confirm ${value.token}`, `取消：/limits reset cancel ${value.token}`])].join("\n"));
+  return toStructuredMarkdownList(["OpenAI 重置券", `账户：${text(value.accountId)}`, `可用数量：${value.availableCount}`,
+    `第 ${value.page}/${value.pageCount} 页`,
+    ...(value.credits.length ? value.credits.flatMap(credit => [...details(credit), ...(interaction === "text" ? [`预览使用：/limits reset use ${text(credit.id)}`] : []), ""])
+      : ["暂无可选择的重置券。"]),
+    ...(interaction === "text" && value.page > 1 ? [`上一页：/limits reset ${value.page - 1}`] : []),
+    ...(interaction === "text" && value.page < value.pageCount ? [`下一页：/limits reset ${value.page + 1}`] : []),
+  ].join("\n"));
+}

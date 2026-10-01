@@ -104,6 +104,7 @@
     "scripts/webui-management-delivery-route.mjs",
     "scripts/service-selection.mjs",
     "scripts/delivery-command.mjs",
+    "scripts/reset-credit-command.mjs",
     "scripts/metrics-config-menu.mjs",
     "scripts/metrics-database-access.mjs",
     "scripts/metrics-database.mjs",
