@@ -12,51 +12,32 @@ import {
   isFastServiceTier,
   listProviders,
 } from "../../application/index.js";
-import { formatCodexProviderLabel, formatProviderLabel } from "../provider-format.js";
+import { formatCodexProviderLabel, scopedModelDisplayName } from "../provider-format.js";
 import { toStructuredMarkdownList } from "../markdown-list.js";
+import { renderConversationCommandResult } from "../conversation-command-renderer.js";
 import {
-  formatConversationAgents,
-  formatConversationMcp,
-  formatConversationMcpDetail,
-  formatConversationMcpHealth,
-  formatConversationMcpLogin,
-  formatConversationMcpReload,
-  formatConversationMcpResource,
-  formatConversationPluginDetail,
-  formatConversationPluginHealth,
   formatConversationPlugins,
-  formatConversationSkills,
 } from "../conversation-extension-command-format.js";
 import {
   formatConversationLimits,
   formatConversationResetCredits,
   formatConversationModels,
-  formatConversationUsage,
 } from "../conversation-model-account-command-format.js";
 import {
-  formatConversationOccupancy,
-  formatConversationSessions,
   formatConversationThreadQueue,
-  formatConversationThreadRevert,
-  formatConversationThreadRevertPreview,
   formatThreadQueueInputTypeLabel,
   isTurnLifecycleAcknowledgedOutcome,
 } from "../conversation-session-command-format.js";
 import {
   formatConversationScheduledConfirmation,
-  formatConversationScheduledRuns,
-  formatConversationScheduledTasks,
 } from "../conversation-scheduled-task-command-format.js";
 import {
   formatConversationArtifacts,
-  formatConversationCollaborationMode,
-  formatConversationGoal,
   formatConversationPermissions,
   formatConversationWorkspacePermissions,
   formatConversationWorkspaces,
 } from "../conversation-workspace-status-command-format.js";
 import { formatConversationCommandOutcome } from "../conversation-command-outcome-format.js";
-import { formatConversationMetrics } from "../metrics-format.js";
 import { formatStatus } from "./format.js";
 import { formatTelegramDiffChunks, formatTelegramPanelChunks } from "./html-format.js";
 
@@ -77,9 +58,6 @@ export async function renderTelegramCommandResult(
       }
       return;
     }
-    case "sessions":
-      await replyTelegramPanel(context, formatConversationSessions(result));
-      return;
     case "thread-queue":
       await replyTelegramPanel(
         context,
@@ -90,18 +68,6 @@ export async function renderTelegramCommandResult(
         ].join("\n"),
         threadQueueKeyboard(result),
       );
-      return;
-    case "thread-revert":
-      await replyTelegramPanel(context, formatConversationThreadRevert(result));
-      return;
-    case "thread-revert-preview":
-      await replyTelegramPanel(context, formatConversationThreadRevertPreview(result));
-      return;
-    case "scheduled-tasks":
-      await replyTelegramPanel(context, formatConversationScheduledTasks(result));
-      return;
-    case "scheduled-runs":
-      await replyTelegramPanel(context, formatConversationScheduledRuns(result));
       return;
     case "scheduled-confirmation":
       await replyTelegramPanel(
@@ -147,56 +113,11 @@ export async function renderTelegramCommandResult(
         );
       }
       return;
-    case "collaboration-mode":
-      await replyTelegramPanel(
-        context,
-        formatConversationCollaborationMode(result),
-      );
-      return;
-    case "skills":
-      await replyTelegramPanel(context, formatConversationSkills(result));
-      return;
-    case "agents":
-      await replyTelegramPanel(context, formatConversationAgents(result));
-      return;
-    case "mcp":
-      await replyTelegramPanel(context, formatConversationMcp(result));
-      return;
-    case "mcp-health":
-      await replyTelegramPanel(context, formatConversationMcpHealth(result));
-      return;
-    case "mcp-reload":
-      await replyTelegramPanel(context, formatConversationMcpReload(result));
-      return;
-    case "mcp-detail":
-      await replyTelegramPanel(context, formatConversationMcpDetail(result));
-      return;
-    case "mcp-login":
-      await replyTelegramPanel(context, formatConversationMcpLogin(result));
-      return;
-    case "mcp-resource":
-      await replyTelegramPanel(context, formatConversationMcpResource(result));
-      return;
     case "plugins":
       await replyTelegramPanel(
         context,
         formatConversationPlugins(result),
         pluginKeyboard(result),
-      );
-      return;
-    case "plugin-health":
-      await replyTelegramPanel(context, formatConversationPluginHealth(result));
-      return;
-    case "plugin-detail":
-      await replyTelegramPanel(context, formatConversationPluginDetail(result));
-      return;
-    case "usage":
-      await replyTelegramPanel(context, formatConversationUsage(result));
-      return;
-    case "metrics":
-      await replyTelegramPanel(
-        context,
-        formatConversationMetrics(result),
       );
       return;
     case "reset-credit":
@@ -224,13 +145,9 @@ export async function renderTelegramCommandResult(
         });
       }
       return;
-    case "goal":
-      await replyTelegramPanel(context, formatConversationGoal(result));
-      return;
-    case "occupancy":
-      await replyTelegramPanel(context, formatConversationOccupancy(result));
-      return;
   }
+  const text = renderConversationCommandResult(result);
+  if (text !== null) await replyTelegramPanel(context, text);
 }
 
 export function workspacePermissionKeyboard(): InlineKeyboardMarkup {
@@ -368,17 +285,6 @@ export function telegramModelSelectionToken(state: ModelSelectionState): string 
     modelSelectionTokens.delete(modelSelectionTokens.keys().next().value!);
   }
   return token;
-}
-
-function scopedModelDisplayName(displayName: string, provider: string | undefined): string {
-  if (!provider) return displayName;
-  for (const label of [formatProviderLabel(provider), provider]) {
-    const prefix = `${label} · `;
-    if (displayName.startsWith(prefix)) {
-      return displayName.slice(prefix.length);
-    }
-  }
-  return displayName;
 }
 
 export function scheduledTaskConfirmationKeyboard(

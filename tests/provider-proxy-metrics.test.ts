@@ -1,4 +1,7 @@
+import { once } from "node:events";
+import { PrivateIpcServer } from "../runtime/private-ipc.mjs";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   rmSync,
@@ -7,9 +10,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type Server } from "node:net";
+import { createConnection, createServer } from "node:net";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ProviderProxyMetricsServer,
@@ -203,21 +206,73 @@ describe("Provider proxy metrics channel", () => {
     await server.close();
   });
 
-  unixIt("closes an active listener even when startup did not reach the started state", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "codexc-provider-metrics-cleanup-"));
+  unixIt("cleans up when startup fails after the listener opens", async () => {
+    const directory = mkdtempSync("/tmp/cm-");
     temporaryDirectories.push(directory);
-    const socketPath = join(directory, "metrics.sock");
+    const socketPath = join(directory, "m.sock");
+    const originalStart = PrivateIpcServer.prototype.start;
+    const start = vi.spyOn(PrivateIpcServer.prototype, "start").mockImplementationOnce(async function (this: PrivateIpcServer, message: string) {
+      await originalStart.call(this, message);
+      throw new Error("injected startup failure");
+    });
     const server = new ProviderProxyMetricsServer(socketPath, () => undefined);
-    const rawServer = (server as unknown as { server: Server }).server;
-    await new Promise<void>((resolveListen) => rawServer.listen(socketPath, resolveListen));
-
     try {
+      await expect(server.start()).rejects.toThrow("injected startup failure");
+      expect(existsSync(socketPath)).toBe(false);
+      await server.start();
+      expect(existsSync(socketPath)).toBe(true);
       await server.close();
-      expect(rawServer.listening).toBe(false);
+      expect(existsSync(socketPath)).toBe(false);
+      await expect(server.start()).rejects.toThrow("已关闭");
     } finally {
-      if (rawServer.listening) {
-        await new Promise<void>((resolveClose) => rawServer.close(() => resolveClose()));
-      }
+      start.mockRestore();
+      await server.close();
+    }
+  });
+
+  unixIt("rejects a public socket without deleting it", async () => {
+    const directory = mkdtempSync("/tmp/cm-");
+    temporaryDirectories.push(directory);
+    const socketPath = join(directory, "m.sock");
+    const occupied = createServer();
+    await new Promise<void>(resolve => occupied.listen(socketPath, resolve));
+    chmodSync(socketPath, 0o666);
+    const server = new ProviderProxyMetricsServer(socketPath, () => undefined);
+    try {
+      await expect(server.start()).rejects.toThrow(/不安全/u);
+      expect(statSync(socketPath).isSocket()).toBe(true);
+      expect(statSync(socketPath).mode & 0o777).toBe(0o666);
+    } finally {
+      await server.close();
+      await new Promise<void>(resolve => occupied.close(() => resolve()));
+    }
+  });
+
+  unixIt("closes unfinished connections and makes repeated close harmless", async () => {
+    const directory = mkdtempSync("/tmp/cm-");
+    temporaryDirectories.push(directory);
+    chmodSync(directory, 0o755);
+    const socketPath = join(directory, "m.sock");
+    const server = new ProviderProxyMetricsServer(socketPath, () => undefined);
+    await server.start();
+    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    const client = createConnection(socketPath);
+    try {
+      await once(client, "connect");
+      client.write("unfinished");
+      const errors: string[] = [];
+      client.on("error", (error: NodeJS.ErrnoException) => errors.push(error.code ?? "unknown"));
+      const closed = new Promise<void>(resolve => client.once("close", () => resolve()));
+      await server.close();
+      await closed;
+      expect(errors.every(code => code === "ECONNRESET")).toBe(true);
+      expect(existsSync(socketPath)).toBe(false);
+      writeFileSync(socketPath, "replacement", { mode: 0o600 });
+      await server.close();
+      expect(statSync(socketPath).isFile()).toBe(true);
+    } finally {
+      client.destroy();
+      await server.close();
     }
   });
 
@@ -241,12 +296,18 @@ describe("Provider proxy metrics channel", () => {
       occupied.once("error", rejectListen);
       occupied.listen(socketPath, resolveListen);
     });
+    chmodSync(socketPath, 0o600);
     const server = new ProviderProxyMetricsServer(socketPath, () => undefined);
 
     try {
       await expect(server.start()).rejects.toThrow("模型代理指标 Socket 已被占用");
+      await new Promise<void>(resolve => occupied.close(() => resolve()));
+      await server.start();
+      await server.close();
+      expect(existsSync(socketPath)).toBe(false);
     } finally {
-      await new Promise<void>((resolveClose) => occupied.close(() => resolveClose()));
+      await server.close();
+      if (occupied.listening) await new Promise<void>((resolveClose) => occupied.close(() => resolveClose()));
     }
   });
 });

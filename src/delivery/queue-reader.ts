@@ -52,16 +52,7 @@ export function readDeliveryQueue(directory: string, options: { before?: number;
   const before = integer.parse(options.before ?? 0);
   const filter = options.state === undefined ? null : stateSchema.parse(options.state);
   const id = options.id === undefined ? null : z.string().min(1).max(4096).parse(options.id);
-  const path = join(directory, "outbox.sqlite3");
-  if (!inspect(directory, true) || !inspect(path, false)) {
-    return { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
-  }
-  const db = new DatabaseSync(path, { readOnly: true });
-  try {
-    db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=100; BEGIN;");
-    if (db.prepare("PRAGMA user_version").get()?.user_version !== deliverySchemaVersion) throw new Error("Unsupported delivery schema");
-    const metadata = db.prepare("SELECT version FROM metadata").all();
-    if (metadata.length !== 1 || metadata[0]?.version !== deliverySchemaVersion) throw new Error("Invalid delivery metadata");
+  return withReadDatabase<DeliveryQueueSnapshot>(directory, db => {
     const summary = { records: 0, bytes: 0, pending: 0, sending: 0, uncertain: 0, blocked: 0 };
     for (const row of db.prepare("SELECT state,COUNT(*) AS records,SUM(bytes) AS bytes FROM deliveries GROUP BY state").all()) {
       const state = stateSchema.parse(row.state);
@@ -74,7 +65,7 @@ export function readDeliveryQueue(directory: string, options: { before?: number;
     const records = rows.slice(0, 50);
     return { state: "available", observedAt: Date.now(), summary, records,
       nextCursor: rows.length > 50 ? records.at(-1)!.sequence : null };
-  } finally { db.close(); }
+  }) ?? { state: "missing", observedAt: Date.now(), summary: null, records: [], nextCursor: null };
 }
 
 /** Metadata lookup in one transaction, without global aggregates or payload access. */

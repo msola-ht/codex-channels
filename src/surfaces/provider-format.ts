@@ -44,3 +44,21 @@ export function supportsFastMode(modelProvider?: string): boolean {
   return usesOpenAiAccount(modelProvider)
     || (modelProvider !== undefined && configuredCustomPrimaryProviderIds.has(modelProvider));
 }
+
+export function scopedModelDisplayName(displayName: string, provider: string | undefined): string {
+  if (!provider) return displayName;
+  // 受管 Provider 的展示名会带上 definition.displayName 前缀（对 OpenCode Go 是
+  // 账户邮箱），而 providerFilter 是原始 provider id（如 ocg-<accountId>），两者不同。
+  // 优先按格式化后的提供商标签剥离，其次回退到原始 id，避免已单独展示 Provider 的卡片里重复前缀。
+  for (const label of [formatProviderLabel(provider), provider]) {
+    const prefix = `${label} · `;
+    if (displayName.startsWith(prefix)) {
+      return displayName.slice(prefix.length);
+    }
+  }
+  return displayName;
+}
+
+export function formatDisplayedProvider(provider: string): string {
+  return provider.startsWith("ocg-") ? formatCodexProviderLabel(provider) : provider;
+}

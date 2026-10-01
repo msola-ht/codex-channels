@@ -5,7 +5,7 @@ import type {
 } from "../application/index.js";
 
 import { toStructuredMarkdownList } from "./markdown-list.js";
-import { formatDisplayedProvider } from "./conversation-model-account-command-format.js";
+import { formatDisplayedProvider } from "./provider-format.js";
 
 const maximumSessionEntries = 20;
 const maximumSessionLabelCharacters = 48;

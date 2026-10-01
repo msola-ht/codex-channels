@@ -279,6 +279,27 @@ describe("SqliteScheduledTaskStore", () => {
     store.close();
   });
 
+  it("rolls back a newly inserted run when advancing its task fails", () => {
+    const { path } = databasePath();
+    const store = new SqliteScheduledTaskStore(path);
+    try {
+      const task = store.createTask(taskInput());
+      const scheduledFor = task.nextRunAt!;
+      const renamed = store.renameTask(task.taskId, "Updated later", scheduledFor + 1);
+
+      expect(() => store.claimDue(task.taskId, scheduledFor, "claimed", scheduledFor))
+        .toThrow(ScheduledTaskStateError);
+      expect(store.listRuns(task.taskId)).toEqual([]);
+      expect(store.getTask(task.taskId)).toEqual(renamed);
+
+      expect(store.claimDue(task.taskId, scheduledFor, "claimed", scheduledFor + 1).kind)
+        .toBe("claimed");
+      expect(store.listRuns(task.taskId)).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
   it("keeps a tombstone and run association while clearing private task data", () => {
     const { path } = databasePath();
     const store = new SqliteScheduledTaskStore(path);

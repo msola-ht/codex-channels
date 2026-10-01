@@ -365,24 +365,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         : result;
       const state: ScheduledRunState = effectiveResult === "claimed" ? "dispatching" : effectiveResult;
       const runId = randomUUID();
-      this.database
-        .prepare(`
-          INSERT INTO runs (
-            run_id, task_id, scheduled_for, state,
-            thread_id, turn_id, dispatch_started_at, started_at, completed_at,
-            error_category, error_message
-          ) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?)
-        `)
-        .run(
-          runId,
-          taskId,
-          scheduledFor,
-          state,
-          state === "dispatching" ? nowMs : null,
-          state === "dispatching" ? null : nowMs,
-          errorCategoryForState(state),
-          errorMessageForState(state),
-        );
+      this.insertRun(runId, taskId, scheduledFor, state, nowMs);
       const nextRunAt = calculateNextRunAt(task.schedule, task.timezone, scheduledFor);
       this.requireNonDecreasingTimestamp(nowMs, task.updatedAt, "Task updated_at");
       if (nextRunAt === null) {
@@ -430,24 +413,7 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
         .prepare("SELECT MAX(scheduled_for) AS value FROM runs WHERE task_id = ?")
         .get(taskId) as { value: number | null };
       const scheduledFor = Math.max(nowMs, (latest.value ?? -1) + 1);
-      this.database
-        .prepare(`
-          INSERT INTO runs (
-            run_id, task_id, scheduled_for, state,
-            thread_id, turn_id, dispatch_started_at, started_at, completed_at,
-            error_category, error_message
-          ) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?)
-        `)
-        .run(
-          runId,
-          taskId,
-          scheduledFor,
-          state,
-          state === "dispatching" ? nowMs : null,
-          state === "dispatching" ? null : nowMs,
-          errorCategoryForState(state),
-          errorMessageForState(state),
-        );
+      this.insertRun(runId, taskId, scheduledFor, state, nowMs);
       this.database.exec("COMMIT");
       return { kind, run: this.requireRun(runId) };
     } catch (error) {
@@ -683,6 +649,33 @@ export class SqliteScheduledTaskStore implements ScheduledTaskStore {
     } catch (error) {
       this.rollback(error);
     }
+  }
+
+  private insertRun(
+    runId: string,
+    taskId: string,
+    scheduledFor: number,
+    state: ScheduledRunState,
+    nowMs: number,
+  ): void {
+    this.database
+      .prepare(`
+        INSERT INTO runs (
+          run_id, task_id, scheduled_for, state,
+          thread_id, turn_id, dispatch_started_at, started_at, completed_at,
+          error_category, error_message
+        ) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?)
+      `)
+      .run(
+        runId,
+        taskId,
+        scheduledFor,
+        state,
+        state === "dispatching" ? nowMs : null,
+        state === "dispatching" ? null : nowMs,
+        errorCategoryForState(state),
+        errorMessageForState(state),
+      );
   }
 
   private updateTask(

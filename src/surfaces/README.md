@@ -169,7 +169,7 @@ CardKit Markdown 或微信文本布局以及各自的发送策略。后台 Threa
 `conversation-model-account-command-format.ts` 为三个渠道渲染 `/limits reset` 选券预览、确认命令和消费结果，并在 OpenAI `/limits` 中展示重置券可用数量，并按相同
 到期时间合并服务端返回的明细；`null` 到期时间明确显示为“无到期时间”，明细少于可用数量时标出
 未返回明细的剩余张数。
-`provider-format.ts` 统一已知 Provider 显示名，并对后续 Provider 标识做有界展示。
+`provider-format.ts` 统一已知 Provider 显示名、命令中的 Provider 文案及限定 Provider 后的模型显示名前缀裁剪，并对后续 Provider 标识做有界展示。
 `slash-command.ts` 统一飞书与微信的严格斜杠命令解析，并规范化三个渠道共同公开的
 `/h`、`/work`、`/r` 快捷命令；Telegram 在 Bot 注册边界接入同一组显式映射。
 `conversation-command-format.ts` 只汇总稳定导出；纯格式化实现分别位于
@@ -183,7 +183,7 @@ Workspace/状态与操作结果分派隔离。它们统一 Telegram、飞书与�
 未支持的 Provider 明确说明能力缺失。计划任务确认、列表、运行记录和命令结果格式也通过本目录
 `index.ts` 供 Bootstrap 动态工具回调复用。
 `conversation-command-renderer.ts` 把完整 `ConversationCommandResult` 穷尽映射为共享纯文本结果；
-飞书与微信直接复用该映射，Telegram 继续在自己的交互式渲染器中处理按钮和键盘。
+三个渠道复用该映射，Telegram 在自己的交互式渲染器中处理按钮、键盘及专属展示，其余结果统一走共享映射。
 `/skill` 返回带序号的已启用项，`/skill <名称或序号> <任务>` 通过 Application
 提交官方结构化 Skill 输入；Surface 不接收或拼装本机 Skill 路径。
 `/mcp`、`/mcp health`、`/mcp reload`、`/mcp <名称或序号>`、工具/资源/模板分页搜索、`/mcp login ...` 与
