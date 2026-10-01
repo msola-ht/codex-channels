@@ -296,9 +296,11 @@
 - `opencode-go-account-files.mjs` / `opencode-go-account-files.d.mts`：集中 OpenCode Go 账户私有文件
   路径与 Profile 文件名；私有文件事务使用 `managed-provider-files.mjs`。
 - `opencode-go-account-management.mjs` / `opencode-go-account-management.d.mts`：提供 OpenCode Go
-  默认账户切换、运行实例停止与账户删除的无终端预览和执行接口，以及旧单账户与旧注册账户的显式移除事务；默认切换只更新注册表，
+  默认账户切换、运行实例停止与当前账户删除的无终端预览和执行接口；默认切换只更新注册表，
   停止明确区分未运行、Remote TUI 占用和已停止，删除在明确确认后保留私有备份并执行多文件回滚；
   删除默认账户前必须先指定其他默认账户；删除最后一个账户会清理共享模型目录，固定模式账户只恢复其管理的主配置字段，保留无关子代理。
+- `opencode-go-legacy-config.mjs` / `opencode-go-legacy-config.d.mts`：只读识别旧单账户与旧注册账户，并提供有界、脱敏错误的旧 TOML 读取；新增账户和 Setup 复用检测，不加载旧清理事务。
+- `opencode-go-legacy-removal.mjs` / `opencode-go-legacy-removal.d.mts`：旧账户预览与显式移除事务；Setup 进入 `legacy remove` 或识别到旧账户的 `account remove <id>` 后才加载，保留确认、占用保护、备份和回滚。
 - `opencode-go-account-provisioning.mjs` / `opencode-go-account-provisioning.d.mts`：提供 OpenCode Go
   账户新增/重新配置的脱敏预览与无终端执行接口；内部完成目录下载、每个账户进入固定模式时的恢复基线更新与旧基线归档、Key 写入、切换/固定模式配置和多文件事务回滚；同一家可保留一个固定账户与其他切换账户。
   生成模型目录时继承已配置 Provider 的同名模型全局窗口占比，避免新账户回落到 OCG 默认值。

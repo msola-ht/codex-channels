@@ -121,6 +121,8 @@
     "scripts/official-login-setup.mjs",
     "scripts/opencode-go-account-files.mjs",
     "scripts/opencode-go-account-management.mjs",
+    "scripts/opencode-go-legacy-config.mjs",
+    "scripts/opencode-go-legacy-removal.mjs",
     "scripts/opencode-go-account-provisioning.mjs",
     "scripts/opencode-go-setup.mjs",
     "scripts/package-path.mjs",

@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parse, stringify } from "smol-toml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +15,8 @@ vi.mock("../runtime/private-file.mjs", async (original) => {
   } };
 });
 import { writePrivateFileAtomicSync as write } from "../runtime/private-file.mjs";
-import { hasLegacyOpencodeGoConfiguration, previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "../scripts/opencode-go-account-management.mjs";
+import { hasLegacyOpencodeGoConfiguration } from "../scripts/opencode-go-legacy-config.mjs";
+import { previewLegacyOpencodeGoRemoval, removeLegacyOpencodeGoAccount } from "../scripts/opencode-go-legacy-removal.mjs";
 import { initializeUserData } from "../scripts/runtime-config.mjs";
 import { runOpencodeGoAccountCli } from "../scripts/opencode-go-setup.mjs";
 
@@ -22,7 +24,7 @@ const homes: string[] = [];
 function fixture(mode: "switching" | "exclusive", accountId?: string) {
   const home = mkdtempSync(join(tmpdir(), "ocg-legacy-removal-"));
   homes.push(home);
-  const environment = { ...process.env, CODEX_HOME: join(home, "codex"), CODEX_CONNECT_HOME: join(home, "connect") };
+  const environment = { ...process.env, CODEX_HOME: join(home, "codex"), CODEX_CONNECT_HOME: join(home, "connect"), CODEX_CONNECT_CONFIG_FILE: join(home, "connect", "config.toml") };
   initializeUserData({ environment, cwd: home });
   const directory = join(environment.CODEX_CONNECT_HOME, "providers", "opencode-go");
   const provider = accountId === undefined ? "opencode-go" : `opencode-go-${accountId}`;
@@ -49,9 +51,38 @@ afterEach(() => {
 });
 
 describe("explicit legacy OCG removal", () => {
+  it.each(["legacy-config", "account-provisioning", "account-management", "setup"])(
+    "keeps legacy removal out of the %s loading path",
+    (entry) => {
+      const options = fixture("switching");
+      const forbidden = ["opencode-go-legacy-removal.mjs",
+        ...(["legacy-config", "account-provisioning"].includes(entry) ? ["opencode-go-account-management.mjs"] : [])];
+      const entryUrl = pathToFileURL(resolve(`scripts/opencode-go-${entry}.mjs`)).href;
+      const action = entry === "setup"
+        ? `await loaded.runOpencodeGoAccountCli(["account", "list", "--json"], { environment: ${JSON.stringify({ CODEX_HOME: options.environment.CODEX_HOME, CODEX_CONNECT_HOME: options.environment.CODEX_CONNECT_HOME })} });`
+        : entry === "legacy-config"
+          ? `if (!loaded.hasLegacyOpencodeGoConfiguration(${JSON.stringify({ CODEX_HOME: options.environment.CODEX_HOME, CODEX_CONNECT_HOME: options.environment.CODEX_CONNECT_HOME })})) throw new Error("Legacy configuration not detected");`
+          : "";
+      const result = runWithBlockedImports(forbidden, `const loaded = await import(${JSON.stringify(entryUrl)}); ${action}`);
+      expect(result.status, result.stderr).toBe(0);
+    },
+  );
+
+  it.each([undefined, "old"])("loads removal only after routing the legacy account %s", (accountId) => {
+    const options = fixture("switching", accountId);
+    const args = accountId === undefined ? ["legacy", "remove"] : ["account", "remove", accountId];
+    const entry = pathToFileURL(resolve("scripts/opencode-go-setup.mjs")).href;
+    const result = runWithBlockedImports(["opencode-go-legacy-removal.mjs"], `
+      const { runOpencodeGoAccountCli } = await import(${JSON.stringify(entry)});
+      await runOpencodeGoAccountCli(${JSON.stringify(args)}, { environment: ${JSON.stringify({ CODEX_HOME: options.environment.CODEX_HOME, CODEX_CONNECT_HOME: options.environment.CODEX_CONNECT_HOME })} });
+    `);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Blocked optional module: ./opencode-go-legacy-removal.mjs");
+  });
+
   it.each(["deepseek", "opencode-go", "ccg"])("shows %s removal help before user initialization", (provider) => {
     const options = fixture("switching");
-    const environment = { ...options.environment, CODEX_CONNECT_HOME: join(options.environment.CODEX_HOME, "missing") };
+    const environment = { ...options.environment, CODEX_CONNECT_HOME: join(options.environment.CODEX_HOME, "missing"), CODEX_CONNECT_CONFIG_FILE: "" };
     for (const help of ["-h", "--help"]) {
       const result = spawnSync(process.execPath, ["bin/codexc.mjs", provider, "legacy", "remove", help], { env: environment, encoding: "utf8" });
       expect(result.status, result.stderr).toBe(0);
@@ -145,3 +176,18 @@ describe("explicit legacy OCG removal", () => {
     expect(existsSync(options.profile)).toBe(true);
   });
 });
+
+function runWithBlockedImports(forbidden: string[], action: string) {
+  const loader = `export async function resolve(specifier, context, nextResolve) {
+    if (${JSON.stringify(forbidden)}.some(name => specifier.endsWith("/" + name))) {
+      throw new Error("Blocked optional module: " + specifier);
+    }
+    return nextResolve(specifier, context);
+  }`;
+  const source = `import { register } from "node:module";
+    register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);
+    ${action}`;
+  return spawnSync(process.execPath, ["--input-type=module", "--eval", source], {
+    encoding: "utf8", timeout: 10_000,
+  });
+}
