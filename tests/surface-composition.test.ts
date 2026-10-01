@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,13 +10,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InteractionPort } from "../src/approval/index.js";
 import {
   createFeishuRuntimeModule,
-  createSurfaceModules,
+  createSurfaceModules as composeSurfaceModules,
+  loadBuiltInSurfacePlugins,
   createTelegramRuntimeModule,
   createWeixinRuntimeModule,
   selectFeishuProxyUrl,
   authorizedFeishuConversations,
   authorizedWeixinConversations,
-  weixinSurfacePlugin,
   type FeishuRuntimeAdapter,
   type TelegramRuntimeAdapter,
   type WeixinRuntimeAdapter,
@@ -126,8 +128,35 @@ describe("Telegram Surface runtime composition", () => {
 });
 
 describe("configured Surface composition", () => {
-  it("does not create Telegram when its token is empty", () => {
-    const modules = createSurfaceModules(options(config({
+  it.each(["none", "weixin", "telegram", "feishu"])("loads only the enabled %s channel implementation in a fresh process", (channel) => {
+    const forbidden = [
+      ...(channel === "telegram" ? [] : ["grammy"]),
+      ...(channel === "feishu" ? [] : ["@larksuiteoapi/node-sdk"]),
+    ];
+    const loader = `export async function resolve(specifier, context, nextResolve) {
+      if (${JSON.stringify(forbidden)}.includes(specifier)) {
+        throw new Error("Disabled channel SDK loaded: " + specifier);
+      }
+      return nextResolve(specifier, context);
+    }`;
+    const source = `import { register } from "node:module";
+      register(${JSON.stringify("data:text/javascript," + encodeURIComponent(loader))}, import.meta.url);
+      await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "dist/bootstrap/index.js")).href)});
+      const { loadBuiltInSurfacePlugins } = await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "dist/bootstrap/surface-composition.js")).href)});
+      const plugins = await loadBuiltInSurfacePlugins({
+        telegramEnabled: ${channel === "telegram"},
+        feishu: ${channel === "feishu" ? "{}" : "undefined"},
+        weixin: ${channel === "weixin" ? "{}" : "undefined"},
+      });
+      console.log(JSON.stringify(plugins.map(plugin => plugin.id)));`;
+    const output = execFileSync(process.execPath, ["--input-type=module", "--eval", source], {
+      encoding: "utf8", timeout: 10_000,
+    });
+    expect(JSON.parse(output.trim())).toEqual(channel === "none" ? [] : [channel]);
+  });
+
+  it("does not create Telegram when its token is empty", async () => {
+    const modules = await createSurfaceModules(options(config({
       telegramEnabled: false,
       telegramBotToken: "",
       telegramAllowedUserIds: new Set(),
@@ -141,9 +170,9 @@ describe("configured Surface composition", () => {
     expect(modules.map((module) => module.adapter.surface)).toEqual(["feishu"]);
   });
 
-  it("registers optional Surfaces only when their runtime config is enabled", () => {
-    const disabled = createSurfaceModules(options(config()));
-    const enabled = createSurfaceModules(options(config({
+  it("registers optional Surfaces only when their runtime config is enabled", async () => {
+    const disabled = await createSurfaceModules(options(config()));
+    const enabled = await createSurfaceModules(options(config({
       feishu: {
         appId: "cli_0123456789abcdef",
         appSecret: "secret",
@@ -165,7 +194,7 @@ describe("configured Surface composition", () => {
     ]);
   });
 
-  it("removes revoked Weixin bindings while composing a restarted Surface", () => {
+  it("removes revoked Weixin bindings while composing a restarted Surface", async () => {
     const bindings = new MemoryBindingStore();
     const accountId = "bot-fixture@im.bot";
     const allowed = {
@@ -191,7 +220,7 @@ describe("configured Surface composition", () => {
       bindings.rememberActor(target, actorId);
     }
 
-    createSurfaceModules(options(config({
+    await createSurfaceModules(options(config({
       weixin: {
         accountId,
         allowedUserIds: new Set(["allowed@im.wechat"]),
@@ -217,6 +246,7 @@ describe("configured Surface composition", () => {
       grantedAt: 1,
     });
     const runtimeConfig = config({
+      telegramEnabled: false,
       credentialsDirectory,
       stateDatabasePath: join(root, "separate-state", "gateway.sqlite3"),
       weixin: {
@@ -249,7 +279,7 @@ describe("configured Surface composition", () => {
     });
     vi.stubGlobal("fetch", fetchImpl);
     const context = options(runtimeConfig);
-    const [module] = createSurfaceModules(context, [weixinSurfacePlugin]);
+    const [module] = await createSurfaceModules(context);
 
     try {
       await module?.adapter.start();
@@ -635,4 +665,8 @@ function options(
     onFatal: vi.fn(),
     autoCompactPercent: () => null,
   };
+}
+
+async function createSurfaceModules(context: Parameters<typeof composeSurfaceModules>[0]) {
+  return composeSurfaceModules(context, await loadBuiltInSurfacePlugins(context.config));
 }

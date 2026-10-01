@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   createLogger: vi.fn(),
   createOwner: vi.fn(),
   createApplication: vi.fn(),
+  loadBuiltInSurfacePlugins: vi.fn(async () => []),
   createAccountRefresh: vi.fn(),
   createProviderSettingsWatcher: vi.fn(),
   createNetworkProxyWatcher: vi.fn(),
@@ -100,6 +101,10 @@ vi.mock("../src/surfaces/index.js", () => ({
   createWeixinCredentialStore: mocks.createWeixinCredentialStore,
   createWeixinCredentialChangeCheck: mocks.createWeixinCredentialChangeCheck,
 }));
+vi.mock("../src/bootstrap/surface-composition.js", () => ({
+  loadBuiltInSurfacePlugins: mocks.loadBuiltInSurfacePlugins,
+}));
+
 vi.mock("../src/bootstrap/app.js", () => ({
   GatewayApplication: class {
     constructor(...args: unknown[]) {
@@ -214,6 +219,8 @@ describe("runGatewayProcess", () => {
     await runGatewayProcess();
 
     expect(mocks.owner.start).toHaveBeenCalledOnce();
+    expect(mocks.loadBuiltInSurfacePlugins).toHaveBeenCalledWith(runtime.config);
+    expect(mocks.createApplication).toHaveBeenCalledWith(runtime.config, mocks.logger, [], runtime.configPath);
     expect(mocks.application.start).toHaveBeenCalledOnce();
     expect(mocks.accountRefresh.start).toHaveBeenCalledOnce();
     expect(mocks.owner.markReady).toHaveBeenCalledOnce();
@@ -233,6 +240,10 @@ describe("runGatewayProcess", () => {
     expect(mocks.acknowledgeConfigEvents)
       .toHaveBeenCalledWith("/tmp/config-events.jsonl", ["event-1"]);
     expect(processHandlers.has("SIGHUP")).toBe(true);
+    expect(mocks.owner.start.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.loadBuiltInSurfacePlugins.mock.invocationCallOrder[0]!);
+    expect(mocks.loadBuiltInSurfacePlugins.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.createApplication.mock.invocationCallOrder[0]!);
     expect(mocks.owner.start.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.application.start.mock.invocationCallOrder[0]!);
     expect(mocks.application.start.mock.invocationCallOrder[0])
@@ -317,6 +328,18 @@ describe("runGatewayProcess", () => {
     expect(mocks.owner.markReady).not.toHaveBeenCalled();
     expect(mocks.providerSettingsWatcher.start).not.toHaveBeenCalled();
     expect(mocks.networkProxyWatcher.start).not.toHaveBeenCalled();
+  });
+
+  it("releases ownership without creating components when channel loading fails", async () => {
+    isolateProcessLifecycle();
+    mocks.loadBuiltInSurfacePlugins.mockRejectedValueOnce(new Error("channel load failed"));
+
+    await expect(runGatewayProcess()).rejects.toThrow("channel load failed");
+
+    expect(mocks.owner.close).toHaveBeenCalledOnce();
+    expect(mocks.createApplication).not.toHaveBeenCalled();
+    expect(mocks.accountRefresh.start).not.toHaveBeenCalled();
+    expect(mocks.owner.markReady).not.toHaveBeenCalled();
   });
 
   it("closes ownership when application construction fails", async () => {

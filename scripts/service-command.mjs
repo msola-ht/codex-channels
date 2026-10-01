@@ -1,3 +1,5 @@
+import { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
+export { serviceCommandActions, serviceCommandUsage } from "./cli-command-usage.mjs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
@@ -23,17 +25,6 @@ import { waitForSelectedRelay } from "./service-selection.mjs";
 
 const nodeExperimentalWarningOption = "--disable-warning=ExperimentalWarning";
 
-export const serviceCommandActions = Object.freeze([
-  "install",
-  "uninstall",
-  "start",
-  "stop",
-  "reload",
-  "restart",
-  "status",
-  "logs",
-]);
-
 // Public spelling is independent of installed service identifiers and file names.
 const serviceTargetUsage = internalServiceTargetUsage.split("|").map(serviceCommandTarget).join("|");
 function parseServiceTarget(value) {
@@ -41,17 +32,6 @@ function parseServiceTarget(value) {
   if (value !== "model-relay" && internalServiceTargetUsage.split("|").includes(value)) return value;
   throw new Error(`服务目标必须是 ${serviceTargetUsage.replaceAll("|", "、")}：${value}`);
 }
-
-export const serviceCommandUsage = Object.freeze({
-  install: "用法：codexc service install",
-  uninstall: "用法：codexc service uninstall",
-  start: `用法：codexc service start [${serviceTargetUsage}]`,
-  stop: `用法：codexc service stop [${serviceTargetUsage}]`,
-  reload: "用法：codexc service reload",
-  restart: `用法：codexc service restart [${serviceTargetUsage}]`,
-  status: `用法：codexc service status [${serviceTargetUsage}] [--json]`,
-  logs: `用法：codexc service logs [${serviceTargetUsage}] [-f|--follow] [-n|--lines 行数]`,
-});
 
 export async function runGatewayServiceCommand(args) {
   if (args.length > 0) throw new Error("用法：codexc gateway");

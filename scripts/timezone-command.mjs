@@ -1,3 +1,5 @@
+import { timezoneCommandUsage } from "./cli-command-usage.mjs";
+export { timezoneCommandUsage } from "./cli-command-usage.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -22,30 +24,6 @@ export const commonTimezones = [
   { value: "America/Los_Angeles", hint: "美国西部 UTC-8 / 夏令时 UTC-7" },
   { value: "UTC", hint: "协调世界时" },
 ];
-
-export const timezoneCommandUsage = `用法：codexc timezone [<IANA 时区>|--system] [--json]
-      codexc timezone --gateway [<IANA 时区>|--follow-app-server|--system] [--json]
-
-设置 App Server 与 WebUI 服务进程时区，决定模型请求 environment context 里的时区与当前日期，
-WebUI 页面时间也随之呈现。缺省不写入配置，两个进程都沿用运行环境的系统时区。
-
-  codexc timezone                    交互选择常见时区，或选“其他”手动输入 IANA 名称；
-                                     选中“恢复系统时区”即删除该配置
-  codexc timezone Asia/Shanghai      直接写入 [codex].timezone
-  codexc timezone --system           删除该配置，恢复系统时区
-  codexc timezone --json             只读输出当前配置；
-                                     与时区名称或 --system 一起使用时输出写入结果
-  codexc timezone --gateway          交互设置网关时区
-  codexc timezone --gateway --follow-app-server
-                                     网关启动时跟随 codex.timezone，未配置则沿用系统时区
-  codexc timezone --gateway Asia/Shanghai
-                                     为网关设置独立 IANA 时区
-  codexc timezone --gateway --system 写入 gateway.timezone = "system"，使用系统时区
-
-默认入口写入 App Server 与 WebUI 时区配置，未设置独立时区的网关也跟随；不修改系统时区。
-修改 App Server 时区后，App Server、Gateway 与 WebUI 均需重启；托管网关自动重启，
-直接运行的网关需重新执行原启动命令。--gateway 只设置网关，重启网关后生效；
-网关未设置时默认跟随 codex.timezone，--follow-app-server 删除网关独立设置。`;
 
 /**
  * 解析 `codexc timezone` 参数：只接受一个 IANA 时区名称或 `--system`，两者互斥。

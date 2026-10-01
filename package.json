@@ -39,6 +39,7 @@
     "scripts/ccg-setup.mjs",
     "scripts/cli-status.mjs",
     "scripts/cli-help.mjs",
+    "scripts/cli-command-usage.mjs",
     "scripts/cli-menu.mjs",
     "scripts/cli-menu.d.mts",
     "scripts/cleanup-menu.mjs",

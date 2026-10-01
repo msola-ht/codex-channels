@@ -44,36 +44,20 @@ import {
   TRAFFIC_CLEANUP_USAGE,
   TRAFFIC_USAGE,
 } from "../scripts/traffic-command-options.mjs";
-import { TRAFFIC_UPGRADE_USAGE, parseTrafficUpgradeArgs, upgradeTrafficCapture } from "../scripts/traffic-upgrade.mjs";
 import {
+  TRAFFIC_UPGRADE_USAGE,
   desktopAppCommandUsage,
-  runDesktopAppCommand,
-} from "../scripts/desktop-app-command.mjs";
-import {
-  runTimezoneCommand,
   timezoneCommandUsage,
-} from "../scripts/timezone-command.mjs";
+  cleanupUsage,
+  serviceCommandActions,
+  serviceCommandUsage,
+} from "../scripts/cli-command-usage.mjs";
 import {
   metricsCommandUsage,
   validateMetricsCommandArgs,
 } from "../scripts/metrics-command-options.mjs";
-import { runMetricsMenu } from "../scripts/metrics-menu.mjs";
-import { runCliMenu, runServiceMenu } from "../scripts/cli-menu.mjs";
-import { cleanupUsage, runCleanupMenu } from "../scripts/cleanup-menu.mjs";
 import { configuredEnvironment, serviceControlEnvironment } from "../scripts/runtime-environment.mjs";
-import {
-  runAppServerServiceCommand,
-  runGatewayServiceCommand,
-  runModelRelayServiceCommand,
-  runServiceCommand,
-  serviceCommandActions,
-  serviceCommandUsage,
-} from "../scripts/service-command.mjs";
 import { parseWebuiCliArgs } from "../scripts/webui-command-options.mjs";
-import { runWorkspaceCommand } from "../scripts/workspace-command.mjs";
-import { runResetCreditCommand } from "../scripts/reset-credit-command.mjs";
-import { runDeliveryCommand } from "../scripts/delivery-command.mjs";
-import { runModelRelayCommand } from "../scripts/model-relay-command.mjs";
 
 const foregroundShutdownTimeoutMs = 5_000;
 const foregroundProcessGroupExitTimeoutMs = 1_000;
@@ -305,6 +289,7 @@ const [command, ...args] = process.argv.slice(2);
 
 try {
   if (command === undefined && process.stdin.isTTY && process.stdout.isTTY) {
+    const { runCliMenu } = await import("../scripts/cli-menu.mjs");
     await runCliMenu({ runCommand: ([name, ...values]) => executeCommand(name, values) });
   } else {
     await executeCommand(command, args);
@@ -371,19 +356,19 @@ async function executeCommand(command, args) {
       if (showRequestedHelp(args, "gateway")) {
         break;
       }
-      await runGatewayServiceCommand(args);
+      await (await import("../scripts/service-command.mjs")).runGatewayServiceCommand(args);
       break;
     case "service-app-server":
       if (showRequestedHelp(args, "service-app-server")) {
         break;
       }
-      await runAppServerServiceCommand(args);
+      await (await import("../scripts/service-command.mjs")).runAppServerServiceCommand(args);
       break;
     case "service-model-relay":
-      await runModelRelayServiceCommand(args);
+      await (await import("../scripts/service-command.mjs")).runModelRelayServiceCommand(args);
       break;
     case "relay":
-      await runModelRelayCommand(args);
+      await (await import("../scripts/model-relay-command.mjs")).runModelRelayCommand(args);
       break;
     case "remote":
       if (showRequestedHelp(args, "remote")) {
@@ -403,10 +388,10 @@ async function executeCommand(command, args) {
         console.log(desktopAppCommandUsage);
         break;
       }
-      await runDesktopAppCommand(args);
+      await (await import("../scripts/desktop-app-command.mjs")).runDesktopAppCommand(args);
       break;
     case "work":
-      await runWorkspaceCommand(args);
+      await (await import("../scripts/workspace-command.mjs")).runWorkspaceCommand(args);
       break;
     case "service":
       await handleServiceCommand(args);
@@ -430,7 +415,7 @@ async function executeCommand(command, args) {
       if (showRequestedHelp(args, "timezone")) {
         break;
       }
-      await runTimezoneCommand(args);
+      await (await import("../scripts/timezone-command.mjs")).runTimezoneCommand(args);
       break;
     case "doctor":
       if (showRequestedHelp(args, "doctor")) {
@@ -483,13 +468,13 @@ async function executeCommand(command, args) {
       runStandaloneScript("scripts/source-uninstall.mjs", [], serviceControlEnvironment());
       break;
     case "reset-credit":
-      await runResetCreditCommand(args);
+      await (await import("../scripts/reset-credit-command.mjs")).runResetCreditCommand(args);
       break;
     case "metrics":
       await metrics(args);
       break;
     case "delivery":
-      await runDeliveryCommand(args);
+      await (await import("../scripts/delivery-command.mjs")).runDeliveryCommand(args);
       break;
     case "cleanup":
       if (showRequestedHelp(args, "cleanup")) break;
@@ -498,7 +483,7 @@ async function executeCommand(command, args) {
         console.log(cleanupUsage);
         break;
       }
-      await runCleanupMenu({
+      await (await import("../scripts/cleanup-menu.mjs")).runCleanupMenu({
         runSessionCleanup: (values) => runScript("scripts/session-cleanup.mjs", values, { failureReportedByChild: true }),
         runTrafficCleanup: (values) => runStandaloneScript("scripts/traffic-cleanup.mjs", values),
         runDatabaseCommand: (values) => runScript("scripts/metrics-database.mjs", values, { failureReportedByChild: true }),
@@ -513,6 +498,7 @@ async function executeCommand(command, args) {
         break;
       }
       if (args[0] === "upgrade") {
+        const { upgradeTrafficCapture, parseTrafficUpgradeArgs } = await import("../scripts/traffic-upgrade.mjs");
         console.log(JSON.stringify(await upgradeTrafficCapture(parseTrafficUpgradeArgs(args.slice(1))), null, 2));
         break;
       }
@@ -567,7 +553,11 @@ async function handleServiceCommand(args) {
   if (showRequestedHelp(args, "service")) return;
   if (args.length === 0) {
     if (!process.stdin.isTTY || !process.stdout.isTTY) console.log(helpText.service);
-    else await runServiceMenu({ runCommand: runServiceCommand });
+    else {
+      const { runServiceMenu } = await import("../scripts/cli-menu.mjs");
+      const { runServiceCommand } = await import("../scripts/service-command.mjs");
+      await runServiceMenu({ runCommand: runServiceCommand });
+    }
     return;
   }
   const [action, ...rest] = args;
@@ -577,7 +567,7 @@ async function handleServiceCommand(args) {
   ) {
     return;
   }
-  await runServiceCommand(args);
+  await (await import("../scripts/service-command.mjs")).runServiceCommand(args);
 }
 
 function runDoctor(args) {
@@ -862,7 +852,7 @@ async function metrics(args) {
       console.log(helpText.metrics);
       return;
     }
-    await runMetricsMenu({
+    await (await import("../scripts/metrics-menu.mjs")).runMetricsMenu({
       runDatabaseCommand: (commandArgs) => {
         if (commandArgs.length === 1 && commandArgs[0] === "status") {
           run(

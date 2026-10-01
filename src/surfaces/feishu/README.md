@@ -18,8 +18,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 
 ## 文件索引
 
-- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 只转出 Bootstrap 所需工厂、选项类型
-  和启动文案渲染器。
+- `index.ts`：飞书模块受控出口；一级 `surfaces/index.ts` 通过显式加载函数提供 Bootstrap 所需工厂
+  和启动文案渲染器，静态出口仅转出选项类型。
 - `adapter.ts`：区分普通文本、平台本地命令和 Application 命令，把同一富文本或 Inbox 已明确成批的图片合并为
   一次最多 4 张的 Application 输入，并通过 Outbox 返回结果或安全错误。
 - `approval-card.ts`：生成有界 CardKit 2.0 审批卡片和移除动作后的处理结果卡片；短审批直接显示，

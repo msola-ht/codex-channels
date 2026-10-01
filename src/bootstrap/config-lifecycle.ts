@@ -22,6 +22,7 @@ import { ResetCreditError } from "../application/index.js";
 import { createLogger } from "../observability/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication } from "./app.js";
+import { loadBuiltInSurfacePlugins } from "./surface-composition.js";
 import { NetworkProxyWatcher } from "./network-proxy-watcher.js";
 import {
   ProviderSettingsWatcher,
@@ -56,6 +57,7 @@ export async function runGatewayProcess(): Promise<void> {
   let application: GatewayApplication;
   let weixinCredentialChange: (() => Promise<"changed" | "unchanged" | "unavailable">) | undefined;
   try {
+    const surfacePlugins = await loadBuiltInSurfacePlugins(config);
     if (config.weixin) {
       weixinCredentialChange = await createWeixinCredentialChangeCheck(
         createWeixinCredentialStore(join(config.credentialsDirectory, "weixin")),
@@ -66,6 +68,7 @@ export async function runGatewayProcess(): Promise<void> {
     application = new GatewayApplication(
       config,
       logger,
+      surfacePlugins,
       runtime.configPath,
     );
   } catch (error) {

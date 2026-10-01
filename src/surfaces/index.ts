@@ -1,23 +1,21 @@
-export {
-  createFeishuSurface,
-  renderFeishuStartupNotification,
-  type FeishuSurfaceOptions,
-} from "./feishu/index.js";
-export {
-  createTelegramSurface,
-  telegramDefaultAccountId,
-  type CreateTelegramSurfaceOptions,
-  type TelegramAudioPort,
-  type TelegramImagePort,
+// Channel implementations are loaded only after validated configuration enables them.
+export function loadFeishuSurface() {
+  return import("./feishu/index.js");
+}
+export function loadTelegramSurface() {
+  return import("./telegram/index.js");
+}
+export function loadWeixinSurface() {
+  return import("./weixin/index.js");
+}
+export { telegramDefaultAccountId } from "./telegram/constants.js";
+export { createWeixinCredentialStore } from "./weixin/credential-store.js";
+export { createWeixinCredentialChangeCheck } from "./weixin/credential-client.js";
+export type { FeishuSurfaceOptions } from "./feishu/index.js";
+export type {
+  CreateTelegramSurfaceOptions, TelegramAudioPort, TelegramImagePort,
 } from "./telegram/index.js";
-export {
-  createWeixinSurface,
-  createWeixinCredentialStore,
-  createWeixinCredentialChangeCheck,
-  renderWeixinStartupNotification,
-  type CreateWeixinSurfaceOptions,
-  type WeixinAudioPort,
-} from "./weixin/index.js";
+export type { CreateWeixinSurfaceOptions, WeixinAudioPort } from "./weixin/index.js";
 export {
   ConversationDeliveryQueue,
   type ConversationDeliveryQueueOptions,

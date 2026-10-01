@@ -16,7 +16,7 @@
   `schedule_task` 工具名，把结果复用现有计划任务渲染格式返回给 Agent，并把确认预览交给当前
   `surface + accountId` 的原生交互入口；后台计划任务 Thread 的
   同类请求先由 `scheduled-task-server-request.ts` 拒绝。
-- `app.ts`：保留 `GatewayApplication` 的稳定构造、启动、停止和配置重载入口，编排顶层生命周期，
+- `app.ts`：提供 `GatewayApplication` 的构造、启动、停止和配置重载入口，构造时接收已加载的内置渠道插件，编排顶层生命周期，
   把具体组件所有权交给组件图；只持有启动/停止幂等任务，配置重载继承组件图实现，启动中取消、订阅移除和资源关闭由组件图统一处理。
 - `gateway-component-graph.ts`：只为 OpenAI 主 Client 注入遵循共享代理配置的图片上传 HTTP 客户端，本地模型路由核验直连回环地址；
   校验 Codex 版本并集中装配 Transport、Client、Core、Router、Storage、Surface、指标与计划任务；
@@ -84,7 +84,7 @@
   `config.toml` 并校验 `permissions` 与 `sandbox` 互斥；文件变化由配置监听热加载。
 - `surface-plugin.ts`：定义编译期内置 Surface 插件、窄会话能力与共享命令执行器上下文及运行时模块契约，并校验插件 ID、
   实际 Surface ID 与账号实例唯一性。
-- `surface-composition.ts`：显式注册 Telegram、飞书和微信内置插件，把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、
+- `surface-composition.ts`：在组件图构造前按已验证配置异步加载 Telegram、飞书和微信内置插件，再同步创建渠道，把组合根创建的共享命令执行器注入各端，并保留各平台访问策略、
   热加载钩子、故障上报装配和全局生命周期通知的安全收件人。三个插件都只在严格运行配置启用时创建实例；Telegram 由非空 Token
   决定是否启用，飞书和微信使用显式开关；飞书和微信启动通知从仍有授权 Actor 的已知 Conversation
   解析收件人，不要求当时已有 Thread 绑定。三个渠道按目标复用共享代理选择；微信协议 Client 在首次调用时从独立安全存储

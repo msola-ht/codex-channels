@@ -18,12 +18,10 @@ import {
 } from "../policy/index.js";
 import type { BindingStore } from "../storage/index.js";
 import {
-  createFeishuSurface,
-  createTelegramSurface,
-  createWeixinSurface,
-  renderFeishuStartupNotification,
+  loadFeishuSurface,
+  loadTelegramSurface,
+  loadWeixinSurface,
   telegramDefaultAccountId,
-  renderWeixinStartupNotification,
   type SurfaceAdapter,
 } from "../surfaces/index.js";
 import {
@@ -61,41 +59,46 @@ export interface ReloadableWeixinAccess {
 
 export function createSurfaceModules(
   options: SurfacePluginContext,
-  plugins: readonly BuiltInSurfacePlugin[] = builtInSurfacePlugins,
+  plugins: readonly BuiltInSurfacePlugin[],
 ): SurfaceRuntimeModule[] {
   return composeBuiltInSurfacePlugins(plugins, options);
 }
 
-export const telegramSurfacePlugin: BuiltInSurfacePlugin = {
-  id: "telegram",
-  create: (options) => options.config.telegramEnabled
-    ? [createTelegramModule(options)]
-    : [],
-};
-
-export const feishuSurfacePlugin: BuiltInSurfacePlugin = {
-  id: "feishu",
-  create: (options) => options.config.feishu
-    ? [createFeishuModule(options)]
-    : [],
-};
-
-export const weixinSurfacePlugin: BuiltInSurfacePlugin = {
-  id: "weixin",
-  create: (options) => options.config.weixin
-    ? [createWeixinModule(options)]
-    : [],
-};
-
-export const builtInSurfacePlugins: readonly BuiltInSurfacePlugin[] =
-  Object.freeze([
-    telegramSurfacePlugin,
-    feishuSurfacePlugin,
-    weixinSurfacePlugin,
-  ]);
+/** Explicit built-in registry: load code before creating any channel resources. */
+export async function loadBuiltInSurfacePlugins(
+  config: GatewayConfig,
+): Promise<readonly BuiltInSurfacePlugin[]> {
+  const plugins: BuiltInSurfacePlugin[] = [];
+  if (config.telegramEnabled) {
+    const channel = await loadTelegramSurface();
+    plugins.push({
+      id: "telegram",
+      create: (options) => options.config.telegramEnabled
+        ? [createTelegramModule(options, channel)] : [],
+    });
+  }
+  if (config.feishu) {
+    const channel = await loadFeishuSurface();
+    plugins.push({
+      id: "feishu",
+      create: (options) => options.config.feishu
+        ? [createFeishuModule(options, channel)] : [],
+    });
+  }
+  if (config.weixin) {
+    const channel = await loadWeixinSurface();
+    plugins.push({
+      id: "weixin",
+      create: (options) => options.config.weixin
+        ? [createWeixinModule(options, channel)] : [],
+    });
+  }
+  return plugins;
+}
 
 function createWeixinModule(
   options: SurfacePluginContext,
+  { createWeixinSurface, renderWeixinStartupNotification }: Awaited<ReturnType<typeof loadWeixinSurface>>,
 ): SurfaceRuntimeModule {
   const config = options.config.weixin;
   if (!config) {
@@ -182,6 +185,7 @@ function createWeixinModule(
 
 function createFeishuModule(
   options: SurfacePluginContext,
+  { createFeishuSurface, renderFeishuStartupNotification }: Awaited<ReturnType<typeof loadFeishuSurface>>,
 ): SurfaceRuntimeModule {
   const config = options.config.feishu;
   if (!config) {
@@ -307,6 +311,7 @@ export function selectFeishuProxyUrl(
 
 function createTelegramModule(
   options: SurfacePluginContext,
+  { createTelegramSurface }: Awaited<ReturnType<typeof loadTelegramSurface>>,
 ): SurfaceRuntimeModule {
   const { config, bindings, logger } = options;
   const proxyUrl = selectHttpProxyUrl(

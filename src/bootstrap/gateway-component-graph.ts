@@ -127,7 +127,7 @@ import { ConversationIdleReleaser } from "./conversation-idle-releaser.js";
 import {
   createSurfaceModules,
 } from "./surface-composition.js";
-import type { SurfaceRuntimeModule } from "./surface-plugin.js";
+import type { BuiltInSurfacePlugin, SurfaceRuntimeModule } from "./surface-plugin.js";
 import { SurfaceManager } from "./surface-manager.js";
 import { createProxyFetch } from "./proxy-fetch.js";
 import {
@@ -201,6 +201,7 @@ export abstract class GatewayComponentGraph {
   constructor(
     private config: GatewayConfig,
     private readonly logger: Logger,
+    surfacePlugins: readonly BuiltInSurfacePlugin[],
     configPath?: string,
   ) {
     verifyCodexVersion(config);
@@ -894,7 +895,7 @@ export abstract class GatewayComponentGraph {
         error,
       ),
       autoCompactPercent: (provider, model) => this.resolveAutoCompactPercent(provider, model),
-    });
+    }, surfacePlugins);
     this.surfaces = this.surfaceModules.map((module) => module.adapter);
     this.surfaceManager = new SurfaceManager(
       this.surfaces,
