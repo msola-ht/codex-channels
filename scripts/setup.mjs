@@ -1,41 +1,28 @@
-import { runClinePassSetup } from "./cline-pass-setup.mjs";
 import { pathToFileURL } from "node:url";
 
 import * as clackPrompts from "@clack/prompts";
 
 import { ForwardedChildSignalError } from "../runtime/process-lifecycle.mjs";
 import { writeCliMessage } from "../runtime/cli-presentation.mjs";
-import { runFeishuSetup } from "./feishu-setup.mjs";
-import { runDeepseekSetup } from "./deepseek-account-setup.mjs";
-import { runCcgSetup } from "./ccg-setup.mjs";
-import { runTelegramSetup } from "./telegram-setup.mjs";
-import { runWeixinSetup } from "./weixin-setup.mjs";
-import { runSkillSetup } from "./skill-setup.mjs";
-import { runOpenCodeGoSetup } from "./opencode-go-setup.mjs";
-import { runModelProviderDefaultSetup } from "./model-provider-default-setup.mjs";
-import { runModelWindowSetup } from "./model-window-setup.mjs";
-import { runCustomPrimaryProviderMenu } from "./primary-provider-cli.mjs";
-import { runOfficialLoginSetup } from "./official-login-setup.mjs";
-import { writeSetupConfigurationSummary } from "./setup-summary.mjs";
 import { configActivationResult } from "./config-activation-result.mjs";
 
 export async function runSetup({
   input = process.stdin,
   output = process.stdout,
   prompts = clackPrompts,
-  feishuSetup = runFeishuSetup,
-  deepseekSetup = runDeepseekSetup,
-  ccgSetup = runCcgSetup,
-  clinePassSetup = runClinePassSetup,
-  telegramSetup = runTelegramSetup,
-  weixinSetup = runWeixinSetup,
-  skillSetup = runSkillSetup,
-  openCodeGoSetup = runOpenCodeGoSetup,
-  modelProviderDefaultSetup = runModelProviderDefaultSetup,
-  modelWindowSetup = runModelWindowSetup,
-  customPrimarySetup = runCustomPrimaryProviderMenu,
-  officialLoginSetup = runOfficialLoginSetup,
-  setupSummary = writeSetupConfigurationSummary,
+  feishuSetup = async (options) => (await import("./feishu-setup.mjs")).runFeishuSetup(options),
+  deepseekSetup = async (options) => (await import("./deepseek-account-setup.mjs")).runDeepseekSetup(options),
+  ccgSetup = async (options) => (await import("./ccg-setup.mjs")).runCcgSetup(options),
+  clinePassSetup = async (options) => (await import("./cline-pass-setup.mjs")).runClinePassSetup(options),
+  telegramSetup = async (options) => (await import("./telegram-setup.mjs")).runTelegramSetup(options),
+  weixinSetup = async (options) => (await import("./weixin-setup.mjs")).runWeixinSetup(options),
+  skillSetup = async (options) => (await import("./skill-setup.mjs")).runSkillSetup(options),
+  openCodeGoSetup = async (options) => (await import("./opencode-go-setup.mjs")).runOpenCodeGoSetup(options),
+  modelProviderDefaultSetup = async (options) => (await import("./model-provider-default-setup.mjs")).runModelProviderDefaultSetup(options),
+  modelWindowSetup = async (options) => (await import("./model-window-setup.mjs")).runModelWindowSetup(options),
+  customPrimarySetup = async (options) => (await import("./primary-provider-cli.mjs")).runCustomPrimaryProviderMenu(options),
+  officialLoginSetup = async (options) => (await import("./official-login-setup.mjs")).runOfficialLoginSetup(options),
+  setupSummary = async (options) => (await import("./setup-summary.mjs")).writeSetupConfigurationSummary(options),
   stayOnMenu = false,
   onResult,
 } = {}) {
