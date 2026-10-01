@@ -328,6 +328,10 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
     return this.queries.recent(limit);
   }
 
+  relayCallerUsage(callers: readonly { callerId: string; keyId: string }[], startAtMs: number, endAtMs: number) {
+    return this.queries.relayCallerUsage(callers, startAtMs, endAtMs);
+  }
+
   weeklyQuotaEstimate(query: WeeklyQuotaEstimateQuery): StoredWeeklyQuotaEstimate | null {
     this.requireOpen();
     return this.quotaQueries.weeklyQuotaEstimate(query);

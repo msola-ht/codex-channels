@@ -380,7 +380,7 @@ async function routeManagement(environment, url, request, response, state, token
     ...routeContext,
     gatewayVersion: SOURCE_GATEWAY_VERSION ?? PACKAGE_VERSION ?? null,
   })) return;
-  if (await routeRelayManagement(routeContext)) return;
+  if (await routeRelayManagement({ ...routeContext, openMetricsStore })) return;
   if (await routeDeliveryManagement(routeContext)) return;
   if (await routeGatewaySettingsManagement({ ...routeContext, consumeHighRisk })) return;
   if (await routeStatusManagement({

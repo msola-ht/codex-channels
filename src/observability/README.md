@@ -34,7 +34,7 @@
 - `sqlite-request-metrics-row-codec.ts`：集中保存指标明细、Turn、Thread、聚合与压缩摘要的 SQLite
   Row 类型和纯领域映射，包括历史未观测响应归一化与额度窗口解析。
 - `sqlite-quota-queries.ts`：封装周额度估算、最新额度与历史窗口归约；通过 Store 的同一连接和受跟踪迭代器读取，不创建连接或事务，不承担 Store 关闭及 Schema 生命周期。
-- `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
+- `sqlite-request-metrics-queries.ts`：请求分页、错误统计、日/小时汇总、Thread/Turn 聚合、Relay 调用方与 Key 的批量使用摘要及同步游标读取；通过 Store 的读取与关闭检查端口执行，SQL 和行映射不介入写入、事务或数据库生命周期。内部 Thread ID 校验同时供 Store 写入使用。
 - `sqlite-request-metrics-schema.ts`：集中保存当前 Schema v24 建库 SQL、存储列定义、版本错误和
   严格结构校验；Store 持有初始化事务，不隐式升级旧库。
 - `sqlite-request-metrics-store.ts`：把脱敏后的 Provider、模型、状态、HTTP/传输格式、Usage、

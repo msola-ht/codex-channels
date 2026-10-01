@@ -119,6 +119,26 @@ interface MetricsQueryReader {
 export class SqliteRequestMetricsQueries {
   constructor(private readonly reader: MetricsQueryReader) {}
 
+  relayCallerUsage(callers: readonly { callerId: string; keyId: string }[], startAtMs: number, endAtMs: number): Array<{
+    callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+  }> {
+    this.reader.requireOpen();
+    if (callers.length === 0) return [];
+    return this.reader.prepare(`
+      WITH callers(caller_id, key_id) AS (VALUES ${callers.map(() => "(?, ?)").join(",")})
+      SELECT c.caller_id AS callerId, c.key_id AS keyId,
+        MAX(m.request_started_at_ms) AS lastRequestAtMs,
+        COUNT(CASE WHEN m.request_started_at_ms >= ? THEN 1 END) AS requestCount,
+        COUNT(CASE WHEN m.request_started_at_ms >= ? AND (${normalizedStatusSql}) != 'completed' THEN 1 END) AS unsuccessfulRequestCount
+      FROM callers c LEFT JOIN model_request_metrics m
+        ON m.source = 'relay' AND m.caller_id = c.caller_id AND m.key_id = c.key_id
+        AND m.request_started_at_ms <= ?
+      GROUP BY c.caller_id, c.key_id
+    `).all(...callers.flatMap(caller => [caller.callerId, caller.keyId]), startAtMs, startAtMs, endAtMs) as Array<{
+      callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+    }>;
+  }
+
   recent(limit: number): StoredModelRequestMetric[] {
     this.reader.requireOpen();
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {

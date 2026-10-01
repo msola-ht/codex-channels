@@ -28,6 +28,7 @@ import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
 import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
 
+const RelayQueuePage = lazy(() => import("@/pages/relay-queue-page").then(module => ({ default: module.RelayQueuePage })))
 const RelayPage = lazy(() => import("@/pages/relay-page").then(module => ({ default: module.RelayPage })))
 const DeliveryPage = lazy(() => import("@/pages/delivery-page").then(module => ({ default: module.DeliveryPage })))
 
@@ -169,6 +170,7 @@ function Layout() {
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
+                <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />
                 <Route path="/models/providers" element={<ProvidersPage />} />
                 <Route path="/models/accounts" element={<ModelAccountsPage />} />

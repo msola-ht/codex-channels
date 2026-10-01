@@ -23,6 +23,8 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       }
     }] });
     try {
+      const { setServerTimeZone } = await server.ssrLoadModule('/src/lib/format.ts');
+      setServerTimeZone('UTC');
       const { RelayPage } = await server.ssrLoadModule('/src/pages/relay-page.tsx');
       const { LanguageContext } = await server.ssrLoadModule('/src/hooks/language-context.ts');
       const noop = () => {};
@@ -33,13 +35,13 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
         ] }
       };
       const render = language => renderToStaticMarkup(h(MemoryRouter, null, h(LanguageContext.Provider, { value: { language, setLanguage: noop } }, h(RelayPage))));
+      globalThis.fixture.data.usage = { observedAtMs: 2000, startAtMs: 0, callers: [
+        { callerId: 'translation', keyId: 'key-a', lastRequestAtMs: 1000, requestCount: 17, unsuccessfulRequestCount: 3 },
+        { callerId: 'kelivo', keyId: 'key-b', lastRequestAtMs: null, requestCount: 0, unsuccessfulRequestCount: 0 }
+      ] };
       const zh = render('zh'), en = render('en');
-      globalThis.fixture.data.runtime.capture.state = 'failed';
-      const captureFailed = render('zh');
-      globalThis.fixture.data.runtime.capture.enabled = false;
-      const captureDisabled = render('zh');
-      globalThis.fixture.data.runtime.configurationValid = false;
-      const captureUnknown = render('zh');
+      globalThis.fixture.data.usage = null;
+      const unavailableUsage = render('zh');
 
       globalThis.fixture.data.callers = [];
       const empty = render('en');
@@ -73,20 +75,25 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
       const dual = render('en');
       globalThis.fixture.data.providers[0].models[0].inputModalities = [];
       const unknownInputs = render('en');
-      console.log(JSON.stringify({ captureFailed, captureDisabled, captureUnknown, zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs }));
+      console.log(JSON.stringify({ unavailableUsage, zh, en, empty, unknown, stopped, refreshing, recovered, failed, editorError, staleEditor, unavailableEditor, availableEditor, availableZh, dual, unknownInputs }));
     } finally { await server.close(); }
   `;
   const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: fileURLToPath(new URL("../webui", import.meta.url)), encoding: "utf8",
-  })) as { captureFailed: string; captureDisabled: string; captureUnknown: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
-  expect(result.captureFailed).toContain("采集故障"); expect(result.captureDisabled).toContain("采集未开启");
-  expect(result.captureUnknown).toContain("采集状态未确认"); expect(result.captureUnknown).not.toContain("采集未开启");
+  })) as { unavailableUsage: string; refreshing: string; recovered: string; unknown: string; stopped: string; zh: string; en: string; empty: string; failed: string; editorError: string; staleEditor: string; unavailableEditor: string; availableEditor: string; availableZh: string; dual: string; unknownInputs: string };
   expect(result.zh).toMatch(/<th[^>]*>凭据轮换<\/th>/u);
   expect(result.en).toContain("Credential rotation");
-  expect(result.zh).toContain("配置并发上限 10"); expect(result.zh).toMatch(/>处理中<\/dt><dd[^>]*>4<\/dd>/u);
-  expect(result.en).toContain("Oldest wait 1.2 s"); expect(result.en).toMatch(/>Capacity skips<\/dt><dd[^>]*>1<\/dd>/u); expect(result.en).toMatch(/>Unconfirmed<\/dt><dd[^>]*>2<\/dd>/u);
-  expect(result.zh).toContain("采集已就绪"); expect(result.zh).toContain("排队超时 3 次");
-  expect(result.en).toMatch(/>Waiting<\/dt><dd[^>]*>2<\/dd>/u); expect(result.en).toMatch(/>Receiving<\/dt><dd[^>]*>1<\/dd>/u);
+  expect(result.zh).toContain("沉浸式翻译 的更多操作");
+  expect(result.en).toContain("More actions for 沉浸式翻译");
+  expect(result.zh).not.toContain(">轮换并启用</button>");
+  expect(result.zh).toContain("17 次调用"); expect(result.zh).toContain("3 次未成功");
+  expect(result.zh).toContain("暂无记录"); expect(result.zh).toContain("0 次调用");
+  expect(result.en).toContain("Calls: 17"); expect(result.en).toContain("Unsuccessful: 3");
+  expect(result.unavailableUsage).toContain("暂不可用"); expect(result.unavailableUsage).not.toContain("0 次调用");
+  for (const text of ["调用采集", "指标交付", "队列与采集状态", "最早等待", "排队超时"]) expect(result.zh).not.toContain(text);
+  for (const text of ["Traffic capture", "Metric delivery", "Queue and capture status"]) expect(result.en).not.toContain(text);
+  expect(result.zh).not.toContain("请求队列");
+  expect(result.zh).toContain("配置并发上限 10");
   expect(result.unknown).toContain("Runtime status unconfirmed"); expect(result.unknown).not.toContain("Waiting 0");
   expect(result.stopped).toContain("服务未运行");
   expect(result.refreshing).toContain("Refreshing runtime status");
@@ -94,14 +101,14 @@ it("renders the real Relay page with per-key policy, exact caller links and loca
   for (const stale of [result.refreshing, result.failed]) {
     for (const text of ["Capture ready", "Capacity skips", "Oldest wait", ">Listening<", ">Processing</dt>", ">Waiting</dt>", ">Receiving</dt>", "Configured concurrency limit 10", "Configuration enabled"]) expect(stale).not.toContain(text);
   }
-  expect(result.recovered).toContain(">Listening<"); expect(result.recovered).toMatch(/>Processing<\/dt><dd[^>]*>4<\/dd>/u);
+  expect(result.recovered).toContain(">Listening<");
 
   expect(result.zh).toContain("沉浸式翻译"); expect(result.zh).toContain("强制关闭"); expect(result.zh).toContain("跟随客户端");
   expect(result.zh).toContain("callerId=translation"); expect(result.zh).toContain("callerId=kelivo");
   expect(result.en).toContain("Force off"); expect(result.en).toContain("Follow client");
   expect(result.en).not.toContain("强制关闭");
-  expect(result.zh).toContain(">删除</button>");
-  expect(result.en).toContain(">Delete</button>");
+  expect(result.zh).not.toContain(">删除</button>");
+  expect(result.en).not.toContain(">Delete</button>");
   expect(result.availableEditor).toMatch(/<button[^>]*id="relay-provider"[^>]*>/u);
   expect(result.availableEditor.match(/<button[^>]*id="relay-provider"[^>]*>/u)?.[0]).not.toMatch(/ disabled(?:=|\s|>)/u);
   expect(result.empty).toContain("No keys yet");
@@ -133,16 +140,14 @@ it("uses a queue table and shared loading, empty and unavailable components", ()
     import { renderToStaticMarkup } from 'react-dom/server';
     const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent', plugins: [{
       name: 'queue-fixture', enforce: 'pre', transform(code, id) {
-        if (id.endsWith('/requests/relay-queue-sheet.tsx')) return code.replace('useState(false)', 'useState(true)');
         if (id.endsWith('/hooks/use-relay-queue.ts')) return 'export function useRelayQueue() { return globalThis.queue; }';
-        if (id.endsWith('/ui/sheet.tsx')) return "import {createElement as h} from 'react'; export const Sheet=({children})=>children; export const SheetTrigger=({children})=>children; export const SheetContent=({children})=>h('section',{role:'dialog'},children); export const SheetHeader=({children})=>h('header',null,children); export const SheetTitle=({children})=>h('h2',null,children); export const SheetDescription=({children})=>h('p',null,children);";
       }
     }] });
     try {
-      const {RelayQueueSheet}=await server.ssrLoadModule('/src/components/requests/relay-queue-sheet.tsx');
+      const {RelayQueuePage}=await server.ssrLoadModule('/src/pages/relay-queue-page.tsx');
       const {LanguageContext}=await server.ssrLoadModule('/src/hooks/language-context.ts');
       const {TooltipProvider}=await server.ssrLoadModule('/src/components/ui/tooltip.tsx');
-      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,h(RelayQueueSheet))));
+      const render=language=>renderToStaticMarkup(h(LanguageContext.Provider,{value:{language,setLanguage(){}}},h(TooltipProvider,null,h(RelayQueuePage))));
       globalThis.queue={data:null,loading:true,error:null,errorCode:null,refetch(){}};
       const loading=render('zh');
       globalThis.queue={...globalThis.queue,loading:false,data:{state:'running',configurationValid:true,enabled:true,listening:true,requests:[]}};
@@ -166,6 +171,8 @@ it("uses a queue table and shared loading, empty and unavailable components", ()
   expect(result.invalid).toContain("当前运行配置不可用");
   expect(result.notListening).toContain("Relay is not listening");
   expect(result.ready).toContain("请求模型");
+  expect(result.ready).toMatch(/<h1[^>]*>请求队列<\/h1>/u);
+  expect(result.ready).not.toContain('role="dialog"');
   expect(result.loading).toContain('data-slot="skeleton"');
   expect(result.empty).toContain("No model requests in progress");
   expect(result.unknown).toContain('data-slot="alert"');

@@ -19,7 +19,7 @@ const mutation = z.discriminatedUnion("command", [
 ]);
 const envelope = z.strictObject({ input: mutation, revision: z.string().regex(/^[a-f0-9]{64}$/u), confirmationToken: z.string().max(128).optional() });
 
-export async function routeRelayManagement({ environment, maximumBodyBytes, path, principalId, request, response, state }) {
+export async function routeRelayManagement({ environment, maximumBodyBytes, openMetricsStore, path, principalId, request, response, state }) {
   if (path === "/relay/queue/events" && request.method === "GET") {
     if (new URL(request.url, "http://localhost").search) throw new ApiError(400, "relay_invalid", "Relay 管理参数无效");
     const { configPath } = locateUserConfig(environment);
@@ -39,7 +39,19 @@ export async function routeRelayManagement({ environment, maximumBodyBytes, path
       capture: { enabled: status.capture.enabled, state: status.capture.state, active: status.capture.active, skippedCapacity: status.capture.skippedCapacity },
       metrics: { accepted: status.metrics.accepted, unconfirmed: status.metrics.unconfirmed, rejected: status.metrics.rejected, localDropped: status.metrics.local_dropped },
     } : { state: status.result === "not_running" ? "stopped" : "unknown" };
-    sendManagementJson(response, 200, { ...snapshot, runtime }); return true;
+    const observedAtMs = Date.now();
+    const startAtMs = observedAtMs - 24 * 60 * 60 * 1000;
+    let usage = null;
+    let store;
+    try {
+      store = openMetricsStore(environment, observedAtMs);
+      usage = { observedAtMs, startAtMs, callers: store.relayCallerUsage(
+        snapshot.callers.map(caller => ({ callerId: caller.caller_id, keyId: caller.key_id })), startAtMs, observedAtMs,
+      ) };
+    } catch {
+      // 指标不可用不阻断 Key 管理，也不伪造零调用。
+    } finally { store?.close(); }
+    sendManagementJson(response, 200, { ...snapshot, runtime, usage }); return true;
   }
   if (!["/relay/preview", "/relay/apply"].includes(path) || request.method !== "POST") return false;
   const parsed = envelope.safeParse(await readJsonBody(request, maximumBodyBytes));

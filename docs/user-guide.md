@@ -693,7 +693,7 @@ Relay 生产记录脱敏后的出站 Chat/Responses 参数、输入和上游 JSO
 
 停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 24 --to 23 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
 
-模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新处理中、等待执行和接收请求数量。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
+模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新服务状态，左侧“模型转发”下的二级菜单“请求队列”独立展示当前请求及执行阶段。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
 
 Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响应提供 `code`、`phase`、
 `request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。
@@ -728,7 +728,7 @@ Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等�
 并带 `upstream_attempted:false`；未出站的拒绝、超时和撤销不会进入模型调用指标。
 客户端断开、Key 撤销或 Relay 关闭时取消等待，不自动重试；队列仅在内存中，重启不恢复。
 `codexc relay status` 返回执行数 `active` 及 `queue.pending`（上传与等待）、`queue.waiting`
-（已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 模型转发页的“请求队列”可查看实时阶段与等待情况，详见[WebUI](webui.md)。
+（已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 左侧“模型转发”下的“请求队列”可查看实时阶段与等待情况，详见[WebUI](webui.md)。
 
 旧配置中账户或 Key 的 `max_concurrency`、`requests_per_minute`、`burst` 不再受支持，
 新程序明确拒绝，不会静默忽略。切换新版本前使用新版本入口执行 `codexc relay upgrade-limits`

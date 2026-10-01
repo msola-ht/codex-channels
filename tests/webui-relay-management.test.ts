@@ -5,6 +5,9 @@ import * as relayControl from "../runtime/model-relay-control.mjs";
 import * as fileLock from "../runtime/private-file-lock.mjs";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
+import { sample } from "./request-metrics-fixtures.js";
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanupWebuiTestFixtures, createWebuiTestFixture, startWebuiTestServer, type WebuiTestServer } from "./webui-server-test-fixture.js";
 import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
@@ -68,6 +71,60 @@ it("shows only declared input formats and keeps unknown capabilities explicit", 
 
 const input: RelayManagementInput = { command: "issue", name: "沉浸式翻译", caller: "translation", key: "translation-key", provider: "clp-test",
   models: ["cline-pass/deepseek-v4.1-flash"], reasoning: "off" };
+it("reads per-key usage across rotations without blocking management when metrics are absent", async () => {
+  const f = await fixture();
+  await manageModelRelay(input, f.environment);
+  const before = await f.snapshot();
+  expect(before.usage).toBeNull();
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const store = new SqliteModelRequestMetricsStore(f.databasePath);
+  try {
+    const record = (time: number, status: "completed" | "failed" | "incomplete" | "unknown", keyId = "translation-key", generation = 1, callerId = "translation") => store.record({
+      ...sample(), source: "relay", provider: "clp-test", threadId: null, turnId: null,
+      callerId, keyId, credentialGeneration: generation, relayRequestId: randomUUID(), deliveryStatus: "finished",
+      requestStartedAtMs: time, responseCompletedAtMs: time + 1, status,
+    });
+    record(now - 2 * day, "failed");
+    record(now - 3000, "completed");
+    record(now - 2000, "failed", "translation-key", 2);
+    record(now - 1500, "incomplete");
+    record(now - 1000, "unknown");
+    record(now - 500, "failed", "another-key");
+    record(now + day, "failed");
+    store.record(sample());
+    record(now - 2 * day, "completed", "old-key", 1, "old-caller");
+    record(now - day, "completed", "boundary-key", 1, "boundary");
+    record(now, "failed", "boundary-key", 1, "boundary");
+    record(now - 500, "failed", "translation-key", 1, "other-caller");
+    store.record({ ...sample(), source: "relay", threadId: null, turnId: null, deliveryStatus: "finished",
+      callerId: "normalized", keyId: "normalized-key",
+      credentialGeneration: 1, relayRequestId: randomUUID(), requestStartedAtMs: now,
+      status: "completed", responseFormat: "unknown", model: null,
+      inputTokens: null, outputTokens: null, totalTokens: null });
+    expect(store.relayCallerUsage([], now - day, now)).toEqual([]);
+    expect(store.relayCallerUsage([
+      { callerId: "old-caller", keyId: "old-key" }, { callerId: "boundary", keyId: "boundary-key" },
+      { callerId: "normalized", keyId: "normalized-key" },
+    ], now - day, now)).toEqual(expect.arrayContaining([
+      { callerId: "old-caller", keyId: "old-key", lastRequestAtMs: now - 2 * day, requestCount: 0, unsuccessfulRequestCount: 0 },
+      { callerId: "boundary", keyId: "boundary-key", lastRequestAtMs: now, requestCount: 2, unsuccessfulRequestCount: 1 },
+      { callerId: "normalized", keyId: "normalized-key", lastRequestAtMs: now, requestCount: 1, unsuccessfulRequestCount: 1 },
+    ]));
+    expect(store.relayCallerUsage([{ callerId: "translation", keyId: "translation-key" }], now - day, now)).toEqual([
+      { callerId: "translation", keyId: "translation-key", lastRequestAtMs: now - 1000, requestCount: 4, unsuccessfulRequestCount: 3 },
+    ]);
+    expect(store.relayCallerUsage([{ callerId: "unused", keyId: "unused-key" }], now - day, now)).toEqual([
+      { callerId: "unused", keyId: "unused-key", lastRequestAtMs: null, requestCount: 0, unsuccessfulRequestCount: 0 },
+    ]);
+  } finally { store.close(); }
+  const after = await f.snapshot();
+  expect(after.revision).toBe(before.revision);
+  expect(after.usage?.callers).toEqual([
+    { callerId: "translation", keyId: "translation-key", lastRequestAtMs: now - 1000, requestCount: 4, unsuccessfulRequestCount: 3 },
+  ]);
+  expect(after.usage!.observedAtMs - after.usage!.startAtMs).toBe(day);
+});
 it("requires auth/origin and confirmation; previews do not sign keys, and writes return a secret only once", async () => {
   const f = await fixture();
   expect((await fetch(f.url)).status).toBe(401);

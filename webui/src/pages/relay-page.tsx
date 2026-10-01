@@ -1,11 +1,13 @@
 import { useRef, useState } from "react"
 import { Link } from "react-router"
+import { MoreHorizontalIcon } from "lucide-react"
 import { RelayServiceManagement } from "@/components/settings/relay-service-management"
 import { useRelayServiceManagement } from "@/hooks/use-relay-service-management"
 import { useRelayManagement } from "@/hooks/use-relay-management"
 import { useTranslation } from "@/hooks/use-translation"
 import type { RelayManagedCaller, RelayManagementInput, RelayManagementResult, RelayReasoning } from "@/lib/types"
 import { translateApiError } from "@/lib/i18n/translate"
+import { formatTime } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -22,8 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyHeader, EmptyDescription } from "@/components/ui/empty"
 import { ErrorBanner } from "@/components/metrics/error-banner"
-import { RelayQueueSheet } from "@/components/requests/relay-queue-sheet"
-import { RelayRuntimeStatus } from "@/components/requests/relay-runtime-status"
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 
 export function RelayPage() {
   const { t } = useTranslation()
@@ -87,24 +88,24 @@ export function RelayPage() {
     }
   }
   const startAction = (input: RelayManagementInput) => {
-    returnFocus.current = document.activeElement as HTMLElement
+    returnFocus.current = document.getElementById(`relay-actions-${input.caller}`)
     mutate(input)
   }
   return <div className="flex min-w-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div><h1 ref={pageHeading} tabIndex={-1} className="text-xl font-semibold">{t("relay.title")}</h1><p className="text-sm text-muted-foreground">{t("relay.description")}</p></div>
-      <div className="flex flex-wrap gap-2"><RelayQueueSheet /><Button variant="outline" disabled={serviceManagement.refreshBlocked} onClick={serviceManagement.refresh}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
+      <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={serviceManagement.refreshBlocked} onClick={serviceManagement.refresh}>{t("relay.refresh")}</Button><Button disabled={blocked || !data} onClick={() => openEditor("new")}>{t("relay.create")}</Button></div>
     </div>
     <ErrorBanner error={management.error ? translateApiError(t, management.error, management.errorCode) : null} />
     <ErrorBanner error={management.actionError ? translateApiError(t, management.actionError, management.actionErrorCode) : null} />
     <RelayServiceManagement controller={serviceManagement} snapshot={data} loading={management.loading} current={snapshotCurrent} />
     {management.loading && <div role="status" aria-label={t("common.loading")}><Skeleton className="h-24 w-full" /></div>}
-    {snapshotCurrent && data?.runtime?.state === "running" && <RelayRuntimeStatus runtime={data.runtime} />}
     {data && !management.loading && !management.error && <Card><CardHeader><CardTitle>{t("relay.keysTitle")}</CardTitle><CardDescription>{t("relay.keysHint")}</CardDescription></CardHeader><CardContent className="min-w-0"><Table><TableHeader><TableRow>
-      {(["purpose", "provider", "protocol", "models", "reasoning", "generationLabel", "status", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
+      {(["purpose", "provider", "protocol", "models", "reasoning", "generationLabel", "status", "lastRequest", "recentRequests", "actions"] as const).map(column => <TableHead key={column}>{t(`relay.${column}`)}</TableHead>)}
     </TableRow></TableHeader><TableBody>
       {data.callers.map(entry => {
         const protocols = data.providers.find(value => value.id === entry.provider)?.protocols
+        const usage = data.usage?.callers.find(value => value.callerId === entry.caller_id && value.keyId === entry.key_id)
         return <TableRow key={entry.key_id}>
         <TableCell className="min-w-40 max-w-60 whitespace-normal"><div className="break-all">{entry.display_name ?? entry.caller_id}</div></TableCell>
         <TableCell className="max-w-40 whitespace-normal break-all">{entry.provider}</TableCell>
@@ -112,15 +113,23 @@ export function RelayPage() {
           ? protocols.map(protocol => <Badge key={protocol} variant="outline">{protocol === "chat" ? "Chat" : "Responses"}</Badge>)
           : <Badge variant="outline">{t("relay.capabilityUnknown")}</Badge>}</div></TableCell><TableCell className="max-w-72 whitespace-normal break-all"><ul className="flex flex-col gap-1">{entry.models.map(model => <li key={model}>{model}</li>)}</ul></TableCell>
         <TableCell>{t(entry.reasoning === "off" ? "relay.off" : "relay.passthrough")}</TableCell><TableCell className="tabular-nums">{entry.credential_generation}</TableCell><TableCell><Badge variant={entry.enabled ? "secondary" : "outline"}>{t(entry.enabled ? "relay.enabled" : "relay.disabled")}</Badge></TableCell>
-        <TableCell className="min-w-40 max-w-64"><div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
-          <Button size="sm" variant="outline" disabled={blocked} onClick={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</Button>
-          <Button size="sm" variant="outline" disabled={blocked || !entry.enabled} onClick={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</Button>
-          <Button size="sm" variant="destructive" disabled={blocked} onClick={() => startAction({ command: "delete", caller: entry.caller_id })}>{t("relay.delete")}</Button>
-          <Button size="sm" variant="outline" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
+        <TableCell className="whitespace-nowrap tabular-nums">{!usage ? t("relay.usageUnknown") : usage.lastRequestAtMs === null ? t("relay.noRecordedRequests") : formatTime(usage.lastRequestAtMs)}</TableCell>
+        <TableCell className="whitespace-nowrap tabular-nums">{!usage ? t("relay.usageUnknown") : <div className="flex flex-col gap-1"><span>{t("relay.requestCount", { count: usage.requestCount })}</span><span className={usage.unsuccessfulRequestCount > 0 ? "text-destructive" : "text-muted-foreground"}>{t("relay.unsuccessfulCount", { count: usage.unsuccessfulRequestCount })}</span></div>}</TableCell>
+        <TableCell className="w-px whitespace-nowrap"><div className="flex items-center gap-1">
+          <Button size="xs" variant="ghost" disabled={blocked} onClick={() => openEditor(entry)}>{t("relay.edit")}</Button>
+          <Button size="xs" variant="ghost" asChild><Link to={`/requests?source=relay&callerId=${encodeURIComponent(entry.caller_id)}`}>{t("relay.requests")}</Link></Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button id={`relay-actions-${entry.caller_id}`} size="icon-xs" variant="ghost" disabled={blocked} aria-label={t("relay.moreActions", { name: entry.display_name ?? entry.caller_id })}><MoreHorizontalIcon /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end"><DropdownMenuGroup>
+              <DropdownMenuItem disabled={blocked} onSelect={() => startAction({ command: "rotate", caller: entry.caller_id })}>{t("relay.rotate")}</DropdownMenuItem>
+              <DropdownMenuItem disabled={blocked || !entry.enabled} onSelect={() => startAction({ command: "disable", caller: entry.caller_id })}>{t("relay.disable")}</DropdownMenuItem>
+            </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup>
+              <DropdownMenuItem variant="destructive" disabled={blocked} onSelect={() => startAction({ command: "delete", caller: entry.caller_id })}>{t("relay.delete")}</DropdownMenuItem>
+            </DropdownMenuGroup></DropdownMenuContent>
+          </DropdownMenu>
         </div></TableCell>
       </TableRow>})}
-      {!data.callers.length && <TableRow><TableCell colSpan={8}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}
+      {!data.callers.length && <TableRow><TableCell colSpan={10}><Empty><EmptyHeader><EmptyDescription>{t("relay.empty")}</EmptyDescription></EmptyHeader></Empty></TableCell></TableRow>}
     </TableBody></Table></CardContent></Card>}
     <Dialog open={editing !== null && !preview} onOpenChange={open => { if (!open && !management.busy) setEditing(null) }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl" closeLabel={t("relay.close")} onCloseAutoFocus={restoreFocus} showCloseButton={!management.busy} onEscapeKeyDown={event => { if (management.busy) event.preventDefault() }} onInteractOutside={event => event.preventDefault()}><DialogHeader className="pr-8"><DialogTitle>{t(editing === "new" ? "relay.create" : "relay.edit")}</DialogTitle><DialogDescription>{t("relay.formHint")}</DialogDescription></DialogHeader>

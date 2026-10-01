@@ -59,7 +59,10 @@ export const navigation: (NavItem | NavGroup)[] = [
   { to: "/threads", labelKey: "pages.threads", icon: MessagesSquare },
   { id: "monitoring", labelKey: "navigation.monitoring", icon: Activity, children: monitoringNavItems },
   { id: "models", labelKey: "modelManagement.title", icon: Boxes, children: modelNavItems },
-  { to: "/relay", labelKey: "relay.title", icon: KeyRound },
+  { id: "relay", labelKey: "relay.title", icon: KeyRound, children: [
+    { to: "/relay", labelKey: "relay.keysTitle", icon: KeyRound },
+    { to: "/relay/queue", labelKey: "relay.queueDetails", icon: ListOrdered },
+  ] },
   { id: "channels", labelKey: "navigation.channels", icon: MessagesSquare, children: channelNavItems },
   { id: "settings", labelKey: "pages.settings", icon: Settings, children: settingsNavItems },
 ]

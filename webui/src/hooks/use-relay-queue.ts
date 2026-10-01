@@ -3,7 +3,7 @@ import { useApi } from "@/hooks/use-api"
 import { useQueueEvents, type QueueSnapshotRead } from "@/hooks/use-queue-events"
 import { ApiClientError, fetchRelayQueue, watchRelayQueue } from "@/lib/api"
 
-/** Mounted only while the queue sheet is open; snapshots follow change notifications. */
+/** Mounted only while the queue page is active; snapshots follow change notifications. */
 export function useRelayQueue() {
   const latest = useRef(0)
   const [read, setRead] = useState<QueueSnapshotRead | null>(null)

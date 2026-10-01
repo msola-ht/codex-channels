@@ -64,6 +64,9 @@ it("keeps settings fields and maintenance actions in their owning pages", () => 
   expect(result.sidebarHome).toContain('aria-label="收起模型管理"');
   expect(result.sidebarHome).toContain('aria-label="收起消息渠道"');
   expect(result.sidebarHome).toContain('aria-label="展开设置"');
+  expect(result.groups.find(group => group.id === "relay")?.children.map(item => item.to)).toEqual(["/relay", "/relay/queue"]);
+  expect(result.sidebars.relay).toContain('aria-label="收起模型转发"');
+  expect(result.sidebars.relay).toMatch(/<a[^>]*data-active="true"[^>]*href="\/relay\/queue"/u);
   expect(result.sidebars.settings).toContain('aria-label="收起设置"');
   expect(result.sidebarPreferences.closed).toContain('data-collapsible="icon"');
   expect(result.sidebarPreferences.closed).toContain('aria-label="展开设置"');

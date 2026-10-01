@@ -1053,6 +1053,9 @@ export interface RelayManagedCaller {
 }
 export interface RelayManagementSnapshot {
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
+  usage: { observedAtMs: number; startAtMs: number; callers: Array<{
+    callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+  }> } | null;
   runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number;
     oldestWaitMs: number; queueTimeouts: number;
     capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };

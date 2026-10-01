@@ -88,7 +88,8 @@ Provider 的请求独立去重。跨 Provider 的同一会话或轮次会分别�
 | 请求导出 | 请求页按钮 | `GET /api/v1/requests/export`（同样的筛选条件，导出全部匹配请求为 JSON） |
 | 调用详情 | `#/traffic` | `GET /api/v1/traffic?label=&session=&offset=&limit=`（逻辑调用摘要，默认 100、每页上限 500、响应返回 `maximumOffset=50000`；达到 offset 上限且仍有更早记录时页面会明确提示缩小批次范围）、`GET /api/v1/traffic/exchange?id=&label=&session=&traceOffset=`（请求、终态响应及可选 trace 分页）、管理任务 `traffic:cleanup`（预览确认后清空） |
 | 错误 | `#/errors` | `GET /api/v1/errors?range=&offset=&limit=` |
-| 模型转发 | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
+| 模型转发 / API Key | `#/relay` | `GET /api/v1/management/relay`（脱敏 Key 与账户模型能力）；`POST /api/v1/management/relay/preview`、`POST /api/v1/management/relay/apply`（版本化预览与一次性确认写入） |
+| 模型转发 / 请求队列 | `#/relay/queue` | `GET /api/v1/management/relay/queue`（当前请求快照）；`GET /api/v1/management/relay/queue/events`（SSE 变化通知） |
 | 设置与管理 | `#/settings`、`#/settings/permissions`、`#/settings/network`、`#/settings/data`、`#/settings/services`；模型管理见下文 | `GET /api/v1/settings/summary`（脱敏配置摘要）、`GET /api/v1/management/services`（服务状态、版本和未运行时的最近错误）、`GET /api/v1/management/upstream-user-agent`（模型上游实际 User-Agent 与取值来源）、`GET /api/v1/management/providers`（Provider 安全概览）、`/api/v1/management/settings`（Gateway 设置）、`/api/v1/management/codex/settings`（App Server 用户设置读取/预览/修改）、`/api/v1/management/provider-settings`（主 Provider 与托管 Provider 默认值读取/预览/确认写入）、`/api/v1/management/account-settings`（OpenCode Go、DeepSeek、Cline Pass 多账户读取/预览/确认写入）、`/api/v1/management/tasks`（白名单服务/指标/更新任务） |
 | 本地账户与额度 | — | `GET /api/v1/accounts`（读取 Gateway 写入的统一账户快照）；`POST /api/v1/management/accounts/refresh`（按 Provider 请求 Gateway 实时刷新） |
 | 渠道投递队列 | `#/delivery`（左侧导航） | `GET /api/v1/management/delivery/queue?before=&state=`；`GET /api/v1/management/delivery/events`（SSE 变化通知）；`POST /api/v1/management/delivery/content-batch`（批量摘要）；`GET /api/v1/management/delivery/content?id=&revision=`（单条内容预览）；`POST /api/v1/management/delivery/batch-preview`、`POST /api/v1/management/delivery/batch-apply`（批量重试/忽略）；`POST /api/v1/management/delivery/preview`、`POST /api/v1/management/delivery/retry`（单条重试） |
@@ -434,19 +435,22 @@ Relay 全局调试沿用“调用详情”页面：原请求/响应展示出站�
 Codex 与 Relay 共用 Gateway 系统设置中的“记录调用详情”和“调用记录模式”。生产/调试分别写入已有裁剪参数 3/65536 与 0/0，不新增模式字段；关闭采集不删除历史记录。
 
 
-模型转发页手动刷新时同步展示最早等待时长、排队超时次数、当前采集状态及容量跳过次数，以及指标接收确认、未确认、拒收和本地丢弃计数。计数只覆盖当前进程，重启后清零；接收确认不代表落盘，未确认不代表丢失。接收请求、等待执行与处理中分别表示正文上传、排队和出站准备至交付阶段；刷新失败时隐藏旧状态。采集沿用全局设置，新状态接口需部署后重启 Relay。
 
 请求列表的转发行直接显示受控失败原因，不再显示复制请求 ID 按钮；调用详情保留已有转储定位复制入口。无转储仍不提供详情入口，提示未关联原因未记录。当前采集状态不用于推断历史未采集原因；已有引用在文件尚未落盘、损坏或被清理时仍由详情接口报告不可用。
 
 Key 编辑允许更换提供商，切换后重新选择模型，思考策略重置为跟随客户端；API Key 保持不变，旧请求取消。删除使用破坏性操作确认，显示用途、调用方和提供商；保存后撤销 Key 并从列表移除，历史指标和转储保留。操作均使用同一预览、修订及一次性确认流程，生效未确认时仍明确提示。
 
-模型转发页的“请求队列”按钮打开右侧明细栏，展示已鉴权且尚未结束的模型请求：用途、提供商、模型、协议、阶段和自接收以来的耗时。阶段区分接收请求、等待名额、准备上游、上游处理及交付响应；按接收顺序展示，不代表按 Key 公平调度的出站顺序。不包括模型列表查询，不保存历史或正文。右侧栏使用共享表格组件，支持排序、分页与列显隐；耗时为快照值。通过鉴权 SSE 订阅队列变化，合并事件后读取快照，每次读取完成后至少间隔 2 秒；无变化不查询。隐藏页面时断开订阅并暂停后续自动查询，关闭侧栏取消在途查询与订阅；重新打开或恢复连接补查快照。通知断开显示重连状态，并对已连接流的中断补查一次；未恢复连接的失败尝试不持续读取。临时快照失败按 2、4、8 秒最多重试 3 次，429 冷却至少 60 秒，保留手动刷新。HTTP 成功但 Relay 返回 `unknown` 时仍视为未确认读取，不确认通知版本、不清零失败次数，走同一有界重试；`stopped` 和运行中的空队列是有效快照，无变化时不重复查询。查询失败隐藏旧明细；进程停止、状态未确认与运行中空队列分开显示。进程存活但停用、配置无效或尚未监听时显示对应提示，并保留尚未结束的请求。用途名称随每次队列快照更新，不依赖 Key 列表刷新；提供商表示该次请求实际绑定的提供商。控制 IPC 为 v4，更新后需重启 Relay 和 WebUI，新旧版本不匹配显示未确认。读取接口为同一管理鉴权下的 `GET /api/v1/management/relay/queue`，变化订阅为 `GET /api/v1/management/relay/queue/events`；通知只含变化或心跳，Relay 私有订阅连接与控制命令隔离，WebUI 与投递队列合计最多 8 个订阅。不触发模型请求或更改管理修订。
+左侧“模型转发”下的“请求队列”进入独立页面（`#/relay/queue`），展示已鉴权且尚未结束的模型请求：用途、提供商、模型、协议、阶段和自接收以来的耗时。阶段区分接收请求、等待名额、准备上游、上游处理及交付响应；按接收顺序展示，不代表按 Key 公平调度的出站顺序。不包括模型列表查询，不保存历史或正文。队列页面使用共享表格组件，支持排序、分页与列显隐；耗时为快照值。通过鉴权 SSE 订阅队列变化，合并事件后读取快照，每次读取完成后至少间隔 2 秒；无变化不查询。隐藏页面时断开订阅并暂停后续自动查询，离开队列页面取消在途查询与订阅；重新进入或恢复连接补查快照。通知断开显示重连状态，并对已连接流的中断补查一次；未恢复连接的失败尝试不持续读取。临时快照失败按 2、4、8 秒最多重试 3 次，429 冷却至少 60 秒，保留手动刷新。HTTP 成功但 Relay 返回 `unknown` 时仍视为未确认读取，不确认通知版本、不清零失败次数，走同一有界重试；`stopped` 和运行中的空队列是有效快照，无变化时不重复查询。查询失败隐藏旧明细；进程停止、状态未确认与运行中空队列分开显示。进程存活但停用、配置无效或尚未监听时显示对应提示，并保留尚未结束的请求。用途名称随每次队列快照更新，不依赖 Key 列表刷新；提供商表示该次请求实际绑定的提供商。控制 IPC 为 v4，更新后需重启 Relay 和 WebUI，新旧版本不匹配显示未确认。读取接口为同一管理鉴权下的 `GET /api/v1/management/relay/queue`，变化订阅为 `GET /api/v1/management/relay/queue/events`；通知只含变化或心跳，Relay 私有订阅连接与控制命令隔离，WebUI 与投递队列合计最多 8 个订阅。不触发模型请求或更改管理修订。
 
 Responses 调用详情优先展示非空终态输出；终态 `output` 为空时保留原始事件中已完成的 `response.output_item.done` 条目，适用于 SSE 与 WebSocket。空终态不会再清空已经保存的正文或工具调用。读取时处理已有 V2 转储，无需重新采集；不从不完整增量编造完成输出，原有截断提示仍保留。
 
-API Key 列表使用 Card 分区及 Table，“凭据轮换”独立成列，仅显示当前凭据代次数值（初始为 1，每次轮换递增），不混在用途/身份字段下；用途列只显示名称，未命名时回退调用方 ID，不再额外展示调用方 ID 与 Key ID；长名称和模型名换行，操作按钮在单元格内排列。队列侧栏使用共享数据表格，支持排序、分页与列显隐，固定刷新工具栏，表格区域滚动；加载、空列表及服务不可用分开显示。请求模型表示本次实际请求的模型，不表示该 Key 的完整允许模型清单。
+API Key 列表增加“最近调用”和“近 24 小时”调用数、未成功数。按调用方与 Key 标识从现有指标库聚合，凭据轮换前后合并，模型失败、未完整完成和未知状态计为未成功；不包含未出站请求，最近调用仅覆盖保留期内已入库记录。数据库不可用显示“暂不可用”，空记录显示“暂无记录”和零次；随页面刷新更新，不影响配置修订及 Key 管理。
 
-模型转发页将配置状态、监听状态、并发上限与服务启停操作合并为一张「转发服务」卡片，另展示请求队列、调用采集和指标交付卡片；宽屏统计区并排，小屏纵向排列。计数与含义分开显示，仍为手动刷新快照，刷新中或失败时隐藏旧统计，未知不显示为零。
+API Key 行内仅保留紧凑的“编辑”“查看调用”和更多操作按钮，轮换并启用、停用、删除收进菜单；删除单独分组并保留危险操作样式，所有修改继续使用原有预览确认流程。
+
+API Key 列表使用 Card 分区及 Table，“凭据轮换”独立成列，仅显示当前凭据代次数值（初始为 1，每次轮换递增），不混在用途/身份字段下；用途列只显示名称，未命名时回退调用方 ID，不再额外展示调用方 ID 与 Key ID；长名称和模型名换行，操作按钮在单元格内排列。队列页面使用共享数据表格，支持排序、分页与列显隐，固定刷新工具栏，表格区域滚动；加载、空列表及服务不可用分开显示。请求模型表示本次实际请求的模型，不表示该 Key 的完整允许模型清单。
+
+模型转发页将配置状态、监听状态、并发上限与服务启停操作合并为一张「转发服务」卡片，下方直接展示 API Key 管理。左侧二级菜单「API Key」与「请求队列」分别进入管理页和实时队列页；页面不再常驻队列、调用采集和指标交付的统计卡。采集开关在设置页管理，底层排队、采集和指标交付保持运行。
 
 调用详情列表的“客户端”从已保存的 User-Agent 识别，存在 Relay 调试记录时只使用受支持版本的入站记录，缺失或未知时不回退猜测；无调试记录时使用出站记录；已有转储无需迁移。显示的是客户端自报的产品名，不是已验证身份；明确应用标识优先；浏览器 UA 显示 Chrome、Edge、Firefox、Safari 等名称及可识别的操作系统（如 Chrome / macOS），不据此猜测浏览器扩展；其余客户端从开头的 `产品名/版本` 提取自报名称，例如 `Bob/1.21.0 (...) Alamofire/5.6.2` 显示 Bob，无需逐个注册应用；也支持 `产品名/v1.2`、`产品名 v1.2`、`产品名 1.2`，名称可包含最多四个单词且总长不超过 64 字符。只有库名时显示库的自报名称，不推断背后的应用；不完整的浏览器兼容前缀、无版本的未知值（如 `node`）或非法值显示“—”。原始 User-Agent 可在调用详情请求头中核对。
 
