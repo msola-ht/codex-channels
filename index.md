@@ -61,6 +61,8 @@
   Provider 的标准流程、安全边界、用户配置主 Provider 支持和验收清单。
 - [`docs/provider-api-relay-development.md`](docs/provider-api-relay-development.md)：Provider 模型 API
   转发方案：独立服务、原生 Chat/Responses、公共提供商接入、鉴权限流、指标与转储、数据升级及分阶段验收。
+- [`docs/relay-codex-auth-development.md`](docs/relay-codex-auth-development.md)：Model Relay 只读
+  复用本机 Codex 登录态的转发设计、WSS 上游、头部对齐、受控边界与分阶段实施。
 - [`docs/user-agent-customization.md`](docs/user-agent-customization.md)：默认官方 TUI 客户端
   身份、App Server 上报终端标识与模型上游 User-Agent 覆盖的配置、生命周期、安全边界和验证方案。
 - [`docs/model-timezone.md`](docs/model-timezone.md)：模型请求里 environment context 的时区与日期
