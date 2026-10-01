@@ -17,6 +17,7 @@ import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { UnixWebSocketTransport } from "../src/codex-client/unix-websocket-transport.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { ModelSelectionService } from "../src/application/model-selection-service.js";
+import { ProviderAccountService, createOpenAiAccountAdapter } from "../src/application/index.js";
 import { ConversationService } from "../src/application/conversation-service.js";
 import type { ConversationCore } from "../src/conversation-core/index.js";
 import { SessionRouter } from "../src/session-routing/index.js";
@@ -153,6 +154,12 @@ contractTest(
       await client.connect();
 
       await expect(client.openAiAccountRoute()).resolves.toBe("chatgpt");
+      let snapshotsWritten = 0;
+      const accounts = new ProviderAccountService([createOpenAiAccountAdapter(client)], {
+        writeOfficialAccountSnapshot: () => { snapshotsWritten += 1; },
+      });
+      await expect(accounts.accountLimits("openai")).rejects.toThrow("codex account authentication required to read rate limits");
+      expect(snapshotsWritten).toBe(0);
     } finally {
       await client?.close().catch(() => undefined);
       if (processHandle?.exitCode === null) {

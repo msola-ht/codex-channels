@@ -116,7 +116,7 @@ describe("webui server data API", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
       requestServiceTier: "priority", serviceTier: "default",
-      firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
+      responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -126,11 +126,11 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
-        firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
+        responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
-        firstTokenMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
+        responseUsageAmount: null, firstTokenMs: null, totalDurationMs: null, requestModel: null, responseModel: null, traffic: null,
         requestServiceTier: null,
       });
       expect(body.records.find((row) => row.provider === "deepseek")?.upstreamTtftMs).toBeNull();

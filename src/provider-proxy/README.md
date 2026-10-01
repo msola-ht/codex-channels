@@ -52,8 +52,8 @@
   代理关闭时取消在途刷新并执行有上限的等待。
   其他路径、OpenAI 额外端点的非 POST 请求以及非 GET 的 `/models` 返回 404；监听地址强制为回环，
   上游空闲超时默认 60 秒并处理双向流式背压；客户端提前断开时取消上游请求。上游在请求正文接收完整前返回 HTTP 错误时，停止转发上传正文，完整发送错误响应后关闭本跳连接；主动清理不重复上报失败指标。服务入口按统一
-  `network.proxy` 选择传入上游 Agent。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
-  `/go/<账户>/responses|compact|models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
+  共享代理解析结果选择传入上游 Agent（Codex `.env` 优先，不读取旧 TOML `[network]`）。OpenCode Go、DeepSeek 与 CCG 的共享代理额外接受
+  `/go/<账户>/responses` 与 `/go/<账户>/models` 前缀：按前缀区分账户、转发时剥离前缀，并让 `onMetrics`
   携带账户标识供服务侧按具体账户 Provider Socket 上报。
 - `response-metrics-observer.ts`：从 HTTP Header、SSE/JSON 终态与 WebSocket 完成或关闭信息中
   归约单次请求指标和额度元数据；只接收受控输入并更新内存指标状态，不执行网络转发、持久化或
@@ -63,6 +63,8 @@
   前者到首段非空内容的接收回调入口，后者到首次终态或结束/失败。未提交发送不伪造耗时。
   指标通过 `timingBasis: "submitted"` 标记新起点，IPC 拒绝无标记的旧计时；指标独立于调用记录传递；调用索引复用同一观测，不从 trace 反推，不表示客户端显示时间。
   HTTP 有界扫描请求模型，WebSocket 读取出站模型，终态模型另存为 `responseModel`，不以请求模型补齐响应回显。
+  HTTP JSON/SSE 与 WebSocket 共用终态提取 `usage_metadata.amount`，以可空 `responseUsageAmount`
+  传递有界非负十进制字符串；保留精度和零值，缺失或畸形值为 null，不采集任意 metadata、换算单位或推断费用。
   两种传输同时采集出站 `service_tier` 为 `requestServiceTier`，不受响应层级覆盖，缺失为空；沿用指标 IPC 入库且不依赖调用转储。
   首 Token 观测后普通增量只扫描事件类型，需要指标正文的事件才解析 JSON；错误消息、标识符和
   `User-Agent` 继续执行既有限长与字符约束。
@@ -99,7 +101,7 @@
 - `relay-dump-payload.ts`：Relay JSON/SSE 的共享脱敏与有界合并写入，供上游及客户端交付阶段复用。
 - `index.ts`：公开代理、指标通道和稳定的脱敏单请求指标类型。
 - `chat-io.ts`：Chat 桥和直接 Chat 共同使用的正文读取、取消等待、拉取式 SSE 分帧与下游背压。
-- `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
+- `direct-model-http.ts`：直接模型请求共用的 HTTP 出站生命周期、响应状态/Content-Type 校验与安全 JSON 解码，保留普通应用请求头并复用跳级头清理，覆盖凭据和传输头、剔除 Cookie/伪造身份；同步出站复核、实际 UA 观测、首包/空闲超时、取消和关闭清理，不负责协议转换、重试或指标发送。
 - `direct-responses.ts`：原生 Responses JSON/SSE 交付，复用 HTTP 生命周期和 Responses 指标归约；非流式通过共享白名单识别首个非空输出，观测时间为整包解析校验后；保留事件、用量、终态与扩展字段，不生成 Chat DONE，断流不伪造成功。
 - `direct-chat.ts`：单次直接 Chat JSON/SSE 协议处理，复用公共 HTTP 生命周期；识别 CLP 显式成功的单层 JSON 包装后复用响应校验，可向注入的有界采集器提交已解析 Chat 报文。
 

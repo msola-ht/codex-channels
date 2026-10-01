@@ -1,3 +1,4 @@
+import { ResetCreditAction } from "./reset-credit-action"
 import {
   Card,
   CardAction,
@@ -40,6 +41,7 @@ import {
 } from "@/lib/format"
 import type {
   Aggregate,
+  OpenAiAccountCredits,
   CcgCreditAccountUsage,
   DeepseekAccountBalance,
   ErrorsReport,
@@ -184,10 +186,16 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
 }
 
 export function WeeklyQuotaCard({
+  refreshControl,
+  credits = null,
+  onCreditsChanged,
   usedPercent,
   resetsAt,
   planType,
 }: {
+  refreshControl?: AccountRefreshControl
+  onCreditsChanged?: () => void
+  credits?: OpenAiAccountCredits | null
   usedPercent: number | null
   resetsAt: number | null
   planType: string | null
@@ -196,17 +204,21 @@ export function WeeklyQuotaCard({
   return (
     <Card size="sm">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <CardTitle className="flex items-center gap-2">
-          {t("overview.weeklyQuotaTitle")}
-          {planType === null ? null : (
-            <Badge variant="outline">{planTypeLabel(t, planType)}</Badge>
-          )}
-        </CardTitle>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <CardTitle>{t("overview.weeklyQuotaTitle")}</CardTitle>
+          {planType === null ? null : <Badge variant="outline">{planTypeLabel(t, planType)}</Badge>}
+          <Badge variant="secondary">
+            {t("overview.resetCreditsAvailable")} {credits?.resetCreditsAvailable ?? t("overview.creditNotProvided")}
+          </Badge>
+          {credits || refreshControl ? <AccountUpdateDescription observedAtMs={credits?.observedAtMs ?? 0} isDefault={false} refreshFailed={Boolean(refreshControl?.error)} /> : null}
+        </div>
         {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
-          {t("overview.usedPercent", { percent: usedPercent.toFixed(1) })}
+          {t("overview.weeklyQuotaUsed", { percent: usedPercent.toFixed(1) })}
         </CardDescription>}
+        {refreshControl && !refreshControl.error ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
+        <AccountRefreshFeedback control={refreshControl} hasSnapshot={credits !== null} />
         {usedPercent === null
           ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("overview.weeklyQuotaEmpty")}</EmptyTitle></EmptyHeader></Empty>
           : (
@@ -217,6 +229,26 @@ export function WeeklyQuotaCard({
               </p>
             </>
           )}
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">{t("overview.creditsRemaining")}</dt>
+          <dd className="text-right break-all tabular-nums">{credits?.unlimited ? t("overview.creditsUnlimited") : credits?.remaining ?? t("overview.creditNotProvided")}</dd>
+        </dl>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {credits?.resetCreditsAvailable === "0" ? null : (
+            <div className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{t("overview.resetCreditsExpiry")}</span>
+              <ul aria-label={t("overview.resetCreditsExpiry")} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {credits?.expirations?.map(expiration => <li key={expiration.expiresAt ?? "unlimited"} className="whitespace-nowrap tabular-nums">
+                  {expiration.expiresAt === null ? t("overview.creditNoExpiry") : formatTime(expiration.expiresAt * 1000)}
+                  {" · "}{t("overview.creditCount", { count: expiration.count })}
+                </li>)}
+                {credits?.undisclosedCount ? <li>{t("overview.creditExpiryUndisclosed", { count: credits.undisclosedCount })}</li>
+                  : !credits?.expirations?.length ? <li>{t("overview.creditNotProvided")}</li> : null}
+              </ul>
+            </div>
+          )}
+          {onCreditsChanged ? <div className="ml-auto shrink-0"><ResetCreditAction onChanged={onCreditsChanged} /></div> : null}
+        </div>
       </CardContent>
     </Card>
   )

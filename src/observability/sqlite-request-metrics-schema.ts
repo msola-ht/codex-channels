@@ -18,9 +18,10 @@ export const metricStorageV20Columns = [
   "request_service_tier",
 ] as const;
 
-export const metricStorageColumns = [...metricStorageV20Columns,
+export const metricStorageV23Columns = [...metricStorageV20Columns,
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
 ] as const;
+export const metricStorageColumns = [...metricStorageV23Columns, "response_usage_amount"] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
 export const modelRequestMetricsV20TableSql = `
@@ -108,11 +109,15 @@ export const relayMetricColumnDefinitions = [
   "caller_id TEXT", "key_id TEXT", "credential_generation INTEGER", "relay_request_id TEXT",
   `delivery_status TEXT CHECK (${relayIdentityCheck})`,
 ] as const;
-export const modelRequestMetricsTableSql = modelRequestMetricsV20TableSql.replace(
+export const modelRequestMetricsV23TableSql = modelRequestMetricsV20TableSql.replace(
   "    CHECK (", `    ${relayMetricColumnDefinitions.join(",\n    ")},\n    CHECK (`,
 );
-export const modelRequestMetricsV22TableSql = modelRequestMetricsTableSql.replace(relayIdentityCheck, relayIdentityV22Check);
-export const modelRequestMetricsV21TableSql = modelRequestMetricsTableSql.replace(relayIdentityCheck, relayIdentityV21Check);
+export const modelRequestMetricsV22TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV22Check);
+export const modelRequestMetricsV21TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV21Check);
+export const responseUsageAmountColumn = "response_usage_amount TEXT CHECK (response_usage_amount IS NULL OR (typeof(response_usage_amount) = 'text' AND length(response_usage_amount) BETWEEN 1 AND 128))";
+export const modelRequestMetricsTableSql = modelRequestMetricsV23TableSql.replace(
+  "    CHECK (", `    ${responseUsageAmountColumn},\n    CHECK (`,
+);
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
     ON model_request_metrics(relay_request_id) WHERE source = 'relay';
@@ -191,7 +196,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 ? `codexc metrics upgrade --from ${actualVersion} --to 23 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 || actualVersion === 23 ? `codexc metrics upgrade --from ${actualVersion} --to 24 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,

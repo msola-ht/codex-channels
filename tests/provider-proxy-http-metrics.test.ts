@@ -5,7 +5,7 @@ import {
 import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HttpResponseMetricsObserver } from "../src/provider-proxy/response-metrics-observer.js";
+import { createMetricsState, observeJsonResponse, observeResponseEvent, HttpResponseMetricsObserver } from "../src/provider-proxy/response-metrics-observer.js";
 
 import {
   ProviderProxy,
@@ -820,4 +820,31 @@ it.each([413, 429])("closes an unfinished upload after fully forwarding upstream
   expect(metrics).toHaveLength(1);
   expect(metrics[0]).toMatchObject({ httpStatus: status, status: "failed", errorCode: "fixture_rejected" });
   expect(errors).toEqual([]);
+});
+
+
+describe("per-response upstream usage amount", () => {
+  it.each(["json", "sse", "websocket"] as const)("preserves exact decimals and unknown values over %s", format => {
+    for (const [amount, expected] of [
+      ["0", "0"], ["0.12345678901234567890", "0.12345678901234567890"],
+      [undefined, null], [null, null], [0.125, null], ["", null], ["-1", null],
+      ["NaN", null], ["1e2", null], [" 1 ", null], ["1\n", null], ["9".repeat(129), null],
+    ]) {
+      const metric = createMetricsState({ threadId: null, turnId: null, operation: "response" }, 1,
+        format === "websocket" ? "websocket" : "http", "response", null);
+      const response = { status: "completed", usage_metadata: { amount, metadata: { secret: "not collected" } } };
+      if (format === "json") observeJsonResponse(metric, response, 2);
+      else if (format === "websocket") observeResponseEvent(metric, "response.completed", { response }, 2, 2);
+      else {
+        metric.responseFormat = "sse";
+        const observer = new HttpResponseMetricsObserver(metric);
+        const bytes = Buffer.from(sse("response.completed", { type: "response.completed", response }));
+        observer.observeChunk(bytes.subarray(0, 40), 2, 2);
+        observer.observeChunk(bytes.subarray(40), 2, 2);
+      }
+      expect(metric.responseUsageAmount).toBe(expected);
+      expect(metric.status).toBe("completed");
+      expect(JSON.stringify(metric)).not.toContain("not collected");
+    }
+  });
 });

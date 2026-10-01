@@ -44,6 +44,8 @@ export interface ProviderProxyMetrics {
   outputTokens: number | null;
   reasoningOutputTokens: number | null;
   totalTokens: number | null;
+  /** 上游单次响应 usage_metadata.amount 原值；缺失不等于零，不推断计费单位。 */
+  responseUsageAmount?: string | null;
   /** 上游 logical_turn 首 Token 耗时；仅在响应 ID 匹配时提供。 */
   upstreamTtftMs?: number;
   /** 提交发送至首段非空文本增量（含思考与工具参数）；不是客户端显示时间。 */
@@ -105,6 +107,7 @@ export function createMetricsState(
     outputTokens: null,
     reasoningOutputTokens: null,
     totalTokens: null,
+    responseUsageAmount: null,
     requestStartedAtMs: startedAtMs,
     responseCompletedAtMs: startedAtMs,
     weeklyQuota: null,
@@ -286,6 +289,7 @@ function observeResponseFields(
   metrics.model = boundedString(response?.model);
   metrics.responseModel = metrics.model;
   metrics.serviceTier = boundedString(response?.service_tier);
+  metrics.responseUsageAmount = responseUsageAmount(asRecord(response?.usage_metadata)?.amount);
   const usage = asRecord(response?.usage);
   const inputDetails = asRecord(usage?.input_tokens_details);
   const outputDetails = asRecord(usage?.output_tokens_details);
@@ -602,4 +606,10 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+/** 有界非负十进制原值；不经浮点转换，也不保留任意上游元数据。 */
+export function responseUsageAmount(value: unknown): string | null {
+  return typeof value === "string" && value.length <= 128 && /^[0-9]+(?:\.[0-9]+)?$/u.test(value)
+    ? value : null;
 }

@@ -84,12 +84,15 @@
   Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
+- `conversation-reset-credit-service.ts`：`/limits reset` 的分页查询、预览和确认归属，绑定 Actor、Conversation、Workspace 与当前 Thread，复用共用重置券服务并在消费前复核授权。
+- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   账户用量、额度、单账户刷新和启动预热可携带取消信号，取消后的结果不写入快照。启动预热按
   Provider 与查询类型回报失败，主动取消不回报为查询失败。第三方同账户查询共享正在进行的
   上游请求，等待方独立取消，最后一个等待方取消才中止上游；失效请求不能清理替代请求。
-  快照写入成功后才更新内存展示缓存。
+  快照写入成功后才更新已发布的额度缓存；OpenAI 冷启动仅取得用量时暂存用量供后续额度查询合并，不覆盖已有持久快照。
+  OpenAI 普通用量查询沿用额度观测时间，只有额度成功查询才推进时间；较早额度请求的迟到结果不覆盖较新的成功观测。
   查询结果可通过快照写入端口落入统一读模型；按需刷新只接受已注册 Provider，查询失败保留最后
   一次确认快照，不以 `unsupported` 覆盖有效余额或额度。官方明确的无有效订阅是结构化查询结果，
   同样写入快照；普通查询失败不覆盖该状态，后续成功获取额度才恢复正常额度展示。
@@ -135,7 +138,7 @@ Queue 由 App Server 持久化并按 Thread 限制为 100 条；Application 默�
 历史、活动 Turn 和完整 Queue，并在并发变化时失败关闭；Queue 按真实 0.148 合同保留原顺序且不会因 Revert 自动启动。成功的
 `thread.reverted` 会清除 Core 的产物、计划、目标、上下文压缩、用量与计时等派生展示缓存；不持久化
 Turn/Item 历史，也不承诺恢复工作区文件。
-后台 Thread 完成后只释放后台绑定，不由 Gateway 手动派发下一 Turn；仍有待结算子代理时保留订阅，
+后台 Thread 完成释放前通过一次原生 `thread/queue/start` 协调自动派发竞态，再读取权威状态；Gateway 不保存或重放下一 Turn 正文；仍有待结算子代理时保留订阅，
 最后一个子代理终态完成后重试此前挂起的释放。
 Gateway 计划任务通过 `ScheduledTaskApplicationService` 暴露创建预览、一次性确认、列表、运行记录、
 重命名、暂停、恢复、立即运行、uncertain 重试和删除预览；每次操作精确绑定 Surface Actor 与

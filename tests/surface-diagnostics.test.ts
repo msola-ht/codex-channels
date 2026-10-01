@@ -1,3 +1,4 @@
+import { UserFacingError } from "../src/conversation-core/index.js";
 import pino from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -132,4 +133,19 @@ describe("Surface diagnostics", () => {
     expect(records.some((r) => r.msg === "Surface 阶段仍未完成")).toBe(false);
     expect(JSON.stringify(records)).not.toContain("SECRET");
   });
+});
+
+
+it("correlates image failure diagnostics with the input without logging the message", async () => {
+  const { logger, records } = capture();
+  const error = new UserFacingError("image.reference.failed", "PRIVATE MESSAGE BODY", {
+    stage: "file-transfer", reason: "network-timeout", networkCode: "UND_ERR_CONNECT_TIMEOUT",
+    diagnosticId: "123e4567-e89b-42d3-a456-426614174000", elapsedMs: "10001",
+  });
+  await expect(withSurfaceDiagnosticContext({ inputId: "input-1" }, () =>
+    observeSurfaceStage(logger, { stage: "input" }, async () => { throw error; }))).rejects.toBe(error);
+  const failed = records.find(record => record.outcome === "failed");
+  expect(failed).toMatchObject({ inputId: "input-1", stage: "input", imageUploadStage: "file-transfer",
+    imageUploadNetworkCode: "UND_ERR_CONNECT_TIMEOUT", imageUploadDiagnosticId: error.details.diagnosticId });
+  expect(JSON.stringify(records)).not.toContain("PRIVATE MESSAGE BODY");
 });

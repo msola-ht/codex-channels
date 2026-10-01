@@ -27,6 +27,27 @@ afterEach(async () => {
 
 describe("webui traffic V2 API", () => {
   it.each([
+    ["Bob/1.21.0 (com.hezongyidev.Bob; build:260; macOS 15.8.0) Alamofire/5.6.2", "Bob"],
+    ["NewClient/2.0-beta (macOS) NetworkKit/1.0", "NewClient"],
+    ["NewClient/v2.0-beta (macOS)", "NewClient"],
+    ["NewClient v2.0.1", "NewClient"],
+    ["NewClient 2.0.1", "NewClient"],
+    ["My Client/1.2.3", "My Client"],
+    ["My Client v1.2.3 (macOS)", "My Client"],
+    ["python-requests/2.32.0", "python-requests"],
+    ["Bob", undefined],
+    ["Bob 123", undefined],
+    ["Bob/latest", undefined],
+    ["node", undefined],
+    ["(Bob/1.21.0) Alamofire/5.6.2", undefined],
+    ["Bob/1.21.0<script>", undefined],
+    ["Bob/1.21.0\nprivate", undefined],
+    [`${"B".repeat(65)}/1.0`, undefined],
+    ["[REDACTED]", undefined],
+  ])("recognizes bounded leading product evidence without an application allowlist: %s", (agent, expected) => {
+    expect(requestClientName({ headers: { "user-agent": agent } })).toBe(expected);
+  });
+  it.each([
     ["Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36", "Chrome / macOS"],
     ["Mozilla/5.0 (Windows NT 10.0) Chrome/143.0 Safari/537.36 Edg/143.0", "Edge / Windows"],
     ["Mozilla/5.0 (Linux; Android 14) Chrome/143.0 Safari/537.36 SamsungBrowser/28.0", "Samsung Internet / Android"],
@@ -94,17 +115,24 @@ describe("webui traffic V2 API", () => {
       const item = httpInteraction(10 + index);
       Object.assign(item.request, { headers: { "user-agent": agent } }); interactions.push(item);
     }
+    const bob = httpInteraction(14);
+    Object.assign(bob.request, { headers: { "user-agent": "codex_cli_rs/0.156.1" },
+      debug: { version: 1, transformations: [], inbound: { headersTruncated: false, payload: { bytes: 0, parts: [] },
+        headers: { "User-Agent": "Bob/1.21.0 (com.hezongyidev.Bob; build:260; macOS 15.8.0) Alamofire/5.6.2" } } } });
+    interactions.push(bob);
     writeSession(fixture.trafficDir, "relay.chat", "client-evidence", interactions);
     const paths = [join(fixture.trafficDir, "relay.chat-client-evidence")];
     const rows = await summarizeDumpFiles(paths);
-    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", "Chrome", undefined, undefined, undefined, "WorkBuddy", undefined, undefined, "Kelivo", "WorkBuddy", undefined, "Codex"]);
+    expect(rows.exchanges.map((row: { clientName?: string }) => row.clientName)).toEqual(["WorkBuddy", "Codex", "Chrome", undefined, undefined, undefined, "WorkBuddy", undefined, undefined, "Kelivo", "WorkBuddy", undefined, "Codex", "Bob"]);
     expect((await describeDumpExchange(paths, 1)).clientName).toBe("WorkBuddy");
     expect((await describeDumpExchange(paths, 3)).clientName).toBe("Chrome");
+    expect((await describeDumpExchange(paths, 14)).clientName).toBe("Bob");
     const server = await startServer(fixture.environment);
     const response = await getJson<TrafficListBody>(`${server.origin}/api/v1/traffic?label=relay.chat`);
     expect(response.status).toBe(200);
     expect(response.body.exchanges.find(row => row.id === 1)?.clientName).toBe("WorkBuddy");
     expect(response.body.exchanges.find(row => row.id === 3)?.clientName).toBe("Chrome");
+    expect(response.body.exchanges.find(row => row.id === 14)?.clientName).toBe("Bob");
   });
 
   it("reports the shared global capture switch and retention for Relay", async () => {

@@ -25,6 +25,16 @@ afterEach(() => {
 });
 
 describe("management security core", () => {
+  it("bounds account refreshes independently from settings writes", () => {
+    let now = 1_000;
+    const limiter = new ManagementRateLimiter({ now: () => now });
+    for (let i = 0; i < 120; i += 1) limiter.consume({ principalId: "account-user", category: "account-refresh" });
+    expect(() => limiter.consume({ principalId: "account-user", category: "account-refresh" }))
+      .toThrow(expect.objectContaining({ code: "management.rate-limited" }));
+    expect(limiter.consume({ principalId: "account-user", category: "write" }).remaining).toBe(29);
+    now += 60_000;
+    expect(limiter.consume({ principalId: "account-user", category: "account-refresh" }).remaining).toBe(119);
+  });
   it("provides shared response headers and category limits", () => {
     expect(managementSecurityHeaders()).toMatchObject({
       "cache-control": "no-store",

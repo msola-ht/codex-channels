@@ -1,3 +1,4 @@
+import { UserFacingError } from "../src/conversation-core/index.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -838,3 +839,19 @@ function serviceFixture(
 ): ConversationMethodOverrides {
   return methods;
 }
+
+
+it("logs image reference diagnostics even when the user error is handled", async () => {
+  const warn = vi.fn();
+  const notifyText = vi.fn(() => true);
+  const adapter = new WeixinConversationAdapter({ submit: async () => {
+    throw new UserFacingError("image.reference.failed", "传输图片网络连接失败。", {
+      stage: "file-transfer", reason: "network", networkCode: "ECONNRESET",
+    });
+  } }, { notifyText }, undefined, { logger: { warn } });
+  await adapter.handle(message);
+  expect(warn).toHaveBeenCalledWith(expect.objectContaining({ imageUploadStage: "file-transfer",
+    imageUploadNetworkCode: "ECONNRESET" }), "微信图片引用发送失败");
+  expect(notifyText).toHaveBeenCalledWith(target, "操作失败：传输图片网络连接失败。");
+  await adapter.close();
+});

@@ -120,6 +120,7 @@ export class WeixinInputAdapter {
       options.images,
       {
         quietWindowMs: 0,
+        ...(options.logger ? { logger: options.logger } : {}),
         pollingHealth: this.health,
         now: this.now,
         debugEnabled: options.debugEnabled ?? false,

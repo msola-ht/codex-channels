@@ -51,15 +51,15 @@
 - `provider-metrics-composition.ts`：组合 Provider 私有指标 Socket、Observability 独立存储和 Core
   模型请求统计端口。所有脱敏请求样本都会持久化；具备 Thread 与 Turn 关联的样本按 Turn 聚合
   到完成卡片；持久化通过 Observability 有界 Writer 延迟分片执行，单项写入失败不会阻断指标确认或
-  Core 统计。优先使用代理指标携带的 WebSocket `reasoning.effort` 或私有第三方角色路径标注，
+  Core 统计。优先使用代理指标携带的 HTTP/WS 请求中明确提供的 `reasoning.effort`，
   普通 Thread 仅在缺失时
-  由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；代理、Core 和数据库
-  View 都不读取请求正文、设置文件或价格目录。
+  由可选 `resolveModelSettings` 按 Thread 关联回填路由层维护的思考等级；该组合层、Core 和数据库
+  View 不解析请求正文、设置文件或价格目录。
 - `account-query.ts`：四类第三方账户查询共用总预算、受控 HTTP/网络/解析失败分类和安全诊断；调用方取消保持取消语义，业务响应解析仍归各适配器；预热和手动刷新复用同一安全诊断投影。
 - `bounded-fetch-body.ts`：统一组合根远端适配器的 Content-Length 校验、流式累计、超限取消与
   Reader 清理；调用方注入领域错误，并决定是否允许缺少正文，不向 Surface 暴露该基础设施。
 - `completion-account-status.ts`：将本次具体 Provider 的官方余额、Credits 与配额窗口投影为完成卡摘要，不携带凭据或完整账户响应。
-- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token 与压缩统计；
+- `completion-timing.ts`：在 Turn 完成时用指标库重建本轮请求数、Token、压缩统计与 OpenAI 单次响应用量汇总；
   上游轮次首 Token 使用当前 Turn 首个有效 OpenAI 上游样本，覆盖重启后仅观测到后续请求的实时值；
   若当前 Turn 已部分延迟写入，按持久化汇总校正请求状态与
   可选用量字段。
@@ -138,7 +138,7 @@
   正在恢复或 Provider 断线的绑定会跳过本轮，强制新建标记也会跳过扫描；关闭时停止定时器并限时等待已经在途的
   扫描退出，避免释放 RPC 卡住 Gateway 关闭。
 - `turn-error-metrics.ts`：把同步 RPC 与异步 `turn.error` 通知的 Turn 级失败统一转换为脱敏的
-  模型请求失败样本，保存错误原文与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
+  模型请求失败样本，保存脱敏、限长后的错误消息与分类；结构化 `misalignmentPolicyViolation` 使用独立分类并
   保留协议代码，不携带任何平台上下文或敏感凭据。
 - `config-lifecycle.ts`：在创建应用组件前应用网关进程时区，并在任何 Surface 或指标组件启动前
   获取配置级 Gateway 所有权；管理配置监听、防抖重载、持久配置事件投递、信号、所有权释放与

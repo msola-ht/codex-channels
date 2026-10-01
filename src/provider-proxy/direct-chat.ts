@@ -1,8 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { DirectChatResponse, ModelConversionError, type DirectChatRequest } from "../model-api/index.js";
-import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
+import { ChatUpstreamError, chatStreamError, chatUpstreamError } from "./chat-errors.js";
 import { readChatBody, readChatFrames } from "./chat-io.js";
-import { withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
+import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
@@ -36,15 +36,13 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
   }, async incoming => {
     call.headers(incoming.statusCode ?? 502);
     call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
-    if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, call.capture);
-    const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+    await validateDirectModelResponse(incoming, call.request.stream, call.capture);
     if (call.request.stream) {
-      if (contentType !== "text/event-stream") throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
       for await (const data of readChatFrames(incoming, call.signal, {
         frameBytes: 1024 * 1024, bufferBytes: 2 * 1024 * 1024, totalBytes: 32 * 1024 * 1024,
       })) {
         if (data === "[DONE]") { call.observer.finish(); call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete"); await call.emit(undefined, true); return; }
-        const value: unknown = parseChatJson(data, call.capture);
+        const value: unknown = parseDirectModelJson(data, call.capture);
         call.capture?.value(value, true);
         const error = chatStreamError(value);
         if (error) throw error;
@@ -54,9 +52,8 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
       }
       throw new ModelConversionError("Chat stream disconnected before DONE");
     }
-    if (contentType !== "application/json") throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
     const body = await readChatBody(incoming, call.signal, 8 * 1024 * 1024);
-    const parsed: unknown = parseChatJson(body, call.capture);
+    const parsed: unknown = parseDirectModelJson(body, call.capture);
     call.capture?.value(parsed, false);
     const envelopeError = chatStreamError(parsed);
     if (envelopeError) throw envelopeError;
@@ -70,11 +67,6 @@ export async function sendDirectChat(call: DirectChatCall): Promise<void> {
     call.capture?.done(call.observer.status === "completed" ? "completed" : "incomplete");
     await call.emit(value as Record<string, unknown>, true);
   });
-}
-
-function parseChatJson(text: string, capture?: DirectChatCapture): unknown {
-  try { return JSON.parse(text) as unknown; }
-  catch { capture?.invalid(Buffer.byteLength(text)); throw new ChatUpstreamError("invalid_upstream_json", "Upstream response contains invalid JSON.", false); }
 }
 
 /** CLP's observed non-streaming envelope; unwrap once, never guess arbitrary wrappers. */

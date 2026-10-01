@@ -1,5 +1,7 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+import { summarizeResponseUsage } from "./response-usage-summary.js";
 import type {
+  ResponseUsageSummary,
   ModelRequestMetricsAggregationDimension,
   ModelRequestMetricsAggregationQuery,
   ModelRequestMetricsErrorQuery,
@@ -116,6 +118,26 @@ interface MetricsQueryReader {
 /** 只读查询共用 Store 的连接和生命周期，不持有事务、写入口或独立连接。 */
 export class SqliteRequestMetricsQueries {
   constructor(private readonly reader: MetricsQueryReader) {}
+
+  relayCallerUsage(callers: readonly { callerId: string; keyId: string }[], startAtMs: number, endAtMs: number): Array<{
+    callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+  }> {
+    this.reader.requireOpen();
+    if (callers.length === 0) return [];
+    return this.reader.prepare(`
+      WITH callers(caller_id, key_id) AS (VALUES ${callers.map(() => "(?, ?)").join(",")})
+      SELECT c.caller_id AS callerId, c.key_id AS keyId,
+        MAX(m.request_started_at_ms) AS lastRequestAtMs,
+        COUNT(CASE WHEN m.request_started_at_ms >= ? THEN 1 END) AS requestCount,
+        COUNT(CASE WHEN m.request_started_at_ms >= ? AND (${normalizedStatusSql}) != 'completed' THEN 1 END) AS unsuccessfulRequestCount
+      FROM callers c LEFT JOIN model_request_metrics m
+        ON m.source = 'relay' AND m.caller_id = c.caller_id AND m.key_id = c.key_id
+        AND m.request_started_at_ms <= ?
+      GROUP BY c.caller_id, c.key_id
+    `).all(...callers.flatMap(caller => [caller.callerId, caller.keyId]), startAtMs, startAtMs, endAtMs) as Array<{
+      callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+    }>;
+  }
 
   recent(limit: number): StoredModelRequestMetric[] {
     this.reader.requireOpen();
@@ -389,7 +411,7 @@ export class SqliteRequestMetricsQueries {
     const turn = latestTurn === undefined
       ? undefined
       : this.queryThreadTurnSummary(threadId, latestTurn.turn_id);
-    const threadAggregate = this.reader.prepare(`
+    const scopeSql = `
       WITH RECURSIVE thread_tree(thread_id) AS (
         SELECT ?
         UNION
@@ -403,6 +425,8 @@ export class SqliteRequestMetricsQueries {
         WHERE metric.thread_id IN (SELECT thread_id FROM thread_tree)
           AND metric.turn_id IS NOT NULL
       )
+    `;
+    const threadAggregate = this.reader.prepare(`${scopeSql}
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
         NULL AS turn_id,
@@ -421,10 +445,16 @@ export class SqliteRequestMetricsQueries {
     `).get(threadId) as unknown as TurnSummaryRow;
     return {
       threadId,
-      latestTurn: turn === undefined ? null : toStoredTurnSummary(turn),
+      latestTurn: turn === undefined ? null : {
+        ...toStoredTurnSummary(turn),
+        responseUsage: this.turnResponseUsage(threadId, latestTurn!.turn_id),
+      },
       threadAggregate: threadAggregate.request_count === 0
         ? null
-        : toStoredThreadAggregate(threadAggregate),
+        : {
+          ...toStoredThreadAggregate(threadAggregate),
+          responseUsage: this.scopedResponseUsage(scopeSql, [threadId]),
+        },
     };
   }
 
@@ -443,7 +473,7 @@ export class SqliteRequestMetricsQueries {
       LIMIT 1
     `).get(threadId, turnId);
     if (child === undefined) return null;
-    const row = this.reader.prepare(`
+    const scopeSql = `
       WITH RECURSIVE task_threads(thread_id, turn_id) AS (
         SELECT child.thread_id, child.turn_id
         FROM subagent_turns AS child
@@ -469,6 +499,8 @@ export class SqliteRequestMetricsQueries {
           )
         )
       )
+    `;
+    const row = this.reader.prepare(`${scopeSql}
       SELECT
         (SELECT provider FROM scoped ORDER BY id DESC LIMIT 1) AS provider,
         (SELECT model FROM scoped ORDER BY id DESC LIMIT 1) AS model,
@@ -491,7 +523,10 @@ export class SqliteRequestMetricsQueries {
     // The direct-child probe above is the display gate. Keep a zero summary
     // when a child has not produced any model rows yet so the parent card can
     // distinguish an observed child from an absent task aggregate.
-    return row === undefined ? null : toStoredTurnSummary(row);
+    return row === undefined ? null : {
+      ...toStoredTurnSummary(row),
+      responseUsage: this.scopedResponseUsage(scopeSql, [threadId, turnId, threadId, turnId]),
+    };
   }
 
   threadTurnSummary(
@@ -502,7 +537,22 @@ export class SqliteRequestMetricsQueries {
     validateThreadId(threadId, "Thread ID");
     validateThreadId(turnId, "Turn ID");
     const row = this.queryThreadTurnSummary(threadId, turnId);
-    return row === undefined ? null : toStoredTurnSummary(row);
+    return row === undefined ? null : {
+      ...toStoredTurnSummary(row),
+      responseUsage: this.turnResponseUsage(threadId, turnId),
+    };
+  }
+
+  private scopedResponseUsage(scopeSql: string, parameters: SQLInputValue[]): ResponseUsageSummary | null {
+    return summarizeResponseUsage(this.reader.iterateRows(`${scopeSql}
+      SELECT response_usage_amount FROM scoped WHERE provider = 'openai'
+    `, ...parameters) as Iterable<{ response_usage_amount: string | null }>);
+  }
+
+  private turnResponseUsage(threadId: string, turnId: string): ResponseUsageSummary | null {
+    return this.scopedResponseUsage(`WITH scoped AS (
+      SELECT provider, response_usage_amount FROM model_request_metrics WHERE thread_id = ? AND turn_id = ?
+    )`, [threadId, turnId]);
   }
 
   private queryThreadTurnSummary(

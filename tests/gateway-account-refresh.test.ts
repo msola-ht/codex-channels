@@ -8,6 +8,7 @@ import {
   GatewayAccountRefreshError,
   GatewayAccountRefreshServer,
   requestGatewayAccountRefresh,
+  requestGatewayResetCredits,
 } from "../runtime/gateway-account-refresh.mjs";
 
 const temporaryDirectories: string[] = [];
@@ -22,6 +23,22 @@ afterEach(async () => {
 });
 
 describe("Gateway account refresh IPC", () => {
+  it("routes reset requests and strips internal failure text", async () => {
+    const configPath = createConfigPath();
+    const reset = vi.fn(async (request: { method: string }) => {
+      if (request.method === "reset/consume") throw new GatewayAccountRefreshError("reset_unknown", "sensitive payload");
+      return { credits: [] };
+    });
+    const server = new GatewayAccountRefreshServer(configPath, async () => true, reset);
+    servers.push(server); await server.start();
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/list" })).resolves.toEqual({ credits: [] });
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/consume", attemptId: "attempt" })).rejects.toMatchObject({ code: "reset_unknown" });
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/preview", creditId: "" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/cancel", attemptId: "attempt" })).resolves.toEqual({ credits: [] });
+    await expect(requestGatewayResetCredits(configPath, { method: "reset/cancel", attemptId: "" })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(reset).toHaveBeenCalledTimes(3);
+  });
+
   it("refreshes a supported account through the private Gateway endpoint", async () => {
     const configPath = createConfigPath();
     const refreshAccount = vi.fn(async (provider: string) => provider === "deepseek");

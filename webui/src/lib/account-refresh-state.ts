@@ -1,12 +1,12 @@
 import type {
   CcgCreditAccountUsage, DeepseekAccountBalance, DeepseekBalance,
-  ManagementProvidersResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
-  QuotaAccountUsage, OpencodeGoQuotaWindow,
+  OfficialAccountSourcesResponse, OfficialAccountSnapshot, OfficialAccountSnapshotsResponse,
+  QuotaAccountUsage, OpencodeGoQuotaWindow, OpenAiAccountCredits,
 } from "./types"
 
 const ACCOUNT_SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000
 
-export type RefreshableAccount = Pick<ManagementProvidersResponse["providers"][number], "id" | "displayName">
+export interface RefreshableAccount { id: string; displayName: string }
 
 export interface AccountRefreshError {
   kind: "refresh-failed"
@@ -24,7 +24,6 @@ export interface AccountRefreshControl {
 export type AccountRefreshFailure =
   | { kind: "listFailed"; code: string | null }
   | { kind: "syncFailed"; code: string | null }
-  | { kind: "sourceMissing" }
 
 /** 删除成功提示只保存账户标识与是否需重启服务，文案在渲染时翻译。 */
 export interface AccountRemovalNotice {
@@ -62,12 +61,42 @@ export function scheduleAccountSnapshotExpiry(
   }
 }
 
-export function refreshableAccounts(result: ManagementProvidersResponse): RefreshableAccount[] {
-  return result.providers.filter((provider) => provider.kind === "managed" && (
-    provider.id.startsWith("clp-") || provider.id === "deepseek" || provider.id.startsWith("ds-")
-      || provider.id === "ocg" || provider.id.startsWith("ocg-")
-      || provider.id === "ccg" || provider.id.startsWith("ccg-")
-  ))
+export function refreshableAccounts(result: OfficialAccountSourcesResponse): RefreshableAccount[] {
+  return result.accounts.map(account => ({ id: account.provider, displayName: account.displayName }))
+}
+
+/** 整表读取负责账户增删与元数据；迟到的旧观测不能覆盖当前较新观测。 */
+export function mergeAccountSnapshotLists(previous: OfficialAccountSnapshotsResponse | null, next: OfficialAccountSnapshotsResponse): OfficialAccountSnapshotsResponse {
+  const current = new Map(previous?.snapshots.map(snapshot => [snapshot.provider, snapshot]))
+  const snapshots = next.snapshots.map(snapshot => {
+    const old = current.get(snapshot.provider)
+    return old && old.observedAtMs > snapshot.observedAtMs
+      ? { ...old, displayName: snapshot.displayName, default: snapshot.default }
+      : snapshot
+  })
+  return { ...next, snapshots, observedAtMs: Math.max(0, ...snapshots.map(snapshot => snapshot.observedAtMs)) }
+}
+
+/** 限制同时出站的查询，并在每个账户完成时立即交付结果。 */
+export async function refreshAccountSnapshots(
+  providers: readonly string[],
+  query: (provider: string, signal: AbortSignal) => Promise<OfficialAccountSnapshotsResponse>,
+  receive: (provider: string, result: PromiseSettledResult<OfficialAccountSnapshotsResponse>) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(4, providers.length) }, async () => {
+    while (!signal.aborted && next < providers.length) {
+      const provider = providers[next++]!
+      let result: PromiseSettledResult<OfficialAccountSnapshotsResponse>
+      try {
+        result = { status: "fulfilled", value: await query(provider, signal) }
+      } catch (reason) {
+        result = { status: "rejected", reason }
+      }
+      if (!signal.aborted) receive(provider, result)
+    }
+  }))
 }
 
 export function accountRefreshErrors(
@@ -123,9 +152,10 @@ export function accountSnapshotsAfterRefresh(
   for (const [index, result] of results.entries()) {
     if (result.status !== "fulfilled") continue
     const snapshot = result.value.snapshots.find((item) => item.provider === providers[index])
-    if (snapshot) snapshots.set(snapshot.provider, snapshot)
+    const current = snapshot ? snapshots.get(snapshot.provider) : undefined
+    if (snapshot && (!current || current.observedAtMs <= snapshot.observedAtMs)) snapshots.set(snapshot.provider, snapshot)
   }
-  return { ...base, snapshots: [...snapshots.values()] }
+  return { ...base, observedAtMs: Math.max(0, ...[...snapshots.values()].map(snapshot => snapshot.observedAtMs)), snapshots: [...snapshots.values()] }
 }
 
 export function accountSnapshotsWithoutRemoved(
@@ -214,3 +244,56 @@ function quotaWindowsFromSnapshot(value: OpencodeGoQuotaWindow[] | undefined): O
       }))
     : []
 }
+
+
+/** OpenAI 余额与重置券均来自账户快照，不从周额度或请求消耗推算。 */
+export function openAiCreditsFromSnapshot(snapshot: OfficialAccountSnapshot | undefined): OpenAiAccountCredits | null {
+  if (!snapshot || snapshot.provider !== "openai") return null
+  const value = snapshot.limits as { kind?: string; provider?: string; limits?: {
+    ordinaryUsageLimit?: { credits?: { balance?: string | null; unlimited?: boolean } | null }
+    resetCreditsAvailable?: number | string | null
+    resetCreditExpiresAt?: Array<number | null> | null
+  } } | null
+  if (value?.kind !== "rate-limits" || value.provider !== "openai" || !value.limits) return null
+  const limits = value.limits
+  const credits = limits.ordinaryUsageLimit?.credits
+  const count = limits.resetCreditsAvailable
+  const available = typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? String(count)
+    : typeof count === "string" && /^[0-9]{1,128}$/u.test(count) ? count : null
+  const dates = limits.resetCreditExpiresAt
+  const groups = new Map<number | null, number>()
+  const hasDates = Array.isArray(dates) && dates.every(date => date === null
+    || (typeof date === "number" && Number.isFinite(date) && date >= 0 && date <= 8_640_000_000_000))
+  if (hasDates) for (const date of dates) groups.set(date, (groups.get(date) ?? 0) + 1)
+  const undisclosed = available === null ? null : BigInt(available) - BigInt(hasDates ? dates.length : 0)
+  return {
+    observedAtMs: snapshot.observedAtMs,
+    remaining: typeof credits?.balance === "string" ? credits.balance : null,
+    unlimited: credits?.unlimited === true,
+    resetCreditsAvailable: available,
+    expirations: hasDates ? [...groups].sort(([left], [right]) => left === null ? 1 : right === null ? -1 : left - right)
+      .map(([expiresAt, count]) => ({ expiresAt, count })) : null,
+    undisclosedCount: undisclosed !== null && undisclosed > 0n ? undisclosed.toString() : null,
+  }
+}
+
+/** 当前周额度来自官方普通用量桶；历史请求里的窗口只用于统计估算。 */
+export function openAiWeeklyQuotaFromSnapshot(snapshot: OfficialAccountSnapshot | undefined) {
+  if (!snapshot || snapshot.provider !== "openai") return null
+  const value = snapshot.limits as { kind?: string; provider?: string; limits?: {
+    ordinaryUsageLimit?: { planType?: string | null; primary?: SnapshotQuotaWindow | null; secondary?: SnapshotQuotaWindow | null } | null
+  } } | null
+  if (value?.kind !== "rate-limits" || value.provider !== "openai") return null
+  const limit = value.limits?.ordinaryUsageLimit
+  if (!limit) return null
+  const window = [limit.primary, limit.secondary].find(window => window?.windowDurationMins === 10_080)
+  return {
+    usedPercent: typeof window?.usedPercent === "number" && Number.isFinite(window.usedPercent) && window.usedPercent >= 0
+      ? window.usedPercent : null,
+    resetsAt: typeof window?.resetsAt === "number" && Number.isSafeInteger(window.resetsAt)
+      && window.resetsAt >= 0 && window.resetsAt <= 8_640_000_000_000 ? window.resetsAt * 1000 : null,
+    planType: typeof limit.planType === "string" ? limit.planType : null,
+  }
+}
+
+type SnapshotQuotaWindow = { usedPercent?: number; windowDurationMins?: number | null; resetsAt?: number | null }

@@ -1,3 +1,4 @@
+import type { ConversationResetCreditService, ConversationResetCreditResult } from "./conversation-reset-credit-service.js";
 import {
   UserFacingError,
   type ConversationTarget,
@@ -107,6 +108,7 @@ export function isConversationCommandName(value: string): value is ConversationC
 }
 
 export type ConversationCommandResult =
+  | { kind: "reset-credit"; result: ConversationResetCreditResult }
   | { kind: "outcome"; outcome: ConversationCommandOutcome }
   | {
       kind: "sessions";
@@ -337,6 +339,7 @@ export class ConversationCommandService implements ConversationCommandExecutor {
   constructor(
     private readonly conversations: ConversationCommandUseCases,
     scheduledTasks?: ScheduledTaskUseCases,
+    private readonly resetCredits?: ConversationResetCreditService,
   ) {
     this.scheduledTasks = scheduledTasks;
   }
@@ -664,6 +667,10 @@ export class ConversationCommandService implements ConversationCommandExecutor {
           ),
         };
       case "limits":
+        if (argumentsText) {
+          if (!this.resetCredits) throw new UserFacingError("reset-credit.failed", "重置券功能不可用", { reason: "reset_unavailable" });
+          return { kind: "reset-credit", result: await this.resetCredits.execute(target, actorId, argumentsText) };
+        }
         return {
           kind: "limits",
           result: await this.conversations.providerAccountLimits(target),

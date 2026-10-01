@@ -4,7 +4,7 @@
 服务商）的标准流程、决策点、实现清单、安全边界与验收要求。新增通讯渠道（飞书、Telegram、
 微信）不适用本指南，走 [`通讯渠道 Surface 接入指南`](surface-integration-guide.md)。
 
-当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go 与 CCG 共用同一套受管管道，
+当前受管第三方 Provider 是编译期注册的：DeepSeek、OpenCode Go、CCG 与 CLP 共用同一套受管管道，
 Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账户和 Setup。
 新增 Provider 时优先复用管道，不得动态加载代码，也不得把未知 Provider 回退到 OpenAI 账户查询。
 
@@ -16,9 +16,9 @@ Provider 特化只存在于定义能力元数据、Bootstrap 有界工厂、账�
 | --- | --- | --- |
 | Provider id | 小写字母/数字/`-`/`_`，1–64 位 | 决定 `sf-<id>.config.toml` Profile、`~/.codex-connect/providers/<id>/` 目录、`modelProvider`、环境变量名 |
 | 显示名称 | 1–64 字符 | 出现在 `/model`、WebUI 与完成卡片 |
-| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom` 与客户端 `tool_search`；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；托管工具在 Chat 协议下无等价形态，须保持关闭 |
+| wire API | App Server 仅 `responses` | Chat 上游需显式独立转换；CLP 使用 `upstreamWireApi: "chat_completions"` 与 `model-api` 模块，不把 Chat 写入 Codex `wire_api`。转换覆盖 `function`、`namespace`、自由格式 `custom` 与客户端 `tool_search`；模型目录可用 `applyPatchToolType: freeform` 与 `supportsSearchTool` 开启自由格式 `apply_patch` 与客户端检索；未映射的顶层工具声明原样交给上游，不注册本地执行身份，也不承诺托管工具执行与回程；受管 DeepSeek 入口仍关闭内置网页搜索 |
 | WebSocket | 支持 / 不支持 | 不支持时必须显式声明 `supports_websockets = false` |
-| 认证 | `sk-` API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
+| 认证 | 按 Provider 校验的 API Key | 编译期受管 Provider 的 Key 只进入子进程环境或专用私有凭据文件，不写入命令行、日志或 Gateway 配置 |
 | 模型目录来源 | 官方目录下载器 / `/models` / 审查后的 JSON | 与 DeepSeek 官方目录一致时可复用现有下载器 |
 | 账户形态 | 无 / 余额 / GO 式用量窗口（5h/7d/月 + 本机 Token + 请求窗口快照） | 决定账户适配器实现与 `/usage` 展示 |
 | 运行模式 | switching / exclusive | 必须同时支持；marker `mode` 区分 |
@@ -87,7 +87,7 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 - 指标库本地用量与 Token 汇总必须按 Provider 过滤；GO 形态还需在统计代理注册窗口
   快照 provider（参考 `opencode-go-quota-windows.mjs`），在请求发生时记录官方
   5h/7d/月窗口 `resetsAt` 快照并写入指标库 `quota_windows` 列（指标库 Schema v9；当前指标库为
-  Schema v20，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
+  Schema v24，另含子代理运行级父子 Turn 关联与逐请求上游 `User-Agent`），
   读取时对 5 小时滚动窗口按当前时间范围和请求开始时间判定，对 7 天/月度固定窗口优先按快照
   归属；快照缺失或请求开始时已经过期才回退到请求时间。账户窗口只展示官方已用百分比、重置时间
   和本地 Token，不展示总额或费用。
@@ -144,8 +144,9 @@ Runtime 按 `instanceAdapter` 将所有单实例定义和显式多账户定义�
 
 ## 5. 验收流程
 
+开发时先运行受影响的定向检查；普通提交由 pre-commit 执行完整 `verify:commit`，不提前重复。下列源码安装、服务重启及线上检查只用于已获授权的部署验收：
+
 ```bash
-npm run verify:commit
 npm run install:global
 codexc service restart all
 codexc doctor
@@ -221,14 +222,14 @@ Provider 分别提示重新登录、改选第三方或更新对应凭据。
 不需要另设 Gateway 默认模型；状态、模型菜单和创建 Thread 使用同一提供商与模型。
 普通消息及 Goal 查询/设置/清除、Review、Compact、Fork 的自动建会话入口均遵循该规则，
 先执行这些命令不会把后续消息绑定回未登录的官方 Provider。
-多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于同一家 DS、OCG
-或 CCG 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
+多个第三方 Provider 可选时不按目录顺序决定默认值；仅当全部已配置切换实例都属于同一家 DS、OCG、
+CCG 或 CLP 时使用该家注册表标记的默认账户，混合其他 Provider 时先通过 `/model` 选择提供商和模型，再发送消息；
 选择在当前 Conversation 中沿用。官方不可用时，Gateway 的官方 `codex.default_model` 不阻断第三方选择。
 已有 Thread 保留自身 Provider，不因官方退出登录而自动迁移。
 同一 Provider 内选模型只标记模型待生效；只有实际离开旧 Provider 的 Thread 才提示创建新 Session，
 目标 Thread 建立后该提示消失。
 `codexc remote` 未指定 Profile 且官方未登录时，自动连接唯一已配置的第三方实例；多个同一家 DS、
-OCG 或 CCG 实例且没有混合其他 Provider 时连接该家默认账户，其他多 Provider 配置明确提示指定 `--profile`。
+OCG、CCG 或 CLP 实例且没有混合其他 Provider 时连接该家默认账户，其他多 Provider 配置明确提示指定 `--profile`。
 显式 Profile 和固定模式仍按原配置执行。
 Gateway 不读取或复制凭据，只把用户配置交给 App Server。`base_url` 必须是无凭据、无查询
 和片段的 HTTP(S) 地址；自定义 Provider ID 只能使用 ASCII 字母、数字、`-` 或 `_`，且不能占用
@@ -291,7 +292,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 
 - [`docs/opencode-go.md`](opencode-go.md)：GO 形态参考实现；
 - [`docs/ccg.md`](ccg.md)：DS 基础目录适配、多账户隔离与 Command Code Credits 查询的参考实现；
-- [`docs/deepseek.md`](deepseek.md)：余额 + CNY 计划价参考实现；
+- [`docs/deepseek.md`](deepseek.md)：官方账户余额查询参考实现，不计算本地价格或费用；
 - [`docs/surface-integration-guide.md`](surface-integration-guide.md)：通讯渠道接入；
 - [`docs/index.md`](index.md)：协议支持矩阵与实现映射；
 - [`docs/codex-cli-upgrade-decisions.md`](codex-cli-upgrade-decisions.md)：Provider 边界决策。
@@ -309,7 +310,7 @@ Provider 块或其他认证、Header、Query 配置。若待编辑 Provider 仍�
 填写平台的 Responses 基础地址（例如 `https://www.zzshu.cc/v1`）、API Key 和一个或多个模型。
 CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，勾选平台支持的条目后，逐项填写平台模型 ID，确认“模板 ID → 平台 ID”。多选时按空格勾选、回车确认；空选会提示尚未导入，并提供返回选择或跳过本类模板的选项。两类均可导入，也可跳过后手填。
 官方模板读取当前 Codex CLI 的内置目录，排除不会原样作为请求等级发送的 Codex 专用 `ultra` / `persistent` 模式；其余等级与默认值仍需通过 RS 校验，不能转换时明确报错并使用手填入口；DS 优先读取现有本地共享目录；没有时复用 DS 官方脚本下载与提取流程，不执行脚本。读取失败明确报错，不回退其他来源。
-官方 Codex 与 DS 模板都只导入模型 ID、显示名称、当前上下文窗口、源目录声明的最大上下文窗口、支持的思考等级、默认思考等级及图片输入能力。DS 指令、工具配置、等级说明、详细程度、压缩参数和多代理元数据不复制。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
+官方 Codex 与 DS 模板均导入模型 ID、显示名称、当前上下文窗口、源目录声明的最大上下文窗口、支持的思考等级、默认思考等级及图片输入能力。DS 模板另保留非空 `model_messages.instructions_template`；工具配置、等级说明、详细程度、压缩参数和多代理元数据不复制。模型 ID 可映射为平台实际名称；生成目录的其余必需字段使用项目统一默认值。请求使用填写的平台 ID，同一 Provider 内不允许重复。导入后选择默认模型，可调整能力并继续手动添加其他模型。编辑时，唯一已有模板映射会预填平台 ID；同 ID 须明确确认才用模板替换已有模型的名称、能力及关联，默认不覆盖，拒绝则保留原值。按 ID 合并，不重复添加已有条目；同一批导入仍禁止两个模板占用同一平台 ID，未选中的模型继续保留供后续编辑。
 模板副本独立保存。DS 模型可选择“跟随模板上下文”，须先配置本地 DS 目录；CLI 或 WebUI 修改 DS 上下文时，现有受管目录事务会同步关联的 RS 模型，平台 ID 与其他能力保持独立。CLI 编辑及 WebUI 可关闭跟随，关闭后保留当前窗口。删除最后一个 DS 账户或重建缺失的 DS 目录前，必须先关闭关联 RS 模型的跟随，避免留下失效关联；同一窗口值再次应用时也会修正跟随副本的差异。没有启用跟随的副本不受源目录变化影响；模型 ID、能力仍须符合平台实际支持情况。WebUI 可编辑保存后的平台 ID 和能力，目前模板勾选入口在 CLI。
 每个模型声明准确 ID、显示名称、上下文窗口、图片输入能力、支持的思考等级与默认等级；默认模型必须属于目录。
 上下文窗口接受 1024–100000000 Token。思考等级仅接受锁定 Codex 支持的
@@ -318,7 +319,7 @@ CLI 新增或编辑时分别询问是否导入官方 Codex、DeepSeek 模型，�
 
 上游必须兼容锁定版 Codex 的 Responses 流式事件、函数调用、工具结果接续及其请求字段；
 “提供 Responses 地址”不代表所有模型均兼容。此入口不转换 Chat Completions，不提供平台专用协议补丁。
-这些实例仍关闭网页搜索；模板中的能力元数据不代替上游接口兼容性验证，也不自动启用 WS 或改变审批策略。手填模型和官方 Codex 基础模板使用通用编程指令，不额外声明远程压缩、免费额度、Fast、推理摘要或详细程度；DS 导入同样使用通用编程指令及保守的工具和请求参数。当前目录合同没有可独立设置的最大输出 Token 字段。
+这些实例仍关闭网页搜索；模板中的能力元数据不代替上游接口兼容性验证，也不自动启用 WS 或改变审批策略。手填模型和官方 Codex 基础模板使用通用编程指令，不额外声明远程压缩、免费额度、Fast、推理摘要或详细程度；DS 导入保留模板的非空编程指令，缺少时使用通用编程指令；工具和请求参数继续采用项目的保守配置。当前目录合同没有可独立设置的最大输出 Token 字段。
 
 固定模式把 Provider、默认模型、思考等级及目录引用写入主配置；切换模式保持官方主配置，写入独立的
 `sf-custom-rs-<标识符>` Profile，并由现有监管服务启动。渠道 `/model` 从各自真实 App Server

@@ -6,7 +6,7 @@
 
 Gateway 把 Telegram、飞书和微信消息接入本机 Codex App Server。`codexc remote` 连接的是同一个 App Server，因此原生 TUI 与聊天渠道共享 Thread、Workspace、模型提供商和实时运行状态。
 
-App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gateway 只保存渠道与 Workspace 的最小绑定，不复制完整会话文件或消息正文。
+App Server 是 Thread、Turn、Item 和会话历史的唯一事实来源。Gateway 的 StateStore 只保存渠道与 Workspace 的最小绑定，不复制完整会话历史。独立投递箱按[投递合同](delivery.md)加密保存待送达结果；显式开启的调用转储另按下文保存模型报文。
 
 ## 2. 安装
 
@@ -30,7 +30,7 @@ irm https://raw.githubusercontent.com/msola-ht/codex-channels/main/install.ps1 |
 
 在交互终端直接运行 `codexc` 打开主菜单，可进入初始化、接入、日常设置、工作区、后台服务、指标、清理、诊断，以及“运行与连接”中的 TUI、WebUI 和前台核心服务启动入口。交互菜单要求标准输入和标准输出均连接终端；输入重定向时，`config` 仅显示路径，`timezone` 仅显示当前时区。非交互终端无参数时显示帮助，显式子命令继续供脚本调用。
 
-`codexc service` 无参数时可选择操作和目标；核心服务 `all` 仅包含 App Server 与 Gateway，WebUI 单独选择。菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
+`codexc service` 无参数时可选择操作和目标；`all` 包含 App Server 与 Gateway，启动时纳入已安装且启用的 Relay，停止时先关闭已安装 Relay；WebUI 单独选择。菜单日志显示最近 100 行，持续跟随仍使用 `codexc service logs <目标> -f`。卸载后台服务需确认。
 
 `codexc work` 菜单区分新建工作区、注册当前目录和注册已有目录；注册前显示实际目录并确认，不创建或删除已有目录。`codexc metrics` 菜单包含会话列表导出和历史额度窗口查询，清理与重置统一使用 `codexc cleanup`。上述操作菜单完成单项后可继续选择；“运行与连接”完成后返回该子菜单，退出后返回主菜单。Setup 和 Config 单项失败会显示错误并返回各自分类菜单，不自动重试写入。
 
@@ -300,7 +300,7 @@ codexc doctor
 更新发现默认 CLI 缺失或版本不匹配时会询问是否安装，确认后先校验临时候选，再更新全局 CLI；
 非交互调用会给出精确版本安装命令并退出，不静默安装。
 
-更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22→v23 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
+更新先检查源码、公开合同、当前配置和数据库升级条件，通过后在一个停机窗口完成程序及配套 Codex CLI 安装、目标版本的数据库升级与服务恢复。目标版本按受支持范围执行显式数据库升级；指标 v20/v21/v22/v23→v24 保留旧数据并生成一致性备份，运行时不隐式迁移。用户偏好与 Provider 模型目录不改写，不支持的旧配置或 Schema 明确报错。新安装由正常初始化创建当前结构。详细流程见[源码安装与更新](source-install.md)。
 
 ### 本机清理与归档
 
@@ -310,16 +310,16 @@ codexc doctor
 codexc cleanup
 ```
 
-菜单包含以下五项，完成或取消单项后返回菜单，现有直接命令继续可用：
+清理菜单包含归档、转储删除、旧指标清理、Provider 指标清理和重置五项，完成或取消后返回菜单。下表另列出独立的投递核对与指标升级命令：
 
-| 菜单项目 | 直接命令 | 执行条件与结果 |
+| 维护项目 | 直接命令 | 执行条件与结果 |
 | --- | --- | --- |
 | 归档短会话及子会话 | `codexc sessions cleanup <最大轮数>` | 停止 Gateway、保留 App Server；预览并确认后归档 |
-| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server；永久删除当前配置目录下全部转储 |
+| 删除请求与响应转储 | `codexc traffic cleanup` | 先预览，确认删除需停止全部 App Server 与 Relay；永久删除当前配置目录下全部转储 |
 | 清理旧指标 | `codexc metrics cleanup --restart-gateway` | 菜单填写保留天数、行数和是否压缩；备份清理，会停止后启动 Gateway（原先停止也会启动） |
 | 核对未确认渠道结果 | `codexc delivery status` / `codexc delivery list` | 先停止 Gateway；明确重发、确认送达与停写备份见[投递箱运维](delivery.md) |
 | 清理指定 Provider 的指标 | `codexc metrics prune <provider>` | 输入区分大小写的精确 ID 并确认；备份清理，Gateway 按原状态恢复 |
-| 保留数据升级指标库 | `codexc metrics upgrade --from 22 --to 23` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
+| 保留数据升级指标库 | `codexc metrics upgrade --from 23 --to 24` | 默认预检；先停止 Gateway 与 Relay，核对后加 `--apply` |
 | 重置整个指标库 | `codexc metrics reset` | 先停止 Gateway；确认后备份并重建指标库 |
 
 `codexc cleanup -h` / `--help` 显示说明，非交互终端不会执行清理。菜单不会统一停掉所有服务，各项沿用原有条件；执行失败会报告错误并返回清理菜单。
@@ -392,6 +392,22 @@ codexc traffic
 
 WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接使用设置页，显式配置令牌后所有 API 都会验证，非回环监听必须配置令牌。详情见 [`WebUI`](webui.md)。
 
+### OpenAI 重置券 CLI
+
+Gateway 和主 App Server 可用、已登录 ChatGPT 时，可在本机使用：
+
+```bash
+codexc reset-credit list          # 实时列表，日期为 UTC
+codexc reset-credit list --json   # 机器可读的账户 ID、数量与可用券明细
+codexc reset-credit use           # 交互选券、预览并确认
+codexc reset-credit use <券ID>    # 指定券后预览并确认
+```
+
+命令不依赖 WebUI 进程。取消或中断已获取的预览会尝试通过私有 IPC 释放记录，清理失败会明确提示并由 5 分钟有效期兜底。消费必须在交互终端明确确认，默认取消；不支持 `--yes` 或非交互消费。
+预览展示账户、券名称、官方说明和到期时间；Gateway 复核账户与券状态后单次执行，5 分钟预览过期需重新操作。
+中断、超时或丢失消费响应时不自动重试，先重新运行 `list` 核对官方状态。消费结果与账户快照刷新结果分开显示。
+API Key 账户、未知类型或未提供明细的券不可使用。渠道使用 `/limits reset` 查询、`/limits reset use <券ID>` 预览，再按返回的 `/limits reset confirm <令牌>` 确认或 `/limits reset cancel <令牌>` 取消。飞书和 Telegram 的 `/limits` 提供“查看重置券”按钮；列表可点选、翻页、刷新，预览提供“确认使用”和“取消”按钮，无需复制令牌。微信使用文字命令，飞书和 Telegram 也保留文字入口；令牌仅限原用户、会话、工作区及当前 Thread，5 分钟过期，重启失效。WebUI 操作见[重置券使用](webui.md#openai-重置券使用)。
+
 ### 正常发图与图片引用
 
 照常在渠道发送图片即可，不需要额外命令。使用 OpenAI ChatGPT 登录时，Gateway 上传已校验的
@@ -401,7 +417,9 @@ WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接�
 API Key、第三方 Provider 和独立自定义 OpenAI 后端保持内联图片输入。Actor、Workspace、模型能力和媒体大小限制继续适用。
 
 图片引用会跳过 App Server 的本地缩放，不能视为与普通原生 TUI 的图片预处理完全相同。
-上传最多等待 60 秒，可通过 `/stop` 取消；账户或路由变化、上传和引用失败都会明确报错，
+上传最多等待 60 秒，可通过 `/stop` 取消；主动取消、连接关闭与超时分别提示。
+账户或路由变化、上传失败会报告对应环节；网络异常不会统一归因于登录失效，
+可按[渠道日志说明](display.md)中的图片诊断字段定位。
 不自动重新上传或回退 Base64。远端图片没有自动删除入口，保留时间和跨重启可用性不作保证；
 此功能不提供文件管理、按编号下载或用户手动编号输入。
 实现、验证范围与限制见[图片引用决策](codex-cli-upgrade-decisions.md#图片文件引用需求阻塞与实现边界)。
@@ -512,15 +530,15 @@ codexc traffic cleanup --confirm               # 停止全部 App Server 与 Rel
 后会生成 V2 session；回滚旧版本时旧文件仍可继续使用。`codexc traffic -h` 列出全部选项。
 `cleanup` 会预览默认 `traffic/` 或 `--dir` 指定目录中可识别的全部 V2 session 和旧版逐帧 JSONL，
 未知文件与目录不处理。实际删除只允许当前配置的数据目录下的 `traffic/`；先运行
-`codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
-`codexc service start app-server`。
+`codexc service stop relay` 和 `codexc service stop app-server`，再加 `--confirm`。删除不可恢复，完成后可按需运行
+`codexc service start app-server`，此前启用的 Relay 可按需运行 `codexc service start relay`。
 
 同一份转储也能在 `codexc webui` 的「转储」页查看：摘要列表与 `codexc traffic` 使用同一套解析，
 点开某条即进入该条的请求参数、实际输出与用量摘要。终态未携带输出时，从已存 trace 的完成条目
 提取；原始正文、诊断信息与传输 trace 默认收起，数据不会回写。页面地址保留标签、writer session、调用编号与分页位置，
 返回列表回到原处；App Server 重启后也不会把旧列表中的编号解析成新 session 的同号调用。
 该页只接受本机回环访问，展示内容同样是未脱敏原文（转储裁剪过的条目会显示对应的截断标记）。页面
-同时显示自动保留天数，并提供“清空转储”的预览确认入口；实际删除前必须先停止全部 App Server。
+同时显示自动保留天数，并提供“清空转储”的预览确认入口；实际删除前必须先停止全部 App Server 与 Relay。
 
 ### 转储体积控制
 
@@ -590,11 +608,13 @@ Relay 默认禁用、回环监听；可显式使用 IPv4 局域网监听，跨�
 客户端使用 `/v1/chat/completions` 或 `/v1/responses` 选择原生协议；不会互转或自动重试另一协议。
 `codexc relay providers` 和管理页展示账户的实际协议能力：CLP 为 Chat，DS 为 Chat/Responses，其他已接入的 Responses 提供商为 Responses。
 自定义主/切换 Provider 必须有可独立读取的 API Key 和有效模型目录；不借用 Codex OAuth 登录态。
-Responses 只提供同步无状态创建；不提供 `store=true`、`background=true`、服务端会话引用或响应管理端点。
+Responses 只提供同步无状态创建；`store` 可省略或传布尔值，出站统一设为 `false`，传 `true` 时会关闭存储后继续转发，不因该值拒绝请求。非布尔值仍报参数错误；调试调用详情记录入站与出站差异。
+`background` 可省略或传布尔值，传入时统一设为 `false`，继续在当前请求内交付结果，不因 `true` 报错；省略时不补字段。
+官方 DS 的 `previous_response_id`、`conversation` 原样转发，由上游按其无状态合同忽略；客户端仍需在 `input` 中携带所需完整历史，引用不会恢复上下文。其他 Responses 提供商仍拒绝服务端会话引用：多个 Relay Key 可共享上游账户，当前没有响应/会话归属校验，不能通过引用读取共享账户历史。Relay 不提供响应管理端点。
 普通参数、工具声明和远程图片交由上游处理；Chat 保留原始响应字段与工具增量，客户端须等待有效终态后才执行工具。
 回退仅支持 CLP 的旧程序前，停止 Gateway、Relay 和 WebUI，使用 `codexc relay rollback-providers --provider ID`（可重复）明确列出所有非 CLP Relay 账户；
 命令备份后移除这些引用及其 Key，保持提供商自身配置和剩余凭据。重新接入须重新签发，不恢复备份中的旧秘密。
-完整双协议、提供商接入与升级回滚合同见[实施方案](provider-api-relay-development.md#1514-原生双协议与提供商公共接入)。
+完整双协议、提供商接入与升级回滚合同见[转发设计与边界](provider-api-relay-development.md)。
 局域网交互设置：运行 `codexc relay listen`，或进入 `codexc config` → 模型转发监听，选择关闭、仅本机、局域网（0.0.0.0）或指定内网 IP。确认后自动备份、原子保存并向运行中的 Relay 确认生效，保留 Key 和现有端口。若服务未运行，会提示启动命令，不自动安装或启动。配置被其他操作修改时拒绝覆盖，请重新进入菜单。
 
 手动设置：先备份当前实际使用的配置文件并校验备份，再在已有 `[model_relay]` 段设置 `host = "192.168.1.10"`（替换为服务器的内网地址），或 `host = "0.0.0.0"`。不要重复创建同名 TOML 段。保留现有 Key、并发及其他字段；默认端口为 4119。支持 10/8、172.16/12、192.168/16 的规范 IPv4 地址，IPv6 当前仅支持回环 `::1`。不接受域名、URL 或公网 IP 字面量。
@@ -632,6 +652,7 @@ codexc relay edit --caller translation --reasoning passthrough
 强制关闭支持 CLP 的精确模型 `cline-pass/deepseek-v4.1-flash`，以及 DS 的 `deepseek-flash` / `deepseek-v4-pro`，同一 Key 的全部允许模型必须支持。
 关闭策略覆盖顶层思考控制参数，CLP Chat 和 DS Responses 实际出站为 `reasoning.effort=none`，DS Chat 使用 `reasoning_effort=none`；不改历史消息或隐藏上游思考响应。
 嵌套 `extra_body` / `extraBody` 的思考控制字段与关闭策略冲突时明确拒绝；跟随客户端不增加此限制。
+Chat 和 Responses 的冲突错误均定位到完整字段路径，例如 `extra_body.reasoning`。
 更换提供商、修改模型或策略会取消该 Key 的旧请求。配置保存与运行态应用分开报告，不会自动启动服务。
 
 新增可选字段 `model_relay.callers[].reasoning` 和 `display_name` 不要求旧配置升级；首次使用前应先停止旧 Gateway、
@@ -642,12 +663,12 @@ Relay、WebUI（包括前台实例），更新全部程序后再启动，避免�
 WebUI 及其他手工写入者须自行保持停止。失败保留原配置，不应恢复整份历史配置以免复活旧凭据。
 
 
-Relay 的 Chat 请求保留模型参数、消息内容和扩展字段，由 CLP 判断是否支持；远程图片 URL
-也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息数量、stream 布尔、单选择
-n=1 和请求大小等边界由 Relay 校验；省略 stream 时默认 JSON。请求参数不能改变本机账户、
+Relay 的 Chat 请求保留模型参数、消息内容和扩展字段，由所选上游判断是否支持；远程图片 URL
+也由上游处理，Relay 不主动抓取。仅本地模型授权、JSON 对象/消息结构、stream 布尔、单选择
+n=1 和请求大小等边界由 Relay 校验；Chat 消息和 Responses 输入项不设条数上限，仍受 1 MiB 请求正文预算限制；省略 stream 时默认 JSON。请求参数不能改变本机账户、
 凭据或上游地址。参数透传不代表当前模型支持所有能力，响应仍遵循已记录的单选择 JSON/SSE 合同。
 
-Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给 CLP。
+Relay 保留普通应用请求头（例如 User-Agent、HTTP-Referer、X-Title），入口密钥不会转发给上游。
 上游 Authorization 和传输头由 Relay 控制；Cookie、代理凭据、转发来源与内部身份头剔除。
 
 在 WebUI“请求明细”点击唯一的“查看调用详情”：已采集报文直接打开现有转储视图；未关联时仅显示“未关联”，不提供详情链接。Relay 没有 Codex 会话或轮次，HTTP 200 不等于客户端交付成功。出站 User-Agent 只记录新调用实际发送的值，缺失时不推断客户端类型。
@@ -670,14 +691,15 @@ Codex/Relay 在生产和调试模式均保留普通请求/响应头及关联 ID�
 
 Relay 生产记录脱敏后的出站 Chat/Responses 参数、输入和上游 JSON/SSE；请求与响应头遵循上述必要脱敏规则。翻译原文、回答及自由文本内的秘密仍会保存。请求正文最多 1 MiB、响应 8 MiB；Relay 共用 512 MiB 磁盘和 16 MiB 待写预算。保留天数统一使用 `[debug].model_traffic_retention_days`，默认 30 天，0 关闭按时间清理但保留 Relay 容量上限。首次启用在取消/超时边界内等待异步容量初始化，随后按实际已写及待写字节记账，并为在途调用预留空间。后台清理保护活动批次及扫描期间新建批次，整理期间继续采集；容量不足、写入故障或超限会留下日志或截断标记。写入故障会停止本进程后续采集，排除故障并重启 Relay 后恢复，模型转发继续。
 
-停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 23 --to 22 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
+停止采集不删除已有文件。回退程序前停止相关写入服务并归档调试批次；统一后的全局字段已被旧程序支持，旧 Relay 因独立字段缺失默认不采集。不要恢复整份旧配置覆盖当前凭据。如需回退指标库，按升级输出的备份路径及 SHA-256 执行 `codexc metrics rollback --from 24 --to 23 --backup PATH --sha256 HASH --apply`，先归档新库再恢复；从 v20 升级的备份使用 `--to 20`。
 
-模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新处理中、等待执行和接收请求数量。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
+模型转发管理页显示配置并发上限及运行状态，点击“刷新”更新服务状态，左侧“模型转发”下的二级菜单“请求队列”独立展示当前请求及执行阶段。配置上限不代表运行进程已应用；服务停止或状态无法确认时，不显示虚假的零队列。
 
 Relay 支持 JSON 非流式调用，不要求客户端启用流式。失败响应提供 `code`、`phase`、
 `request_id` 和已知的 `upstream_status`；除带安全 `param` 的入口字段错误外，`message` 也包含这些定位信息。
 `X-Relay-Request-Id` 可与指标记录关联。`invalid_upstream_*` 表示上游响应类型或字段校验失败；
 例如上游 HTTP 200 配合 `invalid_upstream_tools` 表示工具响应字段校验未通过，并非上游返回了 502。
+Chat 和 Responses 的 JSON/SSE 内容无法解析为 JSON 时统一返回 `invalid_upstream_json`，不回显上游原文。
 WebUI 请求列表的失败状态提示可查看错误码；诊断不包含请求内容、密钥或上游错误原文。
 上游 429/503 提供的 `Retry-After` 在为受限整数秒或规范 HTTP 日期时会保留，客户端可据此退避；Relay 不自动重试。
 Chat 的长度限制、内容过滤、`insufficient_system_resource` 和 `aborted` 终态原样交付，指标与新转储记为未完整完成。
@@ -696,7 +718,7 @@ Relay 只执行全局限流，不与本机 App Server 的代理共用计数。`[
 （关闭分钟与突发限制）；`burst` 为 1–32，默认 10，仅在分钟速率为正数时生效。
 账户和 Key 只管理身份与模型授权，不再设置执行限额。鉴权失败保护始终保留。
 
-Chat 请求在全局并发或令牌不足时排队：上传和等待合计最多 32 个，正文预算合计 16 MiB。
+Chat 与 Responses 请求在全局并发或令牌不足时排队：上传和等待合计最多 32 个，正文预算合计 16 MiB。
 上传前每个请求先预留 1 MiB，正文验证后按重新序列化的实际字节释放多余预算；单请求原始正文
 及重新序列化正文均不超过 1 MiB。计数和字节预算任一达到上限都会拒绝，所以不能保证同时接受
 32 个大请求。上传限时 15 秒，正文验证后的等待最长 30 秒，均计入请求总期限 300 秒。
@@ -706,7 +728,7 @@ Chat 请求在全局并发或令牌不足时排队：上传和等待合计最多
 并带 `upstream_attempted:false`；未出站的拒绝、超时和撤销不会进入模型调用指标。
 客户端断开、Key 撤销或 Relay 关闭时取消等待，不自动重试；队列仅在内存中，重启不恢复。
 `codexc relay status` 返回执行数 `active` 及 `queue.pending`（上传与等待）、`queue.waiting`
-（已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 队列展示尚未实现。
+（已验证正文的等待）、`queue.bytes`（正文预留预算），不包含请求正文。WebUI 左侧“模型转发”下的“请求队列”可查看实时阶段与等待情况，详见[WebUI](webui.md)。
 
 旧配置中账户或 Key 的 `max_concurrency`、`requests_per_minute`、`burst` 不再受支持，
 新程序明确拒绝，不会静默忽略。切换新版本前使用新版本入口执行 `codexc relay upgrade-limits`

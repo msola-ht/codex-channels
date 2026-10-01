@@ -41,6 +41,7 @@ export type {
   StoredThreadListItem,
   StoredThreadTurnSummary,
   StoredTurnRequestMetricsSummary,
+  ResponseUsageSummary,
   StoredWeeklyQuotaEstimate,
   StoredWeeklyQuotaWindow,
   QuotaHistoryQuery,

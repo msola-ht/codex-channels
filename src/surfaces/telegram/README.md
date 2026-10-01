@@ -25,7 +25,8 @@
   版本字符串和当前 Workspace Git 分支，不读取生成协议。
 - `command-renderer.ts`：把平台无关的类型化命令结果渲染为 Telegram 消息；模型按钮绑定当前模型、
   浏览范围与有序选项的随机令牌，最多保留 1000 份菜单状态。列表变化或状态淘汰后旧按钮明确失效，
-  不按新列表重新解释旧序号。
+  不按新列表重新解释旧序号。重置券复用内联按钮，选券令牌绑定用户、聊天与实时列表，
+  确认及取消调用 Application 的一次性确认入口。
 - `outbox.ts`：通过 Surface 共用的每 Conversation 有界顺序队列协调流式回复和审批显示顺序；
   普通 Turn 输入会在内存中绑定到精确消息 ID，“已开始处理。”、阶段性最终正文和最终正文均使用
   `reply_parameters` 原生回复该输入；回复目标保留到 Turn 结束、断线或关闭时清理；
@@ -105,8 +106,8 @@ Telegram 网络调用不得阻塞 App Server Reader。每个 Conversation 的最
 Bot API 与文件下载使用 Bootstrap 按 `api.telegram.org` 选择的统一 HTTP(S) 代理；共享代理
 遵循 `NO_PROXY`，Telegram 私有 `proxy_url` 作为显式覆盖。Bot API 的代理连接启用 Keep-Alive，
 由 Surface 关闭时释放连接池；主动取消的请求不进入自动重试。
-下一 Turn 输入队列属于 Application，不得复用本目录的 Telegram 输出队列；Telegram 只负责
-命令解析及位置、容量和内存生命周期提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
+下一 Turn 输入由 App Server Queue 持久保存，Application 提供受控管理入口，不得复用本目录的 Telegram 输出队列；Telegram 只负责
+命令解析及位置、容量和 App Server 持久队列语义提示。`/queue list` 还提供当前业务页的刷新、分页和条目入口；
 条目按钮使用完整 Queue ID，进入后可启动或删除，删除必须二次确认。新增、更新和排序继续使用文本命令，
 不建立渠道私有 Queue 状态。
 Telegram 手动命令注册显式接入三个渠道共享的 `/h`、`/work`、`/r` 快捷入口，分别执行

@@ -11,20 +11,19 @@ Queue/Revert 联合真实合同仍是条件门禁：
 当前 Queue 条件式真实合同覆盖握手、100/101 容量、CRUD、25/100 分页、活动 busy、指定条目
 启动、中断保留、自动派发以及 App Server 重启后的冷恢复；跳过条件合同不计为通过。
 
-## 目标与顺序
+## 已完成的实施顺序
 
-采用目标是让 App Server 成为待提交用户消息和 Thread 历史的唯一事实来源，删除 Gateway
-现有的平行内存队列。实现分成两个独立阶段：
+App Server 已成为待提交用户消息和 Thread 历史的唯一事实来源，Gateway 原有平行内存队列已移除。
+以下记录当时的两个实施阶段，不是待执行计划：
 
 1. 先完整接入原生 Thread Queue，并删除现有 `queuedFollowUps`、完成事件派发和失败清空逻辑。
 2. 再让新建 Thread 使用分页历史，接入分页 Turn 查询和带显式确认的 Revert。
 
-Queue 与 Revert 不在同一个提交或 PR 中实现。Queue 替换现有公开能力；Revert 会改变新建
-Thread 的历史模式并增加破坏性写操作，必须单独审查和回滚。
+当时将 Queue 替换与 Revert 分开实施和审查：前者替换既有公开能力，后者改变新建 Thread 的历史模式并增加破坏性写操作。后续变更仍需分别核对影响与回滚边界。
 
 ### Revert 实施定稿
 
-本轮只实施第二阶段 Revert，不重新设计或改写已经上线的 Queue。以下约束在编码前冻结：
+第二阶段 Revert 已接入；以下保留当前实现约束，不重新实施或改写已接入的 Queue：
 
 - Gateway 新建的 Thread 一律显式发送 `historyMode: "paginated"`；Resume、Fork 和 Provider 路由
   只采用 App Server 返回的实际 `historyMode`。既有 `legacy` Thread 仍可正常使用，但 `/revert`
@@ -256,7 +255,7 @@ Revert 成功后：
 - 修改根 `AGENTS.md` 中受控实验例外，精确加入 `thread/turns/list`、`thread/revert` 与
   `thread/reverted`，不借机开放 `thread/items/list` 或其他实验 API。
 - 更新 `docs/index.md` 的受控导出数、直接调用方法数、支持矩阵、固定源码说明和复核命令结果。
-- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.150.1` 时仍由现有版本门禁拒绝。
+- 不增加运行时兼容层；运行中的 App Server 不是精确 `0.156.1` 时仍由现有版本门禁拒绝。
 - 不新增 Gateway SQLite Schema，也不新增消息正文持久化配置。
 
 Queue 是对现有 `/queue` 的完整替换，实施后默认可用，不另设功能开关。Revert 是新的破坏性实验

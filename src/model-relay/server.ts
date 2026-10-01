@@ -156,7 +156,7 @@ export class ModelRelayServer {
         try {
           const text = await readChatBody(request, signal, 1024 * 1024);
           inbound = JSON.parse(text) as unknown;
-          body = protocol === "responses" ? validateDirectResponsesRequest(inbound) : validateDirectChatRequest(inbound);
+          body = protocol === "responses" ? validateDirectResponsesRequest(lease.caller.provider, inbound) : validateDirectChatRequest(inbound);
         } finally { clearTimeout(uploadTimer); }
         lease.check(body.model); requestModel = body.model; stream = body.stream;
         body = protocol === "responses" ? applyResponsesReasoningPolicy(body as DirectResponsesRequest, lease.caller.provider, lease.caller.reasoning ?? "passthrough")

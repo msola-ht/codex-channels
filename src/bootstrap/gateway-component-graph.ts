@@ -86,6 +86,8 @@ import {
   ProviderAccountService,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
+  OpenAiResetCreditService,
+  ConversationResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
 } from "../application/index.js";
@@ -183,6 +185,7 @@ export abstract class GatewayComponentGraph {
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private shutdownTask: Promise<void> | undefined;
+  private resetCredits: OpenAiResetCreditService | undefined;
   private accountWarmupTask: Promise<void> | undefined;
   private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
   private readonly queueLifecycleTasks = new Set<Promise<void>>();
@@ -535,6 +538,7 @@ export abstract class GatewayComponentGraph {
       this.router,
       models,
     );
+    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal));
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       ...createManagedProviderAccountAdapters(
@@ -860,7 +864,16 @@ export abstract class GatewayComponentGraph {
       : undefined;
     const scheduledTaskUseCases = this.scheduledTasks?.service;
     const scheduledTaskToolHandler = this.scheduledTasks?.toolHandler;
-    const commands = new ConversationCommandService(service, scheduledTaskUseCases);
+    const channelResetCredits = new ConversationResetCreditService(this.resetCredits, (target, actorId) => {
+      this.requireRunning();
+      if (!this.accessPolicy(target)?.isAllowed({ target, actorId }) || !this.bindings.actors(target).includes(actorId)) {
+        throw new UserFacingError("reset-credit.failed", "当前用户未获授权", { reason: "forbidden" });
+      }
+      const status = service.status(target);
+      const workspace = this.workspaces.require(status.workspaceId);
+      return JSON.stringify([workspace.id, workspace.cwd, status.threadId]);
+    });
+    const commands = new ConversationCommandService(service, scheduledTaskUseCases, channelResetCredits);
     this.surfaceModules = createSurfaceModules({
       config,
       service,
@@ -917,8 +930,8 @@ export abstract class GatewayComponentGraph {
         completionTiming: async (threadId, turnId, current) => {
           const persisted = await metricsWriter.waitForCurrentWrites(threadId, turnId);
           if (!persisted) return current;
-          const summary = metricsStore.threadSummary(threadId);
-          return mergeCompletionTiming(summary.latestTurn, turnId, current);
+          const summary = metricsStore.threadTurnSummary(threadId, turnId);
+          return mergeCompletionTiming(summary, turnId, current);
         },
         taskAggregate: async (threadId, turnId): Promise<TurnTaskMetricsSummary | undefined> => {
           let summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
@@ -931,6 +944,7 @@ export abstract class GatewayComponentGraph {
           summary = metricsStore.threadTurnTaskSummary(threadId, turnId);
           if (summary === null) return undefined;
           return {
+            responseUsage: summary.responseUsage ?? null,
             requestCount: summary.requestCount,
             unsuccessfulRequestCount: summary.unsuccessfulRequestCount,
             inputTokens: summary.inputTokens,
@@ -945,6 +959,7 @@ export abstract class GatewayComponentGraph {
           const aggregate = metricsStore.threadSummary(threadId).threadAggregate;
           if (aggregate === null) return undefined;
           return {
+            responseUsage: aggregate.responseUsage ?? null,
             requestCount: aggregate.requestCount,
             unsuccessfulRequestCount: aggregate.unsuccessfulRequestCount,
             inputTokens: aggregate.inputTokens,
@@ -1171,9 +1186,20 @@ export abstract class GatewayComponentGraph {
     return this.core.hasActiveTurns();
   }
 
+  async resetCreditOperation(request: import("../../runtime/gateway-account-refresh.mjs").ResetCreditRequest, signal: AbortSignal): Promise<unknown> {
+    this.requireRunning();
+    if (!this.resetCredits) throw new Error("Account service unavailable");
+    switch (request.method) {
+      case "reset/list": return this.resetCredits.list(signal);
+      case "reset/preview": return this.resetCredits.preview(request.creditId, signal);
+      case "reset/consume": return this.resetCredits.consume(request.attemptId, signal);
+      case "reset/cancel": this.resetCredits.cancel(request.attemptId); return { cancelled: true };
+    }
+  }
+
   refreshAccountSnapshot(provider: string, signal?: AbortSignal): Promise<boolean> {
     this.requireRunning();
-    if (provider === "openai") return Promise.resolve(false);
+    if (provider === "openai") return this.providerAccounts!.accountLimits("openai", signal).then(() => true);
     return this.providerAccounts?.refreshAccountSnapshot(provider, signal)
       ?? Promise.resolve(false);
   }
@@ -1383,17 +1409,21 @@ export abstract class GatewayComponentGraph {
     if (JSON.stringify(current) !== owner) return false;
     const target = event.target;
     const actors = this.bindings.actors(target);
-    const policy = target.surface === "telegram" && this.config.telegramEnabled
+    const policy = this.accessPolicy(target);
+    if (!policy) return false;
+    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
+    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
+      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
+  }
+
+  private accessPolicy(target: ConversationTarget) {
+    return target.surface === "telegram" && this.config.telegramEnabled
       ? new TelegramAccessPolicy(this.config.telegramAllowedUserIds, "default")
       : target.surface === "feishu" && this.config.feishu
       ? new FeishuAccessPolicy(this.config.feishu.allowedOpenIds, this.config.feishu.appId)
       : target.surface === "weixin" && this.config.weixin
       ? new WeixinAccessPolicy(this.config.weixin.allowedUserIds, this.config.weixin.accountId)
       : undefined;
-    if (!policy) return false;
-    if (actors.some((actorId) => policy.isAllowed({ target, actorId }))) return true;
-    return actors.length === 0 && this.surfaceModules.some((module) => module.notificationTargets?.().some((candidate) =>
-      candidate.surface === target.surface && candidate.accountId === target.accountId && candidate.conversationId === target.conversationId));
   }
 
   private shutdownComponents(): Promise<void> {

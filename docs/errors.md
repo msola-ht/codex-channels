@@ -42,7 +42,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `conversation.name.invalid` | 会话名称必须为 1–64 个字符 | 重命名会话时名称长度非法 |
 | `conversation.missing` | 当前还没有 Codex Thread | 无绑定会话时执行需要 Thread 的命令 |
 | `conversation.busy` | 当前任务运行中，请先使用 /stop 停止当前任务 | 任务运行中提交新消息或切换会话 |
-| `delivery.overloaded` | 当前会话投递受阻、投递箱接近容量上限或不可用，已暂停新执行 | 在本机使用 `codexc delivery` 核对未确认投递，见[投递箱恢复](delivery.md) |
+| `delivery.overloaded` | 投递存储容量不足或不可用，已暂停新执行 | 在本机使用 `codexc delivery` 核对未确认投递，见[投递箱恢复](delivery.md) |
 | `conversation.background-limit` | 后台任务数量达到上限 | 后台 Thread 超过允许数量 |
 | `conversation.background-queued` | 当前任务仍有下一 Turn 排队消息，暂不能切换会话 | 切换会话时存在排队输入 |
 
@@ -50,7 +50,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 
 | 错误码 | 用户提示 | 典型触发 |
 | --- | --- | --- |
-| `image.reference.failed` | 图片上传、账户路由校验或引用提交失败，也用于上传取消与超时 | 检查 Codex 登录状态及网络后重新发送；不会自动重传或改用内联图片 |
+| `image.reference.failed` | 图片提交前的校验或上传失败；提示具体阶段，区分网络、HTTP 拒绝、响应格式异常、主动取消与超时 | 按提示检查本地代理、网络或账户；通过日志中的 `imageUploadDiagnosticId` 关联诊断，不会自动重传或改用内联图片。Turn 提交后的错误保留原有分类 |
 | `image.url.invalid` | 图片必须使用 PNG、JPEG、WebP 或非动画 GIF Base64 Data URL | Application 收到非法内联图片输入 |
 | `image.too-large` | 单张超过 10 MiB / 批量超过 20 MiB | 图片超过暂存大小限制 |
 | `image.too-many` | 一次最多处理 4 张图片 | 单次发送图片过多 |
@@ -133,6 +133,7 @@ CLP 的 HTTP 与流内错误由 Chat 桥归类：认证、额度、权限、模�
 | `scheduled-task.not-found` | 找不到指定计划任务或 Run | ID 不存在、已删除或不属于当前 Actor/Conversation |
 | `scheduled-task.snapshot.required` | 请先刷新计划任务或 Run 列表 | 数字选择器快照缺失或过期 |
 | `scheduled-task.state.invalid` | 当前状态不允许该计划任务操作 | 功能未启用、任务阻塞或 Run 不可重试 |
+| `reset-credit.failed` | 按受控 reason 展示用法、授权不足、确认失效、忙碌、结果待确认或暂不可用 | `/limits reset` 参数、身份或上下文复核失败；消费响应丢失时不自动重试 |
 | `metrics.usage` | /metrics 用法提示 | 参数格式错误 |
 
 ### 提供商、协作模式与计划

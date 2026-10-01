@@ -5,6 +5,7 @@ import {
 } from "../application/index.js";
 import type {
   OutputEvent,
+  ResponseUsageSummary,
   ThreadGoal,
   TurnErrorCode,
   TurnStartIdentity,
@@ -606,6 +607,9 @@ export function createTurnCompletedPresentation(
       }],
     });
   }
+  if (event.modelProvider === "openai" || event.timing?.responseUsage) {
+    runFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.timing?.responseUsage) });
+  }
   if (event.timing?.compact) {
     runFields.push({
       label: "上下文压缩",
@@ -661,6 +665,7 @@ export function createTurnCompletedPresentation(
         }],
       },
     ];
+    if (task.responseUsage) taskFields.push({ label: "OpenAI Credits", value: formatResponseUsage(task.responseUsage) });
     runFields.push({ title: "任务合计（含子代理）", fields: taskFields });
   }
   if (Object.hasOwn(event, "gitBranch")) {
@@ -685,6 +690,9 @@ export function createTurnCompletedPresentation(
           }]),
       ],
     });
+  }
+  if (event.modelProvider === "openai" || event.sessionAggregate?.responseUsage) {
+    sessionFields.push({ label: "OpenAI Credits", value: formatResponseUsage(event.sessionAggregate?.responseUsage) });
   }
   const sections = [
     ...(sessionFields.length > 0
@@ -823,4 +831,10 @@ function turnStatusLabel(
     inProgress: "运行中",
   } as const;
   return labels[status];
+}
+
+function formatResponseUsage(usage: ResponseUsageSummary | null | undefined): string {
+  if (!usage || usage.amount === null) return "未提供";
+  if (usage.missingRequestCount > 0) return `${usage.amount}（部分，${usage.missingRequestCount} 次请求未提供）`;
+  return usage.amount;
 }

@@ -17,7 +17,7 @@ Codex App 的 Scheduled 是宿主产品能力，不是 App Server 中的一组�
 桌面 App 在项目目录或隔离 Worktree 中运行，机器和 App 必须保持运行。
 
 当前锁定版 App Server 没有 `automation/create|list|update|delete|run` 等请求，也不保存用户计划任务的
-启停状态、下次运行时间、RRULE 或运行目录。项目只采用以下相关能力：
+启停状态、下次运行时间、RRULE 或运行目录。固定版上游提供以下相关能力；本项目采用范围见后文，字段存在不表示已接入：
 
 - `thread/start.threadSource` 可以把执行 Thread 标记为字符串 `automation`。
 - 实验 `thread/start.dynamicTools` 与 `item/tool/call` 可以让宿主提供计划任务管理工具，但工具调用
@@ -243,7 +243,7 @@ Agent 会像调用 Hermes `cronjob` 一样直接调用该函数；App Server 通
 提示，不近似为其他计划。固定句式仍可在 Application 内确定性解析并直接创建预览，不依赖工具或模型。
 
 `create` 可选的 `model` 支持模型 ID 或 `provider/model` 复合串（如
-`deepseek/deepseek-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
+`ds-main/deepseek-flash`）；不传时使用当前会话的模型与 Provider。显式指定的 Provider 未配置时
 直接返回可操作错误，确认预览把 Provider 与模型合并展示，避免创建后才发现跨 Provider 不匹配。
 
 官方 `dynamicTools` 只能在 `thread/start` 时注册，不能向已经存在的 Thread 注入。Gateway 不会为了
@@ -355,6 +355,8 @@ enabled = false
 
 ## 分阶段实施
 
+以下是已落地的实施分工，当前边界以本页合同和模块公共接口为准；后续扩展单独列在下一节。
+
 ### PR 1：存储与纯调度域
 
 1. 新模块、Schedule 封闭联合、IANA 时区与 DST 测试。
@@ -421,7 +423,7 @@ enabled = false
 - 前台 Conversation 不被计划任务抢占，Thread 仍保持唯一外部 Conversation 归属。
 - 无人值守运行无法扩大 Sandbox、Workspace、Actor、Provider 或工具权限。
 - Task Store 不保存模型输出或 App Server 历史，Prompt 不进入日志、错误或指标。
-- 三 Surface、WebUI 关联、CLI Doctor、升级、备份和卸载说明一致。
+- 三 Surface、CLI Doctor、升级、备份和卸载说明一致；WebUI Run 关联尚未接入，不作为已完成能力。
 - 条件式真实 App Server 合同及部署验收实际通过。
 
 遇到以下任一情况必须停止实施并重新审查：

@@ -53,7 +53,7 @@ codexc service restart all
 初次配置默认使用官方目录的默认模型 `deepseek-flash`。需要调整时，在 `codexc setup` 中选择“模型与提供商 → 第三方 Provider → OpenCode Go 官方 →
 修改模型设置（思考等级）”，或选择“模型与提供商 → 第三方 Provider → 默认模型与思考等级 → OpenCode Go”，
 再按模型设置默认思考等级，同一目录中引用该模型的账户 Profile 同步该等级，原生子代理保留独立设置，选择其他模型的账户保持各自模型的等级；目录刷新也同步仍存在模型的有效等级。上下文窗口占比走“模型与提供商 → 第三方 Provider → 模型上下文窗口”，按模型名统一设置，
-每个模型按自己的 `max_context_window` 换算窗口，不影响另一个模型或 DeepSeek 官方 Provider。新默认值只影响之后的新会话，恢复历史 Thread
+同名模型跨 Provider 共用窗口占比，在各目录最大窗口一致时同步换算；最大窗口不一致则拒绝修改，不影响其他名称的模型。新默认值只影响之后的新会话，恢复历史 Thread
 仍使用原模型。新增或刷新 OCG 模型目录时会继承 DeepSeek 等已配置 Provider 的同名模型窗口占比，
 不会重新回落到 OCG 目录默认窗口。重复运行 Setup 会保留仍受支持的默认模型及逐模型设置；更新器不刷新模型目录。修改后 Gateway 会自动检测设置文件变化，校验通过并在无活动 Turn
 时自动重启 App Server 生效；如需立即生效，可在终端手动运行 `codexc service restart app-server`。
@@ -102,7 +102,7 @@ Telegram 菜单因订阅状态变化而改变时，旧按钮会提示重新发�
 WebUI 区分此状态与普通刷新失败，并提供经过预览确认的本地账户删除入口，
 详见[WebUI 账户展示](webui.md)。
 本地 Token 与官方窗口使用同一周期口径：统计代理在每个模型请求发生时把官方三个窗口的
-`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v20 另保存子代理
+`resetsAt` 快照写入指标记录（Schema v9 新增 `quota_windows` 列；当前指标库 Schema v24 另保存子代理
 运行级父子 Turn 关联）。5 小时滚动窗口的 `resetsAt` 会随实时查询漂移，读取时只按当前
 `resetsAt` 反推的五小时范围和请求开始时间归集，不把重置秒数当作固定周期 ID。7 天和月度窗口
 优先按记录的固定周期快照归属 Token；快照缺失，或快照的重置时间不晚于请求开始时间（请求开始时
@@ -127,7 +127,7 @@ WebUI 控制台在 DeepSeek 余额卡旁按账户分别展示官方配额窗口�
   不改写基础配置；普通函数工具及 MCP 工具不受影响，见 [网页搜索边界](deepseek.md#网页搜索)。
 - 当前按 HTTP/SSE 接入（`supports_websockets = false`），流式文本、工具调用和上下文压缩走
   HTTP/SSE，不建立 Responses WebSocket。
-- API Key 没有官方账户接口可用于预检，Setup 只校验格式；首次请求失败时从模型指标和日志中
+- Setup 对 API Key 只校验格式；官方账户额度由接入后的 `/usage` 查询；首次请求失败时从模型指标和日志中
   查看错误分类。
 - 所有账户 id 都由添加时明确输入，使用小写字母/数字/`-`/`_`（1–32 位），不允许与现有
   Provider id 冲突；CLI 和 Thread 一律使用 `ocg-<accountId>`，默认账户只使用注册表标记；删除账户前

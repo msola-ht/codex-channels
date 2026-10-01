@@ -13,9 +13,10 @@ import { writePrivateFileAtomicSync } from "../runtime/private-file.mjs";
 import { SqliteModelRequestMetricsStore } from "../src/observability/index.js";
 import { ProviderAccountService } from "../src/application/index.js";
 import { createManagedProviderAccountAdapters } from "../src/bootstrap/managed-provider-capabilities.js";
+import { createClinePassAccountAdapter } from "../src/bootstrap/cline-pass-account-adapter.js";
 import { ccgAccountDefinition } from "../runtime/model-provider-definitions.mjs";
 import { configureCcgAccounts } from "./model-provider-runtime-test-fixture.js";
-import type { OfficialAccountSnapshotsResponse } from "../scripts/webui-api.js";
+import type { OfficialAccountSnapshotsResponse, OfficialAccountSourcesResponse } from "../scripts/webui-api.js";
 import {
   cleanupWebuiTestFixtures,
   createWebuiTestFixture,
@@ -44,6 +45,58 @@ function startServer(
 }
 
 describe("webui server Provider and account management", () => {
+  it("lists refresh sources without a database, model catalogs, or provider summary, isolating bad registries", async () => {
+    const fixture = createFixture();
+    writePrivateFileAtomicSync(clinePassAccountsFilePath(fixture.environment), JSON.stringify([{ id: "test", default: true }]));
+    writePrivateFileAtomicSync(deepseekAccountsFilePath(fixture.environment), "broken registry");
+    const loadProviderState = vi.fn(async () => { throw new Error("unrelated model configuration"); });
+    const { origin } = await startServer(fixture.environment, undefined, { loadProviderState });
+    const response = await fetch(`${origin}/api/v1/management/accounts/sources`);
+    expect(response.status).toBe(200);
+    const result = await response.json() as OfficialAccountSourcesResponse;
+    expect(result.accounts).toEqual([{ provider: "clp-test", accountId: "test", displayName: "Cline Pass test", default: true }]);
+    expect(result.warnings).toEqual([{ source: "deepseek", code: "registry_unavailable", message: "DeepSeek 账户元数据暂不可用" }]);
+    expect(loadProviderState).not.toHaveBeenCalled();
+  });
+
+  it("offers OpenAI refresh only for an authenticated official primary and isolates its invalid config", async () => {
+    const fixture = createFixture();
+    const { origin } = await startServer(fixture.environment);
+    const read = async (): Promise<OfficialAccountSourcesResponse> => (await fetch(`${origin}/api/v1/management/accounts/sources`)).json();
+    expect((await read()).accounts).toEqual([]);
+    writePrivateFileAtomicSync(join(fixture.home, "auth.json"), "{}");
+    writePrivateFileAtomicSync(join(fixture.home, "config.toml"), 'model_provider = "openai"\n');
+    expect((await read()).accounts.map(account => account.provider)).toEqual(["openai"]);
+    writePrivateFileAtomicSync(join(fixture.home, "config.toml"), 'model_provider = "ds-test"\n');
+    expect((await read()).accounts).toEqual([]);
+    writePrivateFileAtomicSync(clinePassAccountsFilePath(fixture.environment), JSON.stringify([{ id: "test", default: true }]));
+    writePrivateFileAtomicSync(join(fixture.home, "config.toml"), 'model_provider = "secret-unclosed');
+    const broken = await read();
+    expect(broken.accounts.map(account => account.provider)).toEqual(["clp-test"]);
+    expect(broken.warnings).toEqual([{ source: "openai", code: "registry_unavailable", message: "OpenAI 账户来源暂不可用" }]);
+    expect(JSON.stringify(broken)).not.toContain("secret-unclosed");
+  });
+  it("keeps account refresh traffic separate from settings write limits", async () => {
+    const fixture = createFixture();
+    new SqliteModelRequestMetricsStore(fixture.databasePath).close();
+    const managementOrigin = "http://127.0.0.1:0";
+    const { origin } = await startServer(fixture.environment, undefined, {
+      managementOrigin, refreshGatewayAccount: async () => undefined,
+    });
+    const headers = { origin: managementOrigin, "content-type": "application/json" };
+    for (let i = 0; i < 31; i += 1) {
+      const response = await fetch(`${origin}/api/v1/management/accounts/refresh`, {
+        method: "POST", headers, body: JSON.stringify({ provider: "clp-test" }),
+      });
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    }
+    const preview = await fetch(`${origin}/api/v1/management/provider-settings/preview`, {
+      method: "POST", headers, body: "{}",
+    });
+    // Invalid input still reaches validation, rather than exhausting the write quota.
+    expect(preview.status).toBe(400);
+  });
   it("keeps upstream authentication failure at HTTP 502 across real refresh IPC", async () => {
     const fixture = createFixture();
     const ipc = new GatewayAccountRefreshServer(join(fixture.home, "config.toml"), async () => {
@@ -95,35 +148,71 @@ describe("webui server Provider and account management", () => {
     new SqliteModelRequestMetricsStore(fixture.databasePath).close();
     const marker = clinePassAccountsFilePath(fixture.environment);
     writePrivateFileAtomicSync(marker, JSON.stringify([{id:"test",default:true}]));
+    const catalogPath = join(fixture.home, "providers", "clp", "models.json");
+    writePrivateFileAtomicSync(catalogPath, JSON.stringify({ models: [{
+      slug: "cline-pass/deepseek-v4.1-flash", display_name: "CLP", visibility: "list", supported_in_api: true,
+      context_window: 64000, max_context_window: 128000, input_modalities: ["text"],
+      default_reasoning_level: "high", supported_reasoning_levels: [{ effort: "high", description: "High" }],
+    }] }));
+    writePrivateFileAtomicSync(join(fixture.home, "providers", "clp", "accounts", "test", "managed.toml"),
+      'version = 1\nprovider = "clp-test"\nmode = "switching"\n');
+    writePrivateFileAtomicSync(join(fixture.home, "sf-clp-test.config.toml"), [
+      'model = "cline-pass/deepseek-v4.1-flash"', 'model_provider = "clp-test"', 'model_reasoning_effort = "high"',
+      `model_catalog_json = ${JSON.stringify(catalogPath)}`, '[model_providers.clp-test]', 'name = "clp-test"',
+      'base_url = "https://api.cline.bot/api/v1"', 'wire_api = "responses"', 'requires_openai_auth = false',
+      'supports_websockets = false', 'experimental_bearer_token = "sk_fixture-secret"', "",
+    ].join("\n"));
     let fail = false;
-    const service = new ProviderAccountService([{ provider: "clp-test", accountUsage: async () => {
+    let usedPercent = 12.5;
+    const upstream = vi.fn<typeof fetch>(async () => {
       if (fail) throw new Error("upstream unavailable");
-      return { kind: "quota-windows", provider: "clp-test", available: true,
-        windows: [{ windowId: "weekly", label: "7天", usedPercent: 12.5, resetsAt: 1790922837, status: null }] };
-    } }], { writeOfficialAccountSnapshot: snapshot => {
+      return Response.json({ success: true, data: { limits: ["five_hour", "weekly", "monthly"].map(type => ({
+        type, percentUsed: usedPercent, resetsAt: "2026-10-25T06:33:57Z",
+      })) } });
+    });
+    const service = new ProviderAccountService([createClinePassAccountAdapter({ provider: "clp-test",
+      environment: fixture.environment, fetchImpl: upstream })], { writeOfficialAccountSnapshot: snapshot => {
       const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
       try { store.upsertAccountSnapshot({ ...snapshot, sourceId: "clp-test:test", accountId: null,
         displayName: "CLP", enabled: true }); } finally { store.close(); }
     } });
     const managementOrigin = "http://127.0.0.1:0";
-    const { origin } = await startServer(fixture.environment, undefined, { managementOrigin,
-      refreshGatewayAccount: async (_path, provider) => service.refreshAccountSnapshot(provider) });
-    const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
-    const refresh = () => fetch(`${origin}/api/v1/management/accounts/refresh`, {
-      method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
-      body: JSON.stringify({ provider: "clp-test" }),
-    });
-    expect((await read()).snapshots).toContainEqual(expect.objectContaining({ provider: "clp-test", observedAtMs: 0 }));
-    expect((await refresh()).status).toBe(200);
-    const before = await read();
-    expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [{ usedPercent: 12.5 }] });
-    fail = true;
-    expect((await refresh()).status).toBe(503);
-    expect(await read()).toEqual(before);
-    unlinkSync(marker);
-    expect((await read()).snapshots).toEqual([]);
-    const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
-    try { expect(store.latestAccountSnapshots()).toHaveLength(1); } finally { store.close(); }
+    const failures: unknown[] = [];
+    const ipc = new GatewayAccountRefreshServer(join(fixture.home, "config.toml"),
+      async (provider, signal) => {
+        try { return await service.refreshAccountSnapshot(provider, signal); }
+        catch (error) { failures.push(error); throw error; }
+      });
+    await ipc.start();
+    try {
+      const { origin } = await startServer(fixture.environment, undefined, { managementOrigin });
+      const read = async (): Promise<OfficialAccountSnapshotsResponse> => (await fetch(`${origin}/api/v1/accounts`)).json();
+      const refresh = () => fetch(`${origin}/api/v1/management/accounts/refresh`, {
+        method: "POST", headers: { origin: managementOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ provider: "clp-test" }),
+      });
+      expect((await read()).snapshots).toContainEqual(expect.objectContaining({ provider: "clp-test", observedAtMs: 0 }));
+      expect(upstream).not.toHaveBeenCalled();
+      const firstRefresh = await refresh();
+      expect(failures).toEqual([]);
+      expect(firstRefresh.status).toBe(200);
+      expect(upstream).toHaveBeenCalledWith("https://api.cline.bot/api/v1/users/me/plan/usage-limits", expect.objectContaining({ method: "GET" }));
+      usedPercent = 35;
+      // No CLI, model request, or warmup: another WebUI refresh must query upstream again.
+      expect((await refresh()).status).toBe(200);
+      expect(upstream).toHaveBeenCalledTimes(2);
+      const before = await read();
+      expect(before.snapshots[0]?.usage).toMatchObject({ kind: "quota-windows", windows: [
+        { usedPercent: 35 }, { usedPercent: 35 }, { usedPercent: 35 },
+      ] });
+      fail = true;
+      expect((await refresh()).status).toBe(502);
+      expect(await read()).toEqual(before);
+      unlinkSync(marker);
+      expect((await read()).snapshots).toEqual([]);
+      const store = new SqliteModelRequestMetricsStore(fixture.databasePath);
+      try { expect(store.latestAccountSnapshots()).toHaveLength(1); } finally { store.close(); }
+    } finally { await ipc.close(); }
   });
   it("isolates same-name accounts through CCG refresh, persistence, failure, recovery and OCG removal", async () => {
     const fixture = createFixture();

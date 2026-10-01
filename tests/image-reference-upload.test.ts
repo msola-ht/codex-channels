@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CodexAppServerClient } from "../src/codex-client/client.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
+import { surfaceErrorMetadata } from "../src/surfaces/error-metadata.js";
 import { FakeTransport } from "./support/json-rpc-fixtures.js";
 
 const route = { chatgptAccountId: "fixture-account", backendOrigin: "https://chatgpt.com", accountRoutingOverride: "NO_CONSTRAINT" };
@@ -22,10 +23,13 @@ class ImageTransport extends FakeTransport {
       authMethod: "chatgpt", authToken: this.token, requiresOpenaiAuth: true,
     } }));
   }
+  rejectRequest(id: number): void {
+    this.emitMessage(JSON.stringify({ id, error: { code: -32600, message: "fixture submission rejection" } }));
+  }
   accountChanged(): void { this.emitMessage(JSON.stringify({ method: "account/updated", params: {} })); }
 }
 const clients: CodexAppServerClient[] = [];
-afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.close())); });
+afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.close())); vi.restoreAllMocks(); });
 async function fixture() {
   const transport = new ImageTransport();
   transport.accountResult = { account: { type: "chatgpt", email: null, planType: "pro" }, requiresOpenaiAuth: true, workspaceRouting: { ...route } };
@@ -102,7 +106,10 @@ describe("official image reference upload", () => {
       ready();
     }));
     const result = client.startTurn("thread-1", input, "message", "/tmp");
-    const rejected = expect(result).rejects.toMatchObject({ code: "image.reference.failed" });
+    const rejected = expect(result).rejects.toMatchObject({ code: "image.reference.failed",
+      details: { reason: kind === "stop" ? "cancelled" : kind === "close" ? "disconnected" : "validation",
+        stage: kind.startsWith("account-") ? "account-recheck" : "file-create" },
+    });
     await started;
     if (kind === "stop") expect(client.cancelPendingInput("thread-1")).toBe(true);
     else if (kind === "close") await client.close();
@@ -216,4 +223,156 @@ describe("official image reference upload", () => {
     await client.startTurn("thread-1", input, "message", "/tmp");
     expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
+});
+
+
+describe("image failure diagnostics", () => {
+  it.each(["model-route", "file-create", "file-transfer", "file-finalize"])("retains %s network failures without secrets or retries", async stage => {
+    const { client, transport, fetchImpl, localFetch } = await fixture();
+    const failure = new TypeError("https://blob.example.test/?signature=secret", {
+      cause: Object.assign(new Error("Bearer fixture-access-token"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
+    });
+    const original = fetchImpl.getMockImplementation()!;
+    fetchImpl.mockImplementation(async (url, init) => {
+      const current = init?.method === "PUT" ? "file-transfer" : String(url).endsWith("/uploaded") ? "file-finalize" : "file-create";
+      if (current === stage) throw failure;
+      return original(url, init);
+    });
+    if (stage === "model-route") localFetch.mockRejectedValueOnce(failure);
+    const error = await client.startTurn("thread-1", input, "message", "/tmp").catch((value: unknown) => value);
+    expect(error).toMatchObject({ code: "image.reference.failed", details: {
+      stage, reason: "network-timeout", networkCode: "UND_ERR_CONNECT_TIMEOUT",
+      elapsedMs: expect.stringMatching(/^\d+$/), stageElapsedMs: expect.stringMatching(/^\d+$/),
+      diagnosticId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    } });
+    expect(surfaceErrorMetadata(error)).toMatchObject({ imageUploadStage: stage, imageUploadNetworkCode: "UND_ERR_CONNECT_TIMEOUT" });
+    expect((error as Error).cause).toBeUndefined();
+    expect(JSON.stringify(error)).not.toMatch(/secret|fixture-access-token/);
+    expect(fetchImpl).toHaveBeenCalledTimes(["model-route", "file-create", "file-transfer", "file-finalize"].indexOf(stage));
+    expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
+  });
+
+  it.each([401, 403, 429, 503])("retains HTTP %s without response bodies", async status => {
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockResolvedValueOnce(new Response("Bearer secret", { status }));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      message: expect.stringContaining(`HTTP ${status}`),
+      details: { stage: "file-create", reason: "http", httpStatus: String(status) },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["model-route", "file-transfer"])("does not blame Codex credentials for %s HTTP 401", async stage => {
+    const { client, localFetch, fetchImpl } = await fixture();
+    if (stage === "model-route") localFetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
+    else fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    const error = await client.startTurn("thread-1", input, "message", "/tmp").catch((value: unknown) => value);
+    expect(error).toMatchObject({ details: { stage, httpStatus: "401" } });
+    expect((error as Error).message).not.toContain("登录");
+  });
+
+  it("classifies invalid JSON and never preserves its contents", async () => {
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockResolvedValueOnce(new Response("secret invalid JSON"));
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      details: { stage: "file-create", reason: "invalid-response" },
+      message: "创建图片文件失败：服务响应格式异常。",
+    });
+  });
+
+  it("distinguishes the overall deadline from explicit cancellation", async () => {
+    const deadline = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const { client, fetchImpl } = await fixture();
+    fetchImpl.mockImplementationOnce(async () => {
+      deadline.abort(new DOMException("secret", "TimeoutError"));
+      throw new Error("secret");
+    });
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+      message: "图片上传已超时，请稍后重新发送。", details: { reason: "timeout" },
+    });
+  });
+
+  it("does not replace submission errors or submit again after dispatch", async () => {
+    const { client, transport } = await fixture();
+    const send = transport.send.bind(transport);
+    vi.spyOn(transport, "send").mockImplementation(async message => {
+      const request = JSON.parse(message) as { id: number; method: string };
+      if (request.method !== "turn/start") return send(message);
+      transport.sent.push(JSON.parse(message) as Record<string, unknown>);
+      transport.rejectRequest(request.id);
+    });
+    await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({ code: -32600 });
+    expect(transport.sent.filter(request => request.method === "turn/start")).toHaveLength(1);
+  });
+});
+
+
+it.each(["ECONNRESET", "ENOTFOUND", "UNTRUSTED_SECRET_CODE"])("bounds network diagnostics for %s", async code => {
+  const { client, fetchImpl } = await fixture();
+  const cause = Object.assign(new Error("secret"), { code });
+  cause.cause = cause;
+  fetchImpl.mockRejectedValueOnce(new TypeError("secret", { cause }));
+  const error = await client.startTurn("thread-1", input, "message", "/tmp").catch((value: unknown) => value);
+  const known = code !== "UNTRUSTED_SECRET_CODE";
+  expect(error).toMatchObject({ details: { stage: "file-create", reason: known ? "network" : "unknown" } });
+  expect(surfaceErrorMetadata(error).imageUploadNetworkCode).toBe(known ? code : undefined);
+  expect(JSON.stringify(error)).not.toContain("SECRET");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+it("retains HTTP rejection when discarding the response stream also fails", async () => {
+  const { client, fetchImpl } = await fixture();
+  const body = new ReadableStream<Uint8Array>({ cancel() { throw new Error("secret cleanup failure"); } });
+  fetchImpl.mockResolvedValueOnce(new Response(body, { status: 403 }));
+  await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+    details: { stage: "file-create", reason: "http", httpStatus: "403" },
+  });
+});
+
+
+it.each([
+  { label: "array", response: [] },
+  { label: "null", response: null },
+  { label: "primitive", response: "secret" },
+  { label: "missing fields", response: {} },
+  { label: "invalid file ID", response: { file_id: "secret invalid", upload_url: "https://blob.example.test/image" } },
+  { label: "invalid URL", response: { file_id: "file_fixture", upload_url: "secret-invalid-url" } },
+  { label: "unsafe scheme", response: { file_id: "file_fixture", upload_url: "http://blob.example.test/secret" } },
+  { label: "URL credentials", response: { file_id: "file_fixture", upload_url: "https://secret@blob.example.test/image" } },
+  { label: "URL fragment", response: { file_id: "file_fixture", upload_url: "https://blob.example.test/image#secret" } },
+])("classifies malformed creation response: $label", async ({ response }) => {
+  const { client, transport, fetchImpl } = await fixture();
+  fetchImpl.mockResolvedValueOnce(Response.json(response));
+  const error = await client.startTurn("thread-1", input, "message", "/tmp").catch((value: unknown) => value);
+  expect(error).toMatchObject({ code: "image.reference.failed", details: { stage: "file-create", reason: "invalid-response" } });
+  expect(surfaceErrorMetadata(error)).toMatchObject({ imageUploadStage: "file-create", imageUploadReason: "invalid-response" });
+  expect((error as Error).cause).toBeUndefined();
+  expect(JSON.stringify(error)).not.toContain("secret");
+  expect(JSON.stringify(surfaceErrorMetadata(error))).not.toContain("secret");
+  expect(fetchImpl).toHaveBeenCalledTimes(1);
+  expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
+});
+
+it.each([{}, { status: "success" }, { status: "secret" }])("classifies malformed finalization response: %j", async response => {
+  const { client, transport, fetchImpl } = await fixture();
+  fetchImpl.mockResolvedValueOnce(Response.json({ file_id: "file_fixture", upload_url: "https://blob.example.test/image" }))
+    .mockResolvedValueOnce(new Response(null, { status: 201 }))
+    .mockResolvedValueOnce(Response.json(response));
+  const error = await client.startTurn("thread-1", input, "message", "/tmp").catch((value: unknown) => value);
+  expect(error).toMatchObject({ details: { stage: "file-finalize", reason: "invalid-response" } });
+  expect(JSON.stringify(error)).not.toContain("secret");
+  expect(fetchImpl).toHaveBeenCalledTimes(3);
+  expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
+});
+
+it("classifies malformed local route attestations before uploading", async () => {
+  const { client, transport, localFetch, fetchImpl } = await fixture();
+  localFetch.mockResolvedValueOnce(Response.json({ supported: "secret" }));
+  await expect(client.startTurn("thread-1", input, "message", "/tmp")).rejects.toMatchObject({
+    details: { stage: "model-route", reason: "invalid-response" },
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(transport.sent.some(request => request.method === "turn/start")).toBe(false);
 });

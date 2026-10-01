@@ -12,6 +12,7 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { formatConversationResetCredits } from "../conversation-model-account-command-format.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import {
   formatDelayMinutes,
@@ -213,6 +214,10 @@ export class FeishuConversationAdapter {
           command.argumentsText,
           message.actorId,
         );
+        if ((result.kind === "reset-credit" || result.kind === "limits") && this.commandCenter) {
+          const response = renderCommandCenterChoices("limits", result);
+          if (response) { await this.commandCenter.openResponse(message.target, message.actorId, response); return; }
+        }
         if (result.kind === "scheduled-confirmation" && this.commandCenter) {
           const response = renderCommandCenterChoices("schedule", result);
           if (response) {
@@ -462,6 +467,7 @@ export class FeishuConversationAdapter {
           || action === "archived"
           || (action === "plugin" && result.kind === "plugins")
           || action === "schedule"
+          || (action === "limits" && result.kind === "reset-credit")
         )
           ? renderCommandCenterChoices(action, result)
           : undefined
@@ -1311,6 +1317,29 @@ function renderCommandCenterChoices(
   action: FeishuCommandCenterAction,
   result: ConversationCommandResult,
 ): FeishuCommandCenterChoices | undefined {
+  if (action === "limits" && result.kind === "limits" && result.result.kind === "rate-limits") {
+    return { title: "OpenAI 额度", description: renderFeishuCommandResult(result) ?? "", descriptionFormat: "markdown",
+      choices: [{ label: "查看重置券", action: "limits", input: "reset" }] };
+  }
+  if (action === "limits" && result.kind === "reset-credit") {
+    const value = result.result;
+    if (value.type === "preview") return {
+      title: "确认使用重置券", description: formatConversationResetCredits(result, "buttons"), descriptionFormat: "markdown",
+      choices: (["confirm", "cancel"] as const).map(operation => ({
+        label: operation === "confirm" ? "确认使用" : "取消", action: "limits", input: `reset ${operation} ${value.token}`,
+        acceptedState: { title: "重置券请求已提交", description: "原按钮已失效，执行结果见后续消息。", template: "grey" },
+      })),
+    };
+    if (value.type === "list") return {
+      title: "选择重置券", description: formatConversationResetCredits(result, "buttons"), descriptionFormat: "markdown",
+      choices: [
+        ...value.credits.map((credit, index) => ({ label: `${index + 1}. ${credit.title ?? "用量重置券"}`.slice(0, 80), action: "limits" as const, input: `reset use ${credit.id}` })),
+        ...(value.page > 1 ? [{ label: "上一页", action: "limits" as const, input: `reset ${value.page - 1}` }] : []),
+        ...(value.page < value.pageCount ? [{ label: "下一页", action: "limits" as const, input: `reset ${value.page + 1}` }] : []),
+        { label: "刷新", action: "limits", input: `reset ${value.page}` },
+      ],
+    };
+  }
   if (action === "schedule" && result.kind === "scheduled-tasks") {
     return {
       title: `Gateway 计划任务 · 第 ${result.result.page}/${result.result.pageCount} 页`,

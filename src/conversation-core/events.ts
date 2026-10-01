@@ -87,7 +87,14 @@ export interface CompactRequestMetricsSummary {
   outputTokens: number;
 }
 
+export interface ResponseUsageSummary {
+  amount: string | null;
+  observedRequestCount: number;
+  missingRequestCount: number;
+}
+
 export interface TurnOutputTiming {
+  responseUsage?: ResponseUsageSummary;
   /** 本轮首个有效 OpenAI 上游 TTFT 样本，不累计。 */
   upstreamTtftMs?: number;
   modelRequestCount?: number;
@@ -106,6 +113,7 @@ export interface TurnOutputTiming {
 }
 
 export interface TurnTaskMetricsSummary {
+  responseUsage?: ResponseUsageSummary | null;
   requestCount: number;
   unsuccessfulRequestCount: number;
   inputTokens: number;

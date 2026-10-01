@@ -228,6 +228,7 @@ export interface RequestRecord {
   firstTokenMs: number | null
   requestModel: string | null
   responseModel: string | null
+  responseUsageAmount?: string | null
   upstreamTtftMs: number | null
   id: number
   provider: string | null
@@ -832,6 +833,15 @@ export interface CcgCreditUsageResponse {
   accounts: CcgCreditAccountUsage[]
 }
 
+export interface OpenAiAccountCredits {
+  observedAtMs: number
+  remaining: string | null
+  unlimited: boolean
+  resetCreditsAvailable: string | null
+  expirations: Array<{ expiresAt: number | null; count: number }> | null
+  undisclosedCount: string | null
+}
+
 export interface OfficialAccountSnapshot {
   provider: string
   accountId: string | null
@@ -847,10 +857,15 @@ export interface OfficialAccountSnapshotsResponse {
   observedAtMs: number
   snapshots: OfficialAccountSnapshot[]
   warnings: Array<{
-    source: "deepseek" | "opencode-go" | "ccg" | "clp"
+    source: "openai" | "deepseek" | "opencode-go" | "ccg" | "clp"
     code: "registry_unavailable"
     message: string
   }>
+}
+
+export interface OfficialAccountSourcesResponse {
+  accounts: Array<Pick<OfficialAccountSnapshot, "provider" | "accountId" | "displayName" | "default">>
+  warnings: OfficialAccountSnapshotsResponse["warnings"]
 }
 
 export interface TrafficLabel {
@@ -1038,6 +1053,9 @@ export interface RelayManagedCaller {
 }
 export interface RelayManagementSnapshot {
   revision: string; enabled: boolean; maxConcurrency: number; callers: RelayManagedCaller[];
+  usage: { observedAtMs: number; startAtMs: number; callers: Array<{
+    callerId: string; keyId: string; lastRequestAtMs: number | null; requestCount: number; unsuccessfulRequestCount: number;
+  }> } | null;
   runtime?: { state: "running"; listening: boolean; configurationValid: boolean; active: number; waiting: number; uploading: number;
     oldestWaitMs: number; queueTimeouts: number;
     capture: { enabled: boolean; state: "initializing" | "ready" | "failed" | "closed"; active: number; skippedCapacity: number };
@@ -1106,3 +1124,26 @@ export interface DeliveryContent { type: string; text: string | null; truncated:
 
 export interface DeliveryContentsResponse { records: Array<DeliveryRetryInput & { content: DeliveryContent | null }> }
 export interface QueueChangeEvent { type: "changed" | "heartbeat" | "unavailable" }
+
+export interface ResetCreditChoice {
+  id: string
+  title: string | null
+  description: string | null
+  expiresAt: number | null
+}
+export interface ResetCreditSnapshot {
+  accountId: string
+  availableCount: string
+  credits: ResetCreditChoice[]
+}
+export interface ResetCreditPreview {
+  attemptId: string
+  accountId: string
+  credit: ResetCreditChoice
+  expiresAt: number
+}
+export interface ResetCreditResult {
+  outcome: "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed"
+  refreshed: boolean
+  auditRecorded: boolean
+}

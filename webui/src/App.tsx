@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect, useState } from "react"
 import { HashRouter, Link, Route, Routes, useLocation } from "react-router"
 
 import { AuthGate } from "@/components/layout/auth-gate"
-import { AppSidebar } from "@/components/layout/app-sidebar"
+import { AppSidebar, AppSidebarProvider } from "@/components/layout/app-sidebar"
 import { ModeToggle } from "@/components/layout/mode-toggle"
 import { LanguageToggle } from "@/components/metrics/language-toggle"
 import { ErrorBanner } from "@/components/metrics/error-banner"
@@ -18,7 +18,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LanguageProvider } from "@/hooks/language-provider"
 import { useTranslation } from "@/hooks/use-translation"
@@ -28,6 +28,7 @@ import { observeServerClock, type ServerClockSnapshot } from "@/lib/server-time"
 import { formatClockTime, formatTimeZoneLabel } from "@/lib/format"
 import type { MetricsRangeQuery } from "@/lib/types"
 
+const RelayQueuePage = lazy(() => import("@/pages/relay-queue-page").then(module => ({ default: module.RelayQueuePage })))
 const RelayPage = lazy(() => import("@/pages/relay-page").then(module => ({ default: module.RelayPage })))
 const DeliveryPage = lazy(() => import("@/pages/delivery-page").then(module => ({ default: module.DeliveryPage })))
 
@@ -132,7 +133,7 @@ function Layout() {
 
   return (
     <ServerTimeContext.Provider value={time.data}>
-      <SidebarProvider className="min-h-0 min-w-0">
+      <AppSidebarProvider>
         <AppSidebar />
         <SidebarInset className="min-w-0">
           <header className="flex h-16 shrink-0 items-center gap-2 border-b px-3">
@@ -169,6 +170,7 @@ function Layout() {
                 <Route path="/traffic" element={<TrafficPage />} />
                 <Route path="/errors" element={<ErrorsPage />} />
                 <Route path="/relay" element={<RelayPage />} />
+                <Route path="/relay/queue" element={<RelayQueuePage />} />
                 <Route path="/delivery" element={<DeliveryPage />} />
                 <Route path="/models/providers" element={<ProvidersPage />} />
                 <Route path="/models/accounts" element={<ModelAccountsPage />} />
@@ -185,7 +187,7 @@ function Layout() {
             </Suspense>
           </div>
         </SidebarInset>
-      </SidebarProvider>
+      </AppSidebarProvider>
     </ServerTimeContext.Provider>
   )
 }

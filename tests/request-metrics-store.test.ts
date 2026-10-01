@@ -26,6 +26,19 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists exact response amounts and distinguishes missing usage from zero in request queries", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    try {
+      for (const responseUsageAmount of [undefined, null, "0", "0.12345678901234567890"]) {
+        store.record({ ...sample(), ...(responseUsageAmount === undefined ? {} : { responseUsageAmount }) });
+      }
+      const values = store.requestRowsAfter(0, 10).map(row => row.responseUsageAmount);
+      expect(values).toEqual([null, null, "0", "0.12345678901234567890"]);
+      expect(store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, limit: 10 }).records.map(row => row.responseUsageAmount)).toEqual([...values].reverse());
+      expect(() => store.record({ ...sample(), responseUsageAmount: "secret" })).toThrow("用量");
+      expect(store.count()).toBe(4);
+    } finally { store.close(); }
+  });
   it("keeps quota queries in the caller's read snapshot and rejects them after close", () => {
     const now = Date.now();
     const path = join(temporaryDirectory(), "metrics.sqlite3");

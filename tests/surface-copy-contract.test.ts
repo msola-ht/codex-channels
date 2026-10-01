@@ -1,3 +1,4 @@
+import { formatOperationFailure } from "../src/surfaces/output-copy.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -833,4 +834,9 @@ describe("shared surface copy contract", () => {
       formatRuntimeMcpStatusUpdate(mcp),
     );
   });
+});
+
+
+it.each(["失败", "失败。", "失败。。"])("normalizes operation failure punctuation: %s", detail => {
+  expect(formatOperationFailure(detail)).toBe("操作失败：失败。");
 });

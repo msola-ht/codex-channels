@@ -24,6 +24,10 @@ describe("direct Chat request boundary", () => {
     result.messages[0]!.content = "changed";
     expect(textRequest.messages[0]!.content).toBe("hello");
   });
+  it("preserves histories beyond 256 messages", () => {
+    const value = { ...textRequest, messages: Array.from({ length: 300 }, () => textRequest.messages[0]) };
+    expect(validateDirectChatRequest(value)).toEqual({ ...value, stream: false });
+  });
   it.each([
     [null, "body"], [[], "body"],
     [{ ...textRequest, model: "" }, "model"],
@@ -32,7 +36,6 @@ describe("direct Chat request boundary", () => {
     [{ ...textRequest, n: 2 }, "n"],
     [{ ...textRequest, messages: [] }, "messages"],
     [{ ...textRequest, messages: [null] }, "messages[0]"],
-    [{ ...textRequest, messages: Array.from({ length: 257 }, () => textRequest.messages[0]) }, "messages"],
   ])("rejects local routing/delivery boundary violations with safe paths", (value, param) => {
     try { validateDirectChatRequest(value); expect.fail("must reject"); }
     catch (error) { expect(error).toBeInstanceOf(DirectChatRequestError); expect(error).toMatchObject({ param }); expect(String(error)).not.toContain("PRIVATE"); }

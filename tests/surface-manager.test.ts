@@ -1301,6 +1301,7 @@ describe("SurfaceManager", () => {
         await timingGate;
         order.push("timing-finished");
         return {
+          responseUsage: { amount: "0.3", observedRequestCount: 2, missingRequestCount: 0 },
           modelRequestCount: 2,
           requestInputTokens: 1_000,
           requestOutputTokens: 100,
@@ -1309,6 +1310,7 @@ describe("SurfaceManager", () => {
       sessionAggregate: (threadId) => {
         order.push(`session-${threadId}`);
         return {
+          responseUsage: { amount: "1.2", observedRequestCount: 4, missingRequestCount: 1 },
           requestCount: 2,
           unsuccessfulRequestCount: 0,
           inputTokens: 1_000,
@@ -1346,11 +1348,13 @@ describe("SurfaceManager", () => {
       expect.objectContaining({
         type: "turn.completed",
         timing: expect.objectContaining({
+          responseUsage: { amount: "0.3", observedRequestCount: 2, missingRequestCount: 0 },
           modelRequestCount: 2,
           requestInputTokens: 1_000,
           requestOutputTokens: 100,
         }),
         sessionAggregate: expect.objectContaining({
+          responseUsage: { amount: "1.2", observedRequestCount: 4, missingRequestCount: 1 },
           requestCount: 2,
           inputTokens: 1_000,
           cachedInputTokens: 800,

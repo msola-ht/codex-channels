@@ -53,6 +53,8 @@ type ProviderClientMethod =
   | "readMcpResource"
   | "listPlugins"
   | "resolvePlugin"
+  | "readResetCredits"
+  | "consumeResetCredit"
   | "accountUsage"
   | "openAiAccountRoute"
   | "accountThreadUsage"
@@ -675,6 +677,13 @@ export class ProviderRoutingClient {
     ...args: Parameters<ProviderClientInstance["resolvePlugin"]>
   ): ReturnType<ProviderClientInstance["resolvePlugin"]> {
     return this.withPrimaryActivity((client) => client.resolvePlugin(...args));
+  }
+
+  readResetCredits(...args: Parameters<ProviderClientInstance["readResetCredits"]>): ReturnType<ProviderClientInstance["readResetCredits"]> {
+    return this.withPrimaryActivity(client => client.readResetCredits(...args));
+  }
+  consumeResetCredit(...args: Parameters<ProviderClientInstance["consumeResetCredit"]>): ReturnType<ProviderClientInstance["consumeResetCredit"]> {
+    return this.withPrimaryActivity(client => client.consumeResetCredit(...args));
   }
 
   accountUsage(

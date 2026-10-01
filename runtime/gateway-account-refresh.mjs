@@ -5,8 +5,9 @@ import {
   PrivateIpcServer,
 } from "./private-ipc.mjs";
 
-const protocolVersion = 1;
+const protocolVersion = 2;
 const maximumMessageBytes = 4_096;
+const maximumResponseBytes = 524_288;
 const requestTimeoutMs = 20_000;
 const providerPattern = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
 
@@ -23,6 +24,9 @@ export class GatewayAccountRefreshError extends Error {
 /** 未知内部异常一律折叠为固定文案，避免上游报文或凭据随 IPC 离开网关进程。 */
 function refreshFailure(error) {
   if (error instanceof GatewayAccountRefreshError) {
+    if (["reset_stale", "reset_busy", "reset_unavailable", "reset_unknown"].includes(error.code)) {
+      return { code: error.code, message: "重置券操作未完成，请刷新核对状态" };
+    }
     if (error.code === "invalid_request") {
       return { code: "invalid_request", message: error.message };
     }
@@ -51,13 +55,13 @@ export class GatewayAccountRefreshServer {
   #sockets = new Set();
   #controllers = new Set();
 
-  constructor(configPath, refreshAccount) {
+  constructor(configPath, refreshAccount, resetCredits) {
     if (typeof refreshAccount !== "function") {
       throw new Error("Gateway 账户刷新处理器无效");
     }
     this.#server = new PrivateIpcServer(
       gatewayAccountRefreshSocketPath(configPath),
-      (socket) => this.#handleConnection(socket, refreshAccount),
+      (socket) => this.#handleConnection(socket, refreshAccount, resetCredits),
     );
   }
 
@@ -70,7 +74,7 @@ export class GatewayAccountRefreshServer {
     return this.#closePromise;
   }
 
-  #handleConnection(socket, refreshAccount) {
+  #handleConnection(socket, refreshAccount, resetCredits) {
     if (this.#closing) {
       socket.destroy();
       return;
@@ -84,7 +88,14 @@ export class GatewayAccountRefreshServer {
     socket.setTimeout(requestTimeoutMs, () => socket.destroy(new Error("账户刷新请求超时")));
     const operation = readJsonLine(socket)
       .then(parseRefreshRequest)
-      .then(async ({ provider }) => {
+      .then(async (request) => {
+        if (request.method !== "account/refresh") {
+          if (!resetCredits) throw new GatewayAccountRefreshError("provider_not_found", "重置券操作不可用");
+          const result = await cancellableRefresh(() => resetCredits(request, controller.signal), controller.signal);
+          writeJsonLine(socket, { version: protocolVersion, ok: true, result });
+          return;
+        }
+        const { provider } = request;
         const supported = await cancellableRefresh(() => refreshAccount(provider, controller.signal), controller.signal);
         if (!supported) {
           writeJsonLine(socket, {
@@ -129,6 +140,17 @@ export function requestGatewayAccountRefresh(configPath, provider, signal) {
       "账户刷新 Provider 无效",
     ));
   }
+  return requestGatewayAccountOperation(configPath, { method: "account/refresh", provider }, signal);
+}
+
+export function requestGatewayResetCredits(configPath, request, signal) {
+  if (!["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(request?.method)) return Promise.reject(new GatewayAccountRefreshError("invalid_request", "重置券请求无效"));
+  return requestGatewayAccountOperation(configPath, request, signal);
+}
+
+function requestGatewayAccountOperation(configPath, request, signal) {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  try { parseRefreshRequest({ ...request, version: protocolVersion }); } catch (error) { return Promise.reject(error); }
   return new Promise((resolve, reject) => {
     let socket;
     try {
@@ -163,13 +185,12 @@ export function requestGatewayAccountRefresh(configPath, provider, signal) {
     socket.once("connect", () => {
       socket.write(`${JSON.stringify({
         version: protocolVersion,
-        method: "account/refresh",
-        provider,
+        ...request,
       })}\n`);
     });
     socket.on("data", (chunk) => {
       bytes += chunk.length;
-      if (bytes > maximumMessageBytes) {
+      if (bytes > maximumResponseBytes) {
         finish(new GatewayAccountRefreshError(
           "invalid_response",
           "Gateway 账户刷新响应过大",
@@ -190,7 +211,7 @@ export function requestGatewayAccountRefresh(configPath, provider, signal) {
         finish(new GatewayAccountRefreshError(response.error.code, response.error.message));
         return;
       }
-      finish(undefined, { provider: response.provider });
+      finish(undefined, request.method === "account/refresh" ? { provider: response.provider } : response.result);
     });
     socket.once("error", (error) => finish(new GatewayAccountRefreshError(
       "gateway_unavailable",
@@ -256,6 +277,14 @@ function readJsonLine(socket) {
 }
 
 function parseRefreshRequest(value) {
+  if (value?.version === protocolVersion && ["reset/list", "reset/preview", "reset/consume", "reset/cancel"].includes(value.method)) {
+    const field = value.method === "reset/preview" ? "creditId" : ["reset/consume", "reset/cancel"].includes(value.method) ? "attemptId" : null;
+    if (Object.keys(value).some(key => !["version", "method", field].includes(key))
+      || (field !== null && (typeof value[field] !== "string" || !value[field] || value[field].length > 256 || /[\0\r\n]/u.test(value[field])))) {
+      throw new GatewayAccountRefreshError("invalid_request", "重置券请求无效");
+    }
+    return value;
+  }
   if (
     value === null
     || typeof value !== "object"
@@ -268,7 +297,7 @@ function parseRefreshRequest(value) {
   ) {
     throw new GatewayAccountRefreshError("invalid_request", "账户刷新请求格式无效");
   }
-  return { provider: value.provider };
+  return { method: value.method, provider: value.provider };
 }
 
 function parseRefreshResponse(content) {
@@ -287,6 +316,7 @@ function parseRefreshResponse(content) {
   ) {
     throw new GatewayAccountRefreshError("invalid_response", "Gateway 账户刷新响应无效");
   }
+  if (value.ok && Object.hasOwn(value, "result")) return { ok: true, result: value.result };
   if (value.ok) {
     if (typeof value.provider !== "string" || !providerPattern.test(value.provider)) {
       throw new GatewayAccountRefreshError("invalid_response", "Gateway 账户刷新响应无效");

@@ -27,6 +27,7 @@ import { translateApiError, translateApiErrorCode } from "@/lib/i18n/translate"
 import type { Translate } from "@/lib/i18n/messages"
 import { cn } from "@/lib/utils"
 import type {
+  OpenAiAccountCredits,
   CcgCreditUsageResponse,
   QuotaAccountUsage,
   DeepseekBalanceResponse,
@@ -76,7 +77,9 @@ export function ConsolePage({ range, onRangeChange }: {
       <AccountStatusCards
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
-        weeklyQuota={dashboard.weeklyQuota}
+        weeklyQuota={officialAccounts.data?.openaiWeeklyQuota ?? null}
+        openai={officialAccounts.data?.openai ?? null}
+        onCreditsChanged={officialAccounts.refetchSnapshots}
         accountDataLoaded={officialAccounts.data !== null}
         accountLoading={officialAccounts.loading}
         deepseek={officialAccounts.data?.deepseek ?? null}
@@ -97,8 +100,6 @@ export function ConsolePage({ range, onRangeChange }: {
 function accountRefreshFailureText(t: Translate, failure: AccountRefreshFailure | null): string | null {
   if (failure === null) return null
   switch (failure.kind) {
-    case "sourceMissing":
-      return t("console.accountSourceMissing")
     case "syncFailed":
       return t("console.accountSyncFailed", { message: translateApiErrorCode(t, failure.code) })
     case "listFailed":
@@ -167,6 +168,8 @@ function AccountStatusCards({
   onAccountRemoved,
   removalNotice,
   weeklyQuota,
+  openai,
+  onCreditsChanged,
   accountDataLoaded,
   accountLoading,
   deepseek,
@@ -181,7 +184,9 @@ function AccountStatusCards({
 }: {
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: AccountRemovalNotice | null
-  weeklyQuota: OverviewResponse["weeklyQuota"]
+  onCreditsChanged: () => void
+  openai: OpenAiAccountCredits | null
+  weeklyQuota: { usedPercent: number | null; resetsAt: number | null; planType: string | null } | null
   accountDataLoaded: boolean
   accountLoading: boolean
   deepseek: DeepseekBalanceResponse | null
@@ -218,6 +223,9 @@ function AccountStatusCards({
       </AlertDescription></Alert> : null}
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
+          refreshControl={refreshControls.openai}
+          credits={openai}
+          onCreditsChanged={onCreditsChanged}
           usedPercent={weeklyQuota?.usedPercent ?? null}
           resetsAt={weeklyQuota?.resetsAt ?? null}
           planType={weeklyQuota?.planType ?? null}

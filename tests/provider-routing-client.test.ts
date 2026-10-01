@@ -1252,6 +1252,8 @@ function client() {
     reloadMcpServers: vi.fn(),
     listPlugins: vi.fn(),
     resolvePlugin: vi.fn(),
+    readResetCredits: vi.fn(async () => ({ accountId: "fixture", availableCount: "0", credits: [] })),
+    consumeResetCredit: vi.fn(async () => "noCredit" as const),
     accountUsage: vi.fn(),
     openAiAccountRoute: vi.fn(),
     accountThreadUsage: vi.fn(),

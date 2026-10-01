@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
-import { ChevronRight } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { ChevronRight, Gauge } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { NavLink, useLocation } from "react-router"
+import { Link, NavLink, useLocation } from "react-router"
 
 import {
   Sidebar,
@@ -10,19 +10,28 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarFooter,
+  SidebarProvider,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuAction,
   SidebarRail,
   SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
-import { SidebarFooterNav } from "@/components/layout/sidebar-footer"
-import { SidebarSwitcher } from "@/components/layout/sidebar-switcher"
 import { navigation, type NavGroup } from "@/lib/navigation"
 import { useSidebar } from "@/components/ui/sidebar-context"
 import { useTranslation } from "@/hooks/use-translation"
+
+export function AppSidebarProvider({ children }: { children: ReactNode }) {
+  const [defaultOpen] = useState(() => {
+    try {
+      return document.cookie.split(";").map(cookie => cookie.trim())
+        .find(cookie => cookie.startsWith("sidebar_state=")) !== "sidebar_state=false"
+    } catch {
+      return true
+    }
+  })
+  return <SidebarProvider defaultOpen={defaultOpen} className="min-h-0 min-w-0">{children}</SidebarProvider>
+}
 
 export function AppSidebar() {
   const { pathname } = useLocation()
@@ -31,14 +40,23 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" mobileTitle={t("common.sidebar")} mobileDescription={t("common.sidebarDescription")}>
       <SidebarHeader>
-        <SidebarSwitcher />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip="Codex WebUI">
+              <Link to="/" onClick={() => setOpenMobile(false)}>
+                <Gauge />
+                <span>Codex WebUI</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>{t("shell.navigation")}</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
-              {navigation.map((item) => "children" in item ? <NavigationGroup key={item.to} item={item} /> : (
+            <SidebarMenu>
+              {navigation.map((item) => "children" in item ? <NavigationGroup key={item.id} item={item} /> : (
                 <SidebarMenuItem key={item.to}>
                   <SidebarMenuButton
                     asChild
@@ -60,9 +78,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarFooterNav />
-      </SidebarFooter>
       <SidebarRail aria-label={t("common.toggleSidebar")} title={t("common.toggleSidebar")} />
     </Sidebar>
   )
@@ -73,22 +88,23 @@ function NavigationGroup({ item }: { item: NavGroup }) {
   const { state, setOpen, isMobile, setOpenMobile } = useSidebar()
   const { t } = useTranslation()
   const active = item.children.some(child => child.to === pathname)
-  const [expanded, setExpanded] = useState(active)
+  const [expandedOverride, setExpanded] = useState<boolean | null>(null)
+  const expanded = expandedOverride ?? (active || (!isMobile && item.id !== "settings"))
+  const iconMode = !isMobile && state === "collapsed"
+  const visibleExpanded = expanded && !iconMode
   useEffect(() => { if (active) setExpanded(true) }, [active, pathname])
-  return <Collapsible asChild open={expanded} onOpenChange={next => {
-    if (!isMobile && state === "collapsed") { setOpen(true); setExpanded(true) }
+  return <Collapsible asChild open={visibleExpanded} onOpenChange={next => {
+    if (iconMode) { setOpen(true); setExpanded(true) }
     else setExpanded(next)
   }}>
     <SidebarMenuItem>
-      <SidebarMenuButton asChild tooltip={t(item.labelKey)} isActive={active}>
-        <NavLink to={item.to} onClick={() => { setExpanded(true); if (!isMobile) setOpen(true) }}>
+      <CollapsibleTrigger asChild>
+        <SidebarMenuButton tooltip={t(item.labelKey)} isActive={iconMode && active} aria-label={t(visibleExpanded ? "navigation.collapse" : "navigation.expand", { name: t(item.labelKey) })}>
           <item.icon /><span>{t(item.labelKey)}</span>
-        </NavLink>
-      </SidebarMenuButton>
-      <CollapsibleTrigger asChild><SidebarMenuAction aria-label={t(expanded ? "navigation.collapse" : "navigation.expand", { name: t(item.labelKey) })}>
-        <ChevronRight data-expanded={expanded} className="transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90" />
-      </SidebarMenuAction></CollapsibleTrigger>
-      <CollapsibleContent><SidebarMenuSub className="my-2">
+          <ChevronRight aria-hidden="true" data-expanded={visibleExpanded} className="ml-auto transition-transform duration-200 motion-reduce:transition-none data-[expanded=true]:rotate-90 group-data-[collapsible=icon]:hidden" />
+        </SidebarMenuButton>
+      </CollapsibleTrigger>
+      <CollapsibleContent><SidebarMenuSub>
         {item.children.map(item => <SidebarMenuSubItem key={item.to}><SidebarMenuSubButton asChild isActive={pathname === item.to}><NavLink to={item.to} onClick={() => setOpenMobile(false)}>{t(item.labelKey)}</NavLink></SidebarMenuSubButton></SidebarMenuSubItem>)}
       </SidebarMenuSub></CollapsibleContent>
     </SidebarMenuItem>

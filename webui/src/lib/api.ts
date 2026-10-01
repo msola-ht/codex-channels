@@ -1,3 +1,4 @@
+import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
@@ -5,6 +6,7 @@ import type {
   ServerTimeResponse,
   ErrorsResponse,
   OfficialAccountSnapshotsResponse,
+  OfficialAccountSourcesResponse,
   OverviewResponse,
   MetricsRangeQuery,
   MetricsQuery,
@@ -358,6 +360,10 @@ export function fetchOfficialAccountSnapshots(
   return getJson<OfficialAccountSnapshotsResponse>(`${API_PREFIX}/accounts`, signal)
 }
 
+export function fetchOfficialAccountSources(signal?: AbortSignal): Promise<OfficialAccountSourcesResponse> {
+  return getJson<OfficialAccountSourcesResponse>(`${API_PREFIX}/management/accounts/sources`, signal)
+}
+
 export function fetchTrafficExchanges(
   query: { label?: string; limit?: number; offset?: number; session?: string },
   signal?: AbortSignal,
@@ -453,4 +459,18 @@ export function fetchDeliveryContent(input: DeliveryRetryInput, signal?: AbortSi
 
 export function fetchDeliveryContents(entries: DeliveryRetryInput[], signal?: AbortSignal): Promise<DeliveryContentsResponse> {
   return requestJson(`${API_PREFIX}/management/delivery/content-batch`, { method: "POST", body: JSON.stringify({ entries }) }, signal)
+}
+
+export function fetchResetCredits(signal?: AbortSignal): Promise<ResetCreditSnapshot> {
+  return getJson(`${API_PREFIX}/management/accounts/openai/reset-credits`, signal)
+}
+export function previewResetCredit(input: { creditId: string }, signal?: AbortSignal): Promise<{ preview: ResetCreditPreview; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function consumeResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<ResetCreditResult> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/consume`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
+}
+
+export function cancelResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<{ cancelled: true }> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/cancel`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
 }

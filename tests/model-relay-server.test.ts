@@ -37,6 +37,56 @@ describe("native Responses relay", () => {
   const post = (relay: ModelRelayServer, value: unknown) => fetch(`${relay.address()}/v1/responses`, {
     method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(value),
   });
+  it.each(["ds-fixture", "rs-fixture"])("scopes ignored lifecycle fields to the authenticated provider (%s)", async provider => {
+    const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString());
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(responseValue()));
+      });
+    }, undefined, undefined, undefined, false, policy);
+    const request = { ...input, provider: "ds-spoofed", store: true, background: true,
+      previous_response_id: "resp_previous", conversation: { id: "conv_previous" },
+      input: Array.from({ length: 300 }, () => ({ role: "user", content: "hello" })) };
+    const result = await post(f.relay, request);
+    if (provider.startsWith("ds-")) {
+      expect(result.status).toBe(200); expect(await result.json()).toEqual(responseValue());
+      expect(received).toEqual({ ...request, stream: false, store: false, background: false });
+      const oversized = await post(f.relay, { ...request, input: "x".repeat(1024 * 1024) });
+      expect(oversized.status).toBe(413); await oversized.text(); expect(f.calls()).toBe(1);
+    } else {
+      expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ error: { param: "previous_response_id", upstream_attempted: false } });
+      expect(f.calls()).toBe(0);
+    }
+  });
+  it.each(["ds-fixture", "rs-fixture"].flatMap(provider => [undefined, false, true].map(store => ({ provider, store }))))(
+    "uses foreground delivery with storage disabled and records the actual change ($provider, store=$store)", async ({ provider, store }) => {
+      const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
+      const directory = mkdtempSync(join(tmpdir(), "relay-store-"));
+      const dump = new RelayTrafficDump({ directory, onError: error => { throw error; } });
+      cleanups.push(async () => { await dump.close(); rmSync(directory, { recursive: true, force: true }); });
+      let received: unknown;
+      const f = await fixture((request, response) => {
+        const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+        request.on("end", () => {
+          received = JSON.parse(Buffer.concat(chunks).toString());
+          response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(responseValue()));
+        });
+      }, undefined, undefined, dump, true, policy);
+      const request = { ...input, background: true, ...(store === undefined ? {} : { store }) };
+      const result = await post(f.relay, request);
+      expect(result.status).toBe(200); expect(await result.json()).toEqual(responseValue());
+      expect(received).toEqual({ ...input, background: false, stream: false, store: false });
+      expect(f.metrics).toHaveLength(1);
+      await dump.close();
+      const reference = f.metrics[0]!.traffic!;
+      const detail = await describeDumpExchange([join(directory, `${reference.label}-${reference.session}`)], reference.interaction);
+      expect(JSON.parse(detail.debug.inbound.body)).toEqual(request);
+      expect(JSON.parse(detail.request.body)).toEqual(received);
+      expect(detail.debug.transformations.includes("store_defaulted")).toBe(store === undefined);
+    });
   it.each([
     { output: [], content: false },
     { output: [{ type: "message", content: [{ type: "output_text", text: "" }] }], content: false },
@@ -98,9 +148,17 @@ describe("native Responses relay", () => {
       { type: "response.output_text.delta", delta: "hello", vendor_extension: "preserve" },
       { type: `response.${status}`, response: responseValue(status) }];
     const wire = events.map(event => `event: ${event.type}\nid: fixture\ndata: ${JSON.stringify(event)}\n\n`).join("");
-    const f = await fixture((_request, response) => { response.writeHead(200, { "content-type": "text/event-stream" }); response.end(wire); }, undefined, undefined, dump, true);
-    const result = await post(f.relay, { ...input, stream: true });
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString());
+        response.writeHead(200, { "content-type": "text/event-stream" }); response.end(wire);
+      });
+    }, undefined, undefined, dump, true);
+    const result = await post(f.relay, { ...input, stream: true, store: true, background: true });
     expect(await result.text()).toBe(wire);
+    expect(received).toEqual({ ...input, stream: true, store: false, background: false });
     expect(f.metrics).toHaveLength(1); expect(f.metrics[0]).toMatchObject({ status, responseFormat: "sse", traffic: { label: "relay.responses" } });
     await dump.close();
     const traffic = f.metrics[0]!.traffic!;
@@ -183,6 +241,39 @@ async function fixture(reply: (request: IncomingMessage, response: ServerRespons
 }
 
 describe("isolated Relay vertical request chain", () => {
+  it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream =>
+    ["json", "content_type"].map(failure => ({ protocol, stream, failure })))))(
+    "classifies response decoding failures consistently ($protocol, stream=$stream, $failure)", async ({ protocol, stream, failure }) => {
+      const f = await fixture((_request, response) => {
+        response.writeHead(200, { "content-type": failure === "content_type" ? "text/plain" : stream ? "text/event-stream" : "application/json" });
+        response.end(stream ? "data: PRIVATE invalid json\n\n" : "PRIVATE invalid json");
+      });
+      const result = protocol === "chat" ? await f.post({ ...body, stream }) : await fetch(`${f.relay.address()}/v1/responses`, {
+        method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify({ model: body.model, input: "hello", stream }),
+      });
+      const text = await result.text();
+      expect(result.status).toBe(502); expect(text).not.toContain("PRIVATE");
+      expect(JSON.parse(text)).toMatchObject({ error: { code: `invalid_upstream_${failure}`, upstream_attempted: true } });
+      expect(f.metrics).toHaveLength(1);
+      expect(f.metrics[0]).toMatchObject({ status: "failed", deliveryStatus: "failed", errorCode: `invalid_upstream_${failure}` });
+    });
+
+  it.each(["clp-a", "ds-a"])("forwards long Chat histories and opaque parameters (%s)", async provider => {
+    const policy = config(); policy.accounts = [{ provider }]; policy.callers[0]!.provider = provider;
+    let received: unknown;
+    const f = await fixture((request, response) => {
+      const chunks: Buffer[] = []; request.on("data", chunk => chunks.push(Buffer.from(chunk)));
+      request.on("end", () => {
+        received = JSON.parse(Buffer.concat(chunks).toString());
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
+      });
+    }, undefined, undefined, undefined, false, policy);
+    const request = { ...body, messages: Array.from({ length: 300 }, () => body.messages[0]),
+      store: true, background: true, vendor_extension: { enabled: true }, tools: [{ type: "function", function: { name: "fixture" } }] };
+    const result = await f.post(request);
+    expect(result.status).toBe(200); expect(await result.json()).toEqual(answer);
+    expect(received).toEqual({ ...request, stream: false });
+  });
 
   it.each([false, true].flatMap(stream => ["stop", "length", "content_filter", "insufficient_system_resource", "aborted"].map(reason => ({ stream, reason }))))(
     "keeps Chat terminal, delivery, metrics and dump consistent ($stream, $reason)", async ({ stream, reason }) => {
@@ -887,9 +978,12 @@ describe("isolated Relay vertical request chain", () => {
       const f = await fixture(() => {});
       const url = new URL(f.relay.address()); const socket = createConnection({ host: url.hostname, port: Number(url.port) });
       socket.on("error", () => {}); await once(socket, "connect");
+      // Expiring an incomplete upload may close with FIN or ECONNRESET. Observe close
+      // directly: events.once(close) rejects on the expected reset error first.
+      const closed = new Promise<void>(resolve => { socket.once("close", () => resolve()); });
       socket.write("POST /v1/chat/completions HTTP/1.1\r\nX-Slow: ");
       const drip = setInterval(() => socket.write("x"), 10);
-      try { await once(socket, "close"); } finally { clearInterval(drip); socket.destroy(); }
+      try { await closed; } finally { clearInterval(drip); socket.destroy(); }
       expect(f.calls()).toBe(0); expect(f.preparedCount()).toBe(0); expect(f.metrics).toHaveLength(0);
     } finally { clock.mockRestore(); }
   });

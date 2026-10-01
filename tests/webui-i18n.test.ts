@@ -8,8 +8,8 @@ describe("WebUI 界面文案语言切换", () => {
     toggleEn: string;
     zhKeys: string[];
     enKeys: string[];
-    zhSubtitle: string;
-    enSubtitle: string;
+    zhNavigationLabel: string;
+    enNavigationLabel: string;
     placeholderParity: boolean;
     enThreads: string;
     enThreadsLoading: string;
@@ -148,7 +148,6 @@ describe("WebUI 界面文案语言切换", () => {
           { windowId: "monthly", label: "月度", usedPercent: 30, resetsAt: null, status: null },
         ];
         const baseDashboard = {
-          weeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" },
           data: { range, generatedAt: "2026-01-01T00:00:00.000Z", global: aggregate, threadCount: 2, turnCount: 3,
             providers: [{ provider: "openai", model: "model-test", aggregate, threadCount: 2, turnCount: 3 }],
             errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, groups: [], totalGroupCount: 0 },
@@ -157,7 +156,7 @@ describe("WebUI 界面文案语言切换", () => {
           loading: false, error: null, errorCode: null, refetch: noop,
         };
         const baseAccounts = {
-          data: { deepseek: { accounts: [{ provider: "deepseek", account: "main", displayName: "DeepSeek main",
+          data: { openaiWeeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" }, deepseek: { accounts: [{ provider: "deepseek", account: "main", displayName: "DeepSeek main",
               default: true, observedAtMs: 1000, available: true,
               balances: [{ currency: "CNY", totalBalance: "2", grantedBalance: "1", toppedUpBalance: "1" }] }] },
             opencodeGo: { accounts: [{ subscriptionRequired: false, account: "main", displayName: "OpenCode Go main",
@@ -320,8 +319,8 @@ describe("WebUI 界面文案语言切换", () => {
           toggleEn: render(LanguageToggle, { value: "en", onChange: noop }, "en"),
           zhKeys: keys(messages.zh, "").sort(),
           enKeys: keys(messages.en, "").sort(),
-          zhSubtitle: translate("zh", "shell.subtitle"),
-          enSubtitle: translate("en", "shell.subtitle"),
+          zhNavigationLabel: translate("zh", "shell.navigation"),
+          enNavigationLabel: translate("en", "shell.navigation"),
           placeholderParity: Object.keys(zh).every(key => JSON.stringify(placeholders(zh[key])) === JSON.stringify(placeholders(en[key]))),
           zhThreads: render(ThreadTable, { threads: [], query: {}, pagination }, "zh"),
           enThreads: render(ThreadTable, { threads: [], query: {}, pagination }, "en"),
@@ -387,8 +386,8 @@ describe("WebUI 界面文案语言切换", () => {
   });
 
   it("同一键在两个语言下返回各自文案", () => {
-    expect(result.zhSubtitle).toBe("本地指标与设置");
-    expect(result.enSubtitle).toBe("Local metrics and settings");
+    expect(result.zhNavigationLabel).toBe("导航");
+    expect(result.enNavigationLabel).toBe("Navigation");
   });
 
   it("恢复有效偏好，非法值或存储不可用时使用中文", () => {
@@ -455,7 +454,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Failure rate: 25.0%");
     expect(result.consoleEn).toContain("No failed requests");
     expect(result.consoleEn).toContain("OpenAI weekly quota");
-    expect(result.consoleEn).toContain("Used 37.5%");
+    expect(result.consoleEn).toContain("Weekly quota used: 37.5%");
     expect(result.consoleEn).toContain("Local accounts and quotas");
     expect(result.consoleEn).toContain("Available balance");
     expect(result.consoleEn).toContain("Remaining credit");

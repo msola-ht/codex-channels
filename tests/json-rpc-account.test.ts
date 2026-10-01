@@ -7,6 +7,30 @@ import type { GetAccountTokenUsageResponse } from "../src/codex-protocol/index.j
 import { appServerRateLimit, FakeTransport } from "./support/json-rpc-fixtures.js";
 
 describe("JsonRpcClient account", () => {
+    it("requires ChatGPT and accepts only available supported reset credits", async () => {
+      const transport = new FakeTransport();
+      const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });
+      await client.connect();
+      try {
+        transport.accountResult = { account: { type: "apiKey" }, requiresOpenaiAuth: true };
+        await expect(client.readResetCredits()).rejects.toThrow("ChatGPT account required");
+        expect(transport.sent.some(message => message.method === "account/rateLimits/read")).toBe(false);
+        transport.accountResult = { account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: true };
+        const credit = { id: "supported", resetType: "codexRateLimits", status: "available", expiresAt: null, grantedAt: null, title: null, description: null };
+        transport.accountRateLimitsResult = { ...transport.accountRateLimitsResult, accountId: "account", rateLimitResetCredits: {
+          availableCount: 3, credits: [credit, { ...credit, id: "unknown", resetType: "unknown" }, { ...credit, id: "redeemed", status: "redeemed" }],
+        } };
+        await expect(client.readResetCredits()).resolves.toEqual({ accountId: "account", availableCount: "3", credits: [
+          { id: "supported", expiresAt: null, title: null, description: null },
+        ] });
+        for (const invalid of [{ availableCount: -1, credits: [credit] }, { availableCount: "1", credits: [credit] },
+          { availableCount: 1, credits: null }, { availableCount: 1, credits: [{ ...credit, expiresAt: 9e15 }] }]) {
+          transport.accountRateLimitsResult.rateLimitResetCredits = invalid;
+          await expect(client.readResetCredits()).rejects.toThrow();
+        }
+      } finally { await client.close(); }
+    });
+
     it("cancels a pending background rate-limit read at the caller deadline", async () => {
       const transport = new FakeTransport();
       const client = new CodexAppServerClient(new JsonRpcClient(transport), { sandbox: "workspace-write" });

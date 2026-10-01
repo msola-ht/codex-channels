@@ -56,7 +56,7 @@ describe("ProviderMetricsComposition", () => {
     await composition.start();
 
     const traffic = { label: provider, session: "2026-09-19T00-00-00-000Z", interaction: 2 };
-    await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: 569, traffic });
+    await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: 569, traffic, responseUsageAmount: "0.12345678901234567890" });
 
     await vi.waitFor(() => {
       expect(record).toHaveBeenCalledWith({
@@ -64,6 +64,7 @@ describe("ProviderMetricsComposition", () => {
         ...metrics(),
         traffic,
         ...(provider === "openai" ? { upstreamTtftMs: 569 } : {}),
+        responseUsageAmount: "0.12345678901234567890",
         reasoningEffort: null,
       });
     });

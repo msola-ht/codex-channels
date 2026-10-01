@@ -5,7 +5,7 @@ export class ManagementSecurityError extends Error {
 
 export class ManagementRateLimiter {
   constructor(options?: { now?: () => number; windowMs?: number });
-  consume(input: { principalId: string; category: "read" | "write" | "high-risk" }): {
+  consume(input: { principalId: string; category: "read" | "write" | "high-risk" | "account-refresh" }): {
     remaining: number;
   };
 }

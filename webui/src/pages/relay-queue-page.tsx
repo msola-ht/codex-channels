@@ -1,7 +1,5 @@
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { DataTable, SortableHeader, TruncatedText, type DataTableColumn } from "@/components/metrics/data-table"
 import type { RelayQueueSnapshot } from "@/lib/types"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -12,19 +10,7 @@ import { useRelayQueue } from "@/hooks/use-relay-queue"
 import { translateApiError } from "@/lib/i18n/translate"
 import { formatElapsedDuration } from "@/lib/format"
 
-export function RelayQueueSheet() {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  return <Sheet open={open} onOpenChange={setOpen}>
-    <SheetTrigger asChild><Button variant="outline">{t("relay.queueDetails")}</Button></SheetTrigger>
-    <SheetContent side="right" closeLabel={t("relay.close")} className="data-[side=right]:w-full data-[side=right]:sm:max-w-3xl">
-      <SheetHeader className="max-h-[35dvh] shrink-0 overflow-y-auto pr-12"><SheetTitle>{t("relay.queueDetails")}</SheetTitle><SheetDescription>{t("relay.queueLiveHint")}</SheetDescription></SheetHeader>
-      {open && <RelayQueueList />}
-    </SheetContent>
-  </Sheet>
-}
-
-function RelayQueueList() {
+export function RelayQueuePage() {
   const { t } = useTranslation()
   const { data, loading, error, errorCode, refetch, notificationStatus } = useRelayQueue()
   type Row = Extract<RelayQueueSnapshot, { state: "running" }>["requests"][number]
@@ -34,7 +20,8 @@ function RelayQueueList() {
     { accessorKey: "phase", header: ({ column }) => <SortableHeader column={column}>{t("relay.queuePhase")}</SortableHeader>, cell: ({ row: { original: row } }) => <Badge variant={row.phase === "queue" ? "outline" : "secondary"}>{t(`relay.queuePhases.${row.phase}`)}</Badge> },
     { accessorKey: "elapsedMs", header: ({ column }) => <SortableHeader column={column}>{t("relay.queueElapsed")}</SortableHeader>, cell: ({ row: { original: row } }) => formatElapsedDuration(row.elapsedMs) },
   ]
-  return <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4">
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+    <div><h1 tabIndex={-1} className="text-xl font-semibold">{t("relay.queueDetails")}</h1><p className="text-sm text-muted-foreground">{t("relay.queueLiveHint")}</p></div>
     <div className="flex shrink-0 items-center justify-between gap-2">
       <span className="w-40 text-xs text-muted-foreground" role="status">{t(`delivery.notifications.${notificationStatus ?? "connecting"}`)}</span>
       <Button size="sm" variant="outline" className="w-24 shrink-0" disabled={loading} onClick={refetch}>

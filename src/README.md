@@ -47,3 +47,11 @@ Client 把 Thread 路由通知与 Turn、Item、Goal、Token、账户、额度�
 Bootstrap 通过 Client 读取版本并向 Surface 注入纯字符串；受控协议导出和模块依赖测试会阻止
 协议或具体 Client 再次泄漏。Storage、Policy、Event Bus、Observability、Config、Surface 和
 Bootstrap 的当前边界分别以本索引中的模块 README 为准。
+
+## 结构调整的取舍
+
+平台 Outbox 共用投递基础设施，分别持有各平台的正文流状态机，不因结构相似合并为通用基类。
+指标、绑定与任务存储保持各自职责；指标查询组件继续复用 Store 的连接和快照，不另建数据库连接。
+Gateway 生命周期保留组件图的资源所有权与现有继承入口；只有独立宿主或生命周期复用等实际需求
+出现时再评估替换，避免只增加等价转发层。Runtime 的基础设施与服务宿主分层同样以具体依赖问题
+为依据，不以文件行数或类型回引本身作为拆分目标。

@@ -1,8 +1,8 @@
 import type { IncomingHttpHeaders } from "node:http";
 import { ModelConversionError, type DirectResponsesRequest, type DirectChatUsage } from "../model-api/index.js";
-import { withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
+import { parseDirectModelJson, validateDirectModelResponse, withDirectModelResponse, type DirectModelTarget } from "./direct-model-http.js";
 import { readChatBody, readModelFrames } from "./chat-io.js";
-import { ChatUpstreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
+import { chatUpstreamError } from "./chat-errors.js";
 import { createMetricsState, hasResponseOutputContent, observeJsonResponse, observeResponseEvent } from "./response-metrics-observer.js";
 import type { DirectChatCapture } from "./relay-traffic-dump.js";
 
@@ -62,11 +62,7 @@ export async function sendDirectResponses(call: DirectResponsesCall): Promise<vo
     submitted: (ua, headers, path) => { call.submitted(ua); call.capture?.submitted(call.request, headers, path); },
   }, async incoming => {
     call.headers(incoming.statusCode ?? 502); call.capture?.head(incoming.statusCode ?? 502, incoming.headers);
-    if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, call.capture);
-    const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-    if (contentType !== (call.request.stream ? "text/event-stream" : "application/json")) {
-      throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
-    }
+    await validateDirectModelResponse(incoming, call.request.stream, call.capture);
     if (!call.request.stream) {
       const value = parse(await readChatBody(incoming, call.signal, 8 * 1024 * 1024), call.capture);
       call.capture?.value(value, false);
@@ -101,8 +97,7 @@ function deliverable(value: Record<string, unknown>, stream: boolean): Record<st
 
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function parse(text: string, capture?: DirectChatCapture): Record<string, unknown> {
-  let value: unknown;
-  try { value = JSON.parse(text); } catch { capture?.invalid(Buffer.byteLength(text)); throw new ModelConversionError("Invalid Responses JSON"); }
+  const value = parseDirectModelJson(text, capture);
   if (!record(value)) throw new ModelConversionError("Invalid Responses object");
   return value;
 }

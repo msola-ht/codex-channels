@@ -1,3 +1,5 @@
+import type { Logger } from "pino";
+
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
@@ -8,6 +10,8 @@ import {
   UserFacingError,
   type ConversationTarget,
 } from "../../conversation-core/index.js";
+import { surfaceErrorMetadata } from "../error-metadata.js";
+import { surfaceDiagnosticContext } from "../diagnostics.js";
 import { formatTurnInputAppended } from "../input-copy.js";
 import type { InputImageMimeType } from "../generated-image.js";
 import {
@@ -106,6 +110,7 @@ export class WeixinConversationAdapter {
       doctor?: WeixinDoctor;
       now?: () => number;
       debugEnabled?: boolean;
+      logger?: Pick<Logger, "warn">;
     } = { quietWindowMs: 0 },
     private readonly files?: Pick<WeixinFilePort, "download">,
     private readonly audios?: Pick<WeixinAudioPort, "download">,
@@ -335,6 +340,10 @@ export class WeixinConversationAdapter {
           formatOperationFailure(gatewayRequestFailedText),
         );
         throw error;
+      }
+      if (error.code === "image.reference.failed") {
+        this.inputOptions.logger?.warn({ ...surfaceDiagnosticContext(), ...surfaceErrorMetadata(error) },
+          "微信图片引用发送失败");
       }
       this.notify(
         message.target,

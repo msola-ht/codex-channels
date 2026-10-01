@@ -13,8 +13,11 @@ export interface UseApiState<T> {
 export function useApi<T>(
   loader: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
-  { retainDataOnError = true }: { retainDataOnError?: boolean } = {},
-): UseApiState<T> & { refetch: () => void; replaceData: (data: T) => void } {
+  { retainDataOnError = true, mergeData }: {
+    retainDataOnError?: boolean
+    mergeData?: (previous: T | null, next: T) => T
+  } = {},
+): UseApiState<T> & { refetch: () => void; replaceData: (data: T | ((previous: T | null) => T | null)) => void } {
   const [state, setState] = useState<UseApiState<T>>({
     data: null,
     loading: true,
@@ -32,7 +35,7 @@ export function useApi<T>(
     loader(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) {
-          setState({ data, loading: false, error: null, errorCode: null })
+          setState((previous) => ({ data: mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null }))
         }
       })
       .catch((error: unknown) => {
@@ -50,17 +53,19 @@ export function useApi<T>(
     return () => controller.abort()
     // loader 由调用方按 deps 稳定；这里只追踪数据依赖与手动刷新。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, reloadKey, retainDataOnError])
+  }, [...deps, reloadKey, retainDataOnError, mergeData])
 
   const refetch = useCallback(() => {
     activeRequest.current?.abort()
     setState((previous) => ({ ...previous, loading: true, error: null, errorCode: null }))
     setReloadKey((key) => key + 1)
   }, [])
-  const replaceData = useCallback((data: T) => {
+  const replaceData = useCallback((data: T | ((previous: T | null) => T | null)) => {
     activeRequest.current?.abort()
-    setState({ data, loading: false, error: null, errorCode: null })
-  }, [])
+    setState((previous) => ({ data: typeof data === "function"
+      ? (data as (previous: T | null) => T | null)(previous.data)
+      : mergeData ? mergeData(previous.data, data) : data, loading: false, error: null, errorCode: null }))
+  }, [mergeData])
   return { ...state, refetch, replaceData }
 }
 

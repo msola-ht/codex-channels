@@ -113,6 +113,7 @@
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
+  重置券读取保留受控可用券的 ID、到期时间及展示说明；消费使用显式券 ID 和幂等键，禁止过载自动重试。
   OpenAI 额度读取声明 Luna Reserve 客户端能力，后台恢复轮询省略独立重置券详情；自动切换只解析
   精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
   不写用户级默认设置。
@@ -159,8 +160,7 @@ Server Request 适配只把已校验的稳定请求交给 Approval；Approval �
 响应类型与请求不一致时失败关闭。
 当前精确协议基线要求 initialize 协商实验 API，App Server 才会发送已生成并受控导出的
 `thread/settings/updated`；该通知用于同步共享 Thread 的模型、思考等级、服务层级和
-Default/Plan 协作模式。Client 只额外调用 `collaborationMode/list` 并把受控的
-`turn/start.collaborationMode` 映射到 Application 窄类型；其他实验请求不属于业务入口。启用该能力
+Default/Plan 协作模式。Client 仅按[受控协议边界](../../docs/index.md#受控协议边界)采用 Plan、Queue、Revert、计划任务动态工具和图片上传账户路由等明确列出的字段与请求，并映射到业务窄类型；生成类型不自动开放其他实验能力。启用这些能力
 同时出现的实验审批字段必须在 `approval` 边界显式展示或默认拒绝，不能静默扩大授权。
 
 固定协议的一次性 `localAudio` 已由 Application 的封闭 `TurnInput` 受控接入；Surface 只能提交

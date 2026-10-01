@@ -78,3 +78,6 @@ export type { ThreadQueueUpdateParams } from "./generated/v2/ThreadQueueUpdatePa
 export type { ThreadQueueUpdateResponse } from "./generated/v2/ThreadQueueUpdateResponse.js";
 
 export const protocolVersion = version;
+
+export type { ConsumeAccountRateLimitResetCreditParams } from "./generated/v2/ConsumeAccountRateLimitResetCreditParams.js";
+export type { ConsumeAccountRateLimitResetCreditResponse } from "./generated/v2/ConsumeAccountRateLimitResetCreditResponse.js";

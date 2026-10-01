@@ -1,12 +1,30 @@
 import { once } from "node:events";
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type OutgoingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { chatUpstreamError } from "./chat-errors.js";
+import { ChatUpstreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
+import type { DirectChatCapture } from "./relay-traffic-dump.js";
 import type { ProviderProxyUpstream } from "./proxy.js";
 import { effectiveUpstreamUserAgent } from "./response-metrics-observer.js";
 import { endToEndHeaders } from "./request-routing.js";
 
 export interface DirectModelTarget extends ProviderProxyUpstream { authorization: string }
+
+export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: DirectChatCapture): Promise<void> {
+  if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture);
+  const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType !== (stream ? "text/event-stream" : "application/json")) {
+    throw new ChatUpstreamError("invalid_upstream_content_type", "Upstream response Content-Type does not match the requested JSON/SSE format.", false);
+  }
+}
+
+export function parseDirectModelJson(text: string, capture?: DirectChatCapture): unknown {
+  try { return JSON.parse(text) as unknown; }
+  catch {
+    capture?.invalid(Buffer.byteLength(text));
+    throw new ChatUpstreamError("invalid_upstream_json", "Upstream response contains invalid JSON.", false);
+  }
+}
+
 interface DirectModelHttpCall {
   body: Record<string, unknown> & { stream: boolean };
   path: "/chat/completions" | "/responses";

@@ -1,5 +1,6 @@
 import {
   ConversationCommandService,
+  type ConversationResetCreditService,
   type ConversationCommandExecutor,
   type ConversationCommandUseCases,
   type ConversationSession,
@@ -54,10 +55,12 @@ export function conversationInputUseCases(
 export function conversationCommandExecutor(
   overrides: ConversationMethodOverrides,
   scheduledTasks?: ScheduledTaskUseCases,
+  resetCredits?: ConversationResetCreditService,
 ): ConversationCommandExecutor {
   return new ConversationCommandService(
     conversationCommandUseCases(overrides),
     scheduledTasks,
+    resetCredits,
   );
 }
 

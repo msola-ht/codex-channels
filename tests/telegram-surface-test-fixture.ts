@@ -7,6 +7,7 @@ import { vi } from "vitest";
 
 import type {
   ConversationTurnUseCases,
+  ConversationResetCreditService,
   ScheduledTaskConfirmation,
   ScheduledTaskUseCases,
 } from "../src/application/index.js";
@@ -66,6 +67,7 @@ export function createTelegramSurfaceFixture(
   debugEnabled = false,
   scheduledTasks?: ScheduledTaskUseCases,
   proxyUrl?: string,
+  resetCredits?: ConversationResetCreditService,
 ): {
   surface: TelegramSurface;
   output: EventBus<OutputEvent>;
@@ -96,7 +98,7 @@ export function createTelegramSurfaceFixture(
   directories.push(directory);
   const surfaceOptions = {
     gatewayVersion: "0.146.0",
-    commands: conversationCommandExecutor({ submit, ...serviceOverrides }, scheduledTasks),
+    commands: conversationCommandExecutor({ submit, ...serviceOverrides }, scheduledTasks, resetCredits),
     inputQuietWindowMs: 0,
     imageStore,
     audioStore,
