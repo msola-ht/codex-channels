@@ -74,3 +74,5 @@ export type {
 } from "../../../scripts/webui-api"
 
 export type { QueueChangeEvent, DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult } from "../../../scripts/webui-api"
+
+export type { ResetCreditChoice, ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "../../../scripts/webui-api"

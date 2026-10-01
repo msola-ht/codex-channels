@@ -1,3 +1,4 @@
+import { ResetCreditAction } from "./reset-credit-action"
 import {
   Card,
   CardAction,
@@ -186,10 +187,12 @@ export function ProviderTable({ providers }: { providers: ProviderGroup[] }) {
 
 export function WeeklyQuotaCard({
   credits = null,
+  onCreditsChanged,
   usedPercent,
   resetsAt,
   planType,
 }: {
+  onCreditsChanged?: () => void
   credits?: OpenAiAccountCredits | null
   usedPercent: number | null
   resetsAt: number | null
@@ -237,6 +240,7 @@ export function WeeklyQuotaCard({
               : !credits?.expirations?.length ? <p>{t("overview.creditNotProvided")}</p> : null}
           </div>
         )}
+        {onCreditsChanged ? <ResetCreditAction onChanged={onCreditsChanged} /> : null}
         {credits ? <p className="text-xs text-muted-foreground">{t("overview.accountUpdatedAt", { time: formatTime(credits.observedAtMs) })}</p> : null}
       </CardContent>
     </Card>

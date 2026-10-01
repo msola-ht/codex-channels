@@ -1,3 +1,4 @@
+import { routeResetCredits } from "./webui-reset-credit-route.mjs";
 import { loadDeepseekAccounts, deepseekProviderId } from "../runtime/deepseek-accounts.mjs";
 import { loadCcgAccounts, ccgProviderId } from "../runtime/ccg-accounts.mjs";
 import { loadClinePassAccounts, clinePassProviderId } from "../runtime/cline-pass-accounts.mjs";
@@ -38,6 +39,7 @@ export async function routeProviderManagement({
   response,
   state,
 }) {
+  if (await routeResetCredits({ configPath, maximumBodyBytes, path, principalId, request, response, state })) return true;
   if (path === "/accounts/refresh" && request.method === "POST") {
     const body = await readJsonBody(request, maximumBodyBytes);
     if (

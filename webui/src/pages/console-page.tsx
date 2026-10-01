@@ -77,8 +77,9 @@ export function ConsolePage({ range, onRangeChange }: {
       <AccountStatusCards
         onAccountRemoved={officialAccounts.accountRemoved}
         removalNotice={officialAccounts.removalNotice}
-        weeklyQuota={dashboard.weeklyQuota}
+        weeklyQuota={officialAccounts.data?.openaiWeeklyQuota ?? null}
         openai={officialAccounts.data?.openai ?? null}
+        onCreditsChanged={officialAccounts.refetchSnapshots}
         accountDataLoaded={officialAccounts.data !== null}
         accountLoading={officialAccounts.loading}
         deepseek={officialAccounts.data?.deepseek ?? null}
@@ -170,6 +171,7 @@ function AccountStatusCards({
   removalNotice,
   weeklyQuota,
   openai,
+  onCreditsChanged,
   accountDataLoaded,
   accountLoading,
   deepseek,
@@ -184,8 +186,9 @@ function AccountStatusCards({
 }: {
   onAccountRemoved: (accountId: string, activation?: string) => void
   removalNotice: AccountRemovalNotice | null
+  onCreditsChanged: () => void
   openai: OpenAiAccountCredits | null
-  weeklyQuota: OverviewResponse["weeklyQuota"]
+  weeklyQuota: { usedPercent: number | null; resetsAt: number | null; planType: string | null } | null
   accountDataLoaded: boolean
   accountLoading: boolean
   deepseek: DeepseekBalanceResponse | null
@@ -223,6 +226,7 @@ function AccountStatusCards({
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
         <WeeklyQuotaCard
           credits={openai}
+          onCreditsChanged={onCreditsChanged}
           usedPercent={weeklyQuota?.usedPercent ?? null}
           resetsAt={weeklyQuota?.resetsAt ?? null}
           planType={weeklyQuota?.planType ?? null}

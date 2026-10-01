@@ -148,7 +148,6 @@ describe("WebUI 界面文案语言切换", () => {
           { windowId: "monthly", label: "月度", usedPercent: 30, resetsAt: null, status: null },
         ];
         const baseDashboard = {
-          weeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" },
           data: { range, generatedAt: "2026-01-01T00:00:00.000Z", global: aggregate, threadCount: 2, turnCount: 3,
             providers: [{ provider: "openai", model: "model-test", aggregate, threadCount: 2, turnCount: 3 }],
             errors: { startAtMs: 1000, endAtMs: 2000, requestCount: 4, unsuccessfulRequestCount: 1, groups: [], totalGroupCount: 0 },
@@ -157,7 +156,7 @@ describe("WebUI 界面文案语言切换", () => {
           loading: false, error: null, errorCode: null, refetch: noop,
         };
         const baseAccounts = {
-          data: { deepseek: { accounts: [{ provider: "deepseek", account: "main", displayName: "DeepSeek main",
+          data: { openaiWeeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" }, deepseek: { accounts: [{ provider: "deepseek", account: "main", displayName: "DeepSeek main",
               default: true, observedAtMs: 1000, available: true,
               balances: [{ currency: "CNY", totalBalance: "2", grantedBalance: "1", toppedUpBalance: "1" }] }] },
             opencodeGo: { accounts: [{ subscriptionRequired: false, account: "main", displayName: "OpenCode Go main",

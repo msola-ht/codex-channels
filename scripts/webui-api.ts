@@ -1116,3 +1116,26 @@ export interface DeliveryContent { type: string; text: string | null; truncated:
 
 export interface DeliveryContentsResponse { records: Array<DeliveryRetryInput & { content: DeliveryContent | null }> }
 export interface QueueChangeEvent { type: "changed" | "heartbeat" | "unavailable" }
+
+export interface ResetCreditChoice {
+  id: string
+  title: string | null
+  description: string | null
+  expiresAt: number | null
+}
+export interface ResetCreditSnapshot {
+  accountId: string
+  availableCount: string
+  credits: ResetCreditChoice[]
+}
+export interface ResetCreditPreview {
+  attemptId: string
+  accountId: string
+  credit: ResetCreditChoice
+  expiresAt: number
+}
+export interface ResetCreditResult {
+  outcome: "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed"
+  refreshed: boolean
+  auditRecorded: boolean
+}

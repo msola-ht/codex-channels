@@ -17,7 +17,8 @@ export function codexManagementError(error) {
 }
 
 export function isHighRiskManagementPath(path) {
-  return path.startsWith("/relay/")
+  return path.startsWith("/accounts/openai/reset-credits/")
+    || path.startsWith("/relay/")
     || path.startsWith("/delivery/")
     || path.startsWith("/provider-settings")
     || path.startsWith("/account-settings")

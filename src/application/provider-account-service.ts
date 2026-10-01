@@ -67,7 +67,7 @@ export class ProviderAccountService implements ProviderAccountQueryPort {
     const adapter = this.adapters.get(modelProvider);
     // 不支持的能力没有新的账户观测，不能覆盖进程重启前保存的状态。
     if (!adapter?.accountLimits) return { kind: "unsupported", provider: modelProvider };
-    const result = await adapter.accountLimits();
+    const result = await adapter.accountLimits(signal);
     signal?.throwIfAborted();
     this.persist(
       this.snapshotUsage.get(modelProvider)
@@ -172,11 +172,11 @@ export function createOpenAiAccountAdapter(
     async accountThreadUsage(threadId) {
       return await query.accountThreadUsage(threadId);
     },
-    async accountLimits() {
+    async accountLimits(signal) {
       return {
         kind: "rate-limits",
         provider: "openai",
-        limits: await query.accountRateLimits(),
+        limits: await query.accountRateLimits(signal ? { signal } : undefined),
       };
     },
   };

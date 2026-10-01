@@ -86,6 +86,7 @@ import {
   ProviderAccountService,
   scheduledTaskToolSpec,
   createOpenAiAccountAdapter,
+  OpenAiResetCreditService,
   type ThreadLockHolder,
   type ThreadOccupancyReleaseResult,
 } from "../application/index.js";
@@ -183,6 +184,7 @@ export abstract class GatewayComponentGraph {
   private removeRpcNotification: (() => void) | undefined;
   private removeRpcDisconnect: (() => void) | undefined;
   private shutdownTask: Promise<void> | undefined;
+  private resetCredits: OpenAiResetCreditService | undefined;
   private accountWarmupTask: Promise<void> | undefined;
   private reconnectCoordinator: GatewayReconnectCoordinator | undefined;
   private readonly queueLifecycleTasks = new Set<Promise<void>>();
@@ -535,6 +537,7 @@ export abstract class GatewayComponentGraph {
       this.router,
       models,
     );
+    this.resetCredits = new OpenAiResetCreditService(this.codex, signal => this.providerAccounts!.accountLimits("openai", signal));
     const accountAdapters = [
       createOpenAiAccountAdapter(this.codex),
       ...createManagedProviderAccountAdapters(
@@ -1173,9 +1176,19 @@ export abstract class GatewayComponentGraph {
     return this.core.hasActiveTurns();
   }
 
+  async resetCreditOperation(request: import("../../runtime/gateway-account-refresh.mjs").ResetCreditRequest, signal: AbortSignal): Promise<unknown> {
+    this.requireRunning();
+    if (!this.resetCredits) throw new Error("Account service unavailable");
+    switch (request.method) {
+      case "reset/list": return this.resetCredits.list(signal);
+      case "reset/preview": return this.resetCredits.preview(request.creditId, signal);
+      case "reset/consume": return this.resetCredits.consume(request.attemptId, signal);
+    }
+  }
+
   refreshAccountSnapshot(provider: string, signal?: AbortSignal): Promise<boolean> {
     this.requireRunning();
-    if (provider === "openai") return Promise.resolve(false);
+    if (provider === "openai") return this.providerAccounts!.accountLimits("openai", signal).then(() => true);
     return this.providerAccounts?.refreshAccountSnapshot(provider, signal)
       ?? Promise.resolve(false);
   }

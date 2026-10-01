@@ -246,3 +246,24 @@ export function openAiCreditsFromSnapshot(snapshot: OfficialAccountSnapshot | un
     undisclosedCount: undisclosed !== null && undisclosed > 0n ? undisclosed.toString() : null,
   }
 }
+
+/** 当前周额度来自官方普通用量桶；历史请求里的窗口只用于统计估算。 */
+export function openAiWeeklyQuotaFromSnapshot(snapshot: OfficialAccountSnapshot | undefined) {
+  if (!snapshot || snapshot.provider !== "openai") return null
+  const value = snapshot.limits as { kind?: string; provider?: string; limits?: {
+    ordinaryUsageLimit?: { planType?: string | null; primary?: SnapshotQuotaWindow | null; secondary?: SnapshotQuotaWindow | null } | null
+  } } | null
+  if (value?.kind !== "rate-limits" || value.provider !== "openai") return null
+  const limit = value.limits?.ordinaryUsageLimit
+  if (!limit) return null
+  const window = [limit.primary, limit.secondary].find(window => window?.windowDurationMins === 10_080)
+  return {
+    usedPercent: typeof window?.usedPercent === "number" && Number.isFinite(window.usedPercent) && window.usedPercent >= 0
+      ? window.usedPercent : null,
+    resetsAt: typeof window?.resetsAt === "number" && Number.isSafeInteger(window.resetsAt)
+      && window.resetsAt >= 0 && window.resetsAt <= 8_640_000_000_000 ? window.resetsAt * 1000 : null,
+    planType: typeof limit.planType === "string" ? limit.planType : null,
+  }
+}
+
+type SnapshotQuotaWindow = { usedPercent?: number; windowDurationMins?: number | null; resetsAt?: number | null }

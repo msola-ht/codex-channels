@@ -1,3 +1,4 @@
+import type { ResetCreditSnapshot, ResetCreditPreview, ResetCreditResult } from "./types"
 import type {
   QueueChangeEvent,
   DeliveryContentsResponse, DeliveryContent, DeliveryBatchInput, DeliveryBatchPreview, DeliveryBatchResult, DeliveryQueueEntry, DeliveryQueueSnapshot, DeliveryRetryInput, DeliveryRetryResult,
@@ -453,4 +454,14 @@ export function fetchDeliveryContent(input: DeliveryRetryInput, signal?: AbortSi
 
 export function fetchDeliveryContents(entries: DeliveryRetryInput[], signal?: AbortSignal): Promise<DeliveryContentsResponse> {
   return requestJson(`${API_PREFIX}/management/delivery/content-batch`, { method: "POST", body: JSON.stringify({ entries }) }, signal)
+}
+
+export function fetchResetCredits(signal?: AbortSignal): Promise<ResetCreditSnapshot> {
+  return getJson(`${API_PREFIX}/management/accounts/openai/reset-credits`, signal)
+}
+export function previewResetCredit(input: { creditId: string }, signal?: AbortSignal): Promise<{ preview: ResetCreditPreview; confirmationToken: string }> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/preview`, { method: "POST", body: JSON.stringify(input) }, signal)
+}
+export function consumeResetCredit(attemptId: string, confirmationToken: string, signal?: AbortSignal): Promise<ResetCreditResult> {
+  return requestJson(`${API_PREFIX}/management/accounts/openai/reset-credits/consume`, { method: "POST", body: JSON.stringify({ attemptId, confirmationToken }) }, signal)
 }

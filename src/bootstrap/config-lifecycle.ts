@@ -18,6 +18,7 @@ import { readCodexProxySettings } from "../../runtime/codex-proxy-env.mjs";
 import { GatewayOwner } from "../../runtime/gateway-owner.mjs";
 import { loadRuntimeConfig } from "../config/index.js";
 import { accountQueryFailureMetadata } from "./account-query.js";
+import { ResetCreditError } from "../application/index.js";
 import { createLogger } from "../observability/index.js";
 import { createWeixinCredentialChangeCheck, createWeixinCredentialStore } from "../surfaces/index.js";
 import { GatewayApplication } from "./app.js";
@@ -84,6 +85,12 @@ export async function runGatewayProcess(): Promise<void> {
         throw new GatewayAccountRefreshError("refresh_failed", "账户刷新失败", {
           cause: error, reason: diagnostic.reason,
         });
+      }
+    },
+    async (request, signal) => {
+      try { return await application.resetCreditOperation(request, signal); }
+      catch (error) {
+        throw new GatewayAccountRefreshError(error instanceof ResetCreditError ? error.code : "reset_unavailable", "重置券操作未完成");
       }
     },
   );

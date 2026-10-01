@@ -3,7 +3,8 @@ export type GatewayAccountRefreshErrorCode =
   | "invalid_request"
   | "invalid_response"
   | "provider_not_found"
-  | "refresh_failed";
+  | "refresh_failed"
+  | "reset_stale" | "reset_busy" | "reset_unavailable" | "reset_unknown";
 
 export type AccountRefreshReason = "configuration" | "timeout" | "authentication" | "rate-limited" | "upstream" | "network" | "invalid-response" | "internal";
 
@@ -21,6 +22,7 @@ export class GatewayAccountRefreshServer {
   constructor(
     configPath: string,
     refreshAccount: (provider: string, signal: AbortSignal) => boolean | Promise<boolean>,
+    resetCredits?: (request: ResetCreditRequest, signal: AbortSignal) => Promise<unknown>,
   );
   start(): Promise<void>;
   close(): Promise<void>;
@@ -32,3 +34,6 @@ export function requestGatewayAccountRefresh(
   provider: string,
   signal?: AbortSignal,
 ): Promise<{ provider: string }>;
+
+export type ResetCreditRequest = { method: "reset/list" } | { method: "reset/preview"; creditId: string } | { method: "reset/consume"; attemptId: string };
+export function requestGatewayResetCredits(configPath: string, request: ResetCreditRequest, signal?: AbortSignal): Promise<unknown>;

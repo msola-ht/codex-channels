@@ -113,6 +113,7 @@
   已有 Thread
   不在 Turn 覆盖中更换 Provider。Application 跨 Provider 选择时新建 Thread；`thread/fork`
   只用于用户显式创建同一 Provider 的历史分支，不承担跨 Provider 历史转换。
+  重置券读取保留受控可用券的 ID、到期时间及展示说明；消费使用显式券 ID 和幂等键，禁止过载自动重试。
   OpenAI 额度读取声明 Luna Reserve 客户端能力，后台恢复轮询省略独立重置券详情；自动切换只解析
   精确隐藏模型 `gpt-reserve`，并用不重试的 `thread/settings/update` 同步 Thread 模型与当前协作模式，
   不写用户级默认设置。

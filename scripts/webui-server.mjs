@@ -20,7 +20,7 @@ import {
   readGatewayConfig,
   validateWebuiConfigDocument,
 } from "../runtime/gateway-config.mjs";
-import { requestGatewayAccountRefresh } from "../runtime/gateway-account-refresh.mjs";
+import { requestGatewayAccountRefresh, requestGatewayResetCredits } from "../runtime/gateway-account-refresh.mjs";
 import { modelRelayConfigSchema } from "../runtime/model-relay-config.mjs";
 import {
   RequestMetricsQueryService,
@@ -129,6 +129,7 @@ export function createWebuiServer({
   applyAccountSettings = applyAccountSettingsMutation,
   loadAccountSettings = loadAccountSettingsResource,
   refreshGatewayAccount = requestGatewayAccountRefresh,
+  resetGatewayCredits = requestGatewayResetCredits,
 } = {}) {
   assertWebuiHost(host);
   if (host === "0.0.0.0" && token === null) {
@@ -155,6 +156,7 @@ export function createWebuiServer({
     applyAccountSettings,
     loadAccountSettings,
     refreshGatewayAccount,
+    resetGatewayCredits,
   );
   const server = createServer((request, response) => {
     handleRequest(environment, staticDir, host, token, serviceStatusCache, management, request, response);
@@ -260,6 +262,7 @@ function createManagementState(
   applyAccountSettings,
   loadAccountSettings,
   refreshGatewayAccount,
+  resetGatewayCredits,
 ) {
   const explicitConfig = environment.CODEX_CONNECT_CONFIG_FILE?.trim();
   const dataDir = explicitConfig ? dirname(resolve(explicitConfig)) : userDataDir(environment);
@@ -294,6 +297,7 @@ function createManagementState(
     applyAccountSettings,
     loadAccountSettings,
     refreshGatewayAccount,
+    resetGatewayCredits,
     confirmations: new ManagementConfirmationStore(),
     tasks,
     limiter: new ManagementRateLimiter(),

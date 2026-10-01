@@ -11,6 +11,8 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
+    expect(markup.quotaCredits).toContain("使用重置券");
+    expect(markup.quotaCreditsEnglish).toContain("Use reset credit");
     expect(markup.quotaCredits).toContain("1970-01-01 00:33");
     expect(markup.quotaCredits).toContain("无到期时间");
     expect(markup.quotaCredits).toContain("其余 2 张：服务端未提供到期明细");
@@ -58,7 +60,7 @@ describe("WebUI metrics table presentation", () => {
         const { GlobalCards, WeeklyQuotaCard, OpencodeGoUsageCard, ClinePassUsageCard, DeepseekBalanceCards, CcgCreditUsageCards } = await server.ssrLoadModule("/src/components/overview/overview-sections.tsx");
         const { QuerySummary } = await server.ssrLoadModule("/src/components/metrics/query-summary.tsx");
         const { ConsolePage } = await server.ssrLoadModule("/src/pages/console-page.tsx");
-        const { accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
+        const { openAiWeeklyQuotaFromSnapshot, accountSnapshotsWithMissingProviders, deepseekAccountFromSnapshot, ccgAccountFromSnapshot, quotaAccountFromSnapshot } = await server.ssrLoadModule("/src/lib/account-refresh-state.ts");
         const { ServerTimeContext } = await server.ssrLoadModule("/src/hooks/use-server-time.ts");
         const { AccountUpdateDescription } = await server.ssrLoadModule("/src/components/overview/account-refresh-feedback.tsx");
         const { ErrorsPage } = await server.ssrLoadModule("/src/pages/errors-page.tsx");
@@ -117,9 +119,9 @@ describe("WebUI metrics table presentation", () => {
           quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
           quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
           quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
-          quotaCreditsEnglish: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null,
+          quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
-          quotaCredits: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: "plus",
+          quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",
             credits: { observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
               expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
           quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
@@ -231,10 +233,16 @@ describe("WebUI metrics table presentation", () => {
         globalThis.fixtureServerClock = undefined;
         globalThis.fixtureApiState = { data: { request: {}, data: { weeklyQuota: { usedPercent: 37.5, resetsAt: 1000, planType: "plus" } } },
           loading: true, error: null };
+        globalThis.fixtureAccounts.data.openaiWeeklyQuota = { usedPercent: 37.5, resetsAt: 1000, planType: "plus" };
         result.consoleQuotaLoading = render(ConsolePage, consoleProps);
         globalThis.fixtureApiState = { ...globalThis.fixtureApiState, loading: false, error: "fixture overview failure" };
         result.consoleQuotaFailed = render(ConsolePage, consoleProps);
-        globalThis.fixtureApiState = { data: { request: {}, data: { weeklyQuota: null } }, loading: false, error: null };
+        globalThis.fixtureApiState = { data: { request: {}, data: { weeklyQuota: { usedPercent: 100, resetsAt: 1000, planType: "plus" } } }, loading: false, error: null };
+        globalThis.fixtureAccounts.data.openaiWeeklyQuota = openAiWeeklyQuotaFromSnapshot({ provider: "openai", limits: {
+          kind: "rate-limits", provider: "openai", limits: { ordinaryUsageLimit: { planType: "plus",
+            secondary: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 4000 } } } } });
+        result.consoleQuotaAfterReset = render(ConsolePage, consoleProps);
+        globalThis.fixtureAccounts.data.openaiWeeklyQuota = null;
         result.consoleQuotaCleared = render(ConsolePage, consoleProps);
         result.accountStale = render(AccountUpdateDescription, { observedAtMs: Date.now() - 16 * 60_000, isDefault: true, refreshFailed: false });
         result.accountFresh = render(AccountUpdateDescription, { observedAtMs: Date.now(), isDefault: false, refreshFailed: false });
@@ -379,6 +387,13 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.partialFailureRetainsSnapshot).toContain("DeepSeek 元数据暂不可用");
     expect(markup.partialFailureRetainsSnapshot).toContain("¥2.00");
     expect(markup.skewedClientFreshAccount).not.toContain("待更新");
+  });
+
+  it("shows the refreshed official window after redemption without another model request", () => {
+    expect(markup.consoleQuotaAfterReset).toContain('aria-valuenow="0"');
+    expect(markup.consoleQuotaAfterReset).toContain("1970-01-01 01:06");
+    expect(markup.consoleQuotaAfterReset).not.toContain('aria-valuenow="100"');
+    expect(markup.consoleQuotaAfterReset).not.toContain("1970-01-01 00:16");
   });
 
   it("keeps the last OpenAI quota during range loading and failures but honors an explicit empty snapshot", () => {

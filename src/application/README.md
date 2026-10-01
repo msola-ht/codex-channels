@@ -84,6 +84,7 @@
   Luna Reserve 后端授权摘要、第三方余额、Credits/配额窗口和未支持状态的可辨识结果，
   以及 Provider 账户适配器与查询窄端口；不同来源不得共用含义不一致的字段。
 - `account-snapshot.ts`：校验并生成跨展示端复用的官方账户快照读模型，不携带凭据或原始响应。
+- `openai-reset-credit-service.ts`：OpenAI 重置券查询、短期选券确认与单次消费；复核账户/券修订、过期及并发，消费结果与额度刷新分离，不保存凭据或自动重试写操作。
 - `provider-account-service.ts`：维护编译期显式 Provider 账户适配器注册表；OpenAI 适配器复用
   App Server 账户查询，未知 Provider 默认返回不支持，不回退到 OpenAI。
   账户用量、额度、单账户刷新和启动预热可携带取消信号，取消后的结果不写入快照。启动预热按

@@ -17,7 +17,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
 }: {
   load: (signal?: AbortSignal) => Promise<Snapshot>
   preview: (input: Input, signal?: AbortSignal) => Promise<{ preview: Preview; confirmationToken: string }>
-  apply: (input: Input, confirmationToken: string, signal?: AbortSignal) => Promise<Result>
+  apply: (input: Input, confirmationToken: string, signal: AbortSignal | undefined, preview: Preview) => Promise<Result>
   retainDataOnError?: boolean
 }) {
   const request = useApi(load, [], { retainDataOnError })
@@ -66,7 +66,7 @@ export function useManagementConfirmedMutation<Snapshot, Input, Preview, Result>
     setActionError(null)
     setActionErrorCode(null)
     try {
-      const result = await apply(pending.input, pending.confirmationToken, controller.signal)
+      const result = await apply(pending.input, pending.confirmationToken, controller.signal, pending.preview)
       if (controller.signal.aborted) return null
       setPendingPreview(null)
       refetch()

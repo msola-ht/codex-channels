@@ -10,6 +10,8 @@ import type {
   ModelSelectionPort,
   ModelOption,
   AccountQueryPort,
+  OpenAiResetCreditSnapshot,
+  ResetCreditOutcome,
   AccountRateLimits,
   AccountThreadUsage,
   AccountUsage,
@@ -40,6 +42,8 @@ import type {
   LunaReserveThreadSettings,
 } from "../application/index.js";
 import type {
+  ConsumeAccountRateLimitResetCreditParams,
+  ConsumeAccountRateLimitResetCreditResponse,
   ConfigReadParams,
   ConfigReadResponse,
   CollaborationModeListResponse,
@@ -1006,6 +1010,37 @@ export class CodexAppServerClient implements
       params,
     }, { retryOverload: true, ...(options.signal ? { signal: options.signal } : {}) });
     return toAccountRateLimits(response);
+  }
+
+  async readResetCredits(signal?: AbortSignal): Promise<OpenAiResetCreditSnapshot> {
+    if (await this.openAiAccountRoute(signal) !== "chatgpt") throw new Error("ChatGPT account required");
+    const response = await this.rpc.request<GetAccountRateLimitsResponse>({
+      method: "account/rateLimits/read", params: { supportsLunaReserve: true, excludeResetCreditDetails: false },
+    }, { retryOverload: true, ...(signal ? { signal } : {}) });
+    const summary = response.rateLimitResetCredits;
+    if (typeof response.accountId !== "string" || !response.accountId || !summary
+      || !((typeof summary.availableCount === "bigint" && summary.availableCount >= 0n)
+        || (typeof summary.availableCount === "number" && Number.isSafeInteger(summary.availableCount) && summary.availableCount >= 0))
+      || !Array.isArray(summary.credits)) throw new Error("Reset credit details unavailable");
+    const credits = summary.credits.filter(credit => credit.status === "available" && credit.resetType === "codexRateLimits");
+    if (credits.length > 128 || response.accountId.length > 256) throw new Error("Reset credit response too large");
+    return { accountId: response.accountId, availableCount: String(summary.availableCount),
+      credits: credits.map(credit => {
+        if (typeof credit.id !== "string" || !credit.id || credit.id.length > 256 || /[\0\r\n]/u.test(credit.id)
+          || (credit.title !== null && (typeof credit.title !== "string" || credit.title.length > 256))
+          || (credit.description !== null && (typeof credit.description !== "string" || credit.description.length > 2048))
+          || (credit.expiresAt !== null && (!Number.isSafeInteger(credit.expiresAt) || credit.expiresAt < 0 || credit.expiresAt > 8_640_000_000_000))) throw new Error("Invalid reset credit");
+        return { id: credit.id, expiresAt: credit.expiresAt, title: credit.title, description: credit.description };
+      }).sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity)) };
+  }
+
+  async consumeResetCredit(creditId: string, idempotencyKey: string, signal?: AbortSignal): Promise<ResetCreditOutcome> {
+    const response = await this.rpc.request<ConsumeAccountRateLimitResetCreditResponse>({
+      method: "account/rateLimitResetCredit/consume",
+      params: { creditId, idempotencyKey } satisfies ConsumeAccountRateLimitResetCreditParams,
+    }, { retryOverload: false, ...(signal ? { signal } : {}) });
+    if (!["reset", "nothingToReset", "noCredit", "alreadyRedeemed"].includes(response.outcome)) throw new Error("Invalid reset outcome");
+    return response.outcome;
   }
 
   async updateLunaReserveThreadSettings(

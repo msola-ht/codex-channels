@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   openAiCreditsFromSnapshot,
+  openAiWeeklyQuotaFromSnapshot,
   accountRefreshErrors,
   accountSnapshotIsStale,
   scheduleAccountSnapshotExpiry,
@@ -261,5 +262,25 @@ describe("OpenAI credit snapshot presentation", () => {
     expect(openAiCreditsFromSnapshot(undefined)).toBeNull();
     expect(openAiCreditsFromSnapshot({ ...snapshot, provider: "deepseek" })).toBeNull();
     expect(openAiCreditsFromSnapshot({ ...snapshot, limits: null })).toBeNull();
+  });
+});
+
+describe("OpenAI current weekly quota snapshot", () => {
+  const snapshot = (ordinaryUsageLimit: unknown) => ({ provider: "openai", accountId: null, displayName: "OpenAI", default: true,
+    observedAtMs: 2000, available: true, usage: null, limits: { kind: "rate-limits", provider: "openai", limits: { ordinaryUsageLimit } } });
+  it.each(["primary", "secondary"])("reads the explicit weekly %s window including zero", slot => {
+    expect(openAiWeeklyQuotaFromSnapshot(snapshot({ planType: "pro", [slot]: { usedPercent: 0, windowDurationMins: 10080, resetsAt: 4000 } })))
+      .toEqual({ usedPercent: 0, resetsAt: 4_000_000, planType: "pro" });
+  });
+  it("does not treat other or absent windows as a weekly quota", () => {
+    expect(openAiWeeklyQuotaFromSnapshot(snapshot({ planType: "pro", primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 2000 } })))
+      .toEqual({ usedPercent: null, resetsAt: null, planType: "pro" });
+    expect(openAiWeeklyQuotaFromSnapshot(undefined)).toBeNull();
+    expect(openAiWeeklyQuotaFromSnapshot({ ...snapshot(null), provider: "deepseek" })).toBeNull();
+    expect(openAiWeeklyQuotaFromSnapshot(snapshot(null))).toBeNull();
+  });
+  it("does not render invalid percent or timestamps", () => {
+    expect(openAiWeeklyQuotaFromSnapshot(snapshot({ secondary: { usedPercent: NaN, windowDurationMins: 10080, resetsAt: 9e15 } })))
+      .toEqual({ usedPercent: null, resetsAt: null, planType: null });
   });
 });
