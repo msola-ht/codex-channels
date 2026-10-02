@@ -66,7 +66,8 @@ DeepSeek 运行实例采用 `ds-<账户>` 与 `sf-ds-<账户>`，账户共享官
 
 ## 官方文档
 
-本次基线从 0.155.1 升至 0.160.0，包含 0.156.0 与 0.160.0 两次正式发布。
+当前基线为 0.160.0，本次由 0.156.1 升级；跨版本取舍见[升级决策](codex-cli-upgrade-decisions.md)。
+以下同时记录此前已采用并继续保留的能力。
 采用稳定的 `thread/resume.collaborationMode` 恢复实际模式，并移除已停用的人格设置；
 Gateway 为 OpenAI ChatGPT 图片上传原图并提交官方 fileId，历史和后续引用由 App Server 管理；
 API Key、第三方 Provider 和独立自定义 OpenAI 后端保留内联图片输入。通过 `config/read`
