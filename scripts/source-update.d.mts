@@ -20,7 +20,7 @@ export type SourceUpdateStage =
   | "switch-source"
   | "refresh-command"
   | "upgrade-databases"
-  | "configure-codex-daemon"
+  | "configure-codex-defaults"
   | "restore-services"
   | "cleanup";
 

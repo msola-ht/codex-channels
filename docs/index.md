@@ -373,7 +373,9 @@ Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JS
 验证使用 HTTP/WS metrics、指标 IPC、request metrics store、relay upgrade、metrics export、thread summary、completion timing 与 lifecycle presentation 测试。
 运行时只接受当前 Schema v24；v20/v21/v22/v23 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
 
-更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
+更新器关闭原生 daemon 自动启动、仅为未设置模型且未选用 Profile 的 OpenAI 用户主配置补写
+`gpt-6.1-sol`，均复用用户层 `config/read` 与版本化 `config/batchWrite`；模型 ID 对照锁定版本的
+`codex-rs/models-manager/models.json`，已有模型和第三方 Provider 保留；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用，
 验证见 `source-update.test.ts` 与 `real-app-server-isolated-state.test.ts`。
 

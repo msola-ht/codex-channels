@@ -7,12 +7,21 @@ import {
 } from "../runtime/executable.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
-export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
+// Older running updaters import this entry after switching to the new checkout.
+export { configureCodexUpdateDefaults as disableCodexDaemonAutoStart };
+
+export async function configureCodexUpdateDefaults(environment = process.env, dependencies = {}) {
   await updateCodexUserConfig(environment, (config) => {
     const features = config.features;
-    return features?.daemon_auto_start === false
+    const edits = features?.daemon_auto_start === false
       ? []
       : [{ keyPath: "features.daemon_auto_start", value: false }];
+    // Only seed the unselected OpenAI root; preserve explicit models and Profiles.
+    if (config.model === undefined && config.profile === undefined
+      && (config.model_provider === undefined || config.model_provider === "openai")) {
+      edits.push({ keyPath: "model", value: "gpt-6.1-sol" });
+    }
+    return edits;
   }, dependencies);
 }
 

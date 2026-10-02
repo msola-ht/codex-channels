@@ -98,9 +98,11 @@ codexc update
 `~/.codex/config.toml`。即使 `main` 没有新提交或使用 npm 安装模式也执行同一只读检查。
 只有这些步骤全部通过，才停止已安装的核心服务，安装配套 CLI、切换源码并刷新全局命令，调用目标版本的数据库升级入口，成功后恢复服务并确认就绪。可选 Relay 在停止前记录运行状态，成功及失败恢复都只启动原本运行且仍启用的实例；手工停止的实例保持停止。
 
-更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
+更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。同一事务仅在用户层根级未设置 `model`、未选用 `profile`，且 `model_provider` 未设置或为 `openai` 时补写 `model = "gpt-6.1-sol"`。已有模型、思考等级、第三方 Provider 和 Profile 保留；不刷新模型目录，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
-新安装完成配置后也可运行 `codexc update` 应用此设置。若首次升级由尚不包含该步骤的旧更新器执行，安装新代码后再运行一次 `codexc update`；以输出“已关闭 Codex 原生 daemon 自动启动”为已执行依据。
+为已运行旧更新器切换候选后的调用保留 `disableCodexDaemonAutoStart` 内部入口，委托同一默认值事务；新更新器使用 `configureCodexUpdateDefaults`。
+
+新安装完成配置后也可运行 `codexc update` 应用此设置。若首次升级由尚不包含该步骤的旧更新器执行，安装新代码后再运行一次 `codexc update`；以输出“Codex 更新默认值已检查”为新策略已执行依据。`codexc init` 仍只创建 Gateway 配置，不写 Codex 主文件默认模型。
 
 当前状态数据库使用 Schema v6，新增未绑定渠道会话的模型偏好。`codexc update` 支持显式从 v5
 升级到 v6：预检只读检查旧结构，停服后获取 Gateway 独占锁，在数据库同目录创建

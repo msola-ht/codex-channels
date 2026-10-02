@@ -52,7 +52,10 @@ export interface CodexUserConfigTransactionClient extends CodexUserConfigClientL
 export interface CodexUserConfigClient
   extends CodexDefaultSettingsClient, CodexUserConfigTransactionClient {}
 
-export function disableCodexDaemonAutoStart(
+/** Stable handoff for an already-running older updater. */
+export { configureCodexUpdateDefaults as disableCodexDaemonAutoStart };
+
+export function configureCodexUpdateDefaults(
   environment?: NodeJS.ProcessEnv,
   dependencies?: {
     createClient?: (options: { environment: NodeJS.ProcessEnv }) => Promise<CodexUserConfigTransactionClient>;

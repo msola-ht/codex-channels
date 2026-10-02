@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
+import { configureCodexUpdateDefaults, disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
 
 import {
   getCodexVersionMismatchRemediation,
@@ -36,11 +36,14 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
+  it("keeps the running older updater handoff on the same defaults transaction", () => {
+    expect(disableCodexDaemonAutoStart).toBe(configureCodexUpdateDefaults);
+  });
   it.each([undefined, true, false])("disables daemon auto-start with version protection (previous=%s)", async previous => {
     const config = { model: "keep", features: { daemon_auto_start: previous, write_stdin_approval: true } };
     const writes: unknown[] = [];
     let closed = false;
-    await disableCodexDaemonAutoStart({}, { createClient: async () => ({
+    await configureCodexUpdateDefaults({}, { createClient: async () => ({
       connect: async () => undefined,
       close: async () => { closed = true; },
       readUserConfigSnapshot: async () => ({ config, version: "v1" }),
@@ -53,6 +56,28 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(closed).toBe(true);
   });
 
+  it.each([
+    [{}, true],
+    [{ model_provider: "openai" }, true],
+    [{ model: "gpt-6-sol" }, false],
+    [{ model: "gpt-6.1-sol" }, false],
+    [{ model: "" }, false],
+    [{ model_provider: "custom" }, false],
+    [{ profile: "work" }, false],
+  ] as const)("seeds only an unset OpenAI root model: %j", async (selection, seed) => {
+    const config = { ...selection, model_reasoning_effort: "high", features: { daemon_auto_start: false } };
+    const writes: unknown[] = [];
+    await configureCodexUpdateDefaults({}, { createClient: async () => ({
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: async () => ({ config, version: "v1" }),
+      writeUserConfigEdits: async (edits, options) => { writes.push({ edits, options }); },
+    }) });
+    expect(writes).toEqual(seed ? [{ edits: [{ keyPath: "model", value: "gpt-6.1-sol" }],
+      options: { expectedVersion: "v1" } }] : []);
+    expect(config.model_reasoning_effort).toBe("high");
+  });
+
   it("reports daemon configuration failure without claiming update success", async () => {
     const fixture = createInstalledFixture("daemon-settings-failure-");
     const messages: string[] = [];
@@ -61,7 +86,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       inspectStaged: async () => ({ services: { installed: false }, databaseUpdatesRequired: false }),
       validateCodexContract: () => {},
       runCommand: (_command, args) => {
-        if (args.some(arg => arg.includes("disableCodexDaemonAutoStart"))) throw new Error("config conflict");
+        if (args.some(arg => arg.includes("configureCodexUpdateDefaults"))) throw new Error("config conflict");
       },
       writeMessage: (_kind, message) => { messages.push(message); },
     })).rejects.toMatchObject({ message: expect.stringContaining("config conflict") });
@@ -70,7 +95,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
 
   it("closes the config client and propagates a concurrent write conflict", async () => {
     let closed = false;
-    await expect(disableCodexDaemonAutoStart({}, { createClient: async () => ({
+    await expect(configureCodexUpdateDefaults({}, { createClient: async () => ({
       connect: async () => undefined,
       close: async () => { closed = true; },
       readUserConfigSnapshot: async () => ({ config: {}, version: "stale" }),
@@ -89,7 +114,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       stopServices: () => {}, inspectRelayRunning: () => false,
       startServices: () => { restored = true; },
       runCommand: (command, args, options) => {
-        if (args.some(arg => arg.includes("disableCodexDaemonAutoStart"))) throw new Error("config conflict");
+        if (args.some(arg => arg.includes("configureCodexUpdateDefaults"))) throw new Error("config conflict");
         execFileSync(command, args, {
           cwd: options.cwd as string, env: options.environment as NodeJS.ProcessEnv, stdio: "ignore",
         });
@@ -97,7 +122,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     });
     await expect(update).rejects.toThrow("config conflict");
     const error = await update.catch(value => value);
-    expect(getSourceUpdateFailure(error)).toMatchObject({ stage: "configure-codex-daemon", recovery: { services: "restored" } });
+    expect(getSourceUpdateFailure(error)).toMatchObject({ stage: "configure-codex-defaults", recovery: { services: "restored" } });
     expect(restored).toBe(true);
   });
 
@@ -322,7 +347,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
     expect(calls).toEqual(["validate"]);
     expect(messages).toEqual([
       ["note", "正在检查配套 Codex CLI、当前配置和数据库升级条件。"],
-      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
+      ["note", "Codex 更新默认值已检查：OpenAI 主配置未设置模型且未选用 Profile 时补写 gpt-6.1-sol，已有选择保留；已关闭原生 daemon 自动启动，现有后台不受影响。"],
       ["success", "检查完成：配套 Codex CLI 0.147.0 与数据库均无需更新。"],
     ]);
   });
@@ -356,7 +381,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
         "switch-source",
         "refresh-command",
         "upgrade-databases",
-        "configure-codex-daemon",
+        "configure-codex-defaults",
         "restore-services",
         "cleanup",
       ],
@@ -459,8 +484,8 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       "refresh-command:completed",
       "upgrade-databases:started",
       "upgrade-databases:completed",
-      "configure-codex-daemon:started",
-      "configure-codex-daemon:completed",
+      "configure-codex-defaults:started",
+      "configure-codex-defaults:completed",
       "cleanup:started",
       "cleanup:completed",
     ]);
@@ -516,7 +541,7 @@ describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
       ["note", "正在核对候选版本的 Codex 公开合同。"],
       ["note", "候选源码已通过校验，准备切换。"],
       ["note", "源码命令已刷新到 npm 全局安装。"],
-      ["note", "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。"],
+      ["note", "Codex 更新默认值已检查：OpenAI 主配置未设置模型且未选用 Profile 时补写 gpt-6.1-sol，已有选择保留；已关闭原生 daemon 自动启动，现有后台不受影响。"],
     ]);
   });
 
@@ -1191,7 +1216,7 @@ function createMainRepository(root: string) {
     "export function applyDatabaseUpdates() {}\n",
   );
   writeFileSync(join(repository, "scripts", "codex-user-config.mjs"),
-    "export async function disableCodexDaemonAutoStart() {}\n");
+    "export async function configureCodexUpdateDefaults() {}\n");
   writeFileSync(
     join(repository, "scripts", "codex-public-cli-contract.mjs"),
     "if (process.argv[2] !== '--check-user-settings') process.exit(1);\n",
