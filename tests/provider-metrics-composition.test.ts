@@ -55,13 +55,15 @@ describe("ProviderMetricsComposition", () => {
     });
     await composition.start();
 
+    const diagnostics = { upstreamProvider: "deepseek", upstreamAttemptCount: 2, modelAttemptCount: 1, finishReason: "stop", errorStage: "stream" as const, upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 };
     const traffic = { label: provider, session: "2026-09-19T00-00-00-000Z", interaction: 2 };
-    await sendProviderProxyMetrics(socketPath, { ...metrics(), upstreamTtftMs: 569, traffic, responseUsageAmount: "0.12345678901234567890" });
+    await sendProviderProxyMetrics(socketPath, { ...metrics(), ...diagnostics, upstreamTtftMs: 569, traffic, responseUsageAmount: "0.12345678901234567890" });
 
     await vi.waitFor(() => {
       expect(record).toHaveBeenCalledWith({
         provider,
         ...metrics(),
+        ...diagnostics,
         traffic,
         ...(provider === "openai" ? { upstreamTtftMs: 569 } : {}),
         responseUsageAmount: "0.12345678901234567890",

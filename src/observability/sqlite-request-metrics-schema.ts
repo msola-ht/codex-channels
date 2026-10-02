@@ -21,7 +21,8 @@ export const metricStorageV20Columns = [
 export const metricStorageV23Columns = [...metricStorageV20Columns,
   "source", "caller_id", "key_id", "credential_generation", "relay_request_id", "delivery_status",
 ] as const;
-export const metricStorageColumns = [...metricStorageV23Columns, "response_usage_amount"] as const;
+export const metricStorageV24Columns = [...metricStorageV23Columns, "response_usage_amount"] as const;
+export const metricStorageColumns = [...metricStorageV24Columns, "upstream_provider", "upstream_attempt_count", "model_attempt_count", "finish_reason", "error_stage", "upstream_error_code", "upstream_error_type", "upstream_http_status"] as const;
 export const metricStorageColumnsSql = metricStorageColumns.join(", ");
 
 export const modelRequestMetricsV20TableSql = `
@@ -115,8 +116,21 @@ export const modelRequestMetricsV23TableSql = modelRequestMetricsV20TableSql.rep
 export const modelRequestMetricsV22TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV22Check);
 export const modelRequestMetricsV21TableSql = modelRequestMetricsV23TableSql.replace(relayIdentityCheck, relayIdentityV21Check);
 export const responseUsageAmountColumn = "response_usage_amount TEXT CHECK (response_usage_amount IS NULL OR (typeof(response_usage_amount) = 'text' AND length(response_usage_amount) BETWEEN 1 AND 128))";
-export const modelRequestMetricsTableSql = modelRequestMetricsV23TableSql.replace(
+export const modelRequestMetricsV24TableSql = modelRequestMetricsV23TableSql.replace(
   "    CHECK (", `    ${responseUsageAmountColumn},\n    CHECK (`,
+);
+export const requestDiagnosticColumnDefinitions = [
+  "upstream_provider TEXT CHECK (upstream_provider IS NULL OR (typeof(upstream_provider) = 'text' AND length(upstream_provider) BETWEEN 1 AND 256 AND upstream_provider NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_attempt_count INTEGER CHECK (upstream_attempt_count IS NULL OR (typeof(upstream_attempt_count) = 'integer' AND upstream_attempt_count BETWEEN 0 AND 9007199254740991))",
+  "model_attempt_count INTEGER CHECK (model_attempt_count IS NULL OR (typeof(model_attempt_count) = 'integer' AND model_attempt_count BETWEEN 0 AND 9007199254740991))",
+  "finish_reason TEXT CHECK (finish_reason IS NULL OR (typeof(finish_reason) = 'text' AND length(finish_reason) BETWEEN 1 AND 256 AND finish_reason NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "error_stage TEXT CHECK (error_stage IS NULL OR (error_stage IN ('http', 'stream')))",
+  "upstream_error_code TEXT CHECK (upstream_error_code IS NULL OR (typeof(upstream_error_code) = 'text' AND length(upstream_error_code) BETWEEN 1 AND 256 AND upstream_error_code NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_error_type TEXT CHECK (upstream_error_type IS NULL OR (typeof(upstream_error_type) = 'text' AND length(upstream_error_type) BETWEEN 1 AND 256 AND upstream_error_type NOT GLOB '*[^a-zA-Z0-9_.:/-]*'))",
+  "upstream_http_status INTEGER CHECK (upstream_http_status IS NULL OR (typeof(upstream_http_status) = 'integer' AND upstream_http_status BETWEEN 400 AND 599))",
+] as const;
+export const modelRequestMetricsTableSql = modelRequestMetricsV24TableSql.replace(
+  "    CHECK (", `    ${requestDiagnosticColumnDefinitions.join(",\n    ")},\n    CHECK (`,
 );
 export const relayMetricIndexesSql = `
   CREATE UNIQUE INDEX model_request_metrics_relay_request
@@ -196,7 +210,7 @@ export class ModelRequestMetricsSchemaError extends Error {
     const detail = options?.cause === undefined
       ? `版本不兼容：当前 ${actualVersion}，Gateway 需要 ${expectedVersion}。`
       : `Schema ${actualVersion} 结构不完整。`;
-    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 || actualVersion === 23 ? `codexc metrics upgrade --from ${actualVersion} --to 24 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
+    const remedy = actualVersion === 20 || actualVersion === 21 || actualVersion === 22 || actualVersion === 23 || actualVersion === 24 ? `codexc metrics upgrade --from ${actualVersion} --to 25 --apply 保留数据升级指标库` : "停止服务并核对数据库版本及备份，勿删除数据库";
     super(
       `模型请求指标数据库${detail}请运行 ${remedy}`,
       options,

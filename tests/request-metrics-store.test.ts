@@ -26,6 +26,22 @@ afterEach(() => {
 });
 
 describe("SqliteModelRequestMetricsStore", () => {
+  it("persists request diagnostic facts without traffic and rejects unsafe diagnostic values", () => {
+    const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
+    const facts = { upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop",
+      errorStage: "stream" as const, upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429 };
+    try {
+      store.record({ ...sample(), ...facts }); store.record(sample());
+      expect(store.requestRowsAfter(0, 10)[0]).toMatchObject({ ...facts, traffic: null });
+      expect(store.requestRowsAfter(0, 10)[1]).toMatchObject(Object.fromEntries(Object.keys(facts).map(key => [key, null])));
+      expect(store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, limit: 10 }).records[1]).toMatchObject(facts);
+      for (const invalid of [{ upstreamProvider: "unsafe value" }, { upstreamErrorCode: "x".repeat(257) },
+        { upstreamAttemptCount: -1 }, { modelAttemptCount: 1.5 }, { upstreamHttpStatus: 200 }]) {
+        expect(() => store.record({ ...sample(), ...invalid })).toThrow();
+      }
+      expect(store.count()).toBe(2);
+    } finally { store.close(); }
+  });
   it("persists exact response amounts and distinguishes missing usage from zero in request queries", () => {
     const store = new SqliteModelRequestMetricsStore(join(temporaryDirectory(), "metrics.sqlite3"));
     try {

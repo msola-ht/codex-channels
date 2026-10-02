@@ -31,12 +31,12 @@ afterEach(() => {
 
 describe("metrics command options", () => {
   it("accepts only the explicit upgrade range and bounded relay query identities", () => {
-    for (const from of ["20", "21", "22", "23"]) {
-      expect(() => validateMetricsCommandArgs("upgrade", ["--from", from, "--to", "24"])).not.toThrow();
+    for (const from of ["20", "21", "22", "23", "24"]) {
+      expect(() => validateMetricsCommandArgs("upgrade", ["--from", from, "--to", "25"])).not.toThrow();
     }
-    expect(() => validateMetricsCommandArgs("upgrade", ["--from", "19", "--to", "24", "--apply"])).toThrow();
-    expect(() => validateMetricsCommandArgs("rollback", ["--from", "24", "--to", "20", "--backup", "fixture", "--sha256", "a".repeat(64), "--apply"])).not.toThrow();
-    expect(() => validateMetricsCommandArgs("rollback", ["--from", "24", "--to", "20"])).toThrow();
+    expect(() => validateMetricsCommandArgs("upgrade", ["--from", "19", "--to", "25", "--apply"])).toThrow();
+    expect(() => validateMetricsCommandArgs("rollback", ["--from", "25", "--to", "20", "--backup", "fixture", "--sha256", "a".repeat(64), "--apply"])).not.toThrow();
+    expect(() => validateMetricsCommandArgs("rollback", ["--from", "25", "--to", "20"])).toThrow();
     expect(() => validateMetricsCommandArgs("export", ["--source", "relay", "--caller", "client"])).not.toThrow();
     expect(() => validateMetricsCommandArgs("export", ["--source", "unknown"])).toThrow();
   });

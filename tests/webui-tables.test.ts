@@ -215,6 +215,10 @@ describe("WebUI metrics table presentation", () => {
           requests: render(RequestsTable, requestProps),
           requestDetail: render(RequestDetail, { record: { ...record, totalTokens: 120, transport: "http", responseFormat: "sse", reasoningEffort: "high", requestServiceTier: "priority", serviceTier: "default" } }),
           requestDetailEnglish: render(RequestDetail, { record }, "en"),
+          requestDiagnostics: render(RequestDetail, { record: { ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2,
+            finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 } }),
+          requestDiagnosticsEn: render(RequestDetail, { record: { ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2,
+            finishReason: "stop", errorStage: "http", upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 } }, "en"),
           requestHistorical: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }),
           requestHistoricalEn: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }, "en"),
           requestMissingModels: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: null } }),
@@ -231,7 +235,7 @@ describe("WebUI metrics table presentation", () => {
           requestsMissingModel: render(RequestsTable, { ...requestProps, records: [{ ...record, requestModel: null, responseModel: "model-test" }] }),
           requestsOtherUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "other-provider" }] }),
           trafficOtherUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "other-provider" }], onOpen: noop }),
-          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek" }] }),
+          requestsUpstream: render(RequestsTable, { ...requestProps, records: [{ ...record, upstreamProvider: "deepseek", upstreamAttemptCount: 3 }] }),
           trafficUpstream: render(TrafficTable, { exchanges: [{ ...exchange, upstreamProvider: "deepseek" }], onOpen: noop }),
           loading: render(RequestsTable, { ...requestProps, loading: true }),
           ascending: render(RequestsTable, { ...requestProps, sorting: [{ id: "totalDuration", desc: false }] }),
@@ -592,8 +596,7 @@ describe("WebUI metrics table presentation", () => {
 
   it("shows only actual upstream badges for CLP account and dump identities", () => {
     for (const key of ["requestsClp", "trafficClp"]) {
-      if (key === "trafficClp") expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
-      else expect(markup[key]).not.toContain('title="routing.finalProvider"');
+      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
       expect(markup[key]).not.toContain("hidden-response-model");
       expect(markup[key]).not.toContain("响应模型：");
       expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
@@ -604,10 +607,20 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficClpNoUpstream).not.toContain('title="routing.finalProvider"');
   });
 
-  it("does not project optional dump evidence onto requests or errors", () => {
-    for (const key of ["requestsUpstream", "requestsOtherUpstream", "errorsUpstream"]) {
-      expect(markup[key]).not.toContain('title="routing.finalProvider"');
+  it("renders independently collected request diagnostics in both languages", () => {
+    for (const key of ["requestDiagnostics", "requestDiagnosticsEn"]) {
+      for (const value of ["deepseek", "stop", "rate_limit", "429"]) expect(markup[key]).toContain(value);
     }
+    for (const label of ["实际上游提供商", "提供商尝试次数", "模型尝试次数", "流式阶段", "内层上游 HTTP 状态"]) expect(markup.requestDiagnostics).toContain(label);
+    for (const label of ["Actual upstream provider", "Provider attempts", "Model attempts", "HTTP phase", "Inner upstream HTTP status"]) expect(markup.requestDiagnosticsEn).toContain(label);
+  });
+
+  it("shows independently collected request upstream evidence, leaving aggregate errors unchanged", () => {
+    for (const key of ["requestsUpstream", "requestsOtherUpstream", "requestsClp"]) {
+      expect(markup[key]).toContain('title="routing.finalProvider"');
+    }
+    expect(markup.requestsUpstream).toContain("尝试 3 次");
+    expect(markup.errorsUpstream).not.toContain('title="routing.finalProvider"');
   });
 
   it("shows the reported final provider beside the detail model without inferring fallbacks", () => {

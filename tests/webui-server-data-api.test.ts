@@ -114,7 +114,7 @@ describe("webui server data API", () => {
     recordSample(fixture.databasePath, {
       ...metricSample(), provider: "openai", upstreamTtftMs: 569.25,
       requestServiceTier: "priority", serviceTier: "default",
-      responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
+      upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, outputTokens: 1_000, requestModel: "requested", responseModel: "echoed", traffic,
     });
     recordSample(fixture.databasePath, metricSample());
     const { origin } = await startServer(fixture.environment);
@@ -124,7 +124,7 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ provider: string; upstreamTtftMs: number | null }> };
       expect(body.records.find((row) => row.provider === "openai")?.upstreamTtftMs).toBe(569.25);
       expect(body.records.find((row) => row.provider === "openai")).toMatchObject({
-        responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
+        upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop", errorStage: "stream", upstreamErrorCode: "rate_limit_exceeded", upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, responseUsageAmount: "0.12345678901234567890", firstTokenMs: 12.5, totalDurationMs: 1234.5, requestModel: "requested", responseModel: "echoed", traffic,
         requestServiceTier: "priority", serviceTier: "default",
       });
       expect(body.records.find((row) => row.provider === "deepseek")).toMatchObject({
@@ -152,16 +152,16 @@ describe("webui server data API", () => {
     const list = await fetch(`${origin}/api/v1/requests?range=all`);
     expect(list.status).toBe(200);
     const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
     const exported = await fetch(`${origin}/api/v1/requests/export?range=all`);
     expect(exported.status).toBe(200);
     const exportedRecord = ((await exported.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(exportedRecord).not.toHaveProperty("upstreamProvider");
+    expect(exportedRecord).toHaveProperty("upstreamProvider", null);
   });
   it.each(["missing", "not-directory", "invalid-index"])("keeps requests, errors and export usable with unavailable capture: %s", async state => {
     const fixture = createFixture();
     const session = "broken-capture";
-    recordSample(fixture.databasePath, { ...metricSample(), status: "failed", httpStatus: 502,
+    recordSample(fixture.databasePath, { ...metricSample(), status: "failed", httpStatus: 502, upstreamProvider: "deepseek", upstreamAttemptCount: 2,
       traffic: { label: "openai", session, interaction: 1 } });
     if (state === "not-directory") writeFileSync(join(fixture.home, "traffic"), "not a dump directory");
     if (state === "invalid-index") {
@@ -175,7 +175,7 @@ describe("webui server data API", () => {
       const body = await response.json() as { records: Array<{ status: string; traffic: unknown; upstreamProvider?: string }> };
       expect(body.records).toHaveLength(1);
       expect(body.records[0]).toMatchObject({ status: "failed", traffic: { label: "openai", session, interaction: 1 } });
-      expect(body.records[0]).not.toHaveProperty("upstreamProvider");
+      expect(body.records[0]).toMatchObject({ upstreamProvider: "deepseek", upstreamAttemptCount: 2 });
     }
   });
   it("keeps serving the request list when the referenced call record is missing", async () => {
@@ -188,7 +188,7 @@ describe("webui server data API", () => {
     const list = await fetch(`${origin}/api/v1/requests?range=all`);
     expect(list.status).toBe(200);
     const record = ((await list.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
   });
   it("serves errors independently of optional traffic indexes", async () => {
     const fixture = createFixture();
@@ -205,7 +205,7 @@ describe("webui server data API", () => {
     const errors = await fetch(`${origin}/api/v1/errors?range=all`);
     expect(errors.status).toBe(200);
     const record = ((await errors.json()) as { records: Array<{ upstreamProvider?: string }> }).records[0];
-    expect(record).not.toHaveProperty("upstreamProvider");
+    expect(record).toHaveProperty("upstreamProvider", null);
   });
   it("preserves every Provider in API parameters and scoped navigation links", () => {
     const query = { range: "30d" as const, provider: ["openai", "custom,provider"], offset: 50, limit: 50, sort: "input" };

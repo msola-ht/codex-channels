@@ -213,6 +213,15 @@ export interface ThreadTurnsResponse extends MetricsPageSummary {
 }
 
 export interface RequestRecord {
+  upstreamProvider?: string | null
+  upstreamAttemptCount?: number | null
+  modelAttemptCount?: number | null
+  finishReason?: string | null
+  errorStage?: "http" | "stream" | null
+  upstreamErrorCode?: string | null
+  upstreamErrorType?: string | null
+  upstreamHttpStatus?: number | null
+
   source?: "owned" | "relay"
   callerId?: string | null
   /** 当前配置中的用途名称；仅用于展示，不改变历史调用身份或筛选。 */

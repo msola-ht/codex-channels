@@ -17,6 +17,14 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
   const fields = [
     [t("requests.recordedAt"), `${formatTimestamp(record.recordedAtMs)} · ${getServerTimeZone()}`],
     [t("metrics.provider"), record.provider],
+    [t("requestDetail.upstreamProvider"), record.upstreamProvider],
+    [t("requestDetail.upstreamAttemptCount"), formatCount(record.upstreamAttemptCount)],
+    [t("requestDetail.modelAttemptCount"), formatCount(record.modelAttemptCount)],
+    [t("requestDetail.finishReason"), record.finishReason],
+    [t("requestDetail.errorStage"), record.errorStage === "http" ? t("requestDetail.httpStage") : record.errorStage === "stream" ? t("requestDetail.streamStage") : null],
+    [t("requestDetail.upstreamErrorCode"), record.upstreamErrorCode],
+    [t("requestDetail.upstreamErrorType"), record.upstreamErrorType],
+    [t("requestDetail.upstreamHttpStatus"), record.upstreamHttpStatus],
     [t("requestDetail.requestModel"), record.requestModel],
     [t("requestDetail.responseModel"), record.responseModel],
     ...(record.requestModel === null && record.responseModel === null && record.model !== null

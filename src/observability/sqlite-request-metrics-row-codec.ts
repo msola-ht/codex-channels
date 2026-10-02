@@ -38,6 +38,15 @@ export interface MetricRow {
   reasoning_output_tokens: number | null;
   total_tokens: number | null;
   response_usage_amount: string | null;
+  upstream_provider: string | null;
+  upstream_attempt_count: number | null;
+  model_attempt_count: number | null;
+  finish_reason: string | null;
+  error_stage: "http" | "stream" | null;
+  upstream_error_code: string | null;
+  upstream_error_type: string | null;
+  upstream_http_status: number | null;
+
   request_started_at_ms: number;
   response_completed_at_ms: number;
   recorded_at_ms: number;
@@ -171,6 +180,15 @@ export function toStoredMetric(row: MetricRow): StoredModelRequestMetric {
     reasoningOutputTokens: row.reasoning_output_tokens,
     totalTokens: row.total_tokens,
     responseUsageAmount: row.response_usage_amount,
+    upstreamProvider: row.upstream_provider,
+    upstreamAttemptCount: row.upstream_attempt_count,
+    modelAttemptCount: row.model_attempt_count,
+    finishReason: row.finish_reason,
+    errorStage: row.error_stage,
+    upstreamErrorCode: row.upstream_error_code,
+    upstreamErrorType: row.upstream_error_type,
+    upstreamHttpStatus: row.upstream_http_status,
+
     requestStartedAtMs: row.request_started_at_ms,
     responseCompletedAtMs: row.response_completed_at_ms,
     weeklyQuota: row.weekly_quota_limit_id === null

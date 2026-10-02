@@ -9,7 +9,7 @@ import { endToEndHeaders } from "./request-routing.js";
 
 export interface DirectModelTarget extends ProviderProxyUpstream { authorization: string }
 
-export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: DirectChatCapture): Promise<void> {
+export async function validateDirectModelResponse(incoming: IncomingMessage, stream: boolean, capture?: Pick<DirectChatCapture, "value" | "invalid">): Promise<void> {
   if (incoming.statusCode !== 200) throw await readChatHttpError(incoming, capture);
   const contentType = incoming.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== (stream ? "text/event-stream" : "application/json")) {

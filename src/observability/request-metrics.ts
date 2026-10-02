@@ -3,6 +3,16 @@ export type ModelResponseFormat = "sse" | "json" | "websocket" | "unknown";
 export type ModelRequestOperation = "response" | "compact";
 export type ModelRequestStatus = "completed" | "failed" | "incomplete" | "unknown";
 export interface ModelRequestMetricSample {
+  /** 上游明确返回的诊断摘要；与可选报文转储独立，历史缺失为空。 */
+  upstreamProvider?: string | null;
+  upstreamAttemptCount?: number | null;
+  modelAttemptCount?: number | null;
+  finishReason?: string | null;
+  errorStage?: "http" | "stream" | null;
+  upstreamErrorCode?: string | null;
+  upstreamErrorType?: string | null;
+  upstreamHttpStatus?: number | null;
+
   source?: "owned" | "relay";
   callerId?: string | null;
   keyId?: string | null;

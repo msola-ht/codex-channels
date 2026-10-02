@@ -371,7 +371,8 @@ Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JS
 及 [`client_websockets.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/tests/suite/client_websockets.rs) 的 Credits 元数据合同；不新增 App Server RPC 或通知订阅。
 完成卡片通过精确 Turn 查询及递归会话查询汇总 OpenAI 单次原值，携带采集/缺失请求数；不新增 Schema 字段或使用浮点求和。
 验证使用 HTTP/WS metrics、指标 IPC、request metrics store、relay upgrade、metrics export、thread summary、completion timing 与 lifecycle presentation 测试。
-运行时只接受当前 Schema v24；v20/v21/v22/v23 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
+Schema v25 增加请求级上游诊断摘要，普通 Provider Proxy 与 Relay 通过独立采集和受校验 IPC 写入同一指标库；WebUI 请求列表及详情、JSON/CSV 导出直接读取，不依赖调用转储。
+运行时只接受当前 Schema v25；v20/v21/v22/v23/v24 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
 
 更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
 入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用，

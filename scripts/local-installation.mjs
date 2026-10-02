@@ -28,9 +28,9 @@ export function inspectGatewayConfiguration(environment = process.env) {
 export function inspectDatabaseUpdates(environment = process.env) {
   const state = inspectStateDatabaseUpgrade(environment);
   const status = inspectMetricsDatabase(environment);
-  const metricsUpgrade = status.exists && [20, 21, 22, 23].includes(status.schemaVersion);
+  const metricsUpgrade = status.exists && [20, 21, 22, 23, 24].includes(status.schemaVersion);
   if (metricsUpgrade) upgradeRequestMetricsDatabase(status.databasePath);
-  const metrics = metricsUpgrade ? { ...status, targetSchemaVersion: 24 } : validateMetricsDatabaseStructure(environment);
+  const metrics = metricsUpgrade ? { ...status, targetSchemaVersion: 25 } : validateMetricsDatabaseStructure(environment);
   const sessionDisplayCache = inspectSessionDisplayCache(environment);
   if (!sessionDisplayCache.compatible) {
     throw new Error("会话展示缓存版本不兼容；请停止服务并备份后重建缓存");
@@ -42,8 +42,8 @@ export function inspectDatabaseUpdates(environment = process.env) {
 export function applyDatabaseUpdates(environment = process.env) {
   const inspection = inspectDatabaseUpdates(environment);
   const state = upgradeStateDatabase(environment);
-  if (inspection.metrics.exists && [20, 21, 22, 23].includes(inspection.metrics.schemaVersion)) {
-    return Promise.resolve(state).then(() => maintainMetricsSchema("upgrade", ["--from", String(inspection.metrics.schemaVersion), "--to", "24", "--apply"], environment));
+  if (inspection.metrics.exists && [20, 21, 22, 23, 24].includes(inspection.metrics.schemaVersion)) {
+    return Promise.resolve(state).then(() => maintainMetricsSchema("upgrade", ["--from", String(inspection.metrics.schemaVersion), "--to", "25", "--apply"], environment));
   }
   return state;
 }

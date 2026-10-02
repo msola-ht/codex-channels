@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrafficModel } from "@/components/traffic/traffic-model"
 import { RequestDetail } from "@/components/requests/request-detail"
@@ -154,10 +155,13 @@ export function RequestsTable({
         <span className="flex items-center gap-2 whitespace-nowrap">
           <TrafficModel
             provider={row.original.provider}
+            upstream={row.original.upstreamProvider}
             request={row.original.requestModel}
             responses={row.original.responseModel === null || row.original.responseModel === undefined ? [] : [row.original.responseModel]}
             fallback={row.original.model ?? undefined}
           />
+          {(row.original.upstreamAttemptCount ?? 0) > 1 ? <Badge variant="secondary" size="sm"
+            title={t("requestDetail.attemptHint")}>{t("requestDetail.attemptBadge", { count: row.original.upstreamAttemptCount! })}</Badge> : null}
           <FastBadge tier={row.original.requestServiceTier} source="request" responseTier={row.original.serviceTier} />
         </span>
       ),

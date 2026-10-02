@@ -47,6 +47,15 @@ describe("Provider proxy metrics channel", () => {
       }
       expect(received.map(value => value.responseUsageAmount)).toEqual(["0", "0.12345678901234567890", null, undefined]);
       received.length = 0;
+      const diagnostics = { upstreamProvider: "deepseek", upstreamAttemptCount: 2, modelAttemptCount: 1, finishReason: "stop",
+        errorStage: "stream" as const, upstreamErrorCode: "rate_limit", upstreamErrorType: "limit", upstreamHttpStatus: 429 };
+      await sendProviderProxyMetrics(socketPath, { ...metrics(), ...diagnostics });
+      for (const invalid of [{ upstreamProvider: "unsafe value" }, { upstreamAttemptCount: "2" }, { modelAttemptCount: -1 },
+        { finishReason: "x".repeat(257) }, { errorStage: "arbitrary" }, { upstreamErrorCode: "unsafe\ncode" }, { upstreamHttpStatus: 200 }]) {
+        await sendProviderProxyMetrics(socketPath, { ...metrics(), ...invalid } as ProviderProxyMetrics);
+      }
+      expect(received).toHaveLength(1); expect(received[0]).toMatchObject(diagnostics);
+      received.length = 0;
       for (const value of [0, 12.5, -1, "123", null]) {
         await sendProviderProxyMetrics(socketPath, {
           ...metrics(), timingBasis: "submitted", firstTokenMs: value, requestModel: "requested", responseModel: "echoed",

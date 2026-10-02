@@ -36,7 +36,7 @@
   不匹配路径，并保留配置、数据库、凭据、日志和输出。
 - `source-shell-path.mjs` / `source-shell-path.d.mts`：只清理旧源码安装写入四类 Shell 配置文件的
   精确 Codex Connect PATH 行或配置块，不修改其他 PATH。
-- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6 与指标库 v20/v21/v22/v23 → v24；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
+- `local-installation.mjs` / `local-installation.d.mts`：检查 Gateway 配置、数据库和服务安装，提供稳定的数据库升级合同：`inspectDatabaseUpdates` 只读预检并返回 `required`，`applyDatabaseUpdates` 由更新器在停服后通过独立 Node 进程导入目标版本并调用。当前支持状态库 v5 → v6 与指标库 v20/v21/v22/v23/v24 → v25；执行入口获取 Gateway 独占锁，创建私有备份、事务升级并校验目标结构，保持入口兼容，供旧更新器调用。不支持的起始 Schema 明确报错，不存在的库由正常启动创建。另提供服务就绪检查，等待 Socket、监管拓扑与 Gateway 健康稳定。
 - `state-database.mjs`：提供状态库与计划任务库的只读版本/结构检查，以及供安装流程调用的 v5 → v6 显式升级；运行时不迁移。
 - `metrics-database-access.mjs`：集中实现 `codexc metrics` 与 WebUI 共用的数据库状态、
   `run`、`turns`、`threads`、`report`、`export`、`quota` 和周额度只读查询；通过 Observability
@@ -559,6 +559,6 @@ Workspace/Provider，按主会话真实轮数筛选，不使用展示缓存决�
 - `webui-management-delivery-route.mjs`：渠道投递箱鉴权 SSE 变化通知、只读分页查询、按需限定内容预览及单条重试/批量重试或忽略确认；复用管理鉴权、限速、记录修订、一次性令牌和审计，在线操作通过投递私有 IPC 交给 Gateway 单写者，确认未发送命令且 Gateway 不可连接时才使用 Journal 维护模式独占锁，持锁复核完整记录修订，不恢复其他记录或清理图片，列表不返回正文或平台检查点内容；单条内容预览及只读批量摘要认证解密后仅返回显式展示字段，摘要批次消耗读取配额，批量操作在同一事务中复核全部修订。
 - `service-selection.mjs`：将已安装的可选 Relay 纳入 all 停止/状态，启动时另要求配置启用；核心服务顺序继续由 Runtime 服务目录定义。
 
-`metrics-database.mjs` 的 `upgrade --from 23 --to 24` 默认只预检，`--apply` 才持锁备份迁移；
-`rollback --from 24 --to 23 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
+`metrics-database.mjs` 的 `upgrade --from 24 --to 25` 默认只预检，`--apply` 才持锁备份迁移；
+`rollback --from 25 --to 24 --backup PATH --sha256 HASH --apply` 先归档新库再恢复验证过的备份。
 两者不自动操作服务，回滚不恢复旧配置/凭据。查询与导出支持 `--source owned|relay`、`--caller ID`。

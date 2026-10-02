@@ -241,6 +241,15 @@ export class SqliteModelRequestMetricsStore implements ModelRequestMetricsStore 
       sample.source ?? "owned", sample.callerId ?? null, sample.keyId ?? null,
       sample.credentialGeneration ?? null, sample.relayRequestId ?? null, sample.deliveryStatus ?? null,
       sample.responseUsageAmount ?? null,
+      sample.upstreamProvider ?? null,
+      sample.upstreamAttemptCount ?? null,
+      sample.modelAttemptCount ?? null,
+      sample.finishReason ?? null,
+      sample.errorStage ?? null,
+      sample.upstreamErrorCode ?? null,
+      sample.upstreamErrorType ?? null,
+      sample.upstreamHttpStatus ?? null,
+
     );
     return recordedAtMs;
   }

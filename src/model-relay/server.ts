@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { DirectResponsesRequestError, applyResponsesReasoningPolicy, validateDirectResponsesRequest, type DirectResponsesRequest, type DirectChatRequest, DirectChatRequestError, DirectChatResponseError, DirectChatResponse, ModelConversionError, applyChatReasoningPolicy, validateDirectChatRequest } from "../model-api/index.js";
-import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type RelayMetric } from "../provider-proxy/index.js";
+import { pinClinePassRouting, sendDirectResponses, DirectResponsesObserver, ChatBodyTooLargeError, ChatUpstreamError, readChatBody, sendDirectChat, waitForChatOperation, writeChatData, type DirectChatCapture, type DirectChatTarget, type ModelRequestDiagnostics, type RelayMetric } from "../provider-proxy/index.js";
 import { RelayAdmission, RelayAdmissionError, type RelayLease, type RelayPolicy } from "./admission.js";
 
 export interface RelayQueueEntry {
@@ -112,6 +112,7 @@ export class ModelRelayServer {
     response.once("close", disconnected);
     let lease: RelayLease | undefined;
     let capture: DirectChatCapture | undefined;
+    let diagnostics: ModelRequestDiagnostics = {};
     let inbound: unknown;
     let started: number | undefined;
     let submittedAt: number | undefined;
@@ -192,7 +193,7 @@ export class ModelRelayServer {
       if (inbound && typeof inbound === "object" && !("stream" in inbound)) capture?.transformed?.("stream_defaulted");
       if (protocol === "responses" && inbound && typeof inbound === "object" && !("store" in inbound)) capture?.transformed?.("store_defaulted");
       inbound = undefined;
-      const call = { ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
+      const call = { diagnostics: (summary: ModelRequestDiagnostics) => { diagnostics = summary; }, ...(capture ? { capture } : {}), clientHeaders: request.headers, target: prepared.target, signal,
         recheck: () => { lease!.check(body!.model); prepared.recheck(); },
         submitted: (ua: string | null) => { userAgent = ua; started = performance.now(); submittedAt = Date.now(); },
         headers: (status: number) => { httpStatus = status; },
@@ -264,7 +265,7 @@ export class ModelRelayServer {
       const traffic = capture?.finish(deliveryStatus, errorCode, firstTokenMs, observer.responseModel);
       if (lease && started !== undefined) {
         const ended = completedAt ?? performance.now();
-        const metric: RelayMetric = { source: "relay", threadId: null, turnId: null, relayRequestId,
+        const metric: RelayMetric = { ...diagnostics, source: "relay", threadId: null, turnId: null, relayRequestId,
           ...(traffic ? { traffic } : {}),
           callerId: lease.caller.callerId, keyId: lease.caller.keyId, credentialGeneration: lease.caller.credentialGeneration,
           provider: lease.caller.provider, requestModel, ...(userAgent === null ? {} : { userAgent }), responseFormat: stream ? "sse" : "json",

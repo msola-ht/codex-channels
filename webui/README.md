@@ -61,7 +61,7 @@ API 响应类型不是前端手写镜像：`src/lib/types.ts` 只转出
 
 `components/settings/tool-access-settings.tsx` 组合电脑、浏览器与已有 MCP 的原生配置编辑器，复用 App Server 设置 Hook 的版本化预览和确认；用户层与合并配置分开展示。
 
-请求列表与错误列表不依赖调用采集或转储索引。`components/requests/request-detail.tsx` 仅展示已选指标快照，报文链接为可选入口；调用列表只加载摘要，Turn State 诊断保留在单次详情。
+请求列表与错误列表不依赖调用采集或转储索引。`components/requests/request-detail.tsx` 仅展示已选指标快照，报文链接为可选入口；请求模型旁的实际上游与尝试次数提示来自独立指标字段，详情展示受限诊断摘要；调用列表只加载摘要，Turn State 诊断保留在单次详情。
 
 调用详情正文复用 `components/traffic/traffic-content.tsx` 的延迟展开与只读文本操作组件，统一复制、换行、格式化和截断提示。
 

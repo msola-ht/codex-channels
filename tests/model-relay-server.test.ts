@@ -1108,13 +1108,16 @@ describe("isolated Relay vertical request chain", () => {
     await receiver.apply(true); cleanups.push(() => receiver.close());
     const sender = new RelayMetricsSender((envelope, signal) => sendRelayMetrics(path, envelope, signal));
     cleanups.push(() => sender.close());
-    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer)), undefined,
+    const routed = { ...answer, choices: [{ ...answer.choices[0], message: { ...answer.choices[0]!.message,
+      provider_metadata: { gateway: { routing: { finalProvider: "deepseek", totalProviderAttemptCount: 2, modelAttemptCount: 1 } } },
+    } }] };
+    const f = await fixture((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(routed)), undefined,
       sample => sender.enqueue(sample));
     const response = await f.post(body, { "user-agent": "translator/1.0" }); expect(response.status).toBe(200); await response.text();
     await sender.close(); expect(sender.diagnostics()).toMatchObject({ accepted: 1, unconfirmed: 0 });
     await writer.waitForCurrentWrites();
     const rows = store.page({ startAtMs: 0, endAtMs: Date.now() + 1000, source: "relay", callerId: "caller-a", limit: 10 });
-    expect(rows.records).toHaveLength(1); expect(rows.records[0]).toMatchObject({ callerId: "caller-a", threadId: null, turnId: null, inputTokens: 3, userAgent: "translator/1.0" });
+    expect(rows.records).toHaveLength(1); expect(rows.records[0]).toMatchObject({ callerId: "caller-a", threadId: null, turnId: null, inputTokens: 3, userAgent: "translator/1.0", traffic: null, upstreamProvider: "deepseek", upstreamAttemptCount: 2, modelAttemptCount: 1, finishReason: "stop" });
     await receiver.apply(false);
     await expect(sendRelayMetrics(path, { version: 1, providerId: "clp-a", relayRequestId: f.metrics[0]!.relayRequestId, sample: f.metrics[0]! }, AbortSignal.timeout(1000))).rejects.toThrow();
   });
@@ -1369,3 +1372,68 @@ it.each(["chat", "responses"].flatMap(protocol => [false, true].flatMap(stream =
   expect(f.queueChanges).toContainEqual(["upstream"]);
   expect(f.queueChanges.at(-1)).toEqual([]);
  });
+
+
+it.each([false, true])("collects Relay Chat routing and finish metrics without capture (stream=%s)", async stream => {
+  const message = { role: "assistant", content: "hello", provider_metadata: { gateway: { routing: {
+    finalProvider: "deepseek", totalProviderAttemptCount: 3, modelAttemptCount: 2,
+  } } } };
+  const value = { ...answer, choices: [{ index: 0, ...(stream ? { delta: message } : { message }), finish_reason: "stop" }] };
+  const f = await fixture((_request, response) => {
+    response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
+    response.end(stream ? frame(value) + "data: [DONE]\n\n" : JSON.stringify({ success: true, data: value }));
+  });
+  const result = await f.post({ ...body, stream }); await result.text();
+  expect(f.metrics).toHaveLength(1);
+  expect(f.metrics[0]).toMatchObject({ upstreamProvider: "deepseek", upstreamAttemptCount: 3, modelAttemptCount: 2, finishReason: "stop" });
+  expect(f.metrics[0]?.traffic).toBeUndefined();
+  expect(f.metrics[0]?.errorStage).toBeUndefined();
+});
+
+it.each(["chat", "responses"].flatMap(protocol => [false, true].map(stream => ({ protocol, stream }))))(
+  "collects bounded Relay error causes independently of capture ($protocol, stream=$stream)", async ({ protocol, stream }) => {
+    const error = { code: "stream_initialization_failed", message: 'Failed to create stream: ' + JSON.stringify({ error: {
+      code: "rate_limit_exceeded", type: "rate_limit_error", message: "PRIVATE error prose", param: { statusCode: 429 },
+    } }) };
+    const f = await fixture((_request, response) => {
+      response.writeHead(stream ? 200 : 502, { "content-type": stream ? "text/event-stream" : "application/json" });
+      response.end(stream ? frame({ type: "error", error }) : JSON.stringify({ error }));
+    });
+    const result = protocol === "chat" ? await f.post({ ...body, stream }) : await fetch(`${f.relay.address()}/v1/responses`, {
+      method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify({ model: body.model, input: "hello", stream }),
+    });
+    await result.text();
+    expect(f.metrics).toHaveLength(1);
+    expect(f.metrics[0]).toMatchObject({ errorStage: stream ? "stream" : "http", upstreamErrorCode: "rate_limit_exceeded",
+      upstreamErrorType: "rate_limit_error", upstreamHttpStatus: 429, httpStatus: stream ? 200 : 502 });
+    expect(f.metrics[0]?.upstreamProvider).toBeUndefined();
+    expect(f.metrics[0]?.traffic).toBeUndefined();
+    expect(JSON.stringify(f.metrics)).not.toContain("PRIVATE");
+  });
+
+it.each(["chat", "responses"].flatMap(protocol => [false, true].map(stream => ({ protocol, stream }))))(
+  "does not blame upstream for cancellation while waiting for more data ($protocol, stream=$stream)", async ({ protocol, stream }) => {
+    const f = await fixture((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": stream ? "text/event-stream" : "application/json" });
+      if (stream) response.write(frame(protocol === "chat" ? { choices: [{ delta: { content: "partial" } }] }
+        : { type: "response.output_text.delta", delta: "partial" }));
+      else response.flushHeaders();
+    });
+    const controller = new AbortController();
+    const pending = fetch(`${f.relay.address()}/v1/${protocol === "chat" ? "chat/completions" : "responses"}`, {
+      method: "POST", headers: { authorization, "content-type": "application/json" }, signal: controller.signal,
+      body: JSON.stringify(protocol === "chat" ? { ...body, stream } : { model: body.model, input: "hello", stream }),
+    }).then(async response => {
+      const reader = response.body!.getReader();
+      await reader.read();
+      controller.abort();
+      await reader.cancel();
+    }).catch(() => undefined);
+    await vi.waitFor(() => expect(f.calls()).toBe(1));
+    if (!stream) controller.abort();
+    await pending;
+    await vi.waitFor(() => expect(f.metrics).toHaveLength(1));
+    expect(f.metrics[0]?.deliveryStatus).toBe("disconnected");
+    expect(f.metrics[0]?.errorStage).toBeUndefined();
+  });

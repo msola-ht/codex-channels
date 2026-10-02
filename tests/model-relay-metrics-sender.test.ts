@@ -8,6 +8,8 @@ import { join } from "node:path";
 
 const sample: RelayMetric = { source: "relay", threadId: null, turnId: null, relayRequestId: "7d40d091-8c74-4dcf-9e40-71531f3f1a98",
   callerId: "a", keyId: "a", credentialGeneration: 1, provider: "clp-a", requestModel: "fixture/model", responseFormat: "json",
+  upstreamProvider: "deepseek", upstreamAttemptCount: 2, modelAttemptCount: 1, finishReason: "stop",
+  errorStage: "stream", upstreamErrorCode: "limit", upstreamErrorType: "rate_limit", upstreamHttpStatus: 429,
   status: "completed", deliveryStatus: "finished", requestStartedAtMs: 1, responseCompletedAtMs: 2, totalDurationMs: 1 };
 afterEach(() => vi.useRealTimers());
 describe("Relay metric confirmation semantics", () => {
@@ -28,6 +30,10 @@ describe("Relay metric confirmation semantics", () => {
       expect(JSON.parse(await exchange({ ...envelope, providerId: "clp-other" })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, responseModel: "unsafe\nmodel" } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, errorCode: "unsafe@error" } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      for (const invalid of [{ upstreamProvider: "unsafe value" }, { upstreamAttemptCount: "2" }, { modelAttemptCount: 1.5 },
+        { finishReason: "x".repeat(257) }, { errorStage: "unknown" }, { upstreamErrorCode: "unsafe@code" }, { upstreamHttpStatus: 200 }]) {
+        expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, ...invalid } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
+      }
       for (const userAgent of ["", "x".repeat(513), "client\nsecret", ["client"], 42]) {
         expect(JSON.parse(await exchange({ ...envelope, sample: { ...sample, userAgent } })) as unknown).toMatchObject({ result: "rejected", reason: "invalid_sample" });
       }
