@@ -11,6 +11,22 @@ import { formatElapsedDuration } from "../src/surfaces/elapsed-duration.js";
 import { formatElapsedDuration as formatWebuiDuration } from "../webui/src/lib/format.js";
 
 describe("metrics export display helpers", () => {
+  it("keeps report timezone labels independent of DST while formatting each record in local time", () => {
+    const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `
+      import { formatLocalTime, formatLocalTimeZone } from './scripts/metrics-export-format.mjs';
+      const winter = Date.parse('2026-01-15T12:00:00Z');
+      const summer = Date.parse('2026-07-15T12:00:00Z');
+      Date.now = () => winter;
+      const winterLabel = formatLocalTimeZone();
+      Date.now = () => summer;
+      console.log(JSON.stringify({ winterLabel, summerLabel: formatLocalTimeZone(),
+        winterTime: formatLocalTime(winter), summerTime: formatLocalTime(summer) }));
+    `], { encoding: "utf8", env: { ...process.env, TZ: "America/Los_Angeles" } }));
+    expect(result).toEqual({
+      winterLabel: "America/Los_Angeles", summerLabel: "America/Los_Angeles",
+      winterTime: "2026-01-15 04:00:00", summerTime: "2026-07-15 05:00:00",
+    });
+  });
   it.each([
     [0, "0 ms"], [0.125, "0.13 ms"], [672, "672 ms"], [999.994, "999.99 ms"],
     [999.999, "1 s"], [1000, "1 s"], [1250, "1.25 s"], [59994, "59.99 s"],
@@ -44,6 +60,7 @@ describe("metrics export display helpers", () => {
     }
     const markdown = render("markdown");
     const markdownLines = markdown.split("\n");
+    expect(markdownLines).toContain(`- 时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
     const headerIndex = markdownLines.findIndex((line) => line.startsWith("| 时间 |"));
     expect(headerIndex).toBeGreaterThanOrEqual(0);
     const cells = (line: string) => line.slice(1, -1).split("|").map((cell) => cell.trim());

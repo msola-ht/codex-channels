@@ -58,7 +58,7 @@ import {
   isHighRiskManagementPath,
   ManagementOperationError,
 } from "./webui-management-operations.mjs";
-import { dumpReferenceKey, readDumpUpstreamProviders, routeTrafficApi } from "./webui-traffic-route.mjs";
+import { routeTrafficApi } from "./webui-traffic-route.mjs";
 import {
   applyProviderSettingsMutation,
   previewProviderSettingsMutation,
@@ -486,7 +486,7 @@ async function routeApi(environment, url, request, response, serviceStatusCache)
     return;
   }
   if (apiPath === "/accounts") {
-    sendAccountSnapshots(environment, response, openMetricsStore);
+    await sendAccountSnapshots(environment, response, openMetricsStore);
     return;
   }
   if (await routeTrafficApi({ apiPath, environment, request, response, url })) return;
@@ -638,7 +638,7 @@ async function handleRequests(environment, url, response) {
       sortDirection: sort.direction,
       ...filters,
     });
-    const records = await attachUpstreamProviders(environment, page.records);
+    const records = page.records;
     if (records.some(record => record.source === "relay")) {
       const config = readGatewayConfig(resolveGatewayConfigPath(environment));
       const relay = modelRelayConfigSchema.parse(config.model_relay ?? {});
@@ -661,23 +661,6 @@ async function handleRequests(environment, url, response) {
   } finally {
     store.close();
   }
-}
-
-/**
- * 请求明细与错误列表共用的按需关联：按记录的 `traffic` 读取同批次调用记录里的 Chat 上游提供商。
- * 调用记录缺失、批次已清理或读取失败时原记录照常返回，不阻断指标页，也不回填历史。
- */
-async function attachUpstreamProviders(environment, records) {
-  if (records.length === 0) return records;
-  const providers = await readDumpUpstreamProviders(
-    environment,
-    records.map((record) => record.traffic),
-  );
-  return records.map((record) => {
-    const key = dumpReferenceKey(record.traffic);
-    const upstreamProvider = key === null ? undefined : providers.get(key);
-    return upstreamProvider === undefined ? record : { ...record, upstreamProvider };
-  });
 }
 
 function handleRequestsExport(environment, url, response) {
@@ -731,7 +714,7 @@ async function handleErrors(environment, url, response) {
       range,
       generatedAt: new Date(range.endAtMs).toISOString(),
       errors: queries.errors(range, filters),
-      records: await attachUpstreamProviders(environment, page.records),
+      records: page.records,
       nextOffset: page.nextOffset,
       total: page.matchedTotal,
       aggregate: page.aggregate,

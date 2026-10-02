@@ -540,3 +540,11 @@ DS 官方目录的无效 verbosity/摘要声明由 [`deepseek-setup.mjs`](../scr
 已有目录经 [`deepseek-account-management.mjs`](../scripts/deepseek-account-management.mjs) 的显式配置事务更新；
 验证包括账户配置回滚测试和原生 Responses 合同的实际出站参数。客户端工具检索与跨轮推理的线上验证范围见
 [DS 兼容性边界](deepseek.md#responses-兼容性边界) 与 [CLP 转换边界](cline-pass.md#chat-转换边界)。
+
+### 渠道文本附件的工具读取
+
+渠道文本附件使用现有 `turn/start` / `turn/steer` 文本输入提交暂存路径，不新增协议附件字段，
+也不修改 Thread 的文件权限。共享存储见 `src/surfaces/text-attachment-store.ts`；
+`tests/text-attachment-store.test.ts` 验证容量、私有权限和过期清理，
+`tests/real-app-server-supervised-tools.test.ts` 的后台工具合同验证真实 App Server 在只读模式下
+读取工作区外私有暂存文本。自定义权限配置可能拒绝读取，应按现有审批流程处理。

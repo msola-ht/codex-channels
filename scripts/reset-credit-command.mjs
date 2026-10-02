@@ -105,7 +105,7 @@ function safeText(value) {
   return stripVTControlCharacters(String(value)).replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ");
 }
 function expiry(seconds) {
-  return seconds === null ? "无到期时间" : `到期：${new Date(seconds * 1000).toISOString()}`;
+  return seconds === null ? "无到期时间" : `到期：${new Date(seconds * 1000).toISOString()}（UTC）`;
 }
 function describeCredit(credit) {
   return `券 ID：${safeText(credit.id)}\n名称：${safeText(credit.title ?? "用量重置券")}\n说明：${safeText(credit.description ?? "使用范围以官方执行结果为准")}\n${expiry(credit.expiresAt)}`;

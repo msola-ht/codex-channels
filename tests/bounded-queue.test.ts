@@ -7,6 +7,53 @@ import {
 } from "../src/event-bus/index.js";
 
 describe("BoundedAsyncQueue", () => {
+  it.each([false, true])("admits replacements at the hard budget (capacity eviction: %s)", async (eviction) => {
+    const overflow = vi.fn();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const received: string[] = [];
+    const bus = new EventBus<{ key: string; text: string }>(pino({ level: "silent" }), 1,
+      event => event.key, { entries: 2, bytes: 8, size: event => event.text.length, overflow });
+    bus.subscribe("slow", async event => {
+      if (event.key === "active") await gate;
+      received.push(event.text);
+    });
+    bus.publish({ key: "active", text: "aaaa" }, true);
+    await Promise.resolve();
+    bus.publish({ key: "snapshot", text: "bbbb" }, !eviction);
+    bus.publish({ key: eviction ? "final" : "snapshot", text: "cc" }, true);
+    expect(overflow).not.toHaveBeenCalled();
+    release();
+    await bus.drain();
+    bus.publish({ key: "later", text: "done" }, true);
+    await bus.close();
+    expect(received).toEqual(["aaaa", "cc", "done"]);
+  });
+
+  it("accounts for different replacement states across subscribers and rejects real byte overflow", async () => {
+    const overflow = vi.fn();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const bus = new EventBus<string>(pino({ level: "silent" }), 10,
+      () => "snapshot", { entries: 3, bytes: 6, size: event => event.length, overflow });
+    const slow: string[] = [];
+    const fast: string[] = [];
+    bus.subscribe("slow", async event => { await gate; slow.push(event); });
+    bus.subscribe("fast", event => { fast.push(event); });
+    bus.publish("aa", true);
+    await vi.waitFor(() => expect(fast).toEqual(["aa"]));
+    bus.publish("bb", true);
+    await vi.waitFor(() => expect(fast).toEqual(["aa", "bb"]));
+    bus.publish("cc", true); // Replace only the slow subscriber's pending item.
+    await vi.waitFor(() => expect(fast).toEqual(["aa", "bb", "cc"]));
+    expect(overflow).not.toHaveBeenCalled();
+    bus.publish("dddd", true); // Active aa + two copies of dddd exceeds six bytes.
+    expect(overflow).toHaveBeenCalledOnce();
+    release();
+    await bus.close();
+    expect(slow).toEqual(["aa", "cc"]);
+  });
+
   it("reports an incomplete required EventBus drain instead of confirming successful close", async () => {
     vi.useFakeTimers();
     let release!: () => void;

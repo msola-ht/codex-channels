@@ -22,7 +22,7 @@ import type { OutputEvent } from "../src/conversation-core/index.js";
 import { ProviderRoutingClient } from "../src/codex-client/index.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
+import { configureCodexUpdateDefaults, disableCodexDaemonAutoStart, updateCodexUserConfig } from "../scripts/codex-user-config.mjs";
 import {
   loadCodexUserSettings,
   updateCodexUserSetting,
@@ -1350,13 +1350,14 @@ contractSuite("isolated Codex App Server state contract", () => {
     expect(after.model_providers).toEqual(before.model_providers);
   }, 15_000);
 
-  it("disables daemon auto-start through an isolated config client without changing other settings", async () => {
+  it("disables daemon auto-start through an isolated config client through the previous updater handoff without seeding an unset model", async () => {
     const before = await ownerClient.readUserConfigSnapshot();
     try {
-      await ownerClient.writeUserConfigEdits([{ keyPath: "features.daemon_auto_start", value: true }]);
+      await ownerClient.writeUserConfigEdits([{ keyPath: "features.daemon_auto_start", value: true },
+        { keyPath: "model", value: null }]);
       const enabled = await ownerClient.readUserConfigSnapshot();
       const environment = { ...process.env, CODEX_HOME: codexHome };
-      await disableCodexDaemonAutoStart(environment);
+      await configureCodexUpdateDefaults(environment);
       const after = await ownerClient.readUserConfigSnapshot();
       expect(after.config).toEqual({ ...enabled.config, features: {
         ...(enabled.config.features as Record<string, unknown>), daemon_auto_start: false,
@@ -1364,7 +1365,8 @@ contractSuite("isolated Codex App Server state contract", () => {
       await disableCodexDaemonAutoStart(environment);
       expect((await ownerClient.readUserConfigSnapshot()).version).toBe(after.version);
     } finally {
-      await ownerClient.writeUserConfigEdits([{ keyPath: "features", value: before.config.features ?? null }]);
+      await ownerClient.writeUserConfigEdits([{ keyPath: "features", value: before.config.features ?? null },
+        { keyPath: "model", value: before.config.model ?? null }]);
     }
   }, 15_000);
 

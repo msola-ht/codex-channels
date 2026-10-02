@@ -1,12 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { UserFacingError } from "../src/conversation-core/index.js";
 import {
   FeishuOutbox,
+  FeishuFileInput,
   type FeishuInboxMessage,
 } from "../src/surfaces/feishu/index.js";
 import {
@@ -284,13 +286,10 @@ describe("Feishu input adapter", () => {
       turnId: "turn-1",
       steered: false,
     }));
-    const files = {
-      download: vi.fn(async () => ({
-        fileName: "settings.json",
-        text: "{\"enabled\":true}",
-        bytes: 16,
-      })),
-    };
+    const downloadFile = vi.fn(async () => ({
+      stream: Readable.from([Buffer.from("\u001b[32m{\"enabled\":true}\u001b[0m")]),
+    }));
+    const files = new FeishuFileInput({ downloadFile });
     const adapter = new FeishuConversationAdapter(
       { submit },
       fixture.outbox,
@@ -306,17 +305,112 @@ describe("Feishu input adapter", () => {
     await adapter.handle(createFileMessage());
     await fixture.outbox.close();
 
-    expect(files.download).toHaveBeenCalledWith(
-      "om_message",
-      "file_v2_resource",
-      "settings.json",
-    );
+    expect(downloadFile).toHaveBeenCalledWith("om_message", "file_v2_resource");
     expect(submit).toHaveBeenCalledWith(message.target, [
       "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
       "文件名：settings.json",
       "",
       "{\"enabled\":true}",
     ].join("\n"));
+  });
+
+  it.each(["success", "download-failure", "too-large", "too-many"] as const)("handles rich-post file batches atomically: %s", async scenario => {
+    const fixture = createOutbox();
+    const submit = vi.fn<(target: unknown, input: unknown) => Promise<{ threadId: string; turnId: string; steered: boolean }>>()
+      .mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
+    let count = 0;
+    const files = {
+      download: vi.fn(async (_messageId: string, _key: string, fileName: string) => {
+        count++;
+        if (scenario === "download-failure" && count === 2) throw new Error("fixture download failed");
+        return { fileName, text: `log-${count}`, bytes: scenario === "too-large" ? 600_000 : 100 };
+      }),
+      discard: vi.fn(() => Promise.resolve()),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit }, fixture.outbox, imagePort,
+      undefined, undefined, undefined, undefined, undefined,
+      { quietWindowMs: 0, files },
+    );
+    const input: FeishuInboxMessage = { ...createFileMessage(), kind: "files", text: "查看日志", imageKeys: [],
+      files: Array.from({ length: scenario === "too-many" ? 5 : 2 }, (_, i) => ({ fileKey: `file_${i}`, fileName: `附件-${i + 1}.txt` })),
+    };
+    if (scenario === "success") {
+      await adapter.handle(input);
+      expect(submit).toHaveBeenCalledTimes(1);
+      const body = submit.mock.calls[0]!;
+      expect(body[1]).toContain("查看日志");
+      expect(body[1]).toContain("log-1");
+      expect(body[1]).toContain("log-2");
+      expect(files.discard).not.toHaveBeenCalled();
+    } else {
+      await expect(adapter.handle(input)).rejects.toThrow();
+      expect(submit).not.toHaveBeenCalled();
+      expect(files.discard).toHaveBeenCalledTimes(scenario === "too-many" ? 0 : scenario === "too-large" ? 2 : 1);
+      if (scenario === "too-many") expect(files.download).not.toHaveBeenCalled();
+    }
+    await fixture.outbox.close();
+  });
+
+  it.each(["success", "image-failure", "too-many-images"] as const)("handles mixed file and image posts atomically: %s", async scenario => {
+    const fixture = createOutbox();
+    const submit = vi.fn().mockResolvedValue({ threadId: "thread-1", turnId: "turn-1", steered: false });
+    const files = {
+      download: vi.fn().mockResolvedValue({ fileName: "server.log", text: "log contents", bytes: 12 }),
+      discard: vi.fn(() => Promise.resolve()),
+    };
+    const images = {
+      download: vi.fn(async () => {
+        if (scenario === "image-failure") throw new Error("image download failed");
+        return { path: pngImagePath, mimeType: "image/png" as const, bytes: 8 };
+      }),
+    };
+    const adapter = new FeishuConversationAdapter(
+      { submit }, fixture.outbox, images,
+      undefined, undefined, undefined, undefined, undefined,
+      { quietWindowMs: 0, files },
+    );
+    const input: FeishuInboxMessage = {
+      ...createFileMessage(), kind: "files", text: "一起分析",
+      files: [{ fileKey: "file_log", fileName: "server.log" }],
+      imageKeys: Array.from({ length: scenario === "too-many-images" ? 5 : 1 }, (_, i) => `img_${i}`),
+    };
+    try {
+      if (scenario === "success") {
+        await adapter.handle(input);
+        expect(submit).toHaveBeenCalledTimes(1);
+        expect(submit).toHaveBeenCalledWith(message.target, {
+          text: expect.stringContaining("log contents"), images: [{ url: pngDataUrl }],
+        });
+        expect(files.discard).not.toHaveBeenCalled();
+      } else {
+        await expect(adapter.handle(input)).rejects.toThrow();
+        expect(submit).not.toHaveBeenCalled();
+        expect(files.discard).toHaveBeenCalledTimes(scenario === "image-failure" ? 1 : 0);
+        if (scenario === "too-many-images") {
+          expect(files.download).not.toHaveBeenCalled();
+          expect(images.download).not.toHaveBeenCalled();
+        }
+      }
+    } finally { await adapter.close(); await fixture.outbox.close(); }
+  });
+
+  it("reports rejected file content without submitting it to Codex", async () => {
+    const fixture = createOutbox();
+    const submit = vi.fn();
+    const files = new FeishuFileInput({ downloadFile: async () => ({
+      stream: Readable.from([Buffer.from("private-log\u0000content")]),
+    }) });
+    const adapter = new FeishuConversationAdapter(
+      { submit }, fixture.outbox, imagePort,
+      undefined, undefined, undefined, undefined, undefined,
+      { quietWindowMs: 0, files },
+    );
+    await expect(adapter.handle(createFileMessage())).rejects.toMatchObject({ code: "unsupported" });
+    await fixture.outbox.close();
+    expect(submit).not.toHaveBeenCalled();
+    expect(JSON.stringify(fixture.sent)).toContain("文件含不支持的控制字符");
+    expect(JSON.stringify(fixture.sent)).not.toContain("private-log");
   });
 
   it("downloads private audio and submits its managed local path", async () => {

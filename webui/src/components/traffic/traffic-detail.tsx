@@ -88,7 +88,7 @@ export function TrafficDetail({
                 ? t("filters.deliveryFinished") : detail.response.deliveryStatus === "disconnected"
                   ? t("filters.deliveryDisconnected") : t("filters.deliveryFailed")}</AlertDescription>
             </Alert> : null}
-            <ResponseFailure response={detail.response} />
+            <ResponseFailure response={detail.response} diagnostics={detail.chatDiagnostics} />
             {detail.response.output.map((item, index) => (
               <TrafficContent key={index} title={outputLabel(t, item)} text={item.text} />
             ))}
@@ -266,12 +266,32 @@ function SummaryMetric({ label, value, description }: { label: ReactNode; value:
   </div>
 }
 
-function ResponseFailure({ response }: { response: NonNullable<TrafficExchangeDetail["response"]> }) {
+function ResponseFailure({ response, diagnostics }: { response: NonNullable<TrafficExchangeDetail["response"]>; diagnostics?: TrafficExchangeDetail["chatDiagnostics"] }) {
   const { t } = useTranslation()
   if (response.state === "completed") return null
+  const fields = diagnostics?.fields ?? {}
+  const codes = [fields["upstreamError.cause.type"], fields["upstreamError.cause.code"], fields["upstreamError.type"], fields["upstreamError.code"], fields["error.code"], response.error]
+  const reasons = {
+    rate_limit_exceeded: "rateLimit", rate_limit: "rateLimit", rate_limit_reached: "rateLimit",
+    authentication_error: "authentication", permission_denied: "permission", payment_required: "payment",
+    context_length_exceeded: "context", content_filter: "content", server_error: "server",
+    upstream_timeout: "timeout", request_timeout: "timeout", invalid_request_error: "invalid", not_found: "notFound",
+  } as const
+  const statusReasons = { 400: "invalid", 401: "authentication", 402: "payment", 403: "permission", 404: "notFound", 429: "rateLimit", 500: "server", 502: "server", 503: "server", 504: "timeout" } as const
+  const known = codes.find((code): code is keyof typeof reasons => typeof code === "string" && Object.hasOwn(reasons, code))
+  const status = fields["upstreamError.cause.statusCode"] ?? response.status
+  const reason = known ? reasons[known] : typeof status === "number" && Object.hasOwn(statusReasons, status) ? statusReasons[status as keyof typeof statusReasons] : "unknown"
+  const facts = [
+    [t("traffic.failureUpstreamCode"), fields["upstreamError.code"]],
+    [t("traffic.failureCause"), fields["upstreamError.cause.type"] ?? fields["upstreamError.cause.code"] ?? fields["upstreamError.type"]],
+    [t("traffic.failureUpstreamStatus"), fields["upstreamError.cause.statusCode"]],
+    [t("traffic.failureRequestId"), fields["upstreamError.request_id"] ?? fields.requestId],
+  ]
   return <Alert variant="destructive">
     <AlertTitle>{response.state === "incomplete" ? t("traffic.responseIncomplete") : t("traffic.requestFailed")}</AlertTitle>
     <AlertDescription className="min-w-0">
+      <p>{t(`traffic.failureReasons.${reason}`)}</p>
+      {facts.filter(([, value]) => value !== undefined).map(([label, value]) => <p key={String(label)} className="break-all">{label}: {String(value)}</p>)}
       {response.failureStage === undefined ? null : <p>{t("traffic.failureStage", { stage: response.failureStage })}</p>}
       {response.failure === undefined && response.error === undefined && response.errorScope === undefined
         ? <p>{t("traffic.failureUnknown")}</p>

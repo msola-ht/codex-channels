@@ -97,6 +97,85 @@ afterAll(() => {
 });
 
 describe("WeixinInputAdapter", () => {
+  it("receives authorized stop from a later poll while an earlier submission is pending", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const submit = vi.fn(async () => { await gate; return { threadId: "thread", turnId: "turn", steered: false }; });
+    const stop = vi.fn(async () => true);
+    const message = { kind: "text" as const, messageId: "first", actorId, conversationId: actorId, contextToken: "context", text: "work" };
+    const getUpdates = vi.fn<WeixinProtocolClient["getUpdates"]>()
+      .mockResolvedValueOnce({ cursor: "first", messages: [message] })
+      .mockResolvedValueOnce({ cursor: "second", messages: [
+        { ...message, messageId: "denied", actorId: "foreign@im.wechat", conversationId: "foreign@im.wechat", text: "/stop" },
+        { ...message, messageId: "stop", text: "/stop" },
+      ] })
+      .mockImplementation((_cursor, signal) => waitForAbort(signal));
+    const cursorStore = cursorStoreFixture();
+    const onFatal = vi.fn();
+    const adapter = new WeixinInputAdapter({ accountId, client: { getUpdates, sendText: vi.fn(async () => {}) }, cursorStore,
+      service: { submit, stop }, outbox: outboxFixture(),
+      access: { isAllowed: context => context.actorId === actorId }, replyContexts: new WeixinReplyContextStore(accountId), onFatal });
+    await adapter.start();
+    try {
+      await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+      expect(stop).toHaveBeenCalledWith(target);
+      expect(submit).toHaveBeenCalledOnce();
+      expect(cursorStore.set).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await vi.waitFor(() => expect(cursorStore.set).toHaveBeenCalledWith(accountId, "second"));
+      await adapter.stop();
+    }
+    expect(onFatal).not.toHaveBeenCalled();
+  });
+
+  it("bounds shutdown even when closing the image batcher waits for a submission", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const submit = vi.fn(async () => { await gate; return { threadId: "thread", turnId: "turn", steered: false }; });
+    const getUpdates = vi.fn<WeixinProtocolClient["getUpdates"]>()
+      .mockResolvedValueOnce(imageBatch("cursor"))
+      .mockImplementation((_cursor, signal) => waitForAbort(signal));
+    const onStopTimeout = vi.fn();
+    const adapter = new WeixinInputAdapter({ accountId, client: { getUpdates, sendText: vi.fn(async () => {}) },
+      cursorStore: cursorStoreFixture(), service: { submit }, outbox: outboxFixture(), access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId), onFatal: vi.fn(), onStopTimeout, closeTimeoutMs: 5,
+      images: { download: async () => ({ path: pngImagePath, mimeType: "image/png", bytes: 8 }) } });
+    await adapter.start();
+    try {
+      await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+      await adapter.stop();
+      expect(onStopTimeout).toHaveBeenCalledOnce();
+    } finally { release(); await adapter.stop(); }
+  });
+
+  it("does not submit a late image download after shutdown times out", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const download = vi.fn(async () => { await gate; return { path: pngImagePath, mimeType: "image/png" as const, bytes: 8 }; });
+    const getUpdates = vi.fn<WeixinProtocolClient["getUpdates"]>()
+      .mockResolvedValueOnce(imageBatch("cursor"))
+      .mockImplementation((_cursor, signal) => waitForAbort(signal));
+    const service = serviceFixture();
+    const cursorStore = cursorStoreFixture();
+    const onStopTimeout = vi.fn();
+    const onFatal = vi.fn();
+    const adapter = new WeixinInputAdapter({ accountId, client: { getUpdates, sendText: vi.fn(async () => {}) },
+      cursorStore, service, outbox: outboxFixture(), access: accessFixture(true),
+      replyContexts: new WeixinReplyContextStore(accountId), onFatal, onStopTimeout, closeTimeoutMs: 5,
+      images: { download } });
+    await adapter.start();
+    try {
+      await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+      await adapter.stop();
+      expect(onStopTimeout).toHaveBeenCalledOnce();
+    } finally { release(); await adapter.stop(); }
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(service.submit).not.toHaveBeenCalled();
+    expect(cursorStore.set).not.toHaveBeenCalled();
+    expect(onFatal).not.toHaveBeenCalled();
+  });
+
   it("authorizes, remembers the actor, submits text, and commits afterward", async () => {
     const events: string[] = [];
     const controller = clientFixture();

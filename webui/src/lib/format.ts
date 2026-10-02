@@ -86,6 +86,11 @@ export function formatTime(value: number | null | undefined, timeZone = getServe
   return `${formatCalendarDay(value, timeZone)} ${time}`
 }
 
+/** Request lists distinguish calls within the same minute; full precision remains in details. */
+export function formatRequestTime(value: number): string {
+  return formatTimestamp(value).slice(0, -4)
+}
+
 /** Detail timestamps retain seconds and milliseconds in the server time zone. */
 export function formatTimestamp(value: number, timeZone = getServerTimeZone()): string {
   const time = new Intl.DateTimeFormat("en-GB", {

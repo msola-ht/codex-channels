@@ -211,7 +211,8 @@ it.each([false, true])("rechecks authorization and preserves conversation order 
     } else {
       await vi.waitFor(() => expect(faults).toContain("authorization-changed"));
       expect(sent).toEqual([]);
-      expect((await f.snapshot()).records.map(row => row.state)).toEqual(["pending", "blocked"]);
+      await output.waitForIdle(target, AbortSignal.timeout(3000));
+      expect((await f.snapshot()).records.map(row => row.state)).toEqual(["blocked", "blocked"]);
     }
   } finally { await output.close(); }
 });
@@ -335,6 +336,8 @@ it.each([{ action: "retry", authorized: true }, { action: "ignore", authorized: 
   });
   try {
     await output.start();
+    await output.waitForIdle(target, AbortSignal.timeout(3000));
+    expect(sent).toEqual(authorized ? ["second"] : []);
     const row = (await f.snapshot()).records.find(row => row.id === "first")!;
     const input = { action, entries: [{ id: row.id, revision: row.revision }] };
     const preview = await (await f.post("batch-preview", input)).json() as { confirmationToken: string };
@@ -343,7 +346,7 @@ it.each([{ action: "retry", authorized: true }, { action: "ignore", authorized: 
     expect(await response.json()).toMatchObject({ result: action === "retry" ? "pending" : "ignored", auditStatus: "recorded" });
     if (authorized) {
       await output.waitForIdle(target, AbortSignal.timeout(3000));
-      expect(sent).toEqual(action === "retry" ? ["first", "second"] : ["second"]);
+      expect(sent).toEqual(action === "retry" ? ["second", "first"] : ["second"]);
       expect((await f.snapshot()).summary?.records).toBe(0);
     } else {
       await vi.waitFor(async () => expect((await f.snapshot()).records.find(row => row.id === "first")?.state).toBe("blocked"));

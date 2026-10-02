@@ -542,14 +542,15 @@ type ParsedInteractionCommand =
   | { action: "submit-form"; token: string; content: string }
   | { action: "complete"; token: string };
 
+export function isWeixinInteractionCommand(text: string): boolean {
+  return /^\/(?:批准一次|批准会话|始终允许|保存命令规则|保存网络规则|拒绝|取消|选择|填写|提交表单|完成)(?:\s|$)/u.test(text.trim());
+}
+
 function parseInteractionCommand(
   text: string,
 ): ParsedInteractionCommand | "invalid" | null {
   const normalized = text.trim();
-  if (
-    !/^\/(?:批准一次|批准会话|始终允许|保存命令规则|保存网络规则|拒绝|取消|选择|填写|提交表单|完成)(?:\s|$)/u
-      .test(normalized)
-  ) {
+  if (!isWeixinInteractionCommand(normalized)) {
     return null;
   }
   const parts = normalized.split(/\s+/u);

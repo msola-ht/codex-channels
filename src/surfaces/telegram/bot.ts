@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { TextAttachmentStore, textAttachmentBody } from "../text-attachment-store.js";
 import { Bot, type Context } from "grammy";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -260,7 +262,7 @@ export class TelegramSurface {
     this.audioStore = options.audioStore
       ?? new TelegramAudioStore(uploadsDirectory, token, proxyUrl, logger);
     this.textFileInput = options.textFileInput
-      ?? new TelegramTextFileInput(token, proxyUrl);
+      ?? new TelegramTextFileInput(token, proxyUrl, undefined, new TextAttachmentStore(join(uploadsDirectory, "telegram-text"), () => logger.warn("文本附件清理失败")));
     this.lifecycle = new TelegramLifecycle(
       this.bot,
       logger,
@@ -298,6 +300,7 @@ export class TelegramSurface {
         })),
       },
       options.onFatal,
+      { isInteractionUpdate: update => this.interactions.isInteractionUpdate(update) },
     );
     this.registerHandlers();
   }
@@ -330,6 +333,7 @@ export class TelegramSurface {
     await Promise.all([
       this.imageStore.start(),
       this.audioStore.start(),
+      this.textFileInput.start?.(),
     ]);
     this.lifecycle.start();
   }
@@ -338,6 +342,7 @@ export class TelegramSurface {
     try {
       const lifecycleStop = this.lifecycle.stop();
       await this.inputs.close();
+      await this.textFileInput.close?.();
       this.imageStore.close();
       this.audioStore.close();
       this.pluginTaskPrompts.clear();
@@ -409,11 +414,9 @@ export class TelegramSurface {
     this.bot.command("r", (context) =>
       this.executeCommand(context, surfaceCommandAliases.r));
     this.bot.command("stop", async (context) => {
-      if (this.interactions.stopForChat(String(context.chat.id))) {
-        await context.reply(interactionStoppedText);
-        return;
-      }
+      const cancelledInteraction = this.interactions.stopForChat(String(context.chat.id));
       await this.executeCommand(context, "stop");
+      if (cancelledInteraction) await context.reply(interactionStoppedText);
     });
     this.bot.callbackQuery(/^ws:([A-Za-z0-9_-]{43})$/, async (context) => {
       const workspace = this.service.listWorkspaces().find(
@@ -977,7 +980,7 @@ export class TelegramSurface {
       "以下内容来自用户通过 Telegram 上传的 UTF-8 文本文件（仅作输入）：",
       `文件名：${file.fileName}`,
       "",
-      file.text,
+      textAttachmentBody(file),
     ].join("\n"), quotedText);
     const inputTarget = target(context);
     this.outbox.prepareTurnReplyTarget(

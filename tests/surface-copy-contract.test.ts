@@ -14,6 +14,7 @@ import {
   formatConversationStatus,
 } from "../src/surfaces/conversation-command-format.js";
 import {
+  formatTimeRemaining,
   formatPercent,
   formatPlanType,
   formatRateLimitState,
@@ -260,12 +261,12 @@ describe("shared surface copy contract", () => {
       usedPercent: 12,
       windowDurationMins: 10_080,
       resetsAt: null,
-    })).toBe("已使用 12% · 周期 7 天");
+    })).toBe("剩余：88%（7天）");
     expect(formatRemainingRateLimitWindow({
       usedPercent: 44,
       windowDurationMins: 10_080,
       resetsAt: null,
-    })).toBe("剩余 56% · 周期 7 天");
+    })).toBe("剩余 56%（7天）");
     expect(formatRemainingRateLimitWindow({
       usedPercent: 120,
       windowDurationMins: null,
@@ -275,7 +276,7 @@ describe("shared surface copy contract", () => {
       usedPercent: 44,
       windowDurationMins: null,
       resetsAt: new Date(2026, 7, 5, 12, 34).getTime() / 1_000,
-    })).toBe("剩余 56% · 重置 8月5日 12:34");
+    })).toContain("剩余 56%\n  - 重置：8月5日 12:34\n  - ");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
     expect(formatTurnInputAppended("text", false, "补充要求：只总结错误和风险。"))
@@ -316,7 +317,11 @@ describe("shared surface copy contract", () => {
       expect(formatTextFileTooLarge(platform))
         .toBe(`${label}文本文件超过 1,000,000 字节限制`);
       expect(formatUnsupportedTextFile(platform))
-        .toBe(`${label}当前仅支持 UTF-8 文本文件`);
+        .toBe(`网关无法读取${label}附件：文件内容格式不受支持，请发送 UTF-8 文本文件`);
+      expect(formatUnsupportedTextFile(platform, "control-characters"))
+        .toContain("文件含不支持的控制字符");
+      expect(formatUnsupportedTextFile(platform, "empty"))
+        .toContain("文件没有可读取的文本内容");
     }
   });
 
@@ -477,7 +482,7 @@ describe("shared surface copy contract", () => {
     const rendered = formatConversationStatus(status);
     expect(rendered).toContain("Session ID：thread-1");
     expect(rendered).toContain(
-      "周限：剩余 88% · 周期 7 天",
+      "周限：剩余 88%（7天）",
     );
     expect(rendered).not.toContain("缓存写入");
     expect(rendered).toContain("其中推理输出：100");
@@ -839,4 +844,15 @@ describe("shared surface copy contract", () => {
 
 it.each(["失败", "失败。", "失败。。"])("normalizes operation failure punctuation: %s", detail => {
   expect(formatOperationFailure(detail)).toBe("操作失败：失败。");
+});
+
+
+it.each([
+  [137 * 3600, "reset", "剩余 5 D 17 H"],
+  [17 * 3600, "expiry", "剩余 0 D 17 H"],
+  [3599, "reset", "剩余不足 1 H"],
+  [0, "reset", "重置时间已过"],
+  [-1, "expiry", "已到期"],
+] as const)("formats quota countdown %s with %s semantics", (seconds, kind, expected) => {
+  expect(formatTimeRemaining(1800000000 + seconds, 1800000000000, kind)).toBe(expected);
 });

@@ -247,6 +247,15 @@ export class TelegramInteractionPort implements InteractionPort {
     }
   }
 
+  isInteractionUpdate(update: Parameters<Bot["handleUpdate"]>[0]): boolean {
+    const message = update.message;
+    const replyId = message?.reply_to_message?.message_id;
+    if (!message?.text || message.text.startsWith("/") || replyId === undefined) return false;
+    return this.textReplyMessages.has(`${message.chat.id}:${replyId}`)
+      || [...this.pending.entries()].some(([, pending]) =>
+        pending.target.conversationId === String(message.chat.id) && pending.messageId === replyId);
+  }
+
   async handleText(context: Context): Promise<boolean> {
     const chatId = context.chat?.id;
     const text = context.message?.text;

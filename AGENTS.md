@@ -267,6 +267,10 @@ Determine the document's responsibility before adding or changing content. Do no
   Record unrelated existing issues separately without automatically broadening cleanup. Report existing gate failures honestly and resolve them or obtain an appropriate disposition; never claim a failed check passed.
 - Review staged scope and content before committing. The pre-commit `verify:commit` handles diff formatting, documentation indexes and full verification.
 - Do not commit, push, rewrite history or perform other remote writes unless explicitly requested by the user.
+- Before creating a PR or pushing updates to an existing PR, refresh the target branch (normally `main`) and review the complete branch diff from its merge base, not only the latest commit.
+  Trace affected call chains across module boundaries, including authorization, concurrency, failure recovery, public behavior, tests and documentation.
+  Fix confirmed in-scope issues and run the relevant verification before pushing. Record the reviewed base and head commits, findings, verification results and remaining limitations in the PR description.
+  If the branch changes after review, inspect the new changes and their interactions with the full diff before updating the PR. Automated CI checks do not replace this assistant-performed review.
 - Use the PR categories “新增” (Added), “修复” (Fixed) and “改动” (Changed) as applicable. Empty categories may be omitted;
   at least one must describe a concrete change, and retained sections must not be empty or contain only placeholders.
   Formal Codex CLI upgrade PRs must also explain project benefits, adopted changes, excluded changes, risks and verification.

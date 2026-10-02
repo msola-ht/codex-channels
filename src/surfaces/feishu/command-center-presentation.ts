@@ -8,6 +8,7 @@ import { UserFacingError } from "../../conversation-core/index.js";
 import { formatConversationResetCredits } from "../conversation-model-account-command-format.js";
 import {
   formatDelayMinutes,
+  formatScheduledAt,
   formatScheduledTaskStatusLabel,
 } from "../conversation-scheduled-task-command-format.js";
 import {
@@ -395,7 +396,7 @@ export function renderCommandCenterChoices(
       description: [
         `第 ${result.result.page}/${result.result.pageCount} 页 · 共 ${result.result.totalRunCount} 条`,
         ...result.result.runs.map((run) =>
-          `${run.selector}. ${run.state} · ${new Date(run.scheduledFor).toISOString()} · ${run.runId}`
+          `${run.selector}. ${run.state} · ${formatScheduledAt(run.scheduledFor)} · ${run.runId}`
         ),
       ].join("\n"),
       choices: [
@@ -433,7 +434,7 @@ export function renderCommandCenterChoices(
         "**任务**",
         `- 名称：${escapeFeishuCardMarkdown(task.name)}`,
         `- 计划：${escapeFeishuCardMarkdown(scheduleChoiceSummary(task.schedule))} · ${escapeFeishuCardMarkdown(task.timezone)}`,
-        `- 下次运行：${escapeFeishuCardMarkdown(task.nextRunAt === null ? "无" : new Date(task.nextRunAt).toISOString())}`,
+        `- 下次运行：${escapeFeishuCardMarkdown(formatScheduledAt(task.nextRunAt))}`,
         "",
         "**执行配置**",
         `- Workspace：${escapeFeishuCardMarkdown(task.workspaceId)}`,

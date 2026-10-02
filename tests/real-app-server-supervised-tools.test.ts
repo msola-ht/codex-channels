@@ -18,10 +18,14 @@ import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, Thr
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+import { TextAttachmentStore } from "../src/surfaces/text-attachment-store.js";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
 const contractSuite = runContract ? describe : describe.skip;
+
+// Tool fixtures disable unrelated curated-plugin Git sync so it cannot outlive
+// the server and race temporary-directory cleanup. Plugin contracts enable it separately.
 
 contractSuite("real supervised App Server tools", () => {
     it.skipIf(process.platform === "win32").each(["accept", "cancel"] as const)("reviews real stdin callbacks without persistent permissions: %s", async (decision) => {
@@ -75,6 +79,7 @@ contractSuite("real supervised App Server tools", () => {
         }] }));
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "stdin-contract"', 'model_provider = "stdin-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[features]', 'plugins = false',
           '[model_providers.stdin-contract]', 'name = "Stdin fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
           'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
         ].join("\n"));
@@ -136,7 +141,7 @@ contractSuite("real supervised App Server tools", () => {
           id_token: `eyJhbGciOiJub25lIn0.${payload}.fixture`, access_token: "fixture-access-token",
           refresh_token: "fixture-refresh-token", account_id: accountId,
         }, last_refresh: new Date().toISOString() }), { mode: 0o600 });
-        writeFileSync(join(directory, "config.toml"), `chatgpt_base_url = "http://127.0.0.1:${address.port}/backend-api"\nopenai_base_url = "${modelBaseUrl}"\n`);
+        writeFileSync(join(directory, "config.toml"), `chatgpt_base_url = "http://127.0.0.1:${address.port}/backend-api"\nopenai_base_url = "${modelBaseUrl}"\n[features]\nplugins = false\n`);
         rpc = new JsonRpcClient(new StdioTransport({
           codexBinary: process.env.CODEX_BINARY ?? "codex", cwd: directory,
           environment: { PATH: process.env.PATH, CODEX_HOME: directory },
@@ -222,6 +227,7 @@ contractSuite("real supervised App Server tools", () => {
         }] }));
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "image-contract"', 'model_provider = "image-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[features]', 'plugins = false',
           '[model_providers.image-contract]', 'name = "Image fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
           'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
           'request_max_retries = 0', 'stream_max_retries = 0',
@@ -344,6 +350,7 @@ contractSuite("real supervised App Server tools", () => {
         }] }));
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "async-contract"', 'model_provider = "async-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
+          '[features]', 'plugins = false',
           '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
           'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
         ].join("\n"));
@@ -397,6 +404,11 @@ contractSuite("real supervised App Server tools", () => {
       let answerRequest: (() => void) | undefined;
       let requestParams: unknown;
       const releaseFile = join(directory, "release-background");
+      const attachmentDirectory = mkdtempSync(join(tmpdir(), "attachment-contract-"));
+      const attachmentStore = new TextAttachmentStore(attachmentDirectory, () => undefined);
+      const attachment = scenario === "background"
+        ? await attachmentStore.prepare("attachment-read-success\n" + "log line\n".repeat(5_000))
+        : undefined;
       let backgroundId: string | undefined;
       let backgroundResult: { status?: string; exitCode?: number | null; aggregatedOutput?: string | null } | undefined;
       let backgroundToolOutput: string | undefined;
@@ -420,7 +432,7 @@ contractSuite("real supervised App Server tools", () => {
           const send = () => {
             const item = scenario === "background" && number === 1
               ? { type: "function_call", call_id: "background-call", namespace: "functions", name: "exec_command",
-                  arguments: JSON.stringify({ cmd: `while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
+                  arguments: JSON.stringify({ cmd: `head -n 1 '${attachment!.path!}'; while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
               : number === questionResponse
               ? { type: "function_call", call_id: "async-question-call", namespace: "functions", name: "request_user_input",
                   arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Choose a scope", options: [{ label: "Small", description: "Minimal change" }, { label: "Full", description: "Full change" }] }] }) }
@@ -454,7 +466,7 @@ contractSuite("real supervised App Server tools", () => {
         }] }));
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "async-contract"', 'model_provider = "async-contract"', `model_catalog_json = ${JSON.stringify(catalog)}`,
-          '[features]', `default_mode_request_user_input = ${scenario !== "disabled"}`, '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
+          '[features]', 'plugins = false', `default_mode_request_user_input = ${scenario !== "disabled"}`, '[model_providers.async-contract]', 'name = "Async fixture"', `base_url = "http://127.0.0.1:${address.port}"`,
           'wire_api = "responses"', 'requires_openai_auth = false', 'supports_websockets = false',
         ].join("\n"));
         const rpc = new JsonRpcClient(new StdioTransport({
@@ -504,6 +516,7 @@ contractSuite("real supervised App Server tools", () => {
               writeFileSync(releaseFile, "release");
               await waitFor(() => backgroundResult !== undefined, 10_000, undefined, "提问等待期间后台命令完成事件");
               expect(backgroundResult).toMatchObject({ status: "completed", exitCode: 0 });
+              expect(`${backgroundToolOutput ?? ""}${backgroundResult?.aggregatedOutput ?? ""}`).toContain("attachment-read-success");
               expect(backgroundResult?.aggregatedOutput).toContain("background-completed");
               expect(count).toBe(questionResponse);
               expect(completeCount).toBe(0);
@@ -526,6 +539,8 @@ contractSuite("real supervised App Server tools", () => {
         }
       } finally {
         writeFileSync(releaseFile, "release");
+        await attachmentStore.close();
+        rmSync(attachmentDirectory, { recursive: true, force: true });
         answerRequest?.();
         removeNotification?.();
         await client?.close();
@@ -588,6 +603,7 @@ contractSuite("real supervised App Server tools", () => {
         `);
         writeFileSync(join(codexHome, "config.toml"), [
           'model = "cua-contract-model"', 'model_provider = "cua-contract"',
+          '[features]', 'plugins = false',
           '[mcp_servers.cua_repl]', `command = ${JSON.stringify(process.execPath)}`,
           `args = [${JSON.stringify(mcpPath)}]`,
           '[model_providers.cua-contract]', 'name = "CUA contract"',
@@ -720,6 +736,7 @@ contractSuite("real supervised App Server tools", () => {
         'model_provider = "search-proxy-contract"',
         "",
         "[features]",
+        "plugins = false",
         "standalone_web_search = true",
         "",
         "[model_providers.search-proxy-contract]",
@@ -873,6 +890,7 @@ contractSuite("real supervised App Server tools", () => {
         'model = "dynamic-tool-contract-model"',
         'model_provider = "dynamic-tool-contract"',
         "",
+        "[features]", "plugins = false",
         "[model_providers.dynamic-tool-contract]",
         'name = "Dynamic Tool Contract Provider"',
         `base_url = "http://127.0.0.1:${apiAddress.port}/v1"`,
@@ -1102,6 +1120,7 @@ contractSuite("real supervised App Server tools", () => {
         'model_provider = "subagent-contract"',
         "",
         "[features]",
+        "plugins = false",
         "multi_agent_v2 = true",
         "",
         "[agents.external]",

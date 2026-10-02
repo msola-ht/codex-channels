@@ -166,5 +166,5 @@ function formatIntervalMinutes(minutes: number): string {
 }
 
 export function formatScheduledAt(value: number | null): string {
-  return value === null ? "无" : new Date(value).toISOString();
+  return value === null ? "无" : `${new Date(value).toISOString()}（UTC）`;
 }

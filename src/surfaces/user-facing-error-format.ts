@@ -25,6 +25,14 @@ export function formatSurfaceUserFacingError(
         case "reset_unknown": return "消费结果待确认，请使用 /limits reset 核对官方状态，不要直接重复消费";
         default: return "重置券暂不可用，请检查 ChatGPT 登录状态并稍后查询";
       }
+    case "attachment.too-many":
+      return "一次最多处理 4 个文本附件";
+    case "attachment.too-large":
+      return "文本附件总大小超过 1,000,000 字节限制";
+    case "attachment.unsupported":
+      return "文本附件格式不支持";
+    case "attachment.capacity":
+      return "文本附件暂存空间已满，请稍后重试或发送较小片段";
     case "message.empty":
       return "消息不能为空";
     case "conversation.name.invalid":

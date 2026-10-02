@@ -374,8 +374,8 @@ describe("formatLimits", () => {
     });
 
     expect(text).toContain("套餐：Pro");
-    expect(text).toContain("主窗口：已使用 31%\n  - 周期 5 小时\n  - 重置 ");
-    expect(text).toContain("次窗口：已使用 42%\n  - 周期 7 天\n  - 重置 ");
+    expect(text).toContain("剩余：69%（5小时）");
+    expect(text).toContain("剩余：58%（7天）");
     expect(text).toContain("Credits：无限");
     expect(text).toContain("消费控制：正常");
     expect(text).toContain("限流状态：正常");
@@ -434,8 +434,8 @@ describe("formatStatus", () => {
 
     expect(text).toContain("**Token**：1.25 M");
     expect(text).toContain("最近模型请求：12.5 K");
-    expect(text).toContain("输入命中缓存：750 K");
-    expect(text).toContain("输入未命中缓存：250 K");
+    expect(text).toContain("缓存：750 K");
+    expect(text).toContain("无缓存：250 K");
     expect(text).toContain("缓存命中率：75.00%");
     expect(text).toContain("Codex 有效上下文窗口：200 K");
     expect(text).toContain("模型：gpt-main");

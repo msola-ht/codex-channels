@@ -7,6 +7,10 @@ import {
 } from "../runtime/executable.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
+// A running updater from 77efce47 imports this name after switching checkouts.
+// Keep the handoff, but never seed or overwrite a model from either entry.
+export { disableCodexDaemonAutoStart as configureCodexUpdateDefaults };
+
 export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
   await updateCodexUserConfig(environment, (config) => {
     const features = config.features;

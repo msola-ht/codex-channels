@@ -9,7 +9,7 @@ import {
 
 describe("FeishuFileInput", () => {
   it("downloads and decodes one bounded UTF-8 text file in memory", async () => {
-    const bytes = Buffer.from("\uFEFF文件内容", "utf8");
+    const bytes = Buffer.from("\uFEFF\u001b[32m文件内容\u001b[0m", "utf8");
     const downloadFile = vi.fn(async () => ({
       stream: Readable.from([bytes]),
       contentLength: bytes.length,
@@ -52,13 +52,41 @@ describe("FeishuFileInput", () => {
       binary.download("om_message", "file_binary", "binary.txt"),
     ).rejects.toMatchObject({
       code: "unsupported",
-      message: "飞书当前仅支持 UTF-8 文本文件",
+      message: "网关无法读取飞书附件：文件不是有效的 UTF-8 文本，请转换编码后重新发送",
     });
     await expect(
       binary.download("om_message", "file_binary", "../secret.txt"),
     ).rejects.toMatchObject({
       code: "unsupported",
     });
+  });
+
+  it("returns a safe timeout reason and closes a stalled resource", async () => {
+    vi.useFakeTimers();
+    const stream = new Readable({ read() {} });
+    try {
+      const input = new FeishuFileInput({ downloadFile: async () => ({ stream }) });
+      const downloading = input.download("om_message", "file_resource", "server.log");
+      const rejected = expect(downloading).rejects.toMatchObject({
+        code: "download-failed",
+        message: expect.stringContaining("文件读取超过 30 秒"),
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejected;
+      expect(stream.destroyed).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      stream.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([-1, Number.NaN, 1.5])("rejects invalid declared length %s as a download failure", async (contentLength) => {
+    const stream = Readable.from([Buffer.from("log")]);
+    const input = new FeishuFileInput({ downloadFile: async () => ({ stream, contentLength }) });
+    await expect(input.download("om_message", "file_resource", "log.txt"))
+      .rejects.toMatchObject({ code: "download-failed" });
+    expect(stream.destroyed).toBe(true);
   });
 
   it("does not expose resource download error details", async () => {

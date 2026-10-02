@@ -37,7 +37,7 @@ export class PersistentSurfaceOutput {
       accounts: () => options.accounts(),
       mayReleaseUncertainBarrier: (record) => {
         const payload = decodePersistentOutput(record.payload);
-        return mayReleaseUncertainOutputBarrier(payload.event, payload.image !== undefined);
+        return mayReleaseUncertainOutputBarrier(payload.event);
       },
       authorized: (record) => {
         const payload = decodePersistentOutput(record.payload);

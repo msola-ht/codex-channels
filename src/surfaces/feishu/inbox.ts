@@ -40,6 +40,7 @@ export type FeishuInboxMessage = FeishuInboxMessageBase & (
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
   | { kind: "file"; fileKey: string; fileName: string }
+  | { kind: "files"; files: readonly { fileKey: string; fileName: string }[]; text?: string; imageKeys: readonly string[] }
   | { kind: "audio"; fileKey: string; durationMs?: number }
 );
 

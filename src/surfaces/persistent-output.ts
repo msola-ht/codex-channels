@@ -26,28 +26,9 @@ export function isPersistentOutput(event: OutputEvent, display: OperationUpdateD
   }
 }
 
-/** Auxiliary notices remain inspectable without indefinitely fencing subsequent results. */
-export function mayReleaseUncertainOutputBarrier(event: OutputEvent, hasImage = false): boolean {
-  if (hasImage) return false;
-  switch (event.type) {
-    case "warning": return event.globalIdle === true;
-    case "connection.lost": case "connection.restored": case "turn.started":
-    case "thread.name": case "thread.availability": case "conversation.idle.released":
-    case "subagent.spawned": case "subagent.contacted": return true;
-    case "operation.updated": {
-      const { kind, status, imagePath } = event.operation;
-      if (kind === "contextCompaction") return status === "running";
-      // Successful progress notices are not the final result. Never release media or error barriers.
-      if (status !== "completed" || imagePath !== undefined) return false;
-      if (kind === "command" && event.operation.exitCode !== undefined && event.operation.exitCode !== 0) return false;
-      switch (kind) {
-        case "command": case "fileChange": case "mcpTool": case "dynamicTool":
-        case "webSearch": case "imageView": case "sleep": case "plan": return true;
-        default: return false;
-      }
-    }
-    default: return false;
-  }
+/** Retain every failed result for inspection without fencing later delivery or interactions. */
+export function mayReleaseUncertainOutputBarrier(event: OutputEvent): boolean {
+  return isPersistentOutput(event);
 }
 
 export interface PersistentOutputPayload {

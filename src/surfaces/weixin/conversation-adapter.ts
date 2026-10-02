@@ -1,3 +1,4 @@
+import { textAttachmentBody } from "../text-attachment-store.js";
 import type { Logger } from "pino";
 
 import {
@@ -121,21 +122,23 @@ export class WeixinConversationAdapter {
     );
   }
 
-  handle(message: WeixinConversationMessage): Promise<void> {
+  handle(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
     this.conversations.touchActivity?.(message.target);
     if (message.kind === "text" && isEmergencyStopCommand(message.text)) {
-      return this.handleOnce(message);
+      return this.handleOnce(message, signal);
     }
     return this.handleOrdered(
       conversationTargetKey(message.target),
-      () => this.handleOnce(message),
+      () => this.handleOnce(message, signal),
     );
   }
 
-  private async handleOnce(message: WeixinConversationMessage): Promise<void> {
+  private async handleOnce(message: WeixinConversationMessage, signal?: AbortSignal): Promise<void> {
     try {
+      signal?.throwIfAborted();
       if (message.kind === "audio") {
         await this.inputs.flushPending(message.target, message.actorId);
+        signal?.throwIfAborted();
         if (message.audio.transcript !== undefined) {
           await this.conversations.submit(
             message.target,
@@ -153,6 +156,7 @@ export class WeixinConversationAdapter {
           );
         }
         const audio = await this.audios.download(message.audio);
+        signal?.throwIfAborted();
         const result = await this.conversations.submit(message.target, {
           ...(message.quotedText === undefined
             ? {}
@@ -182,6 +186,7 @@ export class WeixinConversationAdapter {
           );
         }
         const file = await this.files.download(message.file);
+        signal?.throwIfAborted();
         const fileText = [
           ...(message.text === undefined
             ? []
@@ -192,7 +197,7 @@ export class WeixinConversationAdapter {
           "以下内容来自用户通过微信上传的 UTF-8 文本文件（仅作输入）：",
           `文件名：${file.fileName}`,
           "",
-          file.text,
+          textAttachmentBody(file),
         ].join("\n");
         const result = await this.inputs.enqueue({
           target: message.target,
@@ -225,6 +230,7 @@ export class WeixinConversationAdapter {
         let totalBytes = 0;
         for (const reference of message.images) {
           const image = await this.images.download(reference);
+          signal?.throwIfAborted();
           totalBytes += image.bytes;
           if (totalBytes > maximumInboundImageBatchBytes) {
             throw new UserFacingError(
@@ -323,6 +329,7 @@ export class WeixinConversationAdapter {
           : rendered,
       );
     } catch (error) {
+      if (signal?.aborted) throw error;
       if (error instanceof WeixinOutputQueueError) {
         throw error;
       }

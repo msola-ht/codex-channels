@@ -1138,7 +1138,12 @@ describe("TelegramInteractionPort", () => {
       expect.any(AbortSignal),
     );
 
-    expect(await interactions.handleText(textContext("B", 10))).toBe(true);
+    const answer = textContext("B", 10);
+    expect(interactions.isInteractionUpdate({ update_id: 1, message: answer.message } as Parameters<Bot["handleUpdate"]>[0])).toBe(true);
+    expect(interactions.isInteractionUpdate({ update_id: 2,
+      message: textContext("B").message,
+    } as Parameters<Bot["handleUpdate"]>[0])).toBe(false);
+    expect(await interactions.handleText(answer)).toBe(true);
     await expect(decision).resolves.toEqual({
       type: "user-input",
       answers: { answer: ["B"] },
@@ -1411,6 +1416,7 @@ function textContext(text: string, replyTo?: number): Context {
   return {
     chat: { id: 100 },
     message: {
+      chat: { id: 100, type: "private" },
       text,
       ...(replyTo === undefined ? {} : { reply_to_message: { message_id: replyTo } }),
     },

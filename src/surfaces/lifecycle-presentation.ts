@@ -335,11 +335,11 @@ export function createSubagentCompletedPresentation(
         ? [{ label: "输入", value: formatTokenCount(event.inputTokens) }]
         : [
             {
-              label: "输入命中缓存",
+              label: "缓存",
               value: formatTokenCount(cachedInputTokens),
             },
             {
-              label: "输入未命中缓存",
+              label: "无缓存",
               value: formatTokenCount(Math.max(0, event.inputTokens - cachedInputTokens)),
             },
           ]),
@@ -497,6 +497,7 @@ export function createTurnCompletedPresentation(
       value: `${event.contextCompactionCount} 次`,
     });
   }
+  let accountHasResetTime = false;
   if (
     usesOpenAiAccount(event.modelProvider)
     && event.weeklyLimit
@@ -505,6 +506,7 @@ export function createTurnCompletedPresentation(
       label: "周限",
       value: formatWeeklyLimit(event.weeklyLimit),
     });
+    accountHasResetTime = event.weeklyLimit.resetsAt !== null;
   }
   if (!usesOpenAiAccount(event.modelProvider) && event.accountStatus && event.accountStatus.provider === event.modelProvider) {
     for (const balance of event.accountStatus.balances) {
@@ -515,7 +517,11 @@ export function createTurnCompletedPresentation(
     }
     for (const window of event.accountStatus.windows) {
       accountFields.push({ label: window.label, value: formatRemainingRateLimitWindow({ ...window, windowDurationMins: null }) });
+      accountHasResetTime ||= window.resetsAt !== null;
     }
+  }
+  if (accountHasResetTime) {
+    accountFields.unshift({ label: "时区", value: Intl.DateTimeFormat().resolvedOptions().timeZone });
   }
   if (event.goal) {
     sessionFields.push({
@@ -577,11 +583,11 @@ export function createTurnCompletedPresentation(
           ? [{ label: "输入", value: formatTokenCount(inputTokens) }]
           : [
               {
-                label: "输入命中缓存",
+                label: "缓存",
                 value: formatTokenCount(cachedInputTokens),
               },
               {
-                label: "输入未命中缓存",
+                label: "无缓存",
                 value: formatTokenCount(Math.max(0, inputTokens - cachedInputTokens)),
               },
             ]),
@@ -636,11 +642,11 @@ export function createTurnCompletedPresentation(
             ? [{ label: "输入", value: formatTokenCount(task.inputTokens) }]
             : [
                 {
-                  label: "输入命中缓存",
+                  label: "缓存",
                   value: formatTokenCount(task.cachedInputTokens),
                 },
                 {
-                  label: "输入未命中缓存",
+                  label: "无缓存",
                   value: formatTokenCount(
                     Math.max(0, task.inputTokens - task.cachedInputTokens),
                   ),

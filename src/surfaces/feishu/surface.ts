@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { TextAttachmentStore } from "../text-attachment-store.js";
 import type { Logger } from "pino";
 
 import type {
@@ -74,7 +76,7 @@ const unsupportedFeishuMessageTypeText = [
 ].join("\n");
 const invalidFeishuMessageContentText = [
   "消息内容无法识别，已忽略。",
-  "请改用普通文本或代码块消息发送。",
+  "请改用普通文本或代码块消息；附件请逐个作为独立文件消息发送。",
 ].join("\n");
 
 interface FeishuEventConnectionPort {
@@ -198,7 +200,8 @@ export class FeishuSurface implements SurfaceAdapter {
       options.logger,
     );
     const files = dependencies.filePort
-      ?? (client === undefined ? undefined : new FeishuFileInput(client));
+      ?? (client === undefined ? undefined : new FeishuFileInput(client, new TextAttachmentStore(join(options.uploadsDirectory, "text"), () => options.logger.warn("文本附件清理失败"))));
+    this.files = files;
     this.output = new FeishuOutbox(
       options.appId,
       messagePort,
@@ -507,13 +510,15 @@ export class FeishuSurface implements SurfaceAdapter {
     );
   }
 
+  private readonly files: FeishuFilePort | undefined;
+
   async start(): Promise<void> {
     const imagesStarting = this.images.start();
     const audiosStarting = this.audios.start();
     this.logger.info(this.lifecycleContext(), "飞书长连接正在连接");
     const connectionStarting = this.connection.start();
     try {
-      await Promise.all([imagesStarting, audiosStarting, connectionStarting]);
+      await Promise.all([imagesStarting, audiosStarting, this.files?.start?.(), connectionStarting]);
     } catch (error) {
       this.connection.resetAfterStartFailure?.();
       throw error;
@@ -535,6 +540,7 @@ export class FeishuSurface implements SurfaceAdapter {
     await this.adapter.close();
     await this.applicationSetup.close();
     await this.oauth.close();
+    await this.files?.close?.();
     this.images.close();
     this.audios.close();
     await this.interactions.close();

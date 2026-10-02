@@ -6,7 +6,7 @@ import type {
 import {
   formatPlanType,
   formatRateLimitState,
-  formatRateLimitWindow,
+  formatRemainingRateLimitWindow,
 } from "./account-format.js";
 import { visibleUpstreamMessage } from "./output-copy.js";
 
@@ -27,9 +27,9 @@ export function formatRuntimeRateLimitUpdate(
   const label = snapshot.limitName ?? snapshot.limitId ?? "Codex";
   return [
     `## ${label} 额度提醒`,
-    `- 主窗口：${formatRateLimitWindow(snapshot.primary)}`,
+    `- 主窗口：${formatRemainingRateLimitWindow(snapshot.primary)}`,
     ...(snapshot.secondary
-      ? [`- 次窗口：${formatRateLimitWindow(snapshot.secondary)}`]
+      ? [`- 次窗口：${formatRemainingRateLimitWindow(snapshot.secondary)}`]
       : []),
     `- 状态：${formatRateLimitState(snapshot.rateLimitReachedType)}`,
   ].join("\n");

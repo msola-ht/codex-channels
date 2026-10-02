@@ -14,7 +14,10 @@ import {
   formatPlanType,
   formatRateLimitState,
   formatRateLimitWindow,
+  formatRemainingRateLimitWindow,
   formatResetTime,
+  formatTimezoneLine,
+  formatTimeRemaining,
 } from "./account-format.js";
 import { formatElapsedSeconds } from "./elapsed-duration.js";
 import { formatCodexProviderLabel, formatDisplayedProvider } from "./provider-format.js";
@@ -181,6 +184,7 @@ export function formatConversationUsage(
   if (result.result.kind === "balance") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户余额：`,
+      formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.balances.length === 0
         ? ["暂无余额信息"]
@@ -196,6 +200,7 @@ export function formatConversationUsage(
   if (result.result.kind === "credit-usage") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
       `计划：${result.result.planId ?? "未知"}`,
       `剩余额度：$${result.result.totalRemaining}`,
@@ -204,29 +209,23 @@ export function formatConversationUsage(
       `赠送额度：$${result.result.freeRemaining}`,
       ...(result.result.windows.length === 0
         ? []
-        : result.result.windows.map((window) => {
-            const reset = window.resetsAt === null
-              ? "未知"
-              : formatResetTime(window.resetsAt);
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)} · 重置 ${reset}`;
-          })),
+        : result.result.windows.map((window) =>
+            `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}`)),
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
     return toStructuredMarkdownList([
       `${formatCodexProviderLabel(result.result.provider)} 账户用量：`,
+      formatTimezoneLine(),
       `API 可用：${result.result.available ? "是" : "否"}`,
       ...(result.result.windows.length === 0
         ? ["暂无用量数据"]
         : result.result.windows.map((window) => {
-            const reset = window.resetsAt === null
-              ? "未知"
-              : formatResetTime(window.resetsAt);
             const localTokens = window.localTokens === undefined
               || window.localTokens === null
               ? ""
-              : ` · 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
-            return `- ${window.label}：已用 ${formatPercent(window.usedPercent)}${localTokens} · 重置 ${reset}`;
+              : `\n  - 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
+            return `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}${localTokens}`;
           })),
     ].join("\n"));
   }
@@ -235,13 +234,14 @@ export function formatConversationUsage(
     .slice(0, 7);
   const lines = [
     "OpenAI Codex 账户用量摘要：",
+    formatTimezoneLine(),
     `累计 Tokens：${formatUsageTokens(result.result.usage.summary.lifetimeTokens)}`,
     `单日峰值：${formatUsageTokens(result.result.usage.summary.peakDailyTokens)}`,
     `最长 Turn：${formatAccountDuration(result.result.usage.summary.longestRunningTurnSec)}`,
     `当前连续天数：${formatMetric(result.result.usage.summary.currentStreakDays)}`,
     `最长连续天数：${formatMetric(result.result.usage.summary.longestStreakDays)}`,
     "",
-    "最近每日用量：",
+    "最近每日用量（官方日期口径）：",
     ...(daily.length === 0
       ? ["暂无每日数据"]
       : daily.map(
@@ -352,13 +352,16 @@ export function formatConversationLimits(
     ));
   return toStructuredMarkdownList([
     "OpenAI Codex 额度：",
+    formatTimezoneLine(),
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
+    `订阅截止时间：${result.result.subscription?.activeUntil == null ? "未提供" : formatResetTime(result.result.subscription.activeUntil, true)}（登录缓存）`,
+    `订阅信息最后检查时间：${result.result.subscription?.lastChecked == null ? "未提供" : formatResetTime(result.result.subscription.lastChecked, true)}`,
     ...result.result.limits.limits.flatMap((limit) => [
       "",
       `${limit.limitName ?? limit.limitId}：`,
-      `主窗口：${formatAccountLimitWindow(limit.primary)}`,
+      formatRateLimitWindow(limit.primary),
       ...(limit.secondary
-        ? [`次窗口：${formatAccountLimitWindow(limit.secondary)}`]
+        ? [formatRateLimitWindow(limit.secondary)]
         : []),
       ...(limit.credits
         ? [`Credits：${limit.credits.unlimited
@@ -372,6 +375,7 @@ export function formatConversationLimits(
             `个人限额：已用 ${limit.individualLimit.used} / ${limit.individualLimit.limit}`,
             `个人限额剩余：${formatPercent(limit.individualLimit.remainingPercent)}`,
             `个人限额重置：${formatResetTime(limit.individualLimit.resetsAt)}`,
+            `  - ${formatTimeRemaining(limit.individualLimit.resetsAt, Date.now(), "reset")}`,
           ]
         : []),
       ...(limit.spendControlReached === null
@@ -439,7 +443,7 @@ function formatResetCreditLines(
   const now = Date.now();
   const detailLines = entries.map(([timestamp, count]) => {
     const expiry = timestamp === null ? "无到期时间" : formatResetTime(timestamp);
-    const remaining = timestamp === null ? "" : ` · ${formatTimeRemaining(timestamp, now)}`;
+    const remaining = timestamp === null ? "" : ` · ${formatTimeRemaining(timestamp, now, "expiry")}`;
     return `  - ${expiry}：${count} 张${remaining}`;
   });
   const availableCount = accountMetricToBigInt(available);
@@ -452,29 +456,11 @@ function formatResetCreditLines(
   return [...lines, "重置券到期时间：", ...detailLines];
 }
 
-function formatTimeRemaining(timestamp: number, now: number): string {
-  const remainingMs = timestamp * 1_000 - now;
-  if (remainingMs <= 0) return "已到期";
-  const hours = Math.floor(remainingMs / 3_600_000);
-  if (hours === 0) return "剩余不足 1 H";
-  return `剩余 ${Math.floor(hours / 24)} D ${hours % 24} H`;
-}
-
 function accountMetricToBigInt(value: AccountMetric): bigint | null {
   if (typeof value === "bigint") {
     return value;
   }
   return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null;
-}
-
-function formatAccountLimitWindow(
-  window: Parameters<typeof formatRateLimitWindow>[0],
-): string {
-  const [summary, ...details] = formatRateLimitWindow(window).split(" · ");
-  if (window?.resetsAt != null) {
-    details.push(formatTimeRemaining(window.resetsAt, Date.now()));
-  }
-  return [summary, ...details.map((detail) => `  - ${detail}`)].join("\n");
 }
 
 function formatMetric(value: bigint | number | null): string {
@@ -495,7 +481,7 @@ export function formatConversationResetCredits(result: Extract<ConversationComma
   const details = (credit: { id: string; title: string | null; description: string | null; expiresAt: number | null }) => [
     `券 ID：${text(credit.id)}`, `名称：${text(credit.title ?? "用量重置券")}`,
     `说明：${text(credit.description ?? "使用范围以官方执行结果为准")}`,
-    credit.expiresAt === null ? "到期：无到期时间" : `到期：${formatResetTime(credit.expiresAt)}`,
+    credit.expiresAt === null ? "到期：无到期时间" : `到期：${formatResetTime(credit.expiresAt)}\n  - ${formatTimeRemaining(credit.expiresAt, Date.now(), "expiry")}`,
   ];
   if (value.type === "cancelled") return "已取消重置券确认，未发起消费。";
   if (value.type === "consumed") {

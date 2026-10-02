@@ -102,6 +102,7 @@ export class WeixinSurface implements SurfaceAdapter {
   private readonly startupNotification: WeixinSurfaceOptions["startupNotification"];
   private readonly access: SurfaceAccessPolicy;
   private readonly logger: Logger;
+  private readonly files: WeixinFilePort | undefined;
   private readonly images: WeixinImagePort | undefined;
   private readonly audios: WeixinAudioPort | undefined;
   private readonly lifecycleClient: WeixinLifecycleProtocolClient | undefined;
@@ -115,6 +116,7 @@ export class WeixinSurface implements SurfaceAdapter {
     this.startupNotification = options.startupNotification;
     this.access = options.access;
     this.logger = options.logger;
+    this.files = options.files;
     this.images = options.images;
     this.audios = options.audios;
     this.lifecycleClient = options.lifecycleClient;
@@ -312,6 +314,7 @@ export class WeixinSurface implements SurfaceAdapter {
       await this.input.stop();
     } finally {
       await this.notifyLifecycle("stop");
+      await this.files?.close?.();
       this.images?.close();
       this.audios?.close();
       this.interactions.close();
@@ -352,6 +355,7 @@ export class WeixinSurface implements SurfaceAdapter {
     await Promise.all([
       this.images?.start(),
       this.audios?.start(),
+      this.files?.start?.(),
     ]);
     await this.input.start();
     await this.notifyLifecycle("start");

@@ -41,7 +41,8 @@ export function isWeixinWindowEvent(event: OutputEvent): boolean {
     return event.globalIdle === true;
   }
   if (event.type === "text.completed") {
-    return event.phase === "final_answer";
+    // 官方允许 phase 为空（包括 Chat 桥）；完成正文不能因缺少阶段标记而丢失。
+    return event.phase !== "commentary";
   }
   return true;
 }

@@ -15,7 +15,7 @@ function capture(isTTY = true) {
   let content = "";
   return { isTTY, write: (text: string) => { content += text; }, text: () => content };
 }
-const credit = { id: "credit-a", title: "Official reset", description: "Official scope", expiresAt: null };
+const credit = { id: "credit-a", title: "Official reset", description: "Official scope", expiresAt: null as number | null };
 const snapshot = { accountId: "account-a", availableCount: "1", credits: [credit] };
 function fixture(confirmed: unknown = true) {
   const directory = mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "rc-")); directories.push(directory);
@@ -67,6 +67,16 @@ describe("reset-credit CLI", () => {
     const f = fixture();
     await expect(runResetCreditCommand(["use", "credit-a"], { ...f, input: { isTTY: false } })).rejects.toThrow("交互终端");
     expect(f.request).not.toHaveBeenCalled();
+  });
+  it("labels human-readable expiry as UTC without changing JSON timestamps", async () => {
+    const f = fixture();
+    const dated = { ...snapshot, credits: [{ ...credit, expiresAt: 1790993155 }] };
+    f.request.mockResolvedValueOnce(dated).mockResolvedValueOnce(dated);
+    await runResetCreditCommand(["list"], f);
+    expect(f.output.text()).toContain("到期：2026-10-03T02:05:55.000Z（UTC）");
+    const output = capture();
+    await runResetCreditCommand(["list", "--json"], { ...f, output });
+    expect(JSON.parse(output.text())).toEqual(dated);
   });
   it("lists JSON without prompting or consuming", async () => {
     const f = fixture();

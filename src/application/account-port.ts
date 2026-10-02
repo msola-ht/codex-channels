@@ -186,6 +186,7 @@ export type ProviderAccountLimits =
       provider: "openai";
       limits: AccountRateLimits;
       weeklyEstimates?: AccountWeeklyLimitEstimate[];
+      subscription?: { activeUntil: number | null; lastChecked: number | null } | null;
     }
   | { kind: "unsupported"; provider: string };
 

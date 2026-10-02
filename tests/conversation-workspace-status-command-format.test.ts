@@ -97,6 +97,8 @@ describe("conversation workspace and status command formatting", () => {
     });
 
     expect(rendered).toContain("提供商：DeepSeek");
+    expect(rendered).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+    expect(rendered).not.toContain("网关时区");
     expect(rendered).toContain("Codex 有效上下文窗口：1.05 M");
     expect(rendered).not.toContain("Fast 模式");
     expect(rendered).not.toContain("周限");

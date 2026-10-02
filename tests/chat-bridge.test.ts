@@ -225,6 +225,32 @@ it("bounds diagnostic data without leaking arbitrary metadata", () => {
   expect(JSON.stringify(value).length).toBeLessThan(8192);
 });
 
+it("records bounded stream failure causes without retaining error prose", () => {
+  const collector = new ChatDiagnostics();
+  collector.push({ error: { code: "stream_initialization_failed", type: "stream_error", request_id: "upstream-request",
+    message: `Failed to create stream: private prompt ${JSON.stringify({ error: { type: "rate_limit_exceeded", message: "PRIVATE", param: { type: "rate_limit_exceeded", statusCode: 429, message: "PRIVATE", error: "PRIVATE" } }, providerMetadata: { token: "PRIVATE" } })}` } });
+  expect(collector.snapshot()).toEqual({ truncated: false, fields: {
+    "upstreamError.code": "stream_initialization_failed", "upstreamError.type": "stream_error", "upstreamError.request_id": "upstream-request",
+    "upstreamError.cause.type": "rate_limit_exceeded", "upstreamError.cause.statusCode": 429, "upstreamError.cause.param.type": "rate_limit_exceeded",
+  } });
+});
+
+it.each(["Failed to create stream: {broken", "unrecognized prefix {\"error\":{\"type\":\"rate_limit_exceeded\"}}", `Failed to create stream: ${"x".repeat(65536)}`])("ignores unsupported or oversized embedded error detail", message => {
+  const collector = new ChatDiagnostics();
+  collector.push({ error: { code: "stream_initialization_failed", type: "bad\nsecret", message } });
+  expect(collector.snapshot().fields).toEqual({ "upstreamError.code": "stream_initialization_failed" });
+});
+
+it("records the first failing choice and gives top-level errors precedence", () => {
+  const choices = [{ delta: { content: "PRIVATE" } }, { error: { code: "rate_limit", request_id: "later-choice" } }];
+  const collector = new ChatDiagnostics();
+  collector.push({ choices });
+  expect(collector.snapshot().fields).toEqual({ "upstreamError.code": "rate_limit", "upstreamError.request_id": "later-choice" });
+  const top = new ChatDiagnostics();
+  top.push({ error: { code: "server_error" }, choices });
+  expect(top.snapshot().fields).toEqual({ "upstreamError.code": "server_error" });
+});
+
 it("cleans diagnostic observers and isolates concurrent requests", () => {
   const channel = new ChatDiagnosticsChannel();
   const first: unknown[] = [], second: unknown[] = [];
@@ -250,7 +276,7 @@ it.each([400, 401, 402, 403, 404, 429, 500, 502, 503])("keeps request IDs and sa
   expect(result.status).toBe(status);expect(text).not.toContain("private upstream text");
   await proxy.close();cleanups.pop();
   const detail = await describeDumpExchange(listDumpFiles(root), 1);
-  expect(detail.chatDiagnostics.fields).toMatchObject({ requestId: "fixture-request-id", httpStatus: status, "error.stage": "http", "error.retryable": [429, 500, 502, 503].includes(status) });
+  expect(detail.chatDiagnostics.fields).toMatchObject({ requestId: "fixture-request-id", httpStatus: status, "upstreamError.code": status, "error.stage": "http", "error.retryable": [429, 500, 502, 503].includes(status) });
   expect(JSON.stringify(detail)).not.toContain("credential");
 });
 

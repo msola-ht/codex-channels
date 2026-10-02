@@ -78,8 +78,15 @@ export class EventBus<T> {
     for (const observer of this.observers) observer(event);
     const key = this.coalesceKey?.(event);
     const bytes = this.budget?.size(event) ?? 0;
-    if (this.budget && (this.pendingEntries + this.subscriptions.size > this.budget.entries
-      || this.pendingBytes + bytes * this.subscriptions.size > this.budget.bytes)) {
+    let addedEntries = 0;
+    let addedBytes = 0;
+    for (const { queue } of this.subscriptions) {
+      const replacement = queue.replacementFor(critical, key);
+      addedEntries += replacement === undefined ? 1 : 0;
+      addedBytes += bytes - (replacement?.bytes ?? 0);
+    }
+    if (this.budget && (this.pendingEntries + addedEntries > this.budget.entries
+      || this.pendingBytes + addedBytes > this.budget.bytes)) {
       if (critical) {
         this.overloaded = true;
         this.budget.overflow();

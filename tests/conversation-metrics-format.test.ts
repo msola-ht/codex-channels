@@ -55,7 +55,7 @@ describe("conversation metrics formatting", () => {
     expect(rendered).toContain("其中推理输出：1.8 K");
     expect(rendered).toContain("### 最近运行聚合");
     expect(rendered).toContain("**Token**：30.9 K");
-    expect(rendered).toContain("  - 输入命中缓存：24 K");
+    expect(rendered).toContain("  - 缓存：24 K");
     expect(rendered).toContain("**Token**：184.2 K");
     expect(rendered).toContain("上下文压缩：1 次 · gpt-5.6-sol · 10.5 K Token");
     expect(rendered).toContain("### 当前会话指标累计");
@@ -191,6 +191,7 @@ describe("conversation metrics formatting", () => {
     expect(rendered).toContain("custom / gpt-5.6-luna");
     expect(rendered).toContain("rate_limit_error · 未完成 · HTTP 429 · 1 次");
     expect(rendered).toContain("最近发生：");
+    expect(rendered).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
   });
 
   it("does not render untrusted error types as channel markdown", () => {

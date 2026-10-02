@@ -45,6 +45,16 @@ export class BoundedAsyncQueue<T> {
     return this.pendingByCoalesceKey.has(key);
   }
 
+  /** The entry push would replace, without mutating the queue. */
+  replacementFor(critical: boolean, key?: string): T | undefined {
+    const pending = key === undefined ? undefined : this.pendingByCoalesceKey.get(key);
+    if (pending) return pending.value;
+    if (critical && this.entries.length >= this.capacity && this.nonCriticalCount > 0) {
+      return this.entries.find(entry => !entry.critical)?.value;
+    }
+    return undefined;
+  }
+
   get size(): number {
     return this.entries.length;
   }

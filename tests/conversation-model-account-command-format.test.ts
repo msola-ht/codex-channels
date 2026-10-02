@@ -1,5 +1,6 @@
 import { formatCodexProviderLabel } from "../src/surfaces/provider-format.js";
 import { formatConversationModel } from "../src/surfaces/conversation-model-account-command-format.js";
+import { formatConversationResetCredits } from "../src/surfaces/conversation-model-account-command-format.js";
 import { describe, expect, it, vi } from "vitest";
 import { toAccountRateLimits } from "../src/codex-client/account-adapter.js";
 
@@ -20,6 +21,20 @@ import {
 } from "../src/surfaces/conversation-command-format.js";
 
 describe("conversation model and account command formatting", () => {
+  it("shows matching credit countdowns in list and confirmation, preserving no-expiry semantics", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1800000000000);
+    const credit = { id: "credit", title: null, description: null, expiresAt: 1800000000 + 137 * 3600 };
+    try {
+      const list = formatConversationResetCredits({ kind: "reset-credit", result: { type: "list", accountId: "account",
+        availableCount: "2", credits: [credit, { ...credit, id: "unlimited", expiresAt: null }], page: 1, pageCount: 1 } });
+      expect(list).toContain("剩余 5 D 17 H");
+      expect(list).toContain("到期：无到期时间");
+      const preview = formatConversationResetCredits({ kind: "reset-credit", result: { type: "preview", accountId: "account",
+        credit, token: "fixture-token", expiresAt: Date.now() + 300000 } });
+      expect(preview).toContain("剩余 5 D 17 H");
+      expect(preview).toContain("确认有效期为 5 分钟");
+    } finally { now.mockRestore(); }
+  });
   it.each(["clp-main", "clp-work", "clp-other"])("preserves provider ID %s across shared labels and model summaries", provider => {
     expect(formatCodexProviderLabel(provider)).toBe(provider);
     expect(formatConversationModel("当前模型", { model: "cline-pass/deepseek-v4.1-flash", modelProvider: provider })).toContain(`Provider：${provider}`);
@@ -71,9 +86,19 @@ describe("conversation model and account command formatting", () => {
     expect(limits.resetCreditExpiresAt).toEqual([2_000_000, null, 2_000_000]);
     const render = () => formatConversationLimits({
       kind: "limits",
-      result: { kind: "rate-limits", provider: "openai", limits },
+      result: { kind: "rate-limits", provider: "openai", limits, subscription: { activeUntil: 1790993155, lastChecked: 1790131317 } },
     });
     expect(render()).toContain("可用额度重置券：5");
+    expect(render()).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+    expect(render()).not.toContain("网关时区");
+    expect(render()).toMatch(/订阅截止时间：2026年10月[23]日/u);
+    expect(render()).toContain("（登录缓存）");
+    expect(render()).toMatch(/订阅信息最后检查时间：2026年9月2[23]日/u);
+    expect(render()).not.toContain("订阅截止时间：未提供");
+    expect(render()).not.toContain("订阅信息最后检查时间：未提供");
+    const missing = formatConversationLimits({ kind: "limits", result: { kind: "rate-limits", provider: "openai", limits } });
+    expect(missing).toContain("订阅截止时间：未提供");
+    expect(missing).toContain("订阅信息最后检查时间：未提供");
     expect(render()).toContain("：2 张");
     expect(render()).toContain("无到期时间：1 张");
     expect(render()).toContain("其余 2 张：服务端未提供明细");
@@ -81,6 +106,18 @@ describe("conversation model and account command formatting", () => {
     expect(render()).toContain("重置券到期时间：服务端未提供明细");
     limits.resetCreditsAvailable = 0n;
     expect(render()).not.toContain("重置券到期时间");
+    const reset = new Date(2026, 9, 7, 18, 36).getTime();
+    limits.limits[0]!.primary = { usedPercent: 41, windowDurationMins: 10_080, resetsAt: reset / 1000 };
+    const now = vi.spyOn(Date, "now").mockReturnValue(reset - 137 * 3_600_000);
+    try {
+      expect(render()).toContain("剩余：59%（7天）\n  - 重置：10月7日 18:36\n  - 剩余 5 D 17 H");
+      expect(render()).not.toContain("主窗口：");
+      expect(render()).not.toContain("周期 7 天");
+      now.mockReturnValue(reset - 1);
+      expect(render()).toContain("剩余不足 1 H");
+      now.mockReturnValue(reset);
+      expect(render()).toContain("重置时间已过");
+    } finally { now.mockRestore(); }
   });
 
   it("warns that a pending Provider switch starts a new recoverable Thread", () => {
@@ -219,6 +256,7 @@ describe("conversation model and account command formatting", () => {
     });
 
     expect(rendered).toContain("DeepSeek 账户余额");
+    expect(rendered).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
     expect(rendered).toContain("总余额：110.00");
     expect(rendered).not.toContain("累计 Tokens");
   });
@@ -251,7 +289,7 @@ describe("conversation model and account command formatting", () => {
     expect(rendered).toContain("月度额度：$40.00");
     expect(rendered).toContain("额外充值：$5.00");
     expect(rendered).toContain("赠送额度：$1.00");
-    expect(rendered).toContain("5小时：已用 25%");
+    expect(rendered).toContain("5小时：剩余 75%");
   });
 
   it("renders OpenAI Thread official estimates after the account summary", () => {
@@ -409,8 +447,9 @@ describe("conversation model and account command formatting", () => {
     });
 
     expect(rendered).toContain("ocg-user@example.com 账户用量");
-    expect(rendered).toContain("5小时：已用 0% · 本地 Token 约 123.4 K");
-    expect(rendered).toContain("月度：已用 12.5% · 重置 未知");
+    expect(rendered).toContain("5小时：剩余 100%");
+    expect(rendered).toContain("本地 Token 约 123.4 K");
+    expect(rendered).toContain("月度：剩余 87.5%");
     expect(rendered).not.toContain("总额");
     expect(rendered).not.toContain("累计 Tokens");
   });
@@ -423,7 +462,7 @@ describe("conversation model and account command formatting", () => {
       })),
     } });
     expect(rendered).toContain("clp-test 账户用量");
-    for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：已用 12.5% · 重置`);
+    for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：剩余 87.5%\n  - 重置：`);
     expect(rendered).not.toContain("未知");
     expect(rendered).not.toContain("本地 Token");
   });

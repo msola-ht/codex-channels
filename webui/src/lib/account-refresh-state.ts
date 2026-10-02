@@ -306,6 +306,7 @@ export function openAiCreditsFromSnapshot(snapshot: OfficialAccountSnapshot | un
   return {
     observedAtMs: snapshot.observedAtMs,
     remaining: typeof credits?.balance === "string" ? credits.balance : null,
+    subscription: snapshot.subscription ?? null,
     unlimited: credits?.unlimited === true,
     resetCreditsAvailable: available,
     expirations: hasDates ? [...groups].sort(([left], [right]) => left === null ? 1 : right === null ? -1 : left - right)

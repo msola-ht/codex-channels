@@ -1,4 +1,4 @@
-import { Link } from "react-router"
+import { Link, useLocation } from "react-router"
 import { RefreshCwIcon } from "lucide-react"
 import { useId } from "react"
 
@@ -28,6 +28,9 @@ import { translateApiError } from "@/lib/i18n/translate"
 
 export function TrafficPage() {
   const { t } = useTranslation()
+  const location = useLocation()
+  const returnPath = location.state?.requestsReturnTo
+  const requestsReturnTo = typeof returnPath === "string" && /^\/requests(?:\?|$)/u.test(returnPath) ? returnPath : null
   const labelSelectId = useId()
   const sessionSelectId = useId()
   const { query, update } = useTrafficQuery()
@@ -70,6 +73,7 @@ export function TrafficPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+          {requestsReturnTo === null ? null : <Button variant="outline" size="sm" asChild><Link to={requestsReturnTo}>{t("requestDetail.back")}</Link></Button>}
           <Button type="button" variant="outline" size="sm" disabled={detail.loading} onClick={detail.refetch}>
             {detail.loading ? <Spinner aria-label={t("common.loading")} data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{t("common.refresh")}
           </Button>
@@ -112,7 +116,7 @@ export function TrafficPage() {
           <FieldGroup className="min-w-0 flex-1 flex-row flex-wrap items-end gap-3">
             {listData !== null ? (
               <Field className="w-48">
-                <FieldLabel htmlFor={labelSelectId}>{t("traffic.provider")}</FieldLabel>
+                <FieldLabel htmlFor={labelSelectId}>{t("traffic.captureSource")}</FieldLabel>
                 <Select
                   value={query.label === undefined ? "all" : `label:${query.label}`}
                   onValueChange={(value) => update({ label: value === "all" ? null : value.slice(6), session: null, exchangeSession: null, id: null }, true)}
@@ -174,7 +178,6 @@ export function TrafficPage() {
       </div>
 
       <ErrorBanner error={translateApiError(t, list.error, list.errorCode)} onRetry={list.refetch} pending={list.loading} />
-      <ErrorBanner error={list.turnStatesError === null ? null : t("traffic.turnStatesError", { error: t("traffic.failedBatches", { count: list.turnStatesError.batches.length, batches: list.turnStatesError.batches.join(t("modelComparison.listSeparator")) }) })} onRetry={list.refetchTurnStates} pending={list.turnStatesLoading} />
       {list.error !== null && query.label !== undefined ? (
         <Button
           type="button"
@@ -216,8 +219,6 @@ export function TrafficPage() {
                 onNext: () => { if (listData.nextOffset !== null) update({ id: null, label: listData.label, session: listData.session, offset: listData.nextOffset }) } }}
               loading={list.loading}
               exchanges={listData.exchanges}
-              turnStates={list.turnStates}
-              turnStateErrors={list.turnStateErrors}
               onOpen={(exchange) => update({
                 traceOffset: null,
                 id: exchange.id,

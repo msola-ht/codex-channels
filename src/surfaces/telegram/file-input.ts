@@ -1,3 +1,5 @@
+import { UserFacingError } from "../../conversation-core/index.js";
+import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import {
   formatTextFileDownloadFailed,
   formatTextFileTooLarge,
@@ -9,6 +11,7 @@ import {
   normalizeTextFileName,
   readBoundedTextFile,
   TextFileValidationError,
+  type TextFileValidationErrorCode,
 } from "../text-file-input.js";
 import {
   createTelegramFileDownloader,
@@ -34,7 +37,7 @@ export class TelegramTextFileInputError extends Error {
   }
 }
 
-export interface TelegramTextFile {
+export interface TelegramTextFile extends PreparedTextAttachment {
   fileName: string;
   text: string;
   bytes: number;
@@ -43,6 +46,8 @@ export interface TelegramTextFile {
 export type TelegramTextFileDownloader = TelegramFileDownloader;
 
 export interface TelegramTextFilePort {
+  start?(): Promise<void>;
+  close?(): Promise<void>;
   download(
     api: TelegramFileApi,
     fileId: string,
@@ -57,9 +62,13 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
     private readonly token: string,
     proxyUrl: string | undefined,
     downloader?: TelegramTextFileDownloader,
+    private readonly attachments?: TextAttachmentStore,
   ) {
     this.downloader = downloader ?? createTelegramFileDownloader(proxyUrl);
   }
+
+  async start(): Promise<void> { await this.attachments?.start(); }
+  async close(): Promise<void> { await this.attachments?.close(); }
 
   async download(
     api: TelegramFileApi,
@@ -93,17 +102,20 @@ export class TelegramTextFileInput implements TelegramTextFilePort {
         throw tooLarge();
       }
       const content = await readBoundedTextFile(response.stream);
+      const text = decodeUtf8TextFile(content);
+      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
       return {
         fileName: normalizedName,
-        text: decodeUtf8TextFile(content),
+        ...prepared,
         bytes: content.length,
       };
     } catch (error) {
+      if (error instanceof UserFacingError) throw error;
       if (error instanceof TelegramTextFileInputError) {
         throw error;
       }
       if (error instanceof TextFileValidationError) {
-        throw error.code === "too-large" ? tooLarge() : unsupportedFile();
+        throw error.code === "too-large" ? tooLarge() : validationFailure(error.code);
       }
       // Bot API、文件地址、下载流和正文异常不得越过 Telegram 边界。
       throw new TelegramTextFileInputError(
@@ -125,9 +137,9 @@ function tooLarge(): TelegramTextFileInputError {
   );
 }
 
-function unsupportedFile(): TelegramTextFileInputError {
+function validationFailure(reason: TextFileValidationErrorCode): TelegramTextFileInputError {
   return new TelegramTextFileInputError(
-    "unsupported",
-    formatUnsupportedTextFile("Telegram"),
+    reason === "read-timeout" ? "download-failed" : "unsupported",
+    formatUnsupportedTextFile("Telegram", reason),
   );
 }

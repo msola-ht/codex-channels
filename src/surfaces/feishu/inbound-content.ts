@@ -5,6 +5,7 @@ export type FeishuParsedContent =
   | { kind: "text"; text: string }
   | { kind: "image"; imageKeys: readonly string[]; text?: string }
   | { kind: "file"; fileKey: string; fileName: string }
+  | { kind: "files"; files: readonly { fileKey: string; fileName: string }[]; text?: string; imageKeys: readonly string[] }
   | { kind: "audio"; fileKey: string; durationMs?: number };
 
 export function parseFeishuTextContent(value: string): string | undefined {
@@ -134,16 +135,19 @@ export function parseFeishuPostContent(
     return undefined;
   }
   const body = unwrapPostLocale(parsed);
-  if (body === undefined || !Array.isArray(body.content)) {
+  if (body === undefined) return undefined;
+  const blocks = Array.isArray(body.content_v2) && body.content_v2.length > 0 ? body.content_v2 : body.content;
+  if (!Array.isArray(blocks)) {
     return undefined;
   }
 
   const imageKeys: string[] = [];
+  const files: { fileKey: string; fileName: string }[] = [];
   const lines: string[] = [];
   if (typeof body.title === "string" && body.title.length > 0) {
     lines.push(body.title);
   }
-  for (const paragraph of body.content) {
+  for (const paragraph of blocks) {
     if (!Array.isArray(paragraph)) {
       return undefined;
     }
@@ -177,6 +181,13 @@ export function parseFeishuPostContent(
         if (item.href.length > 0 && item.href !== item.text) {
           line += ` (${item.href})`;
         }
+      } else if (item.tag === "media") {
+        if (typeof item.file_key !== "string" || !isSafeFeishuResourceIdentifier(item.file_key)) return undefined;
+        if (!files.some(file => file.fileKey === item.file_key)) {
+          // The official post resource has no filename field. Use a display label,
+          // never infer a source filename or filesystem path from the resource key.
+          files.push({ fileKey: item.file_key, fileName: `附件-${files.length + 1}.txt` });
+        }
       } else if (item.tag === "img") {
         if (
           typeof item.image_key !== "string"
@@ -192,6 +203,7 @@ export function parseFeishuPostContent(
     lines.push(line);
   }
   const text = lines.join("\n").trim();
+  if (files.length > 0) return { kind: "files", files, imageKeys, ...(text.length === 0 ? {} : { text }) };
   if (imageKeys.length === 0) {
     return text.length === 0 ? undefined : { kind: "text", text };
   }
@@ -216,7 +228,7 @@ export function extractFeishuQuotedText(
     return undefined;
   }
   const parsed = parseFeishuPostContent(content);
-  return parsed?.kind === "text" || parsed?.kind === "image"
+  return parsed?.kind === "text" || parsed?.kind === "image" || parsed?.kind === "files"
     ? parsed.text?.trim() || undefined
     : undefined;
 }
@@ -380,7 +392,7 @@ function unwrapPostLocale(
     return undefined;
   }
   const record = value as Record<string, unknown>;
-  if ("title" in record || "content" in record) {
+  if ("title" in record || "content" in record || "content_v2" in record) {
     return record;
   }
   for (const locale of ["zh_cn", "en_us", "ja_jp"]) {

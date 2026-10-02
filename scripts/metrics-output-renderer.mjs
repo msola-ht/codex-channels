@@ -157,7 +157,7 @@ export function printMetricsReport(result, format) {
   console.log(`- 模型请求：${formatRequestCount(aggregate.requestCount)}`);
   console.log(`- 异常或未完整观测：${formatRequestCount(aggregate.unsuccessfulRequestCount)}`);
   console.log(`- 输入 Token：${aggregate.inputTokens}`);
-  console.log(`- 缓存输入 Token：${aggregate.cachedInputTokens ?? "未知"}`);
+  console.log(`- 缓存：${aggregate.cachedInputTokens ?? "未知"}`);
   console.log(`- 输出 Token：${aggregate.outputTokens}`);
   console.log(`- 推理输出 Token：${aggregate.reasoningOutputTokens}`);
   printCompactSummary(aggregate.compact);
@@ -165,7 +165,7 @@ export function printMetricsReport(result, format) {
     console.log("");
     console.log("## 明细");
     console.log("");
-    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存输入 | 输出 | 上下文压缩 |");
+    console.log("| 提供商 | 模型 | 请求 | 异常/未完整 | 输入 | 缓存 | 输出 | 上下文压缩 |");
     console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
     for (const group of result.report.groups) {
       const value = group.aggregate;
@@ -215,7 +215,7 @@ export function printMetricsExport(result, format) {
       console.log("本时间范围没有请求记录。");
       return;
     }
-    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存输入 | 输出 | 首 Token | 请求耗时 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
+    console.log("| 时间 | 提供商 | 模型 | 操作 | 思考等级 | 状态 | 输入 | 缓存 | 输出 | 首 Token | 请求耗时 | 请求模型 | 响应回显 | 转储定位 | 来源 | 调用方 | 交付 |");
     console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const record of result.records) {
       console.log(
@@ -538,9 +538,9 @@ function printTurnSummary(summary) {
   if (summary.cachedInputTokens === null) {
     console.log("  - 缓存：上游未提供完整数据");
   } else {
-    console.log(`  - 输入命中缓存：${formatTokenCount(summary.cachedInputTokens)}`);
+    console.log(`  - 缓存：${formatTokenCount(summary.cachedInputTokens)}`);
     console.log(
-      `  - 输入未命中缓存：${formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
+      `  - 无缓存：${formatTokenCount(Math.max(0, summary.inputTokens - summary.cachedInputTokens))}`,
     );
     console.log(
       `  - 缓存命中率：${summary.inputTokens === 0 ? "0%" : `${((summary.cachedInputTokens / summary.inputTokens) * 100).toFixed(2)}%`}`,

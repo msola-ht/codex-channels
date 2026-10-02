@@ -1,8 +1,9 @@
 import type { Readable } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
 
 export const maximumTextFileBytes = 1_000_000;
 
-export type TextFileValidationErrorCode = "too-large" | "unsupported";
+export type TextFileValidationErrorCode = "too-large" | "unsupported" | "invalid-name" | "invalid-utf8" | "empty" | "control-characters" | "read-timeout";
 
 export class TextFileValidationError extends Error {
   constructor(readonly code: TextFileValidationErrorCode) {
@@ -21,7 +22,7 @@ export function normalizeTextFileName(
 ): string {
   const normalized = value.trim();
   if (!isNormalizedTextFileNameSafe(normalized, limit)) {
-    throw new TextFileValidationError("unsupported");
+    throw new TextFileValidationError("invalid-name");
   }
   return normalized;
 }
@@ -37,23 +38,31 @@ export async function readBoundedTextFile(
   stream: Readable,
   maximumBytes = maximumTextFileBytes,
 ): Promise<Buffer> {
+  const timer = setTimeout(() => {
+    stream.destroy(new TextFileValidationError("read-timeout"));
+  }, 30_000);
+  timer.unref();
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const chunk of stream) {
-    const candidate: unknown = chunk;
-    if (!(candidate instanceof Uint8Array)) {
-      stream.destroy();
-      throw new TextFileValidationError("unsupported");
+  try {
+    for await (const chunk of stream) {
+      const candidate: unknown = chunk;
+      if (!(candidate instanceof Uint8Array)) {
+        stream.destroy();
+        throw new TextFileValidationError("unsupported");
+      }
+      const value = Buffer.from(candidate);
+      bytes += value.length;
+      if (bytes > maximumBytes) {
+        stream.destroy();
+        throw new TextFileValidationError("too-large");
+      }
+      chunks.push(value);
     }
-    const value = Buffer.from(candidate);
-    bytes += value.length;
-    if (bytes > maximumBytes) {
-      stream.destroy();
-      throw new TextFileValidationError("too-large");
-    }
-    chunks.push(value);
+    return Buffer.concat(chunks, bytes);
+  } finally {
+    clearTimeout(timer);
   }
-  return Buffer.concat(chunks, bytes);
 }
 
 export function decodeUtf8TextFile(value: Buffer): string {
@@ -61,13 +70,19 @@ export function decodeUtf8TextFile(value: Buffer): string {
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(value);
   } catch {
-    throw new TextFileValidationError("unsupported");
+    throw new TextFileValidationError("invalid-utf8");
   }
   const normalized = text.startsWith("\uFEFF") ? text.slice(1) : text;
-  if (normalized.length === 0 || hasUnsupportedTextControl(normalized)) {
-    throw new TextFileValidationError("unsupported");
+  // Logs may contain terminal styling even when exported to a file. Strip
+  // recognized VT sequences only; never silently discard arbitrary controls.
+  const plainText = stripVTControlCharacters(normalized);
+  if (plainText.length === 0) {
+    throw new TextFileValidationError("empty");
   }
-  return normalized;
+  if (hasUnsupportedTextControl(plainText)) {
+    throw new TextFileValidationError("control-characters");
+  }
+  return plainText;
 }
 
 function isNormalizedTextFileNameSafe(

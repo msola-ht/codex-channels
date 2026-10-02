@@ -15,9 +15,7 @@ import {
   TrafficDumpDebugError,
   describeDumpExchange,
   describeDumpTrace,
-  describeDumpTurnStates,
   dumpCatalog,
-  readDumpResponseProviders,
   selectFilesOfLabel,
   summarizeDumpFiles,
   writerSessionOf,
@@ -32,58 +30,8 @@ const maximumSectionBytes = 4 * 1_048_576;
 /** Trace 页同时受正文总量和记录数约束，避免大量空记录绕过字节上限。 */
 const maximumTracePageSize = 100;
 
-/** 指标记录与调用记录共用的关联键；引用缺失或形态无效时返回 null，不猜测其他批次。 */
-export function dumpReferenceKey(reference) {
-  if (reference === null || reference === undefined) return null;
-  const { label, session, interaction } = reference;
-  if (typeof label !== "string" || label === "" || typeof session !== "string" || session === ""
-    || !Number.isSafeInteger(interaction) || interaction <= 0) {
-    return null;
-  }
-  return `${label}\u0000${session}\u0000${interaction}`;
-}
-
-/**
- * 请求明细列表按需关联调用记录里的 Chat 上游提供商：只读本页出现的批次索引，
- * 调用记录缺失、格式不支持或读取失败时返回空表，既不阻断指标展示，也不回填历史。
- */
-export async function readDumpUpstreamProviders(environment, references) {
-  const providers = new Map();
-  const groups = new Map();
-  for (const reference of references) {
-    if (dumpReferenceKey(reference) === null) continue;
-    const key = `${reference.label}\u0000${reference.session}`;
-    if (!groups.has(key)) groups.set(key, { label: reference.label, session: reference.session, ids: new Set() });
-    groups.get(key).ids.add(reference.interaction);
-  }
-  if (groups.size === 0) return providers;
-  const located = locateOptionalUserConfig(environment);
-  const directory = join(located?.dataDir ?? userDataDir(environment), "traffic");
-  let catalog;
-  try {
-    catalog = dumpCatalog(directory);
-  } catch {
-    return providers;
-  }
-  for (const group of groups.values()) {
-    let matches;
-    try {
-      const files = selectFilesOfLabel(catalog.files, group.label, group.session);
-      if (files.length === 0) continue;
-      matches = await readDumpResponseProviders(files, group.ids);
-    } catch {
-      continue;
-    }
-    for (const [interaction, provider] of matches) {
-      const key = dumpReferenceKey({ label: group.label, session: group.session, interaction });
-      if (key !== null) providers.set(key, provider);
-    }
-  }
-  return providers;
-}
-
 export async function routeTrafficApi({ apiPath, environment, request, response, url }) {
-  if (!["/traffic", "/traffic/exchange", "/traffic/trace", "/traffic/turn-state"].includes(apiPath)) return false;
+  if (!["/traffic", "/traffic/exchange", "/traffic/trace"].includes(apiPath)) return false;
   if (!isLoopbackAddress(request.socket.remoteAddress)) {
     throw new ApiError(503, "traffic_unavailable", "调用记录查看只允许回环访问");
   }
@@ -143,26 +91,6 @@ export async function routeTrafficApi({ apiPath, environment, request, response,
         ? page.nextOffset
         : null,
     });
-    return true;
-  }
-  if (apiPath === "/traffic/turn-state") {
-    assertParameters(url, ["ids", "label", "session"]);
-    if (!url.searchParams.has("label") || !url.searchParams.has("session")) {
-      throw new ApiError(400, "missing_parameter", "读取字符数需指定 label 和 session");
-    }
-    const values = url.searchParams.getAll("ids");
-    const ids = values.length === 1 && /^[1-9][0-9]*(,[1-9][0-9]*)*$/u.test(values[0])
-      ? values[0].split(",").map(Number) : [];
-    if (ids.length === 0 || ids.length > maximumPageSize || ids.some((id) => !Number.isSafeInteger(id))
-      || new Set(ids).size !== ids.length) {
-      throw new ApiError(400, "invalid_parameter", "ids 必须是当前页不重复的有效调用编号");
-    }
-    const label = readLabel(url, labels);
-    const { files } = readSessionFiles(url, catalog.files, label);
-    if (files.length !== 1) throw new ApiError(400, "invalid_parameter", "字符数查询必须定位唯一批次");
-    const exchanges = await describeDumpTurnStates(files, ids);
-    if (exchanges === null) throw new ApiError(404, "traffic_exchange_not_found", "关联调用记录不可用；不会匹配其他请求");
-    sendJson(response, 200, { label, session: writerSessionOf(files[0]), exchanges });
     return true;
   }
   assertParameters(url, ["id", "label", "session", "traceOffset"]);

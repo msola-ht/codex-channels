@@ -37,6 +37,7 @@ describe("conversation scheduled task command formatting", () => {
     });
 
     expect(rendered).toContain("每日检查 · 已启用");
+    expect(rendered).toContain("下次运行：2026-08-24T01:00:00.000Z（UTC）");
     expect(rendered).not.toContain("每日检查 · 运行中");
     expect([
       formatScheduledTaskStatusLabel("paused"),

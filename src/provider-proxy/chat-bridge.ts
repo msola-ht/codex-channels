@@ -97,7 +97,7 @@ export class ChatCompletionsBridge {
       publishDiagnostics();
       if (incoming.statusCode !== 200) {
         status = incoming.statusCode && incoming.statusCode >= 400 ? incoming.statusCode : 502;
-        throw await readChatHttpError(incoming);
+        throw await readChatHttpError(incoming, { value: value => diagnostics.push(value), invalid: () => {} });
       }
       if (!incoming.headers["content-type"]?.startsWith("text/event-stream")) {
         // 200 但不是 SSE：上游没有按流式合同返回，按服务异常归类且不读取正文。

@@ -3,6 +3,7 @@ import type { IncomingHttpHeaders, OutgoingHttpHeaders } from "node:http";
 import { RelayDumpPayload, redactRelayValue } from "./relay-dump-payload.js";
 import { capturedTrafficHeaders } from "./traffic-dump-headers.js";
 import { ChatDiagnostics } from "./chat-diagnostics.js";
+import { chatStreamError, chatUpstreamError } from "./chat-errors.js";
 import { waitForChatOperation } from "./chat-io.js";
 import { pruneModelTrafficDumpSessionsAsync } from "./traffic-dump-retention.js";
 import { TrafficDumpStorage, type TrafficDumpSession } from "./traffic-dump-storage.js";
@@ -170,6 +171,10 @@ export class RelayTrafficDump {
           upstream.value(value, stream);
           const envelope = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
           diagnostics.push(!stream && envelope?.success === true && !Object.hasOwn(envelope, "choices") ? envelope.data : value);
+          if (protocol === "chat") {
+            const error = status !== undefined && status !== 200 ? chatUpstreamError(envelope?.error, status) : chatStreamError(value);
+            if (error) diagnostics.error(error.code, stream ? "stream" : "http", error.retryable);
+          }
         }),
         invalid: count => safe(() => { upstream.invalid(count); }),
         done: (status = "completed") => safe(() => { complete = true; modelStatus = status; completedAt = performance.now(); if (streaming && protocol === "chat") upstream.value(undefined, true); }),

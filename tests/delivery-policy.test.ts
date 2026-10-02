@@ -6,6 +6,7 @@ import {
 } from "../src/conversation-core/index.js";
 import {
   mayReleaseUncertainOutputBarrier,
+  isPersistentOutput,
   isSheddableBacklogEvent,
   resolveSurfaceDelivery,
   surfaceDeliveryCoalesceKey,
@@ -251,6 +252,10 @@ describe("resolveSurfaceDelivery", () => {
   });
 
   it("keeps reasoning and non-final copy out of the WeChat window budget", () => {
+    expect(resolveSurfaceDelivery("weixin", {
+      type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "unphased",
+      text: "未标记阶段的完成正文", phase: null,
+    })).toEqual({ disposition: "deliver", critical: true });
     expect(
       isWeixinWindowEvent({
         type: "warning",
@@ -373,25 +378,26 @@ it.each(["feishu", "telegram", "weixin"] as const)("protects compaction start an
   }
 });
 
-it("releases only successful process notices and keeps errors, media and unknown operations fenced", () => {
-  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice", globalIdle: true })).toBe(true);
-  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice" })).toBe(false);
-  expect(mayReleaseUncertainOutputBarrier({ type: "warning", target, message: "idle notice", globalIdle: true }, true)).toBe(false);
-  for (const kind of ["command", "fileChange", "mcpTool", "dynamicTool", "webSearch", "imageView", "sleep", "plan"] as const) {
-    for (const status of ["completed", "failed", "declined", "running"] as const) {
-      const event: OutputEvent = { type: "operation.updated", target, threadId: "t", turnId: "u", operation: { itemId: "i", kind, status } };
-      expect(mayReleaseUncertainOutputBarrier(event)).toBe(status === "completed");
-      expect(mayReleaseUncertainOutputBarrier(event, true)).toBe(false);
-      expect(mayReleaseUncertainOutputBarrier({ ...event, operation: { ...event.operation, imagePath: "/private/result.png" } })).toBe(false);
-    }
+it("releases retained persistent results without treating live intermediate output as a failed record", () => {
+  for (const event of Object.values(eventsByType)) {
+    expect(mayReleaseUncertainOutputBarrier(event)).toBe(isPersistentOutput(event));
+  }
+  for (const phase of ["commentary", "final_answer", null] as const) {
+    expect(mayReleaseUncertainOutputBarrier({ ...eventsByType["text.completed"], phase })).toBe(true);
+  }
+  for (const status of ["completed", "failed", "declined"] as const) {
+    expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
+      operation: { itemId: "i", kind: "command", status, exitCode: 1 } })).toBe(true);
   }
   expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
-    operation: { itemId: "i", kind: "command", status: "completed", exitCode: 1 } })).toBe(false);
-  for (const kind of ["imageGeneration", "subagent", "reviewMode", "contextCompaction"] as const) {
-    expect(mayReleaseUncertainOutputBarrier({ type: "operation.updated", target, threadId: "t", turnId: "u",
-      operation: { itemId: "i", kind, status: "completed" } })).toBe(false);
-  }
-  for (const type of ["text.completed", "turn.completed", "subagent.completed", "mcp.oauth.completed"] as const) {
-    expect(mayReleaseUncertainOutputBarrier(eventsByType[type])).toBe(false);
+    operation: { itemId: "i", kind: "imageGeneration", status: "completed", imagePath: "/private/result.png" } })).toBe(true);
+});
+
+it.each(["telegram", "feishu"] as const)("does not persist successful compact waits for %s but retains failures", surface => {
+  for (const status of ["running", "completed", "failed", "declined"] as const) {
+    const event: OutputEvent = { type: "operation.updated", target: { ...target, surface },
+      threadId: "thread", turnId: "turn", operation: { itemId: "wait", kind: "sleep", status } };
+    expect(isPersistentOutput(event, "compact")).toBe(status === "failed" || status === "declined");
+    expect(isPersistentOutput(event, "full")).toBe(status !== "running");
   }
 });

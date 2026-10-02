@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
-import { disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
+import { configureCodexUpdateDefaults, disableCodexDaemonAutoStart } from "../scripts/codex-user-config.mjs";
 
 import {
   getCodexVersionMismatchRemediation,
@@ -36,6 +36,35 @@ afterEach(() => {
 });
 
 describe.skipIf(process.platform === "win32")("Git 源码更新", () => {
+  it.each([undefined, "keep-user-model"])("supports the previous updater handoff without setting a model: %s", async model => {
+    const config = { ...(model === undefined ? {} : { model }), features: { daemon_auto_start: true } };
+    const writes: unknown[] = [];
+    let closed = false;
+    expect(configureCodexUpdateDefaults).toBe(disableCodexDaemonAutoStart);
+    await configureCodexUpdateDefaults({}, { createClient: async () => ({
+      connect: async () => undefined,
+      close: async () => { closed = true; },
+      readUserConfigSnapshot: async () => ({ config, version: "handoff-version" }),
+      writeUserConfigEdits: async (edits, options) => { writes.push({ edits, options }); },
+    }) });
+    expect(writes).toEqual([{ edits: [{ keyPath: "features.daemon_auto_start", value: false }],
+      options: { expectedVersion: "handoff-version" } }]);
+    expect(closed).toBe(true);
+  });
+
+  it.each([undefined, true, false])("does not seed an unset model during update (daemon=%s)", async previous => {
+    const writes: unknown[] = [];
+    await disableCodexDaemonAutoStart({}, { createClient: async () => ({
+      connect: async () => undefined,
+      close: async () => undefined,
+      readUserConfigSnapshot: async () => ({ config: { features: { daemon_auto_start: previous } }, version: "v1" }),
+      writeUserConfigEdits: async (edits, options) => { writes.push({ edits, options }); },
+    }) });
+    expect(writes).toEqual(previous === false ? [] : [{
+      edits: [{ keyPath: "features.daemon_auto_start", value: false }], options: { expectedVersion: "v1" },
+    }]);
+  });
+
   it.each([undefined, true, false])("disables daemon auto-start with version protection (previous=%s)", async previous => {
     const config = { model: "keep", features: { daemon_auto_start: previous, write_stdin_approval: true } };
     const writes: unknown[] = [];

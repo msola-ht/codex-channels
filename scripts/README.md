@@ -77,6 +77,7 @@
   会话清理 CLI；确认后临停运行中的受管 Gateway，结束后按原状态恢复，保留清理命令自身的候选预览与最终确认。
 - `metrics-export-format.mjs` / `metrics-export-format.d.mts`：指标导出的 Token、汇总请求数与时间格式化，
   以及 Markdown/CSV 转义；紧凑数字和自适应耗时格式复用 Surface 纯函数导出，JSON/CSV 的毫秒数值不转换。
+  指标和转储报告的时区标签只返回 IANA 名称，避免以当前 UTC 偏移描述跨夏令时的历史记录。
 - `metrics-output-renderer.mjs`：把指标查询结果渲染为 Markdown、JSON 或 CSV；集中处理报告、
   请求明细、Thread、Turn 与当前运行输出，不访问数据库、运行时配置或服务控制。
 - `webui-command-options.mjs`：集中解析 `codexc webui` 监听参数，使顶层 CLI 与服务实现复用同一规则。
@@ -85,10 +86,11 @@
   约束、限速、Provider 写事务锁及管理错误响应，再把已验证的请求分派给资源路由；服务进程时区跟随
   `[codex].timezone`，`/api/v1/time` 与页面时间展示随之切换。
 - `webui-management-codex-route.mjs` / `webui-management-gateway-route.mjs` /
-  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警） / `webui-management-task-route.mjs` /
+  `webui-management-provider-route.mjs`（账户刷新随 HTTP 断开取消私有 IPC 等待，上游认证失败保持 502；单账户刷新复用 Store 精确 Provider 查询，整表同步保留账户增删与来源告警；响应附加同账户的 OpenAI 登录缓存订阅日期，不写入快照） / `webui-management-task-route.mjs` /
   `webui-management-status-route.mjs`：分别处理 Codex 设置、Gateway 设置、Provider 与账户、管理任务、
   服务与上游状态资源；复用主服务传入的共享安全状态，不自行建立认证、限速、事务锁或错误出口。
-  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不读取 Provider 凭据或直接请求官方接口；账户
+  Provider 与账户路由通过私有 Gateway IPC 刷新账户，不直接请求官方接口；订阅日期仅通过 runtime 读取器
+  获取匹配账户的登录缓存日期，不向浏览器返回凭据。账户
   来源清单独立读取各家账户注册表、OpenAI 鉴权文件存在性和主配置选择，不依赖模型目录或指标库，来源错误分别返回；
   快照按 DS、OCG、CCG、CLP 四家注册表补齐账户元数据和未刷新占位；状态路由返回受管服务安全摘要，并按
   5 秒 TTL 复用 App Server 进程级 User-Agent 探测结果。
@@ -445,8 +447,7 @@
 - `traffic-dump-reader.mjs`：V2 转储共享读取实现，Relay debug v1 补充入站/交付阶段且拒绝未知版本，严格读取 `manifest.json`、`interactions.jsonl` 与
   payload 引用，按批次和逻辑调用编号配对产出摘要和详情；`codexc traffic` 与 WebUI 共用。WebUI 摘要
   分页用有界堆只保留当前页之前的候选，并限制 offset 上限；单条详情只保留目标调用。
-  `readDumpResponseProviders` 为指标列表按单批次的精确调用编号扫描响应索引，只保留命中的上游提供商，不读取正文。正文和独立 trace
-  均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出；`describeDumpTurnStates` 按精确批次与编号独立读取字符数，不阻塞列表摘要接口。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
+  正文和独立 trace 均有界读取；`describeDumpTrace` 为 WebUI 事件翻页单独读取轨迹，不重读正文或聚合输出。Turn State 字符数仅在单次调用诊断中提取，指标列表不读取调用索引。旧版逐帧 JSONL 明确报错，不隐式迁移或混读。
 - `traffic-dump-presentation.mjs`：从已有 V2 请求接口识别协议、请求头识别客户端自报名称，从正文投影每次调用的元数据、参数、用量和错误，从响应索引投影失败阶段；从终态或
   独立 trace 提取有界的完成输出，重组 WebSocket 分片与 SSE 事件；投影请求输入、声明工具与参数对照，并分开提取本次调用的服务端模型声明和安全缓冲候选及来源；仅从同次调用的单调时钟节点计算阶段，不与上游轮次或旧墙钟相减，不回写转储。
 

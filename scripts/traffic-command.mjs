@@ -6,11 +6,10 @@ import { modelNameComparison } from "../runtime/model-name-comparison.mjs";
 
 import { locateOptionalUserConfig, userDataDir } from "./runtime-config.mjs";
 import { parseTrafficCommandArgs } from "./traffic-command-options.mjs";
-import { formatElapsedDuration } from "./metrics-export-format.mjs";
+import { formatElapsedDuration, formatLocalTime, formatLocalTimeZone } from "./metrics-export-format.mjs";
 import {
   describeDumpExchange,
   dumpCatalog,
-  formatTime,
   labelOf,
   listDumpFiles,
   selectFilesOfLabel,
@@ -58,6 +57,7 @@ async function followTraffic() {
   const stop = () => { stopped = true; };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
+  console.log(`时区：${formatLocalTimeZone()}`);
   console.log(`跟随 ${directory} 中的新模型调用，按 Ctrl-C 停止`);
   while (!stopped) {
     const selected = selectedSessions();
@@ -107,6 +107,7 @@ async function renderSessions(paths) {
     return;
   }
   console.log(`\n### ${paths.join("\n### ")}（${page.total} 次模型调用）`);
+  console.log(`时区：${formatLocalTimeZone()}`);
   const details = !options.list && (options.all || options.exchange !== undefined);
   for (const summary of page.exchanges) {
     const rendered = await renderExchange(paths, summary, details);
@@ -222,4 +223,8 @@ function headerLines(headers) {
   return Object.entries(headers ?? {}).map(([name, value]) => (
     `  ${name}: ${Array.isArray(value) ? value.join(", ") : String(value)}`
   ));
+}
+
+function formatTime(atMs) {
+  return Number.isFinite(atMs) ? formatLocalTime(atMs) : "-";
 }

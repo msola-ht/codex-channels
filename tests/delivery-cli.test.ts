@@ -88,7 +88,7 @@ it("lists safe metadata and rejects concurrent maintenance", () => {
   expect(listed.stdout).toContain("test-result");
   expect(listed.stdout).not.toContain("PRIVATE BODY");
   expect(listed.stdout).not.toContain("PRIVATE OWNER");
-  expect(JSON.parse(listed.stdout)).toMatchObject({ eventType: "text.completed", threadId: "thread", turnId: "turn", blocksFollowing: true, blocksExecution: false });
+  expect(JSON.parse(listed.stdout)).toMatchObject({ eventType: "text.completed", threadId: "thread", turnId: "turn", blocksFollowing: false, blocksExecution: false });
 });
 
 it("requires explicit retry and preserves the result as pending", () => {
@@ -109,7 +109,7 @@ it("removes a result only after explicit delivered confirmation", () => {
   expect(JSON.parse(status.stdout)).toMatchObject({ records: 0 });
 });
 
-it("distinguishes retained notices, queued output and manual barriers without leaking content", () => {
+it("distinguishes retained failures from queued output without leaking content", () => {
   const { home, run } = fixture();
   expect(run("init").status).toBe(0);
   const store = new SqliteDeliveryJournal(join(home, "data", "delivery-outbox"));
@@ -136,12 +136,12 @@ it("distinguishes retained notices, queued output and manual barriers without le
   expect(rows.map(({ id, blocksFollowing, blocksExecution }) => ({ id, blocksFollowing, blocksExecution }))).toEqual([
     { id: "notice", blocksFollowing: false, blocksExecution: false },
     { id: "compact-start", blocksFollowing: false, blocksExecution: false },
-    { id: "compact-end", blocksFollowing: true, blocksExecution: false },
+    { id: "compact-end", blocksFollowing: false, blocksExecution: false },
     { id: "command-end", blocksFollowing: false, blocksExecution: false },
-    { id: "command-error", blocksFollowing: true, blocksExecution: false },
+    { id: "command-error", blocksFollowing: false, blocksExecution: false },
     { id: "queued", blocksFollowing: true, blocksExecution: false },
     { id: "revoked", blocksFollowing: false, blocksExecution: false },
   ]);
   expect(rows[1]).toMatchObject({ operationKind: "contextCompaction", operationStatus: "running", threadId: "thread", turnId: "turn" });
-  expect(JSON.parse(run("delivery", "status").stdout)).toMatchObject({ records: 7, uncertain: 5, pending: 1, blocked: 1, retainedNotices: 4, blockingRecords: 3, blockedConversations: 1 });
+  expect(JSON.parse(run("delivery", "status").stdout)).toMatchObject({ records: 7, uncertain: 5, pending: 1, blocked: 1, retainedNotices: 6, blockingRecords: 1, blockedConversations: 0 });
 });

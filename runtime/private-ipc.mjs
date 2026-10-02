@@ -331,7 +331,9 @@ async function listenUnpublishedUnix(server, logicalPath, occupiedMessage) {
   const nameLength = Math.min(24, Buffer.byteLength(basename(logicalPath)));
   for (let attempt = 0; attempt < 16; attempt++) {
     const path = join(dirname(logicalPath), randomBytes(24).toString("base64url").slice(0, nameLength));
-    if (path === logicalPath) continue;
+    // Default macOS volumes are case-insensitive: binding S already occupies s.
+    // Reject case-only aliases on every platform without changing path lengths.
+    if (path.toLowerCase() === logicalPath.toLowerCase()) continue;
     try {
       await listen(server, path, occupiedMessage);
       return path;

@@ -56,7 +56,6 @@ describe("WebUI 界面文案语言切换", () => {
     trafficDetailPrewarmEn: string;
     trafficDetailNoResponseEn: string;
     trafficPageEn: string;
-    trafficBatchFailedEn: string;
     trafficPageDisabledEn: string;
     trafficPageLimitedEn: string;
     trafficDetailPageEn: string;
@@ -270,8 +269,7 @@ describe("WebUI 界面文案语言切换", () => {
           response: { ...trafficDetail.response, output: [] } };
         const trafficDetailNoResponse = { ...trafficDetail, state: "pending", response: null };
         globalThis.fixtureDisclosureOpen = true;
-        const trafficTableEn = render(TrafficTable, { exchanges: [trafficExchange], onOpen: noop,
-          turnStates: new Map([[JSON.stringify([trafficExchange.label, trafficExchange.session, trafficExchange.id]), trafficExchange.turnStateLengths]]) }, "en");
+        const trafficTableEn = render(TrafficTable, { exchanges: [trafficExchange], onOpen: noop }, "en");
         const trafficTableEmptyEn = render(TrafficTable, { exchanges: [], onOpen: noop }, "en");
         const trafficDetailEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetail }, "en");
         const trafficDetailFailedEn = render(TrafficDetail, { ...trafficDetailProps, detail: trafficDetailFailed }, "en");
@@ -285,12 +283,8 @@ describe("WebUI 界面文案语言切换", () => {
           pendingPreview: null, actionError: null, run: noop, refetch: noop, confirm: noop, cancelPending: noop };
         globalThis.fixtureTrafficDetail = { displayData: null, loading: false, error: null, errorCode: null, refetch: noop };
         globalThis.fixtureTrafficList = { data: trafficListBase, loading: false, error: null, errorCode: null,
-          refetch: noop, turnStates: new Map(), turnStateErrors: new Map(), turnStatesLoading: false,
-          turnStatesError: null, refetchTurnStates: noop };
+          refetch: noop };
         const trafficPageEn = render(TrafficPage, {}, "en");
-        globalThis.fixtureTrafficList.turnStatesError={batches:["openai / batch-1"]};
-        const trafficBatchFailedEn=render(TrafficPage, {}, "en");
-        globalThis.fixtureTrafficList.turnStatesError=null;
         globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, enabled: false } };
         const trafficPageDisabledEn = render(TrafficPage, {}, "en");
         globalThis.fixtureTrafficList = { ...globalThis.fixtureTrafficList, data: { ...trafficListBase, total: 5 } };
@@ -367,7 +361,6 @@ describe("WebUI 界面文案语言切换", () => {
           trafficDetailPrewarmEn,
           trafficDetailNoResponseEn,
           trafficPageEn,
-          trafficBatchFailedEn,
           trafficPageDisabledEn,
           trafficPageLimitedEn,
           trafficDetailPageEn,
@@ -454,7 +447,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Failure rate: 25.0%");
     expect(result.consoleEn).toContain("No failed requests");
     expect(result.consoleEn).toContain("OpenAI weekly quota");
-    expect(result.consoleEn).toContain("Weekly quota used: 37.5%");
+    expect(result.consoleEn).toContain("Weekly quota remaining: 62.5%");
     expect(result.consoleEn).toContain("Local accounts and quotas");
     expect(result.consoleEn).toContain("Available balance");
     expect(result.consoleEn).toContain("Remaining credit");
@@ -518,8 +511,8 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.requestsTableEn).toContain("Records");
     expect(result.requestsTableEn).toContain("Matching records: 1 · This page: 1 · Page 1");
     expect(result.requestsTableEn).toContain("Request duration");
-    expect(result.requestsTableEn).toContain("Traffic");
-    expect(result.requestsTableEn).toContain("Not linked");
+    expect(result.requestsTableEn).toContain("View request");
+    expect(result.requestsTableEn).not.toContain("Not linked");
     expect(result.requestsTableEn).not.toContain('href="/requests/');
     expect(result.requestsTableEn).toContain("Response model: model-other (Name mismatch)");
     expect(result.requestsTableEmptyEn).toContain("No records");
@@ -557,10 +550,11 @@ describe("WebUI 界面文案语言切换", () => {
   });
 
   it("调用列表与详情的表格、提示、空状态与失败覆盖英文", () => {
-    expect(result.trafficTableEn).toContain("Turn State characters");
+    expect(result.trafficTableEn).not.toContain("Turn State characters");
+    expect(result.trafficTableEn).toContain("Started at");
     expect(result.trafficTableEn).toContain("Request duration");
     expect(result.trafficTableEn).toContain("Model request");
-    expect(result.trafficTableEn).toContain("Error");
+    expect(result.trafficTableEn).toContain("Completed");
     expect(result.trafficTableEmptyEn).toContain("No traffic records");
     expect(result.trafficDetailEn).toContain("Diagnostics");
     expect(result.trafficDetailEn).toContain("Request headers and raw body");
@@ -577,8 +571,6 @@ describe("WebUI 界面文案语言切换", () => {
   });
 
   it("调用页面的标题、筛选、保留策略、告警与分页覆盖英文", () => {
-    expect(result.trafficBatchFailedEn).toContain("Failed batches (1): openai / batch-1");
-    expect(result.trafficBatchFailedEn).not.toMatch(/[\u4e00-\u9fff]/u);
     expect(result.trafficPageEn).toContain("Traffic");
     expect(result.trafficPageEn).toContain("Recorded model request and response fields");
     expect(result.trafficPageEn).toContain("Recorded session");

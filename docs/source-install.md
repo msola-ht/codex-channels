@@ -100,6 +100,8 @@ codexc update
 
 更新通过官方版本化配置事务将 Codex 用户层 `features.daemon_auto_start` 设为 `false`，避免原生终端另起官方后台；已为 `false` 时不重复写入，未设置或为 `true` 时关闭。即使源码、CLI 和数据库无需更新，也执行该设置。其他用户偏好与 Provider 模型目录不改写，也不处理历史服务和 PATH。写入失败会使更新明确失败；数据库已就绪时仍按原恢复流程恢复项目服务。此操作不停止已有官方 daemon，不改变其自动更新设置；`codexc remote` 继续连接项目管理的实例。
 
+为已运行更新器切换候选后的交接保留 `configureCodexUpdateDefaults` 内部入口，与 `disableCodexDaemonAutoStart` 委托同一实现；两个入口都只关闭 daemon 自动启动，不补写或覆盖模型。默认模型由 `codexc config` 交互确认后设置。
+
 新安装完成配置后也可运行 `codexc update` 应用此设置。若首次升级由尚不包含该步骤的旧更新器执行，安装新代码后再运行一次 `codexc update`；以输出“已关闭 Codex 原生 daemon 自动启动”为已执行依据。
 
 当前状态数据库使用 Schema v6，新增未绑定渠道会话的模型偏好。`codexc update` 支持显式从 v5

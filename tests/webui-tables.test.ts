@@ -13,11 +13,19 @@ describe("WebUI metrics table presentation", () => {
   });
   it("shows OpenAI remaining Credits, voucher counts and expiry details without losing zero or precision", () => {
     expect(markup.quotaCredits).toContain("12.34567890123456789");
-    expect(markup.quotaCredits).toContain("周额度已用 37.5%");
+    expect(markup.quotaCredits).toContain("周额度剩余：62.5%");
     expect(markup.quotaCreditsEnglish).toContain("Credits remaining");
+    expect(markup.quotaCreditsEnglish).toContain("Weekly quota remaining: 62.5%");
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
+    expect(markup.quotaCredits).toContain("订阅截止时间");
+    expect(markup.quotaCredits).toContain("订阅信息最后检查时间");
+    expect(markup.quotaCredits).toContain("2026-10-03 02:05");
+    expect(markup.quotaCredits).toContain("2026-09-23 02:41");
+    expect(markup.quotaCreditsEnglish).toContain("Subscription active until");
+    expect(markup.quotaCreditsEnglish).toContain("Subscription last checked");
+    expect(markup.quotaCreditsEnglish).toContain("From the login cache");
     expect(markup.quotaCredits).toContain("使用重置券");
     expect(markup.quotaCreditsEnglish).toContain("Use reset credit");
     expect(markup.quotaCredits).toContain("1970-01-01 00:33");
@@ -49,6 +57,32 @@ describe("WebUI metrics table presentation", () => {
       expect(markup[`relay-outcome-${name}`]).not.toContain("查看调用详情");
     }
   });
+  it("shows standalone request metrics without capture and offers optional exact traffic navigation", () => {
+    for (const label of ["请求模型", "响应模型", "思考等级", "缓存", "无缓存", "请求服务层级", "响应服务层级", "1970-01-01 00:00:01.000", "UTC", "fixture-client"]) {
+      expect(markup.requestDetail).toContain(label);
+    }
+    expect(markup.requestDetail).not.toContain('href="/traffic');
+    expect(markup.requestDetailEnglish).toContain("No dump reference");
+    expect(markup.requestDetailEnglish).toContain("Request model");
+    expect(markup.requestDetailLinked).toContain('/traffic?label=clp&amp;exchangeSession=batch&amp;id=7');
+    expect(markup.requestDetailZero).toContain("0 ms");
+    expect(markup.requestDetailZero).not.toContain("NaN");
+    expect(markup.requests).toContain("1970-01-01 00:00:01");
+  });
+  it("preserves historical model evidence without inventing request or response names", () => {
+    for (const key of ["requestHistorical", "requestHistoricalEn"]) {
+      expect(markup[key]).toContain("historical-model");
+    }
+    expect(markup.requestHistorical).toContain("记录模型");
+    expect(markup.requestHistoricalEn).toContain("Recorded model");
+    expect(markup.requestHistorical).toMatch(/请求模型<\/dt><dd[^>]*>—<\/dd>/u);
+    expect(markup.requestHistorical).toMatch(/响应模型<\/dt><dd[^>]*>—<\/dd>/u);
+    for (const key of ["requestDetail", "requestMissingModels", "requestResponseOnly"]) {
+      expect(markup[key]).not.toContain("记录模型");
+    }
+    expect(markup.requestMissingModels).not.toContain("NaN");
+    expect(markup.requestResponseOnly).toContain("response-only-model");
+  });
   beforeAll(() => {
     // Render actual components with the WebUI's existing Vite/React dependencies.
     const script = String.raw`
@@ -67,6 +101,7 @@ describe("WebUI metrics table presentation", () => {
       });
       try {
         const { AccountIdField } = await server.ssrLoadModule("/src/components/settings/account-id-field.tsx");
+        const { RequestDetail } = await server.ssrLoadModule("/src/components/requests/request-detail.tsx");
         const { RequestsTable } = await server.ssrLoadModule("/src/components/requests/requests-table.tsx");
         const { FastBadge } = await server.ssrLoadModule("/src/components/metrics/service-tier.tsx");
         const { ThreadTable } = await server.ssrLoadModule("/src/components/threads/thread-table.tsx");
@@ -135,6 +170,8 @@ describe("WebUI metrics table presentation", () => {
           editingAccount: render(AccountIdField, { id: "account", value: "main", accounts: [{ id: "main" }], disabled: false, editing: true, onChange: noop }),
           quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
           quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
+          quotaExhausted: render(WeeklyQuotaCard, { usedPercent: 120, resetsAt: null, planType: null }),
+          quotaFull: render(WeeklyQuotaCard, { usedPercent: -1, resetsAt: null, planType: null }),
           quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
           quotaRefreshing: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             refreshControl: { refreshing: true, disabled: true, error: null, onRefresh: noop } }),
@@ -143,7 +180,7 @@ describe("WebUI metrics table presentation", () => {
           quotaCreditsEnglish: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "2", expirations: [{ expiresAt: null, count: 1 }], undisclosedCount: "1" } }, "en"),
           quotaCredits: render(WeeklyQuotaCard, { onCreditsChanged: noop, usedPercent: 37.5, resetsAt: 1000, planType: "plus",
-            credits: { observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
+            credits: { subscription: { activeUntil: 1790993155, lastChecked: 1790131317 }, observedAtMs: 1000, remaining: "12.34567890123456789", unlimited: false, resetCreditsAvailable: "5",
               expirations: [{ expiresAt: 2000, count: 2 }, { expiresAt: null, count: 1 }], undisclosedCount: "2" } }),
           quotaZeroCredits: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             credits: { observedAtMs: 1000, remaining: "0", unlimited: false, resetCreditsAvailable: "0", expirations: [], undisclosedCount: null } }),
@@ -161,14 +198,9 @@ describe("WebUI metrics table presentation", () => {
           inputToken: render(InputTokenTooltip, { inputTokens: 10, cachedInputTokens: 5 }),
           outputToken: render(OutputTokenTooltip, { outputTokens: 10, reasoningOutputTokens: 5 }),
           summaryLoading: render(QuerySummary, { aggregate: null, range: { name: "all" }, loading: true }),
-          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]) }),
+          traffic: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
           trafficFirstZero: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: 0 }], onOpen: noop }),
           trafficFirstMissing: render(TrafficTable, { exchanges: [{ ...exchange, firstTokenMs: undefined }], onOpen: noop }),
-          trafficCountsLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop }),
-          trafficCountsFailed: render(TrafficTable, { exchanges: [exchange], onOpen: noop, turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), "fixture count failure"]]) }),
-          trafficCountsPartial: render(TrafficTable, { exchanges: [exchange, { ...exchange, id: 8 }], onOpen: noop,
-            turnStates: new Map([[JSON.stringify([exchange.label, exchange.session, exchange.id]), exchange.turnStateLengths]]),
-            turnStateErrors: new Map([[JSON.stringify([exchange.label, exchange.session, 8]), "fixture count failure"]]) }),
           trafficLoading: render(TrafficTable, { exchanges: [exchange], onOpen: noop, loading: true }),
           trafficMismatch: render(TrafficTable, { exchanges: [{ ...exchange, responseModels: ["model-other"] }], onOpen: noop }),
           relayDebug: render(TrafficDetail, { detail: { ...detail, debug: {
@@ -181,6 +213,14 @@ describe("WebUI metrics table presentation", () => {
           retry: render(ErrorBanner, { error: "fixture failure", onRetry: noop }),
           retryPending: render(ErrorBanner, { error: "fixture failure", onRetry: noop, pending: true }),
           requests: render(RequestsTable, requestProps),
+          requestDetail: render(RequestDetail, { record: { ...record, totalTokens: 120, transport: "http", responseFormat: "sse", reasoningEffort: "high", requestServiceTier: "priority", serviceTier: "default" } }),
+          requestDetailEnglish: render(RequestDetail, { record }, "en"),
+          requestHistorical: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }),
+          requestHistoricalEn: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: "historical-model" } }, "en"),
+          requestMissingModels: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: null, model: null } }),
+          requestResponseOnly: render(RequestDetail, { record: { ...record, requestModel: null, responseModel: "response-only-model" } }),
+          requestDetailLinked: render(RequestDetail, { record: { ...record, traffic: {label:"clp",session:"batch",interaction:7} } }, "zh", "/requests?range=7d&offset=50"),
+          requestDetailZero: render(RequestDetail, { record: { ...record, inputTokens:0,cachedInputTokens:0,outputTokens:0,totalTokens:0,firstTokenMs:0,totalDurationMs:0,cacheHitRate:null,errorMessage:null,errorType:null,errorCode:null } }),
           requestsClp: render(RequestsTable, { ...requestProps, records: [{ ...record, provider: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModel: "hidden-response-model", upstreamProvider: "deepseek" }] }),
           trafficClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "clp", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["hidden-response-model"], upstreamProvider: "deepseek" }], onOpen: noop }),
           trafficRelayClp: render(TrafficTable, { exchanges: [{ ...exchange, label: "relay.chat", account: "clp-main", requestModel: "cline-pass/deepseek-v4.1-flash", responseModels: ["deepseek/deepseek-v4.1-flash"], upstreamProvider: "deepseek" }], onOpen: noop }),
@@ -319,6 +359,13 @@ describe("WebUI metrics table presentation", () => {
         result.pendingCall = render(TrafficDetail, { detail: { ...detail, state: "pending" }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         result.failedCall = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response,
           state: "failed", failureStage: "upstream_error", failure: "hidden-error", errorScope: "socket", error: "hidden-transport-error" } }, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        for (const [name, fields] of Object.entries({
+          rateLimit: { "upstreamError.code": "stream_initialization_failed", "upstreamError.cause.type": "rate_limit_exceeded", "upstreamError.cause.statusCode": 429, "upstreamError.request_id": "readable-request-id" },
+          authentication: { "upstreamError.cause.statusCode": 401 },
+          unknown: { "upstreamError.code": "unknown_upstream_code" },
+        })) {
+          result["errorSummary-" + name] = render(TrafficDetail, { detail: { ...completedDetail, state: "failed", response: { ...completedDetail.response, state: "failed", status: 200, error: "chat_upstream_error" }, chatDiagnostics: { fields, truncated: false } }, provider: "clp-main", session: "batch", onRetry: noop, onTracePageChange: noop });
+        }
         const completedWithDisconnect = { ...completedDetail, response: { ...completedDetail.response, errorScope: "client_disconnected" } };
         result.completedDisconnect = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         globalThis.fixtureDisclosureOpen = true;
@@ -416,15 +463,15 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("shows the refreshed official window after redemption without another model request", () => {
-    expect(markup.consoleQuotaAfterReset).toContain('aria-valuenow="0"');
+    expect(markup.consoleQuotaAfterReset).toContain('aria-valuenow="100"');
     expect(markup.consoleQuotaAfterReset).toContain("1970-01-01 01:06");
-    expect(markup.consoleQuotaAfterReset).not.toContain('aria-valuenow="100"');
+    expect(markup.consoleQuotaAfterReset).not.toContain('aria-valuenow="0"');
     expect(markup.consoleQuotaAfterReset).not.toContain("1970-01-01 00:16");
   });
 
   it("keeps the last OpenAI quota during range loading and failures but honors an explicit empty snapshot", () => {
     for (const key of ["consoleQuotaLoading", "consoleQuotaFailed"]) {
-      expect(markup[key]).toContain('aria-valuenow="37.5"');
+      expect(markup[key]).toContain('aria-valuenow="62.5"');
       expect(markup[key]).not.toContain("尚未获取 OpenAI 额度快照");
     }
     expect(markup.consoleQuotaFailed).toContain("加载失败");
@@ -465,34 +512,37 @@ describe("WebUI metrics table presentation", () => {
   it("orders quota windows by duration and keeps missing windows absent", () => {
     for (const key of ["ocgQuotaOrder", "clineQuotaOrder"]) {
       const html = markup[key]!;
-      const labels = [...html.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]);
+      const labels = [...html.matchAll(/aria-label="([^"]+)剩余比例"/g)].map((match) => match[1]);
       const values = [...html.matchAll(/aria-valuenow="([^"]+)"/g)].map((match) => match[1]);
       expect(labels).toEqual(["5小时", "7天", "月度"]);
-      expect(values).toEqual(["10", "20", "30"]);
+      expect(values).toEqual(["90", "80", "70"]);
     }
     const missing = markup.missingQuotaWindow!;
     expect(missing).not.toContain("7天");
-    expect([...missing.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]))
+    expect([...missing.matchAll(/aria-label="([^"]+)剩余比例"/g)].map((match) => match[1]))
       .toEqual(["5小时", "月度"]);
   });
 
   it("exposes the quota value and names its current snapshot correctly", () => {
-    expect(markup.quota).toContain('aria-valuenow="37.5"');
-    expect(markup.quota).toContain('aria-label="OpenAI 周额度已用比例"');
+    expect(markup.quota).toContain('aria-valuenow="62.5"');
+    expect(markup.quota).toContain('aria-label="OpenAI 周额度剩余比例"');
     expect(markup.quota).toContain('data-state="loading"');
     expect(markup.quotaEmpty).toContain("尚未获取 OpenAI 额度快照");
+    expect(markup.quotaEmpty).not.toContain("role=\"progressbar\"");
+    expect(markup.quotaExhausted).toContain('aria-valuenow="0"');
+    expect(markup.quotaFull).toContain('aria-valuenow="100"');
     expect(markup.quotaEmpty).not.toContain("当前时间范围");
     expect(markup.quotaUnknownReset).toContain("重置时间未知");
     expect(markup.quotaUnknownReset).not.toContain("暂无限额快照");
-    expect(markup.quotaUnknownReset).toContain('aria-valuenow="37.5"');
+    expect(markup.quotaUnknownReset).toContain('aria-valuenow="62.5"');
   });
 
   it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {
-    for (const key of ["requestsUpstream", "trafficUpstream"] as const) {
+    for (const key of ["trafficUpstream"] as const) {
       const html = markup[key]!;
       expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
       expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
-      expect(html.match(/<th\b/g)?.length).toBe(markup[key === "requestsUpstream" ? "requests" : "traffic"]!.match(/<th\b/g)?.length);
+      expect(html.match(/<th\b/g)?.length).toBe(markup.traffic!.match(/<th\b/g)?.length);
     }
     expect(markup.requests).not.toContain('title="routing.finalProvider"');
     expect(markup.traffic).not.toContain('title="routing.finalProvider"');
@@ -513,7 +563,7 @@ describe("WebUI metrics table presentation", () => {
       expect(tag).toContain('data-icon="inline-start"');
     }
     expect(badge(markup.requestsMissingModel!, "响应模型：model-test（信息不足）")).toContain('data-variant="outline"');
-    for (const key of ["requestsUpstream", "trafficUpstream", "requestsOtherUpstream", "trafficOtherUpstream"]) {
+    for (const key of ["trafficUpstream", "trafficOtherUpstream"]) {
       const tag = badge(markup[key]!, "routing.finalProvider");
       expect(tag).toContain(key.includes("Other") ? 'data-variant="destructive"' : 'data-variant="outline"');
       expect(tag).toContain('data-size="sm"');
@@ -542,7 +592,8 @@ describe("WebUI metrics table presentation", () => {
 
   it("shows only actual upstream badges for CLP account and dump identities", () => {
     for (const key of ["requestsClp", "trafficClp"]) {
-      expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      if (key === "trafficClp") expect(markup[key]).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
+      else expect(markup[key]).not.toContain('title="routing.finalProvider"');
       expect(markup[key]).not.toContain("hidden-response-model");
       expect(markup[key]).not.toContain("响应模型：");
       expect(markup[key]).toContain('>deepseek-v4.1-flash</span>');
@@ -553,12 +604,10 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.trafficClpNoUpstream).not.toContain('title="routing.finalProvider"');
   });
 
-  it("shows the recorded upstream provider on the error list without adding a column", () => {
-    const html = markup.errorsUpstream!;
-    expect(html).toContain('title="routing.finalProvider"><span class="truncate">deepseek');
-    expect(html.indexOf('title="routing.finalProvider"')).toBeGreaterThan(html.indexOf("model-test"));
-    expect(html.match(/<th\b/g)?.length).toBe(markup.errors!.match(/<th\b/g)?.length);
-    expect(markup.errors).not.toContain('title="routing.finalProvider"');
+  it("does not project optional dump evidence onto requests or errors", () => {
+    for (const key of ["requestsUpstream", "requestsOtherUpstream", "errorsUpstream"]) {
+      expect(markup[key]).not.toContain('title="routing.finalProvider"');
+    }
   });
 
   it("shows the reported final provider beside the detail model without inferring fallbacks", () => {
@@ -618,10 +667,11 @@ describe("WebUI metrics table presentation", () => {
 
   it("groups request identity, usage, performance and detail columns", () => {
     expect(headers(markup.requests!)).toEqual([
-      "来源", "调用方", "交付", "时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
-      "首 Token", "请求耗时", "调用详情",
+      "记录时间", "提供商", "模型", "状态", "输入 Token", "缓存命中率", "输出 Token",
+      "首 Token", "请求耗时", "来源", "请求详情",
     ]);
-    expect(markup.requests).toContain("未关联");
+    expect(markup.requests).not.toContain("未关联");
+    expect(markup.requests).toContain("查看请求");
     expect(markup.requests).not.toContain('href="/requests/');
     expect(markup.requests).not.toContain('href="/traffic');
     expect(markup.requests).not.toContain('role="checkbox"');
@@ -644,7 +694,8 @@ describe("WebUI metrics table presentation", () => {
     for (const tier of ["fast", "priority"]) expect(markup['tier-' + tier]).toContain(">Fast</span>");
     for (const tier of ["default", "flex", "auto", "null", "undefined"]) expect(markup['tier-' + tier]).toBe("");
     expect(markup.fastRequests).toContain(">Fast</span>");
-    expect(markup.fastRequests).toContain('/traffic?label=ocg&amp;exchangeSession=batch-fast&amp;id=23');
+    expect(markup.fastRequests).toContain("查看请求");
+    expect(markup.fastRequests).not.toContain('href="/traffic');
     expect(markup.fastErrors).toContain(">Fast</span>");
     expect(markup.requests).not.toContain(">Fast</span>");
     expect(markup.responseFastRequests).not.toContain(">Fast</span>");
@@ -701,7 +752,7 @@ describe("WebUI metrics table presentation", () => {
       .map((match) => match[0]);
     const ascendingHeaders = [...markup.ascending!.matchAll(/<th\b[^>]*>[\s\S]*?<\/th>/g)]
       .map((match) => match[0]);
-    const timeIndex = headers(markup.requests!).indexOf("时间");
+    const timeIndex = headers(markup.requests!).indexOf("记录时间");
     const speedIndex = headers(markup.ascending!).indexOf("请求耗时");
     const statusIndex = headers(markup.requests!).indexOf("状态");
     expect(timeIndex).toBeGreaterThanOrEqual(0);
@@ -724,7 +775,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.inputToken).toContain('tabindex="0"');
     expect(markup.outputToken).toContain('tabindex="0"');
     const cells = [...markup.requests!.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/g)].map(match => match[1]!);
-    for (const label of ["首 Token", "请求耗时", "调用详情"]) {
+    for (const label of ["首 Token", "请求耗时", "请求详情"]) {
       expect(cells[headers(markup.requests!).indexOf(label)]).not.toContain('data-slot="tooltip-trigger"');
     }
     expect(markup['tier-fast']).toContain("h-4");
@@ -777,18 +828,13 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("prioritizes traffic model, status and duration with compact response-model badges", () => {
-    expect(headers(markup.traffic!)).toEqual(["时间", "提供商", "客户端", "模型", "协议", "状态", "首 Token", "请求耗时", "Turn State 字符数", "类型", "请求"]);
+    expect(headers(markup.traffic!)).toEqual(["开始时间", "提供商", "客户端", "模型", "协议", "状态", "首 Token", "请求耗时", "类型"]);
     expect(markup.traffic).toContain("WorkBuddy");
     expect(markup.traffic).toContain("客户端");
     expect(markup.traffic).toContain("Responses");
     expect(markup.traffic).toContain("100 ms");
-    expect(markup.traffic).toContain("1,234");
-    expect(markup.trafficCountsLoading).toContain("加载中…");
-    expect(markup.trafficCountsLoading).toContain("的调用明细");
-    expect(markup.trafficCountsFailed).toContain("加载失败");
-    expect(markup.trafficCountsFailed).toContain("的调用明细");
-    expect(markup.trafficCountsPartial).toContain("1,234");
-    expect(markup.trafficCountsPartial?.match(/加载失败/g)).toHaveLength(1);
+    expect(markup.traffic).not.toContain("Turn State 字符数");
+    expect(markup.traffic).not.toContain("加载中…");
     expect(markup.traffic).not.toContain("#7");
     expect(markup.traffic).toContain("的调用明细");
     expect(markup.traffic).toContain("响应模型：model-test（名称一致）");
@@ -819,6 +865,14 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.failedCall!.match(/role="alert"/g)).toHaveLength(1);
     expect(markup.failedCall).toContain("错误详情");
     expect(markup.failedCall).not.toContain("hidden-error");
+    expect(markup["errorSummary-rateLimit"]).toContain("上游限流，请稍后重试或降低并发。");
+    expect(markup["errorSummary-rateLimit"]).toContain("stream_initialization_failed");
+    expect(markup["errorSummary-rateLimit"]).toContain("rate_limit_exceeded");
+    expect(markup["errorSummary-rateLimit"]).toContain("readable-request-id");
+    expect(markup["errorSummary-rateLimit"]).toContain("429");
+    expect(markup["errorSummary-rateLimit"]).toContain("HTTP 200");
+    expect(markup["errorSummary-authentication"]).toContain("上游认证失败，请检查 API Key。");
+    expect(markup["errorSummary-unknown"]).toContain("现有记录不足以确定具体原因");
     for (const category of ["prewarm", "models"]) {
       expect(markup['call-' + category]).not.toContain("首 Token");
       expect(markup['call-' + category]).not.toContain("输入 Token");

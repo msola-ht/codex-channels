@@ -216,6 +216,88 @@ describe("TelegramLifecycle", () => {
     }
   });
 
+  it("isolates Conversations and routes interaction replies ahead of blocked ordinary input", async () => {
+    const handled: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let poll = 0;
+    const other = telegramUpdate(3);
+    other.message.chat.id = 200;
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: { update_id: number }) => {
+        if (update.update_id === 1) await gate;
+        handled.push(update.update_id);
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          if (++poll === 1) return [telegramUpdate(1)];
+          if (poll === 2) return [telegramUpdate(2), other,
+            { update_id: 4, callback_query: { data: "ix:approval", message: telegramUpdate(4).message } },
+            telegramUpdate(5, undefined, "answer")];
+          await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }),
+      undefined, undefined, { isInteractionUpdate: update => update.update_id === 5 });
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(handled).toEqual(expect.arrayContaining([3, 4, 5])));
+      expect(handled).not.toContain(1);
+      expect(handled).not.toContain(2);
+      expect(handled.indexOf(4)).toBeLessThan(handled.indexOf(5));
+    } finally {
+      release();
+      await lifecycle.stop();
+    }
+    expect(handled.slice(-2)).toEqual([1, 2]);
+  });
+
+  it("bounds ordinary Conversation concurrency while stop bypasses a blocked control response", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started: number[] = [];
+    let poll = 0;
+    const bot = {
+      botInfo: { username: "test_bot" },
+      init: async () => undefined,
+      handleUpdate: async (update: { update_id: number }) => {
+        started.push(update.update_id);
+        if (update.update_id !== 22) await gate;
+      },
+      api: {
+        setMyCommands: async () => true,
+        getUpdates: async (_options: unknown, signal: AbortSignal) => {
+          if (++poll === 1) return Array.from({ length: 20 }, (_, index) => {
+            const update = telegramUpdate(index + 1);
+            update.message.chat.id = index + 1;
+            return update;
+          });
+          if (poll === 2) return [telegramUpdate(21, undefined, "answer")];
+          if (poll === 3) return [telegramUpdate(22, undefined, "/stop")];
+          await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+          return [];
+        },
+      },
+    };
+    const lifecycle = new TelegramLifecycle(bot as unknown as Bot, pino({ level: "silent" }),
+      undefined, undefined, { isInteractionUpdate: update => update.update_id === 21 });
+    lifecycle.start();
+    try {
+      await vi.waitFor(() => expect(started).toContain(22));
+      expect(started).toContain(21);
+      expect(started.filter(id => id <= 20)).toHaveLength(8);
+    } finally {
+      release();
+      await lifecycle.stop();
+    }
+    expect(started).toHaveLength(22);
+  });
+
   it("preserves ordinary update order across polling batches", async () => {
     const handled: number[] = [];
     let poll = 0;
