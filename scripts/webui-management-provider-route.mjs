@@ -92,7 +92,7 @@ export async function routeProviderManagement({
     } finally {
       response.removeListener("close", disconnect);
     }
-    sendAccountSnapshots(environment, response, openMetricsStore);
+    sendAccountSnapshots(environment, response, openMetricsStore, body.provider);
     return true;
   }
   if (path === "/provider-settings" && request.method === "GET") {
@@ -260,12 +260,14 @@ export async function routeProviderManagement({
   return false;
 }
 
-export function sendAccountSnapshots(environment, response, openMetricsStore) {
+export function sendAccountSnapshots(environment, response, openMetricsStore, provider) {
   const store = openMetricsStore(environment);
   try {
-    const storedSnapshots = typeof store.latestAccountSnapshots === "function"
-      ? store.latestAccountSnapshots()
-      : [];
+    // A refresh owns one Provider; the separate GET remains the authoritative list.
+    const single = provider === undefined ? null : store.latestAccountSnapshot(provider);
+    const storedSnapshots = provider === undefined
+      ? (typeof store.latestAccountSnapshots === "function" ? store.latestAccountSnapshots() : [])
+      : single === null ? [] : [single];
     const { warnings, dsAccounts, ocgAccounts, ccgAccounts, clineAccounts, accountMetadata } = loadAccountSources(environment);
     const metadataByProvider = new Map(accountMetadata.map((account) => [account.provider, account]));
     const snapshots = storedSnapshots
@@ -299,6 +301,7 @@ export function sendAccountSnapshots(environment, response, openMetricsStore) {
         };
       });
     for (const account of accountMetadata) {
+      if (provider !== undefined && account.provider !== provider) continue;
       if (snapshots.some((snapshot) => snapshot.provider === account.provider)) continue;
       snapshots.push({
         provider: account.provider,

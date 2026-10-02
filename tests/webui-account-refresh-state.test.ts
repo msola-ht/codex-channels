@@ -68,6 +68,17 @@ describe("WebUI per-account refresh state", () => {
     expect(refreshableAccounts({ accounts, warnings: [] })).toEqual(accounts.map(account => ({ id: account.provider, displayName: account.displayName })));
   });
 
+  it("accepts a first single-account response and merges later accounts without replacing the list", () => {
+    const response = (provider: string): OfficialAccountSnapshotsResponse => ({ observedAtMs: 100, warnings: [], snapshots: [{
+      provider, accountId: "main", displayName: provider, default: false, observedAtMs: 100, available: true, usage: null, limits: null,
+    }] });
+    const first = accountSnapshotsAfterRefresh(null, ["clp-main"], [{ status: "fulfilled", value: response("clp-main") }]);
+    const next = accountSnapshotsAfterRefresh(first, ["ds-main"], [{ status: "fulfilled", value: response("ds-main") }]);
+    expect(next?.snapshots.map(snapshot => snapshot.provider)).toEqual(["clp-main", "ds-main"]);
+    expect(accountSnapshotsAfterRefresh(next, ["clp-main"], [{ status: "rejected", reason: new Error("failed") }])).toEqual(next);
+    expect(mergeAccountSnapshotLists(next, response("ds-main")).snapshots.map(snapshot => snapshot.provider)).toEqual(["ds-main"]);
+  });
+
   it("keeps newer quota observations across late single-account and whole-list responses", () => {
     const snapshot = { provider: "openai", accountId: null, displayName: "OpenAI", default: false,
       observedAtMs: 2000, available: true, usage: null, limits: { usedPercent: 0 } };

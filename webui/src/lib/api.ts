@@ -410,6 +410,7 @@ export function fetchTrafficTrace(
   return getJson<TrafficTraceResponse>(`${API_PREFIX}/traffic/trace?${params.toString()}`, signal)
 }
 
+/** Returns the target Provider only; callers merge it and use GET for list membership. */
 export function refreshOfficialAccountSnapshot(
   provider: string,
   signal?: AbortSignal,
