@@ -93,6 +93,7 @@ export function inspectManagedSourceUpdatePlan(
             "switch-source",
             "refresh-command",
             "upgrade-databases",
+            "configure-codex-daemon",
             "restore-services",
             "cleanup",
           ]
@@ -323,6 +324,8 @@ export async function updateManagedSourceInstallation(
     await runStage("upgrade-databases", () =>
       applyCandidateDatabaseUpdates(checkout, environment, options));
     databasesReady = true;
+    await runStage("configure-codex-daemon", () =>
+      disableCandidateDaemonAutoStart(checkout, environment, options));
     if (inspection.services.installed) {
       await runStage("restore-services", () =>
         (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning));
@@ -867,6 +870,17 @@ async function applyCandidateDatabaseUpdates(checkout, environment, options) {
   );
 }
 
+function disableCandidateDaemonAutoStart(checkout, environment, options) {
+  run(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    "const candidate = await import(process.argv[1]); await candidate.disableCodexDaemonAutoStart(process.env);",
+    pathToFileURL(join(checkout, "scripts", "codex-user-config.mjs")).href,
+  ], checkout, environment, options.runCommand);
+  writeMessageSafely(options.writeMessage ?? writeCliMessage, "note",
+    "已关闭 Codex 原生 daemon 自动启动；现有后台不受影响，项目服务继续由 codexc service 管理。");
+}
+
 async function stopCoreServices(checkout, environment, options) {
   run(
     process.execPath,
@@ -1030,6 +1044,8 @@ export async function updateInstalledPackage(environment = process.env, options 
       await applyCandidateDatabaseUpdates(checkout, environment, options);
       databasesReady = true;
     }
+    packageStage = "configure-codex-daemon";
+    disableCandidateDaemonAutoStart(checkout, environment, options);
     if (servicesStopped) {
       await (options.startServices ?? startCoreServices)(checkout, environment, options, relayWasRunning);
       servicesStopped = false;

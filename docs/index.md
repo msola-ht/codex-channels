@@ -110,6 +110,8 @@ OpenAI 模型提交 `input_image.file_id` 且没有 Base64，后续纯文本请�
 | 查询目标 | 官方源码 | 主要内容 |
 | --- | --- | --- |
 | App Server 程序入口 | [`app-server/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/lib.rs) | App Server 模块、启动参数与 Transport 装配入口 |
+| 原生 daemon 生命周期与包管理 | [`app-server-daemon/README.md`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-daemon/README.md)、[`src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-daemon/src/lib.rs) | 生命周期替代研究，当前暂缓接入；配置、代理、固定版本与隔离实测见[专项审查](codex-daemon-review.md)，不增加 RPC 支持范围 |
+| 原生 daemon 恢复合同 | [`daemon_update_recovery.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/tests/suite/v2/daemon_update_recovery.rs) | 官方后台加载与中断续做合同；不能将恢复等同于历史读取，也不能代替 Gateway 归属和审批验收 |
 | JSON-RPC 消息总表 | [`rpc.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/rpc.rs) | Client Request、Server Notification、Server Request |
 | 协议公共类型 | [`common.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/common.rs) | 初始化、ID、通用协议结构 |
 | v2 协议入口 | [`v2/mod.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/src/protocol/v2/mod.rs) | v2 模块与受支持类型汇总 |
@@ -369,6 +371,10 @@ Schema v24 新增可空 `response_usage_amount`，由 Provider Proxy 从 HTTP JS
 完成卡片通过精确 Turn 查询及递归会话查询汇总 OpenAI 单次原值，携带采集/缺失请求数；不新增 Schema 字段或使用浮点求和。
 验证使用 HTTP/WS metrics、指标 IPC、request metrics store、relay upgrade、metrics export、thread summary、completion timing 与 lifecycle presentation 测试。
 运行时只接受当前 Schema v24；v20/v21/v22/v23 通过带一致性备份的显式 upgrade 保留数据升级，不支持的旧版本失败关闭，新安装直接建库。流程见[源码安装与更新](source-install.md)。
+
+更新器关闭原生 daemon 自动启动也复用用户层 `config/read` 与版本化 `config/batchWrite`；
+入口为 `scripts/codex-user-config.mjs`，由 `source-update.mjs` 在候选切换和无需升级两条路径调用，
+验证见 `source-update.test.ts` 与 `real-app-server-isolated-state.test.ts`。
 
 CLI 用户设置使用的用户级 `config/read` 不携带 Workspace CWD，读取用户层并投影该连接的合并配置；渠道跨 Provider
 切换则向目标 App Server 发送带 Workspace CWD 的只读 `config/read`，取得该 Profile 的有效思考等级。

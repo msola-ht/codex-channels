@@ -7,6 +7,15 @@ import {
 } from "../runtime/executable.mjs";
 import { terminateChildProcess } from "../runtime/process-lifecycle.mjs";
 
+export async function disableCodexDaemonAutoStart(environment = process.env, dependencies = {}) {
+  await updateCodexUserConfig(environment, (config) => {
+    const features = config.features;
+    return features?.daemon_auto_start === false
+      ? []
+      : [{ keyPath: "features.daemon_auto_start", value: false }];
+  }, dependencies);
+}
+
 export async function updateCodexUserConfig(
   environment,
   createEdits,
