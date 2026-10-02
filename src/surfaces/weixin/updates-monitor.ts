@@ -1,3 +1,5 @@
+import { setImmediate as yieldToPolling } from "node:timers/promises";
+import { isEmergencyStopCommand } from "../slash-command.js";
 import { validateWeixinAccountId } from "./credential-store.js";
 import {
   WeixinProtocolError,
@@ -26,7 +28,7 @@ export interface CreateWeixinUpdatesMonitorOptions {
   cursorStore: WeixinUpdatesCursorStore;
   handleMessage(message: Extract<WeixinInboundMessage, {
     kind: "text" | "image" | "file" | "audio";
-  }>): Promise<void>;
+  }>, signal: AbortSignal): Promise<void>;
   maximumConsecutiveFailures?: number;
   recentMessageCapacity?: number;
   retryDelayMs?: number;
@@ -72,112 +74,132 @@ export function createWeixinUpdatesMonitor(
       }
       let cursor = await options.cursorStore.get(accountId) ?? "";
       let consecutiveFailures = 0;
-      while (!signal.aborted) {
-        let batch;
-        options.onPollStart?.();
-        try {
-          batch = await options.client.getUpdates(cursor, signal);
-          options.onPollSuccess?.(Date.now());
-        } catch (error) {
-          if (signal.aborted) {
-            return;
+      // Read ahead within a bounded window, but persist only the contiguous completed prefix.
+      // The parser accepts at most 100 messages per batch; eight batches retain at most 800.
+      const controller = new AbortController();
+      const pollingSignal = AbortSignal.any([signal, controller.signal]);
+      const conversations = new Map<string, Promise<void>>();
+      const inFlightIds = new Map<string, Promise<void>>();
+      const pendingBatches = new Set<Promise<void>>();
+      let commitTail = Promise.resolve();
+      let failure: { error: unknown } | undefined;
+      const fail = (error: unknown): void => {
+        failure ??= { error };
+        controller.abort();
+      };
+      const dispatch = (message: WeixinInboundMessage): Promise<void> => {
+        const existing = inFlightIds.get(message.messageId);
+        if (existing) return existing;
+        if (recentMessageIds.has(message.messageId)) return Promise.resolve();
+        const key = message.kind === "ignored" ? undefined : message.conversationId;
+        const urgent = message.kind === "text" && isEmergencyStopCommand(message.text);
+        const previous = key === undefined || urgent ? Promise.resolve() : conversations.get(key) ?? Promise.resolve();
+        const task = previous.then(async () => {
+          if (failure) throw failure.error;
+          if (message.kind !== "ignored") await options.handleMessage(message, pollingSignal);
+          recentMessageIds.add(message.messageId);
+        });
+        inFlightIds.set(message.messageId, task);
+        if (key !== undefined && !urgent) conversations.set(key, task);
+        void task.then(() => {
+          if (key !== undefined && conversations.get(key) === task) conversations.delete(key);
+        }, fail);
+        return task;
+      };
+      try {
+        while (!pollingSignal.aborted) {
+          if (pendingBatches.size >= 8) {
+            await pendingBatches.values().next().value;
+            continue;
           }
-          if (isTimeout(error)) {
+          let batch;
+          options.onPollStart?.();
+          try {
+            batch = await options.client.getUpdates(cursor, pollingSignal);
+            if (pollingSignal.aborted) break;
             options.onPollSuccess?.(Date.now());
-            continue;
-          }
-          if (isStaleCredential(error)) {
-            consecutiveFailures = 0;
-            options.onRetry?.({
-              attempt: 1,
-              code: error.code,
-              phase: "credential-pause",
-              delayMs: staleCredentialPauseMs,
-              returnCode: staleCredentialReturnCode,
-            });
-            await abortableDelay(staleCredentialPauseMs, signal);
-            continue;
-          }
-          if (!isRetryable(error)) {
-            throw error;
-          }
-          consecutiveFailures += 1;
-          if (consecutiveFailures >= maximumConsecutiveFailures) {
+          } catch (error) {
+            if (pollingSignal.aborted) {
+              break;
+            }
+            if (isTimeout(error)) {
+              options.onPollSuccess?.(Date.now());
+              continue;
+            }
+            if (isStaleCredential(error)) {
+              consecutiveFailures = 0;
+              options.onRetry?.({
+                attempt: 1,
+                code: error.code,
+                phase: "credential-pause",
+                delayMs: staleCredentialPauseMs,
+                returnCode: staleCredentialReturnCode,
+              });
+              await abortableDelay(staleCredentialPauseMs, pollingSignal);
+              continue;
+            }
+            if (!isRetryable(error)) {
+              throw error;
+            }
+            consecutiveFailures += 1;
+            if (consecutiveFailures >= maximumConsecutiveFailures) {
+              options.onRetry?.({
+                attempt: consecutiveFailures,
+                code: error.code,
+                phase: "backoff",
+                delayMs: backoffDelayMs,
+                ...(error.status === undefined ? {} : { status: error.status }),
+              });
+              consecutiveFailures = 0;
+              await abortableDelay(backoffDelayMs, pollingSignal);
+              continue;
+            }
             options.onRetry?.({
               attempt: consecutiveFailures,
               code: error.code,
-              phase: "backoff",
-              delayMs: backoffDelayMs,
+              phase: "retry",
+              delayMs: retryDelayMs,
               ...(error.status === undefined ? {} : { status: error.status }),
             });
-            consecutiveFailures = 0;
-            await abortableDelay(backoffDelayMs, signal);
+            await abortableDelay(retryDelayMs, pollingSignal);
             continue;
           }
-          options.onRetry?.({
-            attempt: consecutiveFailures,
-            code: error.code,
-            phase: "retry",
-            delayMs: retryDelayMs,
-            ...(error.status === undefined ? {} : { status: error.status }),
+          consecutiveFailures = 0;
+          if (batch.messages.length > 0 && batch.cursor.length === 0) {
+            throw new WeixinProtocolError(
+              "invalid-response",
+              "微信消息批次缺少可提交游标",
+            );
+          }
+          const tasks = batch.messages.map(dispatch);
+          // Attach rejection handling immediately, including failures in later batches.
+          const handled = Promise.all(tasks).then(() => undefined);
+          void handled.catch(fail);
+          const nextCursor = batch.cursor;
+          const previousCursor = cursor;
+          const commit = commitTail.then(async () => {
+            await handled;
+            if (nextCursor.length > 0 && nextCursor !== previousCursor) {
+              await options.cursorStore.set(accountId, nextCursor);
+            }
+            for (const message of batch.messages) inFlightIds.delete(message.messageId);
           });
-          await abortableDelay(retryDelayMs, signal);
-          continue;
+          commitTail = commit;
+          pendingBatches.add(commit);
+          void commit.then(() => pendingBatches.delete(commit), fail);
+          if (nextCursor.length > 0) cursor = nextCursor;
+          // Let immediately completed handlers/checkpoints settle before fetching again.
+          // Slow handlers do not hold the polling loop or emergency commands.
+          await yieldToPolling();
         }
-        consecutiveFailures = 0;
-        if (batch.messages.length > 0 && batch.cursor.length === 0) {
-          throw new WeixinProtocolError(
-            "invalid-response",
-            "微信消息批次缺少可提交游标",
-          );
-        }
-        const messages: WeixinInboundMessage[] = [];
-        const batchMessageIds = new Set<string>();
-        for (const message of batch.messages) {
-          if (
-            recentMessageIds.has(message.messageId)
-            || batchMessageIds.has(message.messageId)
-          ) {
-            continue;
-          }
-          batchMessageIds.add(message.messageId);
-          messages.push(message);
-        }
-        for (let index = 0; index < messages.length;) {
-          const message = messages[index]!;
-          if (message.kind === "image") {
-            const imageMessages: Array<Extract<
-              WeixinInboundMessage,
-              { kind: "image" }
-            >> = [];
-            while (messages[index]?.kind === "image") {
-              imageMessages.push(messages[index] as Extract<
-                WeixinInboundMessage,
-                { kind: "image" }
-              >);
-              index += 1;
-            }
-            for (const imageMessage of imageMessages) {
-              await options.handleMessage(imageMessage);
-              recentMessageIds.add(imageMessage.messageId);
-            }
-            continue;
-          }
-          if (
-            message.kind === "text"
-            || message.kind === "file"
-            || message.kind === "audio"
-          ) {
-            await options.handleMessage(message);
-          }
-          recentMessageIds.add(message.messageId);
-          index += 1;
-        }
-        if (batch.cursor.length > 0 && batch.cursor !== cursor) {
-          await options.cursorStore.set(accountId, batch.cursor);
-          cursor = batch.cursor;
-        }
+      } catch (error) {
+        fail(error);
+      } finally {
+        // Keep ownership until started handlers settle; the input owner bounds shutdown waits.
+        await Promise.allSettled([...inFlightIds.values()]);
+        await commitTail.catch(fail);
       }
+      if (failure) throw failure.error;
     },
   };
 }

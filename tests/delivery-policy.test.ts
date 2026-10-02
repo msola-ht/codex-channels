@@ -251,6 +251,10 @@ describe("resolveSurfaceDelivery", () => {
   });
 
   it("keeps reasoning and non-final copy out of the WeChat window budget", () => {
+    expect(resolveSurfaceDelivery("weixin", {
+      type: "text.completed", target, threadId: "thread", turnId: "turn", itemId: "unphased",
+      text: "未标记阶段的完成正文", phase: null,
+    })).toEqual({ disposition: "deliver", critical: true });
     expect(
       isWeixinWindowEvent({
         type: "warning",

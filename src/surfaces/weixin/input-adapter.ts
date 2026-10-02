@@ -142,7 +142,7 @@ export class WeixinInputAdapter {
       accountId: options.accountId,
       client: options.client,
       cursorStore: options.cursorStore,
-      handleMessage: (message) => this.handle(message),
+      handleMessage: (message, signal) => this.handle(message, signal),
       onPollStart: () => this.health.recordPollStart(),
       onPollSuccess: (atMs) => this.health.recordSuccess(atMs),
       onRetry: (event) => {
@@ -184,14 +184,15 @@ export class WeixinInputAdapter {
     return this.stopPromise;
   }
 
-  private handle(message: WeixinSupportedMessage): Promise<void> {
+  private handle(message: WeixinSupportedMessage, signal: AbortSignal): Promise<void> {
     return withSurfaceDiagnosticContext({
       component: "Weixin", accountId: this.accountId,
       conversationId: message.conversationId, inputId: message.messageId,
-    }, () => observeSurfaceStage(this.options.logger, { stage: "input" }, () => this.handleMessage(message)));
+    }, () => observeSurfaceStage(this.options.logger, { stage: "input" }, () => this.handleMessage(message, signal)));
   }
 
-  private async handleMessage(message: WeixinSupportedMessage): Promise<void> {
+  private async handleMessage(message: WeixinSupportedMessage, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
     const receivedAtMs = this.now();
     this.options.logger?.debug(
       {
@@ -235,6 +236,7 @@ export class WeixinInputAdapter {
       message.actorId,
       message.contextToken,
     );
+    signal.throwIfAborted();
     this.options.actorRegistry?.rememberActor(target, message.actorId);
     if (
       message.kind === "text"
@@ -284,7 +286,7 @@ export class WeixinInputAdapter {
                 ...(quotedText === undefined ? {} : { quotedText }),
                 audio: message.audio,
               };
-      await this.conversations.handle(conversationMessage);
+      await this.conversations.handle(conversationMessage, signal);
     } catch (error) {
       throw new WeixinMessageProcessingError({ cause: error });
     }
@@ -339,13 +341,8 @@ export class WeixinInputAdapter {
     this.health.stop();
     this.quotedTexts.clear();
     this.controller?.abort();
-    await this.conversations.close();
-    const task = this.runTask;
-    if (task === undefined) {
-      return;
-    }
     const completed = await waitAtMost(
-      task.catch(() => undefined),
+      Promise.allSettled([this.conversations.close(), this.runTask]),
       this.closeTimeoutMs,
     );
     if (!completed) {

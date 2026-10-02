@@ -26,6 +26,31 @@ const turnCompletedText = "**本次运行 · 已完成**\n\n**当前会话**\n- 
 const turnStoppedText = "**本次运行 · 已停止**\n\n**当前会话**\n- Session：测试会话\n- Session ID：thread";
 
 describe("WeixinOutbox", () => {
+  it.each(["short answer", "完整回答".repeat(6_000)])("retains and confirms unphased completed text (%#)", async (text) => {
+    const { outbox, sendText, sendFile } = outboxFixture();
+    const event = completed(null, text);
+    const checkpoints: string[] = [];
+    try {
+      expect(outbox.retains(event)).toBe(true);
+      await outbox.deliver(event, new AbortController().signal, async value => {
+        checkpoints.push(`${value.operation}:${value.state}`);
+      });
+      if (text.length > 20_000) {
+        expect(sendText).toHaveBeenCalledOnce();
+        expect(sendFile).toHaveBeenCalledOnce();
+        expect(sendFile.mock.calls[0]?.[0].file.toString("utf8")).toBe(text);
+        expect(checkpoints).toEqual(["sendText:started", "sendText:confirmed", "sendFile:started", "sendFile:confirmed"]);
+      } else {
+        expect(sendText.mock.calls.map(([input]) => input.text)).toEqual([text]);
+        expect(sendFile).not.toHaveBeenCalled();
+        expect(checkpoints).toEqual(["sendText:started", "sendText:confirmed"]);
+      }
+      expect(outbox.retains(completed("commentary", "working"))).toBe(false);
+    } finally {
+      await outbox.close();
+    }
+  });
+
   it("delivers both compaction lifecycle notices through the reply window", async () => {
     const { outbox, sendText } = outboxFixture();
     for (const status of ["running", "running", "completed", "completed", "running"] as const) {
@@ -501,6 +526,23 @@ describe("WeixinOutbox", () => {
     });
   });
 
+  it.each([false, true])("honors the actual five-bubble budget at surrogate boundaries (file=%s)", async includeFileClient => {
+    const text = "a".repeat(3_999) + "𠀀" + "b".repeat(15_999);
+    const fixture = outboxFixture({ value: true }, { includeFileClient });
+    fixture.outbox.handle(completed(null, text));
+    await fixture.outbox.close();
+    const chunks = fixture.sendText.mock.calls.map(([input]) => input.text);
+    expect(chunks.every(chunk => chunk.length <= 4_000 && Buffer.from(chunk, "utf8").toString("utf8") === chunk)).toBe(true);
+    if (includeFileClient) {
+      expect(chunks).toHaveLength(1);
+      expect(fixture.sendFile.mock.calls[0]?.[0].file.toString("utf8")).toBe(text);
+    } else {
+      expect(chunks).toHaveLength(5);
+      expect(chunks.at(-1)).toMatch(/\[内容过长，已截断\]$/u);
+      expect(fixture.sendFile).not.toHaveBeenCalled();
+    }
+  });
+
   it("keeps bounded text truncation when file sending is unavailable", async () => {
     const fixture = outboxFixture(
       { value: true },
@@ -938,7 +980,7 @@ function accessFixture(
 }
 
 function completed(
-  phase: "commentary" | "final_answer",
+  phase: "commentary" | "final_answer" | null,
   text: string,
 ): Extract<OutputEvent, { type: "text.completed" }> {
   return {

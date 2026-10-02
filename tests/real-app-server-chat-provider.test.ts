@@ -3,6 +3,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import pino from "pino";
+import type { ConversationInputEvent } from "../src/conversation-core/index.js";
+import { toConversationInputEvent } from "../src/codex-client/notification-adapter.js";
+import { WeixinOutbox, WeixinReplyContextStore } from "../src/surfaces/weixin/index.js";
 import { ChatCompletionsBridge } from "../src/provider-proxy/index.js";
 import { JsonRpcClient } from "../src/codex-client/json-rpc.js";
 import { StdioTransport } from "../src/codex-client/stdio-transport.js";
@@ -77,7 +81,10 @@ contract.each([
     const started: Array<{ type: string; id: string }> = [];
     const completed: Array<{ type: string; id: string }> = [];
     const deltas: Array<{ itemId: string; delta: string }> = [];
+    const messages: Array<Extract<ConversationInputEvent, { type: "item.agentMessage.completed" }>> = [];
     rpc.onNotification(notification => {
+      const event = toConversationInputEvent(notification);
+      if (event?.type === "item.agentMessage.completed") messages.push(event);
       if (notification.method === "turn/completed") turns.push((notification.params as { turn: typeof turns[number] }).turn);
       if (notification.method === "item/started") started.push((notification.params as { item: typeof started[number] }).item);
       if (notification.method === "item/completed") completed.push((notification.params as { item: typeof completed[number] }).item);
@@ -126,6 +133,25 @@ contract.each([
     expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "assistant", [reasoningField]: "Inspect scheduled tasks first.", content: "Checking tasks.", tool_calls: [expect.objectContaining({ id: "fixture-call" })] }));
     expect(bodies[1]?.messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "fixture-call", content: expect.stringContaining("Gateway scheduled tasks: empty") }));
     if (!incomplete && !streamError) {
+      // Use the real App Server's phase through the production adapter and Weixin receipt path.
+      const target = { surface: "weixin", accountId: "fixture@im.bot", conversationId: "actor@im.wechat" } as const;
+      const sent: string[] = [];
+      const checkpoints: string[] = [];
+      const contexts = new WeixinReplyContextStore(target.accountId);
+      contexts.remember(target, target.conversationId, "fixture-context");
+      const outbox = new WeixinOutbox(target.accountId, { sendText: async input => { sent.push(input.text); } },
+        contexts, { isAllowed: () => true }, pino({ level: "silent" }));
+      try {
+        expect(messages.length).toBeGreaterThan(0);
+        for (const message of messages) {
+          expect(message.phase).toBeNull();
+          const event = { ...message, type: "text.completed" as const, target };
+          expect(outbox.retains(event)).toBe(true);
+          await outbox.deliver(event, new AbortController().signal, async value => { checkpoints.push(value.state); });
+        }
+        expect(sent.join("")).toBe("Checking tasks.First answer. Chat tool round trip complete");
+        expect(checkpoints.filter(state => state === "confirmed")).toHaveLength(messages.length);
+      } finally { await outbox.close(); }
       const next = await rpc.request<TurnStartResponse>({ method: "turn/start", params: { threadId: thread.id, input: [{ type: "text", text: "Continue", text_elements: [] }] } });
       await waitFor(() => turns.some(entry => entry.id === next.turn.id), 15000);
       expect(turns).toContainEqual(expect.objectContaining({ id: next.turn.id, status: "completed" }));

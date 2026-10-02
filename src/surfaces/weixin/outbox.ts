@@ -274,9 +274,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
       case "operation.updated":
         return this.compactionNotices.accept(event, DeliveryReceipt.current() !== undefined);
       case "text.completed":
-        if (event.phase !== "final_answer") {
-          return null;
-        }
+        // handleEvent 已通过共享投递策略；空 phase 的完成正文同样需要渲染。
         return event.text.trim().length === 0
           ? emptyCodexResponseText
           : formatWeixinFinalText(
@@ -313,8 +311,7 @@ export class WeixinOutbox implements SurfaceOutputPort {
     signal = this.closed ? undefined : signal;
     if (
       event.type === "text.completed"
-      && event.phase === "final_answer"
-      && text.length > maximumChunkCharacters * maximumChunks
+      && text.length > weixinTextCapacity(text, maximumChunks)
       && await this.sendLongFinalAnswer(event.target, text, signal, context)
     ) {
       return;
@@ -568,7 +565,7 @@ function splitWeixinText(
   value: string,
   maximumChunkCount = maximumChunks,
 ): string[] {
-  const maximumCharacters = maximumChunkCharacters * maximumChunkCount;
+  const maximumCharacters = weixinTextCapacity(value, maximumChunkCount);
   let text = value;
   if (text.length > maximumCharacters) {
     DeliveryReceipt.current()?.markContentIncomplete();
@@ -584,6 +581,17 @@ function splitWeixinText(
     text = text.slice(end);
   }
   return chunks.length === 0 ? [emptyCodexResponseText] : chunks;
+}
+
+/** Count the actual prefix fitting in the bubble budget, including surrogate boundaries. */
+function weixinTextCapacity(value: string, maximumChunkCount: number): number {
+  let offset = 0;
+  for (let chunk = 0; chunk < maximumChunkCount && offset < value.length; chunk += 1) {
+    let end = Math.min(value.length, offset + maximumChunkCharacters);
+    if (end < value.length && isHighSurrogate(value.charCodeAt(end - 1))) end -= 1;
+    offset = end;
+  }
+  return offset;
 }
 
 function safePrefix(value: string, maximumLength: number): string {
