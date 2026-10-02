@@ -58,6 +58,7 @@ export function formatPlanType(value: string): string {
     plus: "Plus",
     pro: "Pro",
     prolite: "Pro Lite",
+    promax: "Pro (Max)",
     team: "Team",
     self_serve_business_prolite: "Business Premium",
     self_serve_business_usage_based: "Business（按量）",

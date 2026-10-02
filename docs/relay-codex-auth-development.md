@@ -31,35 +31,35 @@ DeepSeek 等既有行为，不修改 StateStore、指标 Schema 或配置 Schema
 
 ## 2. 固定事实来源
 
-上游以 [`docs/upstream-sources.md`](upstream-sources.md) 锁定的 `openai/codex` `rust-v0.156.1`
-（`b412ff32c417f855c2b2d1581b77058eed87c84b`）为准：
+上游以 [`docs/upstream-sources.md`](upstream-sources.md) 锁定的 `openai/codex` `rust-v0.160.0`
+（`a956835d020762cb2b570053af06f643a11c0ecc`）为准：
 
-- [`login/src/auth/storage.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/storage.rs)：
+- [`login/src/auth/storage.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/login/src/auth/storage.rs)：
   `auth.json` 含 `auth_mode`、`OPENAI_API_KEY`、`tokens`、`last_refresh` 等；`tokens` 含
   `id_token`、`access_token`、`refresh_token`、`account_id`。默认存文件，keyring 由配置启用；
   保存使用原地 truncate 写入，不是原子重命名。
-- [`login/src/token_data.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/token_data.rs)：
+- [`login/src/token_data.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/login/src/token_data.rs)：
   `id_token` 在磁盘上是原始 JWT 字符串，账户、套餐与 FedRAMP 声明需要本地解析。
-- [`login/src/auth/manager.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/manager.rs)：
+- [`login/src/auth/manager.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/login/src/auth/manager.rs)：
   access token 距过期 5 分钟内或 `last_refresh` 超期才刷新；刷新响应的 `refresh_token` 可为空；
   `refresh_token_reused`、`refresh_token_invalidated` 属永久失败。
-- [`login/src/auth/default_client.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/login/src/auth/default_client.rs)：
+- [`login/src/auth/default_client.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/login/src/auth/default_client.rs)：
   默认 originator 为 `codex_cli_rs`；User-Agent 语法为
   `{originator}/{version} ({os} {osver}; {arch}) {terminal}`，无终端环境时终端标识为 `unknown`。
-- [`model-provider-info/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/model-provider-info/src/lib.rs)：
+- [`model-provider-info/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/model-provider-info/src/lib.rs)：
   内置 `openai` Provider 为 `requires_openai_auth = true`、`supports_websockets = true`，
   默认携带 `version` 头；ChatGPT 认证下默认基础地址为 Codex 后端。
-- [`model-provider/src/bearer_auth_provider.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/model-provider/src/bearer_auth_provider.rs)：
+- [`model-provider/src/bearer_auth_provider.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/model-provider/src/bearer_auth_provider.rs)：
   认证头为 `Authorization: Bearer <access_token>`、`ChatGPT-Account-ID`；FedRAMP 账户额外
   携带 `X-OpenAI-Fedramp`。
-- [`core/src/client.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/core/src/client.rs)：
+- [`core/src/client.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/client.rs)：
   Responses WebSocket 的 beta 头名称与值为 `OpenAI-Beta: responses_websockets=2026-02-06`。
-- [`models-manager/src/cache.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/models-manager/src/cache.rs)
-  与 [`models-manager/src/manager.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/models-manager/src/manager.rs)：
+- [`models-manager/src/cache.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/models-manager/src/cache.rs)
+  与 [`models-manager/src/manager.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/models-manager/src/manager.rs)：
   模型缓存文件为 `$CODEX_HOME/models_cache.json`，默认有效期 300 秒。
-- [`protocol/src/openai_models.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/protocol/src/openai_models.rs)：
+- [`protocol/src/openai_models.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/protocol/src/openai_models.rs)：
   模型条目字段与 `visibility` 取值；ChatGPT 模式不要求 `supported_in_api`。
-- [`app-server/src/request_processors/initialize_processor.rs`](https://github.com/openai/codex/blob/rust-v0.156.1/codex-rs/app-server/src/request_processors/initialize_processor.rs)：
+- [`app-server/src/request_processors/initialize_processor.rs`](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server/src/request_processors/initialize_processor.rs)：
   App Server 按连接客户端名与版本追加 User-Agent 后缀，并把最终值放进 `initialize` 响应；
   可用作头部一致性核对，但本方案不以 App Server 为运行依赖。
 

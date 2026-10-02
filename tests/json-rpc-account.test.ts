@@ -142,6 +142,7 @@ describe("JsonRpcClient account", () => {
     });
 
     it.each([
+      "promax",
       "self_serve_business_prolite",
       "enterprise_cbp_automation",
       "edu_plus",

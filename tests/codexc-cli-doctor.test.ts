@@ -228,7 +228,7 @@ if (process.platform === "win32") {
       section: "扩展能力",
       kind: "note",
       name: "Plugin API",
-      detail: expect.stringContaining("Codex 0.156.1"),
+      detail: expect.stringContaining("Codex 0.160.0"),
     }));
     expect(diagnosed.stdout).not.toContain(secret);
     expect(diagnosed.stdout).not.toContain("Codex Connect Doctor\n");

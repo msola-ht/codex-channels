@@ -386,6 +386,7 @@ const accountPlanTypes = new Set<AccountPlanType>([
   "plus",
   "pro",
   "prolite",
+  "promax",
   "team",
   "self_serve_business_prolite",
   "self_serve_business_usage_based",

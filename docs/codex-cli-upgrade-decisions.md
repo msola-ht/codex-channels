@@ -1,10 +1,72 @@
 # Codex CLI 升级决策
 
 本页说明当前项目采用什么、为什么采用，以及哪些上游能力仍不接入，供下一次升级直接复核。
-当前基线为 `codex-cli 0.156.1`；具体协议、实现和测试以[支持矩阵](index.md#当前支持矩阵)为准，
+当前基线为 `codex-cli 0.160.0`；具体协议、实现和测试以[支持矩阵](index.md#当前支持矩阵)为准，
 升级步骤与门禁见[升级流程](codex-cli-upgrade.md)。本页不重复协议数量、命令参数或逐版本更新日志。
 
-## 0.156.1
+## 0.160.0 升级决策
+
+本次从 `0.156.1` 升级至官方正式 `0.160.0`，固定提交
+`a956835d020762cb2b570053af06f643a11c0ecc`。已下载完整目标源码与测试至
+`upstream/openai-codex-0.160.0`；旧基线保留，没有修改其工作树。相对旧基线经过 8 个正式发布，
+决策以两个固定源码端点和目标 CLI 实际生成结果为准，不使用官方 main。
+
+### 必须适配与采用
+
+| 用户得到什么 | 本次决定与实现入口 | 验证边界 |
+| --- | --- | --- |
+| 正确读取 Pro Max 账户和用量 | `PlanType` 新增 `promax`；更新 Client 账户/通知解析、Application/Core 类型、渠道与 WebUI 中英文展示，未知套餐仍失败关闭 | 账户读取与通知回归；套餐名不授予权益、不触发自动换模 |
+| 确认向已有高权限终端继续输入 | 上游默认启用 stdin 审批；Client 独立解码 `writeStdin`，Approval 以独立 stdin 类型通过现有 Surface 交互处理，完整转义预览；仅一次批准或中止 | 真实 App Server 模拟模型后端驱动 exec → stdin，验证身份、输入与批准/中止；超大预览、持久授权、缺失合同和未知类型安全拒绝 |
+| 自定义 Provider 只展示其实际目录 | 随 CLI 采用显式模型目录权威性修复，保持 `model_catalog_json` → `model/list` → 本地选择器链路 | 不补回被上游移除的错误内置模型；Provider 真实合同与模型目录回归 |
+| 原生终端保持后台 Provider 与用户设置 | 随 CLI 采用远程 TUI Provider、推理摘要、verbosity 和历史列表修复 | 保留显式 `--remote`、Workspace 授权和 Provider 隔离 |
+| 理解带错误的中断结果 | 新错误码包含 `flexUnavailable`、`tooManyDenials`，中断 Turn 也可能带错误；保留现有 Client/Core 清洗和错误传递 | 不将其映射成账户耗尽、不盲目重试写请求 |
+| 后台服务启动、执行和日志更可靠 | 随精确 CLI 吸收 SQLite、沙箱、网络与平台进程修复 | 不修改本项目 StateStore/schema；本地验证不等于其他平台实机验收 |
+
+stdin 的上游依据为 `core/src/unified_exec/stdin_approval.rs`、`core/src/tools/approvals.rs`、
+`app-server/src/bespoke_event_handling.rs` 及对应测试。空输入与部分中断控制输入不需要审批；
+保留授权或策略变化才可能要求重新审批，无法满足新的 denied-read 约束时上游拒绝。
+App Server 将内部 argv 编码为 shell 转义字符串，Gateway 不按空格拆分或执行它；展示完整
+JSON 转义表示，合计超过 3000 UTF-8 字节即中止。审批绑定 Thread、Turn、Item 与 RPC 请求，
+独立 callback ID 在 Client 边界必需；会话或永久授权不能作为一次输入的回应。
+
+### 保持边界与不采用
+
+| 能力与用途 | 决策与理由 |
+| --- | --- |
+| CLI 与后台包独立运行、更新 | 独立安装在 `0.156.1` 已存在，`0.157.0` 改变符合条件的交互 CLI 默认启动方式。继续由项目 Supervisor 和 `codexc service` 监管；显式 `--remote` 为权威目标，不引入第二个生命周期所有者或官方后台自动更新 |
+| 原生终端重连后恢复输入 | 修复位于 TUI，不是 Gateway Queue 修复；渠道仍只使用 App Server Queue，不引入正文副本或自动重发 |
+| 上游 Provider gateway OAuth | 新增三个 RPC 与通知，但不是本项目 Gateway/CLP 登录。本次不导出、不新增登录 UI、不设置 `explicitGatewayOauth`；该初始化开关会持续影响共享进程授权策略，未来接入需另审查连接顺序、登录归属和取消 |
+| 历史 Item 锚点查询 | 不接入 `thread/items/list`；保留当前分页 Turn 历史和 Revert |
+| 定向 MCP 服务、应用账户资源 | 可选 `serverName`、`target` 暂不传；新增 `httpOrigin` 不整包透传，现有健康摘要与资源读取保持受控 |
+| 远程执行环境 bearer token、Realtime 新字段 | 未接入能力，不增加凭据保存、远程执行或实时语音入口 |
+| 无项目会话、即时中断、Guardian 扩展 | 不扩大渠道 Workspace 权限，不增加自动审批；TUI 专属体验随 CLI 使用 |
+| 上游上传重试与超时 | Gateway 图片引用上传是独立 HTTP 链路，不能宣称自动获得该修复；保留账户/路由核验、60 秒总超时、取消和禁止盲目写重试 |
+| Plugin 缓存与日志空间回收 | 上游内部改进，不新增本地缓存、数据库维护或 Plugin 管理入口 |
+
+### 生成与验证记录
+
+目标 CLI 在隔离目录安装；基于提交 `b3f5245a59fd98d1d6ee1749a72289d9cdfac544` 的干净候选
+工作树通过 dry-run 与正式生成，后将生成补丁导入 `upgrade/codex-0.160.0` 分支。
+目标生成集为 875 文件、170 Client Request、85 Server Notification、11 Server Request 和
+1 Client Notification；受控公开 CLI 参数无变化。上游仓库的稳定 TS 快照不能直接与本项目
+含实验类型的生成集比较；本次实际使用目标 CLI 的同一生成选项。
+
+业务适配后使用 CI 固定 Node.js 22.13.0 与其 npm 10.9.2 完成 Linux 验证：
+
+- `protocol:check` 通过，目标类型逐文件重新生成一致，受控公开 CLI 合同通过。
+- 完整 `verify:commit` 通过：381 个测试文件通过、11 个按条件跳过；5566 项测试通过、105 项跳过。
+  包含生产类型/版本、Lint、WebUI 构建与 Lint、翻译字典、文档索引、Shell 语法及 tarball 安装冒烟。
+- 9 个隔离真实 App Server 合同文件、81 项测试通过，覆盖 Queue、Revert、Provider、共享服务、
+  图片引用、动态工具、Desktop 桥，以及新 stdin 一次批准和中止；使用模拟模型后端，不调用真实账户。
+- 干净源码全局安装冒烟通过，仅在临时 npm 前缀中安装；没有替换实际全局 CLI 或 Gateway。
+- 初轮沙箱屏蔽官方 Socket 目录及 Git/npm 写路径，临时内存盘也出现 ENOSPC；依据失败日志，
+  在授权的沙箱外和磁盘临时目录重跑后通过。未修改 Socket 权限检查、投递背压实现或测试断言规避失败。
+  真实合同使用短 `/tmp` 夹具，完整门禁和源码安装使用 `/var/tmp`。
+
+上述验证完成时尚未提交、推送、部署或创建 PR。远程 CI、macOS/Windows 平台实机、真实渠道在线审批与真实
+账户刷新未在本轮执行；上述本地合同不能替代这些验收。后续升级提案应保持 Draft，直至相应审查完成。
+
+## 0.156.1 基础能力及历史验收
 
 本次从 0.155.1 升至 0.156.1，同时审查 [0.156.0](https://github.com/openai/codex/releases/tag/rust-v0.156.0)
 与 [0.156.1](https://github.com/openai/codex/releases/tag/rust-v0.156.1) 两次正式发布；两版均非 Draft、非 Pre-release。
@@ -184,7 +246,7 @@ Luna 的上述直接 HTTP 图片探测不覆盖 Gateway 端到端验收；飞书
 | 外部 Agent 会话导入、正文搜索与独立历史库 | 上游有 `externalAgentConfig/import*` 与实验 `thread/search*`，本项目未调用；不读取、复制其他客户端会话文件，也不另建正文索引。通过 App Server 发现和接续原生 Thread 仍属已支持能力 |
 | Realtime 与持续语音 | 当前只有受控一次性媒体输入，没有持续音频输出、实时传输和恢复合同 |
 | Touch ID、设备身份验证及高权限新请求 | 渠道没有设备签名与挑战响应合同；不声明未实现的扩展，未知或未协商请求明确拒绝或取消 |
-| `writeStdin` 审批与尚未支持的新交互模式 | 已有 `form`、`openai/form`、URL elicitation 和用户问题继续按支持矩阵处理；这里仅指未建立输入预览、请求归属和响应合同的新交互，不将现有表单笼统列为未接入 |
+| 尚未支持的新交互模式 | 已有 `form`、`openai/form`、URL elicitation 和用户问题继续按支持矩阵处理；这里仅指未建立输入预览、请求归属和响应合同的新交互，不将现有表单笼统列为未接入 |
 | Plugin 搜索、市场、安装、卸载、发布与分享 | 超出开发中已安装查询和 mention 范围，也增加下载、凭据与全局变更边界 |
 | Hook 管理、直接注入工具输出与原生 TUI 专用动态任务工具 | `hooks/list` 与 `thread/inject_items` 有上游接口，本项目没有对应调用；不新增无归属执行入口。已有 Gateway `schedule_task` 动态工具属于上节列明的受控范围，不能笼统声称所有动态工具均未接入；MCP 输出预算配置继续支持 |
 | Bedrock、远程执行 Host 与独立第三方搜索 | 上游有 Bedrock 设置和 Environment 接口，本项目未接入这些专用认证与执行管理入口；现有通用 Provider 配置不等于已验证这些专用能力，也不新增独立搜索 API |

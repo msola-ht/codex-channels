@@ -7,6 +7,20 @@ import {
 } from "../src/codex-client/index.js";
 
 describe("Notification adapter", () => {
+  it.each(["flexUnavailable", "tooManyDenials"])("preserves interrupted turn errors without quota fallback: %s", (code) => {
+    expect(toConversationInputEvent({ method: "turn/completed", params: {
+      threadId: "thread-1", turn: { id: "turn-1", status: "interrupted",
+        error: { message: "Interrupted with a reason", codexErrorInfo: code } },
+    } })).toEqual({ type: "turn.completed", threadId: "thread-1", turnId: "turn-1",
+      status: "interrupted", error: "Interrupted with a reason" });
+  });
+
+  it("accepts the Pro Max account notification", () => {
+    expect(toConversationInputEvent({ method: "account/updated", params: {
+      authMode: "chatgpt", planType: "promax",
+    } })).toMatchObject({ planType: "promax" });
+  });
+
   it("maps an async plain message to commentary without inventing questions", () => {
     expect(toConversationInputEvent({
       method: "item/completed",

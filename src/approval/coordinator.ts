@@ -52,6 +52,33 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
       ? `后台任务 · ${request.threadId.slice(0, 12)} · ${value}`
       : value;
     switch (request.type) {
+      case "stdin": {
+        // Preserve the entire upstream representation; do not parse shell words
+        // or mistake stdin bytes for a fresh command or persistent authorization.
+        const detail = [
+          "向已有终端发送输入，不是执行新命令。以下为 JSON 转义表示；请核对完整内容。",
+          `完整输入请求：${stdinPreview(request.command)}`,
+          `启动目录（当前目录可能已变化）：${stdinPreview(request.cwd)}`,
+          request.reason ? `原因：${stdinPreview(request.reason)}` : undefined,
+          request.additionalPermissions ? stdinPreview(formatAdditionalPermissions(request.additionalPermissions) ?? "") : undefined,
+        ].filter(Boolean).join("\n\n");
+        // Fit every Surface without an approvable truncated preview.
+        if (Buffer.byteLength(detail, "utf8") > 3_000) {
+          this.logger?.warn({ ...metadata, reason: "stdin-preview-too-large" }, "终端输入审批无法完整展示，已安全中止");
+          return { type: "stdin", decision: "cancel" };
+        }
+        const decision = await this.interaction.request(target, {
+          type: "approval", requestId, kind: "stdin",
+          threadId: request.threadId, turnId: request.turnId, itemId: request.itemId,
+          title: title("Codex 请求向已有终端发送输入"), detail,
+          allowSession: false, expiresInMs: this.timeoutMs,
+        });
+        return {
+          type: "stdin",
+          decision: decision.type === "approval" && decision.approved && decision.scope === "once"
+            ? "accept" : "cancel",
+        };
+      }
       case "command": {
         if (!offersCommandDecision(request.availableDecisions, "accept")) {
           return { type: "command", decision: "decline" };
@@ -258,6 +285,8 @@ export class ApprovalCoordinator implements ApprovalRequestHandler {
 
 function safeDecline(request: ApprovalRequest): ApprovalResponse {
   switch (request.type) {
+    case "stdin":
+      return { type: "stdin", decision: "cancel" };
     case "command":
       return { type: "command", decision: "decline" };
     case "file":
@@ -510,4 +539,10 @@ function truncate(value: string, maximumLength: number): string {
   return value.length <= maximumLength
     ? value
     : `${value.slice(0, maximumLength - 1)}…`;
+}
+
+function stdinPreview(value: string): string {
+  // Escape formatting and invisible controls without changing the approved bytes.
+  return JSON.stringify(value).replace(/[\p{Cf}\u2028\u2029`*_~#>[\]]/gu,
+    (character) => character.split("").map(unit => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`).join(""));
 }

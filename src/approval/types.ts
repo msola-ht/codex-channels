@@ -8,7 +8,7 @@ export type InteractionRequest =
   | {
       type: "approval";
       requestId: string;
-      kind: "command" | "file" | "permissions";
+      kind: "command" | "stdin" | "file" | "permissions";
       threadId: string;
       turnId: string;
       itemId: string;

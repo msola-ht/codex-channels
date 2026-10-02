@@ -57,6 +57,7 @@ const planTypeKeys: Readonly<Record<string, MessageKey>> = {
   plus: "overview.planTypes.plus",
   pro: "overview.planTypes.pro",
   prolite: "overview.planTypes.prolite",
+  promax: "overview.planTypes.promax",
   team: "overview.planTypes.team",
   self_serve_business_usage_based: "overview.planTypes.businessUsageBased",
   business: "overview.planTypes.business",

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "codexCli": "0.156.1",
+  "codexCli": "0.160.0",
   "options": {
     "--config": {
       "present": true,
