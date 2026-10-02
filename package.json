@@ -43,6 +43,7 @@
     "scripts/cli-menu.mjs",
     "scripts/cli-menu.d.mts",
     "scripts/cleanup-menu.mjs",
+    "scripts/maintenance-services.mjs",
     "scripts/codex-defaults-setup.mjs",
     "scripts/codex-public-cli-contract.mjs",
     "scripts/codex-remote-options.mjs",

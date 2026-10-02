@@ -1,8 +1,11 @@
 import type { MetricsMenuPrompts } from "./metrics-menu.mjs";
 
+import type { MaintenanceServiceOptions } from "./maintenance-services.mjs";
+
 export const cleanupUsage: string;
 export function runCleanupMenu(options: {
   prompts?: MetricsMenuPrompts;
+  services?: MaintenanceServiceOptions;
   runSessionCleanup: (args: string[]) => void | Promise<unknown>;
   runTrafficCleanup: (args: string[]) => void | Promise<unknown>;
   runDatabaseCommand: (args: string[]) => void;

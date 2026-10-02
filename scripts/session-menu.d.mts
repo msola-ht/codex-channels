@@ -4,9 +4,12 @@ export interface SessionMenuPrompts {
   isCancel(value: unknown): boolean;
   select(options: Record<string, unknown>): Promise<unknown>;
   text(options: Record<string, unknown>): Promise<unknown>;
+  confirm(options: Record<string, unknown>): Promise<unknown>;
 }
 
 export function runSessionCleanupMenu(options: {
   prompts?: SessionMenuPrompts;
   runCleanup: (args: string[]) => void | Promise<unknown>;
+  gatewayRunning?: () => boolean | Promise<boolean>;
+  runService?: (action: "stop" | "start") => void | Promise<unknown>;
 }): Promise<unknown>;

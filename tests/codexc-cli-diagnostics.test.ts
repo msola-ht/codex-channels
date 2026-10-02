@@ -127,7 +127,7 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     expect(inactive.stderr).toBe("");
   });
 
-  linuxIt("does not repeat a nested service failure from metrics maintenance", () => {
+  linuxIt("reports stop and recovery failures once each with an actionable summary", () => {
     const root = mkdtempSync(join(tmpdir(), "codex-connect-metrics-service-error-"));
     temporaryDirectories.push(root);
     const home = join(root, ".codex-connect");
@@ -136,7 +136,11 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
     mkdirSync(workspace);
     writeFileSync(fakeSystemctl, [
       "#!/bin/sh",
-      "printf '测试 Gateway 停止失败\\n' >&2",
+      'case "$2" in',
+      "  show) printf 'loaded\\n'; exit 0 ;;",
+      "  stop) printf '测试 Gateway 停止失败\\n' >&2 ;;",
+      "  start) printf '测试 Gateway 恢复失败\\n' >&2 ;;",
+      "esac",
       "exit 3",
     ].join("\n"));
     chmodSync(fakeSystemctl, 0o755);
@@ -160,7 +164,10 @@ describe("codexc CLI", { timeout: 15_000 }, () => {
 
     expect(result.status, result.stderr).toBe(1);
     expect(result.stderr).toContain("测试 Gateway 停止失败");
-    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(1);
+    expect(result.stderr.match(/测试 Gateway 停止失败/g)).toHaveLength(1);
+    expect(result.stderr.match(/测试 Gateway 恢复失败/g)).toHaveLength(1);
+    expect(result.stderr).toContain("codexc service start gateway");
+    expect(result.stderr.match(/\[失败\]/g)).toHaveLength(3);
     expect(result.stderr).not.toContain("Gateway 停止失败：exit");
   });
 
