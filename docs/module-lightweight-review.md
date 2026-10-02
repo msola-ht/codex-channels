@@ -24,7 +24,8 @@
 ## 当前工作区
 
 分支：`refactor/lazy-cli-surface-loading`。本记录建立时 HEAD 为 `e93e0c9a`。
-以下工作项是该提交之后的未提交改动；此前 CLI 加载调整不计入本轮模块轻量化收益。
+M01、M02、M03、M04、M06、M07 及 R01 已提交为 `2683d70a`；此前 CLI 加载调整不计入本轮模块轻量化收益。
+各项原有验证记录描述开发阶段；本批提交门禁结果以本节记录为准。
 
 | 编号 | 模块与问题 | 状态 | 收益 |
 | --- | --- | --- | --- |
@@ -33,7 +34,7 @@
 | M03 | Telegram 重复维护普通命令结果分派 | 已验证 | 删除 20 个与共享渲染器等价的分支 |
 | M04 | Provider 展示辅助函数跨渠道重复、依赖位置不合理 | 已验证 | 复用既有 Provider 展示模块，消除重复和反向展示依赖 |
 | M06 | 计划任务定时／手动领取重复创建 Run | 已验证 | 统一 Run 初始记录构造，保留两类领取规则与事务 |
-| M07 | Provider 指标接收端重复维护 Unix IPC 生命周期 | 回归已修复，待提交门禁 | 统一复用现有 PrivateIpcServer，生产代码净减少 83 行 |
+| M07 | Provider 指标接收端重复维护 Unix IPC 生命周期 | 已提交（保留基线限制） | 统一复用现有 PrivateIpcServer，生产代码净减少 83 行 |
 
 ## M01：飞书命令中心展示
 
@@ -108,7 +109,7 @@
 
 ## M07：Provider 指标 IPC 接收端生命周期
 
-- 状态：整体审查发现的 R01 已修复并完成定向验证，待提交门禁。
+- 状态：整体审查发现的 R01 已修复，提交 `2683d70a` 的全量门禁通过。
 - 链路：Bootstrap `ProviderMetricsComposition` → `ProviderProxyMetricsServer` → 私有端点 → 单帧解析 → 指标入队 → 确认；关闭时先销毁已接收连接，再关闭监听和清理端点。
 - 改前审查：Windows 已使用 `PrivateIpcServer`，Unix 另有一份监听、旧端点探测、chmod 和身份清理代码；共享实现已提供这些能力，无需新抽象。
 - 方案：接收端统一持有一个 PrivateIpcServer；保留指标帧上限、解析、确认、连接集合与开始／停止幂等标记。发送端本轮不改。
@@ -132,6 +133,138 @@
 - 其余改动：复核飞书迁移的顶层声明，除已记录的 Provider 函数归属与多余非空断言移除外无意外改变；Telegram 12 个专属分支保持一致。Delivery 读事务与计划任务 INSERT 收敛未发现新增缺陷。
 - M07 的监听路径被替换后遭 Node 自动删除问题仍为已复现基线缺陷，和 R01 分开记录，不算本次新增回归。
 - 验证范围：本次执行 HEAD／工作区隔离对照复现、结构比对和 Diff 检查；复用此前定向测试结果，未重复全量测试，未执行 Windows 实机或提交门禁。
+
+## 提交结果
+
+- 提交：`2683d70a`，改动：收敛模块展示与存储职责并复用指标 IPC；未推送。
+- 正常 pre-commit 门禁一次通过，使用 Node 22.13.0；全量测试 5510 通过、103 跳过，379 个测试文件通过、11 个跳过。
+- 类型与版本、源码／测试 Lint、WebUI 构建与 Lint、翻译、文档、Shell 语法和 tarball 安装冒烟通过，总耗时约 2 分 46.5 秒。
+- 门禁日志：`/tmp/codexc-module-lightweight-commit.log`（当前开发环境临时日志，不作为永久仓库文件）。
+- Windows 实机、远程 CI 与 Unix Socket 路径替换基线问题仍未完成验证或修复。
+
+## M08：Delivery Worker 生命周期分析（搁置）
+
+- 链路：`PersistentSurfaceOutput` → `DeliveryJournal` 有界邮箱 → Worker 串行执行 → SQLite；故障通过注入的 onFailure 返回组合根。
+- 资源所有权：Journal 持有 pending 请求、每请求截止定时器、在途正文预算和 Worker；Worker 持有数据库，正常 close 在回复后关闭消息端口。
+- 改前审查：5 秒请求截止触发整体失败并释放等待者；正常关闭先发送保留容量的 close 命令；1 秒 terminate 上限处理 Worker 不退出。三者等待的对象、故障通知和清理责任不同，不能因为都有 timer／Promise.race 就合并。
+- 现有证据：`persistent-output.test.ts` 覆盖不响应 Worker 的邮箱容量、超时与等待者释放，以及空闲 Worker 退出后的故障隔离；本批全量门禁包含该套件。
+- 结论：没有确认能减少职责或冗余状态的最小改动，暂不增加通用超时／Worker 抽象，也不改变关闭语义。
+
+## M09：Relay 活动租约集合（已验证，未提交）
+
+- 链路：HTTP 请求 → reserve／wait 准入 → lease.check 出站复核 → 请求 finally 调用 release；策略变更、Provider 撤销与关闭遍历租约并 cancel。
+- 改前审查：`leases` 原为 Map<RelayLease, string>，写入的身份摘要没有读取者；所有消费只使用 size、delete 和 keys。每份租约闭包中的 identity 已承担新旧权限比较。
+- 方案：改为 Set<RelayLease>，使用 add 与集合遍历；不删除闭包 identity，不改变维护凭据代次和防复活记录的 identities／retiredIdentities。
+- 预期收益：去掉无用途的键值关系，用成员集合直接表达在途租约；不宣称可观测的内存或性能改善。
+- 保留边界：Set 与原 Map 键迭代均保留插入顺序及遍历时删除的语义；排队仍由 pending／pendingKeys 持有，容量、撤销、超时与释放流程不变。
+- 优化：只修改 leases 的容器声明、登记和三处遍历；用 Set 直接维护租约成员。
+- 改后审查：逐项核对 leases 的全部使用处，无摘要值读取者；闭包中的 privilege 比较、凭据历史 Map、身份轮换／防复活、并发记账和 pending 释放均保持原样。
+- 验证：Relay 准入、授权和 HTTP 服务共 196 项通过，涵盖策略变更、身份撤销、等待租约取消、公平调度、容量与服务关闭；类型和运行时依赖检查、相关 Lint、Diff 检查通过。复用既有行为测试，未增加仅断言容器类型的测试。
+- 限制：未测量内存或延迟，不宣称性能提升；本项未执行提交全量门禁或真实服务操作。
+
+## M10：Event Bus 订阅对象去除闲置 Worker 引用（已验证，未提交）
+
+- 链路：subscribe 创建队列、取消控制器和消费者 Promise → publish 向活动订阅入队 → 取消订阅关闭队列并移除订阅 → close 等待独立 workers 集合。
+- 改前审查：Subscription.worker 只在构造时赋值，没有读取者；真正用于关闭等待和完成清理的是 workers 集合。不能删除后者，否则已取消订阅但尚在处理的消费者不再被关闭等待覆盖。
+- 方案：仅删除订阅对象的 worker 字段与赋值，共两行；不增加类型层、状态或生命周期抽象。
+- 收益限制：消除无用途的持有关系，明确活动订阅与未完成消费者的不同生命周期；属于小幅清理，不宣称模块级性能收益。
+- 改后审查：生产 Diff 仅删除字段声明和对象赋值，workers 集合登记、完成后移除、取消信号、预算释放与关闭等待均未改动。
+- 验证：队列与输出总线预算测试共 28 项通过，包含“取消订阅后关闭仍等待消费者完成”、取消信号、排空、并发关闭和硬预算；类型与运行时依赖检查、相关 Lint、Diff 检查通过。
+- 限制：仅为闲置引用清理，未运行提交全量门禁。
+
+## M11—M15：非展示模块横向链路审查
+
+本轮先比较五组候选，再决定是否优化。以下是源码与现有测试的静态审查结论；本轮没有新增生产代码改动，未重新执行这些行为测试。M09、M10 保持已验证、未提交状态。
+
+| 编号 | 候选 | 审查结论 | 当前决定 |
+| --- | --- | --- | --- |
+| M11 | Model Relay 请求资源登记合并 | 诊断、取消、等待完成及请求头截止分别覆盖不同生命周期 | 搁置合并 |
+| M12 | 指标发送与落库队列统一 | IPC 接受与 SQLite 持久化不是同一完成条件 | 搁置统一队列 |
+| M13 | Binding Store 去除内存层或抽出 SQL 层 | 内存层已复用索引规则；持久化事务与回滚仍由 SQLite 层负责 | 搁置结构调整 |
+| M14 | Scheduler 定时／手动执行流程统一 | 已共享 dispatch；入口排序、领取及停止条件有必要差异 | 搁置通用执行模板 |
+| M15 | Traffic Dump 三类文件流统一 | 文件创建、权限、错误和关闭登记已共享；剩余差异属于格式和轮转 | 搁置动态流注册抽象 |
+
+### M11：Model Relay 请求生命周期
+
+- 链路：HTTP connection → 请求头截止定时器 → handle → 授权与准入 → Provider 请求 → finally 释放；stopListening／close 分别处理暂停监听和最终关闭。
+- 所有权：`server.ts` 的 headerTimers 管理尚未收到完整请求头的 Socket；active 持有请求取消控制器；tasks 等待整个处理 Promise 完成；requests 只登记已授权模型调用的诊断投影。
+- 改前审查：四者并非同一请求表的重复副本。连接可以尚未进入 handle，诊断集合不包含全部 HTTP 请求；取消信号发出也不代表清理已经完成。直接合并会让关闭等待或诊断范围依赖额外条件。
+- 证据：`tests/model-relay-server.test.ts` 覆盖绝对请求头截止、上游超时只结算一次、客户端断开和停止监听取消。入口与清理重点为 `server.ts` 的构造监听、stopListening、close 和 handle 的 finally。
+- 结论：未找到可整块删除的重复资源管理。保留现有集合，不新增统一请求上下文注册器；若后续发现取消与诊断登记遗漏，再围绕具体遗漏审查。
+
+### M12：指标发送、写入与查询水位
+
+- 链路：RelayMetricsSender → 私有 IPC 确认 → BufferedModelRequestMetricsWriter → Store.recordBatch → SQLite；Bootstrap 查询 Thread／Turn 指标前调用 waitForCurrentWrites。
+- 所有权：发送器拥有有界发送队列和传输结果；Writer 拥有落库批次、范围水位及写入失败结果；Store 拥有事务。发送确认只表示入队，不能用它替代持久化结果。
+- 改前审查：Writer 的水位只等待调用当时相关范围内已入队记录，不能改成等待全队列空闲；否则后续无关流量会拖延完成展示。发送超时也不能推导为未入队，更不能因此补发。
+- 证据：`tests/buffered-model-request-metrics-writer.test.ts` 覆盖既有写入水位、Thread／Turn 失败隔离及关闭排空；`tests/model-relay-metrics-sender.test.ts` 覆盖未确认超时不重试、明确拒绝与已接收但确认丢失的区别。查询调用方位于 `gateway-component-graph.ts`。
+- 结论：不统一队列和确认模型。Store 已分离 schema、查询与行映射，record 和 recordBatch 也已共享 insertSample；目前再抽写入门面只会增加转发层，没有确认模块级收益。
+
+### M13：Binding Store 持久化与内存索引
+
+- 链路：业务通过 BindingStore → SqliteBindingStore 写事务及内存索引更新 → MemoryBindingStore 提供查询；重启经 load 从持久化数据恢复索引。
+- 改前审查：内存层保存绑定、Actor、Workspace 等最小索引，并非复制 App Server 会话历史。删除内存层意味着重写查询和绑定索引规则；另抽 SQL 门面仍不能移走事务成功／失败与内存一致性的协调责任。
+- 具体审查：retainActors 在事务提交后清理内存 Actor／绑定并设置 force-new，不能简单改成提前调用 MemoryBindingStore.retainActors；时间戳和清理条件也必须对齐。其他绑定变更还需保留事务失败后的索引恢复。
+- 证据：`tests/sqlite-binding-store.test.ts` 覆盖偏好持久化失败回滚、绑定事务失败恢复内存与持久化索引、跨会话转移、账号隔离及重启恢复。
+- 结论：本轮不删除缓存、不更改 Schema、不按文件长度拆 SQL。该模块的后续分析价值在于逐个核对“双层更新”的业务规则是否重复或不一致；只有能消除同一规则的第二份实现且保持原子性，才进入改前审查通过状态。
+
+### M14：计划任务调度与终态归并
+
+- 链路：tick 收集到期任务／runTaskNow 串行手动请求 → 容量检查 → Store 领取 → 共享 dispatch → 执行结果落库 → onRunStateChanged → 重读权威 Run。
+- 改前审查：定时入口需要补记错过的 occurrence、按 Conversation 保序并跨 Conversation 并发；手动入口通过 manualRunTail 排队，再等待活动 tick。共用执行端已存在，不需要再增加可配置执行模板。
+- 终态边界：completed 路径先保存 running 标识并通知观察者，观察者可能归并已到达的终态；重读后才能决定是否继续完成转换。不能把几个 switch 分支统一成一次状态写入，也不能删掉通知后的重读。
+- 证据：`tests/scheduled-task-scheduler.test.ts` 覆盖容量检查中停止、同会话保序／跨会话并发、终态回调竞态及停止后不启动已领取任务。
+- 结论：保留领取与归并差异。tick 结果使用中间 Map 再排序存在局部简化空间，但不减少模块职责或状态所有者，本轮不把它列作模块轻量化成果。
+
+### M15：Provider Proxy 流量转储资源管理
+
+- 链路：Provider／Relay 转储入口 → TrafficDumpStorage 会话与待写预算 → trace／payload／interaction 文件流 → 串行写队列 → 轮转、退役与 close；Relay 两种协议共用预算和保留清理边界。
+- 改前审查：三种 ensureStream 已共用 createSessionStream，私有权限、错误处理、活动流登记及 close 移除均只有一份。trace 与 payload 有不同计量和轮转条件，interaction 索引使用固定文件名。
+- 关闭边界：结束写入、流 destroyed 与流真正触发 close 并不等价；轮转后仍可能存在待关闭的旧流，不能只等待当前 Session 字段指向的流。
+- 证据：`tests/provider-proxy-traffic-dump.test.ts` 覆盖轮转流关闭、失败后等待 destroyed 流关闭和保留预算；`tests/model-relay-server.test.ts` 覆盖双协议共享预算、待写上限与关闭取消清理扫描。
+- 结论：通用动态流字段注册只会缩短三个很薄的包装函数，不能再消除一套生命周期实现，暂不实施。保留现有共享层和独立预算边界。
+
+### 本轮排序与验证边界
+
+- 五项均未达到“已确认模块级收益，可以直接实施”的条件；不以分析数量作为修改数量，也不把静态审查记为行为验证。
+- 后续优先深入 M13 的事务与内存规则对照；其潜在收益是减少同一绑定规则的维护入口，尚未确认可行方案。M11、M12、M14、M15 的本轮合并方案不继续推进，除非出现新的具体重复证据。
+- 本轮只维护分析记录，执行文档检查与 Diff 格式检查；M09、M10 沿用各自已记录的定向验证，本轮不重复运行全量门禁。
+
+## M16：Workspace 持久化写入收敛
+
+- 状态：已验证，未提交；承接 M13 的链路审查，不删除内存索引或改变持久化格式。
+- 入口链路：Application.selectWorkspace 在会话锁内检查活动任务和排队输入 → Router.selectWorkspace 解析已配置 Workspace、解绑旧订阅并保存选择 → SqliteBindingStore.selectWorkspace → 内存索引；绑定恢复／切换走 Router → switchForeground，跨会话接管走 Router → transfer。
+- 关联边界：Router 在切换或接管的存储步骤失败后负责恢复被取消的旧订阅；Store 负责 Workspace、绑定、偏好和空闲标记的事务一致性；重启 load 从数据库恢复 MemoryBindingStore。模块间仍通过既有公开接口调用。
+- 改前审查：selectWorkspace、switchForeground、transfer 三处 Workspace UPSERT 的列、冲突键、赋值和 Date.now 调用相同；直接选择先检查当前绑定，另两处必须留在现有绑定事务内。绑定表的普通 INSERT 与 UPSERT 不等价，本轮不合并。
+- 优化：三条路径调用同一私有 writeWorkspace，复用原数据库连接，不开启额外事务或更新内存；减少两份重复写入规则，生产代码净减少 26 行，无新文件、公共接口或依赖。不宣称性能改善。
+- 改后审查：核对三处调用参数、写入顺序和异常传播；BEGIN／COMMIT／ROLLBACK、授权检查、Thread 独占条件、订阅补偿、内存提交顺序、Schema v6 与 load 均保持不变。撤权、降为后台和移除 Thread 的不同规则不混入此次收敛。
+- 初次覆盖补强：原前台绑定失败测试未让 Workspace 改值，补充不同 Workspace 输入及当前／重开后的旧值断言；新增接管后段 INSERT 故障注入。后续 R02 审查确认，这些断言能检查内存与恢复结果，但不足以单独证明 Workspace 表回滚；直接持久化断言已按下节补齐。
+- 验证：sqlite-binding-store 与 session-router 两个文件共 92 项通过；类型、版本与运行时边界检查、相关源码／测试 Lint、文档与 Diff 格式检查通过。
+- 限制：本项只消除重复持久化规则，尚未消除 SQLite 与 Memory 两层的绑定状态协调；没有修改 App Server 交互，未操作真实服务、未执行提交全量门禁。
+
+## R02：Workspace 回滚测试盲区修复与方向复核
+
+- 问题：M16 两个失败测试只通过 getWorkspace 检查结果。load 先读取 Workspace 表，再加载前台绑定，后者会覆盖内存中的 Workspace。因此即使 Workspace 表残留错误值，当前实例和重开后的读取也可能通过。
+- 修复：两项测试在失败后各打开独立只读 SQLite 连接，以 surface、accountId、conversationId 精确查询 conversation_workspaces；前台绑定检查原 Workspace，接管检查源／目标两侧。查询连接通过 finally 关闭，保留内存索引、绑定、空闲状态及重启断言。
+- 改后审查：断言在 Store 关闭及重启加载之前执行，直接观察事务结束后的持久化值，不经过内存恢复逻辑。生产代码无新增修改，不改 Schema 或用户数据。
+- 验证：存储测试 26 项通过，相关测试 Lint、文档与 Diff 检查通过。在 /tmp 隔离测试副本中，于失败操作后故意写入错误 Workspace 残留，两项测试均在新增 SQL 断言处失败；这是预期的反向验证，副本与夹具已清理。原 92 项存储／路由测试结果保留，生产源码未变化，本轮不重复路由或全量门禁。
+- 方向判断：M09、M10 属于局部集合／引用清理，M16 属于三条写入链路的内部规则去重；均未扩展功能或转向 CLI，但近期实施偏重小项，不能把这些结果累计描述为显著的模块减负。M16 的收益限于减少两份 SQL 维护入口，未减少模块、资源所有者或状态协调层。
+- 后续选择：优先能整块减少重复生命周期、业务分派或不必要依赖的候选；局部无用字段和薄包装去重不再单独作为下一轮模块轻量化主项。没有确认收益时继续记录分析结论，不为了维持修改数量新增抽象或合并必要边界。本轮不撤销已验证的小改动，也不扩大到无关模块。
+
+## M17：Relay 指标与控制查询的 IPC 请求生命周期收敛
+
+- 状态：已验证，未提交。
+- 候选筛选：Provider 指标发送在 Unix 直接连接、采用空闲超时且只做尽力发送；Relay 指标有取消信号、绝对截止及明确确认分类，两者不强行合并。Queue Events 是持续订阅，也不进入单次请求实现。
+- 链路一：ModelRelayServer 生成指标 → RelayMetricsSender 有界队列 → sendRelayMetrics → 私有 IPC → RelayMetricsServer → Gateway 指标入队。Sender 保留四类结果及物理发送槽，接受不等于持久化。
+- 链路二：管理／WebUI 查询 → queryModelRelayControl → 私有 IPC → ModelRelayControl → v4 回应校验；apply 还需摘要匹配，queue 允许最多 128 KiB 回应，status／apply 为 8192 字节。
+- 改前审查：两条链路重复持有 Socket、截止定时器、响应缓冲、单次结算标记，以及连接／数据／错误／关闭监听。它们均不重试，按换行接收单份 JSON；差异可以由现有调用方给定的截止时间、回应上限和可选取消信号表达，不需要业务回调或协议插件。
+- 优化：在既有 runtime/private-ipc 中集中 requestPrivateIpcJson，并补充类型声明；指标发送和控制查询移除各自请求生命周期实现。共享层只管理连接、字节预算、JSON 解码和清理，业务版本、请求 ID、摘要、结果字段校验仍归调用方。
+- 收益：两份客户端资源管理收敛为一个所有者；这是实际跨调用链复用，不是仅移动文件。三个实现文件合计净增加 8 行（另有类型声明），不以行数、性能或内存改善作为收益。未新增项目依赖、文件层级、队列、重试或用户配置。
+- 改后审查：控制回应验证块规范空白后与 HEAD 完全一致；1 秒指标请求、2 秒控制请求、8192／128 KiB 回应上限与 not_running／unconfirmed 分类保持。共享连接继续使用原私有端点校验和 Windows 认证；失败只返回受控异常，不包含帧或凭据。
+- 解码边界：共享层按收到的字节累计预算，再合并 Buffer 解码；保留控制查询原有 UTF-8 分片支持，Relay 指标发送不再逐块转字符串。它不验证业务确认；非法、多帧同批或缺少换行的回应仍不能作为成功确认。
+- 验证：新增共享合同测试覆盖 UTF-8 分片、回应超限、非法 JSON、截断、超时、主动取消、预取消、端点缺失及成功后连接／取消监听清理。最初的 48 项结果包含旧 dist，未作为最终证据；随后通过 npm test 构建最新产物，5 个文件共 217 项通过，涵盖共享请求、指标确认、Runtime 控制、Relay 授权及 HTTP 生命周期。
+- 其他检查：类型、版本、运行时依赖边界、相关源码／测试 Lint、两份 JavaScript 语法检查、文档与 Diff 检查通过。Runtime 模块说明同步更新。
+- 限制：Linux 隔离 IPC／HTTP 夹具验证；没有操作真实服务或 App Server，未执行 Windows 实机、远程 CI 或提交全量门禁。共享 IPC 监听路径替换的既有问题仍单独保留，本次未修改服务端生命周期。
 
 ## 后续候选
 

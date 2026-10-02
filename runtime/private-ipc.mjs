@@ -166,6 +166,47 @@ export function createPrivateIpcConnection(logicalPath) {
   return socket;
 }
 
+/** One bounded JSON exchange. Callers own response validation and confirmation semantics. */
+export function requestPrivateIpcJson(logicalPath, request, { timeoutMs, maximumBytes, signal }) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error("Private IPC request cancelled")); return; }
+    let socket;
+    let timer;
+    let done = false;
+    let bytes = 0;
+    const chunks = [];
+    const finish = (value, failed) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      socket?.destroy();
+      if (failed) reject(new Error("Private IPC request unconfirmed"));
+      else resolve(value);
+    };
+    const abort = () => finish(undefined, true);
+    try {
+      const payload = `${JSON.stringify(request)}\n`;
+      timer = setTimeout(abort, timeoutMs);
+      socket = createPrivateIpcConnection(logicalPath);
+      signal?.addEventListener("abort", abort, { once: true });
+      socket.once("connect", () => { if (!done) socket.write(payload); });
+      socket.on("error", abort);
+      socket.once("close", abort);
+      socket.on("data", chunk => {
+        if (done) return;
+        bytes += chunk.length;
+        if (bytes > maximumBytes) { abort(); return; }
+        chunks.push(chunk);
+        if (!chunk.includes(10)) return;
+        try { finish(JSON.parse(Buffer.concat(chunks).toString("utf8").trim()), false); }
+        catch { abort(); }
+      });
+      if (signal?.aborted) abort();
+    } catch { abort(); }
+  });
+}
+
 export function privateIpcAcceptsConnections(logicalPath) {
   if (!privateIpcEndpointExists(logicalPath)) return Promise.resolve(false);
   return new Promise((resolve) => {

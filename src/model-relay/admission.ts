@@ -42,7 +42,7 @@ export interface RelayLease {
 export class RelayAdmission {
   private policy: RelayPolicy;
   private readonly budget: Bucket;
-  private readonly leases = new Map<RelayLease, string>();
+  private readonly leases = new Set<RelayLease>();
   private readonly revokedProviders = new Set<string>();
   private readonly identities = new Map<string, Readonly<RelayCaller>>();
   private retiredIdentities = new Map<string, RetiredIdentity>();
@@ -155,7 +155,7 @@ export class RelayAdmission {
         this.schedule();
       },
     };
-    this.leases.set(lease, identity);
+    this.leases.add(lease);
     if (deferred) {
       this.pending.set(lease, { bytes: maximumBodyBytes }); this.pendingBytes += maximumBodyBytes;
       this.pendingKeys.add(caller.keyId);
@@ -258,7 +258,7 @@ export class RelayAdmission {
     for (const provider of this.revokedProviders) if (!policy.accounts.some(value => value.provider === provider)) this.revokedProviders.delete(provider);
     for (const [key, caller] of this.identities) if (!policy.callers.some(value => value.keyId === key)) this.identities.set(key, { ...caller, enabled: false });
     for (const caller of this.policy.callers) this.identities.set(caller.keyId, caller);
-    for (const lease of this.leases.keys()) {
+    for (const lease of this.leases) {
       try { lease.check(); } catch { lease.cancel(); }
     }
     this.schedule();
@@ -268,13 +268,13 @@ export class RelayAdmission {
   invalidateProvider(provider: string): void {
     if (!this.policy.accounts.some(account => account.provider === provider)) return;
     this.revokedProviders.add(provider);
-    for (const lease of this.leases.keys()) if (lease.caller.provider === provider) lease.cancel();
+    for (const lease of this.leases) if (lease.caller.provider === provider) lease.cancel();
   }
   restoreProvider(provider: string): void { if (!this.closed) this.revokedProviders.delete(provider); }
   failClosed(): void {
     clearTimeout(this.wakeTimer); this.wakeTimer = undefined;
     this.policy = { ...this.policy, enabled: false };
-    for (const lease of this.leases.keys()) lease.cancel();
+    for (const lease of this.leases) lease.cancel();
   }
   close(): void { this.closed = true; this.failClosed(); }
 }

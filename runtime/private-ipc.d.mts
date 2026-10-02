@@ -10,4 +10,9 @@ export class PrivateIpcServer {
 export function privateIpcEndpointExists(logicalPath: string): boolean;
 export function assertPrivateIpcEndpointSync(logicalPath: string): unknown;
 export function createPrivateIpcConnection(logicalPath: string): Socket;
+export function requestPrivateIpcJson(logicalPath: string, request: unknown, options: {
+  timeoutMs: number;
+  maximumBytes: number;
+  signal?: AbortSignal;
+}): Promise<unknown>;
 export function privateIpcAcceptsConnections(logicalPath: string): Promise<boolean>;
