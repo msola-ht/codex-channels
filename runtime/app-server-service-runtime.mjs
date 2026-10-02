@@ -152,6 +152,7 @@ export async function runAppServerService(runtime, resolveDefaultWorkspace) {
     let bridge;
     if (definition?.upstreamWireApi === "chat_completions") {
       bridge = new ChatCompletionsBridge({ ...options,
+        clinePass: definition.storageId === "clp" || definition.id === "clp",
         onError: () => proxySelector.invalidate(),
         ...(validatedCodex.upstream_user_agent ? { upstreamUserAgent: validatedCodex.upstream_user_agent } : {}),
       });

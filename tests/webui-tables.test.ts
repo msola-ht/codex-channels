@@ -174,7 +174,7 @@ describe("WebUI metrics table presentation", () => {
           relayDebug: render(TrafficDetail, { detail: { ...detail, debug: {
             inbound: { headers: { "x-client": "[REDACTED]" }, headersTruncated: true, body: "<script>private</script>", bodyTruncated: false },
             delivered: { headers: {}, headersTruncated: false, body: "{}", bodyTruncated: true, state: "finished", status: 200 },
-            transformations: ["stream_defaulted", "json_unwrapped"] } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
+            transformations: ["stream_defaulted", "provider_routing_pinned", "json_unwrapped"] } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFinalProvider: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.finalProvider": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceFallbackOnly: render(TrafficDetail, { detail: { ...detail, chatDiagnostics: { fields: { "routing.fallbacks.0": "deepseek" }, truncated: false } }, provider: "clp-main", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
           traceClosed: render(TrafficDetail, { detail, provider: "openai", session: "batch-1", onRetry: noop, onTracePageChange: noop }),
@@ -323,6 +323,10 @@ describe("WebUI metrics table presentation", () => {
         result.completedDisconnect = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
         globalThis.fixtureDisclosureOpen = true;
         result.completedDisconnectOpen = render(TrafficDetail, { detail: completedWithDisconnect, provider: "openai", session: "batch", onRetry: noop, onTracePageChange: noop });
+        result.relayRoutingOpen = render(TrafficDetail, { detail: { ...detail, debug: {
+          inbound: { headers: {}, headersTruncated: false, body: "{}", bodyTruncated: false },
+          delivered: null, transformations: ["provider_routing_pinned"]
+        } }, provider: "clp-main", session: "batch", onRetry: noop, onTracePageChange: noop });
         globalThis.fixtureDisclosureOpen = false;
         result.incompleteOutput = render(TrafficDetail, { detail: { ...detail, response: {
           state: "completed", status: null, usage: null, headers: {}, body: "", outputTruncated: true,
@@ -386,6 +390,7 @@ describe("WebUI metrics table presentation", () => {
     expect(markup.relayDebug).toContain("客户端入站请求");
     expect(markup.relayDebug).toContain("客户端交付报文");
     expect(markup.relayDebug).toContain("Relay 出站请求");
+    expect(markup.relayRoutingOpen).toContain("已将 CLP 上游限定为 DeepSeek");
     expect(markup.relayDebug).not.toContain("<script>private</script>");
   });
   it("distinguishes account loading and failures from confirmed empty configuration", () => {

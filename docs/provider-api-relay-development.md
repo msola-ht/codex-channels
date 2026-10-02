@@ -71,7 +71,7 @@ Relay 重启取消自身在途请求，不停止共享 App Server。
 仅开放 `POST /v1/chat/completions`、`POST /v1/responses` 和 `GET /v1/models`。
 模型列表返回 Key 允许列表与当前账户目录的交集；不提供响应读取、取消或服务端会话管理端点。
 
-请求保留解析后的普通 JSON 字段和值，由上游判断模型专用参数、工具声明、图片与扩展内容。
+请求保留解析后的普通 JSON 字段和值，由上游判断模型专用参数、工具声明、图片与扩展内容。CLP Chat 的路由策略例外：鉴权确定 CLP 账户后，固定出站 `providerOptions.gateway.only = ["deepseek"]`，覆盖客户端同名值，其他合法字段保留；畸形路由对象在出站前拒绝，不取消限定重试。JSON 与 SSE 均适用，其他 Provider 不注入；探测依据见 [CLP 路由记录](cline-pass.md#上游路由限定探测)。
 Relay 不下载远程图片，不读取请求里的本机路径。具体本地边界如下：
 
 | 字段或条件 | 当前处理 |
@@ -130,7 +130,7 @@ Thread/Turn 为空，不伪造成 Codex 会话。指标发送有界且不重试�
 
 Relay 与 Codex 共用全局 debug 转储开关与 production/debug 模式。V2 转储使用
 `relay.chat` / `relay.responses` 标签，共用容量与待写预算；生产与调试模式均脱敏必要凭据，
-保留普通头及关联信息。调试模式可对照入站、出站和实际交付；非法、截断、未采集与未交付分别显示。
+保留普通头及关联信息。调试模式可对照入站、出站和实际交付；实际补入或覆盖 CLP 路由时记录 `provider_routing_pinned`，读取器和中英文 WebUI 同步识别，已符合限定时不误报；非法、截断、未采集与未交付分别显示。
 普通头可能包含业务数据，不承诺识别任意自定义编码秘密。详细采集口径见
 [WebUI 调用详情](webui.md)和[代理模块](../src/provider-proxy/README.md)。
 

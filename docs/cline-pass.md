@@ -58,6 +58,36 @@ WebUI 账户卡片和渠道 `/usage` 显示 5 小时、7 天、月度窗口的�
 
 ## 调用诊断与错误
 
+### 上游路由限定探测
+
+2026-10-02（UTC）使用当前默认 CLP 账户，对官方 Chat Completions 端点进行了三次隔离短请求，
+模型均为 `cline-pass/deepseek-v4.1-flash`，关闭思考、输出上限 32 Token、使用 SSE。
+只发送固定测试文本，没有调用工具、修改生产配置或重启服务。
+
+| 请求差异 | 结果 | 上游返回的路由证据 |
+| --- | --- | --- |
+| 不传路由限定 | 正常完成 | `resolvedProvider` 与 `finalProvider` 均为 `baseten` |
+| `providerOptions.gateway.only = ["deepseek"]` | 正常完成 | 两字段均为 `deepseek` |
+| `providerOptions.gateway.only = ["codexc-nonexistent-provider"]` | 无生成内容，流内 `stream_initialization_failed` | 没有成功路由记录；HTTP 状态仍为 200，不能据此判定成功 |
+
+路由字段来自 `choices[].delta.provider_metadata.gateway.routing`，不是根据模型名称、回答内容或
+耗时推断。正负对照表明本次 Cline 接口执行了该限制；单组样本不能证明长期可用性或随机路由概率。
+参数是 Chat 请求体中的嵌套对象：
+
+```json
+{"providerOptions":{"gateway":{"only":["deepseek"]}}}
+```
+
+[Vercel 官方路由文档](https://vercel.com/docs/ai-gateway/models-and-providers/provider-options)
+定义了 `only` 的上游允许列表语义；Cline 透传行为以上述实测为依据。项目在 CLP 的 Responses 转 Chat
+与 Relay 直接 Chat（JSON/SSE）两条出站链路统一设置该参数；以受管 Provider 身份判断，其他
+Provider 不受影响。Relay 覆盖客户端已有的 `only`，保留其他合法对象字段；`providerOptions` 或
+其 `gateway` 不是对象时在出站前返回 400。限定失败不自动撤销参数或重试。路由规则由
+Provider Proxy 公共能力提供，通用协议转换器保持独立；Relay 调用转储记录实际注入后的出站请求；调试模式同时保留原始入站正文，并在实际补入或覆盖
+路由时标记 `provider_routing_pinned`，WebUI 显示「已将 CLP 上游限定为 DeepSeek」。已有单一
+`deepseek` 限定不重复标记。已有转储不回填；读取含新标记的记录需使用本次更新后的 WebUI。
+安装本次代码后，重启 App Server 与已启用的 Relay 才会加载新规则，无需重建账户或修改配置。
+
 上下文同步复用现有事务与私有恢复记录。若同步失败且自动回滚未完成，停止相关服务后可执行 `codexc primary-provider recover clp-<账户> rollback`（恢复原值）或 `keep`（保留新值）；恢复整个关联事务后再重启服务。
 
 工具名称与命名空间拼接超过 Chat 的 64 字符限制时，转换层使用稳定短名，返回时还原原始工具身份；历史调用和指定工具选择使用相同映射。

@@ -8,6 +8,7 @@ import { ChatDiagnostics, ChatDiagnosticsChannel, chatDiagnosticsHeader } from "
 import { ChatUpstreamError, chatStreamError, chatUpstreamError, readChatHttpError } from "./chat-errors.js";
 import type { ProviderProxyOptions } from "./proxy.js";
 import { readChatBody, readChatFrames, waitForChatOperation, writeChatData } from "./chat-io.js";
+import { pinClinePassRouting } from "./cline-pass-routing.js";
 
 /**
  * 桥负责单次请求预算；外层代理额外保留终态发送时间，避免先截断结构化错误。
@@ -21,7 +22,7 @@ export class ChatCompletionsBridge {
   private readonly active = new Set<AbortController>();
   private readonly server = createServer((request, response) => { void this.handle(request, response); });
   private readonly requestTimeoutMs: number;
-  constructor(private readonly options: ProviderProxyOptions) {
+  constructor(private readonly options: ProviderProxyOptions & { clinePass?: boolean }) {
     this.requestTimeoutMs = options.timeoutMs ?? chatBridgeRequestTimeoutMs;
   }
   async start(): Promise<void> {
@@ -79,7 +80,7 @@ export class ChatCompletionsBridge {
         ? await waitForChatOperation(Promise.resolve(this.options.resolveUpstream(request.headers)), controller.signal)
         : { host: this.options.upstreamHost, port: this.options.upstreamPort, protocol: this.options.upstreamProtocol, basePath: this.options.upstreamBasePath, agent: this.options.upstreamAgent };
       if (controller.signal.aborted) throw new Error("aborted");
-      const payload = JSON.stringify(body);
+      const payload = JSON.stringify(this.options.clinePass ? pinClinePassRouting(body) : body);
       const headers: Record<string, string> = { "content-type": "application/json", accept: "text/event-stream", "content-length": String(Buffer.byteLength(payload)) };
       if (typeof request.headers.authorization === "string") headers.authorization = request.headers.authorization;
       if (this.options.upstreamUserAgent) headers["user-agent"] = this.options.upstreamUserAgent;
