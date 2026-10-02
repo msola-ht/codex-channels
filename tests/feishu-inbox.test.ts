@@ -272,6 +272,37 @@ describe("FeishuInbox", () => {
     expect(fixture.handled).toHaveLength(0);
   });
 
+  it("accepts authorized rich-post file resources from content_v2 without duplicating fallback content", async () => {
+    const fixture = createFixture();
+    expect(fixture.inbox.receive(createEvent({
+      messageType: "post",
+      content: JSON.stringify({ zh_cn: {
+        content: [[{ tag: "text", text: "legacy duplicate" }]],
+        content_v2: [[{ tag: "text", text: "分析两份日志" },
+          { tag: "media", file_key: "file_first" },
+          { tag: "media", file_key: "file_second" },
+          { tag: "media", file_key: "file_first" }]],
+      } }),
+    }))).toEqual({ status: "accepted" });
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([expect.objectContaining({
+      kind: "files", text: "分析两份日志", imageKeys: [],
+      files: [{ fileKey: "file_first", fileName: "附件-1.txt" }, { fileKey: "file_second", fileName: "附件-2.txt" }],
+    })]);
+  });
+
+  it("rejects unauthorized and malformed rich-post file resources before handling", async () => {
+    const fixture = createFixture();
+    fixture.access.isAllowed.mockReturnValue(false);
+    const post = createEvent({ messageType: "post", content: JSON.stringify({ content: [[{ tag: "media", file_key: "file_resource" }]] }) });
+    expect(fixture.inbox.receive(post)).toEqual({ status: "ignored", reason: "unauthorized" });
+    fixture.access.isAllowed.mockReturnValue(true);
+    expect(fixture.inbox.receive({ ...post, content: JSON.stringify({ content: [[{ tag: "media", file_key: "../unsafe" }]] }) }))
+      .toEqual({ status: "ignored", reason: "invalid-content" });
+    await fixture.inbox.close();
+    expect(fixture.handled).toEqual([]);
+  });
+
   it("accepts one private rich-post image with its text caption", async () => {
     const fixture = createFixture();
 

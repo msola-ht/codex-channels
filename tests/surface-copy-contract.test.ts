@@ -317,7 +317,11 @@ describe("shared surface copy contract", () => {
       expect(formatTextFileTooLarge(platform))
         .toBe(`${label}文本文件超过 1,000,000 字节限制`);
       expect(formatUnsupportedTextFile(platform))
-        .toBe(`${label}当前仅支持 UTF-8 文本文件`);
+        .toBe(`网关无法读取${label}附件：文件内容格式不受支持，请发送 UTF-8 文本文件`);
+      expect(formatUnsupportedTextFile(platform, "control-characters"))
+        .toContain("文件含不支持的控制字符");
+      expect(formatUnsupportedTextFile(platform, "empty"))
+        .toContain("文件没有可读取的文本内容");
     }
   });
 

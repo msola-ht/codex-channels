@@ -10,7 +10,7 @@ import {
 describe("WeixinFileInput", () => {
   it("downloads, decrypts and verifies a UTF-8 text file without persisting it", async () => {
     const key = Buffer.from("00112233445566778899aabbccddeeff", "hex");
-    const plaintext = Buffer.from("{\n  \"enabled\": true\n}\n");
+    const plaintext = Buffer.from("\u001b[32m{\n  \"enabled\": true\n}\n\u001b[0m");
     const cipher = createCipheriv("aes-128-ecb", key, null);
     const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
     const fetchImpl = vi.fn<typeof fetch>(async () =>
@@ -29,7 +29,7 @@ describe("WeixinFileInput", () => {
       mediaAesKey: Buffer.from(key.toString("hex"), "ascii").toString("base64"),
     })).resolves.toEqual({
       fileName: "settings.json",
-      text: plaintext.toString("utf8"),
+      text: '{\n  "enabled": true\n}\n',
       bytes: plaintext.length,
     });
     expect(fetchImpl).toHaveBeenCalledWith(
@@ -48,7 +48,7 @@ describe("WeixinFileInput", () => {
     await expect(new WeixinFileInput(vi.fn()).download({
       ...reference(),
       fileName: "../secret.txt",
-    })).rejects.toMatchObject({ code: "download-failed" });
+    })).rejects.toMatchObject({ code: "unsupported", message: expect.stringContaining("文件名无效") });
 
     const oversized = new WeixinFileInput(vi.fn(async () =>
       new Response(Buffer.alloc(0), {

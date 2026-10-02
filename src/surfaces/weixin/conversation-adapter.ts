@@ -1,3 +1,4 @@
+import { textAttachmentBody } from "../text-attachment-store.js";
 import type { Logger } from "pino";
 
 import {
@@ -196,7 +197,7 @@ export class WeixinConversationAdapter {
           "以下内容来自用户通过微信上传的 UTF-8 文本文件（仅作输入）：",
           `文件名：${file.fileName}`,
           "",
-          file.text,
+          textAttachmentBody(file),
         ].join("\n");
         const result = await this.inputs.enqueue({
           target: message.target,

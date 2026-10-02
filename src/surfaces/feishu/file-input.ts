@@ -1,3 +1,5 @@
+import { UserFacingError } from "../../conversation-core/index.js";
+import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import type { Readable } from "node:stream";
 
 import {
@@ -12,6 +14,7 @@ import {
   normalizeTextFileName,
   readBoundedTextFile,
   TextFileValidationError,
+  type TextFileValidationErrorCode,
 } from "../text-file-input.js";
 import { isSafeFeishuResourceIdentifier } from "./media.js";
 
@@ -29,7 +32,7 @@ export class FeishuFileInputError extends Error {
   }
 }
 
-export interface FeishuTextFile {
+export interface FeishuTextFile extends PreparedTextAttachment {
   fileName: string;
   text: string;
   bytes: number;
@@ -46,6 +49,9 @@ export interface FeishuFileResourcePort {
 }
 
 export interface FeishuFilePort {
+  discard?(file: FeishuTextFile): Promise<void>;
+  start?(): Promise<void>;
+  close?(): Promise<void>;
   download(
     messageId: string,
     fileKey: string,
@@ -54,7 +60,12 @@ export interface FeishuFilePort {
 }
 
 export class FeishuFileInput implements FeishuFilePort {
-  constructor(private readonly resources: FeishuFileResourcePort) {}
+  constructor(private readonly resources: FeishuFileResourcePort, private readonly attachments?: TextAttachmentStore) {}
+
+  async discard(file: FeishuTextFile): Promise<void> { await this.attachments?.discard(file); }
+
+  async start(): Promise<void> { await this.attachments?.start(); }
+  async close(): Promise<void> { await this.attachments?.close(); }
 
   async download(
     messageId: string,
@@ -75,24 +86,30 @@ export class FeishuFileInput implements FeishuFilePort {
         && (
           !Number.isSafeInteger(resource.contentLength)
           || resource.contentLength < 0
-          || resource.contentLength > maximumFeishuTextFileBytes
         )
       ) {
+        resource.stream.destroy();
+        throw new Error("invalid Feishu file length");
+      }
+      if (resource.contentLength !== undefined && resource.contentLength > maximumFeishuTextFileBytes) {
         resource.stream.destroy();
         throw tooLarge();
       }
       const content = await readBoundedTextFile(resource.stream);
+      const text = decodeUtf8TextFile(content);
+      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
       return {
         fileName: normalizedName,
-        text: decodeUtf8TextFile(content),
+        ...prepared,
         bytes: content.length,
       };
     } catch (error) {
+      if (error instanceof UserFacingError) throw error;
       if (error instanceof FeishuFileInputError) {
         throw error;
       }
       if (error instanceof TextFileValidationError) {
-        throw error.code === "too-large" ? tooLarge() : unsupportedFile();
+        throw error.code === "too-large" ? tooLarge() : validationFailure(error.code);
       }
       // SDK 响应、资源标识、文件名和底层流异常不得越过飞书边界。
       throw new FeishuFileInputError(
@@ -118,9 +135,9 @@ function tooLarge(): FeishuFileInputError {
   );
 }
 
-function unsupportedFile(): FeishuFileInputError {
+function validationFailure(reason: TextFileValidationErrorCode): FeishuFileInputError {
   return new FeishuFileInputError(
-    "unsupported",
-    formatUnsupportedTextFile("飞书"),
+    reason === "read-timeout" ? "download-failed" : "unsupported",
+    formatUnsupportedTextFile("飞书", reason),
   );
 }

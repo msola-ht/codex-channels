@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { TextAttachmentStore } from "../text-attachment-store.js";
 import type { Logger } from "pino";
 
 import type {
@@ -73,7 +75,7 @@ export function createWeixinSurface(
       options.logger,
       options.fetchImpl,
     ),
-    files: new WeixinFileInput(options.fetchImpl),
+    files: new WeixinFileInput(options.fetchImpl, new TextAttachmentStore(join(options.uploadsDirectory, "text"), () => options.logger.warn("文本附件清理失败"))),
     audios: new WeixinAudioStore(
       options.uploadsDirectory,
       options.logger,

@@ -1,5 +1,9 @@
 export type UserFacingErrorCode =
   | "message.empty"
+  | "attachment.too-many"
+  | "attachment.too-large"
+  | "attachment.unsupported"
+  | "attachment.capacity"
   | "conversation.name.invalid"
   | "conversation.missing"
   | "conversation.busy"

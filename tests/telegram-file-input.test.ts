@@ -14,8 +14,8 @@ describe("TelegramTextFileInput", () => {
     const downloader: TelegramTextFileDownloader = vi.fn(async (url) => {
       requestedUrl = url;
       return {
-        stream: Readable.from([Buffer.from("\uFEFF发布说明", "utf8")]),
-        contentLength: Buffer.byteLength("\uFEFF发布说明", "utf8"),
+        stream: Readable.from([Buffer.from("\uFEFF\u001b[32m发布说明\u001b[0m", "utf8")]),
+        contentLength: Buffer.byteLength("\uFEFF\u001b[32m发布说明\u001b[0m", "utf8"),
       };
     });
     const input = new TelegramTextFileInput(
@@ -31,7 +31,7 @@ describe("TelegramTextFileInput", () => {
     )).resolves.toEqual({
       fileName: "发布说明.txt",
       text: "发布说明",
-      bytes: Buffer.byteLength("\uFEFF发布说明", "utf8"),
+      bytes: Buffer.byteLength("\uFEFF\u001b[32m发布说明\u001b[0m", "utf8"),
     });
     expect(requestedUrl?.hostname).toBe("api.telegram.org");
     expect(requestedUrl?.pathname).toContain("/documents/file_1.txt");
@@ -52,7 +52,7 @@ describe("TelegramTextFileInput", () => {
       { getFile: async () => ({ file_path: "documents/file.txt" }) },
       "file-id",
       "../secret.txt",
-    )).rejects.toThrow("仅支持 UTF-8 文本文件");
+    )).rejects.toThrow("文件名无效");
     await expect(input.download(
       { getFile: async () => ({ file_path: "../secret" }) },
       "file-id",
@@ -75,7 +75,7 @@ describe("TelegramTextFileInput", () => {
       { getFile: async () => ({ file_path: "documents/file.bin" }) },
       "file-id",
       "binary.bin",
-    )).rejects.toThrow("仅支持 UTF-8 文本文件");
+    )).rejects.toThrow("文件不是有效的 UTF-8 文本");
 
     const empty = new TelegramTextFileInput(
       "123:secret-token",
@@ -86,6 +86,6 @@ describe("TelegramTextFileInput", () => {
       { getFile: async () => ({ file_path: "documents/empty.txt" }) },
       "file-id",
       "empty.txt",
-    )).rejects.toThrow("仅支持 UTF-8 文本文件");
+    )).rejects.toThrow("文件没有可读取的文本内容");
   });
 });

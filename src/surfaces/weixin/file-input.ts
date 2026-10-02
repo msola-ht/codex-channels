@@ -1,3 +1,5 @@
+import { UserFacingError } from "../../conversation-core/index.js";
+import { TextAttachmentStore, type PreparedTextAttachment } from "../text-attachment-store.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -10,6 +12,7 @@ import {
   maximumTextFileBytes,
   normalizeTextFileName,
   TextFileValidationError,
+  type TextFileValidationErrorCode,
 } from "../text-file-input.js";
 import {
   downloadWeixinCdnBytes,
@@ -38,18 +41,23 @@ export class WeixinFileInputError extends Error {
   }
 }
 
-export interface WeixinTextFile {
+export interface WeixinTextFile extends PreparedTextAttachment {
   fileName: string;
   text: string;
   bytes: number;
 }
 
 export interface WeixinFilePort {
+  start?(): Promise<void>;
+  close?(): Promise<void>;
   download(reference: WeixinFileReference): Promise<WeixinTextFile>;
 }
 
 export class WeixinFileInput implements WeixinFilePort {
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(private readonly fetchImpl: typeof fetch = fetch, private readonly attachments?: TextAttachmentStore) {}
+
+  async start(): Promise<void> { await this.attachments?.start(); }
+  async close(): Promise<void> { await this.attachments?.close(); }
 
   async download(reference: WeixinFileReference): Promise<WeixinTextFile> {
     try {
@@ -91,17 +99,20 @@ export class WeixinFileInput implements WeixinFilePort {
       ) {
         throw integrityFailure();
       }
+      const text = decodeUtf8TextFile(plaintext);
+      const prepared = this.attachments === undefined ? { text } : await this.attachments.prepare(text);
       return {
         fileName,
-        text: decodeUtf8TextFile(plaintext),
+        ...prepared,
         bytes: plaintext.length,
       };
     } catch (error) {
+      if (error instanceof UserFacingError) throw error;
       if (error instanceof WeixinFileInputError) {
         throw error;
       }
       if (error instanceof TextFileValidationError) {
-        throw error.code === "too-large" ? tooLarge() : unsupportedFile();
+        throw error.code === "too-large" ? tooLarge() : validationFailure(error.code);
       }
       // CDN 地址、参数、AES key、文件名、正文和底层异常不得越过微信边界。
       throw new WeixinFileInputError(
@@ -113,11 +124,7 @@ export class WeixinFileInput implements WeixinFilePort {
 }
 
 function validateFileName(value: string): string {
-  try {
-    return normalizeTextFileName(value, { maximumCodeUnits: 255 });
-  } catch (error) {
-    throw new Error("invalid Weixin file name", { cause: error });
-  }
+  return normalizeTextFileName(value, { maximumCodeUnits: 255 });
 }
 
 function parseDeclaredLength(value: string | undefined): number | undefined {
@@ -151,10 +158,10 @@ function tooLarge(): WeixinFileInputError {
   );
 }
 
-function unsupportedFile(): WeixinFileInputError {
+function validationFailure(reason: TextFileValidationErrorCode): WeixinFileInputError {
   return new WeixinFileInputError(
-    "unsupported",
-    formatUnsupportedTextFile("微信"),
+    reason === "read-timeout" ? "download-failed" : "unsupported",
+    formatUnsupportedTextFile("微信", reason),
   );
 }
 

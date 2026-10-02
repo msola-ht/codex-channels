@@ -18,6 +18,7 @@ import type { ConfigReadResponse, GetAccountResponse, GetAuthStatusResponse, Thr
 import type { OperationUpdate } from "../src/conversation-core/index.js";
 import { ProviderProxy } from "../src/provider-proxy/index.js";
 import { appendDiagnostic, appServerFailure, stopDetachedTestProcess, waitFor } from "./support/real-app-server-helpers.js";
+import { TextAttachmentStore } from "../src/surfaces/text-attachment-store.js";
 import { completedResponseEvent } from "./support/real-app-server-supervised-fixtures.js";
 
 const runContract = process.env.RUN_CODEX_CONTRACT === "1";
@@ -403,6 +404,11 @@ contractSuite("real supervised App Server tools", () => {
       let answerRequest: (() => void) | undefined;
       let requestParams: unknown;
       const releaseFile = join(directory, "release-background");
+      const attachmentDirectory = mkdtempSync(join(tmpdir(), "attachment-contract-"));
+      const attachmentStore = new TextAttachmentStore(attachmentDirectory, () => undefined);
+      const attachment = scenario === "background"
+        ? await attachmentStore.prepare("attachment-read-success\n" + "log line\n".repeat(5_000))
+        : undefined;
       let backgroundId: string | undefined;
       let backgroundResult: { status?: string; exitCode?: number | null; aggregatedOutput?: string | null } | undefined;
       let backgroundToolOutput: string | undefined;
@@ -426,7 +432,7 @@ contractSuite("real supervised App Server tools", () => {
           const send = () => {
             const item = scenario === "background" && number === 1
               ? { type: "function_call", call_id: "background-call", namespace: "functions", name: "exec_command",
-                  arguments: JSON.stringify({ cmd: `while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
+                  arguments: JSON.stringify({ cmd: `head -n 1 '${attachment!.path!}'; while [ ! -f '${releaseFile.replaceAll("'", "'\"'\"'")}' ]; do sleep 0.05; done; printf background-completed`, login: false, yield_time_ms: 1, max_output_tokens: 100 }) }
               : number === questionResponse
               ? { type: "function_call", call_id: "async-question-call", namespace: "functions", name: "request_user_input",
                   arguments: JSON.stringify({ questions: [{ id: "scope", header: "Scope", question: "Choose a scope", options: [{ label: "Small", description: "Minimal change" }, { label: "Full", description: "Full change" }] }] }) }
@@ -510,6 +516,7 @@ contractSuite("real supervised App Server tools", () => {
               writeFileSync(releaseFile, "release");
               await waitFor(() => backgroundResult !== undefined, 10_000, undefined, "提问等待期间后台命令完成事件");
               expect(backgroundResult).toMatchObject({ status: "completed", exitCode: 0 });
+              expect(`${backgroundToolOutput ?? ""}${backgroundResult?.aggregatedOutput ?? ""}`).toContain("attachment-read-success");
               expect(backgroundResult?.aggregatedOutput).toContain("background-completed");
               expect(count).toBe(questionResponse);
               expect(completeCount).toBe(0);
@@ -532,6 +539,8 @@ contractSuite("real supervised App Server tools", () => {
         }
       } finally {
         writeFileSync(releaseFile, "release");
+        await attachmentStore.close();
+        rmSync(attachmentDirectory, { recursive: true, force: true });
         answerRequest?.();
         removeNotification?.();
         await client?.close();

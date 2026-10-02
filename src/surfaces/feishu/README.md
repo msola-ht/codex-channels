@@ -42,7 +42,7 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - `event-connection.ts`：隔离官方 WebSocket SDK，管理事件注册、握手、SDK 重连、失败后重新启动
   和最终停止生命周期。
 - `file-input.ts`：通过官方消息资源 API 在内存下载独立文件，限制为 1,000,000 字节并严格验证
-  文件名、UTF-8 和控制字符，不创建本地文件。
+  文件名与 UTF-8，文件流读取总时限为 30 秒，清理常见终端转义序列并拒绝残留的不支持控制字符，较大文本通过共享私有暂存交给执行端按需读取。
 - `inbound-content.ts`：统一严格解析入站与被引用消息的文本、富文本、图片、文件和音频元素。
 - `message-content.ts`：中和平台原生提及标签并生成飞书 `post + md` 降级内容。
 - `operation-format.ts`：把操作状态渲染为包含脱敏详情的静态 CardKit Markdown；Computer Use
@@ -154,8 +154,8 @@ Application 的内联 Data URL 输入，同一 Thread 的
 - 图片下载只使用 `im.v1.messageResource.get` 的 `message_id + image_key + type=image` 窄能力；
   SDK 响应被裁剪为下载流和可选长度，不向其他模块暴露 Client、Header 或上游错误。
 - 独立文件下载复用同一消息资源 API 的 `message_id + file_key + type=file` 窄能力；只接受
-  1,000,000 字节以内、不含二进制控制字符的非空 UTF-8 文本，并以内联文件名边界提交到
-  Application。文件不落盘，Office、压缩包、音视频及富文本内附件失败关闭。
+  1,000,000 字节以内的非空 UTF-8 文本，自动清理常见终端转义序列并拒绝残留的不支持控制字符，并以文件名边界提交到
+  Application：清理后至多 32 KiB 内联，更大文本暂存 24 小时并提交路径。富文本按非空 `content_v2` 优先于 `content` 解析 `media.file_key`，最多 4 个文本附件，总大小不超过 1,000,000 字节；顺序下载、同组提交，准备失败清理已暂存的文本文件。资源缺少上游原名时显示为“附件-N.txt”，不推断文件格式。Office、压缩包和音视频仍由文本校验拒绝。
 
 `message-event.ts` 在平台边界把 SDK 原始事件裁剪为稳定的 `FeishuMessageEvent`，只保留账号、
 Actor、消息和 Conversation 路由后续需要的字段。缺少 `open_id`、消息标识或 Chat 标识时失败关闭；

@@ -1,3 +1,4 @@
+import { textAttachmentBody } from "../text-attachment-store.js";
 import {
   isConversationCommandName,
   type ConversationCommandExecutor,
@@ -113,7 +114,7 @@ export class FeishuConversationAdapter {
     },
     private readonly inputOptions: {
       quietWindowMs?: number;
-      files?: Pick<FeishuFilePort, "download">;
+      files?: Pick<FeishuFilePort, "download" | "discard">;
       audios?: Pick<FeishuAudioPort, "download">;
       readQuotedText?(messageId: string): Promise<string | undefined>;
       onQuotedTextError?(error: unknown): void;
@@ -145,7 +146,7 @@ export class FeishuConversationAdapter {
   async handle(message: FeishuInboxMessage): Promise<void> {
     try {
       this.conversations.touchActivity?.(message.target);
-      if (message.kind === "file") {
+      if (message.kind === "file" || message.kind === "files") {
         await this.handleFile(message);
         return;
       }
@@ -695,7 +696,7 @@ export class FeishuConversationAdapter {
   }
 
   private async handleFile(
-    message: Extract<FeishuInboxMessage, { kind: "file" }>,
+    message: Extract<FeishuInboxMessage, { kind: "file" | "files" }>,
   ): Promise<void> {
     if (this.inputOptions.files === undefined) {
       throw new FeishuFileInputError(
@@ -703,18 +704,33 @@ export class FeishuConversationAdapter {
         "飞书当前未启用文本文件输入",
       );
     }
-    const file = await this.inputOptions.files.download(
-      message.messageId,
-      message.fileKey,
-      message.fileName,
-    );
+    const references = message.kind === "file" ? [message] : message.files;
+    const imageKeys = message.kind === "files" ? message.imageKeys : [];
+    if (references.length > 4) throw new UserFacingError("attachment.too-many", "一次最多处理 4 个文本附件");
+    if (imageKeys.length > maximumInboundImages) throw new UserFacingError("image.too-many", "图片数量超过限制", { maximumImages: String(maximumInboundImages) });
+    const files: Awaited<ReturnType<FeishuFilePort["download"]>>[] = [];
+    let bytes = 0;
+    const images: Awaited<ReturnType<FeishuImagePort["download"]>>[] = [];
+    try {
+      for (const reference of references) {
+        const file = await this.inputOptions.files.download(message.messageId, reference.fileKey, reference.fileName);
+        files.push(file);
+        bytes += file.bytes;
+        if (bytes > 1_000_000) throw new UserFacingError("attachment.too-large", "附件总大小超过 1,000,000 字节");
+      }
+      for (const imageKey of imageKeys) images.push(await this.images.download(message.messageId, imageKey));
+    } catch (error) {
+      await Promise.allSettled(files.map(file => this.inputOptions.files?.discard?.(file) ?? Promise.resolve()));
+      throw error;
+    }
     const quotedText = await this.readQuotedText(message);
     const text = formatQuotedInput([
-      "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
-      `文件名：${file.fileName}`,
-      "",
-      file.text,
-    ].join("\n"), quotedText);
+      ...(message.kind === "files" && message.text ? [message.text, ""] : []),
+      ...files.flatMap(file => [
+        "以下内容来自用户通过飞书上传的 UTF-8 文本文件（仅作输入）：",
+        `文件名：${file.fileName}`, "", textAttachmentBody(file), "",
+      ]),
+    ].join("\n").trimEnd(), quotedText);
     const sequence = this.nextInputSequence;
     this.nextInputSequence += 1;
     this.outbox.prepareTurnReplyTarget?.(
@@ -728,6 +744,7 @@ export class FeishuConversationAdapter {
         actorId: message.actorId,
         sequence,
         text,
+        ...(images.length === 0 ? {} : { localImages: images.map(image => ({ path: image.path, mimeType: image.mimeType, bytes: image.bytes })) }),
       });
     } catch (error) {
       this.outbox.discardPendingTurnReplyTarget?.(
