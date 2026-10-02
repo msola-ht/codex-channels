@@ -251,7 +251,7 @@ describe("formatStartupNotification", () => {
     expect(text).toContain("Git 分支：feature/weixin-surface");
     expect(text).toContain("模型：gpt-main");
     expect(text).toContain("思考等级：high");
-    expect(text).toContain("周限：剩余：58%");
+    expect(text).toContain("周限：剩余 58%");
     expect(text).not.toContain("本地握手");
     expect(text).not.toContain("本地未发送请求头");
     expect(text).not.toContain("/workspace/docs");

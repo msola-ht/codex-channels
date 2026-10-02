@@ -454,7 +454,7 @@ describe("WebUI 界面文案语言切换", () => {
     expect(result.consoleEn).toContain("Failure rate: 25.0%");
     expect(result.consoleEn).toContain("No failed requests");
     expect(result.consoleEn).toContain("OpenAI weekly quota");
-    expect(result.consoleEn).toContain("Weekly quota used: 37.5%");
+    expect(result.consoleEn).toContain("Weekly quota remaining: 62.5%");
     expect(result.consoleEn).toContain("Local accounts and quotas");
     expect(result.consoleEn).toContain("Available balance");
     expect(result.consoleEn).toContain("Remaining credit");

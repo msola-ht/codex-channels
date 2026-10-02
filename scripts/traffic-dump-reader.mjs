@@ -285,10 +285,6 @@ export function shortId(value) {
   return typeof value !== "string" ? "-" : value.length <= 12 ? value : `${value.slice(0, 8)}…`;
 }
 
-export function formatTime(atMs) {
-  return Number.isFinite(atMs) ? new Date(atMs).toLocaleString("zh-CN", { hour12: false }) : "-";
-}
-
 function readManifest(directory) {
   const path = join(directory, manifestName);
   if (!existsSync(path)) return undefined;

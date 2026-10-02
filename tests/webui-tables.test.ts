@@ -13,8 +13,9 @@ describe("WebUI metrics table presentation", () => {
   });
   it("shows OpenAI remaining Credits, voucher counts and expiry details without losing zero or precision", () => {
     expect(markup.quotaCredits).toContain("12.34567890123456789");
-    expect(markup.quotaCredits).toContain("周额度已用 37.5%");
+    expect(markup.quotaCredits).toContain("周额度剩余：62.5%");
     expect(markup.quotaCreditsEnglish).toContain("Credits remaining");
+    expect(markup.quotaCreditsEnglish).toContain("Weekly quota remaining: 62.5%");
     expect(markup.quotaCreditsEnglish).toContain("No expiry");
     expect(markup.quotaCreditsEnglish).toContain("Other reset credits: 1");
     expect(markup.quotaCredits).toContain("可用重置券");
@@ -142,6 +143,8 @@ describe("WebUI metrics table presentation", () => {
           editingAccount: render(AccountIdField, { id: "account", value: "main", accounts: [{ id: "main" }], disabled: false, editing: true, onChange: noop }),
           quota: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: 1000, planType: null }),
           quotaUnknownReset: render(WeeklyQuotaCard, { usedPercent: 37.5, resetsAt: null, planType: null }),
+          quotaExhausted: render(WeeklyQuotaCard, { usedPercent: 120, resetsAt: null, planType: null }),
+          quotaFull: render(WeeklyQuotaCard, { usedPercent: -1, resetsAt: null, planType: null }),
           quotaEmpty: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null }),
           quotaRefreshing: render(WeeklyQuotaCard, { usedPercent: null, resetsAt: null, planType: null,
             refreshControl: { refreshing: true, disabled: true, error: null, onRefresh: noop } }),
@@ -423,15 +426,15 @@ describe("WebUI metrics table presentation", () => {
   });
 
   it("shows the refreshed official window after redemption without another model request", () => {
-    expect(markup.consoleQuotaAfterReset).toContain('aria-valuenow="0"');
+    expect(markup.consoleQuotaAfterReset).toContain('aria-valuenow="100"');
     expect(markup.consoleQuotaAfterReset).toContain("1970-01-01 01:06");
-    expect(markup.consoleQuotaAfterReset).not.toContain('aria-valuenow="100"');
+    expect(markup.consoleQuotaAfterReset).not.toContain('aria-valuenow="0"');
     expect(markup.consoleQuotaAfterReset).not.toContain("1970-01-01 00:16");
   });
 
   it("keeps the last OpenAI quota during range loading and failures but honors an explicit empty snapshot", () => {
     for (const key of ["consoleQuotaLoading", "consoleQuotaFailed"]) {
-      expect(markup[key]).toContain('aria-valuenow="37.5"');
+      expect(markup[key]).toContain('aria-valuenow="62.5"');
       expect(markup[key]).not.toContain("尚未获取 OpenAI 额度快照");
     }
     expect(markup.consoleQuotaFailed).toContain("加载失败");
@@ -472,26 +475,29 @@ describe("WebUI metrics table presentation", () => {
   it("orders quota windows by duration and keeps missing windows absent", () => {
     for (const key of ["ocgQuotaOrder", "clineQuotaOrder"]) {
       const html = markup[key]!;
-      const labels = [...html.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]);
+      const labels = [...html.matchAll(/aria-label="([^"]+)剩余比例"/g)].map((match) => match[1]);
       const values = [...html.matchAll(/aria-valuenow="([^"]+)"/g)].map((match) => match[1]);
       expect(labels).toEqual(["5小时", "7天", "月度"]);
-      expect(values).toEqual(["10", "20", "30"]);
+      expect(values).toEqual(["90", "80", "70"]);
     }
     const missing = markup.missingQuotaWindow!;
     expect(missing).not.toContain("7天");
-    expect([...missing.matchAll(/aria-label="([^"]+)已用比例"/g)].map((match) => match[1]))
+    expect([...missing.matchAll(/aria-label="([^"]+)剩余比例"/g)].map((match) => match[1]))
       .toEqual(["5小时", "月度"]);
   });
 
   it("exposes the quota value and names its current snapshot correctly", () => {
-    expect(markup.quota).toContain('aria-valuenow="37.5"');
-    expect(markup.quota).toContain('aria-label="OpenAI 周额度已用比例"');
+    expect(markup.quota).toContain('aria-valuenow="62.5"');
+    expect(markup.quota).toContain('aria-label="OpenAI 周额度剩余比例"');
     expect(markup.quota).toContain('data-state="loading"');
     expect(markup.quotaEmpty).toContain("尚未获取 OpenAI 额度快照");
+    expect(markup.quotaEmpty).not.toContain("role=\"progressbar\"");
+    expect(markup.quotaExhausted).toContain('aria-valuenow="0"');
+    expect(markup.quotaFull).toContain('aria-valuenow="100"');
     expect(markup.quotaEmpty).not.toContain("当前时间范围");
     expect(markup.quotaUnknownReset).toContain("重置时间未知");
     expect(markup.quotaUnknownReset).not.toContain("暂无限额快照");
-    expect(markup.quotaUnknownReset).toContain('aria-valuenow="37.5"');
+    expect(markup.quotaUnknownReset).toContain('aria-valuenow="62.5"');
   });
 
   it("shows the recorded upstream provider as a tag beside the model without adding a column", () => {

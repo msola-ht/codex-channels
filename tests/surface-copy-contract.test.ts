@@ -266,17 +266,17 @@ describe("shared surface copy contract", () => {
       usedPercent: 44,
       windowDurationMins: 10_080,
       resetsAt: null,
-    })).toBe("剩余：56%（7天）");
+    })).toBe("剩余 56%（7天）");
     expect(formatRemainingRateLimitWindow({
       usedPercent: 120,
       windowDurationMins: null,
       resetsAt: null,
-    })).toBe("剩余：0%");
+    })).toBe("剩余 0%");
     expect(formatRemainingRateLimitWindow({
       usedPercent: 44,
       windowDurationMins: null,
       resetsAt: new Date(2026, 7, 5, 12, 34).getTime() / 1_000,
-    })).toContain("剩余：56%\n  - 重置：8月5日 12:34\n  - ");
+    })).toContain("剩余 56%\n  - 重置：8月5日 12:34\n  - ");
     expect(formatTurnInputAppended("text"))
       .toBe("已将补充要求追加到当前 Turn。");
     expect(formatTurnInputAppended("text", false, "补充要求：只总结错误和风险。"))
@@ -478,7 +478,7 @@ describe("shared surface copy contract", () => {
     const rendered = formatConversationStatus(status);
     expect(rendered).toContain("Session ID：thread-1");
     expect(rendered).toContain(
-      "周限：剩余：88%（7天）",
+      "周限：剩余 88%（7天）",
     );
     expect(rendered).not.toContain("缓存写入");
     expect(rendered).toContain("其中推理输出：100");

@@ -5,6 +5,7 @@ import type {
 
 import {
   formatPercent,
+  formatTimezoneLine,
 } from "./account-format.js";
 import { toStructuredMarkdownList } from "./markdown-list.js";
 import { formatCodexProviderLabel } from "./provider-format.js";
@@ -93,6 +94,7 @@ function formatErrorMetricsReport(
     : report.unsuccessfulRequestCount / report.requestCount * 100;
   const lines = [
     "## 请求指标 · 异常请求",
+    formatTimezoneLine(),
     `范围：${formatMetricsRange(report.range)}`,
     "",
     `模型请求：${formatRequestCount(report.requestCount)} 次`,

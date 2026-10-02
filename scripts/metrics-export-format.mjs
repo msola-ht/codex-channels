@@ -19,11 +19,9 @@ export function formatLocalTime(ms) {
   ].join(" ");
 }
 
-export function formatLocalTimeZone(ms = Date.now()) {
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const offset = new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "longOffset" })
-    .formatToParts(ms).find((part) => part.type === "timeZoneName").value.replace("GMT", "UTC");
-  return `${timeZone}（${offset}）`;
+export function formatLocalTimeZone() {
+  // A report can span DST changes; one current offset cannot describe all records.
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 export function markdownCell(value) {

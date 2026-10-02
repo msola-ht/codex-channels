@@ -14,6 +14,7 @@ import {
   formatPlanType,
   formatRateLimitState,
   formatRateLimitWindow,
+  formatRemainingRateLimitWindow,
   formatResetTime,
   formatTimezoneLine,
   formatTimeRemaining,
@@ -209,7 +210,7 @@ export function formatConversationUsage(
       ...(result.result.windows.length === 0
         ? []
         : result.result.windows.map((window) =>
-            `- ${window.label}：${formatRateLimitWindow({ ...window, windowDurationMins: null })}`)),
+            `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}`)),
     ].join("\n"));
   }
   if (result.result.kind === "quota-windows") {
@@ -224,7 +225,7 @@ export function formatConversationUsage(
               || window.localTokens === null
               ? ""
               : `\n  - 本地 Token 约 ${formatTokenCount(window.localTokens)}`;
-            return `- ${window.label}：${formatRateLimitWindow({ ...window, windowDurationMins: null })}${localTokens}`;
+            return `- ${window.label}：${formatRemainingRateLimitWindow({ ...window, windowDurationMins: null })}${localTokens}`;
           })),
     ].join("\n"));
   }
@@ -353,8 +354,8 @@ export function formatConversationLimits(
     "OpenAI Codex 额度：",
     formatTimezoneLine(),
     `套餐：${planType ? formatPlanType(planType) : "未知"}`,
-    `订阅截止时间：${result.result.subscription?.activeUntil == null ? "未提供" : formatResetTime(result.result.subscription.activeUntil)}（登录缓存）`,
-    `订阅信息最后检查时间：${result.result.subscription?.lastChecked == null ? "未提供" : formatResetTime(result.result.subscription.lastChecked)}`,
+    `订阅截止时间：${result.result.subscription?.activeUntil == null ? "未提供" : formatResetTime(result.result.subscription.activeUntil, true)}（登录缓存）`,
+    `订阅信息最后检查时间：${result.result.subscription?.lastChecked == null ? "未提供" : formatResetTime(result.result.subscription.lastChecked, true)}`,
     ...result.result.limits.limits.flatMap((limit) => [
       "",
       `${limit.limitName ?? limit.limitId}：`,

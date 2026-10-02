@@ -204,6 +204,8 @@ describe("traffic command V2 rendering", () => {
     const result = runTraffic(["--dir", directory]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("1 次模型调用");
+    expect(result.stdout.split("\n")).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
+    expect(result.stdout).toMatch(/#1 {2}\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/u);
     expect(result.stdout).toContain("模型=deepseek-flash→deepseek-flash");
     expect(result.stdout).toContain("结果=完成");
   });
@@ -322,6 +324,7 @@ describe("traffic command V2 rendering", () => {
     await new Promise<void>((resolveExit) => child.once("exit", () => resolveExit()));
     runningChildren.delete(child);
     expect(stdout).toContain("结果=完成");
+    expect(stdout.split("\n")).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
   });
 
   it("follows the first session created after startup", async () => {

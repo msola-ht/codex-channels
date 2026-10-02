@@ -191,6 +191,7 @@ describe("conversation metrics formatting", () => {
     expect(rendered).toContain("custom / gpt-5.6-luna");
     expect(rendered).toContain("rate_limit_error · 未完成 · HTTP 429 · 1 次");
     expect(rendered).toContain("最近发生：");
+    expect(rendered).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
   });
 
   it("does not render untrusted error types as channel markdown", () => {

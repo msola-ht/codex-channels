@@ -91,9 +91,9 @@ describe("conversation model and account command formatting", () => {
     expect(render()).toContain("可用额度重置券：5");
     expect(render()).toContain(`时区：${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
     expect(render()).not.toContain("网关时区");
-    expect(render()).toContain("订阅截止时间：");
+    expect(render()).toMatch(/订阅截止时间：2026年10月[23]日/u);
     expect(render()).toContain("（登录缓存）");
-    expect(render()).toContain("订阅信息最后检查时间：");
+    expect(render()).toMatch(/订阅信息最后检查时间：2026年9月2[23]日/u);
     expect(render()).not.toContain("订阅截止时间：未提供");
     expect(render()).not.toContain("订阅信息最后检查时间：未提供");
     const missing = formatConversationLimits({ kind: "limits", result: { kind: "rate-limits", provider: "openai", limits } });
@@ -289,7 +289,7 @@ describe("conversation model and account command formatting", () => {
     expect(rendered).toContain("月度额度：$40.00");
     expect(rendered).toContain("额外充值：$5.00");
     expect(rendered).toContain("赠送额度：$1.00");
-    expect(rendered).toContain("5小时：剩余：75%");
+    expect(rendered).toContain("5小时：剩余 75%");
   });
 
   it("renders OpenAI Thread official estimates after the account summary", () => {
@@ -447,9 +447,9 @@ describe("conversation model and account command formatting", () => {
     });
 
     expect(rendered).toContain("ocg-user@example.com 账户用量");
-    expect(rendered).toContain("5小时：剩余：100%");
+    expect(rendered).toContain("5小时：剩余 100%");
     expect(rendered).toContain("本地 Token 约 123.4 K");
-    expect(rendered).toContain("月度：剩余：87.5%");
+    expect(rendered).toContain("月度：剩余 87.5%");
     expect(rendered).not.toContain("总额");
     expect(rendered).not.toContain("累计 Tokens");
   });
@@ -462,7 +462,7 @@ describe("conversation model and account command formatting", () => {
       })),
     } });
     expect(rendered).toContain("clp-test 账户用量");
-    for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：剩余：87.5%\n  - 重置：`);
+    for (const label of ["5小时", "7天", "月度"]) expect(rendered).toContain(`${label}：剩余 87.5%\n  - 重置：`);
     expect(rendered).not.toContain("未知");
     expect(rendered).not.toContain("本地 Token");
   });

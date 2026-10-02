@@ -202,6 +202,7 @@ export function WeeklyQuotaCard({
   planType: string | null
 }) {
   const { t } = useTranslation()
+  const remainingPercent = usedPercent === null ? null : Math.min(100, Math.max(0, 100 - usedPercent))
   return (
     <Card size="sm">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -213,8 +214,8 @@ export function WeeklyQuotaCard({
           </Badge>
           {credits || refreshControl ? <AccountUpdateDescription observedAtMs={credits?.observedAtMs ?? 0} isDefault={false} refreshFailed={Boolean(refreshControl?.error)} /> : null}
         </div>
-        {usedPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
-          {t("overview.weeklyQuotaUsed", { percent: usedPercent.toFixed(1) })}
+        {remainingPercent === null ? null : <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
+          {t("overview.weeklyQuotaRemaining", { percent: remainingPercent.toFixed(1) })}
         </CardDescription>}
         {refreshControl && !refreshControl.error ? <CardAction><AccountRefreshButton control={refreshControl} /></CardAction> : null}
       </CardHeader>
@@ -225,11 +226,11 @@ export function WeeklyQuotaCard({
           <p>{t("overview.subscriptionLastChecked")}: {credits?.subscription?.lastChecked == null ? t("overview.creditNotProvided") : formatTime(credits.subscription.lastChecked * 1000)}</p>
           <p>{t("overview.subscriptionCacheNote")}</p>
         </div>
-        {usedPercent === null
+        {remainingPercent === null
           ? <Empty className="min-h-20 p-3"><EmptyHeader><EmptyTitle>{t("overview.weeklyQuotaEmpty")}</EmptyTitle></EmptyHeader></Empty>
           : (
             <>
-              <Progress value={Math.min(100, usedPercent)} aria-label={t("overview.weeklyQuotaProgress")} />
+              <Progress value={remainingPercent} aria-label={t("overview.weeklyQuotaProgress")} />
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {resetsAt === null ? t("overview.resetUnknown") : t("overview.resetAt", { time: formatTime(resetsAt) })}
               </p>
@@ -504,16 +505,17 @@ function QuotaWindowCards({ windows }: { windows: OpencodeGoQuotaWindow[] }) {
     (quotaWindowOrder[left.windowId] ?? 3) - (quotaWindowOrder[right.windowId] ?? 3))
   return orderedWindows.map((window) => {
     const label = quotaWindowLabel(t, window)
+    const remainingPercent = Math.min(100, Math.max(0, 100 - window.usedPercent))
     return (
       <Card key={window.windowId} size="sm" className="min-w-0 gap-2 data-[size=sm]:[--card-spacing:--spacing(2)]">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-x-2 gap-y-1">
           <CardTitle className="shrink-0">{label}</CardTitle>
           <CardDescription className="ml-auto whitespace-nowrap tabular-nums">
-            <span className="sr-only">{t("overview.usedLabel")} </span>{window.usedPercent.toFixed(1)}%
+            {t("overview.remainingPercent", { percent: remainingPercent.toFixed(1) })}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          <Progress value={Math.min(100, window.usedPercent)} aria-label={t("overview.windowProgress", { label })} />
+          <Progress value={remainingPercent} aria-label={t("overview.windowProgress", { label })} />
           <p className="text-xs leading-relaxed text-muted-foreground">
             {window.resetsAt === null ? t("overview.resetUnknown") : t("overview.resetAt", { time: formatTime(window.resetsAt) })}
           </p>

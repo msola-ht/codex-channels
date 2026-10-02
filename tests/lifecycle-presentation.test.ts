@@ -467,7 +467,7 @@ describe("shared Surface lifecycle presentation", () => {
       "协作模式：Default",
       "",
       "账户状态：",
-      "周限：剩余：63%",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 
@@ -645,7 +645,7 @@ describe("shared Surface lifecycle presentation", () => {
       "OpenAI Credits：未提供",
       "",
       "账户状态：",
-      "周限：剩余：63%",
+      "周限：剩余 63%",
     ].join("\n"));
   });
 

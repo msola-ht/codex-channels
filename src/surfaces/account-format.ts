@@ -14,20 +14,28 @@ export function formatRateLimitWindow(
   window: RateLimitWindowView | null,
   options: { includeDuration?: boolean } = {},
 ): string {
+  return formatQuotaWindow(window, options, "剩余：");
+}
+
+function formatQuotaWindow(
+  window: RateLimitWindowView | null,
+  options: { includeDuration?: boolean },
+  prefix: string,
+): string {
   if (window === null) {
     return "暂无数据";
   }
   const duration = options.includeDuration === false || window.windowDurationMins === null
     ? "" : `（${formatMinutes(window.windowDurationMins).replaceAll(" ", "")}）`;
   const reset = window.resetsAt === null ? "" : `\n  - 重置：${formatResetTime(window.resetsAt)}\n  - ${formatTimeRemaining(window.resetsAt, Date.now(), "reset")}`;
-  return `剩余：${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}${duration}${reset}`;
+  return `${prefix}${formatPercent(Math.min(100, Math.max(0, 100 - window.usedPercent)))}${duration}${reset}`;
 }
 
 export function formatRemainingRateLimitWindow(
-  window: RateLimitWindowView,
+  window: RateLimitWindowView | null,
   options: { includeDuration?: boolean } = {},
 ): string {
-  return formatRateLimitWindow(window, options);
+  return formatQuotaWindow(window, options, "剩余 ");
 }
 
 export function formatTimeRemaining(timestamp: number, now: number, kind: "reset" | "expiry"): string {
@@ -131,8 +139,9 @@ export function formatRateLimitState(value: string | null): string {
   return value ? (states[value] ?? value) : "正常";
 }
 
-export function formatResetTime(timestamp: number): string {
+export function formatResetTime(timestamp: number, includeYear = false): string {
   return new Intl.DateTimeFormat("zh-CN", {
+    ...(includeYear ? { year: "numeric" as const } : {}),
     month: "long",
     day: "numeric",
     hour: "2-digit",

@@ -397,7 +397,7 @@ WebUI 默认展示本机脱敏指标；回环监听未配置令牌时可直接�
 Gateway 和主 App Server 可用、已登录 ChatGPT 时，可在本机使用：
 
 ```bash
-codexc reset-credit list          # 实时列表，日期为 UTC
+codexc reset-credit list          # 实时列表，日期为 UTC 并明确标注
 codexc reset-credit list --json   # 机器可读的账户 ID、数量与可用券明细
 codexc reset-credit use           # 交互选券、预览并确认
 codexc reset-credit use <券ID>    # 指定券后预览并确认
